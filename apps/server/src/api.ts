@@ -45,6 +45,7 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapSnapshot,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -170,6 +171,10 @@ import {
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
+import { MapConflicts } from "./map/conflicts.ts";
+import { CallRing, type RingSource } from "./map/ring.ts";
+import { mapSeats } from "./map/seats.ts";
+import { mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -266,6 +271,7 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
   queueReorder?: QueueReorderDeps;
+  mapRing?: CallRing;
   config: CcConfig;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
@@ -472,6 +478,60 @@ const HUD_MEMO_MS = 2_000;
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const mapConflicts = new MapConflicts();
+  const mapSources = new Map<string, RingSource>();
+  const mapRing = new CallRing(() => {
+    const sources: RingSource[] = [];
+    const recent = store.runsActiveSince(now() - 15 * 60_000);
+    for (const agent of configuredAgents(config)) {
+      if (agent.kind !== "crew") continue;
+      const seat = store.seatSession(agent.id);
+      const current = store.seatRun(agent.id);
+      const flight = agent.seat.role === "FLIGHT";
+      const runs = [
+        ...new Map(
+          [
+            ...(current ? [current] : []),
+            ...(!flight
+              ? [
+                  ...store.mapAsideRuns(agent.id),
+                  ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
+                ]
+              : []),
+          ].map((r) => [r.id, r]),
+        ).values(),
+      ];
+      for (const run of runs) {
+        const repos = flight ? config.repos : config.repos.filter((r) => r.id === run.repoId);
+        for (const repo of repos) {
+          const id = flight ? `${run.id}:${repo.id}` : run.id;
+          const cwd = flight
+            ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
+            : ((seat?.runId === run.id ? seat.worktree : null) ??
+              run.loop?.aside?.worktree ??
+              mapSources.get(id)?.cwd);
+          if (!cwd) continue;
+          const source: RingSource = {
+            id,
+            seat: agent.id,
+            repoId: repo.id,
+            cwd,
+            transcriptPath: run.transcriptPath,
+            vendor: run.vendor ?? seat?.vendor,
+            turnScoped: flight,
+            current: current?.id === run.id,
+          };
+          sources.push(source);
+          mapSources.set(id, source);
+        }
+      }
+    }
+    const active = new Set(sources.map((s) => s.id));
+    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
+    return sources;
+  });
+  let stopMapRing: (() => void) | undefined;
+
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
@@ -750,9 +810,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     scheduleNotifications();
   });
+  app.addHook("onReady", async () => {
+    stopMapRing = mapRing.start();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
+    stopMapRing?.();
     clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
@@ -1284,6 +1348,87 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
         return { repo: view, backup: basename(result.backup) };
       });
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map panel)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map",
+        async (req, reply): Promise<MapSnapshot | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
+          try {
+            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
+              return reply.code(503).send({ error: "map checkout unavailable" });
+            }
+            const tree = await mapTree(checkout);
+            if (!stopMapRing) stopMapRing = mapRing.start();
+            mapRing.poll();
+            const data = mapSeats(
+              sharedCrew()
+                .rows.filter(
+                  (r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"),
+                )
+                .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r)),
+              store,
+              mapRing,
+              deps.lock?.state() ?? NO_LOCK,
+              now(),
+            );
+            for (const seat of data.seats) {
+              const context = store.seatSession(
+                seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
+              )?.runId
+                ? await deps.supervisor
+                    ?.contextUsage(
+                      seat.seat === "FLIGHT"
+                        ? (flightSeat(config)?.seat.id ?? seat.seat)
+                        : seat.seat,
+                    )
+                    .catch(() => null)
+                : null;
+              seat.context = context ? { total: context.total, window: context.window } : null;
+            }
+            return {
+              repoId: repo.id,
+              ...tree,
+              ...data,
+              conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)),
+              // Slice 1b will publish sequenced deltas; none have been emitted yet.
+              seq: 0,
+            };
+          } catch {
+            return reply.code(503).send({ error: "map snapshot unavailable" });
+          }
+        },
+      );
+
+      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
+        if (!config.repos.some((r) => r.id === req.params.repoId))
+          return reply.code(404).send({ error: "unknown repo" });
+        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
+        return { seats: deps.mapRing.scopes(req.params.repoId) };
+      });
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/conflicts",
+        async (req, reply) => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
+          try {
+            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
+              return reply.code(503).send({ error: "map checkout unavailable" });
+            }
+            return { conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)) };
+          } catch {
+            return reply.code(503).send({ error: "map conflicts unavailable" });
+          }
+        },
+      );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
       api.get<{ Params: { repoId: string }; Querystring: { linked?: unknown } }>(
@@ -2712,7 +2857,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get("/stream", (_req, reply) => {
+      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
+        const repoId = req.query.map;
+        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
+          return reply.code(404).send({ error: "repo not found" });
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -2736,11 +2884,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
+        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
+        const unsubscribeMap =
+          repoId === undefined
+            ? undefined
+            : mapRing.subscribe(repoId, (delta) => {
+                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+              });
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
+          unsubscribeMap?.();
           streams.delete(end);
         };
         const end = () => {
@@ -2754,6 +2910,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { prefix: API_PREFIX },
   );
 
+  app.addHook("onClose", async () => stopMapRing?.());
   return app;
 }
 

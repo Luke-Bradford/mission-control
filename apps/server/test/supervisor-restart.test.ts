@@ -21,7 +21,7 @@ import {
   readPidFile,
 } from "../src/runtime/keeper.ts";
 import { restoreRuns } from "../src/runtime/restore.ts";
-import { CREW_LOCK_FILE, type SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { CREW_LOCK_FILE, crewTempRoot, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   crewCodexDir,
   crewKeeperDir,
@@ -656,7 +656,7 @@ describe("reattach after a restart", () => {
       rolePrompt(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8"), null),
     );
     expect(log).toHaveBeenCalledWith(
-      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md",
+      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index",
     );
   });
 
@@ -1280,6 +1280,62 @@ describe("a seat keeps running through a restart", () => {
     expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
   });
 
+  it.each([false, true])(
+    "startup removes ended-run temp files only after its keeper stops (%s)",
+    async (stopped) => {
+      const runId = "ended-run";
+      store.upsertRun({
+        id: runId,
+        agentId: "guido-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: 2,
+        status: "ok",
+        sessionId: null,
+        model: null,
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+      });
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId,
+        cliSessionId: "11111111-2222-4333-8444-555555555555",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: 2,
+      });
+      const tmp = crewTempRoot(dbPath, runId, process.getuid?.() ?? 0);
+      mkdirSync(tmp, { recursive: true, mode: 0o700 });
+      writeFileSync(join(tmp, "cached-output"), "cache");
+      const folder = crewKeeperDir(dbPath, runId);
+      mkdirSync(folder, { recursive: true });
+      const alive = vi.spyOn(keeper, "keeperAlive").mockReturnValue(true);
+      const end = vi.spyOn(keeper, "endKeeper").mockImplementation(async () => {
+        if (stopped) alive.mockReturnValue(false);
+        return stopped;
+      });
+      try {
+        const { sup } = make();
+        sup.start();
+        await until(() => expect(end).toHaveBeenCalled());
+        await until(() => expect(existsSync(tmp)).toBe(!stopped));
+        expect(existsSync(folder)).toBe(!stopped);
+        await sup.stopAll();
+      } finally {
+        alive.mockRestore();
+        end.mockRestore();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("the start's sweep ends a keeper whose run is not active", async () => {
     const first = make();
     first.sup.start();
@@ -1290,6 +1346,11 @@ describe("a seat keeps running through a restart", () => {
     const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
     const cliPid = readPidFile(keeperDir, CLI_PID_FILE) as number;
     expect(pidAlive(keeperPid)).toBe(true);
+    const tmp = recorded().find((r) => r.argv).env.TMPDIR;
+    writeFileSync(join(tmp, "cached-output"), "cache");
+    const run = store.run(runId);
+    if (!run) throw new Error("missing run");
+    store.upsertRun({ ...run, endedAt: Date.now(), status: "ok" });
     // the seat has no run any more, though its keeper runs on: an orphan
     const row = store.seatSession("guido-1");
     if (row) store.setSeatSession({ ...row, runId: null, state: "idle", reason: null });
@@ -1298,6 +1359,7 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(existsSync(keeperDir)).toBe(false));
     expect(pidAlive(keeperPid)).toBe(false);
     expect(pidAlive(cliPid)).toBe(false);
+    await until(() => expect(existsSync(tmp)).toBe(false));
     expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
     await sup.stopAll();
   });

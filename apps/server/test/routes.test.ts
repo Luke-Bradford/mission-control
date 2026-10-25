@@ -151,6 +151,7 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
+    expect(routes).toContain("GET /api/repos/:repoId/map");
     expect(routes).toContain("GET /api/activity");
     expect(routes).toContain("GET /api/away/digest");
     expect(routes).toContain("GET /api/stream");

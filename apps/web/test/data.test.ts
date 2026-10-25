@@ -484,6 +484,40 @@ describe("activity reconciliation", () => {
     return fetch;
   };
 
+  it("keeps cached timestamp ties when a delta only contains the new arrival", async () => {
+    const at = Date.now();
+    const first = row(at, "alpha");
+    const second = row(at, "beta");
+    const added = row(at + 1, "new");
+    await load([first, second], [added]);
+    const before = snapshot() as unknown[];
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([added, first, second]);
+    expect((snapshot() as unknown[])[1]).toBe(before[0]);
+    expect((snapshot() as unknown[])[2]).toBe(before[1]);
+  });
+
+  it("reuses the cached array and rows for an unchanged full reload with reversed ties", async () => {
+    const at = Date.now();
+    const first = row(at, "alpha");
+    const second = row(at, "beta");
+    await load([first, second], [second, first]);
+    const before = snapshot();
+    hub.refetchAll();
+    await flush();
+    expect(snapshot()).toBe(before);
+  });
+
+  it("updates a discovered run ticket in a delta without keeping the old copy", async () => {
+    const initial = { ...row(Date.now(), "started"), kind: "run-start", runId: "run-1", ref: null };
+    const fresh = { ...initial, ref: "shop-app#42", text: "started on shop-app#42" };
+    await load([initial], [fresh]);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([fresh]);
+  });
+
   it("updates a run-start row's live status, PRs and summary on the next full load", async () => {
     const initial = {
       ...row(Date.now() - 100, "started"),

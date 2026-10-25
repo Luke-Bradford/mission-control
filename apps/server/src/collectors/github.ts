@@ -154,7 +154,10 @@ const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: 
   }
 }`;
 
-const QUEUE_CARD_QUERY = `query QueueCard($owner: String!, $name: String!, $number: Int!) {
+const QUEUE_CARD_QUERY = `query QueueCard($owner: String!, $name: String!, $number: Int!, $projectNumber: Int!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner { projectV2(number: $projectNumber) { id } }
+  }
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
@@ -172,11 +175,18 @@ export async function fetchQueueCard(
   now: number,
 ): Promise<BoardItem | null> {
   const [owner = "", name = ""] = repo.github.split("/");
-  const data = await call(gql, QUEUE_CARD_QUERY, { owner, name, number });
+  const data = await call(gql, QUEUE_CARD_QUERY, {
+    owner,
+    name,
+    number,
+    projectNumber: repo.project,
+  });
+  const projectId = path(data, "repositoryOwner", "projectV2", "id");
+  if (typeof projectId !== "string" || projectId === "") return null;
   const issue = path(data, "repository", "issue");
   const items = path(issue, "projectItems", "nodes");
   const item = Array.isArray(items)
-    ? items.find((i) => isObj(i) && path(i, "project", "number") === repo.project)
+    ? items.find((i) => isObj(i) && path(i, "project", "id") === projectId)
     : undefined;
   if (!isObj(item)) return null;
   const card = boardItem(repo, { ...item, content: issue }, now);
