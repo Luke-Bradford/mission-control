@@ -87,6 +87,12 @@ import Fastify, {
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
 import {
+  AttentionHoldInput,
+  attentionHoldError,
+  holdItem,
+  releaseHold,
+} from "./attention-holds.ts";
+import {
   AWAY_STARTED_SETTING,
   AwayBody,
   activeAway,
@@ -2427,6 +2433,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ?? reply.code(404).send({ error: "Item is no longer open." });
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.get("/attention/held", async () =>
+        attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew().rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ).filter((i) => i.hold),
+      );
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
+        const body = AttentionHoldInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
+        if (!sharedAttention().some((i) => i.key === req.params.key))
+          return reply.code(404).send({ error: "Item is no longer waiting." });
+        holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now());
+        bus.emit("attention");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (!releaseHold(store, req.params.key, now()))
+          return reply.code(404).send({ error: "No active hold." });
+        bus.emit("attention");
+        return { ok: true };
       });
 
       const discussionSends = new Set<string>();

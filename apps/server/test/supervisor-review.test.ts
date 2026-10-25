@@ -424,6 +424,8 @@ describe("startWatch", () => {
       "mcp__mc__remember",
       "mcp__mc__forget",
       "mcp__mc__recall",
+      "mcp__mc__hold_item",
+      "mcp__mc__release_hold",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

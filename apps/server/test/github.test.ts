@@ -7,6 +7,7 @@ import {
   describeGqlErrors,
   EMPTY_BOARD_GRACE_MS,
   fetchCardNow,
+  fetchQueueCard,
   fetchTicket,
   GqlError,
   GqlTransportError,
@@ -95,6 +96,7 @@ describe("fetchCardNow", () => {
       state: "planned",
       closed: false,
       assignees: ["luke"],
+      labels: [],
     });
   });
 
@@ -103,6 +105,30 @@ describe("fetchCardNow", () => {
     expect(await fetchCardNow(repo, 7, answer(onProject("Todo", 99)))).toBeNull();
     expect(await fetchCardNow(repo, 7, answer(onProject("Parked")))).toBeNull();
   });
+});
+
+it("reads queue snapshots from the issue project item with fresh field priorities", async () => {
+  const raw = item(7, "Todo", { priority: "P0", labels: ["catalog"] });
+  const gql = vi.fn(async () => ({
+    repository: {
+      issue: {
+        ...raw.content,
+        projectItems: {
+          nodes: [{ ...raw, project: { id: "project-demo", number: repo.project } }],
+        },
+      },
+    },
+  }));
+  const card = await fetchQueueCard(repo, 7, gql, NOW);
+  expect(card).toMatchObject({
+    issueNumber: 7,
+    itemId: "PVTI_7",
+    projectId: "project-demo",
+    priority: "P0",
+    prioritySource: "field",
+    labels: ["catalog"],
+  });
+  expect(gql.mock.calls).toHaveLength(1);
 });
 
 describe("fetchTicket repos", () => {

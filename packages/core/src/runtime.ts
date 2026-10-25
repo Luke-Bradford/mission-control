@@ -75,6 +75,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.remember,
   MC_TOOL_NAMES.forget,
   MC_TOOL_NAMES.recall,
+  MC_TOOL_NAMES.holdItem,
+  MC_TOOL_NAMES.releaseHold,
 ];
 
 /**

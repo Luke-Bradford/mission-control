@@ -26,6 +26,7 @@ import { CliHold } from "./cli-update.ts";
 import {
   fetchBoard,
   fetchCardNow,
+  fetchQueueCard,
   fetchTicket,
   githubToken,
   makeGql,
@@ -291,6 +292,11 @@ export async function main(): Promise<void> {
       const repo = config.repos.find((r) => r.id === repoId);
       if (!repo) throw new Error("Repository unavailable.");
       return (await fetchBoard(repo, makeGql(await githubToken()), Date.now())).items;
+    },
+    readCard: async (repoId, issue) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      if (!repo) throw new Error("Repository unavailable.");
+      return fetchQueueCard(repo, issue, makeGql(await githubToken()), Date.now());
     },
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     edit: (repoId, issue, fields) => engineBoard.edit(repoId, issue, fields),

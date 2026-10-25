@@ -1624,3 +1624,31 @@ it("a changed focus prevents taking an old queued card", async () => {
   await takeNext(takeDeps(), SERVER);
   expect(started).toEqual([]);
 });
+
+it("rechecks focus labels from GitHub before starting", async () => {
+  store.replaceBoard(REPO, [{ ...card(1), labels: [...card(1).labels, "catalog"] }]);
+  const seat = config.crew?.sessions[0]?.seats[0];
+  if (!seat) throw new Error("Missing seat");
+  seat.focus = "label:catalog";
+  await refill();
+  const deps = takeDeps();
+  deps.readCard = async () => ({ ...card(1), labels: card(1).labels });
+  await takeNext(deps, SERVER);
+  expect(started).toEqual([]);
+});
+
+it("checks the current seat focus if reload replaces the seat during a fresh read", async () => {
+  store.replaceBoard(REPO, [card(1)]);
+  await refill();
+  const deps = takeDeps();
+  const read = deps.readCard;
+  deps.readCard = async (repoId, issue) => {
+    const seats = config.crew?.sessions[0]?.seats;
+    const seat = seats?.[0];
+    if (!seats || !seat) throw new Error("Missing seat");
+    seats[0] = { ...seat, focus: "mc#2" };
+    return read(repoId, issue);
+  };
+  await takeNext(deps, SERVER);
+  expect(started).toEqual([]);
+});

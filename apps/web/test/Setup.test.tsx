@@ -1161,11 +1161,131 @@ describe("Setup tabs", () => {
       );
     });
 
-    it("no claude account: the Account select is empty and Save is disabled", async () => {
+    it("adds Codex seats and resets the model only when the account provider changes", async () => {
+      const p = await seats();
+      const form = await open(p);
+      const account = within(form).getByLabelText("Account");
+      const model = within(form).getByLabelText("Model");
+      fireEvent.change(account, { target: { value: "codex-main" } });
+      expect(account).toHaveProperty("value", "codex-main");
+      expect(model).toHaveProperty("value", "gpt-5.6-sol");
+      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
+      expect(model).toHaveProperty("value", "gpt-5.6-sol");
+      fireEvent.submit(form);
+      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
+      expect(post("/api/crew/sessions/s1/seats").seats[2]).toMatchObject({
+        accountId: "codex-main",
+        model: "gpt-5.6-sol",
+        role: "RETRO",
+        area: [],
+      });
+    });
+
+    it("opens a persisted Codex seat with its model and switches back to the role default", async () => {
+      const codex = { ...GUIDO_SEAT, accountId: "codex-main", model: "gpt-5.6-sol" };
+      const p = await seats({
+        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [codex] }] },
+      });
+      fireEvent.click(within(p).getByRole("button", { name: "Edit" }));
+      const form = screen.getByRole("form", { name: "Edit guido-1" });
+      expect(within(form).getByLabelText("Account")).toHaveProperty("value", "codex-main");
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
+      fireEvent.change(within(form).getByLabelText("Account"), {
+        target: { value: "claude-main" },
+      });
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
+      fireEvent.change(within(form).getByLabelText("Account"), {
+        target: { value: "codex-main" },
+      });
+      fireEvent.change(within(form).getByLabelText("Effort"), { target: { value: "high" } });
+      fireEvent.submit(form);
+      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
+      const saved = post("/api/crew/sessions/s1/seats").seats[0];
+      expect(saved).toEqual({ ...codex, effort: "high" });
+      cleanup();
+      const reloaded = await seats({
+        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [saved] }] },
+      });
+      fireEvent.click(within(reloaded).getByRole("button", { name: "Edit" }));
+      const reopened = screen.getByRole("form", { name: "Edit guido-1" });
+      expect(within(reopened).getByLabelText("Account")).toHaveProperty("value", "codex-main");
+      expect(within(reopened).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
+      expect(within(reopened).getByLabelText("Effort")).toHaveProperty("value", "high");
+    });
+
+    it("switching to Claude never keeps a role's Codex default model", async () => {
+      const crew = SESSIONS_CFG.crew;
+      if (!crew?.roles) throw new Error("missing crew roles");
+      const codex = { ...GUIDO_SEAT, accountId: "codex-main", model: "gpt-5.6-sol" };
       const p = await seats({
         "/api/config": {
           ...SESSIONS_CFG,
-          accounts: SESSIONS_CFG.accounts.filter((a) => a.vendor !== "claude"),
+          crew: {
+            ...crew,
+            roles: crew.roles.map((r) => (r.name === "GUIDO" ? { ...r, model: "gpt-5.6-sol" } : r)),
+          },
+        },
+        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [codex] }] },
+      });
+      fireEvent.click(within(p).getByRole("button", { name: "Edit" }));
+      const form = screen.getByRole("form", { name: "Edit guido-1" });
+      fireEvent.change(within(form).getByLabelText("Account"), {
+        target: { value: "claude-main" },
+      });
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
+    });
+
+    it.each(["unknown", "not-logged-in"])(
+      "shows the external CLI hint for %s status",
+      async (status) => {
+        const p = await seats({
+          "/api/accounts/status": [
+            {
+              accountId: "codex-main",
+              provider: "codex",
+              binding: "machine",
+              identity: null,
+              plan: null,
+              status,
+              checkedAt: NOW,
+              detail: null,
+            },
+          ],
+        });
+        const form = await open(p);
+        fireEvent.change(within(form).getByLabelText("Account"), {
+          target: { value: "codex-main" },
+        });
+        expect(await within(form).findByText(/Sign in with the CLI on this machine/)).toBeTruthy();
+      },
+    );
+
+    it("defaults to a configured Codex account when no Claude account exists", async () => {
+      const p = await seats({
+        "/api/config": {
+          ...SESSIONS_CFG,
+          accounts: SESSIONS_CFG.accounts.filter((a) => a.vendor === "codex"),
+        },
+      });
+      const form = await open(p);
+      expect(within(form).getByLabelText("Account")).toHaveProperty("value", "codex-main");
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
+      const account = within(form).getByLabelText("Account");
+      account.focus();
+      expect(document.activeElement).toBe(account);
+      fireEvent.submit(form);
+      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
+      expect(post("/api/crew/sessions/s1/seats").seats[2]).toMatchObject({
+        accountId: "codex-main",
+        model: "gpt-5.6-sol",
+      });
+    });
+
+    it("no accounts: the Account select is empty and Save is disabled", async () => {
+      const p = await seats({
+        "/api/config": {
+          ...SESSIONS_CFG,
+          accounts: [],
         },
       });
       const form = await open(p);

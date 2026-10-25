@@ -558,6 +558,13 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
     deps.onNotes?.();
     return;
   }
+  const current = writerSeats(config).find(
+    (s) => s.seat.id === seatId && s.session.repoId === repoId,
+  );
+  if (!current || !matchesFocus(current.seat.focus, { ...card, labels: latest.labels ?? [] })) {
+    store.untake(seatId, repoId, issue);
+    return;
+  }
   try {
     await supervisor.startRun(seatId, issue, { loop: NEW_LOOP });
     store.dropQueued(seatId, repoId, issue);

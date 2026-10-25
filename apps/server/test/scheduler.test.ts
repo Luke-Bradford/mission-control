@@ -15,6 +15,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { holdItem, holds } from "../src/attention-holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
@@ -2312,6 +2313,40 @@ describe("Claude usage back-off", () => {
       await s.stop();
     },
   );
+});
+
+it("releases crew holds from a durable idle seat session after the hold", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({
+    rows: [
+      {
+        id: "crew-1",
+        kind: "crew",
+        role: "GUIDO",
+        hudState: "idle",
+        stateSince: NOW + 1,
+      } as CrewRow,
+    ],
+    firstRunToday: null,
+  });
+  holdItem(store, "ask:1", "Waiting", { kind: "crew" }, "operator", NOW);
+  store.setSeatSession({
+    seatId: "crew-1",
+    runId: null,
+    cliSessionId: "session",
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW - 1,
+    vendor: "claude",
+  });
+  const s = createScheduler({ config, store, bus, now: () => NOW + 10, collectors: stubs() });
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBeUndefined();
+  const seat = store.seatSession("crew-1");
+  if (!seat) throw new Error("missing seat session");
+  store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
 });
 
 it("emits attention at the earliest triage deadline and cancels the timer on stop", async () => {

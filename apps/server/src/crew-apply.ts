@@ -108,6 +108,10 @@ export function planCrew(
         };
         plan.applied.push(`seat ${seat.id} renamed`);
       }
+      if (was && was.focus !== seat.focus) {
+        was = { ...was, focus: seat.focus };
+        plan.applied.push(`seat ${seat.id} focus changed`);
+      }
       if (was === undefined) {
         adds.push(seat);
       } else if (same(was, seat)) {

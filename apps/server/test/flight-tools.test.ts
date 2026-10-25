@@ -125,7 +125,7 @@ import {
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView } from "../src/flight/state.ts";
+import { flightBriefView, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -594,6 +594,8 @@ describe("tool list", () => {
       "remember",
       "forget",
       "recall",
+      "hold_item",
+      "release_hold",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -3352,6 +3354,31 @@ describe("brief_item", () => {
   beforeEach(() => {
     raise();
     seen.length = 0;
+  });
+
+  it("refuses to triage FLIGHT's own direct reply and tag", async () => {
+    store.addComms({ at: NOW, from: "CAPCOM", to: "flight-1", ticket: null, text: "Status?" });
+    store.addComms({
+      at: NOW + 1,
+      from: "flight-1",
+      to: "CAPCOM",
+      ticket: null,
+      text: "Waiting @CAPCOM",
+    });
+    const items = operatorItems(config(), store, NOW + 2, null).filter(
+      (i) => i.agentId === "flight-1" && ["message", "tag"].includes(i.kind),
+    );
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect((await call("brief_item", B({ key: item.key }))).isError).toBe(true);
+      expect(store.briefs().has(item.key)).toBe(false);
+    }
+  });
+
+  it("caps the original source text in a brief", async () => {
+    raise("large", { text: "X".repeat(BRIEF_INPUT_MAX * 2) });
+    await call("brief_item", B({ key: "note:large" }));
+    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX);
   });
 
   it("stores a brief on an operator item and emits attention", async () => {
@@ -6234,4 +6261,73 @@ it("FLIGHT can propose queue promotion but cannot approve the board write", asyn
   ).toBe(true);
   expect(editCalls).toEqual([]);
   expect(ghCalls).toEqual([]);
+});
+describe("attention hold tools", () => {
+  const key = "note:blocked:hold-test";
+  const args = { key, reason: " Waiting ", condition: { kind: "manual" } };
+  beforeEach(() => {
+    store.raiseNote({
+      key: "blocked:hold-test",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Choose",
+      at: NOW - 1,
+    });
+  });
+  it.each([
+    { kind: "manual" },
+    { kind: "crew" },
+    { kind: "date", at: NOW + 1000 },
+    { kind: "ticket", ticket: "demo#12" },
+  ])("FLIGHT holds and releases with %j", async (condition) => {
+    const emit = vi.spyOn(bus, "emit");
+    expect((await call("hold_item", { ...args, condition })).isError).not.toBe(true);
+    const holds = JSON.parse(store.getSetting("attention-holds") ?? "{}");
+    expect(holds[key]).toEqual({ reason: "Waiting", condition, by: "FLIGHT", at: NOW });
+    expect((await call("release_hold", { key })).isError).not.toBe(true);
+    expect(JSON.parse(store.getSetting("attention-holds") ?? "{}")[key].releasedAt).toBe(NOW);
+    expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
+    expect(emit).toHaveBeenCalledWith("attention");
+  });
+  it("refuses other seats without changing holds", async () => {
+    live("guido-1", "r-guido");
+    for (const [name, input] of [
+      ["hold_item", args],
+      ["release_hold", { key }],
+    ] as const)
+      expect(await call(name, input, ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
+  it.each([
+    { kind: "bad" },
+    { kind: "date", at: -1 },
+    { kind: "ticket", ticket: "bad" },
+    { kind: "manual", extra: true },
+  ])("refuses %j with the route error", async (condition) => {
+    const app = buildApp({ config: cfg, store, bus, operatorToken: "test-token" });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/attention/${key}/hold`,
+        headers: { [OPERATOR_HEADER]: "test-token" },
+        payload: { reason: args.reason, condition },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(await call("hold_item", { ...args, condition })).toEqual(
+        refused(response.json().error),
+      );
+      expect(store.getSetting("attention-holds")).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+  it("refuses missing items and blank reasons", async () => {
+    expect(await call("hold_item", { ...args, key: "missing" })).toEqual(
+      refused("Item is no longer waiting."),
+    );
+    expect((await call("hold_item", { ...args, reason: " " })).isError).toBe(true);
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
 });

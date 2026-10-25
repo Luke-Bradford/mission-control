@@ -31,6 +31,7 @@ export interface QueueReorderDeps {
   profiles?: () => readonly Profile[] | ProfilesError;
   login: string | null;
   enabled: () => boolean;
+  readCard: (repoId: string, issue: number) => Promise<BoardItem | null>;
   readBoard: (repoId: string) => Promise<BoardItem[]>;
   edit: (repoId: string, issue: number, fields: { priority: string }) => Promise<MoveResult>;
   now: () => number;
@@ -145,6 +146,50 @@ async function validate(
     );
 }
 
+async function currentBoard(deps: QueueReorderDeps, repoId: string, issues: number[]) {
+  const board = await deps.readBoard(repoId);
+  const cards = await Promise.all(issues.map((issue) => deps.readCard(repoId, issue)));
+  if (cards.some((c) => c === null)) refuse("Ticket not on this board.");
+  return [
+    ...board.filter((c) => !issues.includes(c.issueNumber)),
+    ...cards.filter((c): c is BoardItem => c !== null),
+  ];
+}
+
+async function validateAllocation(
+  deps: QueueReorderDeps,
+  seatId: string,
+  cards: [BoardItem, BoardItem],
+  board: BoardItem[],
+) {
+  const swapped = board.map((c) =>
+    c.issueNumber === cards[0].issueNumber
+      ? { ...c, priority: cards[1].priority }
+      : c.issueNumber === cards[1].issueNumber
+        ? { ...c, priority: cards[0].priority }
+        : c,
+  );
+  let hand: number[] = [];
+  const store = new Proxy(deps.store, {
+    get(target, key) {
+      if (key === "board")
+        return (repoId: string) => (repoId === cards[0].repoId ? swapped : target.board(repoId));
+      if (key === "replaceQueues")
+        return (queues: { seatId: string; items: { issue: number }[] }[]) => {
+          const queue = queues.find((q) => q.seatId === seatId);
+          if (queue) hand = queue.items.map((q) => q.issue);
+        };
+      if (key === "raiseNote" || key === "clearNote") return () => {};
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  await refillQueues({ ...deps, store });
+  const moveAt = hand.indexOf(cards[0].issueNumber);
+  if (moveAt < 0 || hand.indexOf(cards[1].issueNumber) <= moveAt)
+    refuse("Queue allocation cannot deliver this order for this seat.");
+}
+
 function approvalItem(
   key: string,
   p: Proposal,
@@ -190,12 +235,17 @@ export async function proposeQueueReorder(
 ) {
   const { seat, session } = seatOf(deps, seatId);
   gate(deps, seat, session.repoId);
-  const board = await deps.readBoard(session.repoId);
+  const board = await currentBoard(
+    deps,
+    session.repoId,
+    [moveRef, aboveRef].map((ref) => Number(ref.split("#")[1])),
+  );
   const find = (ref: string) =>
     board.find((c) => `${c.repoId}#${c.issueNumber}` === ref) ??
     refuse("Ticket not on this board.");
   const cards: [BoardItem, BoardItem] = [find(moveRef), find(aboveRef)];
   await validate(deps, seatId, cards, board);
+  await validateAllocation(deps, seatId, cards, board);
   const key = `${PREFIX}${randomUUID()}`;
   const p: Proposal = {
     seat: seatId,
@@ -252,7 +302,11 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   const { seat, session } = seatOf(deps, p.seat);
   if (session.repoId !== p.repoId || !isDeepStrictEqual(seatInput(seat), p.seatSnapshot))
     refuse("Seat changed; propose again from the current queue.");
-  const board = await deps.readBoard(p.repoId);
+  const board = await currentBoard(
+    deps,
+    p.repoId,
+    p.cards.map((c) => c.issueNumber),
+  );
   const find = (snapshot: BoardItem) => {
     const card = board.find((c) => c.issueNumber === snapshot.issueNumber);
     if (
@@ -267,6 +321,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   };
   const cards: [BoardItem, BoardItem] = [find(p.cards[0]), find(p.cards[1])];
   await validate(deps, p.seat, cards, board);
+  await validateAllocation(deps, p.seat, cards, board);
   const latestSeat = seatOf(deps, p.seat);
   if (
     latestSeat.session.repoId !== p.repoId ||
@@ -292,7 +347,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
     {
       key: recoveryKey,
       kind: "question",
-      seatId: p.seat,
+      seatId: null,
       repoId: p.repoId,
       runId: null,
       text: recoveryText,
@@ -311,7 +366,11 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
       });
       if (!result.ok) throw new Error("Priority write unconfirmed.");
     }
-    const fresh = await deps.readBoard(p.repoId);
+    const fresh = await currentBoard(
+      deps,
+      p.repoId,
+      cards.map((c) => c.issueNumber),
+    );
     for (const [card, priority] of swaps) {
       const changed = fresh.find((c) => c.issueNumber === card.issueNumber);
       if (

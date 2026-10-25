@@ -138,6 +138,7 @@ beforeEach(async () => {
     login: "hub",
     now: () => 100,
     enabled: () => true,
+    readCard: async (_repo, issue) => board.find((c) => c.issueNumber === issue) ?? null,
     readBoard: async () => board.map((c) => ({ ...c })),
     edit: vi.fn(async (_repo, issue, fields) => {
       board = board.map((c) => (c.issueNumber === issue ? { ...c, priority: fields.priority } : c));
@@ -221,6 +222,7 @@ it("a second write failure is visible and recoverable, with no success or replay
     .mockResolvedValueOnce({ ok: false, reason: "Unavailable" });
   const result = await resolveQueueReorder(deps, item.key, "approve");
   expect(result.ok).toBe(false);
+  expect(store.notes().find((n) => n.key.endsWith(":recovery"))?.seatId).toBeNull();
   expect(result.text).toMatch(/partial|incomplete/i);
   expect(store.notes().some((n) => /Refresh.*Priority/.test(n.text))).toBe(true);
   await expect(resolveQueueReorder(deps, item.key, "approve")).rejects.toThrow(/already/);
@@ -354,3 +356,40 @@ it.each(["priority", "area", "lane", "status"])(
     expect(deps.edit).not.toHaveBeenCalled();
   },
 );
+
+it("rejects swaps that allocate the promoted card to another seat before writing", async () => {
+  config.crew?.sessions[0]?.seats.push({ ...configuredSeat(), id: "guido-2" });
+  board = [card(1, "P1"), card(2, "P1"), card(3, "P2")];
+  store.replaceBoard("demo", board);
+  await refill();
+  expect(store.queue("guido-1").map((q) => q.issue)).toEqual([1, 3]);
+  await expect(proposeQueueReorder(deps, "guido-1", "demo#3", "demo#1")).rejects.toThrow(
+    /allocation/i,
+  );
+  expect(deps.edit).not.toHaveBeenCalled();
+});
+
+it("uses direct issue snapshots despite a stale project list throughout approval", async () => {
+  const stale = board.map((c) => ({ ...c, priority: "P4" }));
+  deps.readBoard = async () => stale;
+  const { item } = await propose();
+  expect(item.text).toContain("P2 ↔ P1");
+  expect((await resolveQueueReorder(deps, item.key, "approve")).ok).toBe(true);
+  expect(store.queue("guido-1").map((q) => q.issue)).toEqual([2, 1]);
+});
+it("rejects changed direct issue priorities even when the project list still matches", async () => {
+  const stale = board.map((c) => ({ ...c }));
+  deps.readBoard = async () => stale;
+  const { item } = await propose();
+  required(board[1]).priority = "P3";
+  await expect(resolveQueueReorder(deps, item.key, "approve")).rejects.toThrow(/stale/i);
+  expect(deps.edit).not.toHaveBeenCalled();
+});
+
+it("rechecks allocation at approval if another seat joins after the proposal", async () => {
+  const { item } = await propose();
+  config.crew?.sessions[0]?.seats.push({ ...configuredSeat(), id: "guido-2" });
+  await expect(resolveQueueReorder(deps, item.key, "approve")).rejects.toThrow(/allocation/i);
+  expect(deps.edit).not.toHaveBeenCalled();
+  expect(store.notes().some((n) => n.key.endsWith(":recovery"))).toBe(false);
+});

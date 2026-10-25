@@ -526,6 +526,9 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/held"],
+  ["POST", "/api/attention/example/hold", { reason: "Waiting", condition: { kind: "manual" } }],
+  ["POST", "/api/attention/example/hold/release", {}],
   ["GET", "/api/attention/unknown"],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
@@ -1005,7 +1008,13 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
         continue;
       }
-      if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
+      if (
+        url.endsWith("/dismiss") ||
+        url.endsWith("/handled") ||
+        url.includes("/replies/") ||
+        url.endsWith("/hold") ||
+        url.endsWith("/hold/release")
+      ) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -1167,6 +1176,7 @@ describe("local access", () => {
             .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
