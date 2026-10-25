@@ -91,6 +91,7 @@ import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
+import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const HOUR = 3600e3;
@@ -2641,11 +2642,11 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
-  it("serves this repo's map snapshot under 300 KB, excluding observed loops", async () => {
+  it("serves a fixture repo's map snapshot under 300 KB, excluding observed loops", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
-    session.checkout = resolve(import.meta.dirname, "../../..");
+    session.checkout = mapCheckout(dir);
     const response = await get("/api/repos/shop-app/map");
     expect(response.statusCode).toBe(200);
     expect(Buffer.byteLength(response.body)).toBeLessThan(300_000);
@@ -2671,7 +2672,7 @@ describe("boards, escalations, health", () => {
       withCrew();
       const session = config.crew?.sessions[0];
       if (!session) throw new Error("fixture session missing");
-      session.checkout = resolve(import.meta.dirname, "../../..");
+      session.checkout = mapCheckout(dir);
       session.seats.push({
         id: "flight-1",
         role: "FLIGHT",
@@ -2765,7 +2766,7 @@ describe("boards, escalations, health", () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
-    session.checkout = resolve(import.meta.dirname, "../../..");
+    session.checkout = mapCheckout(dir);
     const transcriptPath = join(dir, "aside.jsonl");
     writeFileSync(
       transcriptPath,
@@ -2821,7 +2822,7 @@ describe("boards, escalations, health", () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
-    session.checkout = resolve(import.meta.dirname, "../../..");
+    session.checkout = mapCheckout(dir);
     store.upsertRun(
       run({
         id: "parked-loop",
@@ -2846,7 +2847,7 @@ describe("boards, escalations, health", () => {
       withCrew();
       const session = config.crew?.sessions[0];
       if (!session) throw new Error("fixture session missing");
-      session.checkout = resolve(import.meta.dirname, "../../..");
+      session.checkout = mapCheckout(dir);
       const transcriptPath = join(dir, "map.jsonl");
       writeFileSync(join(dir, "file.ts"), "before\n");
       const lines = readFileSync(new URL(`./fixtures/map/${vendor}.jsonl`, import.meta.url), "utf8")
