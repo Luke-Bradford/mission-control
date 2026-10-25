@@ -226,6 +226,7 @@ export function BriefOptions(p: {
                 recommended={o.id !== undefined && o.id === p.recommendedOptionId}
                 recommendation={undefined}
                 live={false}
+                hideLabel
               />
             ))}
           </div>
@@ -256,6 +257,7 @@ export function BriefOptions(p: {
 }
 
 function OptionCard(p: {
+  hideLabel?: boolean;
   option: BriefOption;
   of: string;
   recommended: boolean;
@@ -265,7 +267,11 @@ function OptionCard(p: {
   title?: string;
   onPick: (o: BriefOption) => void;
 }) {
-  const label = <b className="qtext">{p.option.label}</b>;
+  const label = (
+    <b className="qtext" aria-hidden={p.hideLabel || undefined}>
+      {p.option.label}
+    </b>
+  );
   return (
     <div className={p.recommended ? "opt rec" : "opt"}>
       {p.live ? (

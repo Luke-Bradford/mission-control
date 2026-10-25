@@ -403,3 +403,21 @@ describe("vite config", () => {
     await expect(buildFixture(dir)).resolves.toBeDefined();
   });
 });
+
+it.each([
+  '<a href="TARGET">Open</a>',
+  '<area href="TARGET">',
+  '<form action="TARGET"></form>',
+  '<div data-path="TARGET"></div>',
+])("allows navigation and metadata without reading files: %s", async (html) => {
+  const target = outsideFile();
+  const dir = fixture("");
+  writeFileSync(join(dir, "index.html"), html.replace("TARGET", target));
+  await expect(buildHtmlFixture(dir)).resolves.toBeTruthy();
+});
+it.each(["use", "forward"])("guards Sass @%s before preprocessing", async (directive) => {
+  const target = outsideFile();
+  const dir = fixture("");
+  writeFileSync(join(dir, "index.html"), `<style>@${directive} "${target}";</style>`);
+  await expect(buildHtmlFixture(dir)).rejects.toThrow(/Web import outside/);
+});

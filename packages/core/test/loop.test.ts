@@ -1779,6 +1779,16 @@ describe("review decisions", () => {
     expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
   });
 
+  it("withholds the plain ready note until the PR is mergeable", () => {
+    const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
+    if (!s.pr) throw new Error("missing PR fixture");
+    const blocked = reconcile({ ...s, pr: { ...s.pr, mergeable: "CONFLICTING" } });
+    expect(noteKinds(blocked.actions)).not.toContain("ready");
+    expect(
+      noteKinds(reconcile({ ...s, pr: { ...s.pr, mergeable: "MERGEABLE" } }).actions),
+    ).toContain("ready");
+  });
+
   it("a clean review raises the ready note and the PR body edit", () => {
     const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
     const a = reconcile(s).actions;

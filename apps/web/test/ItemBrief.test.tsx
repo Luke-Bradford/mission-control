@@ -334,6 +334,7 @@ it("shows the approval recommendation above a labelled call group and all option
     recommendation.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(document.querySelector(".opt.rec")?.textContent).toContain("Approve");
+  expect(document.querySelector(".opt.rec .qtext")?.getAttribute("aria-hidden")).toBe("true");
   expect(document.querySelector(".opt.rec")?.textContent).toContain("FLIGHT recommends");
   for (const description of ["Send the reviewed draft", "Leave the draft unsent"])
     expect(screen.getByText(description).closest(".opt")).toBeTruthy();

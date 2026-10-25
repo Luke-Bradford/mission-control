@@ -1220,6 +1220,38 @@ describe("auto update", () => {
     });
   });
 
+  it("holds test paths, including runtime safeguards and test tooling", () => {
+    for (const path of [
+      "apps/web/test/cards.test.ts",
+      "apps/server/test/views.test.ts",
+      "packages/core/test/board.test.ts",
+      "packages/agentcomms/test/inbox.test.ts",
+      "apps/server/test/session-actions.test.ts",
+      "apps/server/test/brief.test.ts",
+      "apps/server/test/checkouts.test.ts",
+      "apps/server/test/codex-approval.test.ts",
+      "apps/server/test/keeper.test.ts",
+      "apps/server/test/publish.test.ts",
+      "apps/server/test/queue.test.ts",
+      "apps/server/test/gh-read.test.ts",
+      "apps/server/test/remove.test.ts",
+      "packages/core/test/away.test.ts",
+      "apps/server/test/engine.test.ts",
+      "apps/server/test/flight-tools.test.ts",
+      "apps/server/test/supervisor-start.test.ts",
+      "apps/server/test/update.test.ts",
+      "packages/core/test/loop.test.ts",
+      "packages/core/test/guard.test.ts",
+      "apps/server/test/engine/helpers.ts",
+      "apps/web/test/package.json",
+      "apps/web/test/vite.config.ts",
+      "apps/web/test/../src/x.ts",
+      "apps/web/test/fixtures/x.ts",
+    ]) {
+      expect(autoUpdatePath(path), path).toBe(false);
+    }
+  });
+
   it("applies the page and docs", async () => {
     for (const p of [
       "apps/web/src/a.ts",
@@ -1346,28 +1378,32 @@ describe("auto update", () => {
     expect(diffs.some((c) => c.cmd.endsWith(" origin/main"))).toBe(false);
   });
 
-  it.each(["symlink", "gitlink"])("holds a %s even under the allowlist", async (kind) => {
-    mkdirSync(join(dev, "docs"));
-    if (kind === "symlink") {
-      symlinkSync("../apps/server", join(dev, "docs", "linked"));
-      git(dev, "add", "docs/linked");
-    } else {
-      git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
-    }
-    git(dev, "commit", "-qm", "linked docs");
-    git(dev, "push", "-q", "origin", "main");
-    const a = auto();
-    await expect(a.tick()).resolves.toBe("waiting");
-    expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
-    const held = a.held.mock.calls.at(-1)?.[0];
-    expect(held?.unsafePaths).toEqual(["docs/linked"]);
-    expect(hubCodeHeldText(held)).toContain("symlink or submodule");
-    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
-      status: 409,
-      message: HUB_CODE_NEEDS_PERSON,
-    });
-    expect(pulls(a.calls)).toHaveLength(0);
-  });
+  it.each(["symlink", "gitlink", "ignored gitlink"])(
+    "holds a %s even under the allowlist",
+    async (kind) => {
+      mkdirSync(join(dev, "docs"));
+      if (kind === "symlink") {
+        symlinkSync("../apps/server", join(dev, "docs", "linked"));
+        git(dev, "add", "docs/linked");
+      } else {
+        git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
+      }
+      git(dev, "commit", "-qm", "linked docs");
+      git(dev, "push", "-q", "origin", "main");
+      if (kind === "ignored gitlink") git(hub, "config", "diff.ignoreSubmodules", "all");
+      const a = auto();
+      await expect(a.tick()).resolves.toBe("waiting");
+      expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
+      const held = a.held.mock.calls.at(-1)?.[0];
+      expect(held?.unsafePaths).toEqual(["docs/linked"]);
+      expect(hubCodeHeldText(held)).toContain("symlink or submodule");
+      await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+        status: 409,
+        message: HUB_CODE_NEEDS_PERSON,
+      });
+      expect(pulls(a.calls)).toHaveLength(0);
+    },
+  );
 
   it("clears the held note when auto Update is off", async () => {
     const a = auto({ enabled: false });

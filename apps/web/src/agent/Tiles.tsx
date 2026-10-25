@@ -118,7 +118,7 @@ function SeatContext({ row }: { row: CrewRow }) {
           {pct !== null && <i style={{ width: `${Math.min(100, pct)}%` }} />}
         </span>
         <span className="d">
-          {codex && "Codex reports the total, not a breakdown. · "}
+          {codex && "Codex reports the total, not a breakdown · "}
           {tail}
         </span>
       </Tile>

@@ -871,7 +871,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
                 noteKind: "ready",
                 text: readyRuledText(ticket.ref, n, rv.R.retro, rv.P),
               });
-            } else if (s.autoMerge !== true) {
+            } else if (s.autoMerge !== true && s.pr?.mergeable !== "CONFLICTING") {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
@@ -1231,7 +1231,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
-      loop.aside.wake =
+      loop.aside.wake ||=
         loop.phase === "parked" || loop.phase === "working" || !s.asideOk || fixDue(s, loop);
     }
   }
