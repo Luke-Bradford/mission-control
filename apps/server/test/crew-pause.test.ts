@@ -84,6 +84,10 @@ it("refuses FLIGHT messages before sending instructions to a paused destination"
   store.setSetting("crew.paused", "null");
   await messageUnpausedSeat(store, supervisor, "builder-1", "Rework", { interrupt: false });
   expect(supervisor.message).toHaveBeenCalledTimes(2);
+  expect(supervisor.message).toHaveBeenLastCalledWith("builder-1", "Rework", {
+    interrupt: false,
+    enforcePause: true,
+  });
 });
 
 it("persists review pause time through edits and restart, including pauses between engine ticks", () => {

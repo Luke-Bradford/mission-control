@@ -468,6 +468,7 @@ export function crew(
         ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
           ? { displayCallSign: agent.seat.displayCallSign }
           : {}),
+        ...(agent.kind === "crew" ? { focus: agent.seat.focus ?? null } : {}),
         repoId: agent.repoId,
         index,
         hudState: state,

@@ -66,7 +66,7 @@ export async function messageUnpausedSeat(
 ): ReturnType<Supervisor["message"]> {
   const pause = pausedSeat(store, args[0]);
   if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
-  return supervisor.message(...args);
+  return supervisor.message(args[0], args[1], { ...args[2], enforcePause: true });
 }
 
 type ReviewClock = { id: number; seatId: string; startedAt: number | null; createdAt: number };

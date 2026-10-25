@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -286,6 +287,7 @@ interface Harness {
   /** The merge gate's facts (null: unreadable), and the gate reads made. */
   gate: GateFacts | null;
   gateReads: { sha: string; known: boolean }[];
+  duringGate?: () => void;
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
   steps: string[];
   stepEnded: Record<string, string[]>;
@@ -315,6 +317,7 @@ interface Harness {
   busy: boolean;
   noSession: boolean;
   resumes: string[];
+  resumeDeferred: (() => Promise<void>) | null;
   resumeFails: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
@@ -393,6 +396,7 @@ function harness(): Harness {
     busy: false,
     noSession: false,
     resumes: [],
+    resumeDeferred: null,
     resumeFails: false,
     facts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
     retroFacts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
@@ -478,6 +482,7 @@ function harness(): Harness {
         },
         async gateFacts(_r, sha, known): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
+          x.duringGate?.();
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
         },
@@ -540,6 +545,9 @@ function harness(): Harness {
             if (!claimed) return "dup";
             x.sent.push({ runId, key, text });
             return "sent";
+          },
+          async resumeDeferredRuns() {
+            await x.resumeDeferred?.();
           },
           async resumeRun(runId) {
             x.resumes.push(runId);
@@ -605,7 +613,7 @@ function harness(): Harness {
             return { ok: true, changed: true };
           },
         },
-        rules: (repoId) => x.rules(repoId),
+        rules: (repoId, mainSha) => x.rules(repoId, mainSha),
         refillQueues: async () => void x.refills.push(x.taken.length),
         takeNext: async (seatId) => void x.taken.push(seatId),
         pollGithub: () => void x.polls++,
@@ -866,6 +874,9 @@ describe("report to a draft PR", () => {
       sha: SHA,
       paths: [".github/ci.yml"],
       flightPowers: "standard",
+      hardRulesHash: createHash("sha256")
+        .update(JSON.stringify(DEFAULT_REPO_RULES.hardRules))
+        .digest("hex"),
     });
     expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
   });
@@ -3908,7 +3919,14 @@ describe("the engine runs reviews", () => {
         attentionItems(config, store, clock).find((i) => i.key === `note:ready:${RUN}:${SHA}`)
           ?.owner,
       ).toBe("operator");
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: h.touches,
+        flightPowers: "superuser",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
         readyHardRuleText(`${REPO}#7`, 12, h.touches),
@@ -3924,7 +3942,14 @@ describe("the engine runs reviews", () => {
       for (const repo of config.repos) repo.flightPowers = "superuser";
       reported(first().id, []);
       await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: h.touches,
+        flightPowers: "superuser",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
         readyHardRuleText(`${REPO}#7`, 12, h.touches),
@@ -3938,8 +3963,111 @@ describe("the engine runs reviews", () => {
       await gateOpen();
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));
       expect(h.hardRuleLists).toEqual([["x/**"]]);
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: [], flightPowers: "standard" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: [],
+        flightPowers: "standard",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
     });
+
+    it("re-reads touches when hard rules change for the same sha", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["x/**"] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      const reads = h.hardRuleLists.length;
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["docs/**"] });
+      await h.engine.reconcileRun(RUN);
+      expect(h.hardRuleLists).toHaveLength(reads + 1);
+      expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
+    });
+
+    it("re-reads touches when fetching main introduces a matching hard rule", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: [] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().touches?.paths).toEqual([]);
+      const mainSha = need(h.gate).mainSha;
+      const reads = h.hardRuleLists.length;
+      const pinnedReads: (string | undefined)[] = [];
+      h.duringGate = () => {
+        h.rules = async (_repoId, sha) => {
+          pinnedReads.push(sha);
+          return { ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["docs/**"] };
+        };
+      };
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("merge");
+      expect(pinnedReads).toContain(mainSha);
+      expect(h.hardRuleLists.length).toBeGreaterThan(reads);
+      expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
+    });
+
+    it("does not merge when fetching introduces a hard rule and the gate read fails", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: [] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().touches?.paths).toEqual([]);
+      expect(loopOf().gate).not.toBeNull();
+      h.duringGate = () => {
+        h.rules = async () => ({
+          ...DEFAULT_REPO_RULES,
+          hardRulesSet: true,
+          hardRules: ["docs/**"],
+        });
+        h.gate = null;
+      };
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("merge");
+      expect(loopOf().gate).toBeNull();
+    });
+
+    it("re-reads strays when the seat area changes for the same sha and main tip", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(h.gateReads.at(-1)?.known).toBe(true);
+      const seat = need(config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === SEAT));
+      seat.area = ["docs/**"];
+      await h.engine.reconcileRun(RUN);
+      expect(h.gateReads.at(-1)?.known).toBe(false);
+    });
+
+    it("discards cached strays if the new area cannot be read", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      const seat = need(config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === SEAT));
+      seat.area = ["docs/**"];
+      h.gate = null;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().gate).toBeNull();
+      expect(h.steps).toEqual([]);
+    });
+
+    it.each(["close", "delete-remote"])(
+      "retries transient %s failures past three ticks",
+      async (step) => {
+        const down = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults[step] = [down, down, down, down];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.steps).toContain(step));
+        for (let n = 0; n < 3; n++) {
+          clock += ENGINE_TICK_MS;
+          await h.engine.reconcileRun(RUN);
+          expect(loopOf().parked).toBeNull();
+        }
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().phase).toBe("done");
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(1);
+      },
+    );
 
     it("a merge refused finally parks the run as merge-step and runs no later step", async () => {
       h.stepResults.merge = [{ ok: false, text: "the head moved", transient: false }];
@@ -3983,6 +4111,73 @@ describe("the engine runs reviews", () => {
         ended: false,
       });
     });
+
+    it("parks post-merge housekeeping on the tenth transient tick", async () => {
+      const down = { ok: false, text: "gh is down", transient: true } as const;
+      h.stepResults.close = Array.from({ length: 10 }, () => down);
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toContain("close"));
+      for (let n = 2; n <= 10; n++) {
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps.filter((s) => s === "close")).toHaveLength(n);
+        if (n < 10) expect(loopOf().parked).toBeNull();
+      }
+      expect(loopOf().parked).toEqual({
+        kind: "merge-step",
+        reason: mergeStepFailedText("close the issue", "gh is down"),
+        ended: false,
+      });
+      expect(h.steps).not.toContain("delete-remote");
+    });
+
+    it.each([
+      [0, "ready"],
+      [ENGINE_TICK_MS, "ready"],
+      [0, "merge"],
+      [ENGINE_TICK_MS, "merge"],
+    ] as const)(
+      "gives housekeeping ten fresh transient ticks after an operator merge delayed by %s ms following %s failures",
+      async (delay, failedStep) => {
+        const mergeDown = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults[failedStep] = [mergeDown, mergeDown];
+        if (failedStep === "ready") setLoop({ merging: null });
+        await gateOpen();
+        await vi.waitFor(() =>
+          expect(h.steps).toEqual(failedStep === "ready" ? ["ready"] : ["ready", "merge"]),
+        );
+        expect(loopOf().merging).toEqual(
+          failedStep === "ready" ? null : { sha: SHA, done: ["ready"] },
+        );
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().transient).toBe(2);
+        clock += delay;
+        const down = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults.close = Array.from({ length: 10 }, () => down);
+        setPr({ state: "merged", isDraft: false, ci: "passing", mergedAt: clock });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().merging).toEqual({
+          sha: SHA,
+          done: failedStep === "ready" ? ["merge"] : ["ready", "merge"],
+        });
+        expect(loopOf().transient).toBe(1);
+        expect(loopOf().parked).toBeNull();
+        for (let n = 2; n <= 10; n++) {
+          clock += ENGINE_TICK_MS;
+          await h.engine.reconcileRun(RUN);
+          expect(h.steps.filter((s) => s === "close")).toHaveLength(n);
+          if (n < 10) expect(loopOf().parked).toBeNull();
+        }
+        expect(loopOf().parked).toEqual({
+          kind: "merge-step",
+          reason: mergeStepFailedText("close the issue", "gh is down"),
+          ended: false,
+        });
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(failedStep === "ready" ? 0 : 2);
+        expect(h.steps).not.toContain("delete-remote");
+      },
+    );
 
     it("a local branch that cannot be deleted raises a note and does not park the run", async () => {
       h.stepResults["delete-local"] = [{ ok: false, text: "not merged", transient: false }];
@@ -4212,6 +4407,8 @@ describe("the engine runs reviews", () => {
     h.minorResults = [down, down, down];
     draftWorkspace();
     await toReview();
+    // Drain the review-start pass before reporting findings.
+    await h.engine.reconcileRun(RUN);
     reported(first().id, [finding("Minor")]);
     await vi.waitFor(() => expect(h.minorCalls).toHaveLength(1));
     await h.engine.reconcileRun(RUN);
@@ -4424,6 +4621,32 @@ describe("the engine runs reviews", () => {
       expect(first().state).toBe("running");
     });
 
+    it("waits for pause-deferred recovery before supervising a running review", async () => {
+      await toReview();
+      const runId = need(first().runId);
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const recovering = vi.fn(async () => {
+        await gate;
+        h.retroFacts = { inTurn: false, resumedAt: HUB + 1000, rateLimitedUntil: null };
+      });
+      h.resumeDeferred = recovering;
+      const tick = h.engine.tick();
+      try {
+        await vi.waitFor(() => expect(recovering).toHaveBeenCalled());
+        expect(sentKeys().filter((key) => key.startsWith("rv-resume:"))).toEqual([]);
+      } finally {
+        release();
+        await tick;
+      }
+      expect(sentKeys().filter((key) => key.startsWith("rv-resume:"))).toEqual([
+        `rv-resume:${runId}:${HUB}`,
+      ]);
+      expect(first().state).toBe("running");
+    });
+
     it("a resumed seat gets one resume line", async () => {
       await toReview();
       const runId = need(first().runId);
@@ -4492,6 +4715,8 @@ describe("the engine runs reviews", () => {
       store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: WT });
       await toReview();
       expect(h.asides).toEqual([RUN]);
+      // Drain the review-start pass before changing the seat or findings.
+      await h.engine.reconcileRun(RUN);
     }
 
     it("resumes a parked aside run while its seat holds another run, deferring the wake", async () => {

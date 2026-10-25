@@ -449,6 +449,8 @@ export interface Supervisor {
    * start, attach or end is in progress.
    */
   resumeRun(runId: string): Promise<void>;
+  /** Retry pause-deferred recoveries before supervising their reviews. */
+  resumeDeferredRuns?(): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
@@ -515,7 +517,7 @@ export interface Supervisor {
   message(
     seatId: string,
     text: string,
-    opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none" },
+    opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none"; enforcePause?: boolean },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
@@ -636,6 +638,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  const deferredRecoveries = new Set<string>();
+  let recoveringDeferred: Promise<void> | null = null;
+  let unpauseResume: (() => void) | undefined;
   /** Per clone: `prepareCheckout` calls queue here (concurrent fetch/prune race on ref locks). */
   const cloneQueues = new Map<string, Promise<unknown>>();
   const transcripts = new Map<string, FoldState>();
@@ -1793,6 +1798,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (row !== null) await recoverSession(row);
   }
 
+  function resumeDeferredRuns(): Promise<void> {
+    if (recoveringDeferred !== null) return recoveringDeferred;
+    recoveringDeferred = (async () => {
+      if (reattaching !== null) await reattaching;
+      if (!mayAct() || stopping || deps.cliHold?.reason != null) return;
+      for (const runId of deferredRecoveries) {
+        const run = store.run(runId);
+        if (run === null || runGone(runId, run.agentId)) {
+          deferredRecoveries.delete(runId);
+          continue;
+        }
+        if (pausedSeat(store, run.agentId)) continue;
+        await resumeRun(runId);
+        if (live.get(run.agentId)?.session.alive || runGone(runId, run.agentId))
+          deferredRecoveries.delete(runId);
+      }
+    })().finally(() => {
+      recoveringDeferred = null;
+    });
+    return recoveringDeferred;
+  }
+
   async function readOnlyCheckout(info: SeatInfo, row: SeatSessionRow, run: Run) {
     const path = row.worktree;
     if (path === null) throw new Error("no worktree recorded");
@@ -2078,7 +2105,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l = await checkedLaunch(info, run, row.cliSessionId, checkout, true, null);
     } catch (e) {
       log(`${row.seatId}: could not start: ${errText(e)}`);
-      if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, row.seatId)) return;
+      if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, row.seatId)) {
+        deferredRecoveries.add(run.id);
+        return;
+      }
       return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
     }
     // Keep the error that the successful resume is about to replace in Activity.
@@ -3194,6 +3224,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
         }
       });
+      unpauseResume = bus.subscribe((topic) => {
+        if (topic === "settings")
+          void resumeDeferredRuns().catch((e: unknown) =>
+            log(`could not resume paused crew runs: ${errText(e)}`),
+          );
+      });
       reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
     },
 
@@ -3201,6 +3237,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!holdsLock) return;
       stopping = true;
       unholdResume?.();
+      unpauseResume?.();
       // The seats and their keepers keep running: the hub lets go of their sockets, with the lines
       // it has acted on stored, and keeps their tokens, files and holds for the next hub.
       // A seat whose Stop or engine end is under way finishes it first, so `onExit` records the end
@@ -3258,6 +3295,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           if (l.run.vendor === "codex") await sendInterrupt(l);
           else await sendInterrupt(l).catch(rethrowIfDead);
         }
+        if (opts.enforcePause) {
+          const pause = pausedSeat(store, seatId);
+          if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+        }
         writeLine(l, text);
         // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
         try {
@@ -3291,6 +3332,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     send,
 
     resumeRun,
+
+    resumeDeferredRuns,
 
     on(fn) {
       listeners.add(fn);

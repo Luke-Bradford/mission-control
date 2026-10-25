@@ -7,6 +7,7 @@ import {
   describeGqlErrors,
   EMPTY_BOARD_GRACE_MS,
   fetchCardNow,
+  fetchQueueCard,
   fetchTicket,
   GqlError,
   GqlTransportError,
@@ -95,6 +96,7 @@ describe("fetchCardNow", () => {
       state: "planned",
       closed: false,
       assignees: ["luke"],
+      labels: [],
     });
   });
 
@@ -102,6 +104,65 @@ describe("fetchCardNow", () => {
     expect(await fetchCardNow(repo, 7, answer(null))).toBeNull();
     expect(await fetchCardNow(repo, 7, answer(onProject("Todo", 99)))).toBeNull();
     expect(await fetchCardNow(repo, 7, answer(onProject("Parked")))).toBeNull();
+  });
+});
+
+it("reads queue snapshots from the issue project item with fresh field priorities", async () => {
+  const raw = item(7, "Todo", { priority: "P0", labels: ["catalog"] });
+  const gql = vi.fn(async () => ({
+    repositoryOwner: { projectV2: { id: "project-demo" } },
+    repository: {
+      issue: {
+        ...raw.content,
+        projectItems: {
+          nodes: [{ ...raw, project: { id: "project-demo", number: repo.project } }],
+        },
+      },
+    },
+  }));
+  const card = await fetchQueueCard(repo, 7, gql, NOW);
+  expect(card).toMatchObject({
+    issueNumber: 7,
+    itemId: "PVTI_7",
+    projectId: "project-demo",
+    priority: "P0",
+    prioritySource: "field",
+    labels: ["catalog"],
+  });
+  expect(gql.mock.calls).toHaveLength(1);
+});
+
+it("reads queue priorities only from the configured owner's project with the same number", async () => {
+  const raw = item(7, "Todo", { priority: "P0" });
+  const gql = vi.fn(async (_query: string, _vars: Record<string, unknown>) => ({
+    repositoryOwner: { projectV2: { id: "project-configured" } },
+    repository: {
+      issue: {
+        ...raw.content,
+        projectItems: {
+          nodes: [
+            { ...raw, id: "item-other", project: { id: "project-other", number: 2 } },
+            {
+              ...raw,
+              id: "item-configured",
+              priority: { name: "P2" },
+              project: { id: "project-configured", number: 2 },
+            },
+          ],
+        },
+      },
+    },
+  }));
+  expect(await fetchQueueCard(repo, 7, gql, NOW)).toMatchObject({
+    itemId: "item-configured",
+    projectId: "project-configured",
+    priority: "P2",
+  });
+  expect(gql).toHaveBeenCalledWith(expect.stringMatching(/repositoryOwner\(login: \$owner\)/), {
+    owner: "octo-org",
+    name: "shop-app",
+    number: 7,
+    projectNumber: 2,
   });
 });
 

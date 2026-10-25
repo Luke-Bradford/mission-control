@@ -319,6 +319,14 @@ beforeEach(() => {
   logs = [];
   stateSeen.mockClear();
   tools = createFlightTools({
+    focus: async (seatId, focus) => {
+      const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === seatId);
+      if (!seat) throw new Error("Missing seat");
+      seat.focus = focus;
+    },
+    queueReorder: async (seatId, move, above) => ({
+      item: { key: "note:queue-reorder:fixture", seatId, move, above },
+    }),
     seen: stateSeen,
     config: cfg,
     store,
@@ -6219,6 +6227,41 @@ describe("gh_read", () => {
   });
 });
 
+it("FLIGHT reads and changes focus through message_seat without sending a seat message", async () => {
+  live("flight-1", "r-flight");
+  const result = await call("message_seat", {
+    seat: "guido-1",
+    focus: "label:catalog",
+    basis: "Operator asked",
+  });
+  expect(result.isError).not.toBe(true);
+  expect(cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1")?.focus).toBe("label:catalog");
+  const read = await call("message_seat", {
+    seat: "guido-1",
+    read_focus: true,
+    basis: "Check focus",
+  });
+  expect(JSON.parse(read.text).focus).toBe("label:catalog");
+  expect(messageCalls).toEqual([]);
+});
+it("FLIGHT can propose queue promotion but cannot approve the board write", async () => {
+  live("flight-1", "r-flight");
+  const result = await call("promote", {
+    action: "queue-reorder",
+    seat: "guido-1",
+    move: "mc#2",
+    above: "mc#1",
+    basis: "Operator asked",
+  });
+  expect(result.isError).not.toBe(true);
+  expect(JSON.parse(result.text).item.key).toBe("note:queue-reorder:fixture");
+  expect(
+    (await call("promote", { action: "approve", key: "note:queue-reorder:fixture", basis: "Try" }))
+      .isError,
+  ).toBe(true);
+  expect(editCalls).toEqual([]);
+  expect(ghCalls).toEqual([]);
+});
 describe("attention hold tools", () => {
   const key = "note:blocked:hold-test";
   const args = { key, reason: " Waiting ", condition: { kind: "manual" } };

@@ -52,6 +52,7 @@ import { z } from "zod";
 import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
+import { seatFocus } from "./focus.ts";
 import { areaGlob, protectedGlob } from "./globs.ts";
 import { type CodexModels, codexModels } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
@@ -75,6 +76,7 @@ export interface AdoptedLoop {
 /** Editable display metadata stays separate from the seat's stable identity. */
 export interface ConfigSeatInput extends SeatInput {
   displayCallSign?: string;
+  focus?: string | null;
 }
 
 export const displayCallSign = z
@@ -88,6 +90,7 @@ export interface CrewSeatConfig {
   /** Resolved account vendor. Loaded configs always set it; hand-built fixtures may omit it. */
   modelVendor?: CrewVendor;
   displayCallSign?: string;
+  focus?: string | null;
   id: AgentId;
   role: CrewRole;
   /** The seat's resolved role. Loaded: always set; a hand-built config may omit it (`seatDef`). */
@@ -507,6 +510,7 @@ const fileSchema = z
               z.strictObject({
                 id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
                 display_call_sign: displayCallSign.optional(),
+                focus: seatFocus.optional(),
                 role: z.string(),
                 account_id: nonEmpty,
                 model: modelName.optional(),
@@ -601,6 +605,7 @@ const fileSchema = z
                   ...(seat.display_call_sign === undefined
                     ? {}
                     : { displayCallSign: seat.display_call_sign }),
+                  ...(seat.focus === undefined ? {} : { focus: seat.focus }),
                   role: seat.role,
                   accountId: seat.account_id,
                   // the role's model when the seat names none; `checkCrew` fills it in
@@ -776,6 +781,7 @@ export function writerAreaConflict(seats: readonly CrewSeatConfig[]): [string, s
 export function seatInput(seat: CrewSeatConfig): ConfigSeatInput {
   return {
     id: seat.id,
+    ...(seat.focus === undefined ? {} : { focus: seat.focus }),
     ...(seat.displayCallSign === undefined ? {} : { displayCallSign: seat.displayCallSign }),
     role: seat.role,
     accountId: seat.accountId,

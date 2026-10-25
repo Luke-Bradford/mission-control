@@ -106,6 +106,17 @@ describe("planCrew", () => {
     expect(plan.drop).toEqual([]);
   });
 
+  it("applies focus immediately while other busy-seat edits wait", () => {
+    const a = config([{ id: "s1", seats: [seat("guido-1")] }]);
+    const t = config([
+      { id: "s1", seats: [seat("guido-1", { model: "opus", focus: "label:catalog" })] },
+    ]);
+    const plan = planCrew(a, t, () => true);
+    expect(plan.sessions.get("s1")?.[0]?.focus).toBe("label:catalog");
+    expect(plan.sessions.get("s1")?.[0]?.model).toBe("sonnet");
+    expect(plan.drop).toEqual([]);
+  });
+
   it("edit: free applies, busy waits", () => {
     const a = config([{ id: "s1", seats: [seat("guido-1")] }]);
     const t = config([{ id: "s1", seats: [seat("guido-1", { model: "opus" })] }]);
