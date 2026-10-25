@@ -170,7 +170,7 @@ import {
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { MapConflicts } from "./map/conflicts.ts";
-import type { CallRing } from "./map/ring.ts";
+import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -745,9 +745,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     scheduleNotifications();
   });
+  const mapSources = new Map<string, RingSource>();
+  const mapRing = new CallRing(() => {
+    const seats = configuredAgents(config).filter((a) => a.kind === "crew");
+    const runs = store.runsActiveSince(now() - 15 * 60_000);
+    const active = new Set(runs.map((run) => run.id));
+    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
+    return runs.flatMap((run): RingSource[] => {
+      const seat = seats.find((s) => s.id === run.agentId && s.repoId === run.repoId);
+      if (!seat || !run.transcriptPath) return [];
+      const held = store.seatSession(seat.id);
+      // A cleared or reassigned seat can still have unread results in its previous transcript.
+      const cwd =
+        run.loop?.aside?.worktree ??
+        (held?.runId === run.id ? held.worktree : null) ??
+        mapSources.get(run.id)?.cwd;
+      if (!cwd) return [];
+      const source: RingSource = {
+        id: run.id,
+        seat: seat.id,
+        repoId: run.repoId,
+        cwd,
+        transcriptPath: run.transcriptPath,
+        vendor: run.vendor,
+      };
+      mapSources.set(run.id, source);
+      return [source];
+    });
+  });
+  let stopMapRing: (() => void) | undefined;
+  app.addHook("onReady", async () => {
+    stopMapRing = mapRing.start();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
+    stopMapRing?.();
     clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
@@ -2654,7 +2687,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get("/stream", (_req, reply) => {
+      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
+        const repoId = req.query.map;
+        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
+          return reply.code(404).send({ error: "repo not found" });
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -2678,11 +2714,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
+        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
+        const unsubscribeMap =
+          repoId === undefined
+            ? undefined
+            : mapRing.subscribe(repoId, (delta) => {
+                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+              });
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
+          unsubscribeMap?.();
           streams.delete(end);
         };
         const end = () => {
