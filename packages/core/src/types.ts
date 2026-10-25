@@ -999,6 +999,8 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  hold?: AttentionHold;
+  holdReleased?: string;
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
@@ -1178,16 +1180,33 @@ export interface OverviewSummary {
   kpis: {
     working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
-    spendToday: { usd: number; perHour: number[] };
-    inFlight: { count: number; oldestAt: number | null };
-    mergedToday: { count: number; perHour: number[] };
-    ciPassRate24h: { pct: number | null; runs: number; redNow: number };
-    cycleTime: { medianMs: number | null; n: number; avg14dMs: number | null };
-    needsYou: { count: number; overHour: number };
+    /** Minute spend buckets, using the same attribution as perHour. */
+    spendToday: { usd: number; perHour: number[]; series?: number[] };
+    /** Distinct tickets in building, checks, review or merging at each minute end. */
+    inFlight: { count: number; oldestAt: number | null; series?: number[] };
+    /** Merge counts per minute, including minutes before local midnight. */
+    mergedToday: { count: number; perHour: number[]; series?: number[] };
+    /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
+    ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
+    /** Local-day median at each minute end; null without completed cycles. */
+    cycleTime: {
+      medianMs: number | null;
+      n: number;
+      avg14dMs: number | null;
+      series?: (number | null)[];
+    };
+    /** Operator need episodes open at each minute end, including retained resolved episodes. */
+    needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
   /** Missing minute samples are null, rather than zero utilization. */
-  machine: { cpu: (number | null)[]; mem: (number | null)[]; diskFreeGb: number | null };
+  machine: {
+    cpu: (number | null)[];
+    mem: (number | null)[];
+    diskFreeGb: number | null;
+    /** Mean free disk space in GB per minute, in the same units as diskFreeGb. */
+    disk?: (number | null)[];
+  };
 }
 
 export interface PipelineStage {
@@ -1205,4 +1224,18 @@ export interface PipelineCard {
   ci: ("pass" | "fail" | "pending")[];
   since: number;
   who: string | null;
+}
+
+export type AttentionHoldCondition =
+  | { readonly kind: "date"; readonly at: number }
+  | { readonly kind: "ticket"; readonly ticket: string }
+  | { readonly kind: "crew" }
+  | { readonly kind: "manual" };
+
+export interface AttentionHold {
+  reason: string;
+  condition: AttentionHoldCondition;
+  by: string;
+  at: number;
+  releasedAt?: number;
 }

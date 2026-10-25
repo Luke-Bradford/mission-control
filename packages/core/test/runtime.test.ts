@@ -241,6 +241,8 @@ describe("the allowlist in phase 2b", () => {
       remember: "mcp__mc__remember",
       forget: "mcp__mc__forget",
       recall: "mcp__mc__recall",
+      holdItem: "mcp__mc__hold_item",
+      releaseHold: "mcp__mc__release_hold",
       askOperator: "mcp__mc__ask_operator",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
@@ -572,6 +574,8 @@ describe("crew constants", () => {
           "remember",
           "forget",
           "recall",
+          "hold_item",
+          "release_hold",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -670,6 +674,8 @@ describe("mc tool grants", () => {
       "remember",
       "forget",
       "recall",
+      "hold_item",
+      "release_hold",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

@@ -177,11 +177,21 @@ export function MachinePanel() {
           </div>
           <div className="resrow">
             <span className="s fg2">Disk</span>
-            <Bar
-              segs={
-                u.diskPct === null ? [] : [{ pct: u.diskPct, colour: OTHER_COLOUR, label: "used" }]
-              }
-            />
+            {summary?.machine?.disk?.length ? (
+              <Sparkline
+                label="Disk history · GB free"
+                values={summary.machine.disk}
+                color="var(--fg-2)"
+              />
+            ) : (
+              <Bar
+                segs={
+                  u.diskPct === null
+                    ? []
+                    : [{ pct: u.diskPct, colour: OTHER_COLOUR, label: "used" }]
+                }
+              />
+            )}
             <span className="num s" title={none}>
               {u.diskFree === null ? DASH : `${Math.round(u.diskFree / GIB)} GB`}
               <span className="muted"> free</span>

@@ -279,6 +279,14 @@ describe("Needs you", () => {
     expect(needs().querySelector("img")).toBeNull();
   });
 
+  it("shows every operator item with FLIGHT stopped", async () => {
+    stub([item({ key: "a", text: "First" }), item({ key: "b", text: "Second" })]);
+    render(<Comms item={null} />);
+    await within(needs()).findByText("First");
+    expect(within(needs()).getByText("Second")).toBeTruthy();
+    expect(needs().querySelectorAll(":scope > .nrow")).toHaveLength(2);
+  });
+
   it("marks a missed triage and leaves waiting items out of Needs you", async () => {
     stub([
       item({ key: "missed", flightTriage: "missed" }),
