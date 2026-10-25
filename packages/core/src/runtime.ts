@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
@@ -877,7 +876,9 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
     throw new Error("crew sandbox: tempRoot must be absolute");
   // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
   // same-uid seats cannot read sibling runs without blocking unrelated temp tools.
-  const tempReadDenies = i.tempRoot === undefined ? [] : [dirname(i.tempRoot)];
+  // Core also runs in the browser bundle, so no node:path: the root is absolute, so its parent is the text before its last "/".
+  const tempReadDenies =
+    i.tempRoot === undefined ? [] : [i.tempRoot.slice(0, i.tempRoot.lastIndexOf("/")) || "/"];
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {
