@@ -761,6 +761,26 @@ describe("scratch mode", () => {
 });
 
 describe("crew sandbox and scoped edits", () => {
+  it("denies the shared temp parent and sibling runs, allowing only the seat's own root", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      for (const parent of ["/tmp", "/private/tmp", "/custom/temp"]) {
+        const tempRoot = `${parent}/mc-own-run`;
+        const siblingRoot = `${parent}/mc-other-run`;
+        const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
+          .sandbox.filesystem;
+        expect(f.denyRead).toContain(parent);
+        expect(
+          f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
+        ).toBe(true);
+        expect(f.allowRead).toEqual([tempRoot]);
+        if (parent === "/tmp" || parent === "/private/tmp") {
+          expect(f.denyRead).toContain("/tmp");
+          expect(f.denyRead).toContain("/private/tmp");
+        }
+      }
+    }
+  });
+
   it("isolates the run temp root from the operator's Claude sessions in every mode", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
       const tempRoot = "/tmp/mc-seat-test";

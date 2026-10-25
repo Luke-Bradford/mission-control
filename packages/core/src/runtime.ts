@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
@@ -874,6 +875,11 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
+  // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
+  // same-uid seats cannot read sibling runs; cover both names of macOS's temp directory.
+  const tempReadDenies = i.tempRoot === undefined ? [] : [dirname(i.tempRoot)];
+  if (tempReadDenies.includes("/tmp") || tempReadDenies.includes("/private/tmp"))
+    tempReadDenies.splice(0, tempReadDenies.length, "/tmp", "/private/tmp");
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {
@@ -907,7 +913,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
         // read: the hub, the loops, the other crew clones and the operator's own working folders.
-        denyRead: [...denyRead, ...tempDenies],
+        denyRead: [...denyRead, ...tempDenies, ...tempReadDenies],
       },
     },
   });
