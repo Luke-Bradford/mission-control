@@ -350,6 +350,8 @@ const STDIN_SCRIPT = "\0stdin-shell-script";
 /** A pseudo-program for a line the tokenizer could not fully read; the guard denies it. */
 const UNREADABLE_LINE = "\0unreadable-line";
 const GIT_ENV_OVERRIDE = "\0git-env";
+/** A word the shell expands, so the guard can't know what it becomes. */
+const EXPANDS = /[$`]/;
 /** Paths must be literal: the guard cannot resolve shell expansions. */
 const gitPathExpands = (word: string): boolean => /[$`*?[{}]|^~/.test(word);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
@@ -929,6 +931,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const words = [...argv];
   let at = 0;
   let gitEnv = false;
+  // after `env`, an expanded word can be any option or the command itself
+  let afterEnv = false;
   const directories: string[] = [];
   let bg = background;
   // `… | xargs sh`: xargs takes the stdin; the shell gets file operands
@@ -937,6 +941,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   for (;;) {
     const head = words[at];
     if (head === undefined) break;
+    if (afterEnv && EXPANDS.test(head)) gitEnv = true;
     if (ASSIGNMENT.test(head)) {
       if (/^GIT_[A-Za-z0-9_]*\+?=/.test(head)) gitEnv = true;
       at++;
@@ -957,12 +962,15 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       if (spec === undefined) break;
       if (BACKGROUND_WRAPPERS.has(base)) bg = true;
       if (base === "xargs") viaXargs = true;
+      if (base === "env") afterEnv = true;
       at++;
       // options and their values; a lone `-` is one too (`env -` is `env -i`)
       while (words[at]?.startsWith("-")) {
         const opt = words[at] ?? "";
         at++;
         if (opt === "--") break;
+        // `env -u "$name"`, `env -u"$name"`: the guard can't see what is unset
+        if (base === "env" && (EXPANDS.test(opt) || EXPANDS.test(words[at] ?? ""))) gitEnv = true;
         const valueOption = clusterValue(opt, spec.valued);
         const flags =
           valueOption === null ? opt : opt.slice(0, opt.length - valueOption.inline.length);

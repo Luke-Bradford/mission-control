@@ -2237,6 +2237,12 @@ describe("seat git environment", () => {
     "git difftool --no-index a b",
     "GIT_CONFIG_COUNT=0 true; env SAFE=1 git diff",
     "env -i true; env SAFE=1 git diff",
+    `name=GIT_CONFIG_GLOBAL; env -u "${"$"}name" git diff`,
+    `name=GIT_CONFIG_GLOBAL; env -u"${"$"}name" git diff`,
+    `name=GIT_CONFIG_GLOBAL; env --unset="${"$"}name" git diff`,
+    `opts=-i; env ${"$"}opts git diff`,
+    `opts=-i; env SAFE=1 ${"$"}opts git diff`,
+    "opts=-i; env `echo -i` git diff",
   ])("refuses %s", (command) => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
       expect(ruleOf(bash(command), { ...writer, mode })).toBe("git-env");
