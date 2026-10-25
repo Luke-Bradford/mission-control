@@ -154,7 +154,16 @@ export function prDiffKey(diff: string): string {
     .join("\n");
 }
 
+export interface ReviewPrSnapshot {
+  state: "open" | "closed" | "merged";
+  headSha: string;
+  baseSha: string;
+  mergeCommitSha: string | null;
+}
+
 export interface Publisher {
+  /** An authoritative read, independent of the collector's snapshot. */
+  reviewPr(run: Run, number: number): Promise<ReviewPrSnapshot | null>;
   /** The pending merge in the registered worktree, or null when absent or unreadable. */
   mergeHead(run: Run, worktree: string): Promise<string | null>;
   mainTip(
@@ -197,8 +206,14 @@ export interface Publisher {
   rerunRuling(repo: string, sha: string): Promise<RerunResult>;
   /** What those re-runs came to: pending until each run is on a later attempt and completed. */
   rerunState(repo: string, sha: string, runs: CiRerun["runs"]): Promise<RerunStateResult>;
-  /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
-  hardRuleTouches(run: Run, sha: string, hardRules: readonly string[]): Promise<string[]>;
+  /** Hard-rule paths against a persisted base, a merge first parent, or main. */
+  hardRuleTouches(
+    run: Run,
+    sha: string,
+    hardRules: readonly string[],
+    mergeCommitSha?: string,
+    baseSha?: string,
+  ): Promise<string[]>;
   /**
    * The merge gate's reads for `sha`. origin's tip is read every call; when `known` is for the same
    * sha and tip, it is returned without the rest of the reads.
@@ -814,8 +829,52 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return result.ok && result.descends;
     },
 
-    async hardRuleTouches(run, sha, hardRules) {
+    async reviewPr(run, number) {
+      const repo = repoOf(run);
+      if (repo === undefined) return null;
+      const pr = await ghJson(
+        [
+          "pr",
+          "view",
+          String(number),
+          `--repo=${repo}`,
+          "--json",
+          "state,headRefOid,baseRefOid,mergeCommit",
+        ],
+        "pr view",
+      );
+      if (isRefusal(pr)) return null;
+      const state =
+        pr.state === "OPEN"
+          ? "open"
+          : pr.state === "MERGED"
+            ? "merged"
+            : pr.state === "CLOSED"
+              ? "closed"
+              : null;
+      const merge = (pr.mergeCommit as { oid?: unknown } | null)?.oid;
+      if (
+        state === null ||
+        typeof pr.headRefOid !== "string" ||
+        !SHA.test(pr.headRefOid) ||
+        typeof pr.baseRefOid !== "string" ||
+        !SHA.test(pr.baseRefOid) ||
+        (state === "merged" && (typeof merge !== "string" || !SHA.test(merge)))
+      )
+        return null;
+      return {
+        state,
+        headSha: pr.headRefOid,
+        baseSha: pr.baseRefOid,
+        mergeCommitSha: typeof merge === "string" ? merge : null,
+      };
+    },
+
+    async hardRuleTouches(run, sha, hardRules, mergeCommitSha, baseSha) {
       const place = seatPlace(deps.config, run.agentId);
+      if (baseSha !== undefined && !SHA.test(baseSha)) throw new Error("invalid diff base");
+      if (mergeCommitSha !== undefined && !SHA.test(mergeCommitSha))
+        throw new Error("invalid merge commit");
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
@@ -823,7 +882,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const common = await realpath(join(checkout, ".git"));
         const g = (a: string[]) =>
           git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
-        const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
+        for (const commit of new Set(
+          [sha, mergeCommitSha ?? baseSha].filter((value): value is string => value !== undefined),
+        )) {
+          if (await have(g, commit)) continue;
+          await g(["fetch", "--no-tags", "origin", commit]);
+          if (!(await have(g, commit))) throw new Error("diff input could not be fetched");
+        }
+        const base = (
+          await g([
+            "merge-base",
+            mergeCommitSha ? `${mergeCommitSha}^1` : (baseSha ?? "refs/remotes/origin/HEAD"),
+            sha,
+          ])
+        ).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
         const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")

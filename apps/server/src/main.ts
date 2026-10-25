@@ -14,6 +14,7 @@
  *               a preview started with MC_CREW=1, ignored (and logged) anywhere else
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
+
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -41,6 +42,12 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
+import {
+  messageUnpausedSeat,
+  pauseAwareSupervisor,
+  pausedSeat,
+  startUnpausedRun,
+} from "./crew-pause.ts";
 import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -316,7 +323,11 @@ export async function main(): Promise<void> {
     config,
     store,
     bus,
-    supervisor,
+    supervisor: {
+      ...supervisor,
+      startRun: (...args) => startUnpausedRun(store, supervisor, ...args),
+      message: (...args) => messageUnpausedSeat(store, supervisor, ...args),
+    },
     login: hubLogin,
     lockState: () => lock.state(),
     profiles,
@@ -339,13 +350,15 @@ export async function main(): Promise<void> {
     config,
     store,
     bus,
-    supervisor,
+    supervisor: pauseAwareSupervisor(store, supervisor),
     enabled: engineOn,
     login: hubLogin,
     lockState: () => lock.state(),
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
-      cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),
+      pausedSeat(store, seatId) !== null ||
+      cliHold.reason !== null ||
+      crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
   });
 

@@ -9,6 +9,7 @@ import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
+import { messageUnpausedSeat } from "../src/crew-pause.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { CLI_PID_FILE, KEEPER_PID_FILE, pidAlive, readPidFile } from "../src/runtime/keeper.ts";
 import * as sessionDriver from "../src/runtime/session.ts";
@@ -1275,6 +1276,38 @@ describe("Codex interrupt failures", () => {
     expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
     await sup.endRunByEngine(runId);
   });
+
+  it.each([false, true])(
+    "refuses FLIGHT delivery when paused during a queued interrupt (%s)",
+    async (queued) => {
+      const signal = join(dir, "interrupt-complete");
+      const { sup } = codexSupervisor({ holdTurn: true, interruptCompleteSignal: signal });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("running"));
+      const interrupt = queued ? sup.interrupt("guido-1") : null;
+      const replacement = refusal(
+        messageUnpausedSeat(store, sup, "guido-1", "replacement", {
+          interrupt: !queued,
+        }),
+      );
+      await until(() => expect(recorded().some((m) => m.method === "turn/interrupt")).toBe(true));
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: ["guido-1"],
+          reason: "Save tokens",
+          at: Date.now(),
+          by: "operator",
+        }),
+      );
+      writeFileSync(signal, "complete");
+      await interrupt;
+      expect((await replacement).message).toBe("Paused: Save tokens");
+      expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it("Stop terminates a Codex process after interrupt timeout without touching an unrelated process", async () => {
     const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {

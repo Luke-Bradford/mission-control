@@ -3,6 +3,7 @@
  * so the scheduler can build attention items without importing the API (api.ts imports the
  * scheduler).
  */
+
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import {
@@ -80,6 +81,7 @@ import {
   configuredAgents,
   seatUnavailable,
 } from "./config.ts";
+import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
@@ -463,6 +465,7 @@ export function crew(
             : view.stateSince;
       return {
         id: agent.id,
+        ...(agent.kind === "crew" ? { crewPause: pausedSeat(store, agent.id) } : {}),
         ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
           ? { displayCallSign: agent.seat.displayCallSign }
           : {}),

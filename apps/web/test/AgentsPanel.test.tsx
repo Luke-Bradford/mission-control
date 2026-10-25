@@ -812,3 +812,27 @@ it("hides a free seat's completed loop", async () => {
   await screen.findByText("free");
   expect(rowsIn(container)[1]?.querySelector(".loopstep")?.textContent).toBe("—");
 });
+
+it.each(["idle", "running", "stopped"] as const)(
+  "shows FLIGHT's crew pause while %s",
+  async (hudState) => {
+    stub([
+      seatRow({
+        id: "flight",
+        hudState,
+        crewPause: {
+          seats: ["flight"],
+          reason: "Save tokens",
+          at: NOW,
+          by: "operator",
+        },
+      }),
+    ]);
+    const { container } = render(<AgentsPanel />);
+    const row = container.querySelector(".flight") as HTMLElement;
+    await within(row).findByText("Paused: Save tokens");
+    expect(within(row).getByText("head agent").getAttribute("title")).toContain(
+      "next check paused",
+    );
+  },
+);

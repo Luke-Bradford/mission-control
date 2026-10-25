@@ -27,6 +27,7 @@ import {
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
   CREW_DISABLED,
+  CREW_GIT_ENV,
   claimedText,
   conflictKey,
   conflictText,
@@ -74,6 +75,7 @@ import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
+import * as seatGit from "../src/runtime/git.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -593,7 +595,9 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const env = recorded()[0].env as Record<string, string>;
+    expect(env).toMatchObject(CREW_GIT_ENV);
     const allowed = new Set([
+      ...Object.keys(CREW_GIT_ENV),
       "HOME",
       "PATH",
       "USER",
@@ -1250,6 +1254,22 @@ describe("startRun", () => {
     expect(e).toBeInstanceOf(CheckoutError);
     expect(store.seatSession("guido-1")).toBeNull();
     expect(recorded()).toEqual([]);
+  });
+
+  it("refuses seats with a clear git version isolation reason", async () => {
+    const probe = vi
+      .spyOn(seatGit, "assertSeatGitVersion")
+      .mockRejectedValue(new seatGit.SeatGitError("git ≥ 2.32 required for seat isolation"));
+    try {
+      const { sup } = make();
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.message).toBe(`${CANNOT_START}: git ≥ 2.32 required for seat isolation`);
+      expect(store.seatSession("guido-1")).toMatchObject({ state: "error", reason: e.message });
+      expect(recorded()).toEqual([]);
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it("fails the start when the CLI cannot be spawned", async () => {
@@ -2515,8 +2535,8 @@ import(${JSON.stringify(fixture)});
   );
 
   it("applies the ordinary guard after the command allowlist", async () => {
-    // The git-read prefix allows this; the guard catches --output after the revision.
-    const { sup } = codex({ command: "git diff HEAD --output=out" });
+    // The log prefix allows this; the ordinary guard catches the output write.
+    const { sup } = codex({ command: "git log HEAD --output=out" });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("decline"));
@@ -2596,4 +2616,80 @@ import(${JSON.stringify(fixture)});
       expect(recorded()).toEqual([]);
     },
   );
+});
+
+it("refuses a pause arriving during ticket fetching at the launch boundary", async () => {
+  const { sup } = make({
+    fetchTicket: async () => {
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: ["guido-1"],
+          reason: "Save tokens",
+          at: 1,
+          by: "operator",
+        }),
+      );
+      return TICKET;
+    },
+  });
+  sup.start();
+  const error = await refusal(sup.startRun("guido-1", 42));
+  expect(error.status).toBe(409);
+  expect(error.message).toBe("Paused: Save tokens");
+  expect(recorded()).toEqual([]);
+  expect(store.seatSession("guido-1")?.state).toBe("idle");
+  store.setSetting("crew.paused", "null");
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+});
+
+it("excludes paused seats from queue allocation and stealing eligibility", () => {
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+  store.setSetting(
+    "crew.paused",
+    JSON.stringify({
+      seats: ["guido-1"],
+      reason: "Save tokens",
+      at: 1,
+      by: "operator",
+    }),
+  );
+  expect(seatMayTake(store, "guido-1", 2)).toBe(false);
+  expect(seatMayTake(store, "retro", 2)).toBe(true);
+  store.setSetting("crew.paused", "null");
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+});
+
+it("preserves an aside run when pause refuses its rework launch", async () => {
+  const { sup } = make({
+    fetchTicket: async () => {
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: ["guido-1"],
+          reason: "Save tokens",
+          at: 1,
+          by: "operator",
+        }),
+      );
+      return TICKET;
+    },
+  });
+  sup.start();
+  await refusal(sup.startRun("guido-1", 42));
+  const run = store.runs("guido-1", 1)[0];
+  if (!run) throw new Error("missing prepared run");
+  store.upsertRun({ ...run, endedAt: null, status: "running" });
+  store.setRunLoop(run.id, {
+    ...NEW_LOOP,
+    aside: {
+      worktree: join(root, "mc-crew", "guido-1-42"),
+      wake: true,
+    },
+  });
+  const error = await refusal(sup.wakeRun(run.id));
+  expect(error.status).toBe(409);
+  expect(store.run(run.id)?.endedAt).toBeNull();
+  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(recorded()).toEqual([]);
 });

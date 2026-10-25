@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
@@ -172,4 +173,25 @@ describe("Codex refusal records", () => {
       expect.stringContaining("apps/a.ts, apps/b.ts"),
     );
   });
+});
+
+it("approves a confined Git path relative to the approved command cwd", async () => {
+  execFileSync("git", ["init", "-q", cwd]);
+  mkdirSync(join(cwd, "apps"));
+  const h = approver();
+  expect(
+    await h.approve(
+      {
+        id: 1,
+        method: "item/commandExecution/requestApproval",
+        params: {
+          kind: "command",
+          cwd: join(cwd, "apps"),
+          command: "/bin/zsh -lc 'git diff -- ../package.json'",
+        },
+      },
+      undefined,
+      signal(),
+    ),
+  ).toBe("accept");
 });

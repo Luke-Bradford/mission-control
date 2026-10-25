@@ -8,6 +8,7 @@ import {
 import { useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
+import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
 import { Seg } from "../hud/Seg.tsx";
@@ -131,7 +132,7 @@ function UpdateControl() {
   );
 }
 
-/** Setup (catalogue §2.7), read-only except Repos, where a repo is added to config.yaml. */
+/** Setup (catalogue §2.7): sessions, crew controls and hub settings. */
 export function Setup({ tab }: { tab: SetupTab }) {
   const { data: config, error } = useResource<ConfigView>(RESOURCES.config);
   return (
@@ -141,6 +142,7 @@ export function Setup({ tab }: { tab: SetupTab }) {
         <Seg label="Setup" options={TABS} value={tab} onChange={(t) => navigate(setupPath(t))} />
         <BuildChips panel={`setup-${tab}`} />
         <span className="spacer" />
+        <CrewPauseControl />
         <UpdateControl />
       </div>
       <div className="sgrid">

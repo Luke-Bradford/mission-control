@@ -660,6 +660,7 @@ const ENGINE_STATES: readonly HudState[] = ["running", "stalled", "error", "stop
  * its open run is doing (waiting on CI or review, blocked, between turns) or that it is free.
  */
 export function seatStatus(row: CrewRow): { label: string; tone: HudTone } {
+  if (row.crewPause) return { label: `Paused: ${row.crewPause.reason}`, tone: "warn" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) return engine;
   if (isSeatFree(row)) return { label: SEAT_STATUS_LABEL.free, tone: "neutral" };

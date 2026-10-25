@@ -1365,6 +1365,7 @@ describe("guard hits", () => {
     store.addGuardHit(hit({ at: now - 8 * DAY, rule: "read-only" }));
     expect(store.guardHitCounts(now - 7 * DAY)).toEqual({
       "git-write": 2,
+      "git-env": 0,
       "codex-allowlist": 0,
       "github-write": 0,
       "merge-push": 0,

@@ -104,6 +104,7 @@ import type {
   PublishResult,
   RerunResult,
   RerunStateResult,
+  ReviewPrSnapshot,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import {
@@ -281,11 +282,15 @@ interface Harness {
   pushResults: PublishResult[];
   prResults: OpenPrResult[];
   touches: string[];
+  touchesByRun?: Record<string, string[]>;
+  duringTouches?: (runId: string) => void;
+  reviewPrOverride?: (number: number) => ReviewPrSnapshot | null | Promise<ReviewPrSnapshot | null>;
   awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
   /** The merge gate's facts (null: unreadable), and the gate reads made. */
   gate: GateFacts | null;
+  duringDescendant?: (ancestor: string, head: string) => void;
   gateReads: { sha: string; known: boolean }[];
   duringGate?: () => void;
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
@@ -317,6 +322,7 @@ interface Harness {
   busy: boolean;
   noSession: boolean;
   resumes: string[];
+  resumeDeferred: (() => Promise<void>) | null;
   resumeFails: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
@@ -395,6 +401,7 @@ function harness(): Harness {
     busy: false,
     noSession: false,
     resumes: [],
+    resumeDeferred: null,
     resumeFails: false,
     facts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
     retroFacts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
@@ -420,11 +427,26 @@ function harness(): Harness {
     rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
+        async reviewPr(r, number) {
+          if (x.reviewPrOverride) return x.reviewPrOverride(number);
+          const pr = store.pullRequests(r.repoId).find((p) => p.number === number);
+          return pr?.headSha
+            ? {
+                state: pr.state,
+                headSha: pr.headSha,
+                baseSha: "c".repeat(40),
+                mergeCommitSha: pr.mergeCommitSha ?? null,
+              }
+            : null;
+        },
         awayDiff: async () =>
           h.awayDiff === undefined
             ? { base: SHA_B, changes: [{ path: "apps/docs/guide.md", status: "A" }] }
             : h.awayDiff,
-        isDescendant: async (_run, ancestor, head) => x.descends ?? ancestor === head,
+        isDescendant: async (_run, ancestor, head) => {
+          x.duringDescendant?.(ancestor, head);
+          return x.descends ?? ancestor === head;
+        },
         async push(r) {
           x.pushes.push(r.id);
           if (x.pushHang) return new Promise<PublishResult>(() => {});
@@ -474,9 +496,12 @@ function harness(): Harness {
         async worktreeChanges() {
           return x.changes;
         },
-        async hardRuleTouches(_run, _sha, rules) {
+        async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
-          return x.touches.filter((path) => rules.some((rule) => globMatches(rule, path, true)));
+          x.duringTouches?.(run.id);
+          return (x.touchesByRun?.[run.id] ?? x.touches).filter((path) =>
+            rules.some((rule) => globMatches(rule, path, true)),
+          );
         },
         async gateFacts(_r, sha, known): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
@@ -543,6 +568,9 @@ function harness(): Harness {
             if (!claimed) return "dup";
             x.sent.push({ runId, key, text });
             return "sent";
+          },
+          async resumeDeferredRuns() {
+            await x.resumeDeferred?.();
           },
           async resumeRun(runId) {
             x.resumes.push(runId);
@@ -1810,6 +1838,42 @@ describe("taking by rule", () => {
     h.taken.length = 0;
   });
 
+  it("paused seats wait through a restart; other seats take and unpausing resumes", async () => {
+    seatIdle(null);
+    config.crew?.sessions[0]?.seats.push({
+      id: "guido-2",
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [SEAT], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    h.engine.stop();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(h.taken).toEqual(["guido-2"]);
+    h.taken.length = 0;
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(h.taken).toEqual([SEAT, "guido-2"]);
+  });
+
+  it("an all-seat pause starts no tickets", async () => {
+    seatIdle(null);
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: "all", reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    await h.engine.tick();
+    expect(h.taken).toEqual([]);
+  });
+
   it("a tick refills the queues, then asks each idle writer seat with no run to take", async () => {
     seatIdle(null);
     await h.engine.tick();
@@ -2491,6 +2555,7 @@ describe("the engine runs reviews", () => {
   const CALL = "RETRO-1";
   const RUN2 = "guido-2:20261021T100000Z";
   const BRANCH2 = "feature/8-other";
+  const SHA_C = "c".repeat(40);
   const retroSeat = (): CrewSeatConfig => ({
     id: RETRO,
     role: "RETRO",
@@ -2551,6 +2616,62 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("a paused reviewer keeps its queued review until unpaused", async () => {
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [RETRO], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    await toReview();
+    await h.engine.tick();
+    expect(first().state).toBe("queued");
+    expect(first().runId).toBeNull();
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+  });
+
+  it("suspends running review supervision and its deadline across an engine restart", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({
+        seats: [RETRO],
+        reason: "Save tokens",
+        at: clock,
+        by: "operator",
+      }),
+    );
+    await h.engine.tick();
+    clock += 90 * MIN;
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+    clock += 61 * MIN;
+    await h.engine.tick();
+    expect(first().state).toBe("failed");
+  });
+
+  it("a paused author starts no rework; unpausing resumes the pending findings", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [SEAT], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    reported(first().id, [finding("Important")]);
+    await h.engine.tick();
+    expect(h.sent.filter((s) => s.key.startsWith("fix:"))).toEqual([]);
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(h.sent.some((s) => s.key.startsWith("fix:"))).toBe(true);
+  });
+
   /** Another author run in review on its own PR 13, not yet reviewed. */
   async function secondAuthor(): Promise<void> {
     seats().push({
@@ -2598,6 +2719,354 @@ describe("the engine runs reviews", () => {
     });
     await h.engine.reconcileRun(RUN2);
   }
+
+  it("a younger PR waits for an older open PR sharing a hard-rule file", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === RUN2)
+        .map((e) => e.text),
+    ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
+  });
+
+  it("ignores older manual PRs without a run", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, branch: "manual" } : p)),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+  });
+
+  it("does not update for an unrelated older merged PR", async () => {
+    h.touchesByRun = { [RUN]: ["CLAUDE.md"], [RUN2]: ["packages/core/src/guard.ts"] };
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(h.updates).toEqual([]);
+  });
+
+  it("batches authoritative reads and revalidation of mutable older PRs", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(repo, [...prs, prRow({ number: 10 })], at),
+    );
+    let active = 0;
+    const concurrency: number[] = [];
+    h.reviewPrOverride = async (number) => {
+      if (number !== 13) {
+        concurrency.push(++active);
+        await Promise.resolve();
+        active--;
+      }
+      return {
+        state: "open",
+        headSha: number === 13 ? SHA_B : SHA,
+        baseSha: SHA_C,
+        mergeCommitSha: null,
+      };
+    };
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(concurrency).toEqual([1, 2, 1, 2]);
+  });
+
+  it("persists terminal merged snapshots across queued checks", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const reads = vi.fn(
+      (number: number): ReviewPrSnapshot => ({
+        state: number === 12 ? "merged" : "open",
+        headSha: number === 12 ? SHA : SHA_B,
+        baseSha: SHA_C,
+        mergeCommitSha: number === 12 ? SHA_C : null,
+      }),
+    );
+    h.reviewPrOverride = reads;
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    reads.mockClear();
+    await h.engine.tick();
+    expect(reads.mock.calls.filter(([number]) => number === 12)).toEqual([]);
+  });
+
+  it("excludes a contained merge before computing its overlap", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    h.descends = true;
+    h.reviewPrOverride = (number) => ({
+      state: number === 12 ? "merged" : "open",
+      headSha: number === 12 ? SHA : SHA_B,
+      baseSha: SHA_C,
+      mergeCommitSha: number === 12 ? SHA_C : null,
+    });
+    const touched = vi.fn();
+    h.duringTouches = touched;
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(touched.mock.calls.some(([id]) => id === RUN)).toBe(false);
+  });
+
+  it("refreshes authoritative state after a diff while SQLite still says open", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    let merged = false;
+    h.reviewPrOverride = (number) => ({
+      state: number === 12 && merged ? "merged" : "open",
+      headSha: number === 12 ? SHA : SHA_B,
+      baseSha: SHA_C,
+      mergeCommitSha: number === 12 && merged ? SHA_C : null,
+    });
+    h.duringTouches = (id) => {
+      if (id === RUN) merged = true;
+    };
+    await secondAuthor();
+    expect(store.pullRequests(REPO).find((p) => p.number === 12)?.state).toBe("open");
+    expect(h.starts).toEqual([]);
+    h.touchesByRun[RUN] = ["packages/core/src/guard.ts"];
+    h.duringTouches = undefined;
+    const ancestry = vi.fn();
+    h.duringDescendant = ancestry;
+    await h.engine.tick();
+    expect(ancestry).toHaveBeenCalled();
+    expect(h.starts).toEqual([]);
+  });
+
+  it("invalidates an empty open-PR cache when the collector reports a merge", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    let diffRead = false;
+    h.duringTouches = (id) => {
+      if (id === RUN) diffRead = true;
+    };
+    h.reviewPrOverride = (number) =>
+      number === 13 && diffRead
+        ? null
+        : {
+            state: "open",
+            headSha: number === 12 ? SHA : SHA_B,
+            baseSha: SHA_C,
+            mergeCommitSha: null,
+          };
+    await secondAuthor();
+    h.touchesByRun[RUN] = ["packages/core/src/guard.ts"];
+    store.upsertPullRequests(
+      REPO,
+      store
+        .pullRequests(REPO)
+        .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+      clock,
+    );
+    h.reviewPrOverride = undefined;
+    h.duringTouches = undefined;
+    await h.engine.tick();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
+  it("recomputes overlap when the older open head changes", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    h.touchesByRun = { [RUN]: ["CLAUDE.md"], [RUN2]: h.touches };
+    store.upsertPullRequests(
+      REPO,
+      store.pullRequests(REPO).map((p) => (p.number === 12 ? { ...p, headSha: SHA_C } : p)),
+      clock,
+    );
+    await h.engine.tick();
+    expect(h.starts).toHaveLength(1);
+  });
+
+  it.each(["merged", "head changed"] as const)(
+    "keeps review queued if the older PR %s during its diff",
+    async (change) => {
+      h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+      h.duringTouches = (id) => {
+        if (id !== RUN) return;
+        h.duringTouches = undefined;
+        store.upsertPullRequests(
+          REPO,
+          store.pullRequests(REPO).map((p) =>
+            p.number === 12
+              ? {
+                  ...p,
+                  headSha: change === "merged" ? p.headSha : SHA_C,
+                  ...(change === "merged"
+                    ? { state: "merged" as const, mergeCommitSha: SHA_C }
+                    : {}),
+                }
+              : p,
+          ),
+          clock,
+        );
+      };
+      await secondAuthor();
+      expect(h.starts).toEqual([]);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    },
+  );
+
+  it("updates before review when the older PR merged before the first overlap check", async () => {
+    h.touchesByRun = {
+      [RUN]: ["packages/core/src/guard.ts"],
+      [RUN2]: ["packages/core/src/guard.ts"],
+    };
+    // secondAuthor refreshes the PR snapshot before its first reconciliation.
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    h.tip = SHA_C;
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await secondAuthor();
+    expect(store.loopEvents(0).some((e) => e.text.startsWith("waits for #12"))).toBe(false);
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
+  });
+
+  it("keeps a mergeable head queued until it includes the older merge", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    store.upsertPullRequests(
+      REPO,
+      store
+        .pullRequests(REPO)
+        .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+      clock,
+    );
+    h.tip = SHA_C;
+    // The merged diff is reconstructed against its immutable first parent.
+    h.touchesByRun = { [RUN]: h.touches, [RUN2]: h.touches };
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await h.engine.tick();
+    await h.engine.reconcileRun(RUN2);
+    expect(h.starts).toEqual([]);
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
+  it.each(["stopped", "lock lost", "author in turn"] as const)(
+    "defers the older-merge update when %s during the ancestry read",
+    async (condition) => {
+      let crewOn = true;
+      h.engine.stop();
+      h.engine = h.make({ crewOn: () => crewOn });
+      h.engine.start();
+      h.touches = ["packages/core/src/guard.ts"];
+      await secondAuthor();
+      store.upsertPullRequests(
+        REPO,
+        store
+          .pullRequests(REPO)
+          .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        clock,
+      );
+      h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+      let ancestryRead = false;
+      h.duringDescendant = (ancestor, head) => {
+        if (ancestor !== SHA_C || head !== SHA_C) return;
+        ancestryRead = true;
+        if (condition === "stopped") h.engine.stop();
+        if (condition === "lock lost") crewOn = false;
+        if (condition === "author in turn")
+          h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      };
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN2);
+      expect(ancestryRead).toBe(true);
+      expect(h.updates).toEqual([]);
+      expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    },
+  );
+
+  it("an older PR with a removed seat still blocks review", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    const session = need(config.crew?.sessions[0]);
+    session.seats = session.seats.filter((s) => s.id !== "guido-1");
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
+  it.each([
+    { mergeable: "CONFLICTING", prSame: false },
+    { mergeable: "MERGEABLE", prSame: false },
+    { mergeable: "MERGEABLE", prSame: true },
+  ] as const)(
+    "reviews the updated head after the older shared-hard-rule PR merges ($mergeable, prSame: $prSame)",
+    async ({ mergeable, prSame }) => {
+      h.touches = ["packages/core/src/guard.ts"];
+      await secondAuthor();
+      expect(h.starts).toEqual([]);
+      const prs = store.pullRequests(REPO);
+      store.upsertPullRequests(
+        REPO,
+        prs.map((p) =>
+          p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : { ...p, mergeable },
+        ),
+        clock,
+      );
+      h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+      h.tip = SHA_C;
+      h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame }];
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN2);
+      await h.engine.reconcileRun(RUN2);
+      expect(store.runPush(RUN2)?.sha).toBe(SHA_C);
+      h.gate = { ...need(h.gate), containsMain: true };
+      store.upsertPullRequests(
+        REPO,
+        store.pullRequests(REPO).map((p) =>
+          p.number === 13
+            ? {
+                ...p,
+                headSha: SHA_C,
+                ci: "passing",
+                mergeable: "MERGEABLE",
+                checks: prRow().checks,
+              }
+            : p,
+        ),
+        clock,
+      );
+      await h.engine.reconcileRun(RUN2);
+      await h.engine.reconcileRun(RUN2);
+      await h.engine.tick();
+      expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(
+        prSame ? SHA_B : SHA_C,
+      );
+    },
+  );
+
+  it.each(["apps/a.ts", "packages/core/src/loop.ts"])(
+    "does not hold a PR for unrelated or non-hard-rule files (%s)",
+    async (path) => {
+      h.touchesByRun = { [RUN]: ["apps/a.ts", "packages/core/src/guard.ts"], [RUN2]: [path] };
+      await secondAuthor();
+      expect(h.starts).toHaveLength(1);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("running");
+    },
+  );
 
   it("keeps a long review-start failure in the review row and loop event", async () => {
     const failure = "x".repeat(1000);
@@ -4520,6 +4989,32 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       expect(sentKeys().filter((k) => k.startsWith("rv-limit:"))).toEqual([
         `rv-limit:${runId}:${until}`,
+      ]);
+      expect(first().state).toBe("running");
+    });
+
+    it("waits for pause-deferred recovery before supervising a running review", async () => {
+      await toReview();
+      const runId = need(first().runId);
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const recovering = vi.fn(async () => {
+        await gate;
+        h.retroFacts = { inTurn: false, resumedAt: HUB + 1000, rateLimitedUntil: null };
+      });
+      h.resumeDeferred = recovering;
+      const tick = h.engine.tick();
+      try {
+        await vi.waitFor(() => expect(recovering).toHaveBeenCalled());
+        expect(sentKeys().filter((key) => key.startsWith("rv-resume:"))).toEqual([]);
+      } finally {
+        release();
+        await tick;
+      }
+      expect(sentKeys().filter((key) => key.startsWith("rv-resume:"))).toEqual([
+        `rv-resume:${runId}:${HUB}`,
       ]);
       expect(first().state).toBe("running");
     });

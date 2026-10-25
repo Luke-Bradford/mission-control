@@ -33,6 +33,7 @@ import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import {
   BRANCH,
   boardCard,
+  bus,
   clone,
   dbPath,
   dir,
@@ -234,6 +235,49 @@ describe("reattach after a restart", () => {
     const transcript = readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8");
     return { runId, row, transcript };
   }
+
+  it.each([null, ["retro"]])(
+    "retries paused reboot recovery after settings change to %s",
+    async (seats) => {
+      const { runId } = await leftActive();
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: "all",
+          reason: "Save tokens",
+          at: Date.now(),
+          by: "operator",
+        }),
+      );
+      const { sup, log } = make();
+      sup.start();
+      await until(() =>
+        expect(log).toHaveBeenCalledWith(expect.stringContaining("Paused: Save tokens")),
+      );
+      expect(starts()).toHaveLength(1);
+      expect(store.run(runId)?.endedAt).toBeNull();
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify(
+          seats === null
+            ? null
+            : {
+                seats,
+                reason: "Save tokens",
+                at: Date.now(),
+                by: "operator",
+              },
+        ),
+      );
+      bus.emit("settings");
+      await until(() => expect(starts()).toHaveLength(2));
+      await until(() => expect(sup.seatFacts("guido-1")?.resumedAt).toEqual(expect.any(Number)));
+      bus.emit("settings");
+      await sup.resumeRun(runId);
+      expect(starts()).toHaveLength(2);
+      expect(store.run(runId)?.endedAt).toBeNull();
+    },
+  );
 
   it("explains when the old keeper cannot be ended and does not resume", async () => {
     const { runId } = await leftActive();

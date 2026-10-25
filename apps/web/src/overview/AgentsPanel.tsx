@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
+import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
@@ -204,8 +205,9 @@ function FlightRow({
   );
   const status = row ? seatStatus(row) : null;
   const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
-  const label =
-    row?.hudState === "stopped"
+  const label = row?.crewPause
+    ? status?.label
+    : row?.hudState === "stopped"
       ? "Stopped"
       : row?.paused || (row && crewStatus?.enabled === false)
         ? "Held"
@@ -217,11 +219,13 @@ function FlightRow({
               ? "Held"
               : status?.label;
   const midTurn = row?.hudState === "running" || row?.hudState === "stalled";
-  const nextCheck = midTurn
-    ? ""
-    : label === "Held" || label === "Stopped"
-      ? " · next check paused"
-      : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
+  const nextCheck = row?.crewPause
+    ? " · next check paused"
+    : midTurn
+      ? ""
+      : label === "Held" || label === "Stopped"
+        ? " · next check paused"
+        : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
   const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
@@ -377,8 +381,9 @@ function AgentRow({
   const go = () => navigate(agentPath(row.id));
   const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
   const status = seatStatus(row);
-  const statusLabel =
-    lockSince(lock, row.run?.id) !== null
+  const statusLabel = row.crewPause
+    ? status.label
+    : lockSince(lock, row.run?.id) !== null
       ? "Waiting on lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Idle (crew paused)"
@@ -510,14 +515,17 @@ export function AgentsPanel() {
         </>
       }
       actions={
-        <button
-          type="button"
-          className="sm"
-          disabled={!firstSession}
-          onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
-        >
-          Add agent
-        </button>
+        <>
+          <CrewPauseControl />
+          <button
+            type="button"
+            className="sm"
+            disabled={!firstSession}
+            onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
+          >
+            Add agent
+          </button>
+        </>
       }
     >
       <div role="table" aria-label="Crew" id="agentsList" aria-busy={!crew.data && !crew.error}>
