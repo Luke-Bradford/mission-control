@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repos · Mission Control review</title>
+<style>
+/* HUD tokens and base controls copied from docs/prototype/mission-control-hud.html. Offline font fallbacks; no remote assets. */
+:root {
+  color-scheme: dark;
+  --bg: #0e1116; --surface: #151a21; --surface-2: #1c222b; --line: #252c37; --line-2: #354050;
+  --fg: #e7eaef; --fg-2: #aab2bf; --muted: #808999;
+  --accent: #8db0ff; --accent-ink: #0b1020; --accent-soft: rgba(141, 176, 255, .14);
+  --ok: #45c486; --ok-soft: rgba(69, 196, 134, .16);
+  --warn: #f2b53a; --warn-mark: #f2b53a; --warn-soft: rgba(242, 181, 58, .15);
+  --crit: #f06b68; --crit-soft: rgba(240, 107, 104, .15);
+  --think: #b8a8f7; --scrim: rgba(5, 8, 12, .6);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(141, 176, 255, .08), transparent 70%);
+  --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --display: "Barlow Semi Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
+  --fs: 13px; --fs-s: 12px; --fs-xs: 11px; --r: 8px; --r-s: 6px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--glow), var(--bg); color: var(--fg); font: 400 var(--fs)/1.45 var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+[hidden] { display: none !important; }
+h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
+h2 { font-size: 13px; }
+h3 { font-size: var(--fs-s); color: var(--fg-2); }
+p { margin: 0; }
+a { color: var(--accent); }
+button {
+  font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-s);
+  padding: 4px 10px; cursor: pointer; line-height: 1.3; white-space: nowrap;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+button.warn { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-mark); }
+button.ghost { background: transparent; border-color: transparent; color: var(--fg-2); }
+button.ghost:hover { background: var(--surface-2); border-color: var(--line-2); color: var(--fg); }
+button.sm { padding: 2px 8px; font-size: var(--fs-s); }
+button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input, select { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r-s); padding: 4px 8px; min-width: 0; }
+
+html,body{height:auto;min-height:100%}body{display:block;padding:0 24px 24px}a{text-decoration:none}a:hover{text-decoration:underline}header{display:flex;align-items:center;gap:22px;min-height:64px;border-bottom:1px solid var(--line);flex-wrap:wrap}header strong{font:600 22px var(--display)}nav{display:flex;gap:6px;flex-wrap:wrap}nav a{color:var(--fg-2);padding:8px;border-bottom:2px solid transparent}nav a[aria-current=page]{color:var(--fg);border-color:var(--accent)}.meta{margin-left:auto;color:var(--muted);font:11px var(--mono)}.review{margin:14px 0;padding:8px 12px;border:1px dashed var(--line-2);color:var(--warn);font-size:11px;display:flex;gap:18px;flex-wrap:wrap}.heading{display:flex;align-items:end;gap:16px;margin:20px 0}.heading h1{font:600 30px var(--display)}.heading p{color:var(--fg-2)}main{max-width:1600px;margin:auto}.grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:14px}.equal{grid-template-columns:repeat(2,minmax(0,1fr))}.three{grid-template-columns:260px minmax(0,1fr) 300px}.panel{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);min-width:0;overflow:hidden;margin-bottom:14px}.panel>header{min-height:0;padding:12px 16px;gap:12px;align-items:baseline}.panel h2{font:600 18px var(--display)}.panel header span{color:var(--muted);font-size:11px}.body{padding:16px}.wide{grid-column:1/-1}.strip{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--surface);margin-bottom:14px;border-radius:8px}.stat{padding:14px 18px;border-right:1px solid var(--line)}.stat b{display:block;font:600 30px var(--display)}.stat span,.muted{color:var(--muted)}.mono,time,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}.pill{display:inline-block;border:1px solid var(--line-2);border-radius:20px;padding:2px 8px;font-size:11px;color:var(--fg-2)}.ok{color:var(--ok)}.warn{color:var(--warn)}.crit{color:var(--crit)}.tag{white-space:nowrap;font-family:var(--display);font-weight:600}.tag:before{content:'■';color:var(--s1);margin-right:6px}.tag.other:before{color:var(--s2)}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:var(--muted);font-size:11px;font-weight:400}th,td{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}td small{display:block;color:var(--muted);margin-top:5px}.scroll{overflow:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}button:disabled{cursor:default;opacity:.7}.notice{border-left:3px solid var(--warn);background:var(--warn-soft);padding:12px 16px;margin-bottom:14px}.lanes{display:grid;grid-template-columns:repeat(6,minmax(135px,1fr));gap:8px;overflow:auto}.lane{background:var(--bg);padding:10px;border-radius:6px}.lane h3{display:flex;justify-content:space-between;margin-bottom:12px}.card{display:block;background:var(--surface-2);border:1px solid var(--line);padding:12px;margin-bottom:8px;border-radius:6px;color:var(--fg)}.card small{display:block;margin-top:8px;color:var(--muted)}.axis{display:flex;justify-content:space-between;color:var(--muted);font:10px var(--mono);margin-left:120px}.timeline{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:center;margin:14px 0}.track{height:24px;position:relative;background:repeating-linear-gradient(90deg,transparent 0,transparent calc(25% - 1px),var(--line) calc(25% - 1px),var(--line) 25%)}.span{position:absolute;top:4px;height:16px;border-radius:2px;background:var(--accent);font:10px var(--mono);color:var(--bg);overflow:hidden;padding-left:5px}.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:11px;color:var(--fg-2);margin-top:14px}.legend i{display:inline-block;width:8px;height:8px;margin-right:6px}.metric{display:grid;grid-template-columns:75px 1fr 80px;gap:14px;align-items:center;border-bottom:1px solid var(--line);padding:14px 0}.metric strong{text-align:right;font:500 20px var(--mono)}svg{display:block;width:100%;height:auto}svg text{fill:var(--fg-2);font:11px var(--mono)}svg .edge{fill:none;stroke:var(--line-2);stroke-width:2}svg .node{fill:var(--surface-2);stroke:var(--line-2)}.chart{max-height:240px}.bar{height:8px;background:var(--bg);border-radius:2px;overflow:hidden;min-width:0}.bar i{display:block;height:100%;background:var(--accent);max-width:100%}.quota{display:grid;grid-template-columns:26px minmax(50px,1fr) 42px;align-items:center;gap:10px;margin:8px 0}.list{list-style:none;margin:0;padding:0}.list li{padding:14px 0;border-bottom:1px solid var(--line)}.message{padding:18px 0;border-bottom:1px solid var(--line);max-width:850px}.message p{margin-top:8px;line-height:1.7}.message .pill{margin-left:8px}.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.form label{font-size:12px;color:var(--fg-2)}.form input,.form select{display:block;width:100%;margin-top:6px;padding:9px}details{border-top:1px solid var(--line);padding:14px 0}summary{cursor:pointer;color:var(--accent)}.steps{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.step{border:1px solid var(--line-2);padding:10px;border-radius:4px}.split{display:flex;justify-content:space-between;gap:16px}.selected{border-color:var(--accent);background:var(--accent-soft)}.empty{padding:18px;border:1px dashed var(--line-2);color:var(--muted)}footer{margin-top:20px;border-top:1px solid var(--line);padding-top:14px;display:flex;gap:20px;flex-wrap:wrap;color:var(--muted);font-size:11px}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}@media(max-width:1050px){.grid,.three,.equal{grid-template-columns:1fr}.strip{grid-template-columns:repeat(2,1fr)}.meta{margin-left:0}.heading{align-items:start;flex-direction:column}}@media(max-width:600px){body{padding:0 12px 16px}.form{grid-template-columns:1fr}header{gap:8px}.timeline{grid-template-columns:80px 1fr}.axis{margin-left:94px}.metric{grid-template-columns:60px 1fr 70px}th,td{padding:10px 8px}}
+</style>
+</head>
+<body>
+<header>
+<strong>⊕ Mission Control</strong>
+<nav aria-label="Pages">
+<a href="overview.html">Overview</a>
+<a href="flight.html">FLIGHT</a>
+<a href="board.html">Board</a>
+<a href="agent.html">Agent</a>
+<a href="comms.html">Comms</a>
+<a href="telemetry.html">Telemetry</a>
+<a href="sessions.html" aria-current="page">Setup</a>
+</nav>
+<span class="meta">All sessions · MET 03:12:40 · FLIGHT</span>
+</header>
+<main>
+<div class="review">
+<b>Sample data</b>
+<span>Awaiting operator review · #677 · 25 Oct 2026</span>
+<span>Static proposal · action buttons disabled</span>
+</div>
+<nav aria-label="Setup">
+<a href="sessions.html">Sessions</a>
+<a href="repos.html" aria-current="page">Repos</a>
+<a href="loops.html">Loops</a>
+<a href="accounts.html">Accounts</a>
+<a href="roles.html">Roles</a>
+<a href="guards.html">Guards</a>
+<a href="sources.html">Sources</a>
+<a href="access.html">Access and notifications</a>
+</nav>
+<div class="heading">
+<h1>Repos</h1>
+<p>Choose which work is available before adding a repo</p>
+</div>
+<section class="panel">
+<header>
+<h2>Configured repos</h2>
+<span>summary first</span>
+</header>
+<div class="body">
+<div class="scroll">
+<table>
+<thead>
+<tr>
+<th scope="col">Repo</th>
+<th scope="col">Work selection</th>
+<th scope="col">Priority</th>
+<th scope="col">Actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>demo-hub</td>
+<td>backend or frontend · assignee: any · milestone: current</td>
+<td>Project Priority → p0–p3 labels → unranked</td>
+<td>
+<a href="#edit">Edit</a> · <a href="#remove">Remove</a>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<div class="grid">
+<section class="panel">
+<header>
+<h2>Add a repo</h2>
+<span>1 · source  2 · work selection  3 · preview</span>
+</header>
+<div class="body">
+<div id="edit">
+<div class="form">
+<label>Repo<input value="example/demo-hub" readonly>
+</label>
+<label>Project<input value="1" readonly>
+</label>
+<label>Labels · any match<input value="backend, frontend" readonly>
+</label>
+<label>Priority order<input value="P0, P1, P2, P3, unranked" readonly>
+</label>
+<label>Assignee<input value="Any assignee" readonly>
+</label>
+<label>Milestone<input value="Current milestone" readonly>
+</label>
+</div>
+<div class="actions">
+<button type="button" disabled>Preview matching work</button>
+<button type="button" disabled>Cancel</button>
+</div>
+</div>
+</div>
+</section>
+<section class="panel">
+<header>
+<h2>Preview</h2>
+<span>proposed selection · illustration only</span>
+</header>
+<div class="body">
+<ul class="list">
+<li>8 Ready tickets match this selection.</li>
+<li>3 excluded by labels; 2 by milestone.</li>
+<li>Priority source: Project field, then p0–p3 labels.</li>
+<li>Sample first: #224 · Source freshness · P1</li>
+<li>Existing column mapping and polling estimate remain inspectable.</li>
+</ul>
+<p class="warn">Work selection fields and removal are proposed capabilities, not established API behaviour.</p>
+<div class="actions">
+<button type="button" disabled>Add repo</button>
+</div>
+<details id="remove">
+<summary>Remove demo-hub</summary>
+<p>Preview affected sessions and queued tickets before removal. Block conflicting active work; do not delete source files.</p>
+<div class="actions">
+<button type="button" disabled>Confirm remove</button>
+<button type="button" disabled>Cancel</button>
+</div>
+</details>
+</div>
+</section>
+</div>
+</main>
+<footer>
+<span>Sample data · no live readings or writes</span>
+<a href="overview.html">Overview</a>
+<a href="comms.html">Needs you · Comms</a>
+<span>FLIGHT dock: collapsed for review</span>
+<span>Keyboard: Tab to links and disclosure controls</span>
+</footer>
+</body>
+</html>
