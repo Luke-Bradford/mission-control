@@ -1828,11 +1828,22 @@ describe("fileMinorFindings", () => {
     });
     expect(existsSync(file)).toBe(false);
     expect(store.run(r.id)?.loop?.minorIssueNumber).toBe(81);
+    // a later pass files nothing new but re-adds the item, in case a restart cut the first add
+    ghAnswers.push((args) => {
+      expect(args).toEqual([
+        "project",
+        "item-add",
+        "1",
+        "--owner=o",
+        "--url=https://github.com/o/mc/issues/81",
+      ]);
+      return { code: 0, stdout: "" };
+    });
     expect(await createPublisher(deps()).fileMinorFindings(store.run(r.id) ?? r, 12)).toEqual({
       ok: true,
       issueNumber: 81,
     });
-    expect(ghCalls).toHaveLength(3);
+    expect(ghCalls).toHaveLength(4);
   });
   it("files nothing without a minor section", async () => {
     ghAnswers.push(() => ({

@@ -1181,9 +1181,26 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       ) {
         return final(MERGE_PR_NOT_RUNS);
       }
+      // item-add returns the existing item, so it is safe to repeat after a restart
+      const addItem = async (
+        issueNumber: number,
+      ): Promise<PublishResult & { issueNumber: number }> => {
+        const [owner = ""] = repo.github.split("/");
+        const added = await ghDo(
+          [
+            "project",
+            "item-add",
+            String(repo.project),
+            `--owner=${owner}`,
+            `--url=https://github.com/${repo.github}/issues/${issueNumber}`,
+          ],
+          "project item-add",
+        );
+        return { ...added, issueNumber };
+      };
       const remembered =
         run.loop.minorIssueNumber ?? deps.store.run(run.id)?.loop?.minorIssueNumber;
-      if (remembered !== undefined) return { ok: true, issueNumber: remembered };
+      if (remembered !== undefined) return addItem(remembered);
       const file = crewPrBodyPath(deps.dbPath);
       let wrote = false;
       try {
@@ -1234,12 +1251,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const issueNumber = Number(number);
         run.loop.minorIssueNumber = issueNumber;
         deps.store.setRunLoop(run.id, run.loop);
-        const [owner = ""] = repo.github.split("/");
-        const added = await ghDo(
-          ["project", "item-add", String(repo.project), `--owner=${owner}`, `--url=${url}`],
-          "project item-add",
-        );
-        return { ...added, issueNumber };
+        return await addItem(issueNumber);
       } catch (e) {
         return transient(errText(e));
       } finally {
