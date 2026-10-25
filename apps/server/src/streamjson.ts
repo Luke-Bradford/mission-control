@@ -1,4 +1,5 @@
 import {
+  type CrewVendor,
   cutAtWord,
   isObj,
   LIVE_DETAIL_MAX,
@@ -17,9 +18,11 @@ import {
   workSummary,
 } from "@mc/core";
 import { cleanText } from "./clean.ts";
+import { codexPlan, codexTool, transcriptVendor } from "./codex-transcript.ts";
 import { str } from "./util.ts";
 
 export interface TranscriptFacts {
+  latestPlan?: string;
   sessionId: string | null;
   model: string | null;
   permissionMode: string | null;
@@ -86,12 +89,19 @@ const TASK_STATUS: Record<string, SubagentInfo["status"]> = {
  * fold (never mutated in place), so folding on from an earlier facts object stays correct.
  */
 interface DigestState {
+  vendor?: CrewVendor;
+  codexSeen: Set<string>;
+  codexMessage: Map<string, string>;
+  /** Latest observed turn per thread, retained for usage arriving after completion. */
+  codexTurns: Map<string, string>;
   tasks: Map<string, LiveTask>;
   taskPatches: Map<string, Json>;
   taskCalls: Map<string, { name: string; input: Json }>;
   appliedTasks: Set<string>;
   lastEventAt: number | null;
   contextTokens: number | null;
+  /** Codex reports its context limit independently of a model name. */
+  contextWindow: number | null;
   /** contextWindow per model from the latest `result` line. */
   windows: Record<string, number> | null;
   toolStarts: Map<string, number>;
@@ -141,12 +151,16 @@ interface DigestState {
 const digestStates = new WeakMap<TranscriptFacts, DigestState>();
 
 const emptyDigestState = (): DigestState => ({
+  codexSeen: new Set(),
+  codexMessage: new Map(),
+  codexTurns: new Map(),
   tasks: new Map(),
   taskPatches: new Map(),
   taskCalls: new Map(),
   appliedTasks: new Set(),
   lastEventAt: null,
   contextTokens: null,
+  contextWindow: null,
   windows: null,
   toolStarts: new Map(),
   toolCalls: 0,
@@ -173,6 +187,9 @@ function copyDigestState(d: DigestState): DigestState {
   }
   return {
     ...d,
+    codexSeen: new Set(d.codexSeen),
+    codexMessage: new Map(d.codexMessage),
+    codexTurns: new Map(d.codexTurns),
     tasks: new Map([...d.tasks].map(([id, task]) => [id, { ...task }])),
     taskPatches: new Map(d.taskPatches),
     taskCalls: new Map(d.taskCalls),
@@ -550,7 +567,7 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
     lastEventAt: d.lastEventAt,
     model,
     contextTokens: d.contextTokens,
-    contextWindow: window ?? null,
+    contextWindow: d.contextWindow ?? window ?? null,
     liveTool,
     lastText: d.lastText,
     tools,
@@ -588,6 +605,161 @@ function replySpeed(d: DigestState): NonNullable<RunDigest["speed"]> {
   };
 }
 
+function foldCodex(
+  facts: TranscriptFacts,
+  seen: Map<string, TokenUsage>,
+  d: DigestState,
+  ev: Json,
+  fileMtime: number,
+): void {
+  if (typeof ev.method !== "string") return;
+  const p = isObj(ev.params) ? ev.params : {};
+  const at = timeOf(ev.timestamp) ?? fileMtime;
+  d.lastEventAt = Math.max(d.lastEventAt ?? at, at);
+  const threadId = str(p.threadId);
+  const turnId = str(isObj(p.turn) ? p.turn.id : p.turnId);
+  const turnKey =
+    threadId === null
+      ? null
+      : turnId !== null
+        ? `codex:${threadId}:${turnId}`
+        : (d.codexTurns.get(threadId) ?? null);
+  if ((ev.method === "item/started" || ev.method === "item/completed") && isObj(p.item)) {
+    const item = p.item;
+    const id = str(item.id);
+    if (id === null) return;
+    const key = `${p.threadId}:${id}`;
+    const completed = ev.method === "item/completed";
+    const eventKey = `${ev.method}:${key}`;
+    if (d.codexSeen.has(eventKey)) return;
+    d.codexSeen.add(eventKey);
+    if (item.type === "agentMessage" && turnKey !== null) d.codexMessage.set(turnKey, key);
+    if (completed && item.type === "agentMessage" && typeof item.text === "string") {
+      facts.lastAssistantText = cleanText(item.text, NO_REPORT_TEXT_MAX);
+      d.lastText = leadSentence(cleanText(item.text));
+    }
+    const tool = codexTool(item);
+    if (tool) {
+      const started = `tool:${key}`;
+      if (!d.codexSeen.has(started)) {
+        d.codexSeen.add(started);
+        d.toolCalls++;
+        toolStats(d, tool.name).calls++;
+        const startedAt = completed && tool.ms !== null ? at - tool.ms : at;
+        d.toolStarts.set(key, startedAt);
+        d.pending.set(key, {
+          name: tool.name,
+          at: startedAt,
+          live: true,
+          detail: toolDetail(tool.name, tool.input ? JSON.parse(tool.input) : null, d.cwd),
+        });
+      }
+      if (completed) {
+        const pending = d.pending.get(key);
+        const stats = toolStats(d, tool.name);
+        if (tool.error) stats.failed++;
+        const durationMs = tool.ms ?? (pending?.at == null ? null : Math.max(0, at - pending.at));
+        if (durationMs !== null) {
+          stats.durationsMs.push(durationMs);
+          if (stats.durationsMs.length > DURATIONS_KEEP) stats.durationsMs.shift();
+          if (!stats.slowest || durationMs > stats.slowest.durationMs)
+            stats.slowest = { detail: pending?.detail ?? null, durationMs };
+        }
+        d.pending.delete(key);
+      }
+    }
+  } else if (ev.method === "thread/started" && isObj(p.thread)) {
+    facts.sessionId = str(p.thread.id) ?? facts.sessionId;
+    d.cwd = cleanStr(p.thread.cwd) ?? d.cwd;
+    facts.model = cleanStr(p.thread.model) ?? facts.model;
+  } else if (ev.method === "thread/tokenUsage/updated" && isObj(p.tokenUsage)) {
+    const u = p.tokenUsage;
+    if (!isObj(u.total) || typeof p.threadId !== "string") return;
+    const valid = (n: unknown): n is number =>
+      typeof n === "number" && Number.isFinite(n) && n >= 0;
+    if (![u.total.inputTokens, u.total.cachedInputTokens, u.total.outputTokens].every(valid))
+      return;
+    const input = u.total.inputTokens as number;
+    const cacheRead = u.total.cachedInputTokens as number;
+    if (cacheRead > input) return;
+    const usage = {
+      input: input - cacheRead,
+      cacheRead,
+      output: u.total.outputTokens as number,
+      cacheCreate: 0,
+    };
+    const key = `codex:${p.threadId}`;
+    const prev = seen.get(key);
+    // Thread totals are cumulative, including across resume. Repeated notifications add nothing.
+    if (
+      prev &&
+      (usage.input + usage.cacheRead < prev.input + prev.cacheRead || usage.output < prev.output)
+    )
+      return;
+    const delta = usage.input + usage.output - (prev ? prev.input + prev.output : 0);
+    seen.set(key, usage);
+    // Codex reports cumulative counters after each model step, without a message usage id.
+    // The counter snapshot identifies that attempt even when a step only called tools.
+    const messageId = turnKey === null ? key : (d.codexMessage.get(turnKey) ?? turnKey);
+    const message = `${messageId}:${input}:${cacheRead}:${usage.output}`;
+    const change = {
+      input: usage.input - (prev?.input ?? 0),
+      output: usage.output - (prev?.output ?? 0),
+      cacheRead: usage.cacheRead - (prev?.cacheRead ?? 0),
+      cacheCreate: 0,
+    };
+    if (delta !== 0 || change.cacheRead !== 0) {
+      const total = {
+        input: change.input,
+        output: change.output,
+        cacheRead: change.cacheRead,
+        cacheCreate: 0,
+      };
+      d.usage.set(message, {
+        at,
+        minute: null,
+        tokens: total.input + total.output,
+        usage: total,
+        model: facts.model,
+      });
+      const turn = turnKey === null ? undefined : d.turns.get(turnKey);
+      if (turnKey !== null && turn) {
+        d.turns.set(turnKey, {
+          input: turn.input + change.input,
+          output: turn.output + change.output,
+          cacheRead: turn.cacheRead + change.cacheRead,
+        });
+      }
+    }
+    const minute = at - (at % MINUTE_MS);
+    if (delta > 0) d.minutes.set(minute, (d.minutes.get(minute) ?? 0) + delta);
+    d.contextTokens = isObj(u.last) ? numOrNull(u.last.totalTokens) : null;
+    const window = numOrNull(u.modelContextWindow);
+    if (window !== null && window > 0) d.contextWindow = window;
+    facts.costUsd = null;
+  } else if (ev.method === "turn/plan/updated") {
+    const plan = codexPlan(p);
+    if (plan !== null) facts.latestPlan = cleanText(plan);
+  } else if ((ev.method === "turn/started" || ev.method === "turn/completed") && isObj(p.turn)) {
+    if (threadId === null || turnId === null || turnKey === null) return;
+    const key = `${ev.method}:${turnKey}`;
+    if (d.codexSeen.has(key)) return;
+    d.codexSeen.add(key);
+    d.codexTurns.set(threadId, turnKey);
+    if (!d.turns.has(turnKey)) d.turns.set(turnKey, { input: 0, output: 0, cacheRead: 0 });
+    facts.numTurns = d.turns.size;
+    facts.hasResult = ev.method === "turn/completed";
+    facts.stopReason = facts.hasResult ? str(p.turn.status) : null;
+    facts.isError = p.turn.status === "failed";
+    facts.error = isObj(p.turn.error) ? cleanStr(p.turn.error.message) : null;
+    if (facts.hasResult) {
+      facts.resultCount++;
+      if (facts.lastAssistantText) facts.summary = workSummary(facts.lastAssistantText);
+      for (const [id, use] of d.pending) if (use.live) d.pending.set(id, { ...use, live: false });
+    }
+  }
+}
+
 /**
  * Fold new stream-json lines into `prev` (null to start). Returns a new facts object; folding a
  * transcript in several chunks equals folding it at once. Non-JSON and truncated lines are skipped.
@@ -605,6 +777,7 @@ export function foldTranscript(
   prev: TranscriptFacts | null,
   lines: string[],
   fileMtime: number,
+  vendor?: CrewVendor,
 ): TranscriptFacts {
   const facts: TranscriptFacts = prev
     ? { ...prev, rateLimits: [...prev.rateLimits], prs: [...prev.prs] }
@@ -647,6 +820,12 @@ export function foldTranscript(
       continue;
     }
     if (!isObj(ev)) continue;
+    d.vendor = transcriptVendor(ev, vendor ?? d.vendor);
+    if (d.vendor === undefined) continue;
+    if (d.vendor === "codex") {
+      foldCodex(facts, seen, d, ev, fileMtime);
+      continue;
+    }
 
     if (isTopLevel(ev) && (ev.type === "assistant" || ev.type === "user")) {
       if (facts.hasResult) {

@@ -16,6 +16,7 @@ import {
   type CrewLane,
   type CrewMode,
   type CrewRole,
+  type CrewVendor,
   DEFAULT_CREW_NODE,
   DEFAULT_SEAT_COMMANDS,
   FLIGHT_POWERS,
@@ -52,6 +53,7 @@ import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { areaGlob, protectedGlob } from "./globs.ts";
+import { type CodexModels, codexModels } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 
 export { areaGlob } from "./globs.ts";
@@ -83,6 +85,8 @@ export const displayCallSign = z
   .refine((s) => !/\p{Cc}/u.test(s), "must not contain control characters");
 
 export interface CrewSeatConfig {
+  /** Resolved account vendor. Loaded configs always set it; hand-built fixtures may omit it. */
+  modelVendor?: CrewVendor;
   displayCallSign?: string;
   id: AgentId;
   role: CrewRole;
@@ -376,6 +380,7 @@ const seatCommand = z.string().superRefine((e, ctx) => {
 });
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
+export const seatEffort = z.string().min(1);
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
 /** A `crew.roles` entry; `here` is optional and falls back to the `ROLES` row's. */
 const roleSchema = z.strictObject({
@@ -506,7 +511,7 @@ const fileSchema = z
                 account_id: nonEmpty,
                 model: modelName.optional(),
                 light_model: modelName.optional(),
-                effort: z.enum(CREW_EFFORTS).optional(),
+                effort: seatEffort.optional(),
                 mode: z.enum(CONFIG_SEAT_MODES).optional(),
                 area: z.array(areaGlob).optional(),
               }),
@@ -641,7 +646,7 @@ export function loadConfig(path: string): CcConfig {
   } catch (e) {
     throw new ConfigError("", `cannot read config file ${path}: ${(e as Error).message}`);
   }
-  return parseConfig(text, path, { hubRoot: findHubRoot() });
+  return parseConfig(text, path, { hubRoot: findHubRoot(), deferModels: true });
 }
 
 /**
@@ -791,13 +796,53 @@ function isPromptFile(hubRoot: string, prompt: string, rolesDirReal: string): bo
   }
 }
 
-function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
+/** Unknown Claude identifiers remain valid: only a known Codex family/catalog entry is a mismatch. */
+function seatModelProblem(
+  seat: CrewSeatConfig,
+  loading = false,
+  models: CodexModels = codexModels,
+): { key: "model" | "lightModel" | "effort"; reason: string } | null {
+  for (const key of ["model", "lightModel"] as const) {
+    const model = seat[key];
+    if (model === undefined) continue;
+    if (
+      seat.modelVendor !== "codex" &&
+      !loading &&
+      (/^gpt-/.test(model) || models.efforts(model) !== undefined)
+    ) {
+      return { key, reason: `model "${model}" is not a claude model` };
+    }
+    if (seat.modelVendor === "codex" && !models.available) return { key, reason: models.reason };
+    const efforts = seat.modelVendor === "codex" ? models.efforts(model) : CREW_EFFORTS;
+    if (efforts === undefined)
+      return { key, reason: `model "${model}" is not listed by Codex model/list` };
+    if (seat.effort !== undefined && !efforts.includes(seat.effort)) {
+      return { key: "effort", reason: `model "${model}" does not support effort "${seat.effort}"` };
+    }
+  }
+  return null;
+}
+
+/** Runtime availability is derived, never cached on the config: discovery and edits take effect immediately. */
+export function seatUnavailable(
+  seat: CrewSeatConfig,
+  model?: string,
+  vendor: CrewVendor | undefined = seat.modelVendor,
+): string | null {
+  if (seat.modelVendor === undefined || vendor !== "codex") return null;
+  const problem = seatModelProblem({
+    ...seat,
+    modelVendor: vendor,
+    ...(model === undefined ? {} : { model, lightModel: undefined }),
+  });
+  return problem === null ? null : `unavailable: ${problem.reason}`;
+}
+
+function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boolean): void {
   const crew = cfg.crew;
   if (!crew) return;
   const repoIds = new Set(cfg.repos.map((r) => r.id));
-  const claudeAccounts = new Set(
-    cfg.accounts.filter((a) => a.vendor === "claude").map((a) => a.id),
-  );
+  const accountVendors = new Map(cfg.accounts.map((a) => [a.id, a.vendor]));
   const accountIds = new Set(cfg.accounts.map((a) => a.id));
   if (hubRootPath === null) {
     throw new ConfigError("crew", "cannot locate the hub's own checkout");
@@ -942,12 +987,6 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       if (!accountIds.has(seat.accountId)) {
         throw new ConfigError(`${sp}.accountId`, `unknown account "${seat.accountId}"`);
       }
-      if (!claudeAccounts.has(seat.accountId)) {
-        throw new ConfigError(
-          `${sp}.accountId`,
-          `account "${seat.accountId}" is not a claude account`,
-        );
-      }
       const role = roles[seat.role];
       if (role === undefined) {
         throw new ConfigError(`${sp}.role`, `unknown role "${seat.role}"`);
@@ -967,6 +1006,12 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       }
       seat.def = def;
       seat.model ||= role.model;
+      const vendor = accountVendors.get(seat.accountId);
+      seat.modelVendor = vendor;
+      const problem = seatModelProblem(seat, deferModels);
+      if (problem && !(deferModels && vendor === "codex")) {
+        throw new ConfigError(`${sp}.${problem.key}`, problem.reason);
+      }
       if (def.mode !== "writer") {
         if (seat.area.length > 0) {
           throw new ConfigError(`${sp}.area`, `${seat.role} is ${role.mode} and takes no area`);
@@ -1067,11 +1112,13 @@ function seatsMayRun(writer: readonly string[], cmd: string): boolean {
  * it would write (`config-write.ts`). `source` names the text in errors (a path, or a description).
  * `guard.hubRoot` is the hub's own checkout, which crew paths must stay clear of; with no guard it is
  * found from this module's location. A crew section with no hub root is an error (fails closed).
+ * `deferModels` is for loading existing files: Codex model errors become seat unavailability.
+ * Writes use strict validation; loading preserves legacy Claude model identifiers.
  */
 export function parseConfig(
   text: string,
   source: string,
-  guard?: { hubRoot: string | null },
+  guard?: { hubRoot: string | null; deferModels?: boolean },
 ): CcConfig {
   let raw: unknown;
   try {
@@ -1169,6 +1216,6 @@ export function parseConfig(
       }
     }
   });
-  checkCrew(cfg, guard ? guard.hubRoot : findHubRoot());
+  checkCrew(cfg, guard ? guard.hubRoot : findHubRoot(), guard?.deferModels ?? false);
   return cfg;
 }

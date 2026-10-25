@@ -1,13 +1,17 @@
 /** Codex seat confinement: the server owns filesystem checks; core supplies pure parsing. */
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
+  bashEntries,
+  CODEX_MIN_VERSION,
+  CODEX_PROJECT_DOC_CONFIG,
   CODEX_READ_COMMANDS,
   CODEX_SEAT_PROFILE,
   CODEX_SEAT_TOKEN_ENV,
   type CrewMode,
   type CrewSandboxInput,
   codexCommand,
+  codexGitReadCommand,
   codexLineCommands,
   codexReadCommand,
   DENIED_TOOLS,
@@ -53,11 +57,12 @@ export function codexSeatConfig(
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
   return [
     `approvals_reviewer = ${tomlString("user")}`,
-    "project_doc_max_bytes = 0",
+    `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
     `web_search = ${tomlString("disabled")}`,
     `default_permissions = ${tomlString(CODEX_SEAT_PROFILE)}`,
     "[features]",
     "unified_exec = false",
+    "shell_snapshot = false",
     "[shell_environment_policy]",
     `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
     `[mcp_servers.${MC_MCP_SERVER}]`,
@@ -77,13 +82,13 @@ export function codexSeatConfig(
   ].join("\n");
 }
 
-/** Resolve missing leaves through their nearest existing parent; dangling links fail closed. */
+/** Native resolution preserves symlink/.. order; only plain missing leaves may be appended. */
 function realPathOrParent(path: string): string | null {
   const missing: string[] = [];
   let parent = path;
   for (;;) {
     try {
-      return resolve(realpathSync(parent), ...missing.reverse());
+      return resolve(realpathSync.native(parent), ...missing.reverse());
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
       try {
@@ -94,7 +99,10 @@ function realPathOrParent(path: string): string | null {
       }
       const next = dirname(parent);
       if (next === parent) return null;
-      missing.push(basename(parent));
+      const leaf = basename(parent);
+      // A missing component followed by traversal has no certain filesystem meaning.
+      if (leaf === "." || leaf === "..") return null;
+      missing.push(leaf);
       parent = next;
     }
   }
@@ -103,7 +111,7 @@ function realPathOrParent(path: string): string | null {
 /** The relative real path inside an existing worktree, or null. */
 function codexRelativePath(path: string, cwd: string): string | null {
   try {
-    const root = realpathSync(cwd);
+    const root = realpathSync.native(cwd);
     const real = realPathOrParent(isAbsolute(path) ? path : `${root}/${path}`);
     if (real === null) return null;
     const rel = relative(root, real);
@@ -128,7 +136,7 @@ export function codexEditAllowed(
   if (real === null || real === "") return false;
   try {
     const rel = isAbsolute(path)
-      ? relative(realpathSync(cwd), path)
+      ? relative(realpathSync.native(cwd), path)
       : relative(cwd, resolve(cwd, path));
     return (
       !rel.split("/").includes("..") &&
@@ -166,7 +174,7 @@ export function codexApproval(
   if (p.networkApprovalContext != null || (p.environmentId != null && p.environmentId !== "local"))
     return null;
   try {
-    if (!isAbsolute(p.cwd) || !codexReadAllowed(realpathSync(p.cwd), ctx.cwd)) return null;
+    if (!isAbsolute(p.cwd) || !codexReadAllowed(realpathSync.native(p.cwd), ctx.cwd)) return null;
   } catch {
     return null;
   }
@@ -205,28 +213,48 @@ export function codexCommandAllowed(
   let cwd: string;
   try {
     if (!isAbsolute(approvalCwd)) return false;
-    cwd = realpathSync(approvalCwd);
+    cwd = realpathSync.native(approvalCwd);
     if (!codexReadAllowed(cwd, root)) return false;
-    allowed = seatCommands(mode, commands);
+    allowed = bashEntries(seatCommands(mode, commands));
   } catch {
     return false;
   }
   const parsed = codexLineCommands(script);
   if (parsed === null) return false;
-  return parsed.every(({ argv, background, braces }) => {
+  const allowedPath = (path: string) =>
+    codexReadAllowed(isAbsolute(path) ? path : `${cwd}/${path}`, root);
+  return parsed.every(({ argv, background, braces, piped }, index) => {
     if (background || braces || DENIED_TOOLS.some((entry) => codexBashEntry(argv, entry)))
       return false;
     if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) {
-      return codexReadCommand(argv, (path) =>
-        codexReadAllowed(isAbsolute(path) ? path : `${cwd}/${path}`, root),
-      );
+      return codexReadCommand(argv, (path) => {
+        if (!allowedPath(path)) return false;
+        if (argv[0] !== "diff") return true;
+        try {
+          return statSync(isAbsolute(path) ? path : `${cwd}/${path}`).isFile();
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code === "ENOENT";
+        }
+      });
     }
-    return (
-      GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry)) ||
-      allowed.some((entry) => {
-        const words = entry.split(" ");
-        return argv.length >= words.length && words.every((w, n) => argv[n] === w);
-      })
-    );
+    const pipeline = piped || parsed[index + 1]?.piped;
+    const gitRead = GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry));
+    if (gitRead) {
+      if (argv[1] === "diff" && argv.includes("--no-index")) return false;
+      return !pipeline || codexGitReadCommand(argv, allowedPath);
+    }
+    return !pipeline && allowed.some((entry) => codexBashEntry(argv, entry));
   });
+}
+
+/** Only a readable, stable CLI release at or above the floor may start a seat. */
+export function codexVersionAllowed(output: string): boolean {
+  const match = /^codex-cli (\d+)\.(\d+)\.(\d+)\s*$/.exec(output.trim());
+  if (match === null) return false;
+  const version = match.slice(1).map(Number);
+  const floor = CODEX_MIN_VERSION.split(".").map(Number);
+  for (let n = 0; n < floor.length; n++) {
+    if (version[n] !== floor[n]) return version[n] > floor[n];
+  }
+  return true;
 }

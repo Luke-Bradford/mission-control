@@ -17,9 +17,10 @@ export const ROLE_NAME = /^[A-Z][A-Z0-9]{1,15}$/;
 export const ROLE_PROMPT = /^roles\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md$/;
 export const ROLE_PROMPT_DIR = "roles";
 
-/** The effort levels a seat may be configured with; the CLI's `--effort` takes the same words. */
+/** Claude's `--effort` values. Codex advertises its model-specific values through `model/list`. */
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
-export type CrewEffort = (typeof CREW_EFFORTS)[number];
+/** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
+export type CrewEffort = string;
 
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;
@@ -74,6 +75,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.remember,
   MC_TOOL_NAMES.forget,
   MC_TOOL_NAMES.recall,
+  MC_TOOL_NAMES.holdItem,
+  MC_TOOL_NAMES.releaseHold,
 ];
 
 /**
@@ -89,7 +92,7 @@ export const MC_TOOL_GRANTS: Readonly<
     base: ["ask_operator", "report_evidence"],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
-  scratch: { base: ["report_findings"], grantable: [] },
+  scratch: { base: [MC_TOOL_NAMES.reportFindings, MC_TOOL_NAMES.restoreFile], grantable: [] },
 };
 
 /** A role: what a seat of it runs as, unless its own config says otherwise. */
@@ -245,7 +248,7 @@ export function seatCommands(mode: CrewMode, commands: SeatCommands): readonly s
   return mine;
 }
 
-const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
+export const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
 
 export const WRITER_TOOLS = [
   "Read",
@@ -283,6 +286,7 @@ export const SCRATCH_TOOLS = [
   ...GIT_READ_TOOLS,
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.reportFindings,
+  MC_TOOLS.restoreFile,
 ] as const;
 
 /** A scratch seat starts only on a review Mission Control hands it. */
@@ -686,6 +690,12 @@ export const CREW_CLI_ENV = {
   DISABLE_AUTOUPDATER: "1",
 } as const;
 
+/** Keep pnpm on its installed version when a sandbox cannot fetch the project's pin. */
+export const CODEX_CLI_ENV = {
+  pnpm_config_pm_on_fail: "ignore",
+  npm_config_update_notifier: "false",
+} as const;
+
 /** The folder pnpm makes for a project-local store; the commit tool never stages one. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /**
@@ -787,10 +797,14 @@ export const SANDBOX_DENY_READ_HOME = [
   "Library/Keychains",
 ] as const;
 
-/** The shell Step B sets in the Codex process environment and command approvals must name. */
+export const CODEX_MIN_VERSION = "0.154.0";
+export const CODEX_COMMAND = "codex";
+/** The shell the Codex process environment and command approvals must name. */
 export const CODEX_SHELL = "/bin/zsh";
 export const CODEX_SEAT_PROFILE = "mc_seat";
 export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
+/** Apply at thread start/resume too: the run config alone does not exclude project docs. */
+export const CODEX_PROJECT_DOC_CONFIG = Object.freeze({ project_doc_max_bytes: 0 });
 
 /** TOML strings in a seat config never need escaping; refuse input that would. */
 export function tomlString(value: string): string {
@@ -1017,14 +1031,18 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  /** A rejected request is not evidence that any executing turn has ended. */
+  | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
   | { kind: "tool-result"; toolUseId: string }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null }
+  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
+
+export const CANNOT_START = "could not start the CLI";
 
 /** Where operator-facing stderr and failure reasons are cut. */
 export const STDERR_TEXT_MAX = 2000;
@@ -1095,3 +1113,6 @@ export type SessionCheckoutOutcome =
   | "retained-unpushed"
   | "retained-unproven"
   | "removal-failed-partway";
+
+/** The process protocol recorded with a crew run. */
+export type CrewVendor = "claude" | "codex";

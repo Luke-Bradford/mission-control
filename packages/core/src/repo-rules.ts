@@ -175,7 +175,7 @@ export const claimedByOther = (card: Pick<BoardItem, "assignees">, login: string
 /** The issues a ticket body names on its `Depends on` lines, in order, without repeats. */
 export function dependsOn(body: string): number[] {
   const out: number[] = [];
-  for (const line of body.match(/^.*\bDepends on\b.*$/gim) ?? []) {
+  for (const line of body.match(/^\s*(?:[-*]\s+)?Depends on\b.*$/gim) ?? []) {
     for (const m of line.matchAll(/#(\d+)/g)) {
       const n = Number(m[1]);
       if (!out.includes(n)) out.push(n);

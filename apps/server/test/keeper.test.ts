@@ -15,6 +15,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { CODEX_APPROVAL_DECISION } from "../src/runtime/codex-wire.ts";
 import {
   endKeeper,
   HUB_ABSENT_TEXT,
@@ -492,11 +493,11 @@ describe("the hub-absent limit", () => {
 describe("parsePsLine", () => {
   it("reads ps's lstart and command", () => {
     expect(parsePsLine("Thu Oct 23 12:34:56 2026 /usr/bin/node keeper-cli.ts /x/k1\n")).toEqual({
-      startedAt: new Date(2026, 9, 23, 12, 34, 56).getTime(),
+      startedAt: Date.UTC(2026, 9, 23, 12, 34, 56),
       command: "/usr/bin/node keeper-cli.ts /x/k1",
     });
     expect(parsePsLine("  Fri Oct  3 01:02:03 2026 sleep 30")).toEqual({
-      startedAt: new Date(2026, 9, 3, 1, 2, 3).getTime(),
+      startedAt: Date.UTC(2026, 9, 3, 1, 2, 3),
       command: "sleep 30",
     });
     expect(parsePsLine("")).toBeNull();
@@ -582,4 +583,125 @@ describe("endKeeper", () => {
     await k.done;
     expect(() => process.kill(cliPid, 0)).toThrow();
   });
+});
+
+describe("Codex keeper turns and old specs", () => {
+  it("persists activity timestamps and approval decisions for replay", async () => {
+    const folder = folderFor(
+      `
+      console.log(JSON.stringify({ method: "item/started", params: { item: { id: "cmd", type: "commandExecution", command: "pwd" } } }));
+      require("node:readline").createInterface({ input: process.stdin }).on("line", () => {});
+    `,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", from: 0 });
+    await until(() => expect(c.outs()).toHaveLength(1));
+    c.say({ t: "in", line: JSON.stringify({ id: 7, result: { decision: "accept" } }) });
+    c.say({
+      t: "in",
+      line: JSON.stringify({ id: 8, result: { action: "decline", content: null } }),
+    });
+    await until(() => expect(c.outs()).toHaveLength(3));
+    const recorded = lines().map((line) => JSON.parse(line));
+    expect(recorded.map((line) => line.method)).toEqual([
+      "item/started",
+      CODEX_APPROVAL_DECISION,
+      CODEX_APPROVAL_DECISION,
+    ]);
+    expect(recorded.every((line) => Number.isFinite(Date.parse(line.timestamp)))).toBe(true);
+    expect(recorded.slice(1).map((line) => line.params.decision)).toEqual(["accept", "decline"]);
+    const reattached = await client(folder);
+    reattached.say({ t: "hello", from: 0 });
+    await until(() => expect(reattached.outs()).toEqual(c.outs()));
+    reattached.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+
+  it("identifies a Codex process by its marker instead of cliSessionId", async () => {
+    const marker = 'mc_run="run-identity"';
+    const folder = folderFor("setInterval(() => {}, 1000);", {
+      turnEnd: "codex",
+      marker,
+      cliSessionId: "not-in-argv",
+    });
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    spec.args.push(marker);
+    writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+    const k = keep(folder);
+    await until(() => expect(readPidFile(folder, "cli.pid")).not.toBeNull());
+    expect(await endKeeper(folder, 500)).toBe(true);
+    await k.done;
+    expect(readKeeperExit(folder)?.signal).toBe("SIGTERM");
+  });
+
+  it("attaches an old spec with Claude defaults", async () => {
+    const folder =
+      folderFor(`require("node:readline").createInterface({ input: process.stdin }).on("line", () => {
+      console.log(JSON.stringify({ type: "result" }));
+    });`);
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    expect(spec.turnEnd).toBeUndefined();
+    expect(spec.marker).toBeUndefined();
+    const k = keep(folder);
+    const a = await client(folder);
+    a.say({ t: "hello", from: 0 });
+    a.say({ t: "in", line: "hello", user: true });
+    await until(() => expect(a.outs()).toHaveLength(1));
+    const b = await client(folder);
+    expect(b.msgs[0]).toMatchObject({ awaiting: false });
+    b.say({ t: "hello", from: 1 });
+    b.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+
+  it.each(["result", "error"])(
+    "only a parsed turn completion or matching error ends awaiting: %s",
+    async (ending) => {
+      const marker = 'mc_run="run-1"';
+      const folder = folderFor(
+        `require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.method === "turn/start") console.log(JSON.stringify({ id: message.id, result: {} }));
+      else if (message.method === "finish") console.log(JSON.stringify(message.output));
+      else console.log("ack");
+    });`,
+        { turnEnd: "codex", marker, cliSessionId: "not-the-marker" },
+      );
+      // Identity uses the marker even though cliSessionId is different.
+      const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+      spec.args.push(marker);
+      writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+      const k = keep(folder);
+      let c = await client(folder);
+      c.say({ t: "hello", from: 0 });
+      c.say({ t: "in", line: JSON.stringify({ id: 1, method: "initialize" }), user: true });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: false });
+      c.say({ t: "hello", from: 1 });
+      c.say({ t: "in", line: JSON.stringify({ id: 2, method: "turn/start" }), user: true });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: true });
+      c.say({ t: "hello", from: 2 });
+      c.say({ t: "in", line: JSON.stringify({ method: "finish", output: { id: 1, error: {} } }) });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: true });
+      c.say({ t: "hello", from: 3 });
+      const output =
+        ending === "error"
+          ? { id: 2, error: { code: -1 } }
+          : { params: { turn: { status: "completed" } }, method: "turn/completed" };
+      c.say({ t: "in", line: JSON.stringify({ method: "finish", output }) });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: false });
+      c.say({ t: "hello", from: 4 });
+      c.say({ t: "close", graceMs: 100 });
+      await k.done;
+    },
+  );
 });

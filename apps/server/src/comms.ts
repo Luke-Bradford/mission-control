@@ -1,9 +1,36 @@
+import { statSync } from "node:fs";
 import { COMMS_CAPCOM, COMMS_MC, type CommsThreadMessage } from "@mc/core";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
 
 /** A thread scans at most three transcripts, with 200 events per transcript. */
 const THREAD_RUNS = 3;
+
+const TRANSCRIPT_EVENTS = 200;
+const TRANSCRIPT_CACHE_LIMIT = 128;
+const transcripts = new Map<
+  string,
+  { size: number; mtimeMs: number; stream: ReturnType<typeof readStream> }
+>();
+
+function transcript(path: string): ReturnType<typeof readStream> {
+  try {
+    const { size, mtimeMs } = statSync(path);
+    const cached = transcripts.get(path);
+    const stream =
+      cached?.size === size && cached.mtimeMs === mtimeMs
+        ? cached.stream
+        : readStream(path, TRANSCRIPT_EVENTS);
+    transcripts.delete(path);
+    transcripts.set(path, { size, mtimeMs, stream });
+    if (transcripts.size > TRANSCRIPT_CACHE_LIMIT)
+      transcripts.delete(transcripts.keys().next().value as string);
+    return stream;
+  } catch (error) {
+    transcripts.delete(path);
+    throw error;
+  }
+}
 
 /** Shared ceiling for a displayed snapshot and its read acknowledgement. */
 export const COMMS_SNAPSHOT_LIMIT = 10200;
@@ -36,7 +63,7 @@ export function threadMessages(
   for (const run of store.runs(id, scope === "attention" ? 1 : THREAD_RUNS).reverse()) {
     if (!run.transcriptPath) continue;
     try {
-      for (const event of readStream(run.transcriptPath, 200).events) {
+      for (const event of transcript(run.transcriptPath).events) {
         if (event.kind !== "msg") continue;
         messages.push({
           id: `stream:${run.id}:${event.id}`,

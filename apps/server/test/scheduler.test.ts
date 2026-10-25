@@ -15,6 +15,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { holdItem, holds } from "../src/attention-holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
@@ -23,10 +24,8 @@ import {
   OAUTH_USAGE_SOURCE,
   sampleClaude,
   USAGE_BACKOFF_CAP_MS,
-  USAGE_BACKOFF_FACTOR,
   USAGE_BACKOFF_SETTING,
   USAGE_RATE_LIMIT_MAX_AGE_MS,
-  USAGE_RETRY_AFTER_MAX_MS,
 } from "../src/collectors/usage-claude.ts";
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -2062,34 +2061,63 @@ describe("Claude usage back-off", () => {
   }
 
   it.each([
+    ["120", 2 * MINUTE_MS],
     ["600", 10 * MINUTE_MS],
     [new Date(NOW + 17 * MINUTE_MS).toUTCString(), 17 * MINUTE_MS],
-    [new Date(NOW - MINUTE_MS).toUTCString(), 5 * MINUTE_MS],
+    [new Date(NOW - MINUTE_MS).toUTCString(), MINUTE_MS],
     [String(USAGE_BACKOFF_CAP_MS / 1000), USAGE_BACKOFF_CAP_MS],
-  ])("honours Retry-After %s with half an interval of timer slack", async (header, delay) => {
+  ])("honours Retry-After %s without retrying early", async (header, delay) => {
     config.poll.usageMinutes = 5;
     const { s, fetch } = setup(header);
     await s.tick("usage");
     expect(savedBackoff()?.notBefore).toBe(NOW + delay);
-    vi.setSystemTime(NOW + delay - slackMs() - 1);
+    vi.setSystemTime(NOW + delay - 1);
     await s.tick("usage");
     expect(fetch).toHaveBeenCalledTimes(1);
-    vi.setSystemTime(NOW + delay - slackMs());
+    vi.setSystemTime(NOW + delay);
     await s.tick("usage");
     expect(fetch).toHaveBeenCalledTimes(2);
     await s.stop();
   });
 
+  it("holds every Claude account until Retry-After is due", async () => {
+    config.poll.usageMinutes = 5;
+    config.accounts.push({ id: "claude-other", vendor: "claude", alertAt: 85, stopAt: 95 });
+    const { s, fetch } = setup("120");
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(NOW + 2 * MINUTE_MS - 1);
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(NOW + 2 * MINUTE_MS);
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
+  it("retries a capped back-off at 30 minutes when the usage poll is four hours", async () => {
+    config.poll.usageMinutes = 240;
+    const { s, fetch } = setup(String(USAGE_BACKOFF_CAP_MS / 1000));
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(USAGE_BACKOFF_CAP_MS - 1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
   it.each([String(1e20), "Fri, 31 Dec 9999 23:59:59 GMT"])(
-    "caps Retry-After %s at 24 hours and keeps a healthy reading as a note",
+    "caps Retry-After %s at 30 minutes and keeps a healthy reading as a note",
     async (header) => {
       store.addUsage(sample({ window: "7d", pct: 86 }));
       const { s } = setup(header);
       await s.tick("usage");
-      expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_RETRY_AFTER_MAX_MS);
+      expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_BACKOFF_CAP_MS);
       expect(row("usage:claude-main")).toMatchObject({
         ok: true,
-        error: "rate limited by Anthropic; last reading 13:00 (86% 7d); next try 18 Oct 2026 13:00",
+        error: "rate limited by Anthropic; last reading 13:00 (86% 7d); next try 13:30",
       });
       expect(row("usage:claude-main")?.error).not.toContain(TOKEN);
       await s.stop();
@@ -2104,7 +2132,7 @@ describe("Claude usage back-off", () => {
       expect(savedBackoff()).toEqual({ waitMs: usageMs(), notBefore: NOW + usageMs() });
       vi.setSystemTime(NOW + usageMs());
       await s.tick("usage");
-      expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+      expect(savedBackoff()?.waitMs).toBe(USAGE_BACKOFF_CAP_MS);
       await s.stop();
     },
   );
@@ -2116,8 +2144,8 @@ describe("Claude usage back-off", () => {
     let at = NOW;
     for (const wait of [
       usageMs(),
-      usageMs() * USAGE_BACKOFF_FACTOR,
-      usageMs() * USAGE_BACKOFF_FACTOR ** 2,
+      USAGE_BACKOFF_CAP_MS,
+      USAGE_BACKOFF_CAP_MS,
       USAGE_BACKOFF_CAP_MS,
       USAGE_BACKOFF_CAP_MS,
     ]) {
@@ -2155,8 +2183,8 @@ describe("Claude usage back-off", () => {
     expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_BACKOFF_CAP_MS);
     vi.setSystemTime(NOW + USAGE_BACKOFF_CAP_MS - 1);
     await second.tick("usage");
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(savedBackoff()?.waitMs).toBe(USAGE_BACKOFF_CAP_MS);
     setStatus(200);
     vi.setSystemTime(savedBackoff()?.notBefore ?? 0);
     await second.tick("usage");
@@ -2181,6 +2209,9 @@ describe("Claude usage back-off", () => {
       await s.tick("usage");
       expect(fetch).not.toHaveBeenCalled();
       vi.setSystemTime(notBefore - 1);
+      await s.tick("usage");
+      expect(fetch).not.toHaveBeenCalled();
+      vi.setSystemTime(notBefore);
       await s.tick("usage");
       expect(fetch).toHaveBeenCalledTimes(1);
     }
@@ -2218,7 +2249,7 @@ describe("Claude usage back-off", () => {
     await s.tick("usage");
     expect(row("usage:claude-main")).toMatchObject({
       ok: true,
-      error: "rate limited by Anthropic; last reading 16 Oct 2026 13:00 (10% 5h); next try 17:00",
+      error: "rate limited by Anthropic; last reading 16 Oct 2026 13:00 (10% 5h); next try 13:30",
     });
     vi.setSystemTime(NOW + 1);
     await s.tick("usage");
@@ -2245,10 +2276,10 @@ describe("Claude usage back-off", () => {
     await s.tick("usage");
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(c.codex).toHaveBeenCalledTimes(2);
-    vi.setSystemTime(NOW + usageMs() - 1);
+    vi.setSystemTime(NOW + usageMs());
     await s.tick("usage");
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+    expect(savedBackoff()?.waitMs).toBe(USAGE_BACKOFF_CAP_MS);
     await s.stop();
   });
 
@@ -2256,7 +2287,7 @@ describe("Claude usage back-off", () => {
     [503, "HTTP 503"],
     [0, "Error"],
   ])(
-    "clears an expired back-off on %s and retries each poll with a plain failure",
+    "keeps an expired back-off through a plain failure until the first success on %s",
     async (status, error) => {
       const { s, fetch, setStatus } = setup();
       await s.tick("usage");
@@ -2268,7 +2299,7 @@ describe("Claude usage back-off", () => {
         vi.setSystemTime(due + poll * usageMs());
         await s.tick("usage");
         expect(fetch).toHaveBeenCalledTimes(3 + poll);
-        expect(savedBackoff()).toBeNull();
+        expect(savedBackoff()?.notBefore).toBe(due);
         expect(row("usage:claude-main")).toMatchObject({
           ok: false,
           error: `oauth-usage: oauth usage request failed: ${error}`,
@@ -2278,8 +2309,68 @@ describe("Claude usage back-off", () => {
       setStatus(429);
       vi.setSystemTime(due + 2 * usageMs());
       await s.tick("usage");
-      expect(savedBackoff()?.waitMs).toBe(usageMs());
+      expect(savedBackoff()?.waitMs).toBe(USAGE_BACKOFF_CAP_MS);
       await s.stop();
     },
   );
+});
+
+it("releases crew holds from a durable idle seat session after the hold", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({
+    rows: [
+      {
+        id: "crew-1",
+        kind: "crew",
+        role: "GUIDO",
+        hudState: "idle",
+        stateSince: NOW + 1,
+      } as CrewRow,
+    ],
+    firstRunToday: null,
+  });
+  holdItem(store, "ask:1", "Waiting", { kind: "crew" }, "operator", NOW);
+  store.setSeatSession({
+    seatId: "crew-1",
+    runId: null,
+    cliSessionId: "session",
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW - 1,
+    vendor: "claude",
+  });
+  const s = createScheduler({ config, store, bus, now: () => NOW + 10, collectors: stubs() });
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBeUndefined();
+  const seat = store.seatSession("crew-1");
+  if (!seat) throw new Error("missing seat session");
+  store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+});
+
+it("emits attention at the earliest triage deadline and cancels the timer on stop", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  vi.spyOn(hud, "attentionItems").mockImplementation(
+    (_config, _store, at) =>
+      [
+        {
+          key: "deadline",
+          triageDueAt: NOW + 2000,
+          flightTriage: at < NOW + 2000 ? "waiting" : "missed",
+        },
+      ] as ReturnType<typeof hud.attentionItems>,
+  );
+  const s = createScheduler({ config, store, bus, now: () => Date.now(), collectors: stubs() });
+  s.start();
+  await vi.advanceTimersByTimeAsync(EMIT_COALESCE_MS);
+  topics.length = 0;
+  await vi.advanceTimersByTimeAsync(2000 - EMIT_COALESCE_MS);
+  expect(topics).toContain("attention");
+  await s.stop();
+  topics.length = 0;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(topics).toEqual([]);
 });

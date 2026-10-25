@@ -120,6 +120,19 @@ export interface CrewSession {
 
 type Json = Record<string, unknown>;
 
+/** The keeper transport, shared by the Claude stream and Codex RPC drivers. */
+export interface KeeperSession extends CrewSession {
+  write(message: Json, user?: boolean, deliveryId?: string): void;
+  onLine(listener: (line: string) => void): () => void;
+}
+
+export interface KeeperSessionInput extends SessionInput {
+  turnEnd?: "claude" | "codex";
+  marker?: string;
+  /** Write private run files after the folder is made, before the keeper spawns. */
+  prepare?: (dir: string) => void;
+}
+
 /**
  * The longest partial stdout line kept, in characters (not bytes); a longer one is dropped, never
  * half-written.
@@ -193,12 +206,14 @@ function createDriver(i: {
   stopGraceMs: number;
   /** Emit `attached` once the replay is in. */
   announce: boolean;
+  raw?: boolean;
   /** The keeper's secret, said in the hello; null for an older keeper whose spec has none. */
   secret: string | null;
   log?: (msg: string) => void;
 }) {
   const listeners = new Set<(e: SessionEvent) => void>();
   const pending = new Map<string, Pending>();
+  const lineListeners = new Set<(line: string) => void>();
   let sock: Socket | null = null;
   let hello: KeeperHello | null = null;
   /** Messages for the keeper written before the socket is linked, and who is told when each is written. */
@@ -269,6 +284,10 @@ function createDriver(i: {
 
   function stdoutLine(line: string): void {
     emit({ kind: "output", at: Date.now() });
+    if (i.raw) {
+      for (const fn of [...lineListeners]) fn(line);
+      return;
+    }
     if (!line.startsWith("{") || line.startsWith(STREAM_EVENT_PREFIX)) return;
     let ev: unknown;
     try {
@@ -399,7 +418,17 @@ function createDriver(i: {
 
   const writable = () => alive && !stdinEnded && !finished;
 
-  const session: CrewSession = {
+  const session: KeeperSession = {
+    write(message, user = false, deliveryId) {
+      if (!writable()) throw new SessionControlError("ended", "session ended");
+      transmit({ t: "in", line: JSON.stringify(message), user, deliveryId });
+    },
+    onLine(listener) {
+      lineListeners.add(listener);
+      return () => {
+        lineListeners.delete(listener);
+      };
+    },
     send(text) {
       if (!writable()) throw new SessionControlError("ended", "session ended");
       transmit({
@@ -443,6 +472,7 @@ function createDriver(i: {
       detached = true;
       alive = false;
       listeners.clear();
+      lineListeners.clear();
       sock?.destroy();
       // nobody is left waiting on a keeper this driver no longer follows
       resolveReady();
@@ -490,6 +520,10 @@ function createDriver(i: {
  * (or never answers) ends the session with its stderr line and an exit.
  */
 export function startSession(i: SessionInput): CrewSession {
+  return startKeeperSession(i);
+}
+
+export function startKeeperSession(i: KeeperSessionInput): KeeperSession {
   const socketPath = join(i.dir, KEEPER_SOCKET);
   if (socketPath.length > KEEPER_SOCKET_PATH_MAX) {
     throw new Error(`the keeper's socket path is too long (${socketPath.length} characters)`);
@@ -499,6 +533,7 @@ export function startSession(i: SessionInput): CrewSession {
   const stopGraceMs = i.stopGraceMs ?? STOP_GRACE_MS;
   rmSync(i.dir, { recursive: true, force: true });
   mkdirSync(i.dir, { mode: 0o700 });
+  i.prepare?.(i.dir);
   const secret = randomBytes(32).toString("hex");
   const spec: KeeperSpec = {
     runId: i.spawn,
@@ -517,6 +552,8 @@ export function startSession(i: SessionInput): CrewSession {
     stopGraceMs,
     secret,
     cliSessionId: i.cliSessionId,
+    turnEnd: i.turnEnd ?? "claude",
+    marker: i.marker ?? i.cliSessionId,
   };
   writeFileSync(join(i.dir, KEEPER_SPEC_FILE), JSON.stringify(spec), { mode: 0o600 });
   const driver = createDriver({
@@ -524,6 +561,7 @@ export function startSession(i: SessionInput): CrewSession {
     controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
     stopGraceMs,
     announce: false,
+    raw: i.turnEnd === "codex",
     secret,
     log: i.log,
   });
@@ -602,7 +640,7 @@ export function startSession(i: SessionInput): CrewSession {
 
 /** What `attachSession` found. */
 export type Attached =
-  | { kind: "attached"; session: CrewSession; hello: KeeperHello }
+  | { kind: "attached"; session: KeeperSession; hello: KeeperHello }
   /** The CLI exited while no hub was attached. */
   | { kind: "exited"; exit: KeeperExit }
   /** No keeper to attach to (null), or one that speaks another version (its number). */
@@ -615,6 +653,7 @@ export type Attached =
 export async function attachSession(i: {
   dir: string;
   from: (h: KeeperHello) => number;
+  raw?: boolean;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
   log?: (msg: string) => void;
@@ -676,6 +715,7 @@ export async function attachSession(i: {
       controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
       stopGraceMs: i.stopGraceMs ?? STOP_GRACE_MS,
       announce: true,
+      raw: i.raw,
       // an older keeper's spec has no secret, and that keeper asks for none
       secret: readKeeperSecret(i.dir),
       log: i.log,

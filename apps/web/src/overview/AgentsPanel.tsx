@@ -5,9 +5,10 @@ import {
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
-  type LimitRow,
+  type HudState,
   type TestLockState,
 } from "@mc/core";
+import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -18,8 +19,8 @@ import {
   contextPct,
   crewOrder,
   doingLine,
+  hasActiveRun,
   isCurrentWork,
-  isLoopInFlight,
   lockSince,
   modelLine,
   type NeedPart,
@@ -42,7 +43,6 @@ import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
-import { firstWindow } from "../quota.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -50,19 +50,34 @@ import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
 import { activityValues, age } from "./agentActivity.ts";
 import { LoopStep } from "./LoopStep.tsx";
-import { QuotaMeter } from "./QuotaMeter.tsx";
+import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
+const COLUMNS = ["Agent", "Model", "State", "Work", "Loop", "Tokens · 30 min", "Cost", "Context"];
+const LIVE_LOOP_STATES: readonly HudState[] = ["running", "waiting", "blocked", "parked"];
+
+/** The Loop column describes the run in progress, never a completed seat's last run. */
+function hasLiveLoop(row: Crew["rows"][number] | null, needsYou: boolean): boolean {
+  return Boolean(
+    row?.loop &&
+      hasActiveRun(row) &&
+      row.hudState !== "stopped" &&
+      row.hudState !== "error" &&
+      (LIVE_LOOP_STATES.includes(row.hudState) || needsYou),
+  );
+}
 
 function ModelCell({ row, title }: { row: Crew["rows"][number] | null; title?: string }) {
   const id = row?.run?.model ?? row?.model ?? DASH;
   const name = cutText(
-    id
-      .replace(/[- ]\d{8}$/, "")
-      .replace(/^claude-/, "")
-      .replace(/\[1m\]/i, " 1M")
-      .replace(/(\d)-(\d)/g, "$1.$2")
-      .replace(/-/g, " "),
+    id.startsWith("gpt-")
+      ? id
+      : id
+          .replace(/[- ]\d{8}$/, "")
+          .replace(/^claude-/, "")
+          .replace(/\[1m\]/i, " 1M")
+          .replace(/(\d)-(\d)/g, "$1.$2")
+          .replace(/-/g, " "),
     24,
   );
   return (
@@ -71,16 +86,29 @@ function ModelCell({ row, title }: { row: Crew["rows"][number] | null; title?: s
       className="ellip xs muted agent-model"
       title={title ?? (row ? modelLine(row) : undefined)}
     >
-      {name}
+      <span className="ellip">{name}</span>
       {row?.cli.version && (
         <span className="agent-cli">{` · v${row.cli.version.replace(/^v/, "")}`}</span>
       )}
-      {row?.cli.effort && ` · ${row.cli.effort}`}
+      {row?.cli.effort && (
+        <span className="agent-effort">
+          {" "}
+          · {row.cli.effort === "medium" ? "med" : row.cli.effort}
+        </span>
+      )}
     </span>
   );
 }
 
-function WorkCell({ row }: { row: Crew["rows"][number] | null }) {
+function WorkCell({
+  row,
+  doing,
+  note,
+}: {
+  row: Crew["rows"][number] | null;
+  doing: string;
+  note?: ReactNode;
+}) {
   const prs = useReviewPrs(row ?? undefined);
   const prNumber = row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
   const current = row && isCurrentWork(row);
@@ -90,7 +118,12 @@ function WorkCell({ row }: { row: Crew["rows"][number] | null }) {
       .join(" · ");
     return (
       <span role="cell" className="ellip s ticket-cell muted">
-        {refs ? `last ${refs}` : DASH}
+        <span className="ellip">{refs ? `last ${refs}` : DASH}</span>
+        {note ?? (
+          <span className="ellip xs muted" title={doing}>
+            {doing || DASH}
+          </span>
+        )}
       </span>
     );
   }
@@ -108,20 +141,27 @@ function WorkCell({ row }: { row: Crew["rows"][number] | null }) {
       .join(" · ") || DASH;
   return (
     <span role="cell" className="ellip s ticket-cell" title={text}>
-      {row?.ticket && <TicketRef ticket={row.ticket} bare />}
-      {prNumber && row && (
-        <>
-          {row.ticket && " · "}
-          <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
-        </>
+      <span className="ellip">
+        {row?.ticket && <TicketRef ticket={row.ticket} bare />}
+        {prNumber && row && (
+          <>
+            {row.ticket && " · "}
+            <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
+          </>
+        )}
+        {(row?.ticket || prNumber) && title && (
+          <>
+            {" "}
+            · <span>{title}</span>
+          </>
+        )}
+        {!row?.ticket && !prNumber && DASH}
+      </span>
+      {note ?? (
+        <span className="ellip xs muted" title={doing}>
+          {doing || DASH}
+        </span>
       )}
-      {(row?.ticket || prNumber) && title && (
-        <>
-          {" "}
-          · <span>{title}</span>
-        </>
-      )}
-      {!row?.ticket && !prNumber && DASH}
     </span>
   );
 }
@@ -144,7 +184,6 @@ function FlightRow({
   selected,
   items,
   max,
-  limits,
   lock,
 }: {
   row: Crew["rows"][number] | null;
@@ -154,7 +193,6 @@ function FlightRow({
   tz: string | null;
   items: AttentionItem[];
   max: number;
-  limits: LimitRow[];
   lock: TestLockState | undefined;
 }) {
   const flight = useResource<FlightView>(RESOURCES.flight).data;
@@ -186,8 +224,8 @@ function FlightRow({
       : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
   const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
-  const quota = row ? firstWindow(limits, row.accountId) : null;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
+  const needs = row ? needLine(row, items, now, lock) : [];
   const go = () => toggleDock(true);
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign button is the keyboard route
@@ -230,9 +268,17 @@ function FlightRow({
           <span className="xs muted block">{age(row.stateSince, now)}</span>
         )}
       </span>
-      <WorkCell row={row} />
+      <WorkCell
+        row={row}
+        doing={doing}
+        note={
+          row && needs.length ? (
+            <AgentNeeds row={row} items={items} now={now} lock={lock} />
+          ) : undefined
+        }
+      />
       <span role="cell" className="min0 loopstep" title={sessionTurns}>
-        {row?.loop ? (
+        {row?.loop && hasLiveLoop(row, needs.length > 0) ? (
           <LoopStep
             compact
             loop={row.loop}
@@ -250,8 +296,6 @@ function FlightRow({
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={row ? contextPct(row) : null} />
       </span>
-      <QuotaMeter row={quota} accountId={row?.accountId} now={now} compact />
-      {row && <AgentNeeds row={row} items={items} now={now} lock={lock} />}
     </div>
   );
 }
@@ -278,7 +322,7 @@ function AgentNeeds({
   );
   if (parts.length === 0) return null;
   return (
-    <div className="need" role="cell" aria-colspan={9}>
+    <span className="need">
       {lamp && <Lamp {...lamp} />}
       {parts.map((p, i) => (
         <span key={p.key} className="needpart">
@@ -301,7 +345,7 @@ function AgentNeeds({
           <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} />
         </span>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -313,7 +357,6 @@ function AgentRow({
   tz,
   selected,
   lock,
-  limits,
 }: {
   row: Crew["rows"][number];
   items: AttentionItem[];
@@ -322,9 +365,9 @@ function AgentRow({
   tz: string | null;
   selected: boolean;
   lock: TestLockState | undefined;
-  limits: LimitRow[];
 }) {
   const mine = seatItems(row, items);
+  const needs = needLine(row, items, now, lock);
   const repoPrs = useReviewPrs(row ?? undefined);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
@@ -342,7 +385,6 @@ function AgentRow({
         : status.label;
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
-  const quota = firstWindow(limits, row.accountId);
   const aside = row.asideRuns ?? [];
   const identityTitle = [
     modelLine(row),
@@ -395,9 +437,15 @@ function AgentRow({
         </Pill>
         {row.stateSince > 0 && <span className="xs muted block">{age(row.stateSince, now)}</span>}
       </span>
-      <WorkCell row={row} />
+      <WorkCell
+        row={row}
+        doing={doing}
+        note={
+          needs.length ? <AgentNeeds row={row} items={items} now={now} lock={lock} /> : undefined
+        }
+      />
       <span role="cell" className="min0 loopstep">
-        {row.loop && (row.kind !== "crew" || isLoopInFlight(row)) ? (
+        {row.loop && hasLiveLoop(row, needs.length > 0) ? (
           <LoopStep
             compact
             loop={row.loop}
@@ -417,8 +465,6 @@ function AgentRow({
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={contextPct(row)} />
       </span>
-      <QuotaMeter row={quota} accountId={row.accountId} now={now} compact />
-      <AgentNeeds row={row} items={items} now={now} lock={lock} />
     </div>
   );
 }
@@ -427,7 +473,6 @@ function AgentRow({
 export function AgentsPanel() {
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
-  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const lock = useTestLock();
   const tz = useTz();
   const now = useSecond();
@@ -450,13 +495,14 @@ export function AgentsPanel() {
   const working = rows?.filter((r) => r.hudState === "running").length ?? 0;
 
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
-  const sharedQuota = allRows.length > 0 && new Set(allRows.map((r) => r.accountId)).size === 1;
-  const hasSteps = allRows.some((r) => r.loop && (r.kind !== "crew" || isLoopInFlight(r)));
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
+  const placeholders = config
+    ? configuredAgents(config).filter((agent) => agent.id !== flightId && matchesSession(agent))
+    : Array.from({ length: OVERVIEW_LOADING_ROWS - 1 }, (_, i) => ({ id: `loading-${i}` }));
   return (
     <Panel
       id="agentsP"
-      title="Agents"
+      title="Crew"
       sub={
         <>
           {rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : null}
@@ -474,27 +520,20 @@ export function AgentsPanel() {
         </button>
       }
     >
-      <div
-        role="table"
-        aria-label="Agents"
-        id="agentsList"
-        className={`${hasSteps ? "has-steps" : "no-steps"}${sharedQuota ? " no-quota" : ""}`}
-      >
+      <div role="table" aria-label="Crew" id="agentsList" aria-busy={!crew.data && !crew.error}>
         {/* biome-ignore lint/a11y/useFocusableInteractive: table headers have no interaction */}
         <div className="trow head" role="row">
-          {["Agent", "Model", "State", "Work", "Loop", "Activity", "Cost", "Ctx", "Quota"].map(
-            (label) => (
-              // biome-ignore lint/a11y/useFocusableInteractive: these columns are not sortable
-              <span
-                role="columnheader"
-                key={label}
-                title={label}
-                className={label === "Loop" ? "loopstep" : undefined}
-              >
-                {label}
-              </span>
-            ),
-          )}
+          {COLUMNS.map((label) => (
+            // biome-ignore lint/a11y/useFocusableInteractive: these columns are not sortable
+            <span
+              role="columnheader"
+              key={label}
+              title={label}
+              className={label === "Loop" ? "loopstep" : undefined}
+            >
+              {label}
+            </span>
+          ))}
         </div>
         <FlightRow
           row={flight}
@@ -504,7 +543,6 @@ export function AgentsPanel() {
           max={max}
           now={now}
           tz={tz}
-          limits={limits}
           lock={lock}
         />
         {rows?.map((row) => (
@@ -517,11 +555,26 @@ export function AgentsPanel() {
             tz={tz}
             selected={row.id === selected}
             lock={lock}
-            limits={limits}
           />
         ))}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}
-        {!rows && !crew.error && <div className="pb muted">Loading…</div>}
+        {!rows &&
+          !crew.error &&
+          placeholders.map((agent) => (
+            // biome-ignore lint/a11y/useFocusableInteractive: loading rows have no actions
+            <div
+              className="trow crew-skeleton"
+              role="row"
+              key={agent.id}
+              aria-label="Loading agent"
+            >
+              {COLUMNS.map((column) => (
+                <span role="cell" key={column}>
+                  <span className="kpi-skeleton" />
+                </span>
+              ))}
+            </div>
+          ))}
       </div>
     </Panel>
   );

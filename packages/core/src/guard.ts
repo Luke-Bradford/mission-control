@@ -7,6 +7,7 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
+  "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
   "github-write":
@@ -33,7 +34,7 @@ export const engineHitText = (
   action: "push" | "draft PR" | "PR body edit",
 ): string => `${GUARD_RULES[rule]}: Mission Control's ${action}`;
 
-/** One recorded refusal. `text` is the rule's text plus the program and subcommand, never argv. */
+/** One recorded refusal. Codex includes a bounded command or file-path excerpt. */
 export interface GuardHit {
   id: number;
   agentId: string;
@@ -354,6 +355,8 @@ interface Cmd {
   background: boolean;
   /** A word after its program brace-expands (an unquoted `{a,b}`). */
   braces?: boolean;
+  /** The command receives a pipeline's output (preserved by the Codex walk). */
+  piped?: boolean;
 }
 
 /** One decision's walk over a command line. */
@@ -499,6 +502,7 @@ class Reader {
     let target: "drop" | "stdin" | null = null;
     // the next command reads a pipe
     let pipe = false;
+    let needsCommand = false;
     // `case` opened on this line with no `esac` yet: a `)` that pays no closer ends a pattern
     let cases = 0;
     // Every unquoted `case` word counts, wherever it stands (`time case …`, `coproc case …`):
@@ -541,6 +545,7 @@ class Reader {
             keywords = SHELL_KEYWORDS.has(mask);
           }
           cur.argv.push(word);
+          needsCommand = false;
           cur.braces.push(bracesExpand(mask));
         }
         target = null;
@@ -596,6 +601,7 @@ class Reader {
     // the lines are complete only with nothing left open
     const finish = (end: number, arith = false) => {
       endSegment();
+      if (this.walk.codex && needsCommand) throw new Unreadable();
       if (closers.length > 0 || param > 0 || heredocs.length > 0) throw new Unreadable();
       return { line: { segments, subs }, end, arith };
     };
@@ -661,17 +667,10 @@ class Reader {
         endSegment();
         if (i < s.length && heredocs.length > 0) i = bodies(i + 1) - 1;
       } else if (c === ">" || c === "<" || (c === "&" && next === ">")) {
+        if (this.walk.codex) throw new Unreadable();
         // A redirection: `N>`, `>>`, `>&`, `<`, `<<`, `<<<`, `&>`. A bare number before it is the fd.
         if (word !== null && /^\d+$/.test(word)) dropWord();
         else endWord();
-        if (this.walk.codex) {
-          const fd = /^(?:>&|<&)(?:\d+|-)(?=$|[ \t\n;|&])/.exec(s.slice(i));
-          if (fd !== null) {
-            i += fd[0].length - 1;
-            continue;
-          }
-          if (!(c === "<" && next === "<")) throw new Unreadable();
-        }
         if (c === "<" && next === "<" && s.charAt(i + 2) !== "<" && arith === 0 && param === 0) {
           // a heredoc: its delimiter is the next word; the body is read after this line
           const tabs = s.charAt(i + 2) === "-";
@@ -687,6 +686,18 @@ class Reader {
         while (i + 1 < s.length && ">&<|".includes(s.charAt(i + 1))) i++;
         target = hereString ? "stdin" : "drop";
       } else if ("\n;|&()".includes(c)) {
+        if (this.walk.codex) {
+          endWord();
+          if (c !== "\n" && cur.argv.length === 0) throw new Unreadable();
+          if ((c === "&" && next !== "&") || (c === "|" && next === "&")) throw new Unreadable();
+          pipe = c === "|" && next !== "|";
+          endSegment();
+          if (c === "|" || c === "&") {
+            needsCommand = true;
+            if (next === c) i++;
+          }
+          continue;
+        }
         const top = closers[closers.length - 1];
         if (c === "(") {
           if (next === "(") {
@@ -899,7 +910,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   if (depth > MAX_DEPTH) throw new TooLong();
   const { argv, braces } = seg;
   spend(walk, argv.length);
-  if (walk.codex) return [{ argv, background, braces: braces.includes(true) }];
+  if (walk.codex) return [{ argv, background, braces: braces.includes(true), piped: seg.piped }];
   const words = [...argv];
   let at = 0;
   let bg = background;
@@ -1077,7 +1088,11 @@ export function codexLineCommands(script: string): Cmd[] | null {
   const walk = newWalk();
   walk.codex = true;
   const parsed = lineCommands(script, walk);
-  return walk.lineBackground || parsed.length === 0 ? null : parsed;
+  return walk.lineBackground ||
+    parsed.length === 0 ||
+    parsed.some(({ argv }) => argv[0] === UNREADABLE_LINE || argv[0] === TOO_LONG)
+    ? null
+    : parsed;
 }
 
 /** Strict POSIX words for an approval envelope, without evaluating shell syntax. */
@@ -1128,11 +1143,14 @@ export function codexCommand(raw: string, parsed: readonly string[] | null): str
   if (words?.length !== 3 || words[0] !== CODEX_SHELL || words[1] !== "-lc") return null;
   const script = words[2];
   if (parsed !== null) {
-    const expected = parsed[0] === CODEX_SHELL && parsed[1] === "-lc" ? words : codexWords(script);
+    const candidates =
+      parsed[0] === CODEX_SHELL && parsed[1] === "-lc"
+        ? [words]
+        : (codexLineCommands(script)?.map((c) => c.argv) ?? []);
     if (
-      expected === null ||
-      expected.length !== parsed.length ||
-      !expected.every((w, n) => w === parsed[n])
+      !candidates.some(
+        (argv) => argv.length === parsed.length && argv.every((w, n) => w === parsed[n]),
+      )
     )
       return null;
   }
@@ -1144,10 +1162,12 @@ interface ReadOptions {
   flags: readonly string[];
   values?: Readonly<Record<string, ReadOption>>;
   pattern?: boolean;
+  maxOperands?: number;
 }
 
 /** Known read-only options only: unknown options may run a helper, follow links or write files. */
 export const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
+  pwd: { flags: ["-L", "-P"], maxOperands: 0 },
   ls: {
     flags: [
       "-a",
@@ -1177,6 +1197,54 @@ export const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
     values: { "-n": "value", "-c": "value", "--lines": "value", "--bytes": "value" },
   },
   wc: { flags: ["-c", "-m", "-l", "-w", "-L"] },
+  sort: {
+    flags: [
+      "-b",
+      "-d",
+      "-f",
+      "-g",
+      "-h",
+      "-i",
+      "-M",
+      "-n",
+      "-r",
+      "-s",
+      "-u",
+      "-V",
+      "-c",
+      "-C",
+      "-m",
+      "-z",
+    ],
+    values: { "-k": "value", "--key": "value", "-t": "value", "--field-separator": "value" },
+  },
+  uniq: {
+    flags: ["-c", "-d", "-u", "-i", "-z"],
+    values: {
+      "-f": "value",
+      "--skip-fields": "value",
+      "-s": "value",
+      "--skip-chars": "value",
+      "-w": "value",
+      "--check-chars": "value",
+    },
+    // A second positional operand is an output file, even when it is inside the worktree.
+    maxOperands: 1,
+  },
+  cut: {
+    flags: ["-n", "-s", "-z", "--only-delimited", "--complement", "--zero-terminated"],
+    values: {
+      "-b": "value",
+      "--bytes": "value",
+      "-c": "value",
+      "--characters": "value",
+      "-f": "value",
+      "--fields": "value",
+      "-d": "value",
+      "--delimiter": "value",
+      "--output-delimiter": "value",
+    },
+  },
   rg: {
     flags: [
       "-n",
@@ -1343,6 +1411,7 @@ export function codexReadCommand(
   if (program === "find" && argv.some((w) => FIND_EXEC.has(w) || w === "-delete")) return false;
   let pattern = codexPositionalPattern(argv, spec);
   let options = true;
+  let operands = 0;
   let sedScript = program === "sed";
   if (sedScript && argv[1] !== "-n") return false;
   for (let i = 1; i < argv.length; i++) {
@@ -1375,9 +1444,118 @@ export function codexReadCommand(
       if (!/^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(word)) return false;
       sedScript = false;
     } else if (pattern) pattern = false;
-    else if (word !== "-" && !allowedPath(word)) return false;
+    else {
+      operands++;
+      if (program === "uniq") options = false;
+      if (spec.maxOperands !== undefined && operands > spec.maxOperands) return false;
+      if (word !== "-" && !allowedPath(word)) return false;
+    }
   }
   return !pattern && !sedScript;
+}
+
+const CODEX_GIT_DIFF_READ_FLAGS = [
+  "--stat",
+  "--numstat",
+  "--shortstat",
+  "--name-only",
+  "--name-status",
+  "--raw",
+  "-p",
+  "--patch",
+  "-s",
+  "--no-patch",
+  "--no-ext-diff",
+  "--no-textconv",
+] as const;
+
+const CODEX_GIT_READ_OPTIONS: Readonly<Record<string, ReadOptions>> = {
+  status: {
+    flags: [
+      "-s",
+      "--short",
+      "-b",
+      "--branch",
+      "--porcelain",
+      "--porcelain=v1",
+      "--porcelain=v2",
+      "-z",
+    ],
+  },
+  diff: {
+    flags: [...CODEX_GIT_DIFF_READ_FLAGS, "--cached", "--staged", "--check", "-w", "-b"],
+    values: { "-U": "value", "--unified": "value" },
+  },
+  log: {
+    flags: [
+      ...CODEX_GIT_DIFF_READ_FLAGS,
+      "--oneline",
+      "--graph",
+      "--decorate",
+      "--no-decorate",
+      "--all",
+      "--reverse",
+      "--no-merges",
+      "--first-parent",
+    ],
+    values: { "-n": "value", "--max-count": "value" },
+  },
+  show: {
+    flags: [...CODEX_GIT_DIFF_READ_FLAGS, "--oneline"],
+    values: { "-U": "value", "--unified": "value" },
+  },
+};
+
+/** Branch/tag refs and ancestor suffixes; ranges contain two independently validated revisions. */
+function codexGitRevision(word: string, allowedPath: (path: string) => boolean): boolean {
+  const revisions = word.split(/\.{2,3}/);
+  return (
+    revisions.length <= 2 &&
+    revisions.every((revision) => {
+      const match = /^([A-Za-z0-9_][A-Za-z0-9_./-]*)(?:[~^]\d*)*$/.exec(revision);
+      if (match === null) return false;
+      const ref = match[1];
+      return (
+        !ref.endsWith(".") &&
+        !ref.includes("..") &&
+        ref
+          .split("/")
+          .every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock")) &&
+        allowedPath(ref)
+      );
+    })
+  );
+}
+
+/** A Git pipeline segment must have known read options and confined path operands. */
+export function codexGitReadCommand(
+  argv: readonly string[],
+  allowedPath: (path: string) => boolean,
+): boolean {
+  if (argv[0] !== "git" || !Object.hasOwn(CODEX_GIT_READ_OPTIONS, argv[1])) return false;
+  if (!allowedPath(".")) return false;
+  const spec = CODEX_GIT_READ_OPTIONS[argv[1]];
+  let paths = false;
+  const operands: { word: string; path: boolean }[] = [];
+  for (let i = 2; i < argv.length; i++) {
+    const word = argv[i];
+    if (!paths && word === "--") {
+      paths = true;
+    } else if (!paths && word.startsWith("-")) {
+      if (spec.flags.includes(word)) {
+        continue;
+      }
+      const option = codexReadOption(word, spec);
+      if (option === null) return false;
+      const value = option.value ?? argv[++i];
+      if (value === undefined || !/^\d+$/.test(value)) return false;
+    } else operands.push({ word, path: paths || argv[1] === "status" });
+  }
+  return operands.every(({ word, path }) =>
+    path
+      ? word !== "" && !/[:*?[\]\\]/.test(word) && allowedPath(word)
+      : codexGitRevision(word, allowedPath),
+  );
 }
 
 function commands(cmd: string, walk: Walk, depth: number, background: boolean, mux: Mux): Cmd[] {

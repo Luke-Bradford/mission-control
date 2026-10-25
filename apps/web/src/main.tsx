@@ -10,7 +10,7 @@ import "./hud.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { loadOperatorToken } from "./api.ts";
+import { startClient } from "./bootstrap.ts";
 import { BrowserNotifications } from "./browserNotifications.ts";
 import { applyThemeColor, getTheme } from "./theme.ts";
 
@@ -18,10 +18,12 @@ applyThemeColor(getTheme()); // public/theme-init.js already applied a remembere
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");
-void loadOperatorToken();
-createRoot(root).render(
-  <StrictMode>
-    <App />
-    <BrowserNotifications />
-  </StrictMode>,
+const stop = startClient(() =>
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+      <BrowserNotifications />
+    </StrictMode>,
+  ),
 );
+import.meta.hot?.dispose(stop);

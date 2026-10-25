@@ -45,6 +45,7 @@ import {
   type CrewSeatConfig,
   type CrewSessionConfig,
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
+  seatUnavailable,
 } from "../config.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
@@ -116,7 +117,8 @@ function writerSeats(config: CcConfig): { session: CrewSessionConfig; seat: Crew
   const out: { session: CrewSessionConfig; seat: CrewSeatConfig }[] = [];
   for (const session of config.crew?.sessions ?? []) {
     for (const seat of session.seats) {
-      if (!seat.retiring && seatDef(seat).loop === "build") out.push({ session, seat });
+      if (!seat.retiring && !seatUnavailable(seat) && seatDef(seat).loop === "build")
+        out.push({ session, seat });
     }
   }
   return out;
@@ -365,7 +367,8 @@ export function takeReason(e: unknown): string {
 /** Whether a refused start is the card's own: a stray worktree path, a protected branch, an issue GitHub doesn't have. */
 const isCardsOwn = (e: unknown): boolean =>
   (e instanceof SupervisorError && (e.status === 404 || e.status === 422)) ||
-  (e instanceof CheckoutError && (e.code === "path" || e.code === "protected"));
+  (e instanceof CheckoutError &&
+    (e.code === "path" || e.code === "protected" || e.code === "branch"));
 
 /**
  * Whether a refused review start is retried unchanged: the seat is busy or the hub is stopping

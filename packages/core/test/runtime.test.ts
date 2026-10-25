@@ -241,9 +241,12 @@ describe("the allowlist in phase 2b", () => {
       remember: "mcp__mc__remember",
       forget: "mcp__mc__forget",
       recall: "mcp__mc__recall",
+      holdItem: "mcp__mc__hold_item",
+      releaseHold: "mcp__mc__release_hold",
       askOperator: "mcp__mc__ask_operator",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
+      restoreFile: "mcp__mc__restore_file",
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
@@ -569,6 +572,8 @@ describe("crew constants", () => {
           "remember",
           "forget",
           "recall",
+          "hold_item",
+          "release_hold",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -667,6 +672,8 @@ describe("mc tool grants", () => {
       "remember",
       "forget",
       "recall",
+      "hold_item",
+      "release_hold",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
@@ -737,6 +744,7 @@ describe("scratch mode", () => {
       "Bash(git show:*)",
       "Bash(pnpm -s vitest:*)",
       "mcp__mc__report_findings",
+      "mcp__mc__restore_file",
     ]);
   });
 

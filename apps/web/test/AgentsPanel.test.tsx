@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { crewOrder, isCurrentWork } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
+import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
 import { nextAgent, setSelectedAgent } from "../src/shell/selection.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, item, limit5h, MIN, NOW, seatRow } from "./fixtures.ts";
@@ -71,7 +72,7 @@ const rowsIn = (container: HTMLElement) => [
   ...container.querySelectorAll<HTMLElement>(".trow:not(.head)"),
 ];
 
-it("shows FLIGHT, four crew and two observed loops in nine compact columns without disclosures or scrolling", async () => {
+it("shows FLIGHT, four crew and two observed loops in eight columns with a live Work line", async () => {
   const loop = {
     phase: "working" as const,
     profile: "feature",
@@ -92,8 +93,8 @@ it("shows FLIGHT, four crew and two observed loops in nine compact columns witho
   stub(rows);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("observed-running");
-  const table = screen.getByRole("table", { name: "Agents" });
-  expect(within(table).getAllByRole("columnheader")).toHaveLength(9);
+  const table = screen.getByRole("table", { name: "Crew" });
+  expect(within(table).getAllByRole("columnheader")).toHaveLength(8);
   expect(within(table).getAllByRole("row")).toHaveLength(8);
   const rendered = rowsIn(container);
   expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
@@ -112,12 +113,22 @@ it("shows FLIGHT, four crew and two observed loops in nine compact columns witho
     expect(row.querySelectorAll(".doing, .need")).toHaveLength(
       row.querySelector(".rowlink")?.textContent === "need" ? 1 : 0,
     );
-    expect(row.querySelector(".loopstep")?.textContent).toContain("implement");
-    expect(row.querySelector(".stepbar")).toBeTruthy();
+    const name = row.querySelector(".rowlink")?.textContent;
+    if (
+      ["FLIGHT", "need", "running", "observed-running", "parked", "observed-waiting"].includes(
+        name ?? "",
+      )
+    ) {
+      expect(row.querySelector(".loopstep")?.textContent).toContain("implement");
+      expect(row.querySelector(".stepbar")).toBeTruthy();
+    } else {
+      expect(row.querySelector(".loopstep")?.textContent).toBe("—");
+      expect(row.querySelector(".stepbar")).toBeNull();
+    }
     expect(row.querySelector(".spark")).toBeTruthy();
     expect(row.querySelector(".tok")?.textContent).toContain("40/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.querySelectorAll(".meter")).toHaveLength(2);
+    expect(row.querySelectorAll(".meter")).toHaveLength(1);
   }
   expect(container.querySelector("details, summary, .agent-group, .scroll")).toBeNull();
   expect(screen.queryByText("Run details")).toBeNull();
@@ -179,7 +190,7 @@ it("keeps live tool prose in the row tooltip and only the loop node in the cell"
   expect(row?.querySelector(".process-line, .doing")).toBeNull();
 });
 
-it("labels Context, repeats account quota per agent and preserves paused state", async () => {
+it("labels Context, leaves quota in Systems and preserves paused state", async () => {
   stub(
     [
       seatRow({ id: "a", digest: digest([]), contextWindow: 1000, hudState: "idle", run: null }),
@@ -189,7 +200,7 @@ it("labels Context, repeats account quota per agent and preserves paused state",
   );
   const { container } = render(<AgentsPanel />);
   await screen.findByText("ctx 40%");
-  expect(screen.getAllByText("14%")).toHaveLength(2);
+  expect(screen.queryByText("14%")).toBeNull();
   const paused = await screen.findByText("Idle");
   expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Idle (crew paused)");
   expect(paused.closest<HTMLElement>(".trow")?.title).toBe("Crew is paused");
@@ -255,7 +266,7 @@ it.each(["running", "stalled"] as const)(
 it.each([
   [80, "hi"],
   [100, "full"],
-] as const)("colours context and quota at %s%% with %s", async (pct, level) => {
+] as const)("colours context at %s%% with %s", async (pct, level) => {
   stub(
     [seatRow({ digest: { ...digest([]), contextTokens: pct * 10 }, contextWindow: 1000 })],
     true,
@@ -266,7 +277,7 @@ it.each([
   const { container } = render(<AgentsPanel />);
   await screen.findByText(`ctx ${pct}%`);
   const meters = rowsIn(container)[1]?.querySelectorAll(".meter");
-  expect(meters).toHaveLength(2);
+  expect(meters).toHaveLength(1);
   for (const meter of meters ?? []) expect(meter.classList.contains(level)).toBe(true);
 });
 
@@ -323,17 +334,17 @@ it("uses the live FLIGHT seat while config is unavailable, without a duplicate o
   expect(screen.queryByText("flight-1")).toBeNull();
 });
 
-it("gives a free seat one line and removes the empty step column", async () => {
+it("keeps the Loop column and a second Work line for free seats", async () => {
   stub([seatRow({ id: "free", hudState: "idle", run: null, ticket: null, loop: null })], true, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("free");
   const row = rowsIn(container)[1] as HTMLElement;
-  expect(row.querySelector(".ticket-cell")?.textContent).toBe("—");
+  expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toBe("—");
   expect(row.querySelector(".doing, .need")).toBeNull();
-  expect(container.querySelector("#agentsList")?.classList.contains("no-steps")).toBe(true);
+  expect(container.querySelector("#agentsList")?.classList.contains("no-steps")).toBe(false);
 });
 
-it("keeps a real step column and puts the need alone on line two", async () => {
+it("keeps eight cells with the need on the second Work line", async () => {
   stub([
     seatRow({
       id: "need",
@@ -350,10 +361,10 @@ it("keeps a real step column and puts the need alone on line two", async () => {
   await screen.findByText("Decision for you");
   const row = rowsIn(container)[1] as HTMLElement;
   expect(row.querySelectorAll(".doing, .need")).toHaveLength(1);
-  expect(row.querySelector(".need")?.parentElement).toBe(row);
-  expect(within(row).getAllByRole("cell")).toHaveLength(10);
-  expect(row.querySelector(".need")?.getAttribute("aria-colspan")).toBe("9");
-  expect(container.querySelector("#agentsList")?.classList.contains("has-steps")).toBe(true);
+  expect(row.querySelector(".need")?.parentElement).toBe(row.querySelector(".ticket-cell"));
+  expect(within(row).getAllByRole("cell")).toHaveLength(8);
+  expect(row.querySelector(".need")?.getAttribute("aria-colspan")).toBeNull();
+  expect(row.querySelector(".loopstep")).toBeTruthy();
 });
 
 it("retains a stale quota reading with its age and the collector note", async () => {
@@ -375,7 +386,13 @@ it("retains a stale quota reading with its age and the collector note", async ()
       ],
     },
   );
-  const { container } = render(<AgentsPanel />);
+  const { container } = render(
+    <QuotaMeter
+      row={limit5h({ used: 86, stale: true, sampledAt: NOW - 8 * 60 * MIN })}
+      now={NOW}
+      compact
+    />,
+  );
   await screen.findByText("86%");
   expect(
     container.querySelector('[title*="Last reading 8h ago"]')?.classList.contains("stale"),
@@ -490,6 +507,26 @@ it("shows the short model, 1M context variant, CLI version and configured effort
   expect(cell?.querySelector(".agent-cli")?.textContent).toBe(" · v2.1.302");
 });
 
+it("keeps the GPT model name and abbreviates medium effort on one line", async () => {
+  const base = seatRow();
+  if (!base.run) throw new Error("fixture needs a run");
+  stub(
+    [
+      seatRow({
+        id: "model",
+        run: { ...base.run, model: "gpt-5.6-terra" },
+        cli: { version: null, effort: "medium" },
+      }),
+    ],
+    true,
+    [],
+  );
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("model");
+  const cell = rowsIn(container)[1]?.querySelector(".agent-model");
+  expect(cell?.textContent).toBe("gpt-5.6-terra · med");
+});
+
 it.each(["idle", "parked", "stopped"] as const)(
   "keeps a quiet %s row to one line with prose in its title",
   async (hudState) => {
@@ -499,7 +536,7 @@ it.each(["idle", "parked", "stopped"] as const)(
     const row = rowsIn(container)[1];
     expect(row?.querySelector(".doing, .need, .process-line")).toBeNull();
     expect(row?.title).toBeTruthy();
-    expect(row?.children).toHaveLength(9);
+    expect(row?.children).toHaveLength(8);
   },
 );
 
@@ -528,7 +565,7 @@ it.each([
     const { container } = render(<AgentsPanel />);
     await screen.findByText("last-work");
     const cell = rowsIn(container)[1]?.querySelector(".ticket-cell");
-    expect(cell?.textContent).toBe("last #460 · PR #524");
+    expect(cell?.firstElementChild?.textContent).toBe("last #460 · PR #524");
     expect(cell?.classList.contains("muted")).toBe(true);
     expect(cell?.hasAttribute("title")).toBe(false);
   },
@@ -553,7 +590,7 @@ it.each(["running", "waiting", "parked", "blocked", "stalled"] as const)(
     const { container } = render(<AgentsPanel />);
     await screen.findByText("current-work");
     const cell = rowsIn(container)[1]?.querySelector(".ticket-cell");
-    expect(cell?.textContent).toBe("#460 · PR #524 · Current title");
+    expect(cell?.firstElementChild?.textContent).toBe("#460 · PR #524 · Current title");
     expect(cell?.classList.contains("muted")).toBe(false);
   },
 );
@@ -574,7 +611,7 @@ it.each(["ci", "review", "parked"] as const)(
     );
     const { container } = render(<AgentsPanel />);
     await screen.findByText("waiting-work");
-    expect(rowsIn(container)[1]?.querySelector(".ticket-cell")?.textContent).toBe(
+    expect(rowsIn(container)[1]?.querySelector(".ticket-cell > :first-child")?.textContent).toBe(
       "#3349 · PR #524 · Quote cache",
     );
   },
@@ -588,7 +625,9 @@ it.each([
   stub([seatRow({ id: "refs", hudState: "stopped", ...refs })], true, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("refs");
-  expect(rowsIn(container)[1]?.querySelector(".ticket-cell")?.textContent).toBe(expected);
+  expect(rowsIn(container)[1]?.querySelector(".ticket-cell > :first-child")?.textContent).toBe(
+    expected,
+  );
 });
 
 it("highlights FLIGHT when j/k selects it", async () => {
@@ -649,7 +688,9 @@ it.each([
   stub([row], true, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("model");
-  expect(rowsIn(container)[1]?.querySelector(".agent-model")?.textContent).toBe(expected);
+  expect(rowsIn(container)[1]?.querySelector(".agent-model > :first-child")?.textContent).toBe(
+    expected,
+  );
 });
 
 it.each([
@@ -659,7 +700,13 @@ it.each([
   stub([seatRow({ id: "a" })], true, [], "CI", [
     limit5h({ used: 86, stale: false, sampledAt: NOW - age }),
   ]);
-  render(<AgentsPanel />);
+  render(
+    <QuotaMeter
+      row={limit5h({ used: 86, stale: false, sampledAt: NOW - age })}
+      now={NOW}
+      compact
+    />,
+  );
   const reading = await screen.findByText("86%");
   expect(!!reading.closest(".stale")).toBe(stale);
 });
@@ -688,7 +735,9 @@ it("mutes a fresh quota when its collector reports a note", async () => {
       ],
     },
   );
-  render(<AgentsPanel />);
+  render(
+    <QuotaMeter row={limit5h({ used: 86, stale: false, sampledAt: NOW })} now={NOW} compact />,
+  );
   const reading = await screen.findByText("86%");
   await waitFor(() => expect(reading.closest(".stale")).toBeTruthy());
 });
@@ -702,13 +751,64 @@ it("does not light the token dot for output without digest token evidence", asyn
 
 it.each([
   [[], false],
-  [["one", "one"], true],
+  [["one", "one"], false],
   [["one", "two"], false],
-])("hides quota only for a shared visible account: %j", async (accounts, hidden) => {
+])("keeps quota out of Crew regardless of visible accounts: %j", async (accounts, hidden) => {
   stub(
     accounts.map((accountId, i) => seatRow({ id: i === 0 ? "flight" : `seat-${i}`, accountId })),
   );
   const { container } = render(<AgentsPanel />);
   await waitFor(() => expect(container.textContent).not.toContain("Loading…"));
   expect(container.querySelector("#agentsList")?.classList.contains("no-quota")).toBe(hidden);
+});
+
+it.each([
+  ["blocked", true],
+  ["parked", true],
+  ["stopped", false],
+  ["idle", false],
+] as const)("shows a loop only for a current %s run", async (hudState, current) => {
+  stub(
+    [
+      seatRow({
+        id: "guido-cx",
+        hudState,
+        paused: true,
+        loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
+      }),
+      seatRow({ id: "no-loop", loop: null }),
+    ],
+    true,
+    [],
+  );
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("guido-cx");
+  const row = rowsIn(container).find(
+    (el) => el.querySelector(".rowlink")?.textContent === "guido-cx",
+  );
+  expect(row?.querySelectorAll(".stepbar i")).toHaveLength(current ? 5 : 0);
+  expect(row?.querySelector(".loopstep")?.textContent).toBe(current ? "Blocked" : "—");
+  const none = rowsIn(container).find(
+    (el) => el.querySelector(".rowlink")?.textContent === "no-loop",
+  );
+  expect(none?.querySelector(".loopstep")?.textContent).toBe("—");
+});
+
+it("hides a free seat's completed loop", async () => {
+  const live = seatRow().run as NonNullable<CrewRow["run"]>;
+  stub(
+    [
+      seatRow({
+        id: "free",
+        hudState: "idle",
+        run: { ...live, status: "ok", endedAt: NOW },
+        loop: { phase: "done", text: "Done", prNumber: null, parked: null },
+      }),
+    ],
+    true,
+    [],
+  );
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("free");
+  expect(rowsIn(container)[1]?.querySelector(".loopstep")?.textContent).toBe("—");
 });

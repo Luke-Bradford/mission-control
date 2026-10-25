@@ -77,6 +77,8 @@ export type ActivityKind =
 
 /** One `/api/activity` row, newest first. Derived from runs, escalations and collector health. */
 export interface ActivityEvent {
+  /** Exact source run when known; absent for events without a run. */
+  runId?: string;
   at: number;
   /** Agent id, repo id or collector name. */
   who: string;
@@ -195,6 +197,8 @@ export interface ConfigView {
         area: string[];
         /** Removed from config.yaml, kept until free: it takes no new work. */
         retiring?: boolean;
+        /** Codex model validation has not succeeded yet. */
+        unavailable?: string;
       }[];
     }[];
   } | null;

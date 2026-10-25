@@ -22,6 +22,21 @@ The server also needs `gh` logged in with the `project` and `repo` scopes for bo
 escalations, and `codex` on `PATH` for Codex usage. It reads the Claude OAuth token from the
 login Keychain, the same way the loops' `claude_usage.py` does.
 
+Codex crew seats need `codex` 0.154.0 or newer and the account's `~/.codex/auth.json`.
+Set the seat's `account_id` to its Codex account and `model` to a model advertised by
+`model/list` (for example `gpt-6-astra`). After HTTP and the Claude crew start, the hub
+reads the catalog in the background. An explicit `effort` must be advertised by
+that model, including any `light_model`; omit it to use the model's default.
+Until validation succeeds, the seat reports `unavailable: <reason>` and cannot
+start or resume. Discovery failures retry every minute, without a hub restart;
+Claude seats and HTTP remain available. A successful catalog is cached for config
+edits and reloads. Config writes refuse unvalidated Codex models and efforts with
+400. Existing Claude model identifiers and effort options keep loading.
+
+`updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
+binary they started on. Update Codex manually between runs. Resuming a run uses
+the run's saved model.
+
 ### Update
 
 The Setup toolbar reads `Version <sha> · <n> commits behind main · checked <when>`, then
@@ -1419,3 +1434,13 @@ npx vitest run packages/agentcomms/test/two-sides.test.ts --maxWorkers=2
 It uses temporary homes and a local Node relay, runs CLI setup and two daemons, then calls work's
 MCP server over stdio. It needs no Cloudflare credentials. A sandbox that forbids listening
 sockets cannot run it (`listen EPERM`); run it outside that sandbox.
+
+## Codex crew seats
+
+Add a Codex seat in **Setup › Sessions**, or in `config.yaml`: choose an account whose vendor is `codex`, a model from that account's discovered model list, and an advertised effort for that model. The seat's state is shown alongside the other crew seats in the hub.
+
+If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery or validation. The hub still boots and Claude seats continue to run. No intervention is required: the state clears itself when discovery succeeds.
+
+Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
+
+Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.

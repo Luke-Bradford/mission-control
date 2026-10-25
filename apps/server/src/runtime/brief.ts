@@ -22,12 +22,14 @@ import {
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { readBaseFile } from "./checkouts.ts";
-import { crewGitBytes } from "./git.ts";
+import { crewGitBytes, overflowed } from "./git.ts";
 
 /** The most of the repo's CLAUDE.md copied into the prompt. */
 export const CLAUDE_MD_MAX = 64 * 1024;
 /** Heads the repo's CLAUDE.md in the prompt file. */
 export const CLAUDE_MD_HEADING = "# The repository's CLAUDE.md";
+
+const LEFTOVER_CHANGES_MAX = 30;
 
 export interface BriefInput {
   /** The seat's call sign: its id upper-cased (`GUIDO-1`). */
@@ -60,6 +62,8 @@ export interface BriefInput {
   profile?: RunProfile;
   /** Every profile's name, for the planner's line about another template. */
   profileNames?: readonly string[];
+  /** Quoted porcelain status from a reused ticket worktree. */
+  leftoverChanges?: readonly string[];
 }
 
 const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``).join(", ");
@@ -144,6 +148,21 @@ export function ticketBrief(i: BriefInput): string {
     ...(profile.length > 0 ? [...profile, ""] : []),
     ran,
     last,
+    ...((i.leftoverChanges?.length ?? 0) > 0
+      ? [
+          "",
+          "## Leftover changes",
+          "",
+          "these are leftovers from an earlier attempt: review them, keep what's right, discard the rest, then continue",
+          "",
+          "git status --porcelain:",
+          "",
+          ...(i.leftoverChanges ?? []).slice(0, LEFTOVER_CHANGES_MAX).map((line) => `    ${line}`),
+          ...((i.leftoverChanges?.length ?? 0) > LEFTOVER_CHANGES_MAX
+            ? ["", `(Showing the first ${LEFTOVER_CHANGES_MAX} files.)`]
+            : []),
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -315,22 +334,39 @@ export async function repoReferenceIndex(checkout: string, baseSha: string): Pro
       .trim()
       .slice(0, 256);
   const common = await realpath(join(checkout, ".git"));
-  const tree = await crewGitBytes(
-    checkout,
-    ["ls-tree", "-r", "-z", "--full-tree", baseSha, "--", ".claude/skills", ".claude/agents"],
-    common,
-    { gitDir: common },
-  );
+  let tree: Buffer;
+  try {
+    tree = await crewGitBytes(
+      checkout,
+      [
+        "ls-tree",
+        "-r",
+        "-l",
+        "-z",
+        "--full-tree",
+        baseSha,
+        "--",
+        ".claude/skills",
+        ".claude/agents",
+      ],
+      common,
+      { gitDir: common },
+    );
+  } catch (e) {
+    if (!overflowed(e)) throw e;
+    return [...lines, notice].join("\n");
+  }
   const counts = { skills: { scanned: 0, kept: 0 }, agents: { scanned: 0, kept: 0 } };
   for (const entry of tree.toString("utf8").split("\0")) {
-    const match = /^(100644|100755) blob [0-9a-f]+\t([\s\S]+)$/.exec(entry);
+    const match = /^(100644|100755) blob [0-9a-f]+ +([0-9]+)\t([\s\S]+)$/.exec(entry);
     if (match === null) continue;
-    const relative = match[2] as string;
+    const relative = match[3] as string;
     const skill = relative.startsWith(".claude/skills/") && relative.endsWith("/SKILL.md");
     const agent = relative.startsWith(".claude/agents/") && relative.endsWith(".md");
     if (!skill && !agent) continue;
     const count = skill ? counts.skills : counts.agents;
     if (
+      Number(match[2]) > CLAUDE_MD_MAX ||
       relative.length > 256 ||
       /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}`]/u.test(relative) ||
       relative.split("/").length - 3 > 6 ||

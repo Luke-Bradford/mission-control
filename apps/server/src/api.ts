@@ -87,6 +87,12 @@ import Fastify, {
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
 import {
+  AttentionHoldInput,
+  attentionHoldError,
+  holdItem,
+  releaseHold,
+} from "./attention-holds.ts";
+import {
   AWAY_STARTED_SETTING,
   AwayBody,
   activeAway,
@@ -108,6 +114,7 @@ import {
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
+import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
@@ -451,6 +458,7 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
 export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
+const HUD_MEMO_MS = 2_000;
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -677,10 +685,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
+  let crewMemo: { key: string; value: Crew } | undefined;
+  const sharedCrew = (at = now()): Crew => {
+    const key = JSON.stringify([Math.floor(at / HUD_MEMO_MS), config, deps.lock?.state()]);
+    if (crewMemo?.key !== key)
+      crewMemo = { key, value: crew(config, store, at, deps.lock?.state() ?? NO_LOCK) };
+    return crewMemo.value;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
   const sharedAttention = (): AttentionItem[] => {
     const at = now();
-    if (!attentionMemo || at - attentionMemo.at >= 2_000) {
+    if (!attentionMemo || at - attentionMemo.at >= HUD_MEMO_MS) {
       attentionMemo = {
         at,
         items: attentionItems(
@@ -688,7 +704,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          undefined,
+          sharedCrew(at).rows,
           deps.hubLogin?.() ?? null,
         ),
       };
@@ -717,6 +733,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseRevision++;
       responseCache.clear();
       attentionMemo = undefined;
+      crewMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
@@ -803,7 +820,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ) {
             let result: StreamCacheEntry["result"];
             try {
-              result = readTranscript(path, limit);
+              result = readTranscript(path, limit, run.vendor);
             } catch {
               return missing();
             }
@@ -856,7 +873,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             try {
               // With no messages left, only positions before the current event window
               // may be stale snapshot IDs. Future offsets must still be rejected.
-              const first = readStream(run.transcriptPath, 200).events[0];
+              const first = readStream(run.transcriptPath, 200, run.vendor).events[0];
               const boundary = first && commsPosition(`stream:${run.id}:${first.id}`);
               return boundary !== null && boundary !== undefined && p.offset < boundary.offset;
             } catch {
@@ -1967,7 +1984,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (source) postingItems.add(source.itemKey);
         const file = crewPrBodyPath(store.path);
         let wroteBody = false;
+        const attemptKey = `draft-post:${id}`;
+        const finish = () => {
+          store.finishDraft(id, "posted", body);
+          store.deleteSetting(attemptKey);
+          if (thread) {
+            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
+            bus.emit("attention");
+          }
+          bus.emit("flight");
+          return { ok: true };
+        };
         try {
+          if (store.getSetting(attemptKey)) {
+            const latest = await (deps.gh ?? createGh())(
+              [draft.kind, "view", String(n), `--repo=${repo.github}`, "--json=comments"],
+              { cwd: crewDir(store.path) },
+            );
+            let comments: { body: string }[] | undefined;
+            try {
+              comments = z
+                .object({ comments: z.array(z.object({ body: z.string() })) })
+                .parse(JSON.parse(latest.stdout)).comments;
+            } catch {
+              /* A failed read must not turn into a second post. */
+            }
+            if (latest.code !== 0 || !comments)
+              return reply
+                .code(502)
+                .send({ error: "Could not verify the latest comment. Nothing was posted." });
+            if (comments.at(-1)?.body === body && store.getSetting(attemptKey) === body)
+              return finish();
+          }
           if (source && thread) {
             try {
               const rest = deps.notificationRest ?? makeRest(await githubToken());
@@ -2029,19 +2077,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
           wroteBody = true;
+          store.setSetting(attemptKey, body);
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
           );
           if (result.code !== 0)
             return reply.code(502).send({ error: "GitHub refused the comment." });
-          store.finishDraft(id, "posted", body);
-          if (thread) {
-            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
-            bus.emit("attention");
-          }
-          bus.emit("flight");
-          return { ok: true };
+          return finish();
         } finally {
           postingDrafts.delete(id);
           if (source) postingItems.delete(source.itemKey);
@@ -2075,6 +2118,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (draft.via !== "Teams" || draft.state !== "pending")
           return reply.code(409).send({ error: "Only pending Teams drafts can be copied." });
         store.finishDraft(id, "copied");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2085,6 +2129,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!store.drafts().some((d) => d.id === id))
           return reply.code(404).send({ error: "No pending draft." });
         store.finishDraft(id, "discarded");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2127,6 +2172,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
+      // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
+      api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        return { runId: run.id, attempts: store.runAttempts(run.id) };
+      });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
@@ -2159,7 +2210,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ),
           ]),
           round: loop
-            ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
+            ? Math.min(
+                run.profile?.profile.rounds ?? REVIEW_ROUNDS,
+                1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch),
+              )
             : null,
           budget:
             loop &&
@@ -2201,10 +2255,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/overview/timeline", async () => overviewTimeline(config, store, now()));
 
-      api.get(
-        "/crew",
-        async (): Promise<Crew> => crew(config, store, now(), deps.lock?.state() ?? NO_LOCK),
-      );
+      api.get("/crew", async (): Promise<Crew> => sharedCrew());
 
       api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
         const selected = req.query.session;
@@ -2280,7 +2331,51 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get("/attention", async (): Promise<AttentionItem[]> => sharedAttention());
+      api.get(
+        "/attention",
+        async (): Promise<AttentionItem[]> =>
+          sharedAttention().map((item) =>
+            item.kind === "tag" && item.text.length > 170
+              ? { ...item, text: `${item.text.slice(0, 169)}…` }
+              : item,
+          ),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
+      api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
+        const item = sharedAttention().find((item) => item.key === req.params.key);
+        return item ?? reply.code(404).send({ error: "Item is no longer open." });
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.get("/attention/held", async () =>
+        attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew().rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ).filter((i) => i.hold),
+      );
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
+        const body = AttentionHoldInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
+        if (!sharedAttention().some((i) => i.key === req.params.key))
+          return reply.code(404).send({ error: "Item is no longer waiting." });
+        holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now());
+        bus.emit("attention");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (!releaseHold(store, req.params.key, now()))
+          return reply.code(404).send({ error: "No active hold." });
+        bus.emit("attention");
+        return { ok: true };
+      });
 
       const discussionSends = new Set<string>();
       const currentDiscussionItem = (key: string) => {
@@ -2289,7 +2384,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           now(),
           deps.lock?.state() ?? NO_LOCK,
-          undefined,
+          sharedCrew().rows,
           deps.hubLogin?.() ?? null,
         ).find((item) => item.key === key && !item.acked);
         return item ? { ...item, version: attentionVersion(item) } : undefined;
@@ -2508,7 +2603,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store,
             now(),
             deps.lock?.state() ?? NO_LOCK,
-            undefined,
+            sharedCrew().rows,
             deps.hubLogin?.() ?? null,
           ),
           config.repos.map((r) => r.id),
@@ -2592,6 +2687,23 @@ export function githubRate(store: Store): GithubRateState {
 export function limitRows(config: CcConfig, store: Store, now: number): LimitRow[] {
   const rows: LimitRow[] = [];
   for (const acct of config.accounts) {
+    let nextTryAt: number | undefined;
+    if (acct.vendor === "claude") {
+      try {
+        const backoff = JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+        if (
+          backoff &&
+          Number.isFinite(backoff.waitMs) &&
+          backoff.waitMs > 0 &&
+          Number.isFinite(backoff.notBefore)
+        ) {
+          const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);
+          if (capped > now) nextTryAt = capped;
+        }
+      } catch {
+        // An invalid scheduler setting is ignored here; the scheduler removes it on start.
+      }
+    }
     for (const window of WINDOWS) {
       const latest = store.latestUsage(acct.id, window);
       if (!latest) continue;
@@ -2605,6 +2717,7 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         stale: now - latest.at > DEFAULT_MAX_AGE_MS,
         source: latest.source,
         sampledAt: latest.at,
+        ...(nextTryAt === undefined ? {} : { nextTryAt }),
       };
       if (window === "5h") {
         const fiveH: UsageSample[] = store.usage(acct.id, window, resetAt - FIVE_HOURS_MS);

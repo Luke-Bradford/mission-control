@@ -192,10 +192,12 @@ function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | nu
 }
 
 /** The hint under a crew seat's composer. */
-function seatHint(row: CrewRow): string {
+function seatHint(row: CrewRow, vendor?: string): string {
   const call = callSign(row);
   switch (seatTurn(row)) {
     case "running":
+      if (vendor === "codex")
+        return `Reaches ${call} at its next model step (Codex steer); no new turn starts.`;
       return `Reaches ${call} mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters.`;
     case "idle":
       return `${call} is ${HUD_STATE_LABEL[row.hudState].toLowerCase()}; your message starts its next turn.`;
@@ -220,6 +222,8 @@ export function SeatComposer({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
   const crew = row.kind === "crew";
   const call = callSign(row);
 
@@ -277,7 +281,7 @@ export function SeatComposer({
       )}
       <span className="hint" id={HINT_ID}>
         {crew
-          ? seatHint(row)
+          ? seatHint(row, vendor)
           : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
       </span>
     </form>

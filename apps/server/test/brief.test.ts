@@ -31,6 +31,7 @@ import {
 } from "../src/runtime/brief.ts";
 import * as checkouts from "../src/runtime/checkouts.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
+import * as crewGit from "../src/runtime/git.ts";
 
 describe("watchBrief", () => {
   const base = { call: "FLIGHT-1", repo: "octo-org/mission-control" };
@@ -87,6 +88,27 @@ const READONLY_CLOSE =
   "You read and report; you cannot commit, push or open PRs. Ask the operator with mc ask_operator if you need a decision. Reply with your findings, starting with DONE.";
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
+
+describe("ticketBrief leftover changes", () => {
+  it("omits the block for a fresh or clean worktree", () => {
+    expect(ticketBrief(input)).not.toContain("Leftover changes");
+    expect(ticketBrief({ ...input, leftoverChanges: [] })).not.toContain("Leftover changes");
+  });
+
+  it("shows quoted porcelain entries and caps the listing at 30 lines", () => {
+    const leftoverChanges = Array.from({ length: 31 }, (_, n) => `?? file-${n}.txt`);
+    leftoverChanges[0] = '?? "space and\\ttab.txt"';
+    const brief = ticketBrief({ ...input, leftoverChanges });
+    expect(brief).toContain("## Leftover changes");
+    expect(brief).toContain(
+      "these are leftovers from an earlier attempt: review them, keep what's right, discard the rest, then continue",
+    );
+    expect(brief).toContain('    ?? "space and\\ttab.txt"');
+    expect(brief).toContain("    ?? file-29.txt");
+    expect(brief).not.toContain("file-30.txt");
+    expect(brief).toContain("(Showing the first 30 files.)");
+  });
+});
 
 describe("ticketBrief profile lines", () => {
   const base = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
@@ -600,6 +622,62 @@ describe("repository references", async () => {
       `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(description)}\n---\n`,
     );
   };
+
+  it("skips references above 64 KiB before reading and includes the boundary", async () => {
+    for (const [name, size] of [
+      ["large", CLAUDE_MD_MAX + 1],
+      ["boundary", CLAUDE_MD_MAX],
+    ] as const) {
+      reference(`.claude/agents/${name}.md`, name);
+      const path = join(dir, `.claude/agents/${name}.md`);
+      const body = readFileSync(path, "utf8");
+      writeFileSync(path, body.padEnd(size, "x"));
+    }
+    const reads = vi.spyOn(checkouts, "readBaseFile");
+    try {
+      const out = await index();
+      expect(out).toContain('name: "boundary"');
+      expect(out).toContain('name: "reviewer"');
+      expect(out).not.toContain('name: "large"');
+      expect(out).toContain("Some entries were left out");
+      expect(reads.mock.calls.some((call) => call[2] === ".claude/agents/large.md")).toBe(false);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
+  it("reports listing overflow as omissions", async () => {
+    const base = snapshot();
+    const listing = vi
+      .spyOn(crewGit, "crewGitBytes")
+      .mockRejectedValueOnce(
+        Object.assign(new Error("listing overflow"), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }),
+      );
+    try {
+      const out = await repoReferenceIndex(dir, base);
+      expect(out).toContain("# Repository reference material");
+      expect(out).toContain("Some entries were left out (unsafe path or index limit)");
+    } finally {
+      listing.mockRestore();
+    }
+  });
+
+  it("keeps listing and blob verification failures fatal", async () => {
+    const base = snapshot();
+    const error = new CheckoutError("checkout", "verification failed");
+    const listing = vi.spyOn(crewGit, "crewGitBytes").mockRejectedValueOnce(error);
+    try {
+      await expect(repoReferenceIndex(dir, base)).rejects.toBe(error);
+    } finally {
+      listing.mockRestore();
+    }
+    const reads = vi.spyOn(checkouts, "readBaseFile").mockRejectedValueOnce(error);
+    try {
+      await expect(repoReferenceIndex(dir, base)).rejects.toBe(error);
+    } finally {
+      reads.mockRestore();
+    }
+  });
 
   it("renders Read paths exactly as JSON strings", async () => {
     const path = '.claude/agents/code-review.v2 café "guide".md';

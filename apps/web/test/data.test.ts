@@ -158,6 +158,7 @@ describe("hub.clear", () => {
 });
 
 class FakeEventSource {
+  static OPEN = 1;
   static readonly CLOSED = 2;
   static instances: FakeEventSource[] = [];
   readyState = 1;
@@ -434,6 +435,28 @@ it("requests a delta even when the first activity load is empty", async () => {
   }
 });
 
+it("starts each activity visit with a full load and shares an in-flight load across subscribers", async () => {
+  const fetch = vi.fn(async () => new Response("[]"));
+  vi.stubGlobal("fetch", fetch);
+  const ref = RESOURCES.activity;
+  const first = hub.subscribe(ref.path, ref.topic, () => {});
+  first();
+  const second = hub.subscribe(ref.path, ref.topic, () => {});
+  await settle();
+  expect(fetch.mock.calls).toHaveLength(1);
+  second();
+  const third = hub.subscribe(ref.path, ref.topic, () => {});
+  try {
+    await settle();
+    expect(fetch.mock.calls.map((call) => (call as unknown[])[0])).toEqual([ref.path, ref.path]);
+    hub.refetchTopic("agents");
+    await settle();
+    expect(fetch).toHaveBeenLastCalledWith(`${ref.path}?since=0`, expect.anything());
+  } finally {
+    third();
+  }
+});
+
 describe("activity reconciliation", () => {
   let off: (() => void) | undefined;
   beforeEach(() => {
@@ -647,4 +670,22 @@ it("coalesces overview topics within one macrotask and omits the All session fil
   await settle();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   off();
+});
+
+it("refetches the live log on guard, health and board changes", async () => {
+  const fetchMock = vi.fn(async () => Response.json([]));
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = RESOURCES.activity;
+  const off = hub.subscribe(ref.path, ref.topic, () => {});
+  try {
+    await settle();
+    for (const topic of ["guard", "health", "boards"] as const) {
+      fetchMock.mockClear();
+      hub.refetchTopic(topic);
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  } finally {
+    off();
+  }
 });

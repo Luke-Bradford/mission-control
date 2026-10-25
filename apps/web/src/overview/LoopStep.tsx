@@ -1,10 +1,14 @@
 import type { CrewLoop, HudState, RunDigest } from "@mc/core";
 import {
+  LOOP_PATH,
+  LOOP_PATH_TITLE,
+  loopMarks,
   loopPathTitle,
   loopStepLabel,
   loopSteps,
   loopTemplate,
   loopTryText,
+  PLAN_STEP,
   type StepMark,
   stepMarks,
   WAIT_WARN,
@@ -39,8 +43,10 @@ export function LoopStep({
   live?: RunDigest["liveTool"];
   now?: number;
 }) {
-  const marks = stepMarks(loop, hudState);
-  const steps = loopSteps(loop);
+  const planMark: StepMark =
+    loop.planned || loop.phase === "done" ? "done" : loop.phase === "parked" ? "held" : "todo";
+  const marks = compact ? [planMark, ...loopMarks(loop, hudState)] : stepMarks(loop, hudState);
+  const steps = compact ? [PLAN_STEP, ...LOOP_PATH] : loopSteps(loop).map((step) => step.name);
   const warn = loop.wait != null && WAIT_WARN.includes(loop.wait);
   return (
     <>
@@ -58,10 +64,14 @@ export function LoopStep({
           </>
         )}
       </span>
-      <span className="stepbar" title={loopPathTitle(loop)} aria-hidden="true">
+      <span
+        className="stepbar"
+        title={compact ? `${PLAN_STEP} → ${LOOP_PATH_TITLE}` : loopPathTitle(loop)}
+        aria-hidden="true"
+      >
         {marks.map((m, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
-          <i key={`${i}:${steps[i]?.name}`} className={MARK_CLASS[m]} />
+          <i key={`${i}:${steps[i]}`} className={MARK_CLASS[m]} />
         ))}
       </span>
       {!compact && wait === null && <ProcessLine live={live} now={now} />}

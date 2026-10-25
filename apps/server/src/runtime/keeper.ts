@@ -18,7 +18,8 @@
  * it), `{t:"out",n,line}`, `{t:"err",text}`, `{t:"exit",code,signal}`. Hub to keeper:
  * `{t:"hello",version,from,secret}` (the first line wanted, and the secret from `spec.json`; a
  * connection whose first line is anything else is closed, and so is one silent for 5 s),
- * `{t:"in",line,user}` (a line for the CLI's stdin; `user`: it starts a turn) and
+ * `{t:"in",line,user,deliveryId?}` (a line for the CLI's stdin; `user`: it starts a turn;
+ * Codex's optional delivery id is deduplicated and receipted in the transcript) and
  * `{t:"close",graceMs}` (end stdin). One hub at a time: the newest to authenticate replaces the old.
  * A hub that was away gets every line from the one it asks for, replayed 500 at a time, then the
  * live ones, in order, with `exit` after the last. The CLI runs in its own process group, which the
@@ -43,6 +44,8 @@ import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
+
 /** Bumped when the wire changes; a hub that finds another version ends that keeper and resumes. */
 export const KEEPER_PROTOCOL_VERSION = 1;
 /** The keeper's entry, from the hub's root. */
@@ -56,6 +59,8 @@ export const CLI_PID_FILE = "cli.pid";
 export const KEEPER_EXIT_FILE = "exit.json";
 export const KEEPER_LOG_FILE = "keeper.log";
 export const KEEPER_SPEC_FILE = "spec.json";
+/** A replayable receipt for a hub message handed to the Codex process. */
+export const CODEX_DELIVERY = "mc_codex_delivery";
 
 /** Lines replayed to a client per turn of the event loop. */
 const REPLAY_BATCH = 500;
@@ -98,6 +103,9 @@ export interface KeeperSpec {
   secret: string;
   /** The CLI's own session id, which its command line carries: `endKeeper` knows the CLI by it. */
   cliSessionId: string;
+  /** Absent in older specs: Claude's result prefix and CLI session id. */
+  turnEnd?: "claude" | "codex";
+  marker?: string;
   /** Default FIRST_HUB_WAIT_MS; tests that have no hub shorten it. */
   firstHubWaitMs?: number;
   /** Default KEEPER_HUB_ABSENT_MS; tests shorten it. */
@@ -178,7 +186,7 @@ export function keeperAlive(dir: string): boolean {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** One line of `ps -o lstart=,command=`: the process's start (local time, whole seconds) and its command. */
+/** One line of `TZ=UTC ps -o lstart=,command=`: the process's start (whole seconds) and its command. */
 export function parsePsLine(text: string): { startedAt: number; command: string } | null {
   const m = /^\s*\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s+(.*)$/s.exec(
     text,
@@ -186,14 +194,14 @@ export function parsePsLine(text: string): { startedAt: number; command: string 
   if (m === null) return null;
   const month = MONTHS.indexOf(m[1] as string);
   if (month < 0) return null;
-  const startedAt = new Date(
+  const startedAt = Date.UTC(
     Number(m[6]),
     month,
     Number(m[2]),
     Number(m[3]),
     Number(m[4]),
     Number(m[5]),
-  ).getTime();
+  );
   const command = (m[7] as string).trim();
   return Number.isFinite(startedAt) && command !== "" ? { startedAt, command } : null;
 }
@@ -203,7 +211,8 @@ export function processInfo(pid: number): { startedAt: number; command: string }
   try {
     const out = execFileSync("ps", ["-ww", "-o", "lstart=,command=", "-p", String(pid)], {
       encoding: "utf8",
-      env: { ...process.env, LC_ALL: "C" },
+      // Local lstart is ambiguous during the repeated hour when daylight saving ends.
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
       timeout: 2000,
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -257,10 +266,11 @@ export async function endKeeper(
 ): Promise<boolean> {
   type Role = "keeper" | "CLI";
   type Target = { pid: number; role: Role };
-  const cliSessionId = (): string | null => {
+  const marker = (): string | null => {
     try {
       const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
-      const id = (v as { cliSessionId?: unknown } | null)?.cliSessionId;
+      const spec = v as { marker?: unknown; cliSessionId?: unknown } | null;
+      const id = spec?.marker ?? spec?.cliSessionId;
       return typeof id === "string" && id !== "" ? id : null;
     } catch {
       return null;
@@ -268,7 +278,7 @@ export async function endKeeper(
   };
   const fits = (role: Role, command: string): boolean => {
     if (role === "keeper") return command.includes("keeper-cli") && command.includes(dir);
-    const id = cliSessionId();
+    const id = marker();
     return id !== null && command.includes(id);
   };
   /**
@@ -291,7 +301,7 @@ export async function endKeeper(
         found.push({ pid: stamp.pid, role });
         continue;
       }
-      if (info === null || (role === "CLI" && cliSessionId() === null)) {
+      if (info === null || (role === "CLI" && marker() === null)) {
         unknown.push({ pid: stamp.pid, role });
       }
       if (!quiet) {
@@ -464,6 +474,8 @@ export function runKeeper(
   let lineCount = 0;
   let transcriptFailed = false;
   let awaiting = false;
+  let awaitingId: number | string | null = null;
+  const deliveries = new Set<string>();
 
   const send = (c: Client, obj: Json) => {
     if (!c.sock.destroyed) c.sock.write(`${JSON.stringify(obj)}\n`);
@@ -549,6 +561,17 @@ export function runKeeper(
     step();
   };
   const addLine = (line: string) => {
+    if (spec.turnEnd === "codex") {
+      try {
+        const m = JSON.parse(line) as Json | null;
+        // Persist arrival time so replay keeps activity and usage in their original buckets.
+        if (typeof m?.method === "string" && m.timestamp === undefined) {
+          line = JSON.stringify({ ...m, timestamp: new Date().toISOString() });
+        }
+      } catch {
+        // Preserve non-JSON output too.
+      }
+    }
     const n = lineCount;
     const ok = record(line);
     if (ok) {
@@ -558,7 +581,20 @@ export function runKeeper(
       held.set(n, line);
     }
     lineCount = n + 1;
-    if (line.startsWith(RESULT_PREFIX)) awaiting = false;
+    if (spec.turnEnd === "codex") {
+      try {
+        const m = JSON.parse(line) as Json | null;
+        if (
+          m?.method === "turn/completed" ||
+          (awaitingId !== null && m?.id === awaitingId && m.error != null)
+        ) {
+          awaiting = false;
+          awaitingId = null;
+        }
+      } catch {
+        // Non-JSON stdout does not end a turn.
+      }
+    } else if (line.startsWith(RESULT_PREFIX)) awaiting = false;
     if (client) pump(client);
   };
 
@@ -668,8 +704,53 @@ export function runKeeper(
       return; // a line before the hello does not count
     } else if (msg.t === "in" && typeof msg.line === "string") {
       if (stdinEnded || !alive) return;
-      if (msg.user === true) awaiting = true;
+      const deliveryId =
+        spec.turnEnd === "codex" && typeof msg.deliveryId === "string" ? msg.deliveryId : null;
+      if (deliveryId !== null && deliveries.has(deliveryId)) return;
+      if (msg.user === true) {
+        if (spec.turnEnd === "codex") {
+          try {
+            const request = JSON.parse(msg.line) as Json | null;
+            if (
+              request?.method === "turn/start" &&
+              (typeof request.id === "string" || typeof request.id === "number")
+            ) {
+              awaiting = true;
+              awaitingId = request.id;
+            }
+          } catch {
+            // Only a turn/start request can start a Codex turn.
+          }
+        } else awaiting = true;
+      }
       stdin.write(`${msg.line}\n`);
+      if (spec.turnEnd === "codex") {
+        try {
+          const reply = JSON.parse(msg.line) as Json | null;
+          const result = reply?.result as Json | null;
+          if (
+            result &&
+            typeof result === "object" &&
+            (result.decision === "accept" ||
+              result.decision === "decline" ||
+              result.action === "accept" ||
+              result.action === "decline")
+          ) {
+            addLine(
+              JSON.stringify({
+                method: CODEX_APPROVAL_DECISION,
+                params: { requestId: reply?.id, decision: result.decision ?? result.action },
+              }),
+            );
+          }
+        } catch {
+          // Non-JSON input has no approval decision to record.
+        }
+      }
+      if (deliveryId !== null) {
+        deliveries.add(deliveryId);
+        addLine(JSON.stringify({ type: CODEX_DELIVERY, id: deliveryId }));
+      }
     } else if (msg.t === "close") {
       const g = typeof msg.graceMs === "number" && msg.graceMs >= 0 ? msg.graceMs : 0;
       closeStdin(g);

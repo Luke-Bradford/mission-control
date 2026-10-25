@@ -1,6 +1,13 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
-import type { StreamEvent } from "@mc/core";
+import type { CrewVendor, StreamEvent } from "@mc/core";
 import { cleanText } from "./clean.ts";
+import {
+  CODEX_APPROVAL_DECISION,
+  codexPlan,
+  codexTool,
+  transcriptVendor,
+} from "./codex-transcript.ts";
+import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
 import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
@@ -16,8 +23,22 @@ export const EARLIER_CALL = "(earlier call)";
  */
 type Item =
   | { k: "ev"; ev: Omit<StreamEvent, "id"> }
-  | { k: "use"; id: string; name: string; input: string; at: number | null }
-  | { k: "res"; id: string; result: string; error: boolean; at: number | null };
+  | {
+      k: "use";
+      id: string;
+      name: string;
+      input: string;
+      at: number | null;
+      tool?: NonNullable<StreamEvent["tool"]>;
+    }
+  | {
+      k: "res";
+      id: string;
+      result: string;
+      error: boolean;
+      at: number | null;
+      tool?: NonNullable<StreamEvent["tool"]>;
+    };
 type Keyed = Item & { key: string };
 
 /** A tool result's content: a string, or blocks whose text parts are joined. */
@@ -90,8 +111,51 @@ function itemsOf(ev: Json): Item[] {
   return out;
 }
 
+function codexItems(ev: Json): Item[] {
+  const p = isObj(ev.params) ? ev.params : {};
+  const at = timeOf(ev.timestamp);
+  const note = (text: string): Item[] => [
+    { k: "ev", ev: { at, kind: "sys", text: cleanText(text) } },
+  ];
+  if (ev.method === CODEX_APPROVAL_DECISION) {
+    return note(`Approval ${p.decision === "accept" ? "approved" : "declined"}: ${p.requestId}`);
+  }
+  if (
+    typeof ev.method === "string" &&
+    (ev.method.endsWith("/requestApproval") || ev.method === CODEX_MCP_ELICITATION)
+  ) {
+    return note(`Approval requested: ${str(p.command) ?? str(p.itemId) ?? ev.id}`);
+  }
+  if (ev.method === "turn/plan/updated") {
+    const plan = codexPlan(p);
+    return plan === null ? [] : note(plan);
+  }
+  if (!isObj(p.item)) return [];
+  const item = p.item;
+  if (
+    ev.method === "item/completed" &&
+    item.type === "agentMessage" &&
+    typeof item.text === "string"
+  ) {
+    return [{ k: "ev", ev: { at, kind: "msg", text: cleanText(item.text) } }];
+  }
+  const tool = codexTool(item);
+  const id = str(item.id);
+  if (!tool || id === null) return [];
+  tool.input = cleanText(tool.input);
+  tool.result = cleanText(tool.result);
+  tool.name = cleanText(tool.name);
+  if (ev.method === "item/started")
+    return [
+      { k: "use", id, name: tool.name, input: tool.input, at, tool: { ...tool, result: null } },
+    ];
+  if (ev.method === "item/completed")
+    return [{ k: "res", id, result: tool.result, error: tool.error, at, tool }];
+  return [];
+}
+
 /** A line's items, keyed by the line's byte offset in the file and their index in it. */
-function parseLine(buf: Buffer, offset: number): Keyed[] {
+function parseLine(buf: Buffer, offset: number, vendor?: CrewVendor): Keyed[] {
   if (buf.length === 0 || buf[0] !== 0x7b) return [];
   if (buf.subarray(0, STREAM_EVENT_BYTES.length).equals(STREAM_EVENT_BYTES)) return [];
   let ev: unknown;
@@ -100,7 +164,12 @@ function parseLine(buf: Buffer, offset: number): Keyed[] {
   } catch {
     return [];
   }
-  return isObj(ev) ? itemsOf(ev).map((it, i) => ({ ...it, key: `${offset}:${i}` })) : [];
+  return isObj(ev)
+    ? (transcriptVendor(ev, vendor) === "codex" ? codexItems(ev) : itemsOf(ev)).map((it, i) => ({
+        ...it,
+        key: `${offset}:${i}`,
+      }))
+    : [];
 }
 
 /** Pairs each tool call with its result into one `tool` event; oldest first. */
@@ -116,7 +185,7 @@ function toEvents(items: Keyed[]): StreamEvent[] {
         at: it.at,
         kind: "tool",
         text: it.name,
-        tool: { name: it.name, input: it.input, result: null, ms: null, error: false },
+        tool: it.tool ?? { name: it.name, input: it.input, result: null, ms: null, error: false },
       };
       events.push(ev);
       open.set(it.id, { ev, at: it.at });
@@ -124,16 +193,24 @@ function toEvents(items: Keyed[]): StreamEvent[] {
       const use = open.get(it.id);
       if (use?.ev.tool) {
         open.delete(it.id);
+        if (it.tool) Object.assign(use.ev.tool, it.tool);
         use.ev.tool.result = it.result;
         use.ev.tool.error = it.error;
-        use.ev.tool.ms = it.at !== null && use.at !== null ? Math.max(0, it.at - use.at) : null;
+        use.ev.tool.ms =
+          it.tool?.ms ?? (it.at !== null && use.at !== null ? Math.max(0, it.at - use.at) : null);
       } else {
         events.push({
           id: it.key,
           at: it.at,
           kind: "tool",
-          text: EARLIER_CALL,
-          tool: { name: EARLIER_CALL, input: "", result: it.result, ms: null, error: it.error },
+          text: it.tool?.name ?? EARLIER_CALL,
+          tool: it.tool ?? {
+            name: EARLIER_CALL,
+            input: "",
+            result: it.result,
+            ms: null,
+            error: it.error,
+          },
         });
       }
     }
@@ -154,10 +231,24 @@ function toEvents(items: Keyed[]): StreamEvent[] {
 export function readStream(
   path: string,
   limit: number,
+  vendor?: CrewVendor,
 ): { events: StreamEvent[]; truncated: boolean } {
   const fd = openSync(path, "r");
   try {
     const size = fstatSync(fd).size;
+    if (vendor === undefined) {
+      const first = Buffer.alloc(Math.min(size, STREAM_CHUNK_BYTES));
+      readSync(fd, first, 0, first.length, 0);
+      for (const line of first.toString("utf8").split("\n")) {
+        try {
+          const ev: unknown = JSON.parse(line);
+          if (isObj(ev)) vendor = transcriptVendor(ev);
+          if (vendor !== undefined) break;
+        } catch {
+          // Partial and non-JSON lines do not establish the format.
+        }
+      }
+    }
     let pos = size;
     let scanned = 0;
     let count = 0;
@@ -169,7 +260,7 @@ export function readStream(
     let carry: Buffer[] = [];
 
     const take = (buf: Buffer, offset: number) => {
-      const items = parseLine(buf, offset);
+      const items = parseLine(buf, offset, vendor);
       if (items.length === 0) return;
       for (const it of items) {
         if (it.k === "res") results.add(it.id);

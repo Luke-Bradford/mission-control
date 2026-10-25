@@ -14,6 +14,7 @@ export const MC_TOOL_NAMES = {
   askOperator: "ask_operator",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
+  restoreFile: "restore_file",
   reportPlan: "report_plan",
   logDecision: "log_decision",
   readTicket: "read_ticket",
@@ -45,6 +46,8 @@ export const MC_TOOL_NAMES = {
   remember: "remember",
   forget: "forget",
   recall: "recall",
+  holdItem: "hold_item",
+  releaseHold: "release_hold",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -61,6 +64,7 @@ export const MC_TOOLS = {
   askOperator: mcTool(MC_TOOL_NAMES.askOperator),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
+  restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
   reportPlan: mcTool(MC_TOOL_NAMES.reportPlan),
   logDecision: mcTool(MC_TOOL_NAMES.logDecision),
   readTicket: mcTool(MC_TOOL_NAMES.readTicket),
@@ -92,6 +96,8 @@ export const MC_TOOLS = {
   remember: mcTool(MC_TOOL_NAMES.remember),
   forget: mcTool(MC_TOOL_NAMES.forget),
   recall: mcTool(MC_TOOL_NAMES.recall),
+  holdItem: mcTool(MC_TOOL_NAMES.holdItem),
+  releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

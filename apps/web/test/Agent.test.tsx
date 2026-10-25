@@ -273,6 +273,16 @@ describe("Agent page: what the seat is doing", () => {
 });
 
 describe("Agent page: what past runs were", () => {
+  it("opens the run named by an activity deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({ runs: [rv({ id: "linked-run", summary: "Linked summary" })] });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click($(container, "#loopP .runrow:not(.head)") as HTMLElement);
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
   const SUMMARY = "Cached the quotes. ".repeat(20).trim();
 
   it("each run shows its ticket's title beside the number", async () => {
@@ -2370,6 +2380,27 @@ describe("Agent page: loop steps", () => {
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
     fireEvent.click(within(panel).getByRole("button", { name }));
 
+  it("opens on Steps for a later run after applying a deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({
+      rows: [seat(loopOf())],
+      runs: [rv({ id: "linked-run", summary: "Linked summary" })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const panel = $(container, "#loopP") as HTMLElement;
+    expect(title(panel)).toBe("Runs");
+    expect(
+      within(panel).getByRole("button", { name: "Linked summary" }).getAttribute("aria-expanded"),
+    ).toBe("true");
+    await swap(loopOf({ text: "Ticket B" }), "r-13");
+    expect(within(panel).getByRole("button", { name: "Steps" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(title(panel)).toBe("Loop");
+    expect(panel.textContent).toContain("Ticket B");
+  });
+
   it("keeps the viewer's choice while the same loop moves between phases", async () => {
     const panel = await open(loopOf());
     pick(panel, "Runs");
@@ -3560,4 +3591,35 @@ describe("Agent page: the header pill", () => {
     await seatLoaded();
     expect($(container, "#ahead .pill")?.textContent).toBe("Waiting on CI");
   });
+});
+
+it("explains live Codex steering at the next model step", async () => {
+  stub({ rows: [seatRow({ accountId: "codex-main", hudState: "running", run: run() })] });
+  render(<Agent id="guido-1" />);
+  expect(
+    await screen.findByText(
+      "Reaches GUIDO-1 at its next model step (Codex steer); no new turn starts.",
+    ),
+  ).toBeTruthy();
+});
+
+it("refreshes a Codex plan from live stream tasks", async () => {
+  const row = seatRow({ accountId: "codex-main", hudState: "running", run: run() });
+  let tasks: NonNullable<AgentStream["tasks"]> = [
+    { id: "1", text: "Check the catalogue", status: "in_progress" },
+  ];
+  stub({
+    rows: [row],
+    streamNow: () => ({ ...STREAM, runId: row.run?.id ?? null, tasks }),
+  });
+  render(<Agent id="guido-1" />);
+  expect(await screen.findByRole("button", { name: "Plan 0/1" })).toBeTruthy();
+  expect(screen.getByText("Check the catalogue")).toBeTruthy();
+  tasks = [
+    { id: "1", text: "Check the catalogue", status: "done" },
+    { id: "2", text: "Verify the form", status: "in_progress" },
+  ];
+  act(() => hub.refetch("/api/agents/guido-1/stream"));
+  expect(await screen.findByRole("button", { name: "Plan 1/2" })).toBeTruthy();
+  expect(screen.getByText("Verify the form")).toBeTruthy();
 });

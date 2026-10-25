@@ -12,7 +12,9 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DEFAULT_SEAT_COMMANDS, type NewRepo, type SeatInput } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../src/api.ts";
+import { ChangeBus } from "../src/bus.ts";
 import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import {
   addAccount,
@@ -27,6 +29,9 @@ import {
   SeatsBody,
   setSessionSeats,
 } from "../src/config-write.ts";
+import { codexModels } from "../src/runtime/codex-models.ts";
+import { Store } from "../src/store.ts";
+import { fakeModels } from "./config-codex.ts";
 
 // Lets a test make the final rename fail (the disk or directory refusing the swap mid-write), or
 // any chmod fail (a backup created 0600 never needs one).
@@ -50,6 +55,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const EXAMPLE = resolve(import.meta.dirname, "../../../config.example.yaml");
+const catalog = fakeModels();
+beforeAll(() => codexModels.load(catalog.deps));
 const NOW = Date.parse("2026-10-19T12:00:00Z");
 
 let dir: string;
@@ -455,6 +462,93 @@ describe("setSessionSeats", () => {
     setSessionSeats(path, SESSION, base, seats, NOW);
   const change = (id: string, over: Partial<ConfigSeatInput>) =>
     set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
+
+  it("writes Codex models and advertised efforts through the cached startup catalog", async () => {
+    await change("guido-1", { accountId: "codex-main", model: "gpt-6-astra", effort: "ultra" });
+    expect(seat("guido-1")).toMatchObject({
+      accountId: "codex-main",
+      model: "gpt-6-astra",
+      effort: "ultra",
+    });
+    await change("guido-1", { model: "gpt-5.6-luna", effort: "xhigh" });
+    expect(seat("guido-1").effort).toBe("xhigh");
+    expect(catalog.records().filter((r) => r.method === "initialize")).toHaveLength(1);
+  });
+
+  it("keeps legacy Claude identifiers writable", async () => {
+    await change("guido-1", { model: "us.anthropic.claude-sonnet-4-6" });
+    expect(seat("guido-1").model).toBe("us.anthropic.claude-sonnet-4-6");
+  });
+
+  it("validates writes strictly even when the current file has an unavailable Codex seat", async () => {
+    await change("guido-1", { accountId: "codex-main", model: "gpt-6-astra", effort: "high" });
+    const before = readFileSync(path, "utf8");
+    const base = read();
+    const available = vi.spyOn(codexModels, "available", "get").mockReturnValue(false);
+    try {
+      const error = await writeError(
+        set(
+          base.map((s) => (s.id === "guido-1" ? { ...s, effort: "ultra" } : s)),
+          base,
+        ),
+      );
+      expect(error.kind).toBe("invalid");
+      expect(error.message).toContain("Codex model discovery pending");
+      expect(readFileSync(path, "utf8")).toBe(before);
+    } finally {
+      available.mockRestore();
+    }
+  });
+
+  it.each([
+    { accountId: "codex-main", model: "sonnet" },
+    { accountId: "claude-main", model: "gpt-6-astra" },
+    { accountId: "codex-main", model: "gpt-5.6-luna", effort: "ultra" },
+    { accountId: "codex-main", model: "gpt-unlisted" },
+    { accountId: "claude-main", model: "sonnet", effort: "xhigh" },
+  ])("returns 400 without writing for invalid model/effort pairing %j", async (over) => {
+    const config = loadConfig(path);
+    const store = new Store(":memory:");
+    const bus = new ChangeBus();
+    const reload = vi.fn();
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      configPath: path,
+      seatWrites: true,
+      crewReloader: {
+        start: () => {},
+        stop: () => {},
+        settle: () => [],
+        reload,
+        status: () => ({
+          sessions: [],
+          pending: [],
+          restartNeeded: [],
+          error: null,
+          checkedAt: null,
+        }),
+      },
+    });
+    try {
+      const base = read();
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/crew/sessions/${SESSION}/seats`,
+        headers: { host: "127.0.0.1:7420", origin: "http://127.0.0.1:7420" },
+        payload: { base, seats: base.map((s) => (s.id === "guido-1" ? { ...s, ...over } : s)) },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/model|effort/);
+      expect(reload).not.toHaveBeenCalled();
+      expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+      expect(backups()).toEqual([]);
+    } finally {
+      await app.close();
+      store.close();
+    }
+  });
 
   it("persists and clears a display call sign with a stale rename check", async () => {
     const base = read();

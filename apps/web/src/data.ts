@@ -16,6 +16,7 @@ import {
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet } from "./api.ts";
+import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -63,7 +64,12 @@ export const RESOURCES = {
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
     topic: "attention",
   }),
+  heldAttention: { path: "/api/attention/held", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
+  attentionItem: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}`,
+    topic: "attention",
+  }),
   notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
   notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
@@ -75,6 +81,7 @@ export const RESOURCES = {
   flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   flightSummary: { path: "/api/flight/summary", topic: "flight" },
+  flightLedgerOpen: { path: "/api/flight/ledger?status=open", topic: "flight" },
   flightLedger: { path: "/api/flight/ledger?status=all", topic: "flight" },
   flightMemory: (repoId: string): ResourceRef => ({
     path: `${FLIGHT_MEMORY_PATH}?repo=${enc(repoId)}`,
@@ -184,6 +191,8 @@ export const ACTIONS = {
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
+  hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
@@ -260,7 +269,10 @@ class Hub {
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
     const e = this.entry(path, topic);
     e.listeners.add(fn);
-    if (e.listeners.size === 1) void this.fetch(e);
+    if (e.listeners.size === 1 && !e.inflight) {
+      // A new visit reconciles the activity window before following deltas.
+      void this.fetch(e, path === RESOURCES.activity.path);
+    }
     return () => {
       e.listeners.delete(fn);
       if (e.listeners.size === 0) {
@@ -287,6 +299,7 @@ class Hub {
       const delta =
         activity &&
         !full &&
+        e.snap.data !== undefined &&
         e.activityFullAt !== undefined &&
         startedAt - e.activityFullAt < ACTIVITY_FULL_LOAD_MS;
       const previous = delta ? (e.snap.data as ActivityRow[] | undefined) : undefined;
@@ -298,7 +311,7 @@ class Hub {
       const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
       const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
       let data = await apiGet<unknown>(path);
-      if (e.path === RESOURCES.flightLedger.path) {
+      if (e.path === RESOURCES.flightLedger.path || e.path === RESOURCES.flightLedgerOpen.path) {
         const ledger = data as FlightLedgerView;
         let page = ledger;
         while (page.more && page.nextOffset !== null) {
@@ -357,6 +370,9 @@ class Hub {
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
+      const activityChanged =
+        e.path === RESOURCES.activity.path &&
+        (topic === "guard" || topic === "health" || topic === "boards");
       const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
       const briefChanged =
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
@@ -364,22 +380,30 @@ class Hub {
         topic === "settings" && e.path === RESOURCES.notificationEvents.path;
       const summaryChanged =
         e.path === RESOURCES.flightSummary.path &&
-        (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
+        (topic === "agents" ||
+          topic === "boards" ||
+          topic === "attention" ||
+          topic === "guard" ||
+          topic === "config");
       if (
         ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
+          activityChanged ||
           timelineChanged ||
           briefChanged ||
           notificationSettingsChanged ||
           summaryChanged) &&
         e.listeners.size > 0
       ) {
-        if (Array.isArray(e.topic)) {
+        if (Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
           if (!e.queued) {
             e.queued = true;
-            setTimeout(() => {
-              e.queued = false;
-              if (e.listeners.size) void this.fetch(e);
-            }, 0);
+            setTimeout(
+              () => {
+                e.queued = false;
+                if (e.listeners.size) void this.fetch(e);
+              },
+              summaryChanged && topic === "agents" ? 100 : 0,
+            );
           }
         } else void this.fetch(e);
       }
@@ -479,7 +503,18 @@ export function parseTopic(data: unknown): Topic | null {
   }
 }
 
+export const streamStatus = store<{
+  connected: boolean;
+  reconnecting: boolean;
+  lastMessageAt: number | null;
+}>({
+  connected: false,
+  reconnecting: false,
+  lastMessageAt: null,
+});
+
 const RETRY_MS = 5000;
+const STREAM_OPEN_TIMEOUT_MS = 10_000;
 
 /**
  * Subscribe to `/api/stream`. Each `changed` event refetches that topic only. After a reconnect
@@ -492,19 +527,36 @@ export function startStream(): () => void {
   let connectedBefore = false;
   let stopped = false;
 
+  streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
+  const opening = setTimeout(() => {
+    if (!connectedBefore) streamStatus.set({ ...streamStatus.get(), reconnecting: true });
+  }, STREAM_OPEN_TIMEOUT_MS);
+  const received = () => streamStatus.set({ ...streamStatus.get(), lastMessageAt: Date.now() });
+
   const connect = () => {
     if (stopped) return;
     const source = new EventSource("/api/stream");
     es = source;
     source.addEventListener("open", () => {
+      if (stopped || source !== es || source.readyState !== EventSource.OPEN) return;
+      clearTimeout(opening);
+      streamStatus.set({ ...streamStatus.get(), connected: true, reconnecting: false });
       if (connectedBefore) hub.refetchAll();
       connectedBefore = true;
     });
+    source.addEventListener("message", received);
     source.addEventListener("changed", (ev) => {
+      received();
       const topic = parseTopic((ev as MessageEvent).data);
       if (topic) hub.refetchTopic(topic);
     });
     source.addEventListener("error", () => {
+      if (stopped || source !== es || source.readyState === EventSource.OPEN) return;
+      streamStatus.set({
+        ...streamStatus.get(),
+        connected: false,
+        reconnecting: connectedBefore || streamStatus.get().reconnecting,
+      });
       if (source.readyState !== EventSource.CLOSED) return; // the browser is reconnecting
       source.close();
       retry = setTimeout(() => {
@@ -517,6 +569,8 @@ export function startStream(): () => void {
   connect();
   return () => {
     stopped = true;
+    streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
+    clearTimeout(opening);
     clearTimeout(retry);
     es?.close();
   };

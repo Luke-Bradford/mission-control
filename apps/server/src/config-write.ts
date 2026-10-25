@@ -10,7 +10,6 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   CONFIG_SEAT_MODES,
-  CREW_EFFORTS,
   compactUtc,
   type NewCrewSession,
   type NewRepo,
@@ -27,11 +26,13 @@ import {
   type CrewSessionConfig,
   defaultSeatCommands,
   displayCallSign,
+  findHubRoot,
   MODEL_NAME,
   managedSessionPath,
   parseConfig,
   realish,
   SEAT_ID,
+  seatEffort,
   seatInput,
   ticketState,
 } from "./config.ts";
@@ -86,7 +87,7 @@ export const SeatInputBody = z.strictObject({
   role: z.string().regex(ROLE_NAME, "must be a role name"),
   accountId: z.string().min(1).max(64),
   model: z.string().max(100).regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/"),
-  effort: z.enum(CREW_EFFORTS).optional(),
+  effort: seatEffort.optional(),
   mode: z.enum(CONFIG_SEAT_MODES).optional(),
   area: z.array(areaGlob).max(20),
 }) satisfies z.ZodType<ConfigSeatInput>;
@@ -173,7 +174,11 @@ async function readCurrent(
   try {
     const bytes = await readFile(path);
     const text = bytes.toString("utf8");
-    return { bytes, text, current: parseConfig(text, "config.yaml") };
+    return {
+      bytes,
+      text,
+      current: parseConfig(text, "config.yaml", { hubRoot: findHubRoot(), deferModels: true }),
+    };
   } catch {
     throw new ConfigWriteError("current", "the current config.yaml does not load");
   }

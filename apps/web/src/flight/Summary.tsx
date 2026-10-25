@@ -11,12 +11,13 @@ import {
   type FlightSummaryItem,
   type FlightSummaryView,
 } from "@mc/core";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dayMonth, hhmm } from "../fmt.ts";
+import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
@@ -74,8 +75,8 @@ function SummaryRow({
       <Expandable
         summary={
           <span className="flight-summary-line">
-            {entry?.owner && <Pill tone="plain">{entry.owner}</Pill>}
-            <span>{item.title}</span>
+            {entry?.owner && <AgentTag id={entry.owner} index={0} bare sm />}
+            <span className="flight-summary-title">{item.title}</span>
             <Pill
               tone={
                 item.status === "blocked" ? "crit" : item.status === "waiting" ? "warn" : "plain"
@@ -146,24 +147,31 @@ function SummaryRow({
 /** Summary order and counts come from the hub; the ledger supplies each line's details. */
 export function Summary() {
   const summary = useResource<FlightSummaryView>(RESOURCES.flightSummary);
-  const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedger);
+  const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedgerOpen);
+  const [fullOpen, setFullOpen] = useState(false);
+  const fullLedger = useResource<FlightLedgerView>(fullOpen ? RESOURCES.flightLedger : null);
   const schedule = useResource<FlightScheduleView>(RESOURCES.flightSchedule);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const full = useRef<HTMLDetailsElement>(null);
   const view = summary.data;
   const entries = ledger.data?.session === view?.session ? (ledger.data?.entries ?? []) : [];
+  const fullEntries =
+    fullLedger.data?.session === view?.session ? (fullLedger.data?.entries ?? []) : [];
   const plans = schedule.data?.session === view?.session ? (schedule.data?.entries ?? []) : [];
   const repoId = config?.crew?.sessions.find((s) => s.id === view?.session)?.repoId;
-  const row = (item: FlightSummaryItem, due = false) => (
-    <SummaryRow
-      key={`${item.kind}:${item.key}`}
-      item={item}
-      entry={entries.find((e) => e.kind === item.kind && e.key === item.key)}
-      plan={item.kind === "plan" ? plans.find((p) => p.id === item.key) : undefined}
-      repoId={repoId}
-      due={due}
-    />
-  );
+  const row = (item: FlightSummaryItem, due = false) =>
+    !ledger.data && !ledger.error ? (
+      <li key={`${item.kind}:${item.key}`}>{DASH}</li>
+    ) : (
+      <SummaryRow
+        key={`${item.kind}:${item.key}`}
+        item={item}
+        entry={entries.find((e) => e.kind === item.kind && e.key === item.key)}
+        plan={item.kind === "plan" ? plans.find((p) => p.id === item.key) : undefined}
+        repoId={repoId}
+        due={due}
+      />
+    );
   return (
     <div className="flight-summary">
       {summary.error && (
@@ -178,11 +186,12 @@ export function Summary() {
       ) : (
         <>
           <p className="sittext">{view.headline || SUMMARY_EMPTY}</p>
-          {/* biome-ignore lint/a11y/useValidAnchor: Opens and focuses the linked ledger section. */}
-          <a
-            href="#flight-ledger"
-            onClick={(event) => {
-              event.preventDefault();
+          <button
+            type="button"
+            className="sm ghost"
+            aria-controls="flight-ledger"
+            onClick={() => {
+              setFullOpen(true);
               if (full.current) {
                 full.current.open = true;
                 full.current.querySelector("summary")?.focus();
@@ -191,14 +200,14 @@ export function Summary() {
             }}
           >
             Ledger
-          </a>
+          </button>
           {ledger.error && (
             <p role="alert" className="note err">
               Ledger: {ledger.error.message}
             </p>
           )}
-          <section aria-label="Now">
-            <h3>Now</h3>
+          <section aria-labelledby="flight-summary-now">
+            <h3 id="flight-summary-now">Now</h3>
             {view.now.length ? (
               <ul className="flight-summary-list" aria-label="Now">
                 {view.now.slice(0, FLIGHT_SUMMARY_LISTED).map((item) => row(item))}
@@ -207,8 +216,8 @@ export function Summary() {
               <p className="note">No work in progress.</p>
             )}
           </section>
-          <section aria-label="Watching">
-            <h3>Watching</h3>
+          <section aria-labelledby="flight-summary-watching">
+            <h3 id="flight-summary-watching">Watching</h3>
             <p className="s fg2">
               {view.watching.counts.active} active · {view.watching.counts.blocked} blocked ·{" "}
               {view.watching.counts.waiting} waiting
@@ -221,8 +230,8 @@ export function Summary() {
               <p className="note">Nothing to watch.</p>
             )}
           </section>
-          <section aria-label="Next">
-            <h3>Next</h3>
+          <section aria-labelledby="flight-summary-next">
+            <h3 id="flight-summary-next">Next</h3>
             {schedule.error && (
               <p role="alert" className="note err">
                 Schedule: {schedule.error.message}
@@ -236,35 +245,47 @@ export function Summary() {
               <p className="note">Nothing scheduled.</p>
             )}
           </section>
-          <dl className="flight-tiles" aria-label="Last 24 hours">
-            <div>
-              <dt>Merged (24 h)</dt>
-              <dd>{view.metrics.merged}</dd>
-            </div>
-            <div>
-              <dt>In review</dt>
-              <dd>{view.metrics.inReview}</dd>
-            </div>
-            <div>
-              <dt>CI failures</dt>
-              <dd>{view.metrics.ciFailures}</dd>
-            </div>
-            <div>
-              <dt>Parks</dt>
-              <dd>{view.metrics.parks.day}</dd>
-            </div>
-            <div>
-              <dt>Spend (24 h)</dt>
-              <dd>{cost(view.metrics.seats.reduce((sum, seat) => sum + seat.costUsd, 0))}</dd>
-            </div>
-          </dl>
-          <details id="flight-ledger" className="flight-ledger" ref={full}>
+          <section aria-label="Last 24 hours">
+            <dl className="flight-tiles">
+              <div>
+                <dt>Merged (24 h)</dt>
+                <dd>{view.metrics.merged}</dd>
+              </div>
+              <div>
+                <dt>In review</dt>
+                <dd>{view.metrics.inReview}</dd>
+              </div>
+              <div>
+                <dt>CI failures</dt>
+                <dd>{view.metrics.ciFailures}</dd>
+              </div>
+              <div>
+                <dt>Parks</dt>
+                <dd>{view.metrics.parks.day}</dd>
+              </div>
+              <div>
+                <dt>Spend (24 h)</dt>
+                <dd>{cost(view.metrics.seats.reduce((sum, seat) => sum + seat.costUsd, 0))}</dd>
+              </div>
+            </dl>
+          </section>
+          <details
+            id="flight-ledger"
+            className="flight-ledger"
+            ref={full}
+            onToggle={(event) => setFullOpen(event.currentTarget.open)}
+          >
             <summary>Full ledger</summary>
-            {!ledger.data ? (
+            {fullLedger.error && (
+              <p role="alert" className="note err">
+                Ledger: {fullLedger.error.message}
+              </p>
+            )}
+            {!fullLedger.data ? (
               <p className="note">{DASH}</p>
             ) : (
               FLIGHT_LEDGER_KINDS.map((kind) => {
-                const group = entries.filter((entry) => entry.kind === kind);
+                const group = fullEntries.filter((entry) => entry.kind === kind);
                 return (
                   <section key={kind} aria-label={KIND_LABEL[kind]}>
                     <h3>{KIND_LABEL[kind]}</h3>

@@ -1,7 +1,7 @@
 import type { AttentionItem, ConfigView, Crew } from "@mc/core";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSecond } from "./clock.ts";
-import { RESOURCES, startStream, useResource } from "./data.ts";
+import { RESOURCES, useResource } from "./data.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 
 import {
@@ -61,7 +61,6 @@ export function App() {
   const path = usePath();
   // Read once: a popped-out window stays one when its picker moves to another agent.
   const [popout] = useState(() => isPopout(window.location.search));
-  useEffect(() => startStream(), []);
   const r = route(path);
   const moved = r ? null : (legacyRedirect(path, window.location.hash) ?? PAGE_PATHS.overview);
   useEffect(() => {

@@ -2,6 +2,7 @@ import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,6 +11,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -57,6 +59,7 @@ import {
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
   MC_TOOL_GRANTS,
+  MC_TOOL_NAMES,
   MC_TOOLS,
   NEW_LOOP,
   originMovedText,
@@ -209,7 +212,7 @@ function deps(over: Partial<McToolsDeps> = {}): McToolsDeps {
     inClone: (_checkout, fn) => fn(),
     now: () => NOW,
     gh: noGh,
-    dbPath: join(dir, "mc.sqlite"),
+    dbPath: join(dir, "data", "mc.sqlite"),
     knownSecrets: async () => [],
     log: (line) => logs.push(line),
     ...over,
@@ -260,6 +263,7 @@ beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-tools-")));
   clone = join(dir, "clone");
   wt = join(dir, "worktrees", "guido-1-42");
+  mkdirSync(join(dir, "data"));
   mkdirSync(clone);
   git(clone, "init", "-q", "-b", "main");
   git(clone, "config", "user.name", "Test Operator");
@@ -277,7 +281,7 @@ beforeEach(() => {
   git(clone, "add", "-A");
   git(clone, "commit", "-qm", "init");
   git(clone, "worktree", "add", "-q", "-b", BRANCH, wt);
-  store = new Store(join(dir, "mc.sqlite"));
+  store = new Store(join(dir, "data", "mc.sqlite"));
   store.upsertRun(run());
   store.setSeatSession({
     seatId: "guido-1",
@@ -306,6 +310,7 @@ describe("the mc tools", () => {
       ["sync_main", ["writer"]],
       ["ask_operator", ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
+      [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
       ["report_plan", []],
     ]);
@@ -314,6 +319,7 @@ describe("the mc tools", () => {
       MC_TOOLS.syncMain,
       MC_TOOLS.askOperator,
       MC_TOOLS.reportEvidence,
+      MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
       MC_TOOLS.reportPlan,
     ]);
@@ -1052,6 +1058,14 @@ describe("through /mcp", () => {
         "ask_operator",
         "report_evidence",
       ]);
+      expect(
+        (
+          await rpc(writer, "tools/call", {
+            name: MC_TOOL_NAMES.restoreFile,
+            arguments: { path: "apps/a.ts" },
+          })
+        ).error.message,
+      ).toBe("unknown tool");
       expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
       write("apps/a.ts", "a2\n");
       const r = await rpc(writer, "tools/call", {
@@ -2150,7 +2164,7 @@ describe("push and draft_pr", () => {
         delete process.env.MC_TEST_LEAK;
       }
       expect(r).toEqual({ text: PR_URL });
-      const crew = join(dir, "crew");
+      const crew = join(dir, "data", "crew");
       const calls = ghCalls();
       expect(calls).toHaveLength(2);
       const [list, create] = calls;
@@ -3179,7 +3193,7 @@ describe("report_plan", () => {
   const plan = (text: unknown = PLAN, ctx: McToolContext = FAO_CTX) =>
     tool("report_plan", pt).call(ctx, { plan: text });
   const refused = (text: string) => ({ text, isError: true });
-  const bodyFiles = () => readdirSync(join(dir, "crew")).filter((f) => f.startsWith("pr-"));
+  const bodyFiles = () => readdirSync(join(dir, "data", "crew")).filter((f) => f.startsWith("pr-"));
 
   beforeEach(() => {
     ghDir = join(dir, "fakegh");
@@ -3755,4 +3769,168 @@ it("the gh runner sends structured card edits on stdin without a shell", async (
     input: payload,
   });
   expect(result).toMatchObject({ code: 0, stdout: payload });
+});
+
+describe("restore_file", () => {
+  const ctx = { seatId: "retro", runId: "retro:restore" };
+  const restore = (path: string) => tool(MC_TOOL_NAMES.restoreFile).call(ctx, { path });
+  const gitState = () => {
+    const files: Record<string, { body: Buffer; mtime: number }> = {};
+    const scan = (dir: string) => {
+      for (const item of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, item.name);
+        if (item.isDirectory()) scan(path);
+        else files[path] = { body: readFileSync(path), mtime: statSync(path).mtimeMs };
+      }
+    };
+    scan(join(clone, ".git"));
+    return {
+      index: readFileSync(git(wt, "rev-parse", "--git-path", "index").trim()),
+      refs: git(wt, "for-each-ref"),
+      pointer: readFileSync(join(wt, ".git")),
+      files,
+    };
+  };
+  let sha: string;
+  let cfg: CcConfig;
+  beforeEach(() => {
+    cfg = config();
+    const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === ctx.seatId);
+    if (!seat) throw new Error("no review seat");
+    seat.mode = "scratch";
+    tools = make({
+      config: cfg,
+      restoreSandbox: async ({ cwd, args, input }) => {
+        execFileSync(process.execPath, args, { cwd, input, stdio: ["pipe", "pipe", "pipe"] });
+      },
+    });
+    chmodSync(join(wt, "apps/a.ts"), 0o755);
+    writeFileSync(join(wt, "apps/a.ts"), Buffer.from([0, 255, 10, 13]));
+    git(wt, "add", "apps/a.ts");
+    git(wt, "commit", "-qm", "executable binary");
+    sha = head();
+    const id = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: ctx.runId });
+    store.upsertRun(run({ id: ctx.runId, agentId: ctx.seatId, reviewId: id }));
+    const session = store.seatSession("guido-1");
+    if (session === null) throw new Error("no seat session");
+    store.setSeatSession({
+      ...session,
+      seatId: ctx.seatId,
+      runId: ctx.runId,
+    });
+  });
+
+  it("restores exact bytes and mode from the review head without changing the index or refs", async () => {
+    write("apps/a.ts", "experiment");
+    chmodSync(join(wt, "apps/a.ts"), 0o644);
+    git(wt, "commit", "-qam", "later head");
+    const before = gitState();
+    expect((await restore("apps/a.ts")).text).toContain(`review head ${sha}`);
+    expect(readFileSync(join(wt, "apps/a.ts"))).toEqual(Buffer.from([0, 255, 10, 13]));
+    expect(statSync(join(wt, "apps/a.ts")).mode & 0o777).toBe(0o755);
+    chmodSync(join(wt, "README.md"), 0o755);
+    expect((await restore("README.md")).isError).toBeUndefined();
+    expect(statSync(join(wt, "README.md")).mode & 0o777).toBe(0o644);
+    expect(gitState()).toEqual(before);
+  });
+
+  it("restores a deleted file and its missing parent", async () => {
+    rmSync(join(wt, "apps/a.ts"));
+    expect((await restore("apps/a.ts")).isError).toBeUndefined();
+    rmSync(join(wt, "apps"), { recursive: true });
+    expect((await restore("apps/a.ts")).isError).toBeUndefined();
+    expect(readFileSync(join(wt, "apps/a.ts"))).toEqual(Buffer.from([0, 255, 10, 13]));
+    expect(statSync(join(wt, "apps/a.ts")).mode & 0o777).toBe(0o755);
+  });
+
+  it("refuses scratch storage inside the hub data directory before running a helper", async () => {
+    const restoreSandbox = vi.fn();
+    const ts = make({ config: cfg, dbPath: join(dir, "mc.sqlite"), restoreSandbox });
+    const result = await tool(MC_TOOL_NAMES.restoreFile, ts).call(ctx, { path: "apps/a.ts" });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("outside the hub data directory");
+    expect(restoreSandbox).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== "darwin")(
+    "Seatbelt tool restore and delete use the default sandbox runner",
+    async () => {
+      const ts = make({ config: cfg });
+      const call = (path: string) => tool(MC_TOOL_NAMES.restoreFile, ts).call(ctx, { path });
+      rmSync(join(wt, "apps"), { recursive: true });
+      const before = gitState();
+      const restored = await call("apps/a.ts");
+      expect(restored.isError, restored.text).toBeUndefined();
+      expect(readFileSync(join(wt, "apps/a.ts"))).toEqual(Buffer.from([0, 255, 10, 13]));
+      expect(statSync(join(wt, "apps/a.ts")).mode & 0o777).toBe(0o755);
+      expect(gitState()).toEqual(before);
+      write("apps/experiment.ts", "experiment");
+      const removed = await call("apps/experiment.ts");
+      expect(removed.isError, removed.text).toBeUndefined();
+      expect(existsSync(join(wt, "apps/experiment.ts"))).toBe(false);
+      expect(gitState()).toEqual(before);
+    },
+  );
+
+  it("removes only an untracked regular file absent from the review head", async () => {
+    write("apps/new.ts", "experiment");
+    const before = gitState();
+    expect((await restore("apps/new.ts")).text).toContain("Removed untracked file");
+    expect(existsSync(join(wt, "apps/new.ts"))).toBe(false);
+    expect(gitState()).toEqual(before);
+    write("apps/new.ts", "staged");
+    git(wt, "add", "apps/new.ts");
+    expect((await restore("apps/new.ts")).isError).toBe(true);
+    expect(readFileSync(join(wt, "apps/new.ts"), "utf8")).toBe("staged");
+    expect((await restore("missing")).isError).toBe(true);
+    expect((await restore("apps")).isError).toBe(true);
+  });
+
+  it("refuses traversal, absolute and git paths, symlinks and symlinked parents", async () => {
+    const outside = join(dir, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "a.ts"), "outside");
+    symlinkSync(outside, join(wt, "linked"));
+    symlinkSync(join(outside, "a.ts"), join(wt, "link.ts"));
+    rmSync(join(wt, "apps"), { recursive: true });
+    symlinkSync(outside, join(wt, "apps"));
+    for (const path of [
+      "../x",
+      join(outside, "a.ts"),
+      ".git/config",
+      ".GIT/config",
+      "link.ts",
+      "linked/a.ts",
+      "apps/a.ts",
+    ]) {
+      expect((await restore(path)).isError, path).toBe(true);
+    }
+    expect(readFileSync(join(outside, "a.ts"), "utf8")).toBe("outside");
+  });
+
+  it("refuses other modes and ended runs", async () => {
+    expect(tool(MC_TOOL_NAMES.restoreFile).modes).toEqual(["scratch"]);
+    expect((await tool(MC_TOOL_NAMES.restoreFile).call(CTX, { path: "apps/a.ts" })).isError).toBe(
+      true,
+    );
+    const live = store.run(ctx.runId);
+    if (live === null) throw new Error("no run");
+    expect(
+      (await tool(MC_TOOL_NAMES.restoreFile, make()).call(ctx, { path: "apps/a.ts" })).isError,
+    ).toBe(true);
+    store.upsertRun({ ...live, endedAt: NOW });
+    expect((await restore("apps/a.ts")).text).toBe(MC_RUN_ENDED);
+  });
 });

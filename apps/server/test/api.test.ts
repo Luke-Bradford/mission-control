@@ -60,6 +60,7 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
+  TOPICS,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -74,6 +75,7 @@ import {
   type NotificationsView,
   personKey,
 } from "../src/collectors/notifications.ts";
+import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
@@ -368,7 +370,7 @@ beforeEach(async () => {
     now: () => clock,
     logger: { stream: { write: (s: string) => void logs.push(s) } },
     heartbeatMs: 50,
-    readStream: (path, limit) => streamReads(path, limit),
+    readStream: (path, limit, vendor) => streamReads(path, limit, vendor),
     configPath,
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
@@ -508,6 +510,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
+  ["GET", "/api/runs/guido-1/attempts"],
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
@@ -519,6 +522,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/held"],
+  ["POST", "/api/attention/example/hold", { reason: "Waiting", condition: { kind: "manual" } }],
+  ["POST", "/api/attention/example/hold/release", {}],
+  ["GET", "/api/attention/unknown"],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -997,7 +1004,13 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
         continue;
       }
-      if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
+      if (
+        url.endsWith("/dismiss") ||
+        url.endsWith("/handled") ||
+        url.includes("/replies/") ||
+        url.endsWith("/hold") ||
+        url.endsWith("/hold/release")
+      ) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -1019,6 +1032,10 @@ describe("local access", () => {
       if (url === "/api/accounts" && method === "POST") {
         expect(r.statusCode).toBe(409);
         expect(r.json().error).toContain("one account per provider");
+        continue;
+      }
+      if (url === "/api/attention/unknown") {
+        expect(r.statusCode).toBe(404);
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
@@ -1146,12 +1163,14 @@ describe("local access", () => {
         ([m, u]) =>
           `${m} ${u
             .split("?")[0]
-            ?.replace("/shop-app-ta/", "/:id/")
+            ?.replace("/attention/unknown", "/attention/:key")
+            .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
@@ -1554,9 +1573,9 @@ describe("agent stream", () => {
     const p = transcript("t.jsonl", line("x", NOW - 1000), NOW - 1000);
     store.upsertRun(run({ id: "r1", transcriptPath: p }));
     await stream("/api/agents/shop-app-ta/stream");
-    expect(streamReads).toHaveBeenLastCalledWith(p, 200);
+    expect(streamReads).toHaveBeenLastCalledWith(p, 200, undefined);
     await stream("/api/agents/shop-app-ta/stream?limit=500");
-    expect(streamReads).toHaveBeenLastCalledWith(p, 500);
+    expect(streamReads).toHaveBeenLastCalledWith(p, 500, undefined);
     for (const bad of ["0", "501", "abc", "1.5", "-1", "", "1e2"]) {
       const r = await get(`/api/agents/shop-app-ta/stream?limit=${bad}`);
       expect(r.statusCode, `limit=${bad}`).toBe(400);
@@ -2410,6 +2429,19 @@ describe("limits", () => {
       ["claude-main", "7d", true],
     ]);
   });
+
+  it("includes the Claude usage retry while its collector is backing off", async () => {
+    const nextTryAt = NOW + 2 * HOUR;
+    store.addUsage(sample({ accountId: "claude-main", window: "5h", resetAt: NOW + HOUR }));
+    store.setSetting(
+      USAGE_BACKOFF_SETTING,
+      JSON.stringify({ waitMs: 30 * 60e3, notBefore: nextTryAt }),
+    );
+    const rows = (await get("/api/limits")).json() as Record<string, unknown>[];
+    expect(rows.find((r) => r.accountId === "claude-main" && r.window === "5h")?.nextTryAt).toBe(
+      NOW + 30 * 60e3,
+    );
+  });
 });
 
 describe("ticket detail", () => {
@@ -2805,6 +2837,7 @@ describe("activity", () => {
         status: "running",
         prs: [],
         summary: null,
+        runId: "b",
       },
       {
         at: NOW - HOUR,
@@ -2816,6 +2849,7 @@ describe("activity", () => {
         status: "ok",
         prs: [],
         summary: null,
+        runId: "a",
       },
       {
         at: NOW - 2 * HOUR,
@@ -2827,6 +2861,7 @@ describe("activity", () => {
         status: "ok",
         prs: [],
         summary: null,
+        runId: "a",
       },
       {
         at: NOW - 3 * HOUR,
@@ -2860,6 +2895,7 @@ describe("activity", () => {
         status: "failed",
         prs: [],
         summary: null,
+        runId: "c",
       },
     ] satisfies ActivityEvent[]);
   });
@@ -4322,6 +4358,26 @@ describe("seat ids in the agent routes", () => {
     });
   });
 
+  it.each(["codex", undefined] as const)(
+    "GET /api/agents/<seat id>/stream reads Codex events with vendor %s",
+    async (vendor) => {
+      const p = join(dir, "codex.jsonl");
+      writeFileSync(p, readFileSync(resolve(import.meta.dirname, "fixtures/stream/codex.jsonl")));
+      store.upsertRun(
+        run({ id: "cx1", agentId: "guido-1", vendor, startedAt: NOW, transcriptPath: p }),
+      );
+      const response = await get("/api/agents/guido-1/stream");
+      expect(response.statusCode).toBe(200);
+      const events = response.json<AgentStream>().events;
+      expect(events.some((e) => e.kind === "msg" && e.text === "Done. Tests pass.")).toBe(true);
+      expect(events.find((e) => e.text === "Bash")?.tool).toMatchObject({
+        result: "Tests passed\n",
+        status: "completed",
+        exitCode: 0,
+      });
+    },
+  );
+
   describe("a seat's Files tab", () => {
     const gitIn = (cwd: string, ...args: string[]) =>
       execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
@@ -4744,6 +4800,42 @@ describe("the first loop's engine", () => {
       expect(view.budget).toBe(budget);
     },
   );
+
+  it("GET /api/runs/:id/attempts returns retained history and rejects unknown runs", async () => {
+    store.upsertRun(run({ id: "history", agentId: "guido-1" }));
+    store.setRunPush({ runId: "history", sha: "head", at: NOW });
+    const response = await get("/api/runs/history/attempts");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runId: "history",
+      attempts: [{ kind: "run" }, { kind: "push", data: { sha: "head" } }],
+    });
+    expect((await get("/api/runs/unknown/attempts")).statusCode).toBe(404);
+  });
+
+  it("caps the served review round at the run profile limit", async () => {
+    store.upsertRun(
+      run({
+        id: "profiled",
+        agentId: "guido-1",
+        loop,
+        profile: {
+          profile: { ...DEFAULT_PROFILES[0], rounds: 2 },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      }),
+    );
+    for (let n = 1; n <= 3; n++)
+      store.claimLine(`fix:profiled:${loop.epoch}:${n}`, {
+        runId: "profiled",
+        seatId: "guido-1",
+        origin: "engine",
+        text: "fix",
+        at: NOW,
+      });
+    expect((await get("/api/runs/profiled/loop")).json().round).toBe(2);
+  });
 
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
@@ -5261,6 +5353,45 @@ describe("overview", () => {
     ).toEqual(["shop-app"]);
   });
 
+  it("shares crew across crew, attention and Overview, expiring at the next two-second bucket", async () => {
+    const reads = vi.spyOn(store, "asideRuns");
+    clock = Math.floor(clock / 2_000) * 2_000;
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(1);
+    await get("/api/attention");
+    await get("/api/overview");
+    expect(reads).toHaveBeenCalledTimes(1);
+    clock += 1_999;
+    bus.emit("machine");
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(1);
+    clock++;
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(2);
+    reads.mockRestore();
+  });
+
+  it.each(TOPICS.filter((topic) => topic !== "machine"))(
+    "invalidates shared crew on %s",
+    async (topic) => {
+      const reads = vi.spyOn(store, "asideRuns");
+      await get("/api/crew");
+      bus.emit(topic);
+      await get("/api/overview");
+      await get("/api/crew");
+      expect(reads).toHaveBeenCalledTimes(2);
+      reads.mockRestore();
+    },
+  );
+
+  it("rebuilds shared crew when the configured selection changes", async () => {
+    await get("/api/crew");
+    withCrew();
+    expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
+      true,
+    );
+  });
+
   it("shares attention for two seconds and invalidates on non-machine topics", async () => {
     const reads = vi.spyOn(store, "acks");
     await get("/api/overview");
@@ -5324,4 +5455,31 @@ describe("overview", () => {
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
   });
+});
+
+it("bounds tag text in attention and reads the whole message on open", async () => {
+  const text = `@CAPCOM ${"x".repeat(1000)}`;
+  store.addComms({ at: NOW, from: "shop-app-ta", to: "CAPCOM", ticket: null, text });
+  const items = (await get("/api/attention")).json<AttentionItem[]>();
+  const tag = items.find((i) => i.kind === "tag");
+  expect(tag).toBeDefined();
+  expect(tag?.text.length).toBeLessThanOrEqual(170);
+  const full = await get(`/api/attention/${encodeURIComponent(tag?.key ?? "")}`);
+  expect(full.statusCode).toBe(200);
+  expect(full.json().text).toBe(text);
+  expect((await get("/api/attention/unknown")).statusCode).toBe(404);
+});
+it("labels the test lock route's holder and waiting entries", async () => {
+  const state = {
+    holder: { runId: "h", seatId: "a", command: "make check", since: NOW },
+    waiting: [{ runId: "w", seatId: "b", command: "make verify", since: NOW }],
+  };
+  const a = buildApp({ config, store, bus, now: () => NOW, lock: { state: () => state } as never });
+  try {
+    const view = (await a.inject("/api/test-lock")).json();
+    expect(view.holder.label).toBe("make check");
+    expect(view.waiting[0].label).toBe("make verify");
+  } finally {
+    await a.close();
+  }
 });

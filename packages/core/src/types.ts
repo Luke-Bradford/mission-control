@@ -4,7 +4,7 @@ import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
+import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -61,6 +61,10 @@ export type RunPlan =
   | { skipped: `Size ${string}` };
 
 export interface Run {
+  /** Absent on legacy callers; stored as Claude by default. */
+  vendor?: CrewVendor;
+  /** Latest execution plan text from the seat, separate from the ticket plan snapshot. */
+  latestPlan?: string;
   id: string;
   agentId: AgentId;
   repoId: RepoId;
@@ -553,7 +557,15 @@ export interface StreamEvent {
   at: number | null;
   kind: StreamKind;
   text: string;
-  tool?: { name: string; input: string; result: string | null; ms: number | null; error: boolean };
+  tool?: {
+    name: string;
+    input: string;
+    result: string | null;
+    ms: number | null;
+    error: boolean;
+    status?: string;
+    exitCode?: number | null;
+  };
 }
 
 /** A bounded Comms thread snapshot. IDs survive folds and reloads; undated messages stay null. */
@@ -627,6 +639,8 @@ interface LimitRowBase {
   source: string;
   /** When the latest sample (the one `used` comes from) was taken, UTC ms. */
   sampledAt: number;
+  /** The Claude usage collector's next rate-limit retry, UTC ms. Omitted when not backing off. */
+  nextTryAt?: number;
 }
 
 /**
@@ -985,6 +999,8 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  hold?: AttentionHold;
+  holdReleased?: string;
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
@@ -1065,6 +1081,8 @@ export interface RepoPreview {
 
 /** One seat's live session; `runId` is null when no run is active. `reason` shows in the doing line. */
 export interface SeatSessionRow {
+  /** Absent on legacy callers; stored as Claude by default. */
+  vendor?: CrewVendor;
   seatId: string;
   runId: string | null;
   cliSessionId: string | null;
@@ -1162,16 +1180,33 @@ export interface OverviewSummary {
   kpis: {
     working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
-    spendToday: { usd: number; perHour: number[] };
-    inFlight: { count: number; oldestAt: number | null };
-    mergedToday: { count: number; perHour: number[] };
-    ciPassRate24h: { pct: number | null; runs: number; redNow: number };
-    cycleTime: { medianMs: number | null; n: number; avg14dMs: number | null };
-    needsYou: { count: number; overHour: number };
+    /** Minute spend buckets, using the same attribution as perHour. */
+    spendToday: { usd: number; perHour: number[]; series?: number[] };
+    /** Distinct tickets in building, checks, review or merging at each minute end. */
+    inFlight: { count: number; oldestAt: number | null; series?: number[] };
+    /** Merge counts per minute, including minutes before local midnight. */
+    mergedToday: { count: number; perHour: number[]; series?: number[] };
+    /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
+    ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
+    /** Local-day median at each minute end; null without completed cycles. */
+    cycleTime: {
+      medianMs: number | null;
+      n: number;
+      avg14dMs: number | null;
+      series?: (number | null)[];
+    };
+    /** Operator need episodes open at each minute end, including retained resolved episodes. */
+    needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
   /** Missing minute samples are null, rather than zero utilization. */
-  machine: { cpu: (number | null)[]; mem: (number | null)[]; diskFreeGb: number | null };
+  machine: {
+    cpu: (number | null)[];
+    mem: (number | null)[];
+    diskFreeGb: number | null;
+    /** Mean free disk space in GB per minute, in the same units as diskFreeGb. */
+    disk?: (number | null)[];
+  };
 }
 
 export interface PipelineStage {
@@ -1189,4 +1224,18 @@ export interface PipelineCard {
   ci: ("pass" | "fail" | "pending")[];
   since: number;
   who: string | null;
+}
+
+export type AttentionHoldCondition =
+  | { readonly kind: "date"; readonly at: number }
+  | { readonly kind: "ticket"; readonly ticket: string }
+  | { readonly kind: "crew" }
+  | { readonly kind: "manual" };
+
+export interface AttentionHold {
+  reason: string;
+  condition: AttentionHoldCondition;
+  by: string;
+  at: number;
+  releasedAt?: number;
 }

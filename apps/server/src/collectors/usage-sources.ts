@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AdoptedLoop } from "../config.ts";
 import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
-import { USAGE_RETRY_AFTER_MAX_MS } from "./usage-claude.ts";
+import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_MIN_MS } from "./usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, isObj } from "./usage-common.ts";
 
 const execFileAsync = promisify(execFile);
@@ -76,7 +76,7 @@ export class UsageRateLimited extends Error {
     this.name = "UsageRateLimited";
     const value = retryAfter?.trim() ?? "";
     this.retryAfterMs = /^\d+$/.test(value)
-      ? Math.min(Number(value) * 1000, USAGE_RETRY_AFTER_MAX_MS)
+      ? Math.min(Math.max(Number(value) * 1000, USAGE_BACKOFF_MIN_MS), USAGE_BACKOFF_CAP_MS)
       : null;
     // Date.parse also accepts numbers, ISO dates and other non-HTTP strings. Accept
     // only HTTP's three date formats, with a round trip to reject invalid dates.
@@ -97,7 +97,7 @@ export class UsageRateLimited extends Error {
       : null;
     this.retryAt =
       this.retryAfterMs === null && (value === canonical || value === obsolete || value === asctime)
-        ? Math.min(at, now + USAGE_RETRY_AFTER_MAX_MS)
+        ? Math.min(Math.max(at, now + USAGE_BACKOFF_MIN_MS), now + USAGE_BACKOFF_CAP_MS)
         : null;
   }
 

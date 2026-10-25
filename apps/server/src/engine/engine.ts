@@ -109,7 +109,7 @@ import {
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
-import { type CcConfig, type CrewSeatConfig, flightPowersOf } from "../config.ts";
+import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -241,6 +241,7 @@ const REVIEWS_CHAIN = "\0reviews";
  */
 export function reviewerOf(config: CcConfig, seatId: string, role?: string): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
+  // An unavailable reviewer is still required; its queued reviews wait for model discovery.
   const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
   return seats.find((x) => x.role === role) ?? seats[0] ?? null;
 }
@@ -595,6 +596,7 @@ export function createEngine(deps: EngineDeps): Engine {
       cur.carry = r.prSame
         ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
         : null;
+      if (r.prSame && cur.reviewWaivedSha === r.parent) cur.reviewWaivedSha = r.sha;
       store.setRunLoop(run.id, cur);
       store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(mainSha), at);
       const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
@@ -1448,7 +1450,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const seats = (config.crew?.sessions ?? []).flatMap((s) => s.seats);
     await Promise.all(
       seats
-        .filter((s) => !s.retiring && seatDef(s).loop === "build")
+        .filter((s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build")
         .filter((s) => seatMayTake(store, s.id, maxOpenRunsOf(config)))
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
@@ -1593,7 +1595,7 @@ export function createEngine(deps: EngineDeps): Engine {
     // 4. each free scratch seat starts its oldest wanted review
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
-      .filter((x) => !x.retiring && modeOfSeat(x) === "scratch");
+      .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
@@ -1609,7 +1611,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const current = (config.crew?.sessions ?? [])
           .flatMap((x) => x.seats)
           .find((x) => x.id === seat.id);
-        if (current === undefined || current.retiring) break;
+        if (current === undefined || current.retiring || seatUnavailable(current)) break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {
@@ -1872,6 +1874,7 @@ export function createEngine(deps: EngineDeps): Engine {
             if (sent !== "sent" && sent !== "dup") return;
           }
         }
+        if (next.aside) next.aside = { ...next.aside, wake: true };
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);

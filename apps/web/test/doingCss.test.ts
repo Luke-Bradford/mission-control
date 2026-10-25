@@ -78,15 +78,6 @@ function ticketColumn(viewport: number, selector: string) {
   };
 }
 
-/** A `grid-column` value as the tracks it covers, `[first, last]` (0-based, inclusive). */
-function columnsOf(r: string, count: number): [number, number] {
-  const m = r.match(/grid-column: (-?\d+)(?: \/ (-?\d+))?;/);
-  if (!m) throw new Error(`no grid-column in: ${r}`);
-  const line = (n: number) => (n < 0 ? count + 2 + n : n);
-  const start = line(Number(m[1]));
-  return [start - 1, (m[2] === undefined ? start + 1 : line(Number(m[2]))) - 2];
-}
-
 describe("doing lines and run rows (hud.css)", () => {
   it("Work in flight stretches the agent link across the row, below ticket and PR links", () => {
     const row = rule(String.raw`#wifP \.row`);
@@ -131,65 +122,31 @@ describe("doing lines and run rows (hud.css)", () => {
     expect(rule(String.raw`\.runrow button\.rsummary`)).toContain("line-height: inherit");
   });
 
-  it("keeps the ticket on line one and spans doing across the middle columns", () => {
-    expect(rule("#agentsList")).toContain("container: agents / inline-size");
-    expect(rule(String.raw`#agentsList \.trow > \*`)).toContain("grid-row: 1");
-    const cell = rule(String.raw`#agentsList \.trow > \.need`);
-    expect(cell).toContain("grid-row: 2");
-    expect(columnsOf(cell, 9)).toEqual([1, 8]);
+  it("fits all eight Crew columns at the controller's docked and wide viewport widths", () => {
+    for (const [viewport, dock] of [
+      [1440, true],
+      [2000, false],
+    ] as const) {
+      const main = viewport - 32 - (dock ? 392 : 0);
+      const panel = main - Math.max(260, main * 0.28) - 12 - 18;
+      const selector = String.raw`#agentsList \.trow`;
+      const cssAtWidth =
+        panel < 900
+          ? css.slice(css.indexOf("@container agents (width < 900px)"))
+          : panel < 1000
+            ? css.slice(css.indexOf("@container agents (width < 1000px)"))
+            : css;
+      const grid = cssAtWidth.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+      const tracks = templateOf(grid);
+      const gap = panel < 900 ? 4 : 6;
+      const available = panel - 16;
+      const widths = solve(tracks, available, gap);
+      expect(tracks).toHaveLength(8);
+      expect(widths[3]).toBeGreaterThan(100);
+      expect(widths.reduce((a, b) => a + b, 0) + gap * 7).toBeLessThanOrEqual(available + 0.01);
+    }
+    expect(rule("#agentsList")).toContain("overflow-x: hidden");
   });
-
-  it("lets the desktop table shrink without a fixed minimum width", () => {
-    expect(rule("#agentsList")).toContain("overflow: visible");
-    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
-    expect(templateOf(rule(String.raw`#agentsList \.trow`))).toHaveLength(9);
-    expect(templateOf(rule(String.raw`#agentsList\.no-steps \.trow`))).toHaveLength(8);
-  });
-
-  it.each([1100, 1199, 1200, 1280, 1359, 1360, 1440, 1800, 2000])(
-    "fits both Agents grids with FLIGHT open at %ipx",
-    (viewport) => {
-      const app = rule(String.raw`\.app`);
-      const inner = viewport - pxOf(app, "padding-left") - pxOf(app, "padding-right");
-      const shell = rule(String.raw`\.shell`);
-      const main =
-        viewport < 1200 ? inner : (solve(templateOf(shell), inner, gapOf(shell))[0] ?? 0);
-      // Reserve space for a classic scrollbar as well as the panel borders.
-      const panel = main - 16 - 2 * pxOf(rule(String.raw`\.panel`), "border");
-      if (panel < 940) {
-        expect(css).toContain("@container agents (width < 940px)");
-        return;
-      }
-      const compact = css.slice(
-        css.indexOf("@container agents (width < 1360px)"),
-        css.indexOf(".activity-live {"),
-      );
-      for (const selector of [
-        String.raw`#agentsList \.trow`,
-        String.raw`#agentsList\.no-steps \.trow`,
-        String.raw`#agentsList\.no-quota \.trow`,
-        String.raw`#agentsList\.no-steps\.no-quota \.trow`,
-      ]) {
-        const grid =
-          panel < 1360
-            ? (compact.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "")
-            : rule(selector);
-        const tracks = templateOf(grid);
-        const gap = panel < 1360 ? 6 : 8;
-        const available = panel - 2 * pxOf(rule(String.raw`\.trow`), "padding", 2);
-        const widths = solve(tracks, available, gap);
-        expect(widths[3]).toBeGreaterThan(0);
-        expect(widths.reduce((a, b) => a + b, 0) + gap * (widths.length - 1)).toBeLessThanOrEqual(
-          available + 0.01,
-        );
-        expect(widths[2]).toBe(140);
-        expect(tracks.filter((t) => t.fr > 0)).toHaveLength(1);
-        expect(tracks[3]?.fr).toBe(1);
-        expect(widths.at(-1)).toBe(panel < 1360 ? 60 : 72);
-        if (viewport >= 1440) expect(widths[3]).toBeGreaterThan(50);
-      }
-    },
-  );
 
   it("the loop step is one line and a 4px bar, with the mockup's colours", () => {
     expect(rule(String.raw`\.ellip`)).toContain("white-space: nowrap");

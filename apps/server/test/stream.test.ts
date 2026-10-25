@@ -1,4 +1,12 @@
-import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -269,4 +277,86 @@ describe("readStream", () => {
     closeSync(fd);
     expect(readStream(p, 10).events.map((e) => e.text)).toEqual(["a", "b"]);
   });
+});
+
+describe("Codex stream", () => {
+  const fixture = resolve(import.meta.dirname, "fixtures/stream/codex.jsonl");
+  it("shows messages, tools, approval decisions and the plan", () => {
+    const events = readStream(fixture, 200, "codex").events;
+    expect(readStream(fixture, 200).events).toEqual(events);
+    expect(events.map((e) => e.kind)).toEqual([
+      "msg",
+      "tool",
+      "sys",
+      "sys",
+      "tool",
+      "tool",
+      "sys",
+      "sys",
+      "msg",
+    ]);
+    expect(events.find((e) => e.text === "Bash")?.tool).toMatchObject({
+      name: "Bash",
+      input: '{"command":"pnpm test"}',
+      result: "Tests passed\n",
+      status: "completed",
+      exitCode: 0,
+      ms: 1200,
+      error: false,
+    });
+    expect(events.find((e) => e.text === "Edit")?.tool?.input).toContain("/work/a.ts");
+    expect(events.some((e) => e.text === "mcp__mc__status")).toBe(true);
+    expect(events.some((e) => e.text.includes("approved"))).toBe(true);
+    expect(events.some((e) => e.text.includes("declined"))).toBe(true);
+    expect(events.some((e) => e.text.includes("[completed] Run tests"))).toBe(true);
+    expect(readStream(fixture, 1).events).toEqual(events.slice(-1));
+  });
+
+  it("keeps the command's id as its result arrives and reads a result without its start", () => {
+    const lines = readFileSync(fixture, "utf8").trim().split("\n");
+    const path = write("codex.jsonl", `${lines.slice(0, 6).join("\n")}\n`);
+    const before = readStream(path, 200).events.find((e) => e.text === "Bash");
+    expect(before?.tool?.result).toBeNull();
+    writeFileSync(path, `${lines.join("\n")}\n`);
+    expect(readStream(path, 200).events.find((e) => e.text === "Bash")?.id).toBe(before?.id);
+    const result = write("result.jsonl", `${lines[8]}\n`);
+    expect(readStream(result, 1).events[0]?.tool).toMatchObject({
+      name: "Bash",
+      exitCode: 0,
+      ms: 1200,
+    });
+  });
+});
+
+it("detects Codex from an initialize response and honours the run vendor", () => {
+  const path = write(
+    "rpc.jsonl",
+    `${JSON.stringify({ id: 0, result: { userAgent: "codex" } })}\n${JSON.stringify({ method: "item/completed", params: { item: { type: "agentMessage", id: "m", text: "Ready" } } })}\n`,
+  );
+  expect(readStream(path, 20).events.map((e) => e.text)).toEqual(["Ready"]);
+  expect(readStream(path, 20, "claude").events).toEqual([]);
+});
+
+it("shows failed Codex command status and cleans and bounds its output", () => {
+  const path = write(
+    "failed.jsonl",
+    `${JSON.stringify({ method: "item/completed", params: { item: { type: "commandExecution", id: "c", command: "false", aggregatedOutput: `\u001b[31mfailed\u001b[0m${"x".repeat(STREAM_CHUNK_BYTES)}`, status: "failed", exitCode: 1, durationMs: 12 } } })}\n`,
+  );
+  const tool = readStream(path, 20).events[0]?.tool;
+  expect(tool).toMatchObject({ status: "failed", exitCode: 1, error: true, ms: 12 });
+  expect(tool?.result).not.toContain("\u001b");
+  expect(tool?.result?.length).toBeLessThan(STREAM_CHUNK_BYTES);
+});
+
+it("defers stream format detection past bookkeeping and unknown objects", () => {
+  const fixture = readFileSync(resolve(import.meta.dirname, "fixtures/stream/codex.jsonl"), "utf8");
+  const path = write("growing.jsonl", `${fixture.split("\n")[0]}\n`);
+  expect(readStream(path, 200).events).toEqual([]);
+  writeFileSync(path, fixture);
+  expect(readStream(path, 200).events).toEqual(readStream(path, 200, "codex").events);
+  const claude = write(
+    "claude.jsonl",
+    `${JSON.stringify({ type: "bookkeeping" })}\n{}\n${say("Ready.")}\n`,
+  );
+  expect(readStream(claude, 200).events.map((e) => e.text)).toEqual(["Ready."]);
 });

@@ -26,6 +26,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CheckoutError,
   existingCheckout,
+  existingDetached,
+  existingReadOnlyCheckout,
   existingScratch,
   INSTALL_ARGS,
   type InstallRunner,
@@ -35,6 +37,7 @@ import {
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
+  prepareReadOnlyCheckout,
   prepareScratch,
   removeCheckout,
   syncReusedWorktree,
@@ -77,6 +80,29 @@ const input = () => ({
   issue: 42,
   title: TITLE,
 });
+const pendingSet = () => {
+  const s = new Set<string>();
+  return {
+    s,
+    pending: {
+      isPending: (path: string) => s.has(path),
+      markPending: (path: string) => {
+        s.add(path);
+      },
+      clearPending: (path: string) => {
+        s.delete(path);
+      },
+    },
+  };
+};
+const ro = (issue = 42) =>
+  prepareReadOnlyCheckout({
+    checkout: clone,
+    worktreesRoot: root,
+    sessionId: "a",
+    seatId: "retro",
+    issue,
+  });
 const wtPath = () => join(root, "a", "guido-42");
 const fail = (p: Promise<unknown>) =>
   p.then(
@@ -623,8 +649,27 @@ describe("prepareCheckout", () => {
     const first = await prepareCheckout(input());
     writeFileSync(join(wtPath(), "wip.txt"), "wip\n");
     const again = await prepareCheckout(input());
-    expect(again).toEqual({ ...first, created: false });
+    expect(again).toEqual({ ...first, created: false, leftoverChanges: ["?? wip.txt"] });
     expect(existsSync(join(wtPath(), "wip.txt"))).toBe(true);
+  });
+
+  it("captures clean status and quotes spaces and control characters in reused worktrees", async () => {
+    const first = await prepareCheckout(input());
+    expect(first.leftoverChanges).toBeUndefined();
+    expect((await prepareCheckout(input())).leftoverChanges).toEqual([]);
+    writeFileSync(join(first.path, "space name.txt"), "keep");
+    writeFileSync(join(first.path, "tab\tline\n.txt"), "keep");
+    mkdirSync(join(first.path, "nested"));
+    writeFileSync(join(first.path, "nested/one.txt"), "one");
+    writeFileSync(join(first.path, "nested/two.txt"), "two");
+    const reused = await prepareCheckout(input());
+    expect(reused.leftoverChanges).toEqual([
+      "?? nested/one.txt",
+      "?? nested/two.txt",
+      '?? "space name.txt"',
+      '?? "tab\\tline\\n.txt"',
+    ]);
+    expect(readFileSync(join(first.path, "tab\tline\n.txt"), "utf8")).toBe("keep");
   });
 
   it("refuses a path that is not this ticket's checkout", async () => {
@@ -1052,6 +1097,236 @@ describe("prepareCheckout", () => {
       await prepareCheckout(input());
       expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
     });
+  });
+});
+
+describe("ticket checkout recovery", () => {
+  it("keeps the ticket's branch after a title change, its worktree there or not", async () => {
+    await prepareCheckout(input());
+    const renamed = { ...input(), title: "A new name" };
+    expect(await prepareCheckout(renamed)).toMatchObject({ branch: BRANCH, created: false });
+    git(clone, "worktree", "remove", wtPath());
+    expect(await prepareCheckout(renamed)).toMatchObject({ branch: BRANCH, created: true });
+    expect(hasBranch("feature/42-a-new-name")).toBe(false);
+  });
+
+  it("refuses a ticket with more than one branch", async () => {
+    git(clone, "branch", BRANCH);
+    git(seed, "push", "-q", "origin", "main:refs/heads/feature/42-other");
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("branch");
+    expect(e.message).toBe("#42 has more than one branch (2); delete the extra ones");
+    expect(existsSync(wtPath())).toBe(false);
+  });
+
+  it("counts a branch both local and on origin once, and ignores feature/420", async () => {
+    git(clone, "branch", BRANCH);
+    git(seed, "push", "-q", "origin", `main:refs/heads/${BRANCH}`);
+    git(clone, "branch", "feature/420-x");
+    expect(await prepareCheckout(input())).toMatchObject({ branch: BRANCH });
+  });
+
+  it("removes a worktree recorded as half-made and makes it again", async () => {
+    await prepareCheckout(input());
+    writeFileSync(join(wtPath(), "wip.txt"), "wip");
+    const { s, pending } = pendingSet();
+    s.add(wtPath());
+    expect(await prepareCheckout({ ...input(), pending })).toMatchObject({ created: true });
+    expect(existsSync(join(wtPath(), "wip.txt"))).toBe(false);
+    expect(s.size).toBe(0);
+  });
+
+  it.each([
+    "gitdir only",
+    "pointer only",
+    "no HEAD",
+    "no commondir",
+    "locked",
+    "orphan",
+    "missing path",
+  ])("recovers an interrupted add with %s", async (stage) => {
+    const { s, pending } = pendingSet();
+    const path = wtPath();
+    const admin = join(clone, ".git", "worktrees", "interrupted");
+    git(clone, "branch", BRANCH);
+    mkdirSync(dirname(path), { recursive: true });
+    if (stage !== "missing path") {
+      mkdirSync(path);
+      writeFileSync(join(path, "partial.txt"), "partial");
+    }
+    if (stage !== "orphan") {
+      mkdirSync(admin, { recursive: true });
+      writeFileSync(join(admin, "locked"), "initializing");
+      if (stage !== "pointer only") writeFileSync(join(admin, "gitdir"), join(path, ".git"));
+      if (stage !== "missing path" && stage !== "gitdir only") {
+        writeFileSync(join(path, ".git"), `gitdir: ${admin}\n`);
+      }
+      if (stage !== "no commondir" && stage !== "gitdir only") {
+        writeFileSync(join(admin, "commondir"), "../..");
+      }
+      if (stage !== "no HEAD" && stage !== "gitdir only") {
+        writeFileSync(join(admin, "HEAD"), `ref: refs/heads/${BRANCH}\n`);
+      }
+    }
+    s.add(path);
+    expect(await prepareCheckout({ ...input(), pending })).toMatchObject({ created: true });
+    expect(existsSync(join(path, "partial.txt"))).toBe(false);
+    expect(existsSync(admin)).toBe(false);
+    expect(git(path, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+    expect(s.size).toBe(0);
+    expect(worktrees()).toHaveLength(2);
+  });
+
+  it("keeps pending paths that redirect to another checkout", async () => {
+    const other = join(dir, "other");
+    git(clone, "worktree", "add", "--detach", other);
+    const otherAdmin = git(other, "rev-parse", "--absolute-git-dir");
+    mkdirSync(wtPath(), { recursive: true });
+    writeFileSync(join(wtPath(), ".git"), `gitdir: ${otherAdmin}\n`);
+    const { s, pending } = pendingSet();
+    s.add(wtPath());
+    expect((await fail(prepareCheckout({ ...input(), pending }))).code).toBe("path");
+    expect(s.has(wtPath())).toBe(true);
+    expect(existsSync(other)).toBe(true);
+    expect(existsSync(otherAdmin)).toBe(true);
+  });
+
+  it.each(["worktree", "session", "sibling"])(
+    "does not follow a pending %s symlink",
+    async (target) => {
+      const outside = target === "sibling" ? join(root, "other-session") : join(dir, "outside");
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(join(outside, "keep.txt"), "keep");
+      mkdirSync(root, { recursive: true });
+      if (target === "worktree") {
+        mkdirSync(dirname(wtPath()), { recursive: true });
+        symlinkSync(outside, wtPath());
+      } else {
+        symlinkSync(outside, dirname(wtPath()));
+        mkdirSync(join(outside, "guido-42"));
+      }
+      const { s, pending } = pendingSet();
+      s.add(wtPath());
+      expect((await fail(prepareCheckout({ ...input(), pending }))).code).toBe("path");
+      expect(readFileSync(join(outside, "keep.txt"), "utf8")).toBe("keep");
+      expect(s.has(wtPath())).toBe(true);
+    },
+  );
+
+  it("reuses an unrecorded existing worktree as today", async () => {
+    await prepareCheckout(input());
+    writeFileSync(join(wtPath(), "wip.txt"), "wip");
+    const { pending } = pendingSet();
+    expect(await prepareCheckout({ ...input(), pending })).toMatchObject({ created: false });
+    expect(readFileSync(join(wtPath(), "wip.txt"), "utf8")).toBe("wip");
+  });
+
+  it("keeps the record when the start fails, and the next start clears it", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const { s, pending } = pendingSet();
+    expect((await fail(prepareCheckout({ ...input(), pending }))).code).toBe("install");
+    expect(s.has(wtPath())).toBe(true);
+    commit(seed, { "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout({ ...input(), pending });
+    expect(s.size).toBe(0);
+  });
+});
+
+describe("prepareReadOnlyCheckout", () => {
+  it("detaches at the branch tip while a writer's worktree has the branch checked out", async () => {
+    await prepareCheckout(input());
+    const tip = commit(wtPath(), { "w.txt": "w\n" });
+    const r = await ro();
+    expect(r).toMatchObject({ branch: BRANCH, created: true });
+    expect(git(r.path, "rev-parse", "HEAD")).toBe(tip);
+    expect(() => git(r.path, "symbolic-ref", "--quiet", "HEAD")).toThrow();
+  });
+
+  it("detaches at origin's tip when the ticket has no branch, and creates none", async () => {
+    const r = await ro();
+    expect(r.branch).toBe("");
+    expect(git(r.path, "rev-parse", "HEAD")).toBe(r.baseSha);
+    expect(git(clone, "for-each-ref", "refs/heads/feature")).toBe("");
+  });
+
+  it("replaces its own detached leftover, and refuses a worktree on a branch at its path", async () => {
+    const r = await ro();
+    writeFileSync(join(r.path, "stale.txt"), "stale");
+    expect(await ro()).toMatchObject({ created: true });
+    expect(existsSync(join(r.path, "stale.txt"))).toBe(false);
+    git(r.path, "checkout", "-q", "-b", "unrelated");
+    expect((await fail(ro())).code).toBe("path");
+  });
+
+  it.each([false, true])("upgrades a completed legacy checkout (flat: %s)", async (flat) => {
+    const made = await prepareCheckout({ ...input(), seatId: "retro" });
+    const path = flat ? join(root, "retro-42") : made.path;
+    if (flat) git(clone, "worktree", "move", made.path, path);
+    const tip = commit(path, { "legacy.txt": "legacy\n" });
+    writeFileSync(join(path, "stale.txt"), "stale");
+    const r = await ro();
+    expect(r.path).toBe(path);
+    expect(r.branch).toBe(BRANCH);
+    expect(git(path, "rev-parse", "HEAD")).toBe(tip);
+    expect(git(clone, "rev-parse", BRANCH)).toBe(tip);
+    expect(() => git(path, "symbolic-ref", "--quiet", "HEAD")).toThrow();
+    expect(existsSync(join(path, "stale.txt"))).toBe(false);
+  });
+
+  it("detaches a verified legacy run without changing its branch, index or files", async () => {
+    const r = await prepareCheckout({ ...input(), seatId: "retro" });
+    const tip = git(r.path, "rev-parse", "HEAD");
+    writeFileSync(join(r.path, "staged.txt"), "staged");
+    git(r.path, "add", "staged.txt");
+    writeFileSync(join(r.path, "dirty.txt"), "dirty");
+    const before = git(r.path, "status", "--porcelain");
+    await existingReadOnlyCheckout(clone, r.path, BRANCH);
+    expect(git(r.path, "status", "--porcelain")).toBe(before);
+    expect(git(clone, "rev-parse", BRANCH)).toBe(tip);
+    expect(await existingDetached(clone, r.path)).toEqual({ path: r.path, gitDir: r.gitDir });
+    expect(await existingReadOnlyCheckout(clone, r.path, BRANCH)).toEqual({
+      path: r.path,
+      gitDir: r.gitDir,
+    });
+  });
+
+  it("refuses to migrate a legacy run with a redirected git pointer", async () => {
+    const r = await prepareCheckout({ ...input(), seatId: "retro" });
+    const other = join(dir, "other");
+    git(clone, "worktree", "add", "--detach", other);
+    writeFileSync(join(r.path, ".git"), readFileSync(join(other, ".git")));
+    expect((await fail(existingReadOnlyCheckout(clone, r.path, BRANCH))).code).toBe("path");
+    expect(readFileSync(join(r.gitDir, "HEAD"), "utf8")).toContain(`refs/heads/${BRANCH}`);
+  });
+
+  it("existingDetached accepts a detached worktree and refuses one on a branch", async () => {
+    const r = await ro();
+    expect(await existingDetached(clone, r.path)).toEqual({ path: r.path, gitDir: r.gitDir });
+    git(r.path, "checkout", "-q", "-b", BRANCH);
+    expect((await fail(existingDetached(clone, r.path))).code).toBe("path");
+  });
+
+  it("uses origin's ticket branch without creating a local branch", async () => {
+    git(seed, "checkout", "-q", "-b", BRANCH);
+    const tip = commit(seed, { "remote.txt": "remote\n" });
+    git(seed, "push", "-q", "origin", BRANCH);
+    const r = await ro();
+    expect(r.branch).toBe(BRANCH);
+    expect(git(r.path, "rev-parse", "HEAD")).toBe(tip);
+    expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("checks install inputs on the ticket branch", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input());
+    commit(wtPath(), {
+      "package.json": `${PKG}\n`,
+    });
+    expect((await fail(ro())).code).toBe("protected");
+    expect(existsSync(join(root, "a", "retro-42"))).toBe(false);
   });
 });
 

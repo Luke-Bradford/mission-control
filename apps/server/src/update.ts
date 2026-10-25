@@ -59,8 +59,8 @@ export const UPDATE_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
  * The only paths `updates.hub: auto` applies without a person: the page's source and assets, and
- * docs. Everything else (server and core code, roles, any package.json, lockfiles, workspace and
- * build config at any depth) is held for the operator or the controller session to run Update.
+ * docs. Everything else (server and core code, roles,
+ * any package.json, lockfiles, workspace and build config at any depth) is held for the operator or the controller session to run Update.
  */
 export const AUTO_UPDATE_PATHS = [
   "apps/web/src/**",
@@ -68,8 +68,11 @@ export const AUTO_UPDATE_PATHS = [
   "apps/web/index.html",
   "docs/**",
 ] as const;
+
 /** Whether auto-Update may apply a change to `path`. */
 export const autoUpdatePath = (path: string): boolean =>
+  !path.split("/").some((part) => part === ".." || part === "." || part === "") &&
+  !path.includes("/fixtures/") &&
   AUTO_UPDATE_PATHS.some((g) => globMatches(g, path));
 
 /** What auto-Update held: the commits and the paths in them it will not apply. */
