@@ -385,7 +385,7 @@ function AgentRow({
     ? status.label
     : lockSince(lock, row.run?.id) !== null
       ? "Watching"
-    : status.label === "Free" && crewStatus?.enabled === false
+      : status.label === "Free" && crewStatus?.enabled === false
         ? "Idle"
         : status.label;
   const statusTitle = row.crewPause
@@ -394,7 +394,7 @@ function AgentRow({
       ? "Waiting on test lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Crew is paused"
-        : status.reason ?? statusLabel;
+        : (status.reason ?? statusLabel);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const aside = row.asideRuns ?? [];

@@ -1,9 +1,4 @@
-import {
-  type Crew,
-  type CrewRow,
-  FIX_STEP,
-  type RunLoopView,
-} from "@mc/core";
+import { type Crew, type CrewRow, FIX_STEP, type RunLoopView } from "@mc/core";
 import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
 import {
@@ -12,8 +7,8 @@ import {
   isLoopInFlight,
   loopSteps,
   runElapsed,
-  seatStatus,
   type StepMark,
+  seatStatus,
   stepMarks,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
