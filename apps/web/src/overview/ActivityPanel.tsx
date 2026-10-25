@@ -285,15 +285,24 @@ export function ActivityPanel() {
     .sort(compareActivity)
     .slice(0, SHOWN);
   const held = reading?.session === session ? reading.rows : null;
-  const displayed = held ?? rows;
+  const rowKey = (row: LogRow) => row.attentionKey ?? activityKey(row);
+  const current = new Map<string, LogRow[]>();
+  for (const row of rows) {
+    const key = rowKey(row);
+    const group = current.get(key) ?? [];
+    group.push(row);
+    current.set(key, group);
+  }
+  // Hold membership and order while reading, but keep existing rows current.
+  const displayed = held?.map((row) => current.get(rowKey(row))?.shift() ?? row) ?? rows;
   const heldCounts = new Map<string, number>();
   for (const row of displayed) {
-    const key = activityKey(row);
+    const key = rowKey(row);
     heldCounts.set(key, (heldCounts.get(key) ?? 0) + 1);
   }
   const newCount = held
     ? rows.filter((row) => {
-        const key = activityKey(row);
+        const key = rowKey(row);
         const count = heldCounts.get(key) ?? 0;
         heldCounts.set(key, Math.max(0, count - 1));
         return count === 0;

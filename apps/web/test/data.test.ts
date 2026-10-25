@@ -509,6 +509,15 @@ describe("activity reconciliation", () => {
     expect(snapshot()).toBe(before);
   });
 
+  it("updates a discovered run ticket in a delta without keeping the old copy", async () => {
+    const initial = { ...row(Date.now(), "started"), kind: "run-start", runId: "run-1", ref: null };
+    const fresh = { ...initial, ref: "shop-app#42", text: "started on shop-app#42" };
+    await load([initial], [fresh]);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([fresh]);
+  });
+
   it("updates a run-start row's live status, PRs and summary on the next full load", async () => {
     const initial = {
       ...row(Date.now() - 100, "started"),

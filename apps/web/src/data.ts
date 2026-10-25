@@ -230,6 +230,9 @@ export const ACTIONS = {
 
 /** Stable identity for the activity API, which currently supplies no source id. */
 export function activityKey(row: ActivityRow): string {
+  if (row.runId && (row.kind === "run-start" || row.kind === "run-end")) {
+    return JSON.stringify([row.kind, row.runId]);
+  }
   return JSON.stringify([
     row.at,
     row.who,

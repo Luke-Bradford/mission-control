@@ -1848,6 +1848,71 @@ describe("Activity panel", () => {
     expect(nodes()).toHaveLength(3);
   });
 
+  it("updates discovered run tickets on the same DOM row, including while reading", async () => {
+    let current: [ActivityRow] = [
+      {
+        at: NOW,
+        who: "studio",
+        kind: "run-start",
+        runId: "run-1",
+        text: "started",
+        ref: null,
+        url: null,
+        status: "running",
+        prs: [],
+        summary: null,
+      },
+    ];
+    stub({ activityNow: () => current });
+    const { container } = render(<Overview />);
+    await screen.findByText("started");
+    const list = container.querySelector("#actList") as HTMLElement;
+    const node = list.querySelector(".arow");
+    current = [{ ...current[0], ref: "shop-app#42", text: "started on shop-app#42" }];
+    act(() => hub.refetchAll());
+    await screen.findByText("started on");
+    expect(list.querySelector(".arow")).toBe(node);
+    list.scrollTop = 80;
+    fireEvent.scroll(list);
+    current = [
+      {
+        ...current[0],
+        text: "updated while reading",
+        status: "ok",
+        summary: "finished",
+        prs: [prView({ number: 42 })],
+      },
+    ];
+    act(() => hub.refetchAll());
+    await screen.findByText("updated while reading");
+    expect(list.querySelector(".arow")).toBe(node);
+    expect(list.textContent).toContain("PR #42");
+    expect(list.scrollTop).toBe(80);
+    expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+  });
+
+  it("refreshes attention text in place while reading without new entries", async () => {
+    let current: [AttentionItem] = [item({ key: "attention-1", text: "Original decision" })];
+    const fallback = stub();
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
+      input === "/api/attention"
+        ? Promise.resolve(new Response(JSON.stringify(current)))
+        : fallback(input, init),
+    );
+    const { container } = render(<Overview />);
+    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
+    await screen.findByText("Original decision");
+    const list = container.querySelector("#actList") as HTMLElement;
+    const node = list.querySelector(".arow");
+    list.scrollTop = 80;
+    fireEvent.scroll(list);
+    current = [{ ...current[0], text: "Updated decision" }];
+    act(() => hub.refetchAll());
+    await screen.findByText("Updated decision");
+    expect(list.querySelector(".arow")).toBe(node);
+    expect(list.scrollTop).toBe(80);
+  });
+
   it("holds new rows while scrolled down and shows N new without moving the reader", async () => {
     const base = {
       at: NOW,
