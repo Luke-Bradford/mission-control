@@ -248,6 +248,37 @@ describe("crew call ring", () => {
     });
   });
 
+  it("publishes only the difference when Codex completion revises edit churn", () => {
+    const { ring, transcriptPath } = setup("codex");
+    const received: MapDelta[] = [];
+    ring.subscribe("repo", (delta) => received.push(delta));
+    for (const [method, changes] of [
+      [
+        "item/started",
+        [
+          { path: "file.ts", diff: "-before\n+after\n" },
+          { path: "removed.ts", diff: "+line\n" },
+        ],
+      ],
+      ["item/completed", [{ path: "file.ts", diff: "-before\n+after\n+extra\n" }]],
+    ]) {
+      appendFileSync(
+        transcriptPath,
+        `${JSON.stringify({ method, params: { item: { id: "revised", type: "fileChange", changes } } })}\n`,
+      );
+      ring.poll();
+    }
+    expect(received.filter((d) => d.type === "edit").map((d) => [d.file, d.add, d.rem])).toEqual([
+      ["file.ts", 1, 1],
+      ["removed.ts", 1, 0],
+      ["file.ts", 1, 0],
+      ["removed.ts", -1, 0],
+    ]);
+    expect(ring.calls("seat")[0]?.churn).toEqual([
+      { file: "file.ts", add: 2, rem: 1, source: "churn" },
+    ]);
+  });
+
   it("counts diff content beginning with plus or minus and missing final newlines", () => {
     const { ring, transcriptPath } = setup("codex");
     const item = {

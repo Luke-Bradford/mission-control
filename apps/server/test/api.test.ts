@@ -3568,6 +3568,50 @@ describe("SSE stream", () => {
     },
   );
 
+  it.each(["cleared", "reassigned"] as const)(
+    "finishes the previous run's calls after its seat is %s",
+    async (transition) => {
+      withCrew();
+      const transcriptPath = join(dir, "previous-map.jsonl");
+      const frames = readFileSync(resolve(import.meta.dirname, "fixtures/map/claude.jsonl"), "utf8")
+        .trim()
+        .split("\n");
+      writeFileSync(transcriptPath, `${frames[0]}\n`);
+      store.upsertRun(run({ id: "previous-map", agentId: "guido-1", transcriptPath }));
+      const session = {
+        seatId: "guido-1",
+        runId: "previous-map",
+        cliSessionId: null,
+        state: "running" as const,
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      };
+      store.setSeatSession(session);
+      const client = await open("/api/stream?map=shop-app");
+      await client.until('"type":"call.start"');
+      store.setSeatSession({
+        ...session,
+        runId: transition === "cleared" ? null : "next-map",
+        worktree: null,
+      });
+      appendFileSync(transcriptPath, `${frames[1]}\n`);
+      const write = vi.spyOn(client.res.raw.res, "write");
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              write.mock.calls.some(([chunk]) => String(chunk).includes('"type":"call.end"')),
+            ).toBe(true);
+          },
+          { timeout: 2000 },
+        );
+      } finally {
+        client.res.raw.res.emit("close");
+      }
+    },
+  );
+
   it("emits event: changed with the topic, sends heartbeats, and cleans up on close", async () => {
     const s = await open();
     expect(s.res.statusCode).toBe(200);

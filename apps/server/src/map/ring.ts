@@ -94,9 +94,22 @@ export class CallRing {
     }
   }
 
-  private edits(source: RingSource, call: RingCall): void {
-    for (const { file, add, rem } of call.churn)
-      this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
+  private edits(source: RingSource, call: RingCall, previous: MapChange[] = []): void {
+    const changes = new Map<string, { add: number; rem: number }>();
+    for (const [churn, sign] of [
+      [call.churn, 1],
+      [previous, -1],
+    ] as const) {
+      for (const { file, add, rem } of churn) {
+        const total = changes.get(file) ?? { add: 0, rem: 0 };
+        total.add += sign * add;
+        total.rem += sign * rem;
+        changes.set(file, total);
+      }
+    }
+    for (const [file, { add, rem }] of changes)
+      if (add || rem)
+        this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
   }
 
   calls(seat: string): RingCall[] {
@@ -292,12 +305,12 @@ export class CallRing {
         : {}),
     };
     if (found) {
-      const changed = JSON.stringify(found.churn) !== JSON.stringify(call.churn);
+      const previous = found.churn;
       found.files = call.files;
       found.churn = call.churn;
       found.writeTok = call.writeTok;
       found.detail = call.detail;
-      if (changed) this.edits(source, found);
+      this.edits(source, found, previous);
       return found;
     }
     calls.push(call);

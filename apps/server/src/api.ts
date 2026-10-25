@@ -744,24 +744,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     scheduleNotifications();
   });
+  const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const seats = configuredAgents(config).filter((a) => a.kind === "crew");
-    return store.runsActiveSince(now() - 15 * 60_000).flatMap((run): RingSource[] => {
+    const runs = store.runsActiveSince(now() - 15 * 60_000);
+    const active = new Set(runs.map((run) => run.id));
+    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
+    return runs.flatMap((run): RingSource[] => {
       const seat = seats.find((s) => s.id === run.agentId && s.repoId === run.repoId);
       if (!seat || !run.transcriptPath) return [];
       const held = store.seatSession(seat.id);
-      const cwd = run.loop?.aside?.worktree ?? (held?.runId === run.id ? held.worktree : null);
+      // A cleared or reassigned seat can still have unread results in its previous transcript.
+      const cwd =
+        run.loop?.aside?.worktree ??
+        (held?.runId === run.id ? held.worktree : null) ??
+        mapSources.get(run.id)?.cwd;
       if (!cwd) return [];
-      return [
-        {
-          id: run.id,
-          seat: seat.id,
-          repoId: run.repoId,
-          cwd,
-          transcriptPath: run.transcriptPath,
-          vendor: run.vendor,
-        },
-      ];
+      const source: RingSource = {
+        id: run.id,
+        seat: seat.id,
+        repoId: run.repoId,
+        cwd,
+        transcriptPath: run.transcriptPath,
+        vendor: run.vendor,
+      };
+      mapSources.set(run.id, source);
+      return [source];
     });
   });
   let stopMapRing: (() => void) | undefined;
