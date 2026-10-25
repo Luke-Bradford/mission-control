@@ -45,6 +45,7 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapSnapshot,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -170,6 +171,9 @@ import {
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { MapConflicts } from "./map/conflicts.ts";
+import { CallRing, type RingSource } from "./map/ring.ts";
+import { mapSeats } from "./map/seats.ts";
+import { mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -465,6 +469,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
   const mapConflicts = new MapConflicts();
+  const mapSources = new Map<string, RingSource>();
+  const mapRing = new CallRing(() => {
+    const sources: RingSource[] = [];
+    for (const agent of configuredAgents(config)) {
+      if (agent.kind !== "crew") continue;
+      const seat = store.seatSession(agent.id);
+      const run = store.seatRun(agent.id);
+      const cwd =
+        seat?.worktree ??
+        run?.loop?.aside?.worktree ??
+        (run ? mapSources.get(run.id)?.cwd : undefined);
+      if (cwd && run) {
+        const source: RingSource = {
+          id: run.id,
+          seat: agent.id,
+          repoId: run.repoId,
+          cwd,
+          transcriptPath: run.transcriptPath,
+          vendor: seat?.vendor,
+        };
+        sources.push(source);
+        mapSources.set(run.id, source);
+      }
+    }
+    const active = new Set(sources.map((s) => s.id));
+    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
+    return sources;
+  });
+  let stopMapRing: (() => void) | undefined;
+
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
@@ -1278,7 +1312,49 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
+      // Reader: apps/web/src/data.ts (future Crew Activity Map panel)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map",
+        async (req, reply): Promise<MapSnapshot | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
+          try {
+            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
+              return reply.code(503).send({ error: "map checkout unavailable" });
+            }
+            const tree = await mapTree(checkout);
+            if (!stopMapRing) stopMapRing = mapRing.start();
+            mapRing.poll();
+            const data = mapSeats(
+              sharedCrew().rows.filter((r) => r.kind === "crew" && r.repoId === repo.id),
+              store,
+              mapRing,
+              deps.lock?.state() ?? NO_LOCK,
+              now(),
+            );
+            for (const seat of data.seats) {
+              const context = store.seatSession(seat.seat)?.runId
+                ? await deps.supervisor?.contextUsage(seat.seat).catch(() => null)
+                : null;
+              seat.context = context ? { total: context.total, window: context.window } : null;
+            }
+            return {
+              repoId: repo.id,
+              ...tree,
+              ...data,
+              conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)),
+              // Slice 1b will publish sequenced deltas; none have been emitted yet.
+              seq: 0,
+            };
+          } catch {
+            return reply.code(503).send({ error: "map snapshot unavailable" });
+          }
+        },
+      );
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/conflicts",
         async (req, reply) => {
@@ -2686,6 +2762,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { prefix: API_PREFIX },
   );
 
+  app.addHook("onClose", async () => stopMapRing?.());
   return app;
 }
 
