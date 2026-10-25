@@ -3,6 +3,7 @@
  * status toggle. Each overlay pushes itself on one stack while open, and `Esc` closes the topmost
  * (catalogue §1.6).
  */
+import type { AttentionItem } from "@mc/core";
 import { type KeyboardEvent, useEffect, useRef, useSyncExternalStore } from "react";
 import { itemParam, withItemParam } from "../router.ts";
 import { BUILD_STATUS_KEY, DOCK_KEY, readBool, writeBool } from "../storage.ts";
@@ -115,9 +116,12 @@ export const useAwayOpen = (): boolean => useStore(away);
  * the parameter is replaced out of the URL.
  */
 const item = store<string | null>(null);
+const openedItem = store<AttentionItem | null>(null);
+export const useOpenedItem = (): AttentionItem | null => useStore(openedItem);
 /** The open pushed the history entry that holds `?item=`. */
 let pushed = false;
-export function openItem(key: string): void {
+export function openItem(key: string, proposal?: AttentionItem): void {
+  openedItem.set(proposal?.key === key ? proposal : null);
   item.set(key);
   const to = withItemParam(key);
   if (to === null) return; // the URL already names it
@@ -131,6 +135,7 @@ export function openItem(key: string): void {
   window.history.pushState(null, "", to);
 }
 export function closeItem(): void {
+  openedItem.set(null);
   item.set(null);
   const was = pushed;
   pushed = false;
@@ -143,6 +148,7 @@ export function closeItem(): void {
 }
 /** Show or hide an item whose key the URL already names (a page load, Back, Forward). */
 export function syncItem(key: string | null): void {
+  if (openedItem.get()?.key !== key) openedItem.set(null);
   pushed = false;
   item.set(key);
 }
@@ -278,6 +284,7 @@ export function resetOverlays(): void {
   stack.length = 0;
   help.set(false);
   away.set(false);
+  openedItem.set(null);
   item.set(null);
   buildOn = undefined;
   query?.removeEventListener?.("change", onBreakpoint);

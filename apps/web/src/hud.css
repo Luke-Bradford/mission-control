@@ -4734,3 +4734,19 @@ button.nrow.thread.tagged {
   display: flex;
   gap: 6px;
 }
+
+.queue-focus {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.queue-focus form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+.queue-focus input {
+  min-width: 0;
+  width: 100%;
+}
