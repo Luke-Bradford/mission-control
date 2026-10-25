@@ -1,13 +1,14 @@
 import { existsSync, globSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { CrewVendor, MapCall, MapChange, MapTests } from "@mc/core";
+import type { CrewVendor, MapCall, MapChange, MapDelta, MapTests } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
 
 const KEEP_MS = 15 * 60_000;
+type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
   seat: string;
@@ -60,9 +61,42 @@ export class CallRing {
   private rows = new Map<string, RingCall[]>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
+  private sequences = new Map<string, number>();
+  private listeners = new Map<string, Set<(delta: MapDelta) => void>>();
 
   constructor(sources: () => RingSource[]) {
     this.sources = sources;
+  }
+
+  sequence(repoId: string): number {
+    return this.sequences.get(repoId) ?? 0;
+  }
+
+  subscribe(repoId: string, fn: (delta: MapDelta) => void): () => void {
+    const listeners = this.listeners.get(repoId) ?? new Set();
+    this.listeners.set(repoId, listeners);
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+      if (!listeners.size) this.listeners.delete(repoId);
+    };
+  }
+
+  private publish(repoId: string, delta: DeltaPayload): void {
+    const seq = this.sequence(repoId) + 1;
+    this.sequences.set(repoId, seq);
+    for (const listener of [...(this.listeners.get(repoId) ?? [])]) {
+      try {
+        listener({ ...delta, seq });
+      } catch {
+        // One disconnected client must not interrupt the transcript fold.
+      }
+    }
+  }
+
+  private edits(source: RingSource, call: RingCall): void {
+    for (const { file, add, rem } of call.churn)
+      this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
   }
 
   calls(seat: string): RingCall[] {
@@ -258,13 +292,24 @@ export class CallRing {
         : {}),
     };
     if (found) {
+      const changed = JSON.stringify(found.churn) !== JSON.stringify(call.churn);
       found.files = call.files;
       found.churn = call.churn;
       found.writeTok = call.writeTok;
       found.detail = call.detail;
+      if (changed) this.edits(source, found);
       return found;
     }
     calls.push(call);
+    this.publish(source.repoId, {
+      type: "call.start",
+      seat: source.seat,
+      tool: call.tool,
+      detail: call.detail,
+      files: call.files,
+      ...(call.writeTok === undefined ? {} : { writeTok: call.writeTok }),
+    });
+    this.edits(source, call);
     return call;
   }
 
@@ -288,6 +333,16 @@ export class CallRing {
         ? this.safe(output) || (refused ? "Permission denied" : "Tool failed")
         : null;
     call.tests = call.tool === "Bash" ? tests(output) : null;
+    this.publish(source.repoId, {
+      type: "call.end",
+      seat: source.seat,
+      files: call.files,
+      resultTok: call.resultTok,
+      error: call.error,
+      refused: call.refused,
+      why: call.why,
+      tests: call.tests,
+    });
   }
 
   private fold(source: RingSource, ev: Json, now: number): void {

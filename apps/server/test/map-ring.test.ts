@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { STREAM_TEXT_MAX } from "@mc/core";
+import { type MapDelta, STREAM_TEXT_MAX } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallRing } from "../src/map/ring.ts";
 
@@ -35,6 +35,75 @@ function setup(vendor: "claude" | "codex") {
 }
 
 describe("crew call ring", () => {
+  it("publishes per-repo sequences and lets a client detect a gap and refetch", () => {
+    const { ring, transcriptPath, lines } = setup("claude");
+    const received: MapDelta[] = [];
+    const stop = ring.subscribe("repo", (delta) => received.push(delta));
+    appendFileSync(transcriptPath, `${lines[0]}\n${lines[1]}\n`);
+    ring.poll();
+    expect(received.map((d) => [d.seq, d.type])).toEqual([
+      [1, "call.start"],
+      [2, "edit"],
+      [3, "call.end"],
+    ]);
+    expect(ring.sequence("repo")).toBe(3);
+    expect(ring.sequence("other")).toBe(0);
+    // The future panel must refetch its snapshot on reconnect or any missing sequence (§6).
+    const refetch = vi.fn();
+    let seq = 0;
+    for (const delta of received.filter((d) => d.seq !== 2)) {
+      if (delta.seq !== seq + 1) refetch();
+      seq = delta.seq;
+    }
+    expect(refetch).toHaveBeenCalledTimes(1);
+    stop();
+    appendFileSync(transcriptPath, `${lines.slice(2).join("\n")}\n`);
+    ring.poll();
+    expect(received).toHaveLength(3);
+    expect(ring.sequence("repo")).toBeGreaterThan(3);
+  });
+
+  it("keeps repo sequences independent across interleaved calls and reconnects", () => {
+    const { cwd, transcriptPath, lines } = setup("claude");
+    const otherPath = join(cwd, "other.jsonl");
+    writeFileSync(otherPath, "");
+    const ring = new CallRing(() => [
+      { id: "one", seat: "one", repoId: "one", cwd, transcriptPath },
+      { id: "two", seat: "two", repoId: "two", cwd, transcriptPath: otherPath },
+    ]);
+    const one: MapDelta[] = [];
+    const two: MapDelta[] = [];
+    const stop = ring.subscribe("one", (delta) => one.push(delta));
+    ring.subscribe("two", (delta) => two.push(delta));
+    appendFileSync(transcriptPath, `${lines[0]}\n`);
+    ring.poll();
+    appendFileSync(otherPath, `${lines[0]}\n${lines[1]}\n`);
+    ring.poll();
+    stop();
+    appendFileSync(transcriptPath, `${lines[1]}\n`);
+    ring.poll();
+    expect(one.map((d) => [d.seq, d.type, "seat" in d && d.seat])).toEqual([
+      [1, "call.start", "one"],
+      [2, "edit", "one"],
+    ]);
+    expect(two.map((d) => [d.seq, d.type, "seat" in d && d.seat])).toEqual([
+      [1, "call.start", "two"],
+      [2, "edit", "two"],
+      [3, "call.end", "two"],
+    ]);
+    const refetch = vi.fn(() => ring.sequence("one"));
+    const seq = refetch(); // Reconnect starts with a new snapshot, not replayed events.
+    const resumed: MapDelta[] = [];
+    ring.subscribe("one", (delta) => resumed.push(delta));
+    appendFileSync(transcriptPath, `${lines.slice(2).join("\n")}\n`);
+    ring.poll();
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(resumed.map((d) => d.seq)).toEqual(resumed.map((_, i) => seq + i + 1));
+    expect(resumed.at(-1)?.seq).toBe(ring.sequence("one"));
+    expect(ring.sequence("one")).toBeGreaterThan(3);
+    expect(ring.sequence("two")).toBe(3);
+  });
+
   for (const vendor of ["claude", "codex"] as const) {
     it(`${vendor}: tails calls within two seconds, closes results and measures raw payloads`, () => {
       vi.useFakeTimers();
