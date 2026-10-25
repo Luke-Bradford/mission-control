@@ -45,7 +45,8 @@ describe("Pipeline", () => {
         {
           ...ready,
           count: 10,
-          cards: Array.from({ length: 9 }, (_, i) => ({
+          // The overview endpoint limits each stage to its chip capacity.
+          cards: Array.from({ length: 8 }, (_, i) => ({
             ...card,
             ticket: i + 1,
             title: `Ready ticket ${i + 1}`,
