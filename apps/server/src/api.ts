@@ -45,6 +45,7 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  type MapSnapshot,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -171,6 +172,8 @@ import { LocalNotifications, NotificationPreferencesBody } from "./local-notific
 import { loopTries } from "./loophistory.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
+import { mapSeats } from "./map/seats.ts";
+import { mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -467,6 +470,59 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
   const mapConflicts = new MapConflicts();
+  const mapSources = new Map<string, RingSource>();
+  const mapRing = new CallRing(() => {
+    const sources: RingSource[] = [];
+    const recent = store.runsActiveSince(now() - 15 * 60_000);
+    for (const agent of configuredAgents(config)) {
+      if (agent.kind !== "crew") continue;
+      const seat = store.seatSession(agent.id);
+      const current = store.seatRun(agent.id);
+      const flight = agent.seat.role === "FLIGHT";
+      const runs = [
+        ...new Map(
+          [
+            ...(current ? [current] : []),
+            ...(!flight
+              ? [
+                  ...store.mapAsideRuns(agent.id),
+                  ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
+                ]
+              : []),
+          ].map((r) => [r.id, r]),
+        ).values(),
+      ];
+      for (const run of runs) {
+        const repos = flight ? config.repos : config.repos.filter((r) => r.id === run.repoId);
+        for (const repo of repos) {
+          const id = flight ? `${run.id}:${repo.id}` : run.id;
+          const cwd = flight
+            ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
+            : ((seat?.runId === run.id ? seat.worktree : null) ??
+              run.loop?.aside?.worktree ??
+              mapSources.get(id)?.cwd);
+          if (!cwd) continue;
+          const source: RingSource = {
+            id,
+            seat: agent.id,
+            repoId: repo.id,
+            cwd,
+            transcriptPath: run.transcriptPath,
+            vendor: run.vendor ?? seat?.vendor,
+            turnScoped: flight,
+            current: current?.id === run.id,
+          };
+          sources.push(source);
+          mapSources.set(id, source);
+        }
+      }
+    }
+    const active = new Set(sources.map((s) => s.id));
+    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
+    return sources;
+  });
+  let stopMapRing: (() => void) | undefined;
+
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
@@ -745,35 +801,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     scheduleNotifications();
   });
-  const mapSources = new Map<string, RingSource>();
-  const mapRing = new CallRing(() => {
-    const seats = configuredAgents(config).filter((a) => a.kind === "crew");
-    const runs = store.runsActiveSince(now() - 15 * 60_000);
-    const active = new Set(runs.map((run) => run.id));
-    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
-    return runs.flatMap((run): RingSource[] => {
-      const seat = seats.find((s) => s.id === run.agentId && s.repoId === run.repoId);
-      if (!seat || !run.transcriptPath) return [];
-      const held = store.seatSession(seat.id);
-      // A cleared or reassigned seat can still have unread results in its previous transcript.
-      const cwd =
-        run.loop?.aside?.worktree ??
-        (held?.runId === run.id ? held.worktree : null) ??
-        mapSources.get(run.id)?.cwd;
-      if (!cwd) return [];
-      const source: RingSource = {
-        id: run.id,
-        seat: seat.id,
-        repoId: run.repoId,
-        cwd,
-        transcriptPath: run.transcriptPath,
-        vendor: run.vendor,
-      };
-      mapSources.set(run.id, source);
-      return [source];
-    });
-  });
-  let stopMapRing: (() => void) | undefined;
   app.addHook("onReady", async () => {
     stopMapRing = mapRing.start();
   });
@@ -1312,6 +1339,60 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
         return { repo: view, backup: basename(result.backup) };
       });
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map panel)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map",
+        async (req, reply): Promise<MapSnapshot | FastifyReply> => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
+          try {
+            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
+              return reply.code(503).send({ error: "map checkout unavailable" });
+            }
+            const tree = await mapTree(checkout);
+            if (!stopMapRing) stopMapRing = mapRing.start();
+            mapRing.poll();
+            const data = mapSeats(
+              sharedCrew()
+                .rows.filter(
+                  (r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"),
+                )
+                .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r)),
+              store,
+              mapRing,
+              deps.lock?.state() ?? NO_LOCK,
+              now(),
+            );
+            for (const seat of data.seats) {
+              const context = store.seatSession(
+                seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
+              )?.runId
+                ? await deps.supervisor
+                    ?.contextUsage(
+                      seat.seat === "FLIGHT"
+                        ? (flightSeat(config)?.seat.id ?? seat.seat)
+                        : seat.seat,
+                    )
+                    .catch(() => null)
+                : null;
+              seat.context = context ? { total: context.total, window: context.window } : null;
+            }
+            return {
+              repoId: repo.id,
+              ...tree,
+              ...data,
+              conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)),
+              // Slice 1b will publish sequenced deltas; none have been emitted yet.
+              seq: 0,
+            };
+          } catch {
+            return reply.code(503).send({ error: "map snapshot unavailable" });
+          }
+        },
+      );
 
       // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
@@ -2740,6 +2821,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { prefix: API_PREFIX },
   );
 
+  app.addHook("onClose", async () => stopMapRing?.());
   return app;
 }
 

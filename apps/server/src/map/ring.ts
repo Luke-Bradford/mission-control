@@ -17,6 +17,7 @@ export interface RingSource {
   cwd: string;
   transcriptPath: string;
   vendor?: CrewVendor;
+  turnScoped?: boolean;
   current?: boolean;
 }
 export interface RingCall extends MapCall {
@@ -58,8 +59,23 @@ function tests(output: string): MapTests {
   return { runner: "vitest", status: failed ? "failed" : "passed", passed, failed };
 }
 
+interface RunScope {
+  read: string[];
+  modified: MapChange[];
+  editedAt: number;
+  tests: { tests: MapTests; at: number } | null;
+}
+
 /** Raw payload measurements stay separate from the cleaned strings exposed to the map. */
 export class CallRing {
+  private runScopes = new Map<string, RunScope>();
+
+  scope(runId: string): RunScope {
+    return structuredClone(
+      this.runScopes.get(runId) ?? { read: [], modified: [], editedAt: 0, tests: null },
+    );
+  }
+
   private rows = new Map<string, RingCall[]>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
@@ -166,11 +182,13 @@ export class CallRing {
       }
       for (;;) {
         const next = readNewLines(source.transcriptPath, tail.offset);
-        if (next.reset)
+        if (next.reset) {
+          this.runScopes.delete(source.id);
           this.rows.set(
             source.seat,
             (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
           );
+        }
         for (const line of next.lines) {
           try {
             const ev: unknown = JSON.parse(line);
@@ -200,8 +218,13 @@ export class CallRing {
       else this.rows.delete(seat);
     }
     const active = new Set(sources.map((s) => s.id));
+    for (const id of this.tails.keys()) {
+      if (!active.has(id)) {
+        this.tails.delete(id);
+        this.runScopes.delete(id);
+      }
+    }
     for (const id of this.diffs.keys()) if (!active.has(id)) this.diffs.delete(id);
-    for (const id of this.tails.keys()) if (!active.has(id)) this.tails.delete(id);
   }
 
   private safe(s: string): string {
@@ -390,6 +413,32 @@ export class CallRing {
         ? this.safe(output) || (refused ? "Permission denied" : "Tool failed")
         : null;
     call.tests = call.tool === "Bash" ? tests(output) : null;
+    const scope = this.runScopes.get(source.id) ?? {
+      read: [],
+      modified: [],
+      editedAt: 0,
+      tests: null,
+    };
+    this.runScopes.set(source.id, scope);
+    if (!error && !refused) {
+      if (call.writeTok === undefined) scope.read = [...new Set([...scope.read, ...call.files])];
+      for (const change of call.churn) {
+        const previous = scope.modified.find((c) => c.file === change.file);
+        if (previous) {
+          previous.add += change.add;
+          previous.rem += change.rem;
+        } else scope.modified.push({ ...change });
+        scope.editedAt = Math.max(scope.editedAt, call.since);
+      }
+    }
+    if (
+      call.tests &&
+      !refused &&
+      (call.tests.runner !== null ||
+        /\b(?:test|tests|pytest|jest|vitest|mocha)\b/.test(call.detail)) &&
+      at >= (scope.tests?.at ?? 0)
+    )
+      scope.tests = { tests: call.tests, at };
     this.publish(source.repoId, {
       type: "call.end",
       seat: source.seat,
@@ -404,6 +453,18 @@ export class CallRing {
 
   private fold(source: RingSource, ev: Json, now: number): void {
     const at = timeOf(ev.timestamp) ?? now;
+    if (
+      source.turnScoped &&
+      (ev.type === "result" || ev.method === "turn/completed" || ev.method === "turn/started")
+    ) {
+      this.runScopes.delete(source.id);
+      this.rows.set(
+        source.seat,
+        (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
+      );
+      return;
+    }
+
     if (transcriptVendor(ev, source.vendor) === "codex") {
       const p = isObj(ev.params) ? ev.params : {};
       if (!isObj(p.item)) return;

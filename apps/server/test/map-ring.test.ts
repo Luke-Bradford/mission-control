@@ -385,3 +385,16 @@ describe("crew call ring", () => {
     expect(ring.calls("seat")).toEqual([]);
   });
 });
+
+it("retains branch scope and last tests after calls age out of the ring", () => {
+  const { ring, transcriptPath, lines } = setup("claude");
+  appendFileSync(transcriptPath, `${lines.join("\n")}\n`);
+  ring.poll();
+  vi.advanceTimersByTime(16 * 60_000);
+  ring.poll();
+  expect(ring.calls("seat")).toEqual([]);
+  expect(ring.scope("run")).toMatchObject({
+    modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }],
+    tests: { tests: { runner: "vitest", status: "failed", passed: 2, failed: 1 } },
+  });
+});

@@ -91,6 +91,7 @@ import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
+import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const HOUR = 3600e3;
@@ -469,6 +470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
+  ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
@@ -1046,7 +1048,7 @@ describe("local access", () => {
         expect(r.json()).toEqual({ error: "map collector unavailable" });
         continue;
       }
-      if (url === "/api/repos/shop-app/map/conflicts") {
+      if (url === "/api/repos/shop-app/map/conflicts" || url === "/api/repos/shop-app/map") {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
@@ -2640,6 +2642,333 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
+  it("serves a fixture repo's map snapshot under 300 KB, excluding observed loops", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.statusCode).toBe(200);
+    expect(Buffer.byteLength(response.body)).toBeLessThan(300_000);
+    expect(response.json()).toMatchObject({
+      repoId: "shop-app",
+      seq: 0,
+      conflicts: [],
+      findings: [],
+      seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
+    });
+    expect(response.json().tree).toContainEqual(
+      expect.objectContaining({ path: "packages/core/src/map.ts", lines: expect.any(Number) }),
+    );
+    expect(response.json().imports).toContainEqual({
+      from: "packages/core/src/map.ts",
+      to: "packages/core/src/types.ts",
+    });
+    expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
+  });
+
+  for (const vendor of ["claude", "codex"] as const) {
+    it(`scopes FLIGHT ${vendor} activity to the current turn and selected repo`, async () => {
+      withCrew();
+      const session = config.crew?.sessions[0];
+      if (!session) throw new Error("fixture session missing");
+      session.checkout = mapCheckout(dir);
+      session.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const transcriptPath = join(dir, "flight.jsonl");
+      const call =
+        vendor === "claude"
+          ? {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "read",
+                    name: "Read",
+                    input: { file_path: join(session.checkout, "package.json") },
+                  },
+                ],
+              },
+            }
+          : {
+              method: "item/started",
+              params: {
+                item: {
+                  id: "read",
+                  type: "commandExecution",
+                  command: `cat ${join(session.checkout, "package.json")}`,
+                },
+              },
+            };
+      const elsewhere =
+        vendor === "claude"
+          ? {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "outside",
+                    name: "Read",
+                    input: { file_path: join(dir, "outside.ts") },
+                  },
+                ],
+              },
+            }
+          : {
+              method: "item/started",
+              params: {
+                item: {
+                  id: "outside",
+                  type: "commandExecution",
+                  command: `cat ${join(dir, "outside.ts")}`,
+                },
+              },
+            };
+      writeFileSync(join(dir, "outside.ts"), "outside\n");
+      writeFileSync(transcriptPath, `${JSON.stringify(call)}\n${JSON.stringify(elsewhere)}\n`);
+      store.upsertRun(run({ id: "flight-turn", agentId: "flight-1", transcriptPath, vendor }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-turn",
+        cliSessionId: null,
+        vendor,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const response = await get("/api/repos/shop-app/map");
+      expect(
+        response.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT"),
+      ).toMatchObject({
+        ticket: null,
+        calls: [expect.objectContaining({ files: ["package.json"] })],
+      });
+      const end = vendor === "claude" ? { type: "result" } : { method: "turn/completed" };
+      appendFileSync(transcriptPath, `${JSON.stringify(end)}\n`);
+      const ended = await get("/api/repos/shop-app/map");
+      expect(ended.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT")).toMatchObject({
+        calls: [],
+        scope: { read: [], modified: [] },
+        recent: [],
+      });
+    });
+  }
+
+  it("keeps aside churn after reassignment and drops it after merge", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    const transcriptPath = join(dir, "aside.jsonl");
+    writeFileSync(
+      transcriptPath,
+      readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url)),
+    );
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        transcriptPath,
+        branch: "aside-branch",
+        loop: { ...NEW_LOOP, aside: { worktree: dir, wake: false } },
+      }),
+    );
+    store.upsertRun(run({ id: "next", agentId: "guido-1", startedAt: NOW + 1 }));
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.json().seats[0].scope.modified).toEqual([
+      { file: "file.ts", add: 2, rem: 1, source: "churn" },
+    ]);
+    expect(response.json().seats[0].scope.read).toEqual([]);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 7,
+          title: "Fixture",
+          url: "https://example.invalid/pr",
+          branch: "aside-branch",
+          ticket: null,
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: NOW,
+          mergeCommitSha: null,
+          headSha: null,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          checks: [],
+          closingIssues: [],
+        },
+      ],
+      NOW,
+    );
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].scope.modified).toEqual([]);
+  });
+
+  it("uses the loop park reason and its state age for waiting", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    store.upsertRun(
+      run({
+        id: "parked-loop",
+        agentId: "guido-1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "operator", reason: "Check the plan", ended: false },
+        },
+      }),
+    );
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.json().seats[0].badges.waiting).toEqual({
+      kind: "parked",
+      reason: "Check the plan",
+      since: response.json().seats[0].since,
+    });
+  });
+
+  for (const vendor of ["claude", "codex"] as const) {
+    it(`assembles ${vendor} map calls, churn, parsed tests and measured context`, async () => {
+      withCrew();
+      const session = config.crew?.sessions[0];
+      if (!session) throw new Error("fixture session missing");
+      session.checkout = mapCheckout(dir);
+      const transcriptPath = join(dir, "map.jsonl");
+      writeFileSync(join(dir, "file.ts"), "before\n");
+      const lines = readFileSync(new URL(`./fixtures/map/${vendor}.jsonl`, import.meta.url), "utf8")
+        .trim()
+        .split("\n");
+      writeFileSync(transcriptPath, `${lines.join("\n")}\n`);
+      store.upsertRun(
+        run({ id: "map-run", agentId: "guido-1", transcriptPath, ticket: "shop-app#7" }),
+      );
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "map-run",
+        cliSessionId: null,
+        vendor,
+        state: "running",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      const question = store.addQuestion({
+        agentId: "guido-1",
+        runId: "map-run",
+        text: "Which approach?",
+        at: NOW,
+      });
+      store.addQuestion({
+        agentId: "guido-1",
+        runId: "previous-run",
+        text: "Old question",
+        at: NOW - 1,
+      });
+      for (const round of [1, 2]) {
+        const reviewId = store.requestReview({
+          authorRunId: "map-run",
+          repoId: "shop-app",
+          seatId: "retro-1",
+          prNumber: 7,
+          sha: String(round).repeat(40),
+          epoch: 1,
+          attempt: round,
+          round,
+          at: NOW + round,
+        });
+        if (reviewId === null) throw new Error("fixture review missing");
+        store.setReviewState(reviewId, ["queued"], "running", {
+          at: NOW + round,
+          runId: `review-${round}`,
+        });
+        store.recordFindings(reviewId, `review-${round}`, {
+          verdict: { spec: "pass", quality: "fail" },
+          summary: "Check boundary",
+          findings: [
+            {
+              severity: round === 1 ? "Critical" : "Important",
+              file: "file.ts",
+              line: round,
+              summary: "Check input",
+              scenario: "Empty input",
+              fix: "Handle empty input",
+            },
+          ],
+          at: NOW + round,
+        });
+      }
+      const a = buildApp({ config, store, bus, now: () => clock, supervisor: stubSupervisor() });
+      try {
+        const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+        expect(response.statusCode).toBe(200);
+        expect(response.json().findings).toEqual([
+          expect.objectContaining({
+            seat: "guido-1",
+            ticket: 7,
+            round: 2,
+            severity: "Important",
+            line: 2,
+          }),
+        ]);
+        expect(response.json().seats[0].badges.questions).toEqual([
+          { id: question, from: "guido-1", to: "CAPCOM", ticket: 7, since: NOW },
+        ]);
+        expect(response.json().seats[0].badges.review).toMatchObject({
+          round: 2,
+          counts: { Critical: 0, Important: 1, Minor: 0 },
+        });
+        expect(response.json().seats[0]).toMatchObject({
+          seat: "guido-1",
+          ticket: 7,
+          context: { total: 10, window: 100 },
+          scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
+          badges: {
+            tests: { runner: "vitest", status: "failed", passed: 2, failed: 1, editedSince: false },
+            failures: [expect.objectContaining({ refused: true })],
+          },
+        });
+        appendFileSync(transcriptPath, `${(lines[4] as string).replaceAll("denied", "pending")}\n`);
+        const active = (await a.inject({ method: "GET", url: "/api/repos/shop-app/map" })).json();
+        expect(active.seats[0].calls).toEqual([
+          expect.objectContaining({ files: ["file.ts"], since: expect.any(Number) }),
+        ]);
+        store.setSeatSession({
+          seatId: "guido-1",
+          runId: "map-run",
+          cliSessionId: null,
+          vendor,
+          state: "parked",
+          reason: "Waiting for input",
+          worktree: dir,
+          updatedAt: NOW,
+        });
+        clock += 2100;
+        const parked = (await a.inject({ method: "GET", url: "/api/repos/shop-app/map" })).json();
+        expect(parked.seats[0]).toMatchObject({
+          calls: [],
+          scope: { read: [], modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
+          badges: { waiting: { kind: "parked", since: NOW, reason: "Waiting for input" } },
+        });
+      } finally {
+        await a.close();
+      }
+    });
+  }
   it("exposes repo-scoped modified seat entries from the live map ring", async () => {
     const cwd = join(dir, "diff-checkout");
     mkdirSync(cwd);
