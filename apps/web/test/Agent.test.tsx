@@ -273,6 +273,16 @@ describe("Agent page: what the seat is doing", () => {
 });
 
 describe("Agent page: what past runs were", () => {
+  it("opens the run named by an activity deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({ runs: [rv({ id: "linked-run", summary: "Linked summary" })] });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click($(container, "#loopP .runrow:not(.head)") as HTMLElement);
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
   const SUMMARY = "Cached the quotes. ".repeat(20).trim();
 
   it("each run shows its ticket's title beside the number", async () => {

@@ -6,7 +6,7 @@ import {
   runPill,
   startOfLocalDay,
 } from "@mc/core";
-import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { BUILD_LOOP_TEMPLATE, isLoopInFlight, runElapsed, runPrs } from "../crew.ts";
@@ -17,6 +17,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { useSearch } from "../router.ts";
 import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
 import { LoopTimeline } from "./LoopTimeline.tsx";
 import { type LoopLimits, runLimits } from "./loopView.ts";
@@ -112,6 +113,13 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
         ? "steps"
         : "runs";
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const requestedRun = new URLSearchParams(useSearch()).get("run");
+  useEffect(() => {
+    if (requestedRun) {
+      setPicked({ view: "runs", inFlight, runId });
+      setOpen(new Set([requestedRun]));
+    }
+  }, [requestedRun, inFlight, runId]);
   const toggle = (id: string) =>
     setOpen((prev) => {
       const next = new Set(prev);

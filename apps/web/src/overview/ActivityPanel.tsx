@@ -21,7 +21,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { itemPath } from "../router.ts";
+import { agentPath, followLink, itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 
 type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
@@ -367,7 +367,23 @@ export function ActivityPanel() {
               <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
               <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind] ?? FALLBACK_GLYPH}</span>
               <span className="log-who ellip" title={e.who}>
-                {agent ? (
+                {e.runId ? (
+                  <a
+                    href={`${agentPath(e.who)}?run=${encodeURIComponent(e.runId)}`}
+                    onClick={(event) =>
+                      followLink(
+                        event,
+                        `${agentPath(e.who)}?run=${encodeURIComponent(e.runId ?? "")}`,
+                      )
+                    }
+                  >
+                    {agent ? (
+                      <AgentTag id={agent.id} index={agent.index} sm />
+                    ) : (
+                      <span className="muted">{e.who}</span>
+                    )}
+                  </a>
+                ) : agent ? (
                   <AgentTag id={agent.id} index={agent.index} sm />
                 ) : (
                   <span className="muted">{e.who}</span>
