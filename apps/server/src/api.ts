@@ -2138,6 +2138,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
+      // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
+      api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        return { runId: run.id, attempts: store.runAttempts(run.id) };
+      });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
