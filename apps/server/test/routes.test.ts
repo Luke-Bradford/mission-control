@@ -175,6 +175,10 @@ describe("the route table", () => {
     expect(routes).toContain("PUT /api/flight/memory/:repo/:topic");
     expect(routes).toContain("DELETE /api/flight/memory/:repo/:topic");
     expect(routes).toContain("POST /api/seats/:id/start");
+    expect(routes).toContain("GET /api/seats/:id/focus");
+    expect(routes).toContain("POST /api/seats/:id/focus");
+    expect(routes).toContain("POST /api/seats/:id/queue/reorder");
+    expect(routes).toContain("POST /api/queue/reorder/:key");
     expect(routes).toContain("GET /api/runs/:id/attempts");
     expect(routes).toContain("GET /api/attention/:key");
     expect(routes).toContain("GET /api/attention/:key/discussion");
