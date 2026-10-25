@@ -193,6 +193,12 @@ import {
   startSession,
 } from "./session.ts";
 
+/** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
+export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
+  const key = createHash("sha256").update(`${dbPath}:${runId}`).digest("hex").slice(0, 12);
+  return `/tmp/m${uid.toString(36)}/${key}`;
+}
+
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
 /** A running seat's transcript is folded at most this often while it writes. */
@@ -1090,6 +1096,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           r.runId === null ? [] : [basename(crewKeeperDir(deps.dbPath, r.runId))],
         ),
       );
+      const ended = store.runsActiveSince(0).filter((r) => r.endedAt !== null);
+      const endedKeepers = new Map(
+        ended.map((r) => [basename(crewKeeperDir(deps.dbPath, r.id)), r.id]),
+      );
+      const removeOrphan = (folder: string) => {
+        rmSync(folder, { recursive: true, force: true });
+        const runId = endedKeepers.get(basename(folder));
+        if (runId !== undefined) removeRunFiles(runId);
+      };
       const dir = crewDir(deps.dbPath);
       const codexHomes = new Set(
         store
@@ -1105,13 +1120,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         // a keeper's folder of a run that is no longer active: its keeper and CLI are ended, then it goes
         if (CREW_KEEPER_DIR.test(name)) {
           const folder = join(dir, name);
-          if (keeping.has(name)) continue;
+          if (keeping.has(name) && !endedKeepers.has(name)) continue;
           if (!keeperAlive(folder)) {
-            rmSync(folder, { recursive: true, force: true });
+            removeOrphan(folder);
             continue;
           }
           void endKeeper(folder, keeperEndWait(), log).then((ended) => {
-            if (ended) rmSync(folder, { recursive: true, force: true });
+            if (ended) removeOrphan(folder);
             else log(`could not end the orphan keeper in ${folder}; its folder is kept`);
           });
           continue;
@@ -1124,6 +1139,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!stale) continue;
         rmSync(join(dir, name), { force: true });
       }
+      // Also covers a crash after the keeper folder went but before its temp root did.
+      for (const run of ended) removeRunFiles(run.id);
     } catch (e) {
       log(`could not clear old run files: ${errText(e)}`);
     }
@@ -1346,7 +1363,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: [...(deps.commandArgs ?? []), ...args],
           cwd,
           transcriptPath: run.transcriptPath,
-          env: crewEnv(info.seat.id, tmp),
+          env: crewEnv(info.seat.id, tmpPath),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
           dir: crewKeeperDir(deps.dbPath, run.id),
@@ -1405,10 +1422,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function seatTmp(runId: string): string {
-    // Claude 2.1.308 falls back to /tmp when its temp path exceeds 44 bytes. Keep even the
-    // canonical macOS /private/tmp path plus the CLI's claude-<uid> suffix below that limit.
-    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 12);
-    return `/tmp/mc-runs/${key}`;
+    return crewTempRoot(deps.dbPath, runId, process.getuid?.() ?? 0);
   }
 
   /**

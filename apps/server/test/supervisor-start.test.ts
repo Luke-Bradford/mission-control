@@ -77,6 +77,7 @@ import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
+  crewTempRoot,
   type Supervisor,
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
@@ -631,6 +632,17 @@ describe("startRun", () => {
     expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
   });
 
+  it.each([1000, 9999999999])(
+    "keeps UID %s temp paths private and within Claude's limit",
+    (uid) => {
+      const tmp = crewTempRoot("/test/data.sqlite", "run-test", uid);
+      expect(tmp.startsWith(`/tmp/m${uid.toString(36)}/`)).toBe(true);
+      expect(Buffer.byteLength(join(tmp, `claude-${uid}`))).toBeLessThanOrEqual(44);
+      expect(crewTempRoot("/test/data.sqlite", "run-test", uid + 1)).not.toBe(tmp);
+      expect(crewTempRoot("/test/other.sqlite", "run-test", uid)).not.toBe(tmp);
+    },
+  );
+
   it("gives runs private temp roots and removes them when stopped", async () => {
     const { sup } = make();
     sup.start();
@@ -644,18 +656,19 @@ describe("startRun", () => {
     for (const r of recorded().filter((r) => r.argv)) {
       const tmp = r.env.TMPDIR;
       expect(tmp).toBeTruthy();
+      expect(tmp.startsWith("/tmp/")).toBe(true);
       expect(r.env.CLAUDE_CODE_TMPDIR).toBe(tmp);
       expect(tmp).not.toContain("/claude-");
       expect(Buffer.byteLength(join(tmp, `claude-${process.getuid?.()}`))).toBeLessThanOrEqual(44);
       expect(statSync(tmp).mode & 0o777).toBe(0o700);
       writeFileSync(join(tmp, "test-output"), "ok");
       const settings = JSON.parse(r.argv[r.argv.indexOf("--settings") + 1]);
-      expect(settings.sandbox.filesystem.allowWrite).toEqual([tmp]);
+      expect(settings.sandbox.filesystem.allowWrite).toEqual([realpathSync(tmp)]);
       const parent = dirname(tmp);
-      expect(basename(parent)).toBe("mc-runs");
+      expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([tmp]);
-      expect(settings.sandbox.filesystem.denyRead).toContain(parent);
+      expect(settings.sandbox.filesystem.allowRead).toEqual([realpathSync(tmp)]);
+      expect(settings.sandbox.filesystem.denyRead).toContain(realpathSync(parent));
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/tmp");
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/private/tmp");
       for (const sibling of roots.filter((root) => root !== tmp)) {
@@ -792,7 +805,7 @@ describe("startRun", () => {
     const argv = recorded()[0].argv as string[];
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     const common = join(clone, ".git");
-    expect(fs.allowWrite).toEqual([recorded()[0].env.TMPDIR]);
+    expect(fs.allowWrite).toEqual([realpathSync(recorded()[0].env.TMPDIR)]);
     expect(fs.denyWrite).toEqual([
       `${root}/mc-crew/guido-1-42/.git`,
       common,
@@ -814,7 +827,7 @@ describe("startRun", () => {
       hubGit,
       "/tmp/claude-*",
       "/private/tmp/claude-*",
-      dirname(recorded()[0].env.TMPDIR),
+      realpathSync(dirname(recorded()[0].env.TMPDIR)),
     ]);
   });
 
@@ -2225,7 +2238,7 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
     const parent = dirname(spawn.env.TMPDIR);
-    expect(basename(parent)).toBe("mc-runs");
+    expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
     expect(statSync(parent).mode & 0o777).toBe(0o700);
     expect(config).toContain(`${JSON.stringify(parent)}="deny"`);
     expect(config).not.toContain('"/tmp"="deny"');
