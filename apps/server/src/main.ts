@@ -214,6 +214,7 @@ export async function main(): Promise<void> {
         );
       });
     },
+    crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
   };
   const mcTools = createMcTools(mcDeps);
 

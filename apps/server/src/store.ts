@@ -14,6 +14,9 @@ import {
   type ChosenProfile,
   COMMS_CAPCOM,
   COMMS_TEXT_MAX,
+  type CommsLabel,
+  type CommsReaction,
+  type CommsReactionKind,
   commsCutMarker,
   type Escalation,
   type FLIGHT_HEADLINE,
@@ -587,11 +590,27 @@ export interface BoardMove {
 /** Who a seat line is from. */
 /** A hand-off between agents; `from` and `to` are seat ids, COMMS_CAPCOM or COMMS_MC. */
 export interface CommsRow {
+  id: string;
   at: number;
   from: string;
   to: string;
   ticket: string | null;
   text: string;
+  label: CommsLabel | null;
+  ref: string | null;
+  replyTo: string | null;
+  mentions: string[];
+}
+export interface NewCommsRow {
+  at: number;
+  from: string;
+  to: string;
+  ticket: string | null;
+  text: string;
+  label?: CommsLabel | null;
+  ref?: string | null;
+  replyTo?: string | null;
+  mentions?: readonly string[];
 }
 
 export const THREAD_COMMS_LIMIT = 500;
@@ -1074,6 +1093,35 @@ export class Store {
         ).join(" OR ")}`,
       );
     });
+    // Stored Comms v2 is deliberately additive: hubs can open databases written by older hubs.
+    this.addColumn(
+      "comms",
+      "label",
+      "TEXT CHECK (label IS NULL OR label IN ('question','handoff','blocker'))",
+    );
+    this.addColumn("comms", "ref", "TEXT");
+    this.addColumn("comms", "reply_to", "INTEGER");
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
+      CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
+      CREATE TABLE IF NOT EXISTS comms_mentions (
+        message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
+        PRIMARY KEY (message_id, mentioned_id)
+      );
+      CREATE INDEX IF NOT EXISTS comms_mentions_target ON comms_mentions(mentioned_id, seen_at, message_id);
+      CREATE TABLE IF NOT EXISTS comms_reactions (
+        message_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reaction TEXT NOT NULL
+          CHECK (reaction IN ('seen','on_it','done','cant')),
+        reason TEXT, at INTEGER NOT NULL,
+        CHECK ((reaction = 'cant' AND length(trim(reason)) BETWEEN 1 AND 80)
+          OR (reaction != 'cant' AND reason IS NULL)),
+        PRIMARY KEY (message_id, actor_id)
+      );
+      CREATE INDEX IF NOT EXISTS comms_reactions_message ON comms_reactions(message_id);
+      CREATE TABLE IF NOT EXISTS comms_pins (
+        message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
+      );
+    `);
   }
 
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
@@ -1719,6 +1767,17 @@ export class Store {
         this.transaction(() => {
           ids = select.all(lastId, ...cutoffs, HISTORY_BATCH_ROWS) as { id: number }[];
           if (ids.length === 0) return;
+          if (table === "comms") {
+            const marks = ids.map(() => "?").join(",");
+            const values = ids.map(({ id }) => id);
+            this.db
+              .prepare(`DELETE FROM comms_mentions WHERE message_id IN (${marks})`)
+              .run(...values);
+            this.db
+              .prepare(`DELETE FROM comms_reactions WHERE message_id IN (${marks})`)
+              .run(...values);
+            this.db.prepare(`DELETE FROM comms_pins WHERE message_id IN (${marks})`).run(...values);
+          }
           this.db
             .prepare(`DELETE FROM ${table} WHERE rowid IN (${ids.map(() => "?").join(",")})`)
             .run(...ids.map(({ id }) => id));
@@ -2819,15 +2878,169 @@ export class Store {
   }
 
   /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
-  addComms(row: CommsRow): void {
+  addComms(row: NewCommsRow, rate?: { since: number; limit: number }): CommsRow | null {
     const chars = Array.from(row.text);
     const text =
       chars.length > COMMS_TEXT_MAX
         ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
         : row.text;
+    let id: number | null = null;
+    this.transaction(() => {
+      if (rate !== undefined) {
+        const count = this.db
+          .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND at >= ?")
+          .get(row.from, rate.since) as { n: number };
+        if (count.n >= rate.limit) return;
+      }
+      const inserted = this.db
+        .prepare(
+          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          row.at,
+          row.from,
+          row.to,
+          row.ticket,
+          text,
+          row.label ?? null,
+          row.ref ?? null,
+          row.replyTo === undefined || row.replyTo === null
+            ? null
+            : Number(row.replyTo.replace(/^comms:/, "")),
+        );
+      id = Number(inserted.lastInsertRowid);
+      const mention = this.db.prepare(
+        "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
+      );
+      for (const target of row.mentions ?? []) mention.run(id, target);
+    }, true);
+    return id === null ? null : this.commsMessage(`comms:${id}`);
+  }
+
+  private commsRow(r: Row): CommsRow {
+    const id = Number(r.id);
+    const mentions = this.db
+      .prepare("SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id")
+      .all(id)
+      .map((m) => m.mentioned_id as string);
+    return {
+      id: `comms:${id}`,
+      at: r.at as number,
+      from: r.from_id as string,
+      to: r.to_id as string,
+      ticket: r.ticket as string | null,
+      text: r.text as string,
+      label: r.label as CommsLabel | null,
+      ref: r.ref as string | null,
+      replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
+      mentions,
+    };
+  }
+
+  commsMessage(id: string): CommsRow | null {
+    const n = Number(id.replace(/^comms:/, ""));
+    if (!Number.isSafeInteger(n)) return null;
+    const row = this.db.prepare("SELECT * FROM comms WHERE id = ?").get(n) as Row | undefined;
+    return row === undefined ? null : this.commsRow(row);
+  }
+
+  addCommsReaction(
+    messageId: string,
+    actor: string,
+    reaction: CommsReactionKind,
+    reason: string | undefined,
+    at: number,
+  ): CommsReaction | null {
+    const message = this.commsMessage(messageId);
+    if (message === null) return null;
+    const id = Number(messageId.slice(6));
     this.db
-      .prepare("INSERT INTO comms (at, from_id, to_id, ticket, text) VALUES (?, ?, ?, ?, ?)")
-      .run(row.at, row.from, row.to, row.ticket, text);
+      .prepare(`INSERT INTO comms_reactions (message_id, actor_id, reaction, reason, at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(message_id, actor_id) DO UPDATE SET reaction=excluded.reaction, reason=excluded.reason, at=excluded.at`)
+      .run(id, actor, reaction, reason ?? null, at);
+    return { messageId, actor, reaction, reason: reason ?? null, at };
+  }
+
+  setCommsPinned(messageId: string, pinned: boolean, actor: string, at: number): boolean {
+    const message = this.commsMessage(messageId);
+    if (message === null) return false;
+    const id = Number(messageId.slice(6));
+    if (pinned)
+      this.db
+        .prepare(
+          "INSERT INTO comms_pins (message_id, pinned_by, pinned_at) VALUES (?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET pinned_by=excluded.pinned_by, pinned_at=excluded.pinned_at",
+        )
+        .run(id, actor, at);
+    else this.db.prepare("DELETE FROM comms_pins WHERE message_id = ?").run(id);
+    return true;
+  }
+
+  commsPins(): CommsRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT c.* FROM comms c JOIN comms_pins p ON p.message_id=c.id ORDER BY p.pinned_at DESC",
+        )
+        .all() as Row[]
+    ).map((r) => this.commsRow(r));
+  }
+  commsMentions(target: string): CommsRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at,c.id",
+        )
+        .all(target) as Row[]
+    ).map((r) => this.commsRow(r));
+  }
+  markCommsMentionsSeen(target: string, ids: string[], at: number): void {
+    const q = this.db.prepare(
+      "UPDATE comms_mentions SET seen_at=? WHERE mentioned_id=? AND message_id=?",
+    );
+    for (const id of ids) q.run(at, target, Number(id.replace(/^comms:/, "")));
+  }
+  commsForCrew(): CommsRow[] {
+    return this.commsForWhere("to_id = 'crew'");
+  }
+  commsForAgent(id: string, contact?: string): CommsRow[] {
+    return contact === undefined
+      ? this.commsForWhere("from_id=? OR to_id=?", id, id)
+      : this.commsForPair(id, contact);
+  }
+  commsInbox(id: string): CommsRow[] {
+    return this.commsForWhere("to_id=?", id);
+  }
+  commsForPair(a: string, b: string): CommsRow[] {
+    return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+  commsForRefs(refs: string[]): CommsRow[] {
+    if (!refs.length) return [];
+    return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
+  }
+  private commsForWhere(where: string, ...args: SQLInputValue[]): CommsRow[] {
+    return (
+      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
+    ).map((r) => this.commsRow(r));
+  }
+  commsLinkCounts(since: number): { from: string; to: string; count: number }[] {
+    return this.db
+      .prepare(
+        "SELECT from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY from_id,to_id",
+      )
+      .all(since) as { from: string; to: string; count: number }[];
+  }
+  markCommsScopeRead(scope: string, messageId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO comms_reads(thread_id,source_id,offset,block) VALUES (?, 'comms', ?, 0) ON CONFLICT(thread_id,source_id) DO UPDATE SET offset=MAX(offset,excluded.offset)`,
+      )
+      .run(scope, Number(messageId.replace(/^comms:/, "")));
+  }
+  commsScopeCursor(scope: string): string | null {
+    const r = this.db
+      .prepare("SELECT offset FROM comms_reads WHERE thread_id=? AND source_id='comms'")
+      .get(scope) as { offset: number } | undefined;
+    return r ? `comms:${r.offset}` : null;
   }
 
   /** The hand-offs at or after `since`, oldest first. */
@@ -2835,13 +3048,15 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM comms WHERE at >= ? ORDER BY at, id")
       .all(since) as Row[];
+    // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
+    // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({
       at: r.at as number,
       from: r.from_id as string,
       to: r.to_id as string,
       ticket: r.ticket as string | null,
       text: r.text as string,
-    }));
+    })) as CommsRow[];
   }
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
@@ -2869,14 +3084,7 @@ export class Store {
         THREAD_COMMS_LIMIT,
         THREAD_COMMS_LIMIT,
       ) as Row[];
-    return rows.reverse().map((r) => ({
-      id: `comms:${r.id}`,
-      at: r.at as number,
-      from: r.from_id as string,
-      to: r.to_id as string,
-      ticket: r.ticket as string | null,
-      text: r.text as string,
-    }));
+    return rows.reverse().map((r) => this.commsRow(r));
   }
 
   /** Prompt metadata remains available even after its body has been read. */

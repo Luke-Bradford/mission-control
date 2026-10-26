@@ -294,7 +294,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { threadMessages } from "../comms.ts";
+import { pinComms, threadMessages } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -622,6 +622,10 @@ const MessageSeatArgs = z
       (a.text !== undefined || (a.unpark === undefined && a.runId === undefined)),
     "Provide text, focus or read_focus, separately.",
   );
+const CommsPinArgs = z.strictObject({
+  id: z.string().regex(/^comms:\d+$/),
+  pinned: z.boolean(),
+});
 const QueuePromotionArgs = z.strictObject({
   action: z.literal("queue-reorder"),
   seat: z.string().regex(SEAT_ID),
@@ -830,6 +834,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const runId = store.seatSession(seatId)?.runId ?? null;
     const run = runId === null ? null : store.run(runId);
     return run !== null && run.endedAt === null ? run : null;
+  };
+  const commsPin = async (ctx: McToolContext, args: unknown): Promise<Result> => {
+    const checked = flightCall(deps, ctx, CommsPinArgs, args);
+    if (!checked.ok) return checked.result;
+    if (flightSeat(config)?.seat.id !== ctx.seatId) return fail(MC_FLIGHT_ONLY);
+    try {
+      pinComms(store, ctx.seatId, checked.args.id, checked.args.pinned, now());
+      bus.emit("agents");
+      return { text: checked.args.pinned ? "Comms message pinned." : "Comms message unpinned." };
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : "Comms pin refused.", isError: true };
+    }
   };
   const record = (
     at: number,
@@ -2832,6 +2848,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: messageSeat,
+    },
+    {
+      name: MC_TOOL_NAMES.commsPin,
+      description: "Pin or unpin a stored Comms message. Only the live FLIGHT run may do this.",
+      inputSchema: z.toJSONSchema(CommsPinArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: commsPin,
     },
     {
       name: MC_TOOL_NAMES.flightState,

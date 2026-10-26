@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { threadMessages } from "../src/comms.ts";
+import { reactComms, sendComms, threadMessages } from "../src/comms.ts";
 import { Store } from "../src/store.ts";
 import * as stream from "../src/stream.ts";
 
@@ -44,6 +44,42 @@ afterEach(() => {
   vi.restoreAllMocks();
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+it("stores labels, reply mentions and reactions without waking for a reaction", async () => {
+  const notify = vi.fn();
+  const first = await sendComms(
+    {
+      store,
+      crew: ["seat", "other"],
+      knownSecrets: async () => [],
+      now: () => 10,
+      notify,
+      seatSender: true,
+    },
+    "seat",
+    { to: "other", text: "hello @other", label: "question", ref: "#7" },
+  );
+  const reply = await sendComms(
+    {
+      store,
+      crew: ["seat", "other"],
+      knownSecrets: async () => [],
+      now: () => 11,
+      notify,
+      seatSender: true,
+    },
+    "other",
+    { to: "seat", text: "reply", replyTo: first.id },
+  );
+  expect(reply.mentions).toEqual(["seat"]);
+  expect(store.commsMessage(first.id)).toMatchObject({
+    label: "question",
+    ref: "#7",
+    mentions: ["other"],
+  });
+  reactComms(store, "other", first.id, "seen", undefined, 12);
+  expect(notify).toHaveBeenCalledTimes(2);
 });
 
 it("reuses parsed transcripts across thread and attention reads", () => {

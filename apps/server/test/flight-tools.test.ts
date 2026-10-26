@@ -569,6 +569,7 @@ describe("tool list", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "comms_pin",
       "flight_state",
       "promote",
       "end_run",
@@ -1586,6 +1587,40 @@ describe("message_seat", () => {
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
     expect(store.comms(0)).toEqual([]);
+  });
+});
+
+describe("comms_pin", () => {
+  const message = () =>
+    store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: null,
+      text: "Please decide",
+    });
+
+  it("lets the live FLIGHT run pin and unpin a stored message", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual({
+      text: "Comms message pinned.",
+    });
+    expect(store.commsPins().map((m) => m.id)).toEqual([stored.id]);
+    expect(await call("comms_pin", { id: stored.id, pinned: false })).toEqual({
+      text: "Comms message unpinned.",
+    });
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("refuses every non-FLIGHT caller", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    live("guido-1", "r-guido");
+    expect(
+      await call("comms_pin", { id: stored.id, pinned: true }, ctx("guido-1", "r-guido")),
+    ).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.commsPins()).toEqual([]);
   });
 });
 

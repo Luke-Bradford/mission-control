@@ -1,7 +1,113 @@
 import { statSync } from "node:fs";
-import { COMMS_CAPCOM, COMMS_MC, type CommsThreadMessage } from "@mc/core";
+import {
+  COMMS_CANT_REASON_MAX,
+  COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_MC,
+  COMMS_RATE_LIMIT_COUNT,
+  COMMS_RATE_LIMIT_WINDOW_MS,
+  type CommsMessage,
+  type CommsReaction,
+  type CommsReactionKind,
+  type CommsSendInput,
+  type CommsThreadMessage,
+  scanSecrets,
+} from "@mc/core";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
+
+export interface CommsServiceDeps {
+  store: Store;
+  crew: readonly string[];
+  knownSecrets: () => Promise<readonly string[]>;
+  now?: () => number;
+  /** Only direct seat delivery wakes a worker; reactions never use it. */
+  notify?: (to: string) => void;
+  seatSender?: boolean;
+}
+
+const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
+  if (row === null) throw new Error("Comms message was not stored.");
+  return { ...row, operator: row.from === COMMS_CAPCOM, reactions: [] };
+};
+
+/** Store a normal Comms message after validating the small, local address space. */
+export async function sendComms(
+  deps: CommsServiceDeps,
+  from: string,
+  input: CommsSendInput,
+): Promise<CommsMessage> {
+  const now = deps.now?.() ?? Date.now();
+  const members = new Set([...deps.crew, COMMS_CAPCOM]);
+  if (input.to !== COMMS_CREW && !members.has(input.to))
+    throw new Error("Unknown Comms destination.");
+  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  const findings = scanSecrets(`\0commit 0000000\n${input.text}`, await deps.knownSecrets());
+  if (findings.length)
+    throw new Error(
+      `Refused: message contains ${[...new Set(findings.map((f) => f.kind))].join(", ")}.`,
+    );
+  let replyFrom: string | undefined;
+  if (input.replyTo !== undefined) {
+    const original = deps.store.commsMessage(input.replyTo);
+    if (original === null) throw new Error("Unknown reply message.");
+    replyFrom = original.from;
+  }
+  const mentions = new Set<string>();
+  for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
+    if (members.has(found[2])) mentions.add(found[2]);
+  }
+  if (replyFrom !== undefined) mentions.add(replyFrom);
+  const stored = deps.store.addComms(
+    {
+      at: now,
+      from,
+      to: input.to,
+      ticket: input.ref ?? null,
+      text: input.text,
+      label: input.label,
+      ref: input.ref,
+      replyTo: input.replyTo,
+      mentions: [...mentions],
+    },
+    deps.seatSender
+      ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
+      : undefined,
+  );
+  if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
+  if (input.to !== COMMS_CREW) deps.notify?.(input.to);
+  return message(stored);
+}
+
+export function reactComms(
+  store: Store,
+  actor: string,
+  id: string,
+  reaction: CommsReactionKind,
+  reason: string | undefined,
+  at: number,
+): CommsReaction {
+  if (
+    reaction === "cant" &&
+    (reason === undefined || reason.trim() === "" || reason.length > COMMS_CANT_REASON_MAX)
+  )
+    throw new Error("A nonblank reason of at most 80 characters is required for cant.");
+  if (reaction !== "cant" && reason !== undefined)
+    throw new Error("Only cant may include a reason.");
+  const added = store.addCommsReaction(id, actor, reaction, reason, at);
+  if (added === null) throw new Error("Unknown Comms message.");
+  return added;
+}
+
+export function pinComms(
+  store: Store,
+  actor: string,
+  id: string,
+  pinned: boolean,
+  at: number,
+): void {
+  if (!store.setCommsPinned(id, pinned, actor, at)) throw new Error("Unknown Comms message.");
+}
 
 /** A thread scans at most three transcripts, with 200 events per transcript. */
 const THREAD_RUNS = 3;

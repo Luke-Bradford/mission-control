@@ -2,6 +2,7 @@ export * from "./activity.ts";
 export * from "./away.ts";
 export * from "./board.ts";
 export * from "./collectors.ts";
+export * from "./comms.ts";
 export * from "./crew-pause.ts";
 export * from "./flight.ts";
 export * from "./flight-memory.ts";
