@@ -48,6 +48,7 @@ export type Page = "overview" | "flight" | "board" | "agent" | "comms" | "teleme
 export type CommsView =
   | { kind: "flight" }
   | { kind: "crew" }
+  | { kind: "ticket"; ref: string }
   | { kind: "agent"; agentId: string }
   | { kind: "inbox"; agentId: string }
   | { kind: "contact"; agentId: string; contactId: string };
@@ -81,6 +82,7 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
 export const commsCrewPath = (): string => "/comms/crew";
+export const commsTicketPath = (ref: string): string => `/comms/tickets/${enc(ref)}`;
 export const commsAgentPath = (agentId: string): string => `/comms/agents/${enc(agentId)}`;
 export const commsInboxPath = (agentId: string): string => `${commsAgentPath(agentId)}/inbox`;
 export const commsContactPath = (agentId: string, contactId: string): string =>
@@ -170,6 +172,13 @@ export function route(path: string): Route | null {
   if (agent) return { page: "agent", id: agent.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
+  const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
+  if (commsTicket) {
+    const ref = decode(commsTicket[1]);
+    if (ref && /^(?:#\d+|PR \d+)$/.test(ref))
+      return { page: "comms", item: null, view: { kind: "ticket", ref } };
+    return null;
+  }
   const contact = /^\/comms\/agents\/([^/]+)\/contacts\/([^/]+)$/.exec(p);
   if (contact) {
     const agentId = decode(contact[1]);

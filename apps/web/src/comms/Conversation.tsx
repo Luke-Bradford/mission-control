@@ -1,14 +1,22 @@
 import {
   ATTENTION_LABEL,
   COMMS_CAPCOM,
+  COMMS_CREW,
   COMMS_MC,
+  type CommsAgentResponse,
+  type CommsMention,
+  type CommsMessage,
+  type CommsMessagesResponse,
+  type CommsPinsResponse,
+  type CommsReactionKind,
   type CommsThreadMessage,
+  type CommsTicketResponse,
   type CrewRow,
   type FlightView,
 } from "@mc/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SeatComposer } from "../agent/StreamPanel.tsx";
-import { apiPost } from "../api.ts";
+import { apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { callSign, seatStatus, seatTurn } from "../crew.ts";
@@ -18,12 +26,20 @@ import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { agentPath, commsAgentPath, commsFlightPath, followLink, navigate } from "../router.ts";
+import {
+  agentPath,
+  commsAgentPath,
+  commsContactPath,
+  commsFlightPath,
+  commsInboxPath,
+  commsTicketPath,
+  followLink,
+  navigate,
+} from "../router.ts";
 import { FlightChat } from "../shell/Dock.tsx";
-import { AgentContacts } from "./AgentContacts.tsx";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
-import { type CommsView, messagesForView } from "./model.ts";
+import type { CommsView } from "./model.ts";
 
 /** Comms › Conversation (catalogue 2.5.3): FLIGHT's chat, or the selected agent's thread. */
 export function Conversation({
@@ -177,195 +193,555 @@ export function Conversation({
   );
 }
 
-function useCommsRead(id: string | undefined, messages: CommsThreadMessage[]) {
-  const [error, setError] = useState<string | null>(null);
-  const pending = useRef(new Set<string>());
-  const completed = useRef(new Set<string>());
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on the selected agent
-  useEffect(() => {
-    setError(null);
-  }, [id]);
-  useEffect(() => {
-    if (!id) return;
-    const unread = messages.filter(
-      (message) =>
-        !message.seen &&
-        !pending.current.has(`${id}:${message.id}`) &&
-        !completed.current.has(`${id}:${message.id}`),
-    );
-    if (unread.length === 0) return;
-    const keys = unread.map((message) => `${id}:${message.id}`);
-    keys.forEach((key) => {
-      pending.current.add(key);
-    });
-    void apiPost(ACTIONS.commsRead(id), { messageIds: unread.map((message) => message.id) })
-      .then(() => {
-        keys.forEach((key) => {
-          completed.current.add(key);
-        });
-        setError(null);
-        hub.refetch(RESOURCES.attention.path);
-        hub.refetch(RESOURCES.comms(id).path);
-      })
-      .catch(() => setError("Could not mark thread read."))
-      .finally(() => {
-        keys.forEach((key) => {
-          pending.current.delete(key);
-        });
-      });
-  }, [id, messages]);
-  return error;
+type OpenMessage = (view: CommsView, messageId: string) => void;
+
+const time = (at: number) =>
+  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+function scopeFor(view: CommsView): string | null {
+  if (view.kind === "crew") return "crew";
+  if (view.kind === "flight") return "flight";
+  if (view.kind === "agent") return `agent-all:${view.agentId}`;
+  if (view.kind === "inbox") return `inbox:${view.agentId}`;
+  if (view.kind === "contact") return `pair:${[view.agentId, view.contactId].sort().join(":")}`;
+  return null;
 }
 
-function AgentConversation({
-  row,
-  view,
-  prefill,
-  onPrefillConsumed,
-}: {
-  row: CrewRow;
-  view: CommsView;
-  prefill?: import("./model.ts").ComposerPrefill;
-  onPrefillConsumed?: (token: number) => void;
-}) {
-  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(row.id));
-  const all = activity.data?.messages ?? [];
-  const messages = view.kind === "inbox" ? [] : messagesForView(view, all);
-  const selected = view.kind === "contact" ? view.contactId : null;
-  const readError = useCommsRead(row.id, all);
-  const box = useRef<HTMLDivElement>(null);
-  const nearBottom = useRef(true);
-  const route = `${view.kind}:${row.id}:${view.kind === "contact" ? view.contactId : ""}`;
-  const shownRoute = useRef<string | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: route and message count drive bottom following
-  useLayoutEffect(() => {
-    const element = box.current;
-    if (!element) return;
-    if (shownRoute.current !== route) {
-      shownRoute.current = route;
-      nearBottom.current = true;
-      element.scrollTop = element.scrollHeight;
-    } else if (nearBottom.current) element.scrollTop = element.scrollHeight;
-  }, [route, messages.length]);
+function MessageRefs({ text }: { text: string }) {
+  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
+  const occurrences = new Map<string, number>();
   return (
-    <div className="comms-agent">
-      <AgentContacts
-        agentId={row.id}
-        messages={all}
-        selected={selected}
-        inbox={view.kind === "inbox"}
-        onNavigate={navigate}
-      />
-      <Panel id="chatP" title={<CommsBreadcrumb view={view} />}>
-        {readError && <p className="pb crit-t s">{readError}</p>}
-        <div
-          className="scroll comms-messages"
-          id="convo"
-          ref={box}
-          onScroll={() => {
-            const element = box.current;
-            if (element)
-              nearBottom.current =
-                element.scrollHeight - element.scrollTop - element.clientHeight < 40;
-          }}
-        >
-          <div className="comms-message-stack">
-            {messages.length === 0 ? (
-              <p className="pb note">
-                {view.kind === "inbox" ? "Not available yet." : "No messages yet."}
-              </p>
-            ) : (
-              messages.map((message) => (
-                <div
-                  className={`msg${message.from === COMMS_CAPCOM ? " mine" : ""}`}
-                  key={message.id}
+    <>
+      {parts.map((part) => {
+        const n = occurrences.get(part) ?? 0;
+        occurrences.set(part, n + 1);
+        const key = `${part}:${n}`;
+        return /^(?:PR \d+|#\d+)$/.test(part) ? (
+          <button
+            className="comms-ref"
+            key={key}
+            type="button"
+            onClick={() => navigate(commsTicketPath(part))}
+          >
+            {part}
+          </button>
+        ) : (
+          <MentionText key={key} text={part} />
+        );
+      })}
+    </>
+  );
+}
+
+function Breadcrumb({ view }: { view: CommsView }) {
+  const parts =
+    view.kind === "flight"
+      ? ["Comms", "FLIGHT ↔ CAPCOM"]
+      : view.kind === "crew"
+        ? ["Comms", "#crew"]
+        : view.kind === "ticket"
+          ? ["Comms", view.ref]
+          : view.kind === "contact"
+            ? ["Comms", "Agents", view.agentId, view.contactId]
+            : view.kind === "inbox"
+              ? ["Comms", "Agents", view.agentId, "Inbox"]
+              : ["Comms", "Agents", view.agentId];
+  return (
+    <nav className="comms-breadcrumb" aria-label="Breadcrumb">
+      {parts.map((part, index) => (
+        <span key={part}>
+          {index > 0 && <i aria-hidden="true">›</i>}
+          {index === 0 ? (
+            <button type="button" onClick={() => navigate(commsFlightPath())}>
+              {part}
+            </button>
+          ) : (
+            part
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function conversationHint(view: CommsView): string {
+  if (view.kind === "flight") return "FLIGHT reports and asks here; you direct it";
+  if (view.kind === "crew") return "Crew messages and handoffs";
+  if (view.kind === "ticket") return `Every message about ${view.ref}`;
+  return "Direct messages and handoffs";
+}
+
+function MessageActions({ message, onReply }: { message: CommsMessage; onReply: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const react = (reaction: CommsReactionKind) => {
+    const reason = reaction === "cant" ? window.prompt("Why can't you?")?.trim() : undefined;
+    if (reaction === "cant" && !reason) return;
+    void apiPost(`/api/comms/${encodeURIComponent(message.id)}/reactions`, { reaction, reason })
+      .then(() => hub.refetchTopic("agents"))
+      .catch(() => setError("Could not add reaction."));
+  };
+  const pin = () => {
+    const call = message.pinned ? apiDelete : apiPut;
+    void call(`/api/comms/${encodeURIComponent(message.id)}/pin`, {})
+      .then(() => hub.refetchTopic("agents"))
+      .catch(() => setError("Could not change pin."));
+  };
+  return (
+    <span className="comms-actions">
+      <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
+        Reply
+      </button>
+      <button
+        type="button"
+        onClick={() => react("seen")}
+        aria-label={`Acknowledge ${message.from}`}
+      >
+        Ack
+      </button>
+      <button type="button" onClick={pin}>
+        {message.pinned ? "Unpin" : "Pin"}
+      </button>
+      <fieldset className="comms-react-set">
+        <legend className="sr-only">React</legend>
+        {(["seen", "on_it", "done", "cant"] as const).map((reaction) => (
+          <button key={reaction} type="button" onClick={() => react(reaction)}>
+            {reaction === "on_it" ? "on it" : reaction === "cant" ? "can't" : reaction}
+          </button>
+        ))}
+      </fieldset>
+      {error && <span role="alert">{error}</span>}
+    </span>
+  );
+}
+
+function MessagePane({
+  messages,
+  lookupMessages = messages,
+  jumpId,
+  onJumped,
+  onOpenMessage,
+  onReply,
+}: {
+  messages: CommsMessage[];
+  lookupMessages?: CommsMessage[];
+  jumpId: string | null;
+  onJumped: () => void;
+  onOpenMessage: OpenMessage;
+  onReply: (message: CommsMessage) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [highlightId, setHighlightId] = useState(jumpId);
+  const latestId = messages.at(-1)?.id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follow the newest rendered message.
+  useLayoutEffect(() => {
+    if (jumpId) {
+      setHighlightId(jumpId);
+      document.getElementById(`comms-message-${jumpId}`)?.scrollIntoView?.({ block: "center" });
+      onJumped();
+    } else if (box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [jumpId, latestId, onJumped]);
+  const byId = new Map(lookupMessages.map((message) => [message.id, message]));
+  const targetFor = (message: CommsMessage): CommsView => {
+    if (message.to === COMMS_CREW) return { kind: "crew" };
+    const agentId = message.from === COMMS_CAPCOM ? message.to : message.from;
+    return { kind: "contact", agentId, contactId: COMMS_CAPCOM };
+  };
+  return (
+    <div className="comms-messages scroll" id="convo" ref={box}>
+      <div className="comms-message-stack">
+        {messages.length === 0 ? <p className="pb note">No messages yet.</p> : null}
+        {messages.map((message) => {
+          const quote = message.replyTo ? byId.get(message.replyTo) : undefined;
+          return (
+            <article
+              className={`comms-bubble${message.from === COMMS_CAPCOM ? " capcom" : ""}${highlightId === message.id ? " highlighted" : ""}`}
+              id={`comms-message-${message.id}`}
+              key={message.id}
+            >
+              <div className="comms-message-meta">
+                <span>{time(message.at)}</span>
+                <CommsEnd id={message.from} />
+                {message.from === COMMS_CAPCOM && <Pill tone="warn">operator</Pill>}
+                {message.label && (
+                  <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
+                    {message.label}
+                  </Pill>
+                )}
+                {message.ref && (
+                  <button
+                    className="comms-ref"
+                    type="button"
+                    onClick={() => navigate(commsTicketPath(message.ref as string))}
+                  >
+                    {message.ref}
+                  </button>
+                )}
+                <MessageActions message={message} onReply={() => onReply(message)} />
+              </div>
+              {quote && (
+                <button
+                  className="comms-quote"
+                  type="button"
+                  onClick={() => onOpenMessage(targetFor(quote), quote.id)}
                 >
-                  <div className="from">
-                    <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
-                    {message.from === COMMS_CAPCOM && <Pill tone="neutral">operator</Pill>}
-                  </div>
-                  <div className="body">
-                    <MentionText text={message.text} />
-                  </div>
+                  <b>{quote.from}</b> · {time(quote.at)} · {quote.text}
+                </button>
+              )}
+              <div className="comms-bubble-body">
+                <MessageRefs text={message.text} />
+              </div>
+              {message.reactions.length > 0 && (
+                <div className="comms-reactions">
+                  {message.reactions.map((reaction) => (
+                    <span key={`${reaction.actor}:${reaction.reaction}`}>
+                      {reaction.reaction === "on_it"
+                        ? "on it"
+                        : reaction.reaction === "cant"
+                          ? "can't"
+                          : reaction.reaction}
+                      {reaction.reason ? `: ${reaction.reason}` : ""} · {reaction.actor}
+                    </span>
+                  ))}
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-        <p className="s muted">{`Message ${row.id} directly as CAPCOM · marked operator`}</p>
-        <SeatComposer row={row} prefill={prefill} onPrefillConsumed={onPrefillConsumed} />
-      </Panel>
+              )}
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-/** The route-driven Comms content; unavailable main resources have explicit empty states. */
+function Composer({
+  to,
+  reply,
+  onCancelReply,
+  label,
+  placeholder,
+}: {
+  to: string;
+  reply: CommsMessage | null;
+  onCancelReply: () => void;
+  label: string;
+  placeholder: string;
+}) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const send = (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = text.trim();
+    if (!value) return;
+    void apiPost<{ message: CommsMessage }>("/api/comms", {
+      to,
+      text: value,
+      ...(reply ? { replyTo: reply.id } : {}),
+    })
+      .then(() => {
+        setText("");
+        onCancelReply();
+        hub.refetchTopic("agents");
+      })
+      .catch(() => setError("Could not send message."));
+  };
+  return (
+    <form className="comms-composer" onSubmit={send}>
+      {reply && (
+        <div className="comms-replying">
+          Replying to {reply.from}: {reply.text}
+          <button type="button" onClick={onCancelReply} aria-label="Cancel reply">
+            ×
+          </button>
+        </div>
+      )}
+      <label htmlFor="comms-compose">{label}</label>
+      <div>
+        <input
+          id="comms-compose"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={placeholder}
+        />
+        <button type="submit">Send</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
+}
+
+function MentionsBell({ onOpenMessage }: { onOpenMessage: OpenMessage }) {
+  const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
+  const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState<Set<string>>(() => new Set());
+  const mentions = resource.data?.mentions ?? [];
+  const unseen = mentions.filter((mention) => !mention.seen && !seen.has(mention.message.id));
+  const mark = (ids: string[]) => {
+    setSeen((current) => new Set([...current, ...ids]));
+    void apiPost("/api/comms/mentions/seen", { ids }).then(() =>
+      hub.refetch(RESOURCES.commsMentions.path),
+    );
+  };
+  const openMention = (mention: CommsMention) => {
+    mark([mention.message.id]);
+    const message = mention.message;
+    onOpenMessage(
+      message.to === COMMS_CREW
+        ? { kind: "crew" }
+        : { kind: "contact", agentId: message.from, contactId: COMMS_CAPCOM },
+      message.id,
+    );
+  };
+  return (
+    <div className="comms-mentions">
+      <button
+        type="button"
+        className="comms-bell"
+        aria-label={`Mentions, ${unseen.length} new`}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+        {unseen.length > 0 && <b>{unseen.length}</b>}
+      </button>
+      {open && (
+        <section className="comms-mentions-panel" aria-label="Mentions">
+          <header>
+            Mentions <span>{unseen.length} new</span>
+            <button
+              type="button"
+              onClick={() => mark(mentions.map((mention) => mention.message.id))}
+            >
+              Mark all read
+            </button>
+          </header>
+          {mentions.map((mention) => {
+            const isSeen = mention.seen || seen.has(mention.message.id);
+            return (
+              <button
+                className={isSeen ? "seen" : ""}
+                key={mention.message.id}
+                type="button"
+                onClick={() => openMention(mention)}
+              >
+                <b>{mention.message.from}</b>
+                <span>
+                  {mention.message.to === COMMS_CREW ? "#crew" : "direct"} ·{" "}
+                  {time(mention.message.at)}
+                </span>
+                <em>{mention.message.text}</em>
+              </button>
+            );
+          })}
+          {mentions.length === 0 && <p>Nobody has tagged you.</p>}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function StoredContacts({
+  agentId,
+  data,
+  view,
+}: {
+  agentId: string;
+  data: CommsAgentResponse | undefined;
+  view: CommsView;
+}) {
+  const active = view.kind === "contact" ? view.contactId : null;
+  return (
+    <aside className="comms-contacts" aria-label={`${agentId}'s contacts`}>
+      <button
+        type="button"
+        className={view.kind === "inbox" ? "on" : ""}
+        onClick={() => navigate(commsInboxPath(agentId))}
+      >
+        Inbox · what it reads <small>{data?.inboxUnread ?? 0} unread</small>
+      </button>
+      <button
+        type="button"
+        className={view.kind === "agent" ? "on" : ""}
+        onClick={() => navigate(commsAgentPath(agentId))}
+      >
+        All messages <small>{data?.messages.length ?? 0}</small>
+      </button>
+      {(data?.contacts ?? []).map((contact) => (
+        <button
+          type="button"
+          className={active === contact.id ? "on" : ""}
+          key={contact.id}
+          onClick={() => navigate(commsContactPath(agentId, contact.id))}
+        >
+          {contact.id} · {contact.count}
+          <small>{contact.lastMessage?.text ?? "No messages yet."}</small>
+        </button>
+      ))}
+    </aside>
+  );
+}
+
+function ModernConversation({
+  view,
+  jumpId,
+  onJumped,
+  onOpenMessage,
+}: {
+  view: CommsView;
+  jumpId: string | null;
+  onJumped: () => void;
+  onOpenMessage: OpenMessage;
+}) {
+  const crew = useResource<CommsMessagesResponse>(
+    view.kind === "crew" ? RESOURCES.commsCrew : null,
+  );
+  const flight = useResource<CommsMessagesResponse>(
+    view.kind === "flight" ? RESOURCES.commsFlight : null,
+  );
+  const flightSeat = useResource<FlightView>(view.kind === "flight" ? RESOURCES.flight : null).data
+    ?.seat;
+  const agent = useResource<CommsAgentResponse>(
+    "agentId" in view ? RESOURCES.commsAgent(view.agentId) : null,
+  );
+  const contact = useResource<CommsMessagesResponse>(
+    view.kind === "contact" ? RESOURCES.commsContact(view.agentId, view.contactId) : null,
+  );
+  const ticket = useResource<CommsTicketResponse>(
+    view.kind === "ticket"
+      ? { path: `/api/comms/tickets/${encodeURIComponent(view.ref)}`, topic: "agents" }
+      : null,
+  );
+  const pins = useResource<CommsPinsResponse>(RESOURCES.commsPins).data?.messages ?? [];
+  const messages =
+    view.kind === "crew"
+      ? (crew.data?.messages ?? [])
+      : view.kind === "flight"
+        ? (flight.data?.messages ?? [])
+        : view.kind === "contact"
+          ? (contact.data?.messages ?? [])
+          : view.kind === "ticket"
+            ? (ticket.data?.messages ?? [])
+            : view.kind === "inbox"
+              ? (agent.data?.inbox ?? [])
+              : (agent.data?.messages ?? []);
+  const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
+  const [reply, setReply] = useState<CommsMessage | null>(null);
+  const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
+  const read = useRef(new Set<string>());
+  const scope = scopeFor(view);
+  useEffect(() => {
+    if (!scope || messages.length === 0) return;
+    const latest = messages.at(-1);
+    if (!latest || read.current.has(`${scope}:${latest.id}`)) return;
+    read.current.add(`${scope}:${latest.id}`);
+    void apiPost("/api/comms/read", { scope, messageId: latest.id }).then(() =>
+      hub.refetchTopic("agents"),
+    );
+  }, [scope, messages]);
+  const to =
+    view.kind === "crew" || view.kind === "ticket"
+      ? COMMS_CREW
+      : view.kind === "flight"
+        ? (flightSeat?.id ??
+          messages.find((message) => message.from !== COMMS_CAPCOM)?.from ??
+          "FLIGHT")
+        : view.agentId;
+  const showPins = view.kind === "crew" || view.kind === "inbox";
+  const chat = (
+    <Panel
+      id="chatP"
+      title={
+        <div className="comms-chat-title">
+          <Breadcrumb view={view} />
+          <span className="comms-chat-hint" title={conversationHint(view)}>
+            {conversationHint(view)}
+          </span>
+          <MentionsBell onOpenMessage={onOpenMessage} />
+        </div>
+      }
+    >
+      {view.kind === "ticket" && (
+        <div className="comms-ticket-strip">Every message about {view.ref}</div>
+      )}
+      {showPins && pins.length > 0 && (
+        <div className="comms-pins">
+          <b>Pinned</b>
+          {pins.map((pin) => (
+            <span key={pin.id}>
+              {pin.from}: {pin.text}
+            </span>
+          ))}
+        </div>
+      )}
+      <MessagePane
+        messages={messages}
+        lookupMessages={lookupMessages}
+        jumpId={jumpId}
+        onJumped={onJumped}
+        onOpenMessage={onOpenMessage}
+        onReply={setReply}
+      />
+      <Composer
+        to={to}
+        reply={replyInView}
+        onCancelReply={() => setReply(null)}
+        label={
+          view.kind === "crew"
+            ? "Post to #crew as CAPCOM · @name pings one agent"
+            : view.kind === "flight"
+              ? "Message FLIGHT as CAPCOM"
+              : `Message ${to} as CAPCOM`
+        }
+        placeholder={
+          view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
+        }
+      />
+    </Panel>
+  );
+  return "agentId" in view ? (
+    <div className="comms-agent">
+      <StoredContacts agentId={view.agentId} data={agent.data} view={view} />
+      {chat}
+    </div>
+  ) : (
+    chat
+  );
+}
+
+/** The route-driven Comms view uses the stored Comms API rather than transcript-derived threads. */
 export function CommsConversation({
   view,
   row,
-  prefill,
-  onPrefillConsumed,
+  jumpId = null,
+  onJumped = () => {},
+  onOpenMessage = () => {},
 }: {
   view: CommsView;
   row: CrewRow | null;
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
+  jumpId?: string | null;
+  onJumped?: () => void;
+  onOpenMessage?: OpenMessage;
 }) {
-  if (view.kind === "flight")
-    return <Conversation row={null} prefill={prefill} onPrefillConsumed={onPrefillConsumed} />;
-  if (view.kind === "crew") {
-    return (
-      <Panel id="chatP" title="#crew">
-        <p className="pb note">Not available yet.</p>
-      </Panel>
-    );
-  }
-  if (row === null) {
+  if ("agentId" in view && row?.kind !== "crew") {
     return (
       <Panel id="chatP" title="Comms">
-        <p className="pb note">This agent is no longer in the crew.</p>
+        <p className="pb note">Stored Comms is available for crew seats only.</p>
       </Panel>
     );
   }
   return (
-    <AgentConversation
-      row={row}
+    <ModernConversation
       view={view}
-      prefill={prefill}
-      onPrefillConsumed={onPrefillConsumed}
+      jumpId={jumpId}
+      onJumped={onJumped}
+      onOpenMessage={onOpenMessage}
     />
   );
 }
 
 export function CommsBreadcrumb({ view }: { view: CommsView }) {
-  if (view.kind === "flight") return <span>Comms</span>;
-  return (
-    <nav className="comms-breadcrumb" aria-label="Breadcrumb">
-      <button type="button" onClick={() => navigate(commsFlightPath())}>
-        Comms
-      </button>
-      {view.kind !== "crew" && (
-        <>
-          <span>›</span>
-          <span>Agents</span>
-          <span>›</span>
-          <button type="button" onClick={() => navigate(commsAgentPath(view.agentId))}>
-            {view.agentId}
-          </button>
-          {view.kind === "contact" && (
-            <>
-              <span>›</span>
-              <span>{view.contactId}</span>
-            </>
-          )}
-          {view.kind === "inbox" && (
-            <>
-              <span>›</span>
-              <span>Inbox</span>
-            </>
-          )}
-        </>
-      )}
-    </nav>
-  );
+  return <span>{view.kind === "crew" ? "Comms › #crew" : "Comms"}</span>;
 }

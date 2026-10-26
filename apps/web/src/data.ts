@@ -108,6 +108,20 @@ export const RESOURCES = {
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
   }),
+  /** The stored Comms views.  Unlike the older transcript endpoint above, these include labels,
+   * replies, reactions, pins and read cursors. */
+  commsCrew: { path: "/api/comms/crew", topic: "agents" },
+  commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  commsAgent: (agentId: string): ResourceRef => ({
+    path: `/api/comms/agents/${enc(agentId)}`,
+    topic: "agents",
+  }),
+  commsContact: (agentId: string, contactId: string): ResourceRef => ({
+    path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
+    topic: "agents",
+  }),
+  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  commsPins: { path: "/api/comms/pins", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
     topic: "agents",
