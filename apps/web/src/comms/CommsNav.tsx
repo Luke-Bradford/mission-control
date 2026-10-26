@@ -1,4 +1,5 @@
 import type { CrewRow } from "@mc/core";
+import { seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
 
@@ -18,6 +19,7 @@ function AgentNavRow({
   const recent = messages.filter((message) => message.at !== null && message.at >= since).length;
   const unread = messages.filter((message) => !message.seen).length;
   const active = "agentId" in view && view.agentId === row.id;
+  const status = seatStatus(row);
   return (
     <button
       type="button"
@@ -25,7 +27,7 @@ function AgentNavRow({
       onClick={() => onNavigate(commsAgentPath(row.id))}
     >
       <span>{row.id}</span>
-      <small>{`${recent} · ${unread} unread`}</small>
+      <small>{`${status.label} · ${recent} · ${unread} unread`}</small>
     </button>
   );
 }

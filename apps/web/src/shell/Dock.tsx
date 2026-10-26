@@ -9,6 +9,7 @@ import {
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
+import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { contextPct, doingLine } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -101,14 +102,18 @@ function Composer({
   busy,
   err,
   onSend,
+  prefill,
 }: {
   where: ChatPlace;
   seat: FlightSeat | null;
   busy: boolean;
   err: string | null;
   onSend: (body: string) => Promise<boolean>;
+  prefill?: ComposerPrefill;
 }) {
   const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const used = useRef<number | null>(null);
   const live = seat?.live === true;
   const send = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -116,10 +121,17 @@ function Composer({
     if (!live || body === "") return;
     if (await onSend(body)) setText("");
   };
+  useEffect(() => {
+    if (!prefill || used.current === prefill.token) return;
+    used.current = prefill.token;
+    setText(prefill.text);
+    input.current?.focus();
+  }, [prefill]);
   return (
     <form className="composer" id={`${ID_PREFIX[where]}Form`} onSubmit={(e) => void send(e)}>
       <input
         id={`${ID_PREFIX[where]}Input`}
+        ref={input}
         autoComplete="off"
         aria-label="Message FLIGHT"
         placeholder={
@@ -159,7 +171,7 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
  * FLIGHT's conversation: the asks waiting on the operator, the message log and the message box.
  * With no FLIGHT seat the log is empty and the input is switched off.
  */
-export function FlightChat({ where }: { where: ChatPlace }) {
+export function FlightChat({ where, prefill }: { where: ChatPlace; prefill?: ComposerPrefill }) {
   const msgs = useRef<HTMLDivElement>(null);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
@@ -250,7 +262,7 @@ export function FlightChat({ where }: { where: ChatPlace }) {
           <Msg key={r.id} row={r} tz={tz} />
         ))}
       </div>
-      <Composer where={where} seat={seat} busy={busy} err={err} onSend={send} />
+      <Composer where={where} seat={seat} busy={busy} err={err} onSend={send} prefill={prefill} />
     </>
   );
 }

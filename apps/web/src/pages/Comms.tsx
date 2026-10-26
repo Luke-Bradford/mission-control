@@ -3,10 +3,18 @@ import { useEffect, useRef, useState } from "react";
 import { CommsNav } from "../comms/CommsNav.tsx";
 import { CommsConversation, Conversation } from "../comms/Conversation.tsx";
 import { Decisions } from "../comms/Decisions.tsx";
+import type { ComposerPrefill } from "../comms/model.ts";
 import { NeedsList } from "../comms/NeedsList.tsx";
 import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { type CommsView, commsAgentPath, navigate, PAGE_PATHS } from "../router.ts";
+import type { FlightSeat } from "../flight/flightTypes.ts";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsFlightPath,
+  navigate,
+  PAGE_PATHS,
+} from "../router.ts";
 import { ITEM_GONE, openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
@@ -19,6 +27,7 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const { inView: matchesSession } = useSessionScope();
   const [selected, setSelected] = useState({ id: FLIGHT_THREAD, fromNeeds: false });
+  const [prefill, setPrefill] = useState<ComposerPrefill | undefined>();
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (item === null) {
@@ -39,7 +48,8 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
   const rows = crew?.rows ?? [];
   const inView = rows.filter((r) => matchesSession(r));
   const row = (selected.fromNeeds ? rows : inView).find((r) => r.id === selected.id) ?? null;
-  const flightId = useResource<{ seat: { id: string } | null }>(RESOURCES.flight).data?.seat?.id;
+  const flightSeat = useResource<{ seat: FlightSeat | null }>(RESOURCES.flight).data?.seat ?? null;
+  const flightId = flightSeat?.id;
   if (view) {
     const agentId = "agentId" in view ? view.agentId : null;
     const selectedRow = agentId
@@ -52,14 +62,19 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
             <Decisions
               items={items}
               rows={rows}
-              flightId={flightId}
+              flightSeat={flightSeat}
               onDiscuss={(decision) => {
-                if (decision.agentId) navigate(commsAgentPath(decision.agentId));
+                const ticket = decision.ticket?.match(/#(\d+)$/)?.[1];
+                setPrefill({
+                  token: (prefill?.token ?? 0) + 1,
+                  text: ticket ? `Re #${ticket}: ` : "Re: ",
+                });
+                navigate(decision.agentId ? commsAgentPath(decision.agentId) : commsFlightPath());
               }}
             />
             <CommsNav rows={rows} flightId={flightId} view={view} onNavigate={navigate} />
           </div>
-          <CommsConversation view={view} row={selectedRow} />
+          <CommsConversation view={view} row={selectedRow} prefill={prefill} />
         </div>
       </section>
     );

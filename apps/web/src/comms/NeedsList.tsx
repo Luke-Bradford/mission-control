@@ -491,7 +491,7 @@ function GuardDrawer({
   );
 }
 
-function HoldForm({
+export function HoldForm({
   busy,
   onCancel,
   onHold,

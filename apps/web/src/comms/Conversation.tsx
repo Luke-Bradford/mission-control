@@ -26,7 +26,13 @@ import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, messagesForView } from "./model.ts";
 
 /** Comms › Conversation (catalogue 2.5.3): FLIGHT's chat, or the selected agent's thread. */
-export function Conversation({ row }: { row: CrewRow | null }) {
+export function Conversation({
+  row,
+  prefill,
+}: {
+  row: CrewRow | null;
+  prefill?: import("./model.ts").ComposerPrefill;
+}) {
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const activity = useResource<{ messages: CommsThreadMessage[] }>(
     row ? RESOURCES.comms(row.id) : null,
@@ -84,7 +90,7 @@ export function Conversation({ row }: { row: CrewRow | null }) {
         {flightSeat === null ? (
           <p className="pb note">{FLIGHT_NO_SEAT}</p>
         ) : (
-          <FlightChat where="comms" />
+          <FlightChat where="comms" prefill={prefill} />
         )}
       </Panel>
     );
@@ -169,18 +175,93 @@ export function Conversation({ row }: { row: CrewRow | null }) {
   );
 }
 
-function AgentConversation({ row, view }: { row: CrewRow; view: CommsView }) {
+function useCommsRead(id: string | undefined, messages: CommsThreadMessage[]) {
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef(new Set<string>());
+  const completed = useRef(new Set<string>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on the selected agent
+  useEffect(() => {
+    setError(null);
+  }, [id]);
+  useEffect(() => {
+    if (!id) return;
+    const unread = messages.filter(
+      (message) =>
+        !message.seen &&
+        !pending.current.has(`${id}:${message.id}`) &&
+        !completed.current.has(`${id}:${message.id}`),
+    );
+    if (unread.length === 0) return;
+    const keys = unread.map((message) => `${id}:${message.id}`);
+    keys.forEach((key) => {
+      pending.current.add(key);
+    });
+    void apiPost(ACTIONS.commsRead(id), { messageIds: unread.map((message) => message.id) })
+      .then(() => {
+        keys.forEach((key) => {
+          completed.current.add(key);
+        });
+        setError(null);
+        hub.refetch(RESOURCES.attention.path);
+        hub.refetch(RESOURCES.comms(id).path);
+      })
+      .catch(() => setError("Could not mark thread read."))
+      .finally(() => {
+        keys.forEach((key) => {
+          pending.current.delete(key);
+        });
+      });
+  }, [id, messages]);
+  return error;
+}
+
+function AgentConversation({
+  row,
+  view,
+  prefill,
+}: {
+  row: CrewRow;
+  view: CommsView;
+  prefill?: import("./model.ts").ComposerPrefill;
+}) {
   const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(row.id));
   const all = activity.data?.messages ?? [];
-  const messages = messagesForView(view, all);
+  const messages = view.kind === "inbox" ? [] : messagesForView(view, all);
   const selected = view.kind === "contact" ? view.contactId : null;
+  const readError = useCommsRead(row.id, all);
+  const box = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: route and message count drive bottom following
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element && nearBottom.current) element.scrollTop = element.scrollHeight;
+  }, [view, messages.length]);
   return (
     <div className="comms-agent">
-      <AgentContacts agentId={row.id} messages={all} selected={selected} onNavigate={navigate} />
+      <AgentContacts
+        agentId={row.id}
+        messages={all}
+        selected={selected}
+        inbox={view.kind === "inbox"}
+        onNavigate={navigate}
+      />
       <Panel id="chatP" title={<CommsBreadcrumb view={view} />}>
-        <div className="scroll comms-messages" id="convo">
+        {readError && <p className="pb crit-t s">{readError}</p>}
+        <div
+          className="scroll comms-messages"
+          id="convo"
+          ref={box}
+          onScroll={() => {
+            const element = box.current;
+            if (element)
+              nearBottom.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+          }}
+        >
           {messages.length === 0 ? (
-            <p className="pb note">No messages yet.</p>
+            <p className="pb note">
+              {view.kind === "inbox" ? "Not available yet." : "No messages yet."}
+            </p>
           ) : (
             messages.map((message) => (
               <div
@@ -189,6 +270,7 @@ function AgentConversation({ row, view }: { row: CrewRow; view: CommsView }) {
               >
                 <div className="from">
                   <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
+                  {message.from === COMMS_CAPCOM && <Pill tone="neutral">operator</Pill>}
                 </div>
                 <div className="body">
                   <MentionText text={message.text} />
@@ -197,15 +279,24 @@ function AgentConversation({ row, view }: { row: CrewRow; view: CommsView }) {
             ))
           )}
         </div>
-        <SeatComposer row={row} />
+        <p className="s muted">{`Message ${row.id} directly as CAPCOM · marked operator`}</p>
+        <SeatComposer row={row} prefill={prefill} />
       </Panel>
     </div>
   );
 }
 
 /** The route-driven Comms content; unavailable main resources have explicit empty states. */
-export function CommsConversation({ view, row }: { view: CommsView; row: CrewRow | null }) {
-  if (view.kind === "flight") return <Conversation row={null} />;
+export function CommsConversation({
+  view,
+  row,
+  prefill,
+}: {
+  view: CommsView;
+  row: CrewRow | null;
+  prefill?: import("./model.ts").ComposerPrefill;
+}) {
+  if (view.kind === "flight") return <Conversation row={null} prefill={prefill} />;
   if (view.kind === "crew") {
     return (
       <Panel id="chatP" title="#crew">
@@ -220,7 +311,7 @@ export function CommsConversation({ view, row }: { view: CommsView; row: CrewRow
       </Panel>
     );
   }
-  return <AgentConversation row={row} view={view} />;
+  return <AgentConversation row={row} view={view} prefill={prefill} />;
 }
 
 export function CommsBreadcrumb({ view }: { view: CommsView }) {
@@ -242,6 +333,12 @@ export function CommsBreadcrumb({ view }: { view: CommsView }) {
             <>
               <span>›</span>
               <span>{view.contactId}</span>
+            </>
+          )}
+          {view.kind === "inbox" && (
+            <>
+              <span>›</span>
+              <span>Inbox</span>
             </>
           )}
         </>

@@ -2657,8 +2657,20 @@ pre.diff .h {
   flex-direction: column;
   min-height: 0;
 }
+.comms-decisions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  max-height: 46%;
+  min-height: 0;
+}
+.comms-decision-list {
+  min-height: 0;
+  overflow: auto;
+}
 .comms-nav,
 .comms-contacts {
+  flex: 1 1 auto;
   overflow: auto;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -2709,7 +2721,6 @@ pre.diff .h {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  justify-content: flex-end;
   min-height: 0;
   overflow: auto;
 }

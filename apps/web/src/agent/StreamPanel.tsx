@@ -10,8 +10,9 @@ import {
   type StreamEvent,
   type StreamKind,
 } from "@mc/core";
-import { type FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
+import type { ComposerPrefill } from "../comms/model.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { callSign, seatTurn } from "../crew.ts";
@@ -214,18 +215,28 @@ export function SeatComposer({
   row,
   placeholder,
   onSent,
+  prefill,
 }: {
   row: CrewRow;
   placeholder?: string;
   onSent?: () => void;
+  prefill?: ComposerPrefill;
 }) {
   const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const used = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
   const crew = row.kind === "crew";
   const call = callSign(row);
+  useEffect(() => {
+    if (!prefill || used.current === prefill.token) return;
+    used.current = prefill.token;
+    setText(prefill.text);
+    input.current?.focus();
+  }, [prefill]);
 
   const send = async (interrupt: boolean) => {
     if (text.trim() === "") {
@@ -254,6 +265,7 @@ export function SeatComposer({
     <form className="composer" id="agentForm" onSubmit={submit}>
       <input
         id="agentInput"
+        ref={input}
         autoComplete="off"
         aria-label="Message this agent"
         aria-describedby={HINT_ID}

@@ -1,28 +1,52 @@
-import type { AttentionItem, CrewRow } from "@mc/core";
+import type { AttentionHoldCondition, AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
+import { isOperatorItem } from "../attention.ts";
 import { ACTIONS } from "../data.ts";
+import type { FlightSeat } from "../flight/flightTypes.ts";
+import { answerTarget, sendAnswer } from "./answer.ts";
+import { HoldForm } from "./NeedsList.tsx";
 
 export function DecisionCard({
   item,
   row,
+  rows,
+  flightSeat,
   onDiscuss,
 }: {
   item: AttentionItem;
   row: CrewRow | undefined;
+  rows: CrewRow[];
+  flightSeat: FlightSeat | null;
   onDiscuss: (item: AttentionItem) => void;
 }) {
   const [held, setHeld] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const option = item.brief?.options.find(
     (choice) => choice.id === item.brief?.recommendedOptionId,
   );
   const accept = async () => {
-    if (!option || item.agentId === null) return;
-    await apiPost(ACTIONS.seatMessage(item.agentId), { text: option.answer });
+    if (!option) return;
+    setError(
+      await sendAnswer(
+        answerTarget(item, rows, flightSeat),
+        flightSeat,
+        item,
+        item.brief?.ask ?? item.text,
+        option.answer,
+      ),
+    );
   };
-  const hold = async () => {
-    await apiPost(ACTIONS.hold(item.key), {});
-    setHeld(true);
+  const hold = async (reason: string, condition: AttentionHoldCondition) => {
+    setError(null);
+    try {
+      await apiPost(ACTIONS.hold(item.key), { reason, condition });
+      setHeld(true);
+      setHolding(false);
+    } catch {
+      setError("Could not hold this decision.");
+    }
   };
   return (
     <article className="decision-card">
@@ -39,10 +63,18 @@ export function DecisionCard({
         <button type="button" onClick={() => onDiscuss(item)}>
           Discuss
         </button>
-        <button type="button" disabled={held} onClick={() => void hold()}>
+        <button type="button" disabled={held} onClick={() => setHolding(true)}>
           Held
         </button>
       </div>
+      {error && <p className="crit-t s">{error}</p>}
+      {holding && (
+        <HoldForm
+          busy={false}
+          onCancel={() => setHolding(false)}
+          onHold={(reason, condition) => void hold(reason, condition)}
+        />
+      )}
     </article>
   );
 }
@@ -50,31 +82,36 @@ export function DecisionCard({
 export function Decisions({
   items,
   rows,
+  flightSeat,
   onDiscuss,
 }: {
   items: AttentionItem[] | undefined;
   rows: CrewRow[];
-  flightId: string | undefined;
+  flightSeat: FlightSeat | null;
   onDiscuss: (item: AttentionItem) => void;
 }) {
   const decisions = (items ?? []).filter(
-    (item) => item.kind === "decision" && item.owner !== "flight",
+    (item) => item.kind === "decision" && isOperatorItem(item),
   );
   return (
     <section className="comms-decisions" aria-label="Decisions">
       <h2>Decisions</h2>
-      {decisions.length === 0 ? (
-        <p className="note">No decisions need you.</p>
-      ) : (
-        decisions.map((item) => (
-          <DecisionCard
-            key={item.key}
-            item={item}
-            row={rows.find((row) => row.id === item.agentId)}
-            onDiscuss={onDiscuss}
-          />
-        ))
-      )}
+      <div className="comms-decision-list">
+        {decisions.length === 0 ? (
+          <p className="note">No decisions need you.</p>
+        ) : (
+          decisions.map((item) => (
+            <DecisionCard
+              key={item.key}
+              item={item}
+              row={rows.find((row) => row.id === item.agentId)}
+              rows={rows}
+              flightSeat={flightSeat}
+              onDiscuss={onDiscuss}
+            />
+          ))
+        )}
+      </div>
     </section>
   );
 }
