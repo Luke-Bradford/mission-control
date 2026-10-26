@@ -41,6 +41,7 @@ import {
   HOOK_RETRY_ENV,
   lockBusyText,
   MC_MCP_SERVER,
+  MC_TMP_DIR_NAME,
   MC_TOOL_NAMES,
   mergedMainText,
   NEW_LOOP,
@@ -605,6 +606,8 @@ describe("startRun", () => {
       "LANG",
       "LC_ALL",
       "TMPDIR",
+      "TMP",
+      "TEMP",
       "CLAUDE_CODE_TMPDIR",
       "SHELL",
       "TERM",
@@ -662,6 +665,8 @@ describe("startRun", () => {
       expect(tmp).toBeTruthy();
       expect(tmp.startsWith("/tmp/")).toBe(true);
       expect(r.env.CLAUDE_CODE_TMPDIR).toBe(tmp);
+      expect(r.env.TMP).toBe(tmp);
+      expect(r.env.TEMP).toBe(tmp);
       expect(tmp).not.toContain("/claude-");
       expect(Buffer.byteLength(join(tmp, `claude-${process.getuid?.()}`))).toBeLessThanOrEqual(44);
       expect(statSync(tmp).mode & 0o777).toBe(0o700);
@@ -2250,6 +2255,8 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
+    expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
+    expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(statSync(home).mode & 0o777).toBe(0o700);
     for (const name of ["config.toml", "auth.json"])
@@ -2258,13 +2265,22 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
     const parent = dirname(spawn.env.TMPDIR);
-    expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
+    expect(parent).toBe(join(spawn.cwd, MC_TMP_DIR_NAME));
+    expect(basename(spawn.env.TMPDIR)).toBe(
+      basename(crewTempRoot(dbPath, runId, process.getuid?.() ?? 0)),
+    );
+    expect(spawn.env.TMPDIR).not.toBe(process.env.TMPDIR);
     expect(statSync(parent).mode & 0o777).toBe(0o700);
-    expect(config).toContain(`${JSON.stringify(parent)}="deny"`);
+    expect(config).not.toContain(`${JSON.stringify(parent)}="deny"`);
     expect(config).not.toContain('"/tmp"="deny"');
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    const exclude = readFileSync(
+      join(realpathSync(join(clone, ".git")), "info", "exclude"),
+      "utf8",
+    );
+    expect(exclude.split("\n").filter((line) => line === `${MC_TMP_DIR_NAME}/`)).toHaveLength(1);
     expect(spawn.env.TMPDIR).not.toContain("/claude-");
     expect(statSync(spawn.env.TMPDIR).mode & 0o777).toBe(0o700);
     for (const prefix of ["/tmp", "/private/tmp"]) {

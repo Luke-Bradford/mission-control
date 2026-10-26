@@ -23,6 +23,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -68,6 +69,7 @@ import {
   hasPlanSection,
   inferTicket,
   LOOPBACK_HOST,
+  MC_TMP_DIR_NAME,
   MCP_PATH,
   type McToolName,
   mainConflictText,
@@ -329,6 +331,18 @@ function writePrivate(path: string, text: string): void {
     }
     throw e;
   }
+}
+
+/** Keep Codex's worktree-local temp files out of its own `git status`, once per checkout. */
+function addMcTmpExclude(gitCommonDir: string): void {
+  const path = join(gitCommonDir, "info", "exclude");
+  const line = `${MC_TMP_DIR_NAME}/`;
+  mkdirSync(dirname(path), { recursive: true });
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  if (existing.split("\n").includes(line)) return;
+  appendFileSync(path, `${existing === "" || existing.endsWith("\n") ? "" : "\n"}${line}\n`, {
+    mode: 0o600,
+  });
 }
 
 /** What a crew action that failed unexpectedly says to a caller: no path, no git text. */
@@ -711,6 +725,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const transcripts = new Map<string, FoldState>();
   /** Per run: its newest spawn, which owns the run's token, files and test-lock hold. */
   const spawns = new Map<string, object>();
+  const codexTemps = new Map<string, string>();
   const digests = new Map<string, string>();
   let started = false;
   let holdsLock = false;
@@ -1125,6 +1140,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     env.HOME = homedir();
     env.TMPDIR = tmp;
+    env.TMP = tmp;
+    env.TEMP = tmp;
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
     Object.assign(env, crewPythonEnv(tmp, seatId));
@@ -1339,7 +1356,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
             ]
           : [];
-      const tmpPath = seatTmp(run.id);
+      const tmpPath = run.vendor === "codex" ? codexSeatTmp(cwd, run.id) : seatTmp(run.id);
+      if (run.vendor === "codex") codexTemps.set(run.id, tmpPath);
       for (const path of [dirname(tmpPath), tmpPath]) {
         try {
           mkdirSync(path, { mode: 0o700 });
@@ -1351,10 +1369,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
       const sandbox = {
         cwd,
         ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
-        gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
+        gitCommonDir,
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
@@ -1367,6 +1386,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
+        addMcTmpExclude(gitCommonDir);
         let auth: string;
         try {
           const account = config.accounts.find((a) => a.id === info.seat.accountId);
@@ -1400,6 +1420,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           SHELL: CODEX_SHELL,
           ZDOTDIR: zdotdir,
           TMPDIR: tmp,
+          TMP: tmp,
+          TEMP: tmp,
           [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
@@ -1434,14 +1456,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
-              // Codex uses more-specific grants for the seat's temp root, worktree and
-              // git dirs. Close the shared parent before those grants, including
-              // future sibling runs, without feeding an ancestor deny to the
-              // config builder's validation of the private temp directory.
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
-                '":root"="read"',
-                ['":root"="read"', `${JSON.stringify(dirname(tmp))}="deny"`].join("\n"),
-              ),
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
             );
             writePrivate(join(home, "auth.json"), auth);
           },
@@ -1520,7 +1535,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
-      rmSync(seatTmp(runId), { recursive: true, force: true });
+      const run = store.run(runId);
+      const session = run === null ? null : store.seatSession(run.agentId);
+      const tmp =
+        codexTemps.get(runId) ??
+        (run?.vendor === "codex" && session?.runId === runId && session.worktree !== null
+          ? codexSeatTmp(session.worktree, runId)
+          : seatTmp(runId));
+      rmSync(tmp, { recursive: true, force: true });
+      codexTemps.delete(runId);
     } catch (e) {
       log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
@@ -1528,6 +1551,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function seatTmp(runId: string): string {
     return crewTempRoot(deps.dbPath, runId, process.getuid?.() ?? 0);
+  }
+
+  function codexSeatTmp(worktree: string, runId: string): string {
+    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 12);
+    return join(worktree, MC_TMP_DIR_NAME, key);
   }
 
   /**

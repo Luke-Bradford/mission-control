@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 import {
   DIFF_CUT_LINE,
+  MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
@@ -25,6 +26,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CheckoutError,
+  COMMIT_ADD_PATHSPEC,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -594,6 +596,10 @@ describe("prepareCheckout", () => {
     const r = await syncCheckout();
     expect(r.synced?.kind).toBe("merged");
     expect(git(r.path, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain(PNPM_STORE_DIR_NAME);
+  });
+
+  it("keeps Codex worktree temp directories out of commits", () => {
+    expect(COMMIT_ADD_PATHSPEC).toContain(`:(top,exclude,glob)**/${MC_TMP_DIR_NAME}/**`);
   });
 
   it("answers up-to-date when the reused branch contains main", async () => {
