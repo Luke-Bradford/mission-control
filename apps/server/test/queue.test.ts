@@ -18,7 +18,6 @@ import {
   type Run,
   type SeatState,
   startMissingNeedsText,
-  startNeedsPlanText,
   type TicketView,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -357,7 +356,7 @@ describe("refillQueues", () => {
     expect(started.map((r) => r.issue)).toEqual([1]);
   });
 
-  it("deals no card without a done-when, Size M without a plan, or a ticket GitHub lacks", async () => {
+  it("deals a complete planless Size M card, but not an incomplete or missing ticket", async () => {
     store.replaceBoard(REPO, [
       card(1, { size: "S" }),
       card(2, { size: "S" }),
@@ -374,17 +373,17 @@ describe("refillQueues", () => {
             ? null
             : "## Done when\n- x\n";
     await refill();
-    expect(issues(SERVER)).toEqual([1, 4]);
+    expect(issues(SERVER)).toEqual([1, 3, 4]);
   });
 
-  it("deals a Size M chore with no plan (its profile needs none) but not an unlabelled one", async () => {
+  it("deals Size M cards without a plan, whatever their profile", async () => {
     store.replaceBoard(REPO, [
       card(1, { size: "M", labels: ["area:server", "chore"] }),
       card(2, { size: "M" }),
     ]);
     bodyOf = () => "## Done when\n- x\n";
     await refill();
-    expect(issues(SERVER)).toEqual([1]);
+    expect(issues(SERVER)).toEqual([1, 2]);
   });
 
   it("deals nothing while the profiles file cannot be read, or the ticket's stored override is unknown", async () => {
@@ -1295,10 +1294,7 @@ describe("takeNext", () => {
     });
 
     it("treats the supervisor's start-check refusal (422) as the card's own", async () => {
-      for (const text of [
-        startMissingNeedsText("mc#1", ["done_when"]),
-        startNeedsPlanText("mc#1", "M"),
-      ]) {
+      for (const text of [startMissingNeedsText("mc#1", ["done_when"])]) {
         await queued(card(1));
         startFails = () => new SupervisorError(422, text);
         await take();

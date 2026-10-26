@@ -426,7 +426,7 @@ export const smallNoPlanText = (ref: string, size: string): string =>
   `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
-  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column); the planner seat on a complete Size M, L or XL ticket with no ## Plan. At most 4 starts an hour, and one start of a ticket a day.";
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. At most 4 starts an hour, and one start of a ticket a day.";
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;
@@ -446,8 +446,6 @@ export const startClosedText = (ref: string): string => `Not started: ${ref} is 
 export const noAreaText = (ref: string): string => `Not started: ${ref} has no area label.`;
 export const researchText = (ref: string): string =>
   `Not started: ${ref} is a research ticket; developer seats do not start those.`;
-export const startNeedsPlanText = (ref: string, size: string): string =>
-  `Not started: ${ref} is Size ${size} and has no ## Plan; a planner writes one first.`;
 export const START_NO_GITHUB = "Not started: GitHub could not be reached.";
 export const notReadyText = (ref: string): string =>
   `Not started: ${ref} has no ## Plan section, no ready label, and is not in Ready.`;
@@ -491,8 +489,6 @@ export const moveTwoAreasText = (ref: string, labels: readonly string[]): string
 export const moveNoAreaText = (ref: string): string => `Not moved: ${ref} has no area label.`;
 export const moveWaitsOnText = (ref: string, open: readonly string[]): string =>
   `Not moved: ${ref} waits on ${open.join(", ")}.`;
-export const needsPlanText = (ref: string, size: string): string =>
-  `Not moved: ${ref} is Size ${size} and has no ## Plan; start the planner on it with mc start_seat first.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
 export const heldDecision = (pr: number): string => `Held in Backlog behind PR #${pr}`;

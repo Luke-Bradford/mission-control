@@ -124,7 +124,6 @@ import {
   type CcConfig,
   configuredAgents,
   crewSeatDef,
-  crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
   TeamsSelection,
@@ -185,7 +184,7 @@ import { mapSeats } from "./map/seats.ts";
 import { mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
-import type { RunTokens } from "./mcp/tokens.ts";
+import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
@@ -199,6 +198,7 @@ import {
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
+import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import {
   type BoardTitleCache,
@@ -338,6 +338,8 @@ export interface AppDeps {
   seatMode?: (seatId: string) => CrewMode;
   /** The extra mc tools a seat's role holds; default: none. */
   seatGrants?: (seatId: string) => readonly string[];
+  /** The extra mc tools an authenticated run holds; default: none. */
+  runGrants?: (who: RunIdentity) => readonly string[];
   /** The test lock the guard takes for a full suite; absent: a full suite is denied, never run unlocked. */
   lock?: TestLock;
   /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
@@ -352,17 +354,18 @@ export function crewGuardDeps(
   config: CcConfig,
   tokens: RunTokens,
   lock: TestLock,
+  store: Store,
 ): {
   tokens: RunTokens;
   lock: TestLock;
   seatMode: (seatId: string) => CrewMode;
-  seatGrants: (seatId: string) => McToolName[];
+  runGrants: (who: RunIdentity) => McToolName[];
 } {
   return {
     tokens,
     lock,
     seatMode: (seatId) => crewSeatMode(config, seatId),
-    seatGrants: (seatId) => crewSeatGrants(config, seatId),
+    runGrants: (who) => runSeatGrants(config, store, who),
   };
 }
 
@@ -710,6 +713,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       mcpTools: deps.mcpTools ?? (() => []),
       seatMode: deps.seatMode ?? (() => "read-only"),
       ...(deps.seatGrants === undefined ? {} : { seatGrants: deps.seatGrants }),
+      ...(deps.runGrants === undefined ? {} : { runGrants: deps.runGrants }),
     });
   }
 
@@ -1131,7 +1135,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
             deps.superuserTools,
-            deps.seatGrants?.(who.seatId),
+            deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
           if (verdict.kind === "allow") return answer();

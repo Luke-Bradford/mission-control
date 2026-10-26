@@ -57,7 +57,6 @@ import {
   START_NO_RULES,
   startClosedText,
   startMissingNeedsText,
-  startNeedsPlanText,
   type TicketView,
   ticketHasRunText,
   twoAreasText,
@@ -295,9 +294,16 @@ describe("startRun eligibility", () => {
     });
   });
 
-  it("10: refuses Size M with no plan", async () => {
+  it("10: starts Size M with no plan so its seat can write it", async () => {
     onBoard(boardCard(42, { size: "M" }));
-    await refused(422, startNeedsPlanText("mc#42", "M"));
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(store.run(runId)?.plan).toBeUndefined();
+    expect(userLines()[0]).toContain(
+      "This ticket has no ## Plan. Before changing code, write its plan",
+    );
   });
 
   it("refuses a card that is not on the board", async () => {
@@ -407,7 +413,7 @@ describe("startRun profiles", () => {
     expect(profileHash(file.find((p) => p.name === "feature") as Profile)).not.toBe(before?.hash);
   });
 
-  it("a profile that needs no plan starts a Size M build without one", async () => {
+  it("a planless Size M build exposes report_plan to its own seat", async () => {
     writeFileSync(profilesFile(), FILE(3));
     store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
     const { sup } = make({
@@ -417,6 +423,8 @@ describe("startRun profiles", () => {
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     expect(store.run(runId)?.profile?.profile.name).toBe("small-change");
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    expect(recorded()[0]?.argv).toContain("mcp__mc__report_plan");
   });
 });
 
