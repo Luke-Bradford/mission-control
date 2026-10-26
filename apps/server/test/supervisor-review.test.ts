@@ -1165,6 +1165,19 @@ describe("a run set aside in review", () => {
     expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", worktree: wt() });
   });
 
+  it("keeps due rework from another aside run first, even when the ticket is in review", async () => {
+    const { sup, runId } = await aside(false);
+    const matching = store.run(runId);
+    if (matching === null) throw new Error("missing matching aside run");
+    const otherId = "guido-1:other-aside";
+    store.upsertRun({ ...matching, id: otherId, seq: matching.seq + 1, ticket: "mc#43" });
+    store.setRunLoop(otherId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([409, reworkFirstText("GUIDO-1", "mc#43")]);
+    expect(store.run(otherId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
+  });
+
   it("does not wake another seat's run set aside for the ticket", async () => {
     const { sup } = make({
       extraSeat: {
