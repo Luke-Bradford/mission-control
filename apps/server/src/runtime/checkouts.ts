@@ -771,6 +771,17 @@ const UV_TOOL: InstallTool = {
 };
 const INSTALL_TOOLS = [PNPM_TOOL, UV_TOOL];
 
+type InstallVerification = {
+  checkout: string;
+  common: string;
+  inClone: (args: string[]) => Promise<string>;
+  path: string;
+  rev: string;
+  base: string;
+  compare: boolean;
+  subject: string;
+};
+
 /** Injectable process runner: tests never invoke a real uv. */
 export type InstallRunner = (
   command: string,
@@ -855,69 +866,61 @@ function refuseUnsafeUvRegistries(lock: string, subject: string): void {
  * Every present tool's checks first, then the installs in table order (pnpm's symlinked
  * node_modules must not meet uv's disk check).
  */
+async function verifyInstall(s: InstallVerification, tool: InstallTool): Promise<void> {
+  await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
+  if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
+  const found: string[] = [];
+  const unsafe = await inspectDisk(s.path, tool, found);
+  if (unsafe !== null) throw refuse(s.subject, unsafe);
+  const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
+  if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
+  const read = verifiedObjects((args, maxBuffer) =>
+    crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
+  );
+  await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
+  for (const file of tool.required) {
+    if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
+  }
+  if (tool === UV_TOOL) {
+    // --no-config does not disable discovery of a parent project's workspace.
+    let parent = dirname(await realpath(s.path));
+    for (;;) {
+      for (const file of ["pyproject.toml", "uv.toml"]) {
+        try {
+          await lstat(join(parent, file));
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+          throw e;
+        }
+        throw refuse(s.subject, `has an ancestor ${file}`);
+      }
+      const next = dirname(parent);
+      if (next === parent) break;
+      parent = next;
+    }
+    for (const file of found.filter((file) => basename(file) === ".python-version")) {
+      const lines = (await readFile(join(s.path, file), "utf8")).split(/\r?\n/);
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        if (!/^(cpython-|pypy-|graalpy-)?\d+(\.\d+){0,2}[a-z0-9.+-]*$/.test(line)) {
+          throw refuse(s.subject, `has a non-version interpreter in ${file}`);
+        }
+      }
+    }
+    refuseUnsafeUvRegistries(await readFile(join(s.path, "uv.lock"), "utf8"), s.subject);
+  }
+}
+
 async function installAll(
-  s: {
-    checkout: string;
-    common: string;
-    inClone: (args: string[]) => Promise<string>;
-    path: string;
-    rev: string;
-    base: string;
-    compare: boolean;
-    subject: string;
-    name: string;
-  },
+  s: InstallVerification & { name: string },
   run: InstallRunner,
 ): Promise<void> {
   const picked: InstallTool[] = [];
   for (const tool of INSTALL_TOOLS) {
     if (await succeeds(lstat(join(s.path, tool.lockfile)))) picked.push(tool);
   }
-  for (const tool of picked) {
-    await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
-    if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
-    const found: string[] = [];
-    const unsafe = await inspectDisk(s.path, tool, found);
-    if (unsafe !== null) throw refuse(s.subject, unsafe);
-    const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
-    if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
-    const read = verifiedObjects((args, maxBuffer) =>
-      crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
-    );
-    await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
-    for (const file of tool.required) {
-      if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
-    }
-    if (tool === UV_TOOL) {
-      // --no-config does not disable discovery of a parent project's workspace.
-      let parent = dirname(await realpath(s.path));
-      for (;;) {
-        for (const file of ["pyproject.toml", "uv.toml"]) {
-          try {
-            await lstat(join(parent, file));
-          } catch (e) {
-            if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
-            throw e;
-          }
-          throw refuse(s.subject, `has an ancestor ${file}`);
-        }
-        const next = dirname(parent);
-        if (next === parent) break;
-        parent = next;
-      }
-      for (const file of found.filter((file) => basename(file) === ".python-version")) {
-        const lines = (await readFile(join(s.path, file), "utf8")).split(/\r?\n/);
-        for (const raw of lines) {
-          const line = raw.trim();
-          if (!line || line.startsWith("#")) continue;
-          if (!/^(cpython-|pypy-|graalpy-)?\d+(\.\d+){0,2}[a-z0-9.+-]*$/.test(line)) {
-            throw refuse(s.subject, `has a non-version interpreter in ${file}`);
-          }
-        }
-      }
-      refuseUnsafeUvRegistries(await readFile(join(s.path, "uv.lock"), "utf8"), s.subject);
-    }
-  }
+  for (const tool of picked) await verifyInstall(s, tool);
   for (const tool of picked) {
     if (tool === PNPM_TOOL) {
       await prepareCodexPnpmStore(s.path, s.name);
@@ -925,6 +928,40 @@ async function installAll(
     }
     await install(tool, s.path, s.name, run);
   }
+}
+
+/** Reused pnpm worktrees must be relinked to Codex's stable, seat-read-only store. */
+async function installReusedPnpm(
+  s: InstallVerification & { name: string },
+  run: InstallRunner,
+): Promise<void> {
+  if (!(await succeeds(lstat(join(s.path, PNPM_TOOL.lockfile))))) return;
+  const modules = join(s.path, PNPM_TOOL.installDir);
+  try {
+    const stat = await lstat(modules);
+    if (!stat.isDirectory()) throw refuse(s.subject, `has ${PNPM_TOOL.installDir}`);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      // A pre-upgrade checkout without dependencies needs no cleanup.
+    } else {
+      throw e;
+    }
+  }
+  try {
+    await rm(modules, { recursive: true, force: true });
+  } catch (e) {
+    throw new CheckoutError(
+      "install",
+      `pnpm install failed for ${s.name} (could not clear node_modules)`,
+      {
+        cause: e,
+      },
+    );
+  }
+  await verifyInstall(s, PNPM_TOOL);
+  await prepareCodexPnpmStore(s.path, s.name);
+  await addMcTmpExclude(s.common);
+  await install(PNPM_TOOL, s.path, s.name, run);
 }
 
 /**
@@ -1351,6 +1388,20 @@ export async function prepareCheckout(
       { gitDir },
     );
     const leftoverChanges = status.split("\n").filter((line) => line !== "");
+    await installReusedPnpm(
+      {
+        checkout: i.checkout,
+        common,
+        inClone,
+        path,
+        rev,
+        base: baseSha,
+        compare: true,
+        subject,
+        name: branch,
+      },
+      runInstall,
+    );
     return { branch, path, created: false, baseSha, gitDir, leftoverChanges };
   }
 

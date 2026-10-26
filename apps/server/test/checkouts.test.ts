@@ -826,26 +826,46 @@ describe("prepareCheckout", () => {
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
   });
 
-  it("keeps the private Codex pnpm store outside the worktree across pnpm script runs", async () => {
-    await prepareCheckout(input());
+  it("relinks a reused worktree from its old pnpm store before its scripts run", async () => {
     const scriptPackage = `${JSON.stringify({
       name: "x",
       version: "1.0.0",
       private: true,
       scripts: { check: 'node -e ""' },
+      dependencies: { dep: "file:vendor/dep" },
     })}\n`;
+    const depPackage = '{"name":"dep","version":"1.0.0"}\n';
+    writeFileSync(join(seed, "package.json"), scriptPackage);
+    mkdirSync(join(seed, "vendor", "dep"), { recursive: true });
+    writeFileSync(join(seed, "vendor", "dep", "package.json"), depPackage);
+    execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
+      cwd: seed,
+      env: installEnv(seed),
+    });
     commit(seed, {
       "package.json": scriptPackage,
-      "pnpm-lock.yaml": EMPTY_LOCK,
+      "pnpm-lock.yaml": readFileSync(join(seed, "pnpm-lock.yaml"), "utf8"),
+      "vendor/dep/package.json": depPackage,
     });
     git(seed, "push", "-q", "origin", "main");
-    const next = await syncCheckout();
-    if (next.synced?.kind !== "merged") throw new Error("expected merged checkout");
-    expect(await installAfterSync(clone, next, next.synced.before)).toBeUndefined();
-    expectPrivateCodexPnpmStore(next.path);
-    expect(existsSync(join(next.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+    const first = await prepareCheckout(input());
+    const oldStore = join(dir, "pre-upgrade-pnpm-store");
+    const modulesPath = join(first.path, "node_modules", ".modules.yaml");
+    const modules = JSON.parse(readFileSync(modulesPath, "utf8")) as { storeDir: string };
+    modules.storeDir = join(oldStore, basename(modules.storeDir));
+    mkdirSync(modules.storeDir, { recursive: true });
+    writeFileSync(modulesPath, `${JSON.stringify(modules, null, 2)}\n`);
+    expect(readFileSync(modulesPath, "utf8")).toContain(oldStore);
+
+    const reused = await prepareCheckout(input());
+    expect(reused).toMatchObject({ path: first.path, created: false });
+    expectPrivateCodexPnpmStore(reused.path);
+    expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
+      installEnv(reused.path).pnpm_config_store_dir,
+    );
+    expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
     for (let n = 0; n < 2; n++)
-      execFileSync("pnpm", ["-s", "check"], { cwd: next.path, env: installEnv(next.path) });
+      execFileSync("pnpm", ["-s", "check"], { cwd: reused.path, env: installEnv(reused.path) });
 
     const fresh = await prepareCheckout({ ...input(), issue: 43 });
     expectPrivateCodexPnpmStore(fresh.path);

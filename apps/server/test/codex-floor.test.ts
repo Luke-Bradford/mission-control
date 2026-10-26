@@ -12,6 +12,7 @@ import {
   type SeatCommands,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import {
   codexApproval,
   codexCommandAllowed,
@@ -181,12 +182,14 @@ describe("codexSeatConfig", () => {
   });
 
   it.each(["writer", "read-only"] as const)(
-    "keeps Codex's pnpm store read-only for %s seats",
+    "refuses writes to Codex's pnpm store for %s seats",
     (mode) => {
-      const store = "/mc/.mc-pnpm-store/guido-42";
+      const store = codexPnpmStoreDir(sandboxInput.cwd);
       const config = codexSeatConfig(sandboxInput, mode, url, tmp);
       expect(config).toContain('":root"="read"');
       expect(config).toContain(`"${tmp}"="write"`);
+      expect(config).toContain(`"${store}"="read"`);
+      // An attempted write has an explicit read-only rule, outside the writable workspace root.
       expect(config).not.toContain(`"${store}"="write"`);
       expect(config).toContain(`"."="${mode === "read-only" ? "read" : "write"}"`);
     },
