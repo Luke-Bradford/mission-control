@@ -690,14 +690,14 @@ describe("startRun", () => {
     for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
   });
 
-  it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
+  it("keeps pnpm's store stable beside the seat's per-run temp root, outside the worktree", async () => {
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
+    expect(store).toBe(join(dirname(start.env.TMPDIR as string), "pnpm-store"));
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up

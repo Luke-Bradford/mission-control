@@ -292,14 +292,12 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
+  it("keeps a Codex seat's pnpm store stable beside the per-run temp root", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
-    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
-    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
-      crewPnpmStoreDir("/tmp/mc-test", "guido-1"),
-    );
+    expect(crewPnpmStoreDir("/tmp/mc-test/run-one", "guido-1")).toBe("/tmp/mc-test/pnpm-store");
+    expect(crewPnpmStoreDir("/tmp/mc-test/run-two", "guido-1")).toBe("/tmp/mc-test/pnpm-store");
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
-    expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
+    expect(PNPM_STORE_DIR_NAME).toBe("pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
   });
 });
