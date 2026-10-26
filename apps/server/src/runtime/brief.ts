@@ -194,6 +194,8 @@ export interface ReviewBriefInput {
   prevSha: string | null;
   /** The blocking findings the author was asked to fix after the last review. */
   prevFindings: readonly ReviewFinding[];
+  /** The author's evidence note responding to the previous blocking findings, if any. */
+  prevReply: string | null;
   diffCut: boolean;
   since: boolean;
   /** Hard-rule files the PR touches. */
@@ -242,15 +244,15 @@ export function reviewBrief(i: ReviewBriefInput): string {
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
         ]
       : []),
-    `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings the author was asked to fix after the last review" : ""}.`,
+    `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings and reply from the last review" : ""}.`,
     "",
     "How to review:",
     i.since && i.prevSha !== null
-      ? `1. Read the ticket and ${REVIEW_SINCE_FILE} first${i.prevFindings.length > 0 ? ", and check that each finding below was fixed as asked" : ""}. Go back to ${REVIEW_DIFF_FILE} only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.`
+      ? `1. Read the ticket and ${REVIEW_SINCE_FILE} first${i.prevFindings.length > 0 ? ", and judge each finding and the developer's reply below" : ""}. Go back to ${REVIEW_DIFF_FILE} only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.`
       : `1. Read the ticket and ${REVIEW_DIFF_FILE}. Open a whole file, or the code that calls it, only where the diff leaves a doubt.`,
     "2. Run the test files that cover the change, and check that each new behaviour has a test that would fail without it. Mutation-check only to prove a finding: break the code in this copy, confirm a test fails, then put it back.",
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
-    "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and the fix: the exact change the author should make, so that it can be applied without redesigning anything.",
+    "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
     "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
     "",
     `## Ticket ${i.repo}#${i.issue}`,
@@ -266,12 +268,12 @@ export function reviewBrief(i: ReviewBriefInput): string {
   if (i.prevFindings.length > 0) {
     lines.push(
       "",
-      "## Findings the author was asked to fix after the last review",
+      "## Findings and the developer's reply from the last review",
       "",
       i.prevFindings
         .map(
           (f, k) =>
-            `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Fix asked: ${f.fix}`,
+            `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}\n   Developer's reply: ${i.prevReply ?? "(no separate reply recorded)"}`,
         )
         .join("\n\n"),
     );

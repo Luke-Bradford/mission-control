@@ -754,6 +754,7 @@ describe("startReview", () => {
         notes: [],
         prevSha: null,
         prevFindings: [],
+        prevReply: null,
         diffCut: false,
         since: false,
         touches: [],

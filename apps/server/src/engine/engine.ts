@@ -646,6 +646,7 @@ export function createEngine(deps: EngineDeps): Engine {
               id: evidence.id,
               at: evidence.at,
               ruling: evidence.note.startsWith(EVIDENCE_RULING_PREFIX),
+              note: evidence.note,
             },
       evidenceCount: store.evidenceCount(run.id),
       headCommit: store.newestRunCommit(run.id)?.sha ?? null,
