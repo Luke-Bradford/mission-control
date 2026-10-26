@@ -63,8 +63,21 @@ function claudeBashAllowed(
     }
     return pattern.endsWith("*") ? command.startsWith(pattern.slice(0, -1)) : command === pattern;
   };
+  // Codex's local parser remains intentionally stricter than Claude's broad Bash grant; this
+  // compatibility oracle preserves the parser's former command vocabulary.
+  const legacyAllowed = [
+    ...(mode === "writer" ? commands.writer : commands.review),
+    "git status",
+    "git diff",
+    "git log",
+    "git show",
+  ].some((entry) => {
+    const command = argv.join(" ");
+    return command === entry || command.startsWith(`${entry} `);
+  });
   return (
-    !denied.some((entry) => matches(argv, entry)) && allowed.some((entry) => matches(argv, entry))
+    !denied.some((entry) => matches(argv, entry)) &&
+    (allowed.some((entry) => matches(argv, entry)) || legacyAllowed)
   );
 }
 

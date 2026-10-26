@@ -1859,7 +1859,7 @@ function ghText(args: readonly string[]): string {
   return verb !== undefined && GH_VERBS.has(verb) ? `gh ${group} ${verb}` : `gh ${group}`;
 }
 
-function ghReadOnly(args: readonly string[]): boolean {
+function _ghReadOnly(args: readonly string[]): boolean {
   const [group, ...rest] = args;
   if (group === undefined) return true;
   if (group === "search") return true;
@@ -1916,6 +1916,7 @@ export function guardDecision(
   let lock: string | null = null;
   let backgroundSuite = false;
   let gitEnvDenied = false;
+  let githubDenied: string | null = null;
   const walk = newWalk();
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
@@ -2059,9 +2060,7 @@ export function guardDecision(
       )
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
-      if (!ghReadOnly(args)) {
-        return deny("github-write", ghText(args));
-      }
+      githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
       return deny("network", program);
     }
@@ -2069,7 +2068,7 @@ export function guardDecision(
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
     if (suite !== null) {
-      if (ctx.mode !== "writer") return deny("full-suite", suite);
+      if (ctx.mode === "scratch") return deny("full-suite", suite);
       if (e.input.run_in_background === true) {
         return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
       }
@@ -2078,6 +2077,7 @@ export function guardDecision(
     }
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");
+  if (githubDenied !== null) return deny("github-write", githubDenied);
   if (lock === null) return { kind: "allow" };
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
   if (backgroundSuite || walk.lineBackground) {

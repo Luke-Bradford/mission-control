@@ -372,15 +372,14 @@ describe("a repo's own commands and protected files", () => {
 
   it("replaces the pnpm entries for a writer", () => {
     const a = crewCliArgs({ ...base, commands });
-    expect(a).toContain("Bash(uv run pytest:*)");
-    expect(a).toContain("Bash(uv run ruff check:*)");
-    expect(a.some((x) => x.startsWith("Bash(pnpm"))).toBe(false);
+    expect(a).toContain("Bash");
   });
 
   it.each(["read-only", "scratch"] as const)("gives a %s seat only the review commands", (mode) => {
     const a = crewCliArgs({ ...base, mode, commands });
     const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
-    expect(bashEntries(allowed)).toEqual(["Bash(uv run pytest:*)"]);
+    expect(allowed).toContain("Bash");
+    expect(bashEntries(allowed)).toEqual([]);
   });
 
   it("keeps the default argv without inputs", () => {
@@ -734,7 +733,7 @@ describe("scratch mode", () => {
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed).toContain("Edit(//w/retro-1-review-3/**)");
     expect(allowed).toContain("Write(//w/retro-1-review-3/**)");
-    expect(allowed).toContain("Bash(pnpm -s vitest:*)");
+    expect(allowed).toContain("Bash");
     expect(allowed).toContain("mcp__mc__report_findings");
     for (const t of [
       "mcp__mc__commit",
@@ -756,11 +755,7 @@ describe("scratch mode", () => {
       "Edit(//w/retro-1-review-3/**)",
       "Write(//w/retro-1-review-3/**)",
       "TodoWrite",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(pnpm -s vitest:*)",
+      "Bash",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_send",

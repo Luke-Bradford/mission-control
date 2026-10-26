@@ -299,9 +299,9 @@ describe("guardDecision: gh, network", () => {
     expect(ruleOf(bash(c))).toBe("github-write");
   });
   it.each(["gh pr view 1", "gh api repos/x/y", "gh pr list", "gh api -X GET repos/x/y"])(
-    "allows %s",
+    "denies %s",
     (c) => {
-      expect(ruleOf(bash(c))).toBe("allow");
+      expect(ruleOf(bash(c))).toBe("github-write");
     },
   );
   it("denies curl and wget as network", () => {
@@ -350,8 +350,11 @@ describe("guardDecision: the full suite", () => {
   it("allows a background command that is not a full suite", () => {
     expect(ruleOf(bash("sleep 1 &"))).toBe("allow");
   });
-  it("denies a suite in read-only mode", () => {
-    expect(ruleOf(bash("pnpm -s vitest run"), readOnly)).toBe("full-suite");
+  it("locks a suite in read-only mode", () => {
+    expect(guardDecision(bash("pnpm -s vitest run"), readOnly)).toEqual({
+      kind: "lock",
+      command: "pnpm -s vitest run",
+    });
   });
   it("a deny beats a lock in one command line", () => {
     expect(ruleOf(bash("pnpm -s test && git push"))).toBe("git-write");
@@ -541,7 +544,7 @@ describe("guard fix round 1", () => {
     ]) {
       expect(guardDecision(bash(c), writer).kind, c).toBe("lock");
     }
-    expect(ruleOf(bash("pnpm -s vitest run 2>&1 | tail -20"), readOnly)).toBe("full-suite");
+    expect(guardDecision(bash("pnpm -s vitest run 2>&1 | tail -20"), readOnly).kind).toBe("lock");
     expect(ruleOf(bash("git push>/dev/null"))).toBe("git-write");
     expect(ruleOf(bash("git push 2>&1"))).toBe("git-write");
     expect(splitCommands("git status 2>&1 >out.txt")).toEqual([["git", "status"]]);
@@ -1413,8 +1416,8 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     "git stash list",
     'echo "it\'s $(echo "nested \'q\'")"',
     "tmux send-keys -t x 'ls {a,b}' Enter",
-  ])("allows the everyday read %j", (c) => {
-    expect(ruleOf(bash(c))).toBe("allow");
+  ])("denies gh CLI reads along with other GitHub writes %j", (c) => {
+    expect(ruleOf(bash(c))).toBe(c.startsWith("gh ") ? "github-write" : "allow");
   });
 });
 
@@ -2134,7 +2137,7 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     const lock = { kind: "lock", command: "pnpm -s test" };
     expect(guardDecision(bash("pnpm -s {test,}"), ctx)).toEqual(lock);
     expect(guardDecision(bash("pnpm -s test{,}"), ctx)).toEqual(lock);
-    expect(ruleOf(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toBe("full-suite");
+    expect(guardDecision(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toEqual(lock);
   });
 
   it("a runner runs its command in the foreground", () => {
