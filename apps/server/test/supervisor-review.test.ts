@@ -1163,6 +1163,38 @@ describe("a run set aside in review", () => {
     const same = await sup.startRun("guido-1", 42);
     expect(same).toEqual({ runId, branch: BRANCH });
     expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", worktree: wt() });
+    expect(store.run(runId)?.loop?.aside).toBeNull();
+  });
+
+  it("does not launch a review resume when a budget park lands during its checkout", async () => {
+    const { sup, runId } = await aside(false);
+    const before = store.seatSession("guido-1");
+    let release = () => {};
+    prep.resumeChecks = 0;
+    prep.resumeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(prep.resumeChecks).toBe(1));
+    store.setRunLoop(runId, {
+      ...REVIEW,
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+    release();
+
+    const e = await refusal(resuming);
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(starts()).toHaveLength(1);
+    // `setAside` keeps the seat's idle row; a refused wake must not attach it to the run.
+    expect(store.seatSession("guido-1")).toEqual(before);
+    expect(store.run(runId)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
   });
 
   it("keeps due rework from another aside run first, even when the ticket is in review", async () => {
