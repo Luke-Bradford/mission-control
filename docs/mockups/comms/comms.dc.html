@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mission Control · Comms</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0e1116}
+a{color:#8db0ff}a:hover{color:#b9cdff}
+.mc *{box-sizing:border-box}
+.mc button{font:inherit;color:inherit;cursor:pointer}
+.mc button:focus-visible,.mc a:focus-visible,.mc input:focus-visible{outline:2px solid #8db0ff;outline-offset:2px}
+.nav a{color:#aab2bf;text-decoration:none;padding:6px 10px;border-radius:6px;min-height:32px;display:inline-flex;align-items:center}
+.nav a:hover{color:#e7eaef;background:#1c222b}
+.panel{background:#151a21;border:1px solid #252c37;border-radius:8px;min-width:0;min-height:0;display:flex;flex-direction:column}
+.ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #252c37;font-family:"Barlow Semi Condensed","Arial Narrow",sans-serif;font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#aab2bf;flex:0 0 auto}
+.ph .n{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:0;color:#808999;text-transform:none}
+.sub{font-family:"Barlow Semi Condensed","Arial Narrow",sans-serif;font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#808999;padding:10px 12px 4px}
+.btn{border:1px solid #354050;background:#1c222b;border-radius:6px;padding:5px 10px;font-size:12px;min-height:30px}
+.btn:hover{border-color:#8db0ff}
+.btn.pri{background:#8db0ff;color:#0b1020;border-color:#8db0ff;font-weight:600}
+.btn.pri:hover{background:#b9cdff}
+.btn.ghost{background:transparent}
+.btn.xs{min-height:26px;padding:2px 8px;font-size:11px}
+.row{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:2px 10px;align-items:center;width:100%;text-align:left;background:transparent;border:0;padding:8px 12px;min-height:44px}
+.row:hover{background:#1c222b}
+.mono{font-family:"IBM Plex Mono","Cascadia Mono",ui-monospace,monospace}
+.tag{font-family:"IBM Plex Mono",monospace;font-size:11px;padding:1px 6px;border:1px solid;border-radius:4px;white-space:nowrap}
+.pill{font-family:"IBM Plex Mono",monospace;font-size:10.5px;padding:1px 6px;border-radius:999px;background:#1c222b;color:#aab2bf;white-space:nowrap}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.node{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;background:transparent;border:0;padding:0;min-width:44px;min-height:44px}
+.crumb{border:0;background:transparent;padding:2px 4px;border-radius:4px;color:#aab2bf;font-family:"IBM Plex Mono",monospace;font-size:13px;min-height:28px}
+.crumb:hover{color:#e7eaef;background:#1c222b}
+.scroll{overflow-y:auto;min-height:0}
+input.comp{flex:1 1 auto;min-width:0;background:#0e1116;border:1px solid #354050;border-radius:6px;color:#e7eaef;font:inherit;font-size:13px;padding:10px 12px}
+input.comp::placeholder{color:#808999}
+.mrow{display:grid;grid-template-columns:10px minmax(0,1fr);gap:10px;align-items:start;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid #252c37;padding:10px 12px;min-height:44px}
+.mrow:hover{background:#1c222b}
+.mreply{opacity:0;transition:opacity .12s}
+.msg:hover .mreply,.mreply:focus-visible{opacity:1}
+.quote{display:flex;align-items:center;gap:6px;max-width:100%;min-width:0;background:#0e1116;border:1px dashed #354050;border-radius:6px;padding:4px 8px;font-size:11.5px;color:#aab2bf;text-align:left;min-height:28px}
+.quote:hover{border-color:#8db0ff}
+.refbtn{border:0;cursor:pointer;color:#8db0ff;min-height:20px}
+.refbtn:hover{background:#252c37}
+.cap{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:#808999;letter-spacing:.06em;text-transform:uppercase}
+.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@media (max-width: 900px){.fullh{height:auto !important}.contacts{display:none !important}}
+</style>
+</helmet>
+<div class="mc fullh" style="height: 100vh; min-height: 720px; display: flex; flex-direction: column; background: #0e1116; color: #e7eaef; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+<header style="flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 10px 20px; border-bottom: 1px solid #252c37; background: #151a21">
+<div style="font-family: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .14em">MISSION CONTROL</div>
+<nav class="nav" aria-label="Pages" style="display: flex; flex-wrap: wrap; gap: 2px; font-size: 13px">
+<a href="#">Overview</a><a href="#">Board</a><a href="#">Agents</a><a href="#" aria-current="page" style="color: #e7eaef; background: #1c222b; box-shadow: inset 0 -2px 0 #8db0ff">Comms</a><a href="#">Telemetry</a><a href="#">Map</a><a href="#">Setup</a>
+</nav>
+<div class="mono" style="margin-left: auto; display: flex; gap: 14px; font-size: 11px; color: #aab2bf">
+<span>CLAUDE <span style="color: #f2b53a">93%</span></span><span>CODEX <span style="color: #45c486">12%</span></span><span style="color: #e7eaef">22:31</span>
+</div>
+</header>
+
+<main class="fullh" style="flex: 1 1 auto; min-height: 0; width: 100%; max-width: 1600px; margin: 0 auto; padding: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch">
+
+<!-- LEFT: decisions + nav -->
+<div class="fullh" style="flex: 1 1 280px; max-width: 330px; min-width: 0; height: 100%; display: flex; flex-direction: column; gap: 14px">
+
+<section class="panel" aria-labelledby="dh" style="flex: 0 1 auto; max-height: 46%">
+<div class="ph"><span id="dh">Decisions</span><span class="n">{{decisionCount}} for you · default applies at 00:00</span></div>
+<div class="scroll">
+<sc-if value="{{noDecisions}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; padding: 14px 12px; color: #808999; font-size: 12px">Nothing needs you. FLIGHT is running the crew.</p>
+</sc-if>
+<sc-for list="{{decisions}}" as="d" hint-placeholder-count="3">
+<article style="padding: 11px 12px; border-bottom: 1px solid #252c37; display: flex; flex-direction: column; gap: 7px">
+<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+<span class="tag" style="color: {{d.color}}; border-color: {{d.color}}">{{d.from}}</span>
+<span class="pill">{{d.ref}}</span>
+<span class="mono" style="margin-left: auto; font-size: 11px; color: {{d.clockColor}}">{{d.countdown}}</span>
+</div>
+<div style="font-weight: 600">{{d.title}}</div>
+<div style="font-size: 12px; color: #aab2bf"><span style="color: #808999">Recommends:</span> {{d.rec}}</div>
+<div style="display: flex; gap: 6px; flex-wrap: wrap">
+<button type="button" class="btn pri" onClick="{{d.accept}}">Accept · {{d.def}}</button>
+<button type="button" class="btn" onClick="{{d.discuss}}">Discuss</button>
+<button type="button" class="btn ghost" onClick="{{d.hold}}" title="Held on purpose: stop pinging me">Held</button>
+</div>
+</article>
+</sc-for>
+</div>
+</section>
+
+<nav class="panel" aria-label="Conversations" style="flex: 1 1 auto">
+<div class="ph"><span>Comms</span><span class="n">{{agentCount}} agents live</span></div>
+<div class="scroll" style="flex: 1 1 auto; padding-bottom: 6px">
+<sc-for list="{{tops}}" as="t" hint-placeholder-count="2">
+<button type="button" class="row" aria-current="{{t.current}}" onClick="{{t.go}}" style="background: {{t.bg}}; box-shadow: inset 2px 0 0 {{t.mark}}">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: {{t.color}}"></span>
+<span style="min-width: 0; display: flex; flex-direction: column">
+<span class="mono ell" style="font-size: 12.5px; font-weight: 500">{{t.title}}</span>
+<span class="ell" style="font-size: 11.5px; color: #808999">{{t.sub}}</span>
+</span>
+<sc-if value="{{t.hasUnread}}" hint-placeholder-val="{{false}}"><span class="mono" style="font-size: 10.5px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 999px; background: #8db0ff; color: #0b1020; font-weight: 600">{{t.unread}}</span></sc-if>
+</button>
+</sc-for>
+<div class="sub">Agents</div>
+<sc-for list="{{agentRows}}" as="a" hint-placeholder-count="6">
+<button type="button" class="row" aria-current="{{a.current}}" onClick="{{a.go}}" style="background: {{a.bg}}; box-shadow: inset 2px 0 0 {{a.mark}}">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: {{a.color}}; opacity: {{a.op}}"></span>
+<span style="min-width: 0; display: flex; align-items: baseline; gap: 8px">
+<span class="mono ell" style="font-size: 12.5px; font-weight: 500; color: {{a.color}}">{{a.id}}</span>
+<span class="ell" style="font-size: 11.5px; color: #808999">{{a.role}} · {{a.state}}</span>
+</span>
+<span style="display: flex; gap: 6px; align-items: center">
+<span class="mono" style="font-size: 11px; color: #808999">{{a.total}}</span>
+<sc-if value="{{a.hasUnread}}" hint-placeholder-val="{{false}}"><span class="mono" style="font-size: 10.5px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 999px; background: #8db0ff; color: #0b1020; font-weight: 600">{{a.unread}}</span></sc-if>
+</span>
+</button>
+</sc-for>
+</div>
+</nav>
+</div>
+
+<!-- CENTRE: conversation -->
+<section class="panel fullh" aria-labelledby="ch" style="flex: 999 1 520px; height: 100%">
+<div style="flex: 0 0 auto; padding: 6px 12px; border-bottom: 1px solid #252c37; display: grid; grid-template-columns: minmax(0, 1fr) 40px; gap: 12px; align-items: start; min-height: 48px">
+<div style="min-width: 0; min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px">
+<h2 id="ch" style="margin: 0; display: flex; align-items: center; gap: 2px; font-weight: 400">
+<sc-for list="{{crumbs}}" as="c" hint-placeholder-count="3">
+<sc-if value="{{c.notFirst}}" hint-placeholder-val="{{true}}"><span aria-hidden="true" style="color: #354050; padding: 0 2px">›</span></sc-if>
+<button type="button" class="crumb" onClick="{{c.go}}" aria-current="{{c.last}}" style="color: {{c.color}}">{{c.label}}</button>
+</sc-for>
+</h2>
+<span class="ell" title="{{headNote}}" style="flex: 1 1 200px; min-width: 0; text-align: right; font-size: 12px; color: #808999">{{headNote}}</span>
+</div>
+<div style="position: relative; width: 40px; height: 36px">
+
+<button type="button" class="btn ghost" onClick="{{openMentions}}" aria-label="{{bellAria}}" aria-expanded="{{bellOpen}}" title="Where you were tagged" style="position: relative; min-width: 40px; min-height: 36px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border-color: {{bellBorder}}; color: {{bellColor}}">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+<sc-if value="{{hasMentions}}" hint-placeholder-val="{{true}}"><span class="mono" style="position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: #f2b53a; color: #1a1300; font-size: 10.5px; font-weight: 600; text-align: center">{{mentionCount}}</span></sc-if>
+</button>
+<sc-if value="{{bellOpen}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-label="Mentions" style="position: absolute; top: 44px; right: 0; z-index: 20; width: 380px; max-width: calc(100vw - 32px); max-height: 440px; display: flex; flex-direction: column; background: #151a21; border: 1px solid #354050; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.45)">
+<div style="display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-bottom: 1px solid #252c37">
+<span style="font-family: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif; font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #aab2bf">Mentions</span>
+<span class="mono" style="font-size: 11px; color: #808999">{{mentionCount}} new</span>
+<button type="button" class="btn xs ghost" onClick="{{markAllRead}}" style="margin-left: auto">Mark all read</button>
+<button type="button" class="btn xs ghost" onClick="{{closeBell}}" aria-label="Close mentions" style="min-width: 30px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+<div class="scroll" style="flex: 1 1 auto">
+<sc-if value="{{noMentions}}" hint-placeholder-val="{{false}}"><p style="margin: 0; padding: 14px 12px; color: #808999; font-size: 12px">Nobody has tagged you.</p></sc-if>
+<sc-for list="{{mentions}}" as="x" hint-placeholder-count="3">
+<button type="button" class="mrow" onClick="{{x.open}}" aria-label="{{x.aria}}" style="opacity: {{x.op}}">
+<span aria-hidden="true" style="width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: {{x.dot}}"></span>
+<span style="min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<span style="display: flex; gap: 6px; align-items: center; font-size: 11px; color: #808999">
+<span class="mono" style="color: {{x.fromColor}}; font-weight: 500">{{x.from}}</span>
+<span class="mono ell">in {{x.where}}</span>
+<span class="mono" style="margin-left: auto">{{x.time}}</span>
+</span>
+<span class="clamp" style="font-size: 12.5px; color: #e7eaef">{{x.text}}</span>
+</span>
+</button>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+
+<div style="flex: 1 1 auto; min-height: 0; display: flex">
+<sc-if value="{{isAgent}}" hint-placeholder-val="{{false}}">
+<div class="contacts scroll" style="flex: 0 0 220px; border-right: 1px solid #252c37; display: flex; flex-direction: column">
+<div class="sub">{{focus}}'s contacts</div>
+<sc-for list="{{contacts}}" as="p" hint-placeholder-count="4">
+<button type="button" class="row" aria-current="{{p.current}}" onClick="{{p.go}}" style="background: {{p.bg}}; box-shadow: inset 2px 0 0 {{p.mark}}; grid-template-columns: 10px minmax(0,1fr) auto">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: {{p.color}}"></span>
+<span style="min-width: 0; display: flex; flex-direction: column">
+<span class="mono ell" style="font-size: 12px; color: {{p.color}}">{{p.label}}</span>
+<span class="ell" style="font-size: 11px; color: #808999">{{p.last}}</span>
+</span>
+<span class="mono" style="font-size: 11px; color: #808999; text-align: right">{{p.count}}<br>{{p.time}}</span>
+</button>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isChat}}" hint-placeholder-val="{{true}}">
+<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<sc-if value="{{isRef}}" hint-placeholder-val="{{false}}">
+<div style="flex: 0 0 auto; border-bottom: 1px solid #252c37; padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; background: #121820">
+<span class="mono" style="color: #8db0ff; font-weight: 500">{{refId}}</span>
+<span>{{refTitle}}</span>
+<span class="pill">{{refStatus}}</span>
+<span class="mono" style="color: {{refOwnerColor}}">{{refOwner}}</span>
+<span class="mono" style="color: #808999">{{refCount}} messages · {{refConvos}} conversations</span>
+<a href="#" style="margin-left: auto">Open on Board</a>
+</div>
+</sc-if>
+<sc-if value="{{hasPins}}" hint-placeholder-val="{{false}}">
+<div style="flex: 0 0 auto; border-bottom: 1px solid #252c37; padding: 8px 14px; display: flex; flex-direction: column; gap: 4px; background: #121820">
+<div class="cap">Pinned · every agent reads these when woken</div>
+<sc-for list="{{pins}}" as="p" hint-placeholder-count="2">
+<div style="display: flex; gap: 8px; align-items: center; font-size: 12px; min-width: 0">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f2b53a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"></path><path d="M9 3h6l-1 6 4 4H6l4-4z"></path></svg>
+<span class="mono" style="color: {{p.color}}">{{p.from}}</span>
+<span class="ell" style="flex: 1 1 auto; min-width: 0">{{p.text}}</span>
+<button type="button" class="btn xs ghost" onClick="{{p.unpin}}" aria-label="{{p.aria}}">Unpin</button>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<div class="scroll" style="flex: 1 1 auto; display: flex; flex-direction: column-reverse; padding: 14px">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<sc-if value="{{noMessages}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; color: #808999; font-size: 12px">No messages yet.</p>
+</sc-if>
+<sc-for list="{{messages}}" as="m" hint-placeholder-count="6">
+<sc-if value="{{m.isSys}}" hint-placeholder-val="{{false}}">
+<div class="mono" style="display: flex; align-items: center; gap: 10px; font-size: 11px; color: #808999">
+<span style="flex: 1 1 auto; height: 1px; background: #252c37"></span><span>{{m.time}} · {{m.text}}</span><span style="flex: 1 1 auto; height: 1px; background: #252c37"></span>
+</div>
+</sc-if>
+<sc-if value="{{m.isMsg}}" hint-placeholder-val="{{true}}">
+<div id="{{m.domId}}" class="msg" style="align-self: {{m.side}}; max-width: 80%; display: flex; flex-direction: column; align-items: {{m.side}}; gap: 4px">
+<div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11px; color: #808999">
+<span class="mono">{{m.time}}</span>
+<span class="tag" style="color: {{m.fromColor}}; border-color: {{m.fromColor}}">{{m.from}}</span>
+<sc-if value="{{m.showTo}}" hint-placeholder-val="{{true}}"><span class="mono">→</span><span class="tag" style="color: {{m.toColor}}; border-color: {{m.toColor}}">{{m.to}}</span></sc-if>
+<sc-if value="{{m.operator}}" hint-placeholder-val="{{false}}"><span class="pill" style="color: #f2b53a">operator</span></sc-if>
+<sc-if value="{{m.tagsMe}}" hint-placeholder-val="{{false}}"><span class="pill" style="color: #1a1300; background: #f2b53a">@you</span></sc-if>
+<sc-if value="{{m.hasKind}}" hint-placeholder-val="{{false}}"><span class="pill" style="color: {{m.kindColor}}; background: transparent; border: 1px solid {{m.kindColor}}">{{m.kindLabel}}</span></sc-if>
+<sc-if value="{{m.hasRef}}" hint-placeholder-val="{{false}}"><button type="button" class="pill refbtn" onClick="{{m.openRef}}" aria-label="{{m.refAria}}">{{m.ref}}</button></sc-if>
+<sc-if value="{{m.isOpen}}" hint-placeholder-val="{{false}}"><span class="pill" style="color: #f2b53a">{{m.openNote}}</span></sc-if>
+<button type="button" class="mreply btn xs ghost" onClick="{{m.reply}}" aria-label="{{m.replyAria}}">Reply</button>
+<button type="button" class="mreply btn xs ghost" onClick="{{m.ack}}" aria-label="{{m.ackAria}}">Ack</button>
+<button type="button" class="mreply btn xs ghost" onClick="{{m.pin}}" aria-label="{{m.pinAria}}">{{m.pinLabel}}</button>
+</div>
+<sc-if value="{{m.hasQuote}}" hint-placeholder-val="{{false}}">
+<button type="button" class="quote" onClick="{{m.jumpQuote}}" aria-label="{{m.qAria}}">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#808999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"></path><path d="M4 9h10a6 6 0 0 1 6 6v5"></path></svg>
+<span class="mono" style="color: {{m.qColor}}">{{m.qFrom}}</span><span class="mono" style="color: #808999">{{m.qTime}}</span><span class="ell" style="min-width: 0">{{m.qText}}</span>
+</button>
+</sc-if>
+<div style="background: {{m.bg}}; border: 1px solid {{m.border}}; border-radius: {{m.radius}}; padding: 9px 12px; box-shadow: {{m.glow}}"><sc-for list="{{m.segs}}" as="g" hint-placeholder-count="1"><span style="color: {{g.color}}; font-weight: {{g.weight}}">{{g.text}}</span></sc-for></div>
+<sc-if value="{{m.hasAcks}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; gap: 4px; flex-wrap: wrap">
+<sc-for list="{{m.acks}}" as="k" hint-placeholder-count="1"><span class="pill" style="color: {{k.color}}"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px"><path d="M5 12l5 5L20 7"></path></svg> {{k.label}} · {{k.by}} {{k.t}}</span></sc-for>
+</div>
+</sc-if>
+</div>
+</sc-if>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+
+<div style="flex: 0 0 auto; border-top: 1px solid #252c37; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; background: #151a21; border-radius: 0 0 8px 8px">
+<sc-if value="{{replying}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #aab2bf; background: #0e1116; border: 1px dashed #354050; border-radius: 6px; padding: 4px 4px 4px 10px">
+<span class="mono" style="color: #808999">Replying to</span><span class="mono" style="color: {{replyColor}}">{{replyFrom}}</span><span class="mono" style="color: #808999">{{replyTime}}</span>
+<span class="ell" style="flex: 1 1 auto; min-width: 0">{{replyText}}</span>
+<button type="button" class="btn xs ghost" onClick="{{cancelReply}}" aria-label="Cancel reply" style="min-width: 30px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+</sc-if>
+<label for="comp" class="mono" style="font-size: 11px; color: #808999">{{composeLabel}}</label>
+<div style="display: flex; gap: 8px">
+<input id="comp" class="comp" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{composeHint}}">
+<button type="button" class="btn pri" onClick="{{send}}" style="min-height: 42px; padding: 0 18px">Send</button>
+</div>
+</div>
+</section>
+
+<!-- RIGHT: graph + traffic -->
+<div class="fullh" style="flex: 1 1 340px; max-width: 380px; min-width: 0; height: 100%; display: flex; flex-direction: column; gap: 14px">
+
+<section class="panel" aria-labelledby="gh" style="flex: 1 1 auto">
+<div class="ph"><span id="gh">Comms graph</span><span class="n">24h</span>
+<span style="margin-left: auto; display: flex; gap: 4px; text-transform: none; letter-spacing: 0">
+<span role="group" aria-label="Measure links by" style="display: flex; gap: 2px; margin-right: 6px">
+<button type="button" class="btn xs" onClick="{{showMsgs}}" aria-pressed="{{msgsOn}}" style="background: {{msgsBg}}; border-color: {{msgsBorder}}">Msgs</button>
+<button type="button" class="btn xs" onClick="{{showTokens}}" aria-pressed="{{tokensOn}}" style="background: {{tokensBg}}; border-color: {{tokensBorder}}">Tokens</button>
+</span>
+<button type="button" class="btn xs ghost" onClick="{{addSeat}}" title="Demo only: a seat joins the crew">+ seat</button>
+<button type="button" class="btn xs ghost" onClick="{{removeSeat}}" title="Demo only: a seat leaves the crew">− seat</button>
+</span></div>
+<div style="flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 10px; min-height: 0">
+<div role="img" aria-label="{{graphLabel}}" style="position: relative; width: 340px; height: 320px; flex: 0 0 auto">
+<sc-for list="{{edges}}" as="e" hint-placeholder-count="10">
+<span aria-hidden="true" style="position: absolute; left: {{e.x}}px; top: {{e.y}}px; width: {{e.len}}px; height: {{e.w}}px; margin-top: {{e.mt}}px; transform-origin: 0 50%; transform: rotate({{e.ang}}deg); background: {{e.color}}; opacity: {{e.op}}; border-radius: 2px"></span>
+</sc-for>
+<sc-for list="{{dots}}" as="p" hint-placeholder-count="20">
+<span aria-hidden="true" style="position: absolute; left: {{p.x}}px; top: {{p.y}}px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: {{p.color}}; box-shadow: 0 0 6px {{p.color}}; opacity: {{p.op}}"></span>
+</sc-for>
+<sc-for list="{{edges}}" as="e" hint-placeholder-count="10">
+<span aria-hidden="true" class="mono" style="position: absolute; left: {{e.mx}}px; top: {{e.my}}px; transform: translate(-50%,-50%); font-size: 10px; color: {{e.labelColor}}; background: #151a21; padding: 0 3px; border-radius: 3px; opacity: {{e.op}}">{{e.label}}</span>
+</sc-for>
+<sc-for list="{{nodes}}" as="n" hint-placeholder-count="7">
+<button type="button" class="node" onClick="{{n.go}}" aria-label="{{n.aria}}" style="left: {{n.x}}px; top: {{n.y}}px; opacity: {{n.op}}">
+<span aria-hidden="true" style="width: {{n.size}}px; height: {{n.size}}px; border-radius: 50%; background: #0e1116; border: 2px solid {{n.color}}; box-shadow: 0 0 0 {{n.ring}}px rgba(141,176,255,.3); display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{n.color}}">{{n.total}}</span>
+<span class="mono" style="font-size: 10.5px; color: #e7eaef; background: #151a21; padding: 0 3px; border-radius: 3px">{{n.label}}</span>
+</button>
+</sc-for>
+</div>
+</div>
+<div style="flex: 0 0 auto; border-top: 1px solid #252c37; padding: 8px 12px 6px; display: flex; flex-direction: column; gap: 2px">
+<div class="cap">Chatter watch · over 6 rounds on one thing</div>
+<sc-if value="{{noLoops}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #808999; padding: 6px 0">Nothing looping.</span></sc-if>
+<sc-for list="{{loops}}" as="l" hint-placeholder-count="1">
+<button type="button" class="row" onClick="{{l.go}}" style="padding: 4px 0; min-height: 40px">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: #f2b53a"></span>
+<span style="min-width: 0; display: flex; flex-direction: column">
+<span class="ell" style="font-size: 12px"><span class="mono">{{l.pair}}</span> · {{l.rounds}} rounds on {{l.ref}}</span>
+<span class="ell" style="font-size: 11px; color: #808999">{{l.note}}</span>
+</span>
+<span class="mono" style="font-size: 11px; color: #f2b53a">{{l.tokens}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+
+<section class="panel" aria-labelledby="sh" style="flex: 0 0 auto">
+<div class="ph"><span id="sh">Traffic</span><span class="n">{{scopeLabel}}</span></div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: #252c37; border-bottom: 1px solid #252c37">
+<sc-for list="{{stats}}" as="s" hint-placeholder-count="4">
+<div style="background: #151a21; padding: 10px 10px 8px">
+<div style="font-family: 'Barlow Semi Condensed', 'Arial Narrow', sans-serif; font-size: 24px; font-weight: 600; line-height: 1; color: {{s.color}}">{{s.value}}</div>
+<div class="mono" style="font-size: 10.5px; color: #808999; margin-top: 4px">{{s.label}}</div>
+</div>
+</sc-for>
+</div>
+<div style="padding: 12px">
+<div role="img" aria-label="{{trafficLabel}}" style="display: flex; align-items: flex-end; gap: 3px; height: 60px">
+<sc-for list="{{hours}}" as="h" hint-placeholder-count="24">
+<div style="flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; height: 60px" title="{{h.tip}}">
+<span style="display: block; height: {{h.b}}px; background: {{legendB}}; border-radius: 1px"></span>
+<span style="display: block; height: {{h.a}}px; background: {{legendA}}; border-radius: 1px"></span>
+</div>
+</sc-for>
+</div>
+<div class="mono" style="display: flex; justify-content: space-between; font-size: 10px; color: #808999; margin-top: 4px"><span>23:00</span><span>05:00</span><span>11:00</span><span>17:00</span><span>now</span></div>
+<div style="display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: #aab2bf">
+<span style="display: inline-flex; align-items: center; gap: 5px"><span aria-hidden="true" style="width: 8px; height: 8px; background: {{legendA}}; border-radius: 2px"></span>{{legendAText}}</span>
+<span style="display: inline-flex; align-items: center; gap: 5px"><span aria-hidden="true" style="width: 8px; height: 8px; background: {{legendB}}; border-radius: 2px"></span>{{legendBText}}</span>
+</div>
+</div>
+</section>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+var AG = {
+  CAPCOM: { id: 'CAPCOM', role: 'operator', color: '#e7eaef', state: 'online' },
+  FLIGHT: { id: 'FLIGHT', role: 'head', color: '#8db0ff', state: 'running' },
+  'guido-cx': { id: 'guido-cx', role: 'core', color: '#5fd0c0', state: 'running' },
+  'inco-cx': { id: 'inco-cx', role: 'web', color: '#e9a0e6', state: 'running' },
+  'retro-cx': { id: 'retro-cx', role: 'review', color: '#b8a8f7', state: 'idle' },
+  'work·mac': { id: 'work·mac', role: 'work lane', color: '#f0a46a', state: 'online' },
+  'guido-1': { id: 'guido-1', role: 'core', color: '#9aa3b2', state: 'paused' },
+  'fao-1': { id: 'fao-1', role: 'ops', color: '#7fc8ff', state: 'starting' },
+  'guido-2': { id: 'guido-2', role: 'core', color: '#9be37a', state: 'starting' },
+  'inco-2': { id: 'inco-2', role: 'web', color: '#ffcf6b', state: 'starting' }
+};
+var CREW0 = ['FLIGHT', 'guido-cx', 'inco-cx', 'retro-cx', 'work·mac', 'guido-1'];
+var SPARE = ['fao-1', 'guido-2', 'inco-2'];
+var UNREAD = { 'guido-cx': 2, 'inco-cx': 3, 'retro-cx': 1, 'work·mac': 1 };
+
+// [a, b, a→b, b→a] over 24h
+var EDGES = [
+  ['CAPCOM', 'FLIGHT', 7, 11], ['FLIGHT', 'guido-cx', 12, 10], ['FLIGHT', 'inco-cx', 10, 9], ['FLIGHT', 'retro-cx', 5, 6],
+  ['inco-cx', 'retro-cx', 14, 13], ['guido-cx', 'retro-cx', 6, 8], ['FLIGHT', 'work·mac', 4, 5], ['guido-cx', 'inco-cx', 4, 2],
+  ['FLIGHT', 'guido-1', 2, 1],
+  ['FLIGHT', 'fao-1', 2, 1], ['FLIGHT', 'guido-2', 2, 1], ['retro-cx', 'guido-2', 1, 1], ['FLIGHT', 'inco-2', 2, 1]
+];
+// thousand tokens the agents spent reading and writing each link's messages, 24h
+var TOK = {
+  'CAPCOM|FLIGHT': 38, 'FLIGHT|guido-cx': 61, 'FLIGHT|inco-cx': 52, 'FLIGHT|retro-cx': 24, 'inco-cx|retro-cx': 118,
+  'guido-cx|retro-cx': 33, 'FLIGHT|work·mac': 19, 'guido-cx|inco-cx': 12, 'FLIGHT|guido-1': 4
+};
+var LOOPS = [{ a: 'inco-cx', b: 'retro-cx', ref: 'PR 701', rounds: 7, note: 'FLIGHT stepped in at 22:13 and settled the wording' }];
+var TICKETS = {
+  '#684': { title: 'Short state words on Overview and Agent', status: 'In progress', owner: 'inco-cx', link: 'PR 701' },
+  'PR 701': { title: '#684 short state words', status: 'Merged', owner: 'inco-cx', link: '#684' },
+  '#681': { title: 'Retry cap on seat restarts', status: 'In review', owner: 'guido-cx', link: 'PR 699' },
+  'PR 699': { title: '#681 retry cap', status: 'Approved', owner: 'guido-cx', link: '#681' },
+  '#695': { title: 'CARD_LIMIT in core', status: 'Done', owner: 'guido-cx', link: 'PR 696' },
+  'PR 696': { title: '#695 CARD_LIMIT', status: 'Merged', owner: 'guido-cx', link: '#695' },
+  '#685': { title: 'Board lane counts from core', status: 'In progress', owner: 'guido-cx', link: 'PR 703' },
+  'PR 703': { title: '#685 lane counts', status: 'In review', owner: 'guido-cx', link: '#685' },
+  '#679': { title: 'Map: repo picker', status: 'In progress', owner: 'work·mac', link: 'PR 702' },
+  'PR 702': { title: '#679 repo picker', status: 'Draft', owner: 'work·mac', link: '#679' },
+  'PR 704': { title: '#680 map slice', status: 'Draft', owner: 'work·mac', link: '#680' },
+  '#698': { title: 'Guard by outcome', status: 'Ready', owner: 'FLIGHT' },
+  '#692': { title: 'Codex reviewer asked for "opus"', status: 'Done', owner: 'FLIGHT' },
+  '#321': { title: 'CI flake log', status: 'Open', owner: 'retro-cx' },
+  '#682': { title: 'Overview pipeline lanes', status: 'In progress', owner: 'inco-cx' },
+  '#686': { title: 'Telemetry accuracy pass', status: 'Backlog', owner: '—' },
+  '#656': { title: 'Seat git hardening remnants', status: 'Ready', owner: '—' },
+  'PR 551': { title: '#487', status: 'Held', owner: 'work·mac' }
+};
+// message labels: question · handoff · blocker (FYI untagged; "done" is a reaction, not a label)
+var KINDS = { question: ['question', '#7fc8ff'], handoff: ['handoff', '#5fd0c0'], blocker: ['blocker', '#f1706d'] };
+var REACT_COLOR = { 'seen': '#aab2bf', 'on it': '#5fd0c0', 'done': '#45c486' };
+var INBOX = '__inbox';
+var PATTERN = [1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 4, 3, 4, 5, 6, 5, 4, 6, 8, 9, 7, 5];
+var PSUM = PATTERN.reduce(function (a, b) { return a + b; }, 0);
+
+function M(t, from, to, text, ref) { return { t: t, from: from, to: to, text: text, ref: ref || '' }; }
+function S(t, from, to, text) { return { t: t, from: from, to: to, sys: true, text: text }; }
+
+var MSGS = [
+  M('19:02', 'FLIGHT', 'guido-1', 'Pausing you until Wed 02:00 (Claude quota). Hand #656 back to Ready.', '#656'),
+  M('19:03', 'guido-1', 'FLIGHT', '#656 back in Ready, worktree clean. Paused.'),
+  S('20:30', 'work·mac', 'FLIGHT', 'work·mac joined room mission-control · key verified'),
+  M('20:32', 'work·mac', 'FLIGHT', 'Took #679 and #680 (map web slices) from lane:work. Drafts by 23:00.'),
+  M('20:40', 'FLIGHT', 'work·mac', 'Ack. #680 needs #679\'s repo picker, so land #679 first.', '#679'),
+  S('21:12', 'engine', 'crew', 'engine merged PR 690 · #683 → Done'),
+  M('21:13', 'FLIGHT', 'crew', '#683 done. @inco-cx #684 is yours next (Ready, P1, area:web).', '#684'),
+  M('21:15', 'FLIGHT', 'inco-cx', '#684 brief: one word per state, 10 chars max, the reason goes in the tooltip and the agent header.'),
+  M('21:16', 'inco-cx', 'FLIGHT', 'A seat waiting on its review: "Review" or "Waiting"?'),
+  M('21:17', 'FLIGHT', 'inco-cx', '"Review". "Waiting" is for blocked.'),
+  M('21:20', 'guido-cx', 'FLIGHT', '#695 wants CARD_LIMIT in core. Does the server cap /api/board too, or only the web?', '#695'),
+  M('21:21', 'FLIGHT', 'guido-cx', 'Core exports it, the server caps to the same number. One source of truth.'),
+  M('21:30', 'guido-cx', 'crew', '#681 pushed, PR 699 open. @retro-cx yours.', 'PR 699'),
+  M('21:31', 'inco-cx', 'crew', '@CAPCOM #684 changes the state words on Overview and Agent. Want a look before it merges, or leave it to retro-cx?', '#684'),
+  M('21:40', 'retro-cx', 'guido-cx', 'Round 1 on PR 699: the retry loop has no cap. Cap at 3, then park with the error.', 'PR 699'),
+  M('21:40', 'FLIGHT', 'CAPCOM', 'Evening brief: 4 tickets in flight on Codex seats. #683 merged by the engine at 21:12. One decision for you on #698.', '#698'),
+  M('21:44', 'guido-cx', 'FLIGHT', 'CARD_LIMIT done in core/board.ts. PR 696 open.', 'PR 696'),
+  M('21:46', 'guido-cx', 'inco-cx', 'CARD_LIMIT is exported from @mc/core now: import it, don\'t hard-code 40.'),
+  M('21:47', 'guido-cx', 'retro-cx', 'Capped at 3, parks with lastError. Pushed a71f0e4.'),
+  M('21:48', 'inco-cx', 'guido-cx', 'Will do, in the #684 branch.'),
+  M('21:50', 'retro-cx', 'guido-cx', 'Approve.'),
+  M('21:52', 'CAPCOM', 'FLIGHT', 'Fine. Keep the Claude seats paused until Wed.'),
+  M('21:58', 'inco-cx', 'retro-cx', 'PR 701 ready: state labels cut to one word, the reason moves to the tooltip and the agent header.', 'PR 701'),
+  M('22:03', 'retro-cx', 'crew', 'supervisor-start flaked twice today. @FLIGHT worth a ticket?'),
+  M('22:04', 'FLIGHT', 'crew', '@retro-cx #321 already tracks it. Added today\'s runs there.', '#321'),
+  M('22:05', 'FLIGHT', 'CAPCOM', 'retro-cx was asking Codex for "opus" on full-depth reviews. Fixed in #692, merged 22:01, hub updated. Nothing for you.', '#692'),
+  M('22:06', 'retro-cx', 'inco-cx', 'One blocker: "Reviewing" and "Review" both show up, pick one. The reason tooltip is on a span, so Tab skips it: make it a button.'),
+  M('22:07', 'retro-cx', 'crew', '@CAPCOM PR 551 has been held 3 days. It is in your Decisions with a default.', 'PR 551'),
+  M('22:09', 'inco-cx', 'retro-cx', 'Both fixed in 3e1a9c2.'),
+  M('22:10', 'work·mac', 'FLIGHT', '#679 is PR 702, draft. Starting #680.', 'PR 702'),
+  M('22:12', 'retro-cx', 'inco-cx', 'Approve. Engine merges on green.'),
+  M('22:12', 'FLIGHT', 'guido-cx', 'PR 696 merged. #685 next.', '#685'),
+  M('22:14', 'FLIGHT', 'CAPCOM', 'Codex at 12% of the week. Builds on gpt-5.6-terra, reviews on sol.'),
+  M('22:16', 'guido-cx', 'retro-cx', 'On the PR 699 cap: @CAPCOM set 3 retries max in the guard notes, so I am keeping 3, not 5.', 'PR 699'),
+  M('22:17', 'inco-cx', 'crew', 'PR 701 merged. Picking #686 next.'),
+  M('22:19', 'FLIGHT', 'crew', '@inco-cx #686 is still in Backlog. Take #682 first.', '#682'),
+  M('22:22', 'guido-cx', 'inco-cx', 'Does #685 need the web to read CARD_LIMIT from /api/board, or straight from core?', '#685'),
+  M('22:23', 'guido-cx', 'crew', '#685 pushed, PR 703 open. @retro-cx yours.', 'PR 703'),
+  M('22:27', 'work·mac', 'crew', '#680 is up as PR 704, draft. @FLIGHT both map slices ready for review.', 'PR 704'),
+  M('22:29', 'FLIGHT', 'crew', '@retro-cx PR 702 and PR 704 after 703, please.')
+];
+MSGS.forEach(function (m, i) { m.id = 'm' + i; });
+function find(t, from) { return MSGS.filter(function (m) { return m.t === t && m.from === from; })[0]; }
+find('22:04', 'FLIGHT').replyTo = find('22:03', 'retro-cx').id;
+find('22:29', 'FLIGHT').replyTo = find('22:27', 'work·mac').id;
+// acks replace "Picked" / "Claimed" messages: a mark on the message, no new message, no wake-up
+function ack(t, from, by, label, at) { var m = find(t, from); m.acks = (m.acks || []).concat([{ by: by, label: label, t: at }]); }
+// the whole reaction set: seen · on it · done · can't (with a reason)
+ack('21:13', 'FLIGHT', 'inco-cx', 'on it', '21:14');
+ack('21:21', 'FLIGHT', 'guido-cx', 'seen', '21:21');
+ack('21:30', 'guido-cx', 'retro-cx', 'on it', '21:31');
+ack('21:40', 'retro-cx', 'guido-cx', 'done', '21:47');
+ack('22:06', 'retro-cx', 'inco-cx', 'done', '22:09');
+ack('22:12', 'FLIGHT', 'guido-cx', 'on it', '22:13');
+ack('22:19', 'FLIGHT', 'inco-cx', 'on it', '22:20');
+ack('22:23', 'guido-cx', 'retro-cx', 'on it', '22:24');
+ack('22:29', 'FLIGHT', 'retro-cx', 'can\'t: CI queue full till 23:00', '22:30');
+[['20:32', 'work·mac', 'handoff'], ['21:13', 'FLIGHT', 'handoff'], ['21:16', 'inco-cx', 'question'], ['21:20', 'guido-cx', 'question'],
+  ['21:30', 'guido-cx', 'handoff'], ['21:31', 'inco-cx', 'question'], ['21:40', 'retro-cx', 'blocker'], ['21:44', 'guido-cx', 'done'],
+  ['21:50', 'retro-cx', 'done'], ['22:03', 'retro-cx', 'question'], ['22:06', 'retro-cx', 'blocker'], ['22:07', 'retro-cx', 'question'],
+  ['22:09', 'inco-cx', 'done'], ['22:10', 'work·mac', 'handoff'], ['22:12', 'retro-cx', 'done'], ['22:12', 'FLIGHT', 'handoff'],
+  ['22:17', 'inco-cx', 'done'], ['22:22', 'guido-cx', 'question'], ['22:23', 'guido-cx', 'handoff'], ['22:27', 'work·mac', 'handoff']
+].forEach(function (k) { find(k[0], k[1]).k = k[2]; });
+find('22:22', 'guido-cx').open = 'no answer 9m · goes to FLIGHT at 15m';
+var PINS0 = [find('21:52', 'CAPCOM').id, find('22:14', 'FLIGHT').id];
+var JOIN = {
+  'fao-1': M('22:31', 'FLIGHT', 'fao-1', 'Welcome. You own ops: start with the CI flake list on #321.', '#321'),
+  'guido-2': M('22:31', 'FLIGHT', 'guido-2', 'Welcome. Core area, split with guido-cx: you take packages/core/src/map/**.'),
+  'inco-2': M('22:31', 'FLIGHT', 'inco-2', 'Welcome. Web area: #686 Telemetry when it reaches Ready.', '#686')
+};
+Object.keys(JOIN).forEach(function (k) { JOIN[k].id = 'j-' + k; });
+var TAG_ME = /@CAPCOM\b/;
+
+var DECISIONS = [
+  { id: 'd1', from: 'FLIGHT', ref: '#698', title: 'Guard by outcome: design note before the build?', rec: 'Yes. Note first, then build on Codex seats.', def: 'Start note', secs: 2340 },
+  { id: 'd2', from: 'inco-cx', ref: '#686', title: 'Telemetry spend chart: tokens or dollars?', rec: 'Tokens, with $ on hover. Codex runs report no cost.', def: 'Tokens', secs: 610 },
+  { id: 'd3', from: 'retro-cx', ref: 'PR 551', title: 'PR 551 has been held 3 days. Keep holding?', rec: 'Mark it Held until the crew resumes Wed.', def: 'Hold', secs: 5700 }
+];
+
+function clock(s) { var m = Math.floor(s / 60), r = s % 60; return 'default in ' + (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r; }
+function segs(text) {
+  return text.split(/(@[A-Za-z0-9·_-]+)/).filter(Boolean).map(function (p) {
+    var at = p.charAt(0) === '@', me = p === '@CAPCOM';
+    return { text: p, color: me ? '#f2b53a' : at ? '#8db0ff' : 'inherit', weight: at ? 600 : 'inherit' };
+  });
+}
+function colorOf(id) { return AG[id] ? AG[id].color : '#808999'; }
+
+class Component extends DCLogic {
+  state = { crew: CREW0.slice(), view: { mode: 'flight' }, draft: '', tick: 0, gone: {}, extra: [], read: {}, seen: {}, jump: null, highlight: null, bellOpen: false, replyTo: null, pins: PINS0.slice(), acks: {}, metric: 'msgs' };
+
+  componentDidUpdate() {
+    if (!this.state.jump) return;
+    var el = document.getElementById('msg-' + this.state.jump);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    this.setState({ jump: null });
+  }
+
+  componentDidMount() {
+    var self = this;
+    this.timer = setInterval(function () { self.setState(function (s) { return { tick: s.tick + 1 }; }); }, 60);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  go(view) {
+    var read = Object.assign({}, this.state.read);
+    if (view.mode === 'agent') read[view.id] = true;
+    if (view.mode === 'crew') read.crew = true;
+    this.setState({ view: view, read: read, highlight: null, bellOpen: false, replyTo: null });
+  }
+
+  send() {
+    var text = this.state.draft.trim(), v = this.state.view;
+    if (!text) return;
+    var to = v.mode === 'agent' ? v.id : v.mode === 'flight' ? 'FLIGHT' : 'crew';
+    var msg = M('22:31', 'CAPCOM', to, text);
+    msg.operator = v.mode === 'agent';
+    msg.replyTo = this.state.replyTo;
+    if (v.mode === 'ref') msg.ref = v.ref;
+    var view = v.mode === 'agent' ? { mode: 'agent', id: v.id, peer: 'CAPCOM' } : v.mode === 'mentions' ? { mode: 'crew' } : v;
+    this.setState({ extra: this.state.extra.concat([msg]), draft: '', view: view, replyTo: null });
+  }
+
+  decide(d, verb) {
+    var gone = Object.assign({}, this.state.gone); gone[d.id] = true;
+    this.setState({ gone: gone, extra: this.state.extra.concat([S('22:31', 'CAPCOM', 'FLIGHT', 'CAPCOM ' + verb + ' · ' + d.ref + ' · ' + d.from)]) });
+  }
+
+  renderVals() {
+    var st = this.state, self = this, v = st.view, crew = st.crew;
+    var live = function (id) { return id === 'CAPCOM' || crew.indexOf(id) >= 0; };
+    var edgesLive = EDGES.filter(function (e) { return live(e[0]) && live(e[1]); });
+    var msgs = MSGS.concat(crew.filter(function (c) { return JOIN[c]; }).map(function (c) { return JOIN[c]; }))
+      .concat(st.extra.map(function (m, i) { return Object.assign({ id: 'x' + i }, m); }))
+      .filter(function (m) { return (live(m.from) || m.from === 'engine') && (live(m.to) || m.to === 'crew'); });
+    var byId = {};
+    msgs.forEach(function (m) { byId[m.id] = m; });
+    var totals = {};
+    edgesLive.forEach(function (e) { var n = e[2] + e[3]; totals[e[0]] = (totals[e[0]] || 0) + n; totals[e[1]] = (totals[e[1]] || 0) + n; });
+
+    // scope: which edges are "in view"
+    var focus = v.mode === 'agent' ? v.id : v.mode === 'flight' ? 'FLIGHT' : null;
+    var peer = v.mode === 'agent' ? (v.peer && v.peer !== INBOX ? v.peer : null) : v.mode === 'flight' ? 'CAPCOM' : null;
+    var inScope = function (e) {
+      if (!focus) return true;
+      var hit = e[0] === focus || e[1] === focus;
+      if (!peer) return hit;
+      return hit && (e[0] === peer || e[1] === peer);
+    };
+
+    // decisions
+    var secs = Math.floor(st.tick * 0.06);
+    var decisions = DECISIONS.filter(function (d) { return !st.gone[d.id]; }).map(function (d) {
+      var left = Math.max(0, d.secs - secs);
+      return {
+        from: d.from, ref: d.ref, title: d.title, rec: d.rec, def: d.def, color: colorOf(d.from),
+        countdown: clock(left), clockColor: left < 900 ? '#f2b53a' : '#808999',
+        accept: function () { self.decide(d, 'accepted default "' + d.def + '"'); },
+        hold: function () { self.decide(d, 'marked held, no more pings'); },
+        discuss: function () {
+          self.go(d.from === 'FLIGHT' ? { mode: 'flight' } : { mode: 'agent', id: d.from, peer: null });
+          self.setState({ draft: 'Re ' + d.ref + ': ' });
+        }
+      };
+    });
+
+    // left nav
+    var lastOf = function (list) { var m = list[list.length - 1]; return m ? (m.sys ? m.text : m.from + ': ' + m.text) : ''; };
+    var flightMsgs = msgs.filter(function (m) { return (m.from === 'CAPCOM' || m.to === 'CAPCOM') && (m.from === 'FLIGHT' || m.to === 'FLIGHT'); });
+    var crewMsgs = msgs.filter(function (m) { return m.to === 'crew'; });
+
+    // mentions: every message that tags CAPCOM, newest first, with the line before it and how much came after
+    var convoOf = function (m) {
+      return m.to === 'crew' ? crewMsgs : msgs.filter(function (x) { return (x.from === m.from && x.to === m.to) || (x.from === m.to && x.to === m.from); });
+    };
+    var tagged = msgs.filter(function (m) { return !m.sys && m.from !== 'CAPCOM' && TAG_ME.test(m.text); }).reverse();
+    var mentions = tagged.map(function (m) {
+      var list = convoOf(m), i = list.indexOf(m), prev = i > 0 ? list[i - 1] : null, after = list.length - 1 - i;
+      var where = m.to === 'crew' ? '#crew' : m.from + ' ↔ ' + m.to;
+      var target = m.to === 'crew' ? { mode: 'crew' } : { mode: 'agent', id: m.from, peer: m.to };
+      var unread = !st.seen[m.id];
+      var mark = function () { var seen = Object.assign({}, self.state.seen); seen[m.id] = true; return seen; };
+      return {
+        time: m.t, from: m.from, fromColor: colorOf(m.from), where: where, ref: m.ref, hasRef: !!m.ref,
+        since: after ? after + ' newer message' + (after > 1 ? 's' : '') : 'latest',
+        hasPrev: !!prev, prevFrom: prev ? prev.from : '', prevText: prev ? prev.text : '',
+        segs: segs(m.text), unread: unread, border: unread ? 'rgba(242,181,58,.55)' : '#252c37',
+        text: m.text, op: unread ? 1 : 0.5, dot: unread ? '#f2b53a' : 'transparent',
+        aria: (unread ? 'New: ' : 'Seen: ') + m.from + ' in ' + where + ' at ' + m.t + ', ' + m.text,
+        open: function () { self.go(target); self.setState({ seen: mark(), jump: m.id, highlight: m.id }); },
+        reply: function () { self.go(m.to === 'crew' ? { mode: 'crew' } : { mode: 'agent', id: m.from, peer: null }); self.setState({ seen: mark(), draft: '@' + m.from + ' ' }); }
+      };
+    });
+    var mentionCount = mentions.filter(function (x) { return x.unread; }).length;
+    var tops = [
+      { key: 'flight', title: 'FLIGHT ↔ CAPCOM', sub: lastOf(flightMsgs), color: '#8db0ff', unread: 1, view: { mode: 'flight' } },
+      { key: 'crew', title: '#crew', sub: (crew.length + 1) + ' members · ' + lastOf(crewMsgs), color: '#aab2bf', unread: st.read.crew ? 0 : 4, view: { mode: 'crew' } }
+    ].map(function (t) {
+      var on = v.mode === t.key, unread = on && t.key === 'flight' ? 0 : t.unread;
+      return { title: t.title, sub: t.sub, color: t.color, unread: unread, hasUnread: unread > 0, current: on ? 'page' : 'false',
+        bg: on ? '#1c222b' : 'transparent', mark: on ? '#8db0ff' : 'transparent', go: function () { self.go(t.view); } };
+    });
+    var agentRows = crew.map(function (id) {
+      var a = AG[id], on = v.mode === 'agent' && v.id === id;
+      var unread = st.read[id] || on ? 0 : (UNREAD[id] || 0);
+      return { id: id, role: a.role, state: a.state, color: a.color, op: a.state === 'paused' ? 0.45 : 1, total: totals[id] || 0,
+        unread: unread, hasUnread: unread > 0, current: on ? 'page' : 'false',
+        bg: on ? '#1c222b' : 'transparent', mark: on ? a.color : 'transparent',
+        go: function () { self.go({ mode: 'agent', id: id, peer: null }); } };
+    });
+
+    // centre
+    var crumbs, view, headNote, contacts = [], refInfo = null;
+    if (v.mode === 'flight') {
+      crumbs = [{ label: 'Comms', view: { mode: 'flight' } }, { label: 'FLIGHT ↔ CAPCOM', view: v, color: '#8db0ff' }];
+      view = flightMsgs; headNote = 'FLIGHT reports and asks here; you direct it';
+    } else if (v.mode === 'crew') {
+      crumbs = [{ label: 'Comms', view: { mode: 'flight' } }, { label: '#crew', view: v }];
+      view = crewMsgs; headNote = (crew.length + 1) + ' members · everyone reads and posts · @name pings';
+    } else if (v.mode === 'ref') {
+      var T = TICKETS[v.ref] || {}, keys = [v.ref].concat(T.link ? [T.link] : []);
+      view = msgs.filter(function (m) { return keys.indexOf(m.ref) >= 0 || keys.some(function (k) { return (m.text || '').indexOf(k) >= 0; }); });
+      var convos = {};
+      view.forEach(function (m) { convos[m.to === 'crew' ? 'crew' : [m.from, m.to].sort().join('|')] = true; });
+      refInfo = { id: v.ref, title: T.title || '', status: T.status || '', owner: T.owner || '—', count: view.length, convos: Object.keys(convos).length };
+      crumbs = [{ label: 'Comms', view: { mode: 'flight' } }, { label: v.ref, view: v, color: '#8db0ff' }];
+      headNote = 'Every message about ' + keys.join(' and ') + ', across conversations';
+    } else if (v.mode === 'mentions') {
+      crumbs = [{ label: 'Comms', view: { mode: 'flight' } }, { label: 'Mentions', view: v, color: '#f2b53a' }];
+      view = []; headNote = 'Where you were tagged, newest first';
+    } else {
+      var a = v.id, mine = msgs.filter(function (m) { return m.from === a || m.to === a; });
+      var peers = {};
+      mine.forEach(function (m) { var p = m.from === a ? m.to : m.from; if (p !== 'crew' && p !== 'engine') (peers[p] = peers[p] || []).push(m); });
+      var cnt = function (p) { var e = edgesLive.filter(function (x) { return (x[0] === a && x[1] === p) || (x[1] === a && x[0] === p); })[0]; return e ? e[2] + e[3] : peers[p].length; };
+      var allRow = { key: null, label: 'All messages', color: '#e7eaef', count: mine.length, list: mine };
+      // what this seat reads when woken: messages to it, tags on it, replies to it (plus the pins)
+      var tagRe = new RegExp('@' + a + '(?![A-Za-z0-9·_-])');
+      var inbox = msgs.filter(function (m) {
+        return !m.sys && m.from !== a && (m.to === a || tagRe.test(m.text) || (m.replyTo && byId[m.replyTo] && byId[m.replyTo].from === a));
+      });
+      var inboxRow = { key: INBOX, label: 'Inbox · what it reads', color: '#f2b53a', count: inbox.length + st.pins.length, list: inbox };
+      contacts = [inboxRow, allRow].concat(Object.keys(peers).sort(function (x, y) { return cnt(y) - cnt(x); }).map(function (p) {
+        return { key: p, label: p, color: colorOf(p), count: cnt(p), list: peers[p] };
+      })).map(function (c) {
+        var on = (v.peer || null) === c.key, last = c.list[c.list.length - 1];
+        return { label: c.label, color: c.color, count: c.count, time: last ? last.t : '', last: last ? last.text : '',
+          current: on ? 'page' : 'false', bg: on ? '#1c222b' : 'transparent', mark: on ? c.color : 'transparent',
+          go: function () { self.go({ mode: 'agent', id: a, peer: c.key }); } };
+      });
+      crumbs = [{ label: 'Comms', view: { mode: 'flight' } }, { label: 'Agents', view: { mode: 'agent', id: a, peer: null } }, { label: a, view: { mode: 'agent', id: a, peer: null }, color: colorOf(a) }];
+      if (v.peer) crumbs.push({ label: v.peer === INBOX ? 'Inbox' : v.peer, view: v, color: v.peer === INBOX ? '#f2b53a' : colorOf(v.peer) });
+      view = v.peer === INBOX ? inbox : v.peer ? peers[v.peer] || [] : mine;
+      headNote = v.peer === INBOX ? 'All ' + a + ' reads when woken: messages to it, tags on it, replies to it, pins. Not the whole of #crew.' : v.peer ?'Read-only between ' + a + ' and ' + v.peer + ' · you can message ' + a : 'Everything ' + a + ' sent and received';
+    }
+    crumbs = crumbs.map(function (c, i) {
+      return { label: c.label, notFirst: i > 0, last: i === crumbs.length - 1 ? 'page' : 'false', color: c.color || (i === crumbs.length - 1 ? '#e7eaef' : '#aab2bf'), go: function () { self.go(c.view); } };
+    });
+    var me = v.mode === 'agent' ? v.id : 'CAPCOM';
+    var rq = st.replyTo ? byId[st.replyTo] : null;
+    var messages = view.map(function (m) {
+      var q = m.replyTo ? byId[m.replyTo] : null;
+      var ackList = (m.acks || []).concat(st.acks[m.id] || []).map(function (k) { return { by: k.by, label: k.label, t: k.t, color: REACT_COLOR[k.label] || '#f1706d' }; });
+      var pinned = st.pins.indexOf(m.id) >= 0;
+      var own = m.from === me;
+      var tint = own && me !== 'CAPCOM' ? colorOf(me) : null;
+      var tagsMe = !m.sys && m.from !== 'CAPCOM' && TAG_ME.test(m.text), hi = st.highlight === m.id;
+      return {
+        domId: 'msg-' + m.id, tagsMe: tagsMe, glow: hi ? '0 0 0 2px #f2b53a' : 'none',
+        hasQuote: !!q, qFrom: q ? q.from : '', qColor: q ? colorOf(q.from) : '#808999', qTime: q ? q.t : '', qText: q ? q.text : '',
+        qAria: q ? 'Go to the message this replies to: ' + q.from + ' at ' + q.t : '',
+        jumpQuote: function () { if (q) self.setState({ jump: q.id, highlight: q.id }); },
+        replyAria: 'Reply to ' + m.from + ' at ' + m.t,
+        hasKind: !!KINDS[m.k], kindLabel: KINDS[m.k] ? KINDS[m.k][0] : '', kindColor: KINDS[m.k] ? KINDS[m.k][1] : '#808999',
+        isOpen: !!m.open, openNote: m.open || '',
+        refAria: 'Every message about ' + m.ref,
+        openRef: function () { self.go({ mode: 'ref', ref: m.ref }); },
+        acks: ackList, hasAcks: ackList.length > 0,
+        ackAria: 'Acknowledge ' + m.from + ' at ' + m.t,
+        ack: function () {
+          var cur = st.acks[m.id] || [];
+          if (cur.some(function (k) { return k.by === 'CAPCOM'; })) return;
+          var acks = Object.assign({}, st.acks); acks[m.id] = cur.concat([{ by: 'CAPCOM', label: 'seen', t: '22:31' }]);
+          self.setState({ acks: acks });
+        },
+        pinLabel: pinned ? 'Unpin' : 'Pin', pinAria: (pinned ? 'Unpin ' : 'Pin ') + m.from + ' at ' + m.t,
+        pin: function () { self.setState({ pins: pinned ? st.pins.filter(function (x) { return x !== m.id; }) : st.pins.concat([m.id]) }); },
+        reply: function () {
+          self.setState({ replyTo: m.id });
+          var box = document.getElementById('comp');
+          if (box) box.focus();
+        },
+        time: m.t, isSys: !!m.sys, isMsg: !m.sys, text: m.text, segs: segs(m.text || ''),
+        from: m.from, fromColor: colorOf(m.from), to: m.to === 'crew' ? '#crew' : m.to, toColor: colorOf(m.to),
+        showTo: v.mode === 'ref' || (v.mode === 'agent' && (!v.peer || v.peer === INBOX || m.to === 'crew')),
+        operator: !!m.operator, ref: m.ref, hasRef: !!m.ref,
+        side: own ? 'flex-end' : 'flex-start',
+        bg: tagsMe ? 'rgba(242,181,58,.08)' : own ? (tint ? '#1a212b' : 'rgba(141,176,255,.14)') : '#1c222b',
+        border: tagsMe ? 'rgba(242,181,58,.45)' : own ? (tint ? tint + '66' : 'rgba(141,176,255,.35)') : '#252c37',
+        radius: own ? '8px 8px 2px 8px' : '2px 8px 8px 8px'
+      };
+    });
+    var composeLabel = v.mode === 'flight' ? 'Message FLIGHT as CAPCOM' : v.mode === 'crew' ? 'Post to #crew as CAPCOM · @name pings one agent'
+      : v.mode === 'ref' ? 'Post to #crew as CAPCOM · tagged ' + v.ref
+      : v.mode === 'mentions' ? 'Post to #crew as CAPCOM · or Reply on a mention to answer where it was asked' : 'Message ' + v.id + ' directly as CAPCOM · marked operator';
+    var composeHint = v.mode === 'flight' ? 'Ask FLIGHT, or give it direction…' : v.mode === 'agent' ? 'Say something to ' + v.id + '…' : 'Say something to the whole crew…';
+
+    // graph layout: FLIGHT at the centre, everyone else on a ring, CAPCOM at the top
+    var ring = ['CAPCOM'].concat(crew.filter(function (c) { return c !== 'FLIGHT'; }));
+    var pos = { FLIGHT: { x: 170, y: 160 } }, R = ring.length > 7 ? 128 : 118;
+    ring.forEach(function (id, i) {
+      var ang = -Math.PI / 2 + 2 * Math.PI * i / ring.length;
+      pos[id] = { x: Math.round(170 + R * Math.cos(ang)), y: Math.round(160 + R * Math.sin(ang)) };
+    });
+    var t = st.tick, dots = [];
+    var isLoop = function (x, y) { return LOOPS.some(function (l) { return (l.a === x && l.b === y) || (l.a === y && l.b === x); }); };
+    var edges = edgesLive.map(function (e) {
+      var A = pos[e[0]], B = pos[e[1]], dx = B.x - A.x, dy = B.y - A.y, n = e[2] + e[3], on = inScope(e);
+      var tok = TOK[e[0] + '|' + e[1]] || 5, loop = isLoop(e[0], e[1]);
+      var w = 1 + (st.metric === 'tokens' ? tok / 14 : n / 8), k = Math.min(14, Math.max(2, Math.round(n / 2))), speed = 0.016 + n / 1100;
+      var kab = Math.max(1, Math.round(k * e[2] / n));
+      for (var j = 0; j < k; j++) {
+        var f = (t * speed + j / k) % 1, back = j >= kab, q = back ? 1 - f : f;
+        dots.push({ x: A.x + dx * q, y: A.y + dy * q, color: colorOf(back ? e[1] : e[0]), op: on ? 0.95 : 0.08 });
+      }
+      return { x: A.x, y: A.y, len: Math.sqrt(dx * dx + dy * dy), ang: Math.atan2(dy, dx) * 180 / Math.PI, w: w, mt: -w / 2,
+        mx: A.x + dx / 2, my: A.y + dy / 2, count: n, op: on ? 1 : 0.15,
+        color: loop ? '#f2b53a' : '#354050', labelColor: loop ? '#f2b53a' : '#aab2bf', label: st.metric === 'tokens' ? tok + 'k' : n };
+    });
+    var lit = function (id) { return !focus || id === focus || (peer ? id === peer : edgesLive.some(function (e) { return inScope(e) && (e[0] === id || e[1] === id); })); };
+    var nodes = ['FLIGHT'].concat(ring).map(function (id) {
+      var tot = totals[id] || 0, sel = id === focus || id === peer;
+      return { x: pos[id].x, y: pos[id].y, label: id, color: colorOf(id), total: tot, size: Math.round(26 + Math.min(tot, 90) / 5),
+        op: lit(id) ? 1 : 0.3, ring: sel ? 4 : 0, aria: 'Open ' + id + ', ' + tot + ' messages in 24h',
+        go: function () { self.go(id === 'CAPCOM' ? { mode: 'flight' } : { mode: 'agent', id: id, peer: null }); } };
+    });
+
+    // traffic
+    var act = edgesLive.filter(inScope);
+    var sumBy = function (fn) { return act.reduce(function (s, e) { return s + fn(e); }, 0); };
+    var total = sumBy(function (e) { return e[2] + e[3]; });
+    var sentOf = function (e) { return focus ? (e[0] === focus ? e[2] : e[1] === focus ? e[3] : 0) : 0; };
+    var capOf = function (e) { return e[0] === 'CAPCOM' || e[1] === 'CAPCOM' ? e[2] + e[3] : 0; };
+    var stats, legendAText, legendBText, legendA, legendB, splitA;
+    if (focus && v.mode === 'agent') {
+      var sent = sumBy(sentOf);
+      stats = [{ value: total, label: 'messages', color: '#e7eaef' }, { value: sent, label: 'sent', color: colorOf(focus) },
+        { value: total - sent, label: 'received', color: '#aab2bf' }, { value: act.length, label: peer ? 'link' : 'contacts', color: '#e7eaef' }];
+      legendA = colorOf(focus); legendB = '#55606f'; legendAText = 'Sent by ' + focus; legendBText = 'Received';
+      splitA = sentOf;
+    } else {
+      var capN = sumBy(capOf);
+      stats = [{ value: total, label: 'messages', color: '#e7eaef' }, { value: total ? Math.round(100 * (total - capN) / total) + '%' : '—', label: 'agent ↔ agent', color: '#b8a8f7' },
+        { value: capN, label: 'with CAPCOM', color: '#8db0ff' }, { value: crew.length, label: 'agents', color: '#e7eaef' }];
+      legendA = '#b8a8f7'; legendB = '#8db0ff'; legendAText = 'Agent ↔ agent'; legendBText = 'With CAPCOM';
+      splitA = function (e) { return e[2] + e[3] - capOf(e); };
+    }
+    var hourly = PATTERN.map(function (p, i) {
+      var a = 0, all = 0;
+      act.forEach(function (e) { a += splitA(e) * p / PSUM; all += (e[2] + e[3]) * p / PSUM; });
+      return { a: a, b: all - a, hour: (23 + i) % 24 };
+    });
+    var peak = Math.max.apply(null, hourly.map(function (h) { return h.a + h.b; }).concat([1]));
+    var hours = hourly.map(function (h) {
+      return { a: Math.round(56 * h.a / peak), b: Math.round(56 * h.b / peak),
+        tip: (h.hour < 10 ? '0' : '') + h.hour + ':00 · ' + Math.round(h.a) + ' ' + legendAText.toLowerCase() + ', ' + Math.round(h.b) + ' ' + legendBText.toLowerCase() };
+    });
+    var loops = LOOPS.filter(function (l) { return live(l.a) && live(l.b); }).map(function (l) {
+      return { pair: l.a + ' ↔ ' + l.b, rounds: l.rounds, ref: l.ref, note: l.note, tokens: (TOK[l.a + '|' + l.b] || 0) + 'k tok',
+        go: function () { self.go({ mode: 'agent', id: l.a, peer: l.b }); } };
+    });
+    var pins = st.pins.map(function (id) { return byId[id]; }).filter(Boolean).map(function (p) {
+      return { from: p.from, color: colorOf(p.from), text: p.text, aria: 'Unpin ' + p.from + ' at ' + p.t,
+        unpin: function () { self.setState({ pins: st.pins.filter(function (x) { return x !== p.id; }) }); } };
+    });
+    var metricBtn = function (on) { return { bg: on ? '#252c37' : 'transparent', border: on ? '#8db0ff' : '#354050' }; };
+    var mM = metricBtn(st.metric === 'msgs'), mT = metricBtn(st.metric === 'tokens');
+    var scopeLabel = v.mode === 'ref' ? 'whole crew' : v.mode === 'crew' ? 'whole crew' : v.mode === 'flight' ? 'FLIGHT ↔ CAPCOM' : v.peer ? v.id + ' ↔ ' + v.peer : v.id + ', all contacts';
+
+    return {
+      decisions: decisions, decisionCount: decisions.length, noDecisions: decisions.length === 0,
+      tops: tops, agentRows: agentRows, agentCount: crew.length,
+      isChat: v.mode !== 'mentions', isMentions: v.mode === 'mentions',
+      mentions: mentions, noMentions: mentions.length === 0, mentionCount: mentionCount, hasMentions: mentionCount > 0,
+      mentionSummary: mentions.length + ' mention' + (mentions.length === 1 ? '' : 's') + ' · ' + mentionCount + ' new',
+      bellAria: 'Mentions, ' + mentionCount + ' new', bellBorder: mentionCount ? 'rgba(242,181,58,.6)' : '#354050', bellColor: mentionCount ? '#f2b53a' : '#aab2bf',
+      bellOpen: st.bellOpen,
+      isRef: !!refInfo, refId: refInfo ? refInfo.id : '', refTitle: refInfo ? refInfo.title : '', refStatus: refInfo ? refInfo.status : '',
+      refOwner: refInfo ? refInfo.owner : '', refOwnerColor: refInfo ? colorOf(refInfo.owner) : '#808999',
+      refCount: refInfo ? refInfo.count : 0, refConvos: refInfo ? refInfo.convos : 0,
+      pins: pins, hasPins: pins.length > 0 && (v.mode === 'crew' || (v.mode === 'agent' && v.peer === INBOX)),
+      loops: loops, noLoops: loops.length === 0,
+      msgsOn: st.metric === 'msgs', tokensOn: st.metric === 'tokens',
+      msgsBg: mM.bg, msgsBorder: mM.border, tokensBg: mT.bg, tokensBorder: mT.border,
+      showMsgs: function () { self.setState({ metric: 'msgs' }); },
+      showTokens: function () { self.setState({ metric: 'tokens' }); },
+      replying: !!rq, replyFrom: rq ? rq.from : '', replyColor: rq ? colorOf(rq.from) : '#808999', replyTime: rq ? rq.t : '', replyText: rq ? rq.text : '',
+      cancelReply: function () { self.setState({ replyTo: null }); },
+      openMentions: function () { self.setState({ bellOpen: !st.bellOpen }); },
+      closeBell: function () { self.setState({ bellOpen: false }); },
+      markAllRead: function () { var seen = Object.assign({}, st.seen); tagged.forEach(function (m) { seen[m.id] = true; }); self.setState({ seen: seen }); },
+      crumbs: crumbs, headNote: headNote, isAgent: v.mode === 'agent', focus: v.mode === 'agent' ? v.id : '', contacts: contacts,
+      messages: messages, noMessages: messages.length === 0,
+      draft: st.draft,
+      onDraft: function (e) { self.setState({ draft: e.target.value }); },
+      onKey: function (e) { if (e.key === 'Enter') self.send(); },
+      send: function () { self.send(); },
+      composeLabel: composeLabel, composeHint: composeHint,
+      edges: edges, dots: dots, nodes: nodes,
+      graphLabel: 'Comms graph, ' + crew.length + ' agents, ' + total + ' messages in view (' + scopeLabel + ')',
+      addSeat: function () { var n = SPARE.filter(function (s) { return crew.indexOf(s) < 0; })[0]; if (n) self.setState({ crew: crew.concat([n]) }); },
+      removeSeat: function () {
+        var gone = crew.filter(function (c) { return c !== 'FLIGHT'; }).slice(-1)[0];
+        if (!gone) return;
+        var nv = v.mode === 'agent' && (v.id === gone || v.peer === gone) ? { mode: 'crew' } : v;
+        self.setState({ crew: crew.filter(function (c) { return c !== gone; }), view: nv });
+      },
+      stats: stats, hours: hours, scopeLabel: scopeLabel,
+      legendA: legendA, legendB: legendB, legendAText: legendAText, legendBText: legendBText,
+      trafficLabel: 'Hourly messages over the last 24 hours, ' + scopeLabel
+    };
+  }
+}
+</script>
+</body>
+</html>
