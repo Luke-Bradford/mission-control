@@ -173,7 +173,7 @@ export function Accounts({ config }: { config: ConfigView }) {
                 <th>Name</th>
                 <th>Vendor</th>
                 <th>Login</th>
-                <th>Models</th>
+                <th>Plan</th>
                 <th>5h</th>
                 <th>7d</th>
                 <th>Resets</th>

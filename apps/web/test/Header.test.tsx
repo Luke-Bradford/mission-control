@@ -1,4 +1,4 @@
-import type { AttentionItem, AwaySettings, Crew } from "@mc/core";
+import type { AttentionItem, AwaySettings, Crew, LimitRow } from "@mc/core";
 import { DEFAULT_AWAY, LOCK_HEADER_TITLE, type TestLockState } from "@mc/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useEffect } from "react";
@@ -18,6 +18,7 @@ import {
   HOUR,
   item,
   itemWithoutOwner,
+  limit7d,
   MIN,
   NOW,
   REPOS,
@@ -37,6 +38,7 @@ function routes(
     away?: AwaySettings;
     machine?: unknown;
     lock?: TestLockState;
+    limits?: LimitRow[];
   } = {},
 ) {
   return stubFetch({
@@ -45,6 +47,7 @@ function routes(
     "/api/attention": over.attention ?? [],
     "/api/settings/away": over.away ?? DEFAULT_AWAY,
     "/api/machine": over.machine ?? { latest: null },
+    "/api/limits": over.limits ?? [],
     "/api/repos": REPOS,
     "/api/config": over.config ?? CONFIG,
     "/api/flight": { seat: null, decisions: [] },
@@ -110,6 +113,24 @@ describe("Header", () => {
     ]);
     expect(tab(/^Board/).getAttribute("aria-current")).toBe("page");
     expect(tab(/^Board/).className).toBe("on");
+  });
+
+  it("shows the highest 7-day usage across a provider's accounts", async () => {
+    routes({
+      config: {
+        ...CONFIG,
+        accounts: [
+          ...CONFIG.accounts,
+          { id: "codex-backup", vendor: "codex", alertAt: 70, stopAt: 80 },
+        ],
+      },
+      limits: [
+        limit7d({ accountId: "codex-main", used: 18 }),
+        limit7d({ accountId: "codex-backup", used: 92 }),
+      ],
+    });
+    render(<Header page="overview" />);
+    expect(await screen.findByRole("img", { name: "Claude —; Codex 92%" })).toBeTruthy();
   });
 
   it("puts lamps on the tabs from the attention list", async () => {
@@ -235,6 +256,8 @@ describe("Header", () => {
     render(<Header page="flight" />);
     const btn = screen.getByTitle("Machine and test lock (on Overview)");
     await vi.waitFor(() => expect(btn.textContent).toBe("CPU 12%RAM 50%Lock: free"));
+    expect(btn.closest(".top-status")).not.toBeNull();
+    expect(btn.closest(".sr-only")).toBeNull();
     expect(within(btn).getByText("Lock: free").title).toBe(LOCK_HEADER_TITLE);
     fireEvent.click(btn);
     expect(window.location.pathname).toBe("/");
@@ -374,15 +397,23 @@ describe("Header", () => {
     expect(seen).toBe("s1");
   });
 
-  it("Setup is a page link, and the FLIGHT chat button has no badge", () => {
+  it("the FLIGHT button opens Comms from Setup and is already pressed on Comms", () => {
     routes();
-    render(<Header page="setup" />);
+    const { unmount } = render(<Header page="setup" />);
     const setup = tab(/^Setup$/);
     expect(setup.className).toBe("on");
     fireEvent.click(setup);
     expect(window.location.pathname).toBe("/setup");
     const chat = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(chat.title).toBe("Show or hide FLIGHT's chat (f)");
+    expect(chat.title).toBe("Open FLIGHT chat in Comms (f)");
+    expect(chat.getAttribute("aria-pressed")).toBeNull();
     expect(chat.querySelector(".badge")).toBeNull();
+    fireEvent.click(chat);
+    expect(window.location.pathname).toBe("/comms");
+    unmount();
+    render(<Header page="comms" />);
+    const open = screen.getByRole("button", { name: "FLIGHT chat" });
+    expect(open.title).toBe("FLIGHT chat is open in Comms");
+    expect(open.getAttribute("aria-pressed")).toBe("true");
   });
 });

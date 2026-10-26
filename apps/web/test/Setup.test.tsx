@@ -561,17 +561,7 @@ describe("Setup tabs", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
-    ).toEqual([
-      "Name",
-      "Vendor",
-      "Login",
-      "Models",
-      "5h",
-      "7d",
-      "Resets",
-      "Alert / stop",
-      "Actions",
-    ]);
+    ).toEqual(["Name", "Vendor", "Login", "Plan", "5h", "7d", "Resets", "Alert / stop", "Actions"]);
     const rows = within(table).getAllByRole("row");
     const claude = rows[1] as HTMLElement;
     expect(claude.textContent).toContain("claude-main");
