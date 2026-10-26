@@ -216,11 +216,13 @@ export function SeatComposer({
   placeholder,
   onSent,
   prefill,
+  onPrefillConsumed,
 }: {
   row: CrewRow;
   placeholder?: string;
   onSent?: () => void;
   prefill?: ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -236,7 +238,8 @@ export function SeatComposer({
     used.current = prefill.token;
     setText(prefill.text);
     input.current?.focus();
-  }, [prefill]);
+    onPrefillConsumed?.(prefill.token);
+  }, [onPrefillConsumed, prefill]);
 
   const send = async (interrupt: boolean) => {
     if (text.trim() === "") {

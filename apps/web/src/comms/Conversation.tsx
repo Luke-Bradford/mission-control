@@ -29,9 +29,11 @@ import { type CommsView, messagesForView } from "./model.ts";
 export function Conversation({
   row,
   prefill,
+  onPrefillConsumed,
 }: {
   row: CrewRow | null;
   prefill?: import("./model.ts").ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const activity = useResource<{ messages: CommsThreadMessage[] }>(
@@ -90,7 +92,7 @@ export function Conversation({
         {flightSeat === null ? (
           <p className="pb note">{FLIGHT_NO_SEAT}</p>
         ) : (
-          <FlightChat where="comms" prefill={prefill} />
+          <FlightChat where="comms" prefill={prefill} onPrefillConsumed={onPrefillConsumed} />
         )}
       </Panel>
     );
@@ -219,10 +221,12 @@ function AgentConversation({
   row,
   view,
   prefill,
+  onPrefillConsumed,
 }: {
   row: CrewRow;
   view: CommsView;
   prefill?: import("./model.ts").ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(row.id));
   const all = activity.data?.messages ?? [];
@@ -231,11 +235,18 @@ function AgentConversation({
   const readError = useCommsRead(row.id, all);
   const box = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const route = `${view.kind}:${row.id}:${view.kind === "contact" ? view.contactId : ""}`;
+  const shownRoute = useRef<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: route and message count drive bottom following
   useLayoutEffect(() => {
     const element = box.current;
-    if (element && nearBottom.current) element.scrollTop = element.scrollHeight;
-  }, [view, messages.length]);
+    if (!element) return;
+    if (shownRoute.current !== route) {
+      shownRoute.current = route;
+      nearBottom.current = true;
+      element.scrollTop = element.scrollHeight;
+    } else if (nearBottom.current) element.scrollTop = element.scrollHeight;
+  }, [route, messages.length]);
   return (
     <div className="comms-agent">
       <AgentContacts
@@ -258,29 +269,31 @@ function AgentConversation({
                 element.scrollHeight - element.scrollTop - element.clientHeight < 40;
           }}
         >
-          {messages.length === 0 ? (
-            <p className="pb note">
-              {view.kind === "inbox" ? "Not available yet." : "No messages yet."}
-            </p>
-          ) : (
-            messages.map((message) => (
-              <div
-                className={`msg${message.from === COMMS_CAPCOM ? " mine" : ""}`}
-                key={message.id}
-              >
-                <div className="from">
-                  <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
-                  {message.from === COMMS_CAPCOM && <Pill tone="neutral">operator</Pill>}
+          <div className="comms-message-stack">
+            {messages.length === 0 ? (
+              <p className="pb note">
+                {view.kind === "inbox" ? "Not available yet." : "No messages yet."}
+              </p>
+            ) : (
+              messages.map((message) => (
+                <div
+                  className={`msg${message.from === COMMS_CAPCOM ? " mine" : ""}`}
+                  key={message.id}
+                >
+                  <div className="from">
+                    <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
+                    {message.from === COMMS_CAPCOM && <Pill tone="neutral">operator</Pill>}
+                  </div>
+                  <div className="body">
+                    <MentionText text={message.text} />
+                  </div>
                 </div>
-                <div className="body">
-                  <MentionText text={message.text} />
-                </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
         <p className="s muted">{`Message ${row.id} directly as CAPCOM · marked operator`}</p>
-        <SeatComposer row={row} prefill={prefill} />
+        <SeatComposer row={row} prefill={prefill} onPrefillConsumed={onPrefillConsumed} />
       </Panel>
     </div>
   );
@@ -291,12 +304,15 @@ export function CommsConversation({
   view,
   row,
   prefill,
+  onPrefillConsumed,
 }: {
   view: CommsView;
   row: CrewRow | null;
   prefill?: import("./model.ts").ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
-  if (view.kind === "flight") return <Conversation row={null} prefill={prefill} />;
+  if (view.kind === "flight")
+    return <Conversation row={null} prefill={prefill} onPrefillConsumed={onPrefillConsumed} />;
   if (view.kind === "crew") {
     return (
       <Panel id="chatP" title="#crew">
@@ -311,7 +327,14 @@ export function CommsConversation({
       </Panel>
     );
   }
-  return <AgentConversation row={row} view={view} prefill={prefill} />;
+  return (
+    <AgentConversation
+      row={row}
+      view={view}
+      prefill={prefill}
+      onPrefillConsumed={onPrefillConsumed}
+    />
+  );
 }
 
 export function CommsBreadcrumb({ view }: { view: CommsView }) {

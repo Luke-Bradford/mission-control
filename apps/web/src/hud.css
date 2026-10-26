@@ -2724,6 +2724,12 @@ pre.diff .h {
   min-height: 0;
   overflow: auto;
 }
+.comms-message-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100%;
+}
 .comms-breadcrumb {
   display: flex;
   gap: 8px;

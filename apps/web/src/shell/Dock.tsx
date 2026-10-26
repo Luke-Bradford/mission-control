@@ -103,6 +103,7 @@ function Composer({
   err,
   onSend,
   prefill,
+  onPrefillConsumed,
 }: {
   where: ChatPlace;
   seat: FlightSeat | null;
@@ -110,6 +111,7 @@ function Composer({
   err: string | null;
   onSend: (body: string) => Promise<boolean>;
   prefill?: ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -126,7 +128,8 @@ function Composer({
     used.current = prefill.token;
     setText(prefill.text);
     input.current?.focus();
-  }, [prefill]);
+    onPrefillConsumed?.(prefill.token);
+  }, [onPrefillConsumed, prefill]);
   return (
     <form className="composer" id={`${ID_PREFIX[where]}Form`} onSubmit={(e) => void send(e)}>
       <input
@@ -171,7 +174,15 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
  * FLIGHT's conversation: the asks waiting on the operator, the message log and the message box.
  * With no FLIGHT seat the log is empty and the input is switched off.
  */
-export function FlightChat({ where, prefill }: { where: ChatPlace; prefill?: ComposerPrefill }) {
+export function FlightChat({
+  where,
+  prefill,
+  onPrefillConsumed,
+}: {
+  where: ChatPlace;
+  prefill?: ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
+}) {
   const msgs = useRef<HTMLDivElement>(null);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
@@ -262,7 +273,15 @@ export function FlightChat({ where, prefill }: { where: ChatPlace; prefill?: Com
           <Msg key={r.id} row={r} tz={tz} />
         ))}
       </div>
-      <Composer where={where} seat={seat} busy={busy} err={err} onSend={send} prefill={prefill} />
+      <Composer
+        where={where}
+        seat={seat}
+        busy={busy}
+        err={err}
+        onSend={send}
+        prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
+      />
     </>
   );
 }

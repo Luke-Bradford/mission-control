@@ -69,12 +69,23 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
                   token: (prefill?.token ?? 0) + 1,
                   text: ticket ? `Re #${ticket}: ` : "Re: ",
                 });
-                navigate(decision.agentId ? commsAgentPath(decision.agentId) : commsFlightPath());
+                navigate(
+                  decision.agentId === null || decision.agentId === flightSeat?.id
+                    ? commsFlightPath()
+                    : commsAgentPath(decision.agentId),
+                );
               }}
             />
             <CommsNav rows={rows} flightId={flightId} view={view} onNavigate={navigate} />
           </div>
-          <CommsConversation view={view} row={selectedRow} prefill={prefill} />
+          <CommsConversation
+            view={view}
+            row={selectedRow}
+            prefill={prefill}
+            onPrefillConsumed={(token) =>
+              setPrefill((current) => (current?.token === token ? undefined : current))
+            }
+          />
         </div>
       </section>
     );
