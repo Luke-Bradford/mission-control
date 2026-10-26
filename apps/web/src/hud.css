@@ -2633,6 +2633,133 @@ pre.diff .h {
   gap: 12px;
   height: 100%;
 }
+.comms-page,
+.comms-grid,
+.comms-left,
+.comms-agent,
+.comms-agent #chatP,
+.comms-agent #chatP .panel-body {
+  min-height: 0;
+}
+.comms-page {
+  height: 100%;
+}
+.comms-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+}
+.comms-left,
+.comms-nav,
+.comms-contacts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.comms-decisions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  max-height: 46%;
+  min-height: 0;
+}
+.comms-decision-list {
+  min-height: 0;
+  overflow: auto;
+}
+.comms-nav,
+.comms-contacts {
+  flex: 1 1 auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.comms-nav button,
+.comms-contacts button {
+  padding: 10px 12px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.comms-nav button.on,
+.comms-contacts button.on {
+  background: var(--accent-soft);
+}
+.comms-nav p {
+  margin: 12px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.comms-nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comms-nav-row small,
+.comms-contacts small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comms-agent {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+}
+.comms-agent #chatP,
+.comms-agent #chatP .panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.comms-messages {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+.comms-message-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100%;
+}
+.comms-breadcrumb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.comms-breadcrumb button {
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+}
+.decision-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+}
+.decision-card p,
+.decision-card h3 {
+  margin: 0 0 6px;
+}
+@media (max-width: 390px) {
+  .comms-grid,
+  .comms-agent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comms-nav,
+  .comms-contacts {
+    max-height: 220px;
+  }
+}
 .col > #cThreadsP {
   flex: 1 1 0;
   min-height: 220px;

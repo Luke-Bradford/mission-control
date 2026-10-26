@@ -172,7 +172,7 @@ function PageView({ route: r }: { route: Route }) {
     case "agent":
       return <Agent id={r.id} />;
     case "comms":
-      return <Comms item={r.item} />;
+      return <Comms item={r.item} view={r.view} />;
     case "telemetry":
       return <Telemetry />;
     case "setup":

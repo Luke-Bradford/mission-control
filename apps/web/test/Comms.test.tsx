@@ -145,6 +145,47 @@ describe("Threads", () => {
   });
 });
 
+describe("Comms routes", () => {
+  it("shows live agent navigation and drills into an agent contact", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/shop-app-ta": {
+        messages: [
+          {
+            id: "m1",
+            from: "shop-app-ta",
+            to: "studio",
+            text: "handoff",
+            at: NOW,
+            seen: false,
+            tagged: false,
+          },
+        ],
+      },
+      "/api/comms/studio": { messages: [] },
+    });
+    render(
+      <Comms item={null} view={{ kind: "contact", agentId: "shop-app-ta", contactId: "studio" }} />,
+    );
+    expect(await screen.findByRole("navigation", { name: "Comms" })).toBeTruthy();
+    expect(screen.getByText("FLIGHT ↔ CAPCOM")).toBeTruthy();
+    expect(screen.getByText("#crew")).toBeTruthy();
+    expect((await screen.findAllByText("handoff")).length).toBe(2);
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toContain(
+      "shop-app-ta›studio",
+    );
+  });
+
+  it("shows the main-resource empty state for crew", async () => {
+    stub([], () => {});
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    expect(await screen.findByText("Not available yet.")).toBeTruthy();
+  });
+});
+
 describe("Threads: the FLIGHT entry", () => {
   const flightSeat = { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true };
   const asks = [
