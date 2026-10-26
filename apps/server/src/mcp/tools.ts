@@ -18,6 +18,7 @@ import {
   COMMS_CAPCOM,
   COMMS_LABELS,
   COMMS_REACTIONS,
+  COMMS_REF,
   clashText,
   closesIssue,
   commitMarkersText,
@@ -210,7 +211,7 @@ export interface McToolsDeps {
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
-  onComms?: (to: string, text: string) => void;
+  onComms?: (to: string, text: string, from: string) => void;
 }
 
 /**
@@ -252,7 +253,7 @@ const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
   label: z.enum(COMMS_LABELS).optional(),
-  ref: z.string().min(1).max(100).optional(),
+  ref: z.string().regex(COMMS_REF).optional(),
   replyTo: z
     .string()
     .regex(/^comms:\d+$/)

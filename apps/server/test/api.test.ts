@@ -456,6 +456,17 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/agents/shop-app-ta/stream"],
   ["GET", "/api/comms/guido-1"],
   ["POST", "/api/comms/guido-1/read", { messageIds: [] }],
+  ["GET", "/api/comms/crew"],
+  ["GET", "/api/comms/flight"],
+  ["GET", "/api/comms/agents/guido-1"],
+  ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
+  ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
+  ["GET", "/api/comms/tickets/%237"],
+  ["GET", "/api/comms/mentions"],
+  ["POST", "/api/comms/mentions/seen", { ids: [] }],
+  ["GET", "/api/comms/pins"],
+  ["GET", "/api/comms/links"],
+  ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
   ["PUT", "/api/comms/comms:1/pin", {}],
@@ -987,6 +998,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
@@ -1278,6 +1290,10 @@ describe("local access", () => {
           `${m} ${u
             .split("?")[0]
             ?.replace("/attention/unknown", "/attention/:key")
+            .replace("/comms/agents/guido-1/contacts/CAPCOM", "/comms/agents/:id/contacts/:contact")
+            .replace("/comms/agents/guido-1", "/comms/agents/:id")
+            .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
+            .replace("/comms/tickets/%237", "/comms/tickets/:ref")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")

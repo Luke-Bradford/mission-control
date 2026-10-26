@@ -22,7 +22,7 @@ export interface CommsServiceDeps {
   knownSecrets: () => Promise<readonly string[]>;
   now?: () => number;
   /** Only direct seat delivery wakes a worker; reactions never use it. */
-  notify?: (to: string, text: string) => void;
+  notify?: (to: string, text: string, from: string) => void;
   seatSender?: boolean;
 }
 
@@ -58,6 +58,8 @@ export async function sendComms(
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
+    if (from !== COMMS_CAPCOM && !canReadComms(deps.store, from, original))
+      throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
   }
   const mentions = new Set<string>();
@@ -82,8 +84,26 @@ export async function sendComms(
       : undefined,
   );
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  if (deps.crew.includes(input.to)) deps.notify?.(input.to, input.text);
+  const notify = new Set<string>();
+  if (deps.crew.includes(input.to)) notify.add(input.to);
+  for (const mention of mentions) if (deps.crew.includes(mention)) notify.add(mention);
+  for (const to of notify) deps.notify?.(to, input.text, from);
   return message(stored);
+}
+
+export function canReadComms(
+  store: Store,
+  actor: string,
+  message: NonNullable<ReturnType<Store["commsMessage"]>>,
+): boolean {
+  return (
+    message.to === COMMS_CREW ||
+    message.from === actor ||
+    message.to === actor ||
+    message.mentions.includes(actor) ||
+    store.commsPins().some((pin) => pin.id === message.id) ||
+    (message.replyTo !== null && store.commsMessage(message.replyTo)?.from === actor)
+  );
 }
 
 export function reactComms(
@@ -101,6 +121,10 @@ export function reactComms(
     throw new Error("A nonblank reason of at most 80 characters is required for cant.");
   if (reaction !== "cant" && reason !== undefined)
     throw new Error("Only cant may include a reason.");
+  const message = store.commsMessage(id);
+  if (message === null) throw new Error("Unknown Comms message.");
+  if (actor !== COMMS_CAPCOM && !canReadComms(store, actor, message))
+    throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
   return added;

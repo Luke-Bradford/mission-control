@@ -2984,6 +2984,20 @@ export class Store {
         .all() as Row[]
     ).map((r) => this.commsRow(r));
   }
+  commsReactions(messageId: string): CommsReaction[] {
+    return this.db
+      .prepare(
+        "SELECT actor_id, reaction, reason, at FROM comms_reactions WHERE message_id=? ORDER BY at,actor_id",
+      )
+      .all(Number(messageId.replace(/^comms:/, "")))
+      .map((r) => ({
+        messageId,
+        actor: r.actor_id as string,
+        reaction: r.reaction as CommsReactionKind,
+        reason: r.reason as string | null,
+        at: r.at as number,
+      }));
+  }
   commsMentions(target: string): CommsRow[] {
     return (
       this.db
@@ -2999,6 +3013,15 @@ export class Store {
     );
     for (const id of ids) q.run(at, target, Number(id.replace(/^comms:/, "")));
   }
+  commsMentionSeen(target: string, id: string): boolean {
+    return (
+      (
+        this.db
+          .prepare("SELECT seen_at FROM comms_mentions WHERE mentioned_id=? AND message_id=?")
+          .get(target, Number(id.replace(/^comms:/, ""))) as { seen_at: number | null } | undefined
+      )?.seen_at !== null
+    );
+  }
   commsForCrew(): CommsRow[] {
     return this.commsForWhere("to_id = 'crew'");
   }
@@ -3008,7 +3031,20 @@ export class Store {
       : this.commsForPair(id, contact);
   }
   commsInbox(id: string): CommsRow[] {
-    return this.commsForWhere("to_id=?", id);
+    return this.commsForWhere(
+      `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      id,
+      id,
+      id,
+    );
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
@@ -3016,6 +3052,13 @@ export class Store {
   commsForRefs(refs: string[]): CommsRow[] {
     if (!refs.length) return [];
     return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
+  }
+  commsLinkedPr(ref: string): string | null {
+    const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
+    const row = this.db
+      .prepare("SELECT number FROM pull_requests WHERE ticket=? ORDER BY number DESC LIMIT 1")
+      .get(ticket) as { number: number } | undefined;
+    return row === undefined ? null : `PR ${row.number}`;
   }
   private commsForWhere(where: string, ...args: SQLInputValue[]): CommsRow[] {
     return (

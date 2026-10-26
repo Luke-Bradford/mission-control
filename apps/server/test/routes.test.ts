@@ -185,6 +185,10 @@ describe("the route table", () => {
     expect(routes).toContain("POST /api/attention/:key/discussion");
     expect(routes).toContain("GET /api/comms/:id");
     expect(routes).toContain("POST /api/comms/:id/read");
+    expect(routes).toContain("GET /api/comms/crew");
+    expect(routes).toContain("GET /api/comms/agents/:id");
+    expect(routes).toContain("GET /api/comms/tickets/:ref");
+    expect(routes).toContain("POST /api/comms/read");
     expect(orphans(routes, webReads(), readerComments())).toEqual([]);
   });
 

@@ -82,6 +82,89 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
   expect(notify).toHaveBeenCalledTimes(2);
 });
 
+it("notifies direct recipients, mentions and reply authors once each", async () => {
+  const notify = vi.fn();
+  const deps = {
+    store,
+    crew: ["seat", "other"],
+    knownSecrets: async () => [],
+    now: () => 10,
+    notify,
+    seatSender: true,
+  };
+  const original = await sendComms(deps, "seat", { to: "crew", text: "@other please look" });
+  await sendComms(deps, "other", {
+    to: "crew",
+    text: "@seat acknowledged",
+    replyTo: original.id,
+  });
+
+  expect(notify).toHaveBeenNthCalledWith(1, "other", "@other please look", "seat");
+  expect(notify).toHaveBeenNthCalledWith(2, "seat", "@seat acknowledged", "other");
+  expect(notify).toHaveBeenCalledTimes(2);
+});
+
+it("delivers CAPCOM direct Comms but never wakes for the CAPCOM channel or a reaction", async () => {
+  const notify = vi.fn();
+  const deps = {
+    store,
+    crew: ["seat", "other"],
+    knownSecrets: async () => [],
+    notify,
+    seatSender: false,
+  };
+  const direct = await sendComms(deps, "CAPCOM", { to: "seat", text: "direct" });
+  await sendComms(deps, "seat", { to: "CAPCOM", text: "channel" });
+  reactComms(store, "seat", direct.id, "seen", undefined, 12);
+
+  expect(notify).toHaveBeenCalledTimes(1);
+  expect(notify).toHaveBeenCalledWith("seat", "direct", "CAPCOM");
+});
+
+it("refuses guessed private messages for reactions and replies", async () => {
+  const deps = {
+    store,
+    crew: ["seat", "other", "third"],
+    knownSecrets: async () => [],
+    seatSender: true,
+  };
+  const privateMessage = await sendComms(deps, "seat", { to: "other", text: "private" });
+
+  expect(() => reactComms(store, "third", privateMessage.id, "seen", undefined, 12)).toThrow(
+    "You cannot react to that Comms message.",
+  );
+  await expect(
+    sendComms(deps, "third", { to: "seat", text: "guess", replyTo: privateMessage.id }),
+  ).rejects.toThrow("You cannot reply to that Comms message.");
+
+  expect(store.setCommsPinned(privateMessage.id, true, "CAPCOM", 13)).toBe(true);
+  expect(() => reactComms(store, "third", privateMessage.id, "seen", undefined, 14)).not.toThrow();
+});
+
+it("builds an inbox from direct, mention, reply and pinned messages without duplicates", async () => {
+  let at = 10;
+  const deps = {
+    store,
+    crew: ["seat", "other"],
+    knownSecrets: async () => [],
+    now: () => at++,
+    seatSender: true,
+  };
+  const direct = await sendComms(deps, "other", { to: "seat", text: "direct" });
+  const mentioned = await sendComms(deps, "other", { to: "crew", text: "@seat mention" });
+  const original = await sendComms(deps, "seat", { to: "crew", text: "original" });
+  const reply = await sendComms(deps, "other", { to: "crew", text: "reply", replyTo: original.id });
+  const pinned = await sendComms(deps, "other", { to: "other", text: "pinned" });
+  expect(store.setCommsPinned(pinned.id, true, "CAPCOM", at++)).toBe(true);
+
+  expect(store.commsInbox("seat").map((row) => row.id)).toEqual([
+    direct.id,
+    mentioned.id,
+    reply.id,
+    pinned.id,
+  ]);
+});
+
 it("reuses parsed transcripts across thread and attention reads", () => {
   expect(messages()[0]?.text).toBe("first");
   expect(threadMessages(store, "seat", true, "attention")).toEqual(messages());

@@ -14,10 +14,12 @@ import {
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CREW,
   COMMS_LABELS,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
+  COMMS_REF,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -298,7 +300,7 @@ export interface AppDeps {
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
   /** Delivers a direct Comms message to a local live seat. */
-  deliverComms?: (seatId: string, text: string) => Promise<void>;
+  deliverComms?: (seatId: string, text: string, from: string) => void;
   store: Store;
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
@@ -994,10 +996,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
         label: z.enum(COMMS_LABELS).optional(),
-        ref: z
-          .string()
-          .regex(/^(?:#\d+|PR \d+)$/)
-          .optional(),
+        ref: z.string().regex(COMMS_REF).optional(),
         replyTo: z
           .string()
           .regex(/^comms:\d+$/)
@@ -1015,7 +1014,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
-              notify: (seatId, text) => void deps.deliverComms?.(seatId, text),
+              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
             COMMS_CAPCOM,
             body.data,
@@ -1071,6 +1070,119 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.put<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(true));
       // Reader: apps/web/src/App.tsx#App (operator pins)
       api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
+
+      const storedCommsMessage = (row: ReturnType<Store["commsMessage"]>) => {
+        if (row === null) throw new Error("Unknown Comms message.");
+        return {
+          ...row,
+          reactions: store.commsReactions(row.id),
+          pinned: store.commsPins().some((pin) => pin.id === row.id),
+          operator: row.from === COMMS_CAPCOM,
+        };
+      };
+      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
+        rows.map((row) => storedCommsMessage(row));
+      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+
+      // Reader: apps/web/src/App.tsx#App (crew Comms)
+      api.get("/comms/crew", () => ({ messages: storedCommsMessages(store.commsForCrew()) }));
+      // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
+      api.get("/comms/flight", () => ({
+        messages: storedCommsMessages(store.commsForPair(COMMS_CAPCOM, "FLIGHT")),
+      }));
+      // Reader: apps/web/src/App.tsx#App (agent Comms)
+      api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
+        const id = req.params.id;
+        if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
+        const messages = storedCommsMessages(store.commsForAgent(id));
+        const inbox = storedCommsMessages(store.commsInbox(id));
+        const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
+          .filter((contact) => contact !== id && contact !== COMMS_CREW)
+          .map((contact) => {
+            const contactMessages = messages.filter((m) => m.from === contact || m.to === contact);
+            return {
+              id: contact,
+              lastMessage: contactMessages.at(-1) ?? null,
+              count: contactMessages.length,
+              unread: inbox.filter((m) => m.from === contact).length,
+            };
+          });
+        return { messages, inbox, contacts };
+      });
+      // Reader: apps/web/src/App.tsx#App (agent contact Comms)
+      api.get<{ Params: { id: string; contact: string } }>(
+        "/comms/agents/:id/contacts/:contact",
+        (req, reply) => {
+          if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
+            return reply.code(404).send({ error: "unknown Comms agent" });
+          return {
+            messages: storedCommsMessages(store.commsForPair(req.params.id, req.params.contact)),
+          };
+        },
+      );
+      // Reader: apps/web/src/App.tsx#App (pair Comms)
+      api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
+        if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
+          return reply.code(404).send({ error: "unknown Comms agent" });
+        return { messages: storedCommsMessages(store.commsForPair(req.params.a, req.params.b)) };
+      });
+      // Reader: apps/web/src/App.tsx#App (ticket Comms)
+      api.get<{ Params: { ref: string } }>("/comms/tickets/:ref", (req, reply) => {
+        const supplied = decodeURIComponent(req.params.ref);
+        if (!COMMS_REF.test(supplied)) return reply.code(400).send({ error: "invalid Comms ref" });
+        const n = supplied.replace(/^(?:#|PR )/, "");
+        const refs = [`#${n}`, `PR ${n}`];
+        const token = new RegExp(`(^|[^A-Za-z0-9])(?:#${n}|PR ${n})(?=$|[^A-Za-z0-9])`);
+        const rows = store
+          .comms(0)
+          .filter((row) => refs.includes(row.ref ?? "") || token.test(row.text));
+        return {
+          messages: storedCommsMessages(rows),
+          ticket: { ref: `#${n}`, linkedPr: store.commsLinkedPr(`#${n}`) },
+        };
+      });
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
+      api.get("/comms/mentions", () => ({
+        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+          message: storedCommsMessage(row),
+          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+        })),
+      }));
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
+      api.post("/comms/mentions/seen", (req, reply) => {
+        const body = z
+          .strictObject({ ids: z.array(z.string().regex(/^comms:\d+$/)).max(500) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.ids.some((id) => store.commsMessage(id) === null))
+          return reply.code(400).send({ error: "unknown Comms message" });
+        store.markCommsMentionsSeen(COMMS_CAPCOM, body.data.ids, now());
+        return { ok: true };
+      });
+      // Reader: apps/web/src/App.tsx#App (pinned Comms)
+      api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
+      // Reader: apps/web/src/App.tsx#App (Comms link activity)
+      api.get("/comms/links", () => ({
+        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/App.tsx#App (Comms read cursors)
+      api.post("/comms/read", (req, reply) => {
+        const body = z
+          .strictObject({
+            scope: z.string().min(1).max(200),
+            messageId: z.string().regex(/^comms:\d+$/),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const validScope =
+          /^(?:crew|flight|agent:[A-Za-z0-9_-]+|inbox:[A-Za-z0-9_-]+|pair:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/.test(
+            body.data.scope,
+          );
+        if (!validScope || store.commsMessage(body.data.messageId) === null)
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
+        store.markCommsScopeRead(body.data.scope, body.data.messageId);
+        return { ok: true };
+      });
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 

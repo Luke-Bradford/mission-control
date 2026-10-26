@@ -5,6 +5,8 @@ export const COMMS_CREW = "crew";
 export const COMMS_RATE_LIMIT_COUNT = 30;
 export const COMMS_RATE_LIMIT_WINDOW_MS = 10 * 60_000;
 export const COMMS_CANT_REASON_MAX = 80;
+/** The only ticket references accepted at Comms boundaries. */
+export const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 
 export const COMMS_TEXT_MAX = 32_000;
 export const COMMS_MESSAGE_MAX = COMMS_TEXT_MAX;
