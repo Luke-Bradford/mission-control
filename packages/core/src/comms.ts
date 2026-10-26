@@ -73,6 +73,7 @@ export interface CommsAgentResponse extends CommsMessagesResponse {
   inbox: CommsMessage[];
   contacts: CommsContact[];
   inboxCursor?: string | null;
+  inboxUnread?: number;
 }
 export interface CommsTicketResponse extends CommsMessagesResponse {
   ticket: CommsTicketContext;

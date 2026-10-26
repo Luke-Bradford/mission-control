@@ -1121,6 +1121,16 @@ export class Store {
       CREATE TABLE IF NOT EXISTS comms_pins (
         message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
       );
+      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_insert
+      BEFORE INSERT ON comms_reactions
+      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
+        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
+      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
+      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_update
+      BEFORE UPDATE OF reaction, reason ON comms_reactions
+      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
+        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
+      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
     `);
   }
 
@@ -3074,12 +3084,13 @@ export class Store {
     }
     const resolvedRef = issueNumber === null ? ref : `#${issueNumber}`;
     const refs = linkedPr === null ? [resolvedRef] : [resolvedRef, linkedPr];
-    const rows = this.commsForWhere(
-      `ref IN (${refs.map(() => "?").join(",")}) OR text LIKE ? OR text LIKE ?`,
-      ...refs,
-      `%${resolvedRef}%`,
-      linkedPr === null ? "%" : `%${linkedPr}%`,
-    ).filter((row) => {
+    const predicates = [`ref IN (${refs.map(() => "?").join(",")})`, "text LIKE ?"];
+    const args: SQLInputValue[] = [...refs, `%${resolvedRef}%`];
+    if (linkedPr !== null) {
+      predicates.push("text LIKE ?");
+      args.push(`%${linkedPr}%`);
+    }
+    const rows = this.commsForWhere(predicates.join(" OR "), ...args).filter((row) => {
       if (refs.includes(row.ref ?? "")) return true;
       return refs.some((candidate) =>
         new RegExp(`(^|[^A-Za-z0-9])${candidate.replace("#", "\\#")}(?=$|[^A-Za-z0-9])`).test(

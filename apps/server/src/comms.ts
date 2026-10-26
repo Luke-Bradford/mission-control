@@ -35,7 +35,7 @@ export async function validateCommsText(
   knownSecrets: () => Promise<readonly string[]>,
   text: string,
 ): Promise<void> {
-  const findings = scanSecrets(`\0commit 0000000\n${text}`, await knownSecrets());
+  const findings = scanSecrets(`\0commit ${"0".repeat(40)}\n${text}`, await knownSecrets());
   if (findings.length)
     throw new Error(
       `Refused: message contains ${[...new Set(findings.map((f) => f.kind))].join(", ")}.`,

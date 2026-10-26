@@ -1111,21 +1111,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get("/comms/crew", () => ({ messages: storedCommsMessages(store.commsForCrew()) }));
+      api.get("/comms/crew", () => {
+        const rows = store.commsForCrew();
+        const cursor = store.commsScopeCursor("crew");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get("/comms/flight", () => ({
-        messages: storedCommsMessages(
-          flightSeat(config) === null
-            ? []
-            : store.commsForPair(COMMS_CAPCOM, flightSeat(config)?.seat.id ?? ""),
-        ),
-      }));
+      api.get("/comms/flight", () => {
+        const flight = flightSeat(config)?.seat.id;
+        const rows = flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight);
+        const cursor = store.commsScopeCursor("flight");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
-        const messages = storedCommsMessages(store.commsForAgent(id));
-        const inbox = storedCommsMessages(store.commsInbox(id));
+        const rows = store.commsForAgent(id);
+        const inboxRows = store.commsInbox(id);
+        const messages = storedCommsMessages(rows);
+        const inbox = storedCommsMessages(inboxRows);
         const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
           .filter((contact) => contact !== id && contact !== COMMS_CREW)
           .map((contact) => {
@@ -1144,7 +1149,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           inbox,
           contacts,
           cursor: store.commsScopeCursor(`agent-all:${id}`),
+          unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
           inboxCursor: store.commsScopeCursor(`inbox:${id}`),
+          inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
         };
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)

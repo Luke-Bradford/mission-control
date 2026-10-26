@@ -1097,6 +1097,119 @@ describe("through /mcp", () => {
   });
 });
 
+describe("Comms seat tools", () => {
+  const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
+  const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("persists every supported destination, label, ref, reply and mention", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    for (const [to, label, ref] of [
+      ["guido-2", "question", "#703"],
+      ["crew", "handoff", "PR 711"],
+      ["CAPCOM", "blocker", undefined],
+    ] as const)
+      expect(await send({ to, text: `to ${to} @guido-2`, label, ref })).toMatchObject({
+        text: expect.stringMatching(/^Sent comms:\d+\.$/),
+      });
+    const original = store.commsForPair("guido-1", "guido-2")[0];
+    if (original === undefined) throw new Error("expected direct Comms row");
+    expect(
+      await send({ to: "guido-1", text: "reply", replyTo: original.id }, tools, {
+        seatId: "guido-2",
+        runId: "guido-2:live",
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:/) });
+    expect(store.commsForAgent("guido-1")[0]).toMatchObject({
+      label: "question",
+      ref: "#703",
+      mentions: ["guido-2"],
+    });
+    expect(store.commsForPair("guido-1", "guido-2").at(-1)).toMatchObject({
+      replyTo: original.id,
+      mentions: ["guido-1"],
+    });
+  });
+
+  it.each([
+    [{ to: "unknown", text: "x" }, "Unknown Comms destination."],
+    [{ to: "guido-2", text: "x", label: "wrong" }, "Invalid arguments:"],
+    [{ to: "guido-2", text: "x", ref: "703" }, "Invalid arguments:"],
+    [
+      { to: "guido-2", text: "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "Refused: message contains",
+    ],
+  ])("refuses invalid destination, labels, refs and secrets: %o", async (args, expected) => {
+    liveSeat("guido-2", "guido-2:live");
+    const ts =
+      (args as { text?: string }).text === "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ? make({ knownSecrets: async () => ["ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] })
+        : tools;
+    expect(await send(args, ts)).toMatchObject({
+      text: expect.stringContaining(expected),
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+  });
+
+  it("delivers direct and mentioned seats once, while reactions never wake or add a message", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    const wake = vi.fn();
+    const ts = make({ onComms: wake });
+    await send({ to: "guido-2", text: "@guido-2 direct" }, ts);
+    const message = store.commsForAgent("guido-1")[0];
+    if (message === undefined) throw new Error("expected Comms message");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(await react({ id: message.id, reaction: "seen" }, ts)).toEqual({
+      text: "Reaction recorded.",
+    });
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(store.comms(0)).toHaveLength(1);
+    expect(store.commsReactions(message.id)).toHaveLength(1);
+  });
+
+  it.each([
+    [{ id: "comms:1", reaction: "nope" }, "Invalid arguments:"],
+    [{ id: "comms:1", reaction: "cant" }, "Invalid arguments:"],
+    [{ id: "comms:1", reaction: "seen", reason: "why" }, "Invalid arguments:"],
+    [{ id: "comms:99", reaction: "seen" }, "Unknown Comms message."],
+  ])("refuses bad reactions: %o", async (args, expected) => {
+    expect(await react(args)).toMatchObject({
+      text: expect.stringContaining(expected),
+      isError: true,
+    });
+  });
+
+  it("refuses ended, inaccessible and rate-limited calls without changing their state", async () => {
+    expect(await send({ to: "crew", text: "ended" }, tools, { ...CTX, runId: "gone" })).toEqual({
+      text: "This run has ended.",
+      isError: true,
+    });
+    liveSeat("guido-2", "guido-2:live");
+    liveSeat("retro", "retro:live");
+    await send({ to: "guido-2", text: "private" });
+    const privateMessage = store.commsForPair("guido-1", "guido-2")[0];
+    if (privateMessage === undefined) throw new Error("expected private message");
+    expect(
+      await react({ id: privateMessage.id, reaction: "seen" }, tools, {
+        seatId: "retro",
+        runId: "retro:live",
+      }),
+    ).toMatchObject({ text: "You cannot react to that Comms message.", isError: true });
+    expect(
+      await send({ to: "retro", text: "guess", replyTo: privateMessage.id }, tools, {
+        seatId: "retro",
+        runId: "retro:live",
+      }),
+    ).toMatchObject({ text: "You cannot reply to that Comms message.", isError: true });
+    for (let i = 0; i < 29; i++) await send({ to: "crew", text: String(i) });
+    expect(await send({ to: "crew", text: "one too many" })).toMatchObject({
+      text: "Comms rate limit reached: 30 messages per 10 minutes.",
+      isError: true,
+    });
+    expect(store.comms(0)).toHaveLength(30);
+  });
+});
+
 describe("commit: what it refuses beyond areas (fix round 1)", () => {
   it("sees a nested repo that .gitmodules says to ignore, refuses it and leaves nothing staged", async () => {
     writeFileSync(
