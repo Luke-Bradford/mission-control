@@ -366,11 +366,24 @@ export const reviewParkText = (
   const base = `${retro} found blocking issues in ${rounds} reviews; the last on ${sha.slice(0, 7)}`;
   if (lastWords === undefined) return base;
   const developer = lastWords.developer.slice(0, 1000);
-  const findings = lastWords.findings
-    .map((f) => f.summary.replace(/\s+/g, " ").trim())
-    .join("; ")
-    .slice(0, 1000);
-  return `${base}. Developer's last reply: ${developer}. ${retro}'s last finding: ${findings}`;
+  const heading = `${retro}'s last findings: `;
+  const room = Math.max(0, 1000 - heading.length);
+  const required = lastWords.findings.map(
+    (f) =>
+      `${f.summary.replace(/\s+/g, " ").trim()}\nWhy: ${f.scenario.replace(/\s+/g, " ").trim()}`,
+  );
+  const requiredText = required.join("\n\n");
+  let findings = requiredText.slice(0, room);
+  if (requiredText.length <= room) {
+    findings = "";
+    for (const [i, f] of lastWords.findings.entries()) {
+      const separator = i === 0 ? "" : "\n\n";
+      findings += `${separator}${required[i]}`;
+      const fix = `\nSuggested fix: ${f.fix.replace(/\s+/g, " ").trim()}`;
+      if (findings.length + fix.length <= room) findings += fix;
+    }
+  }
+  return `${base}. Developer's last reply: ${developer}. ${heading}${findings}`;
 };
 export const reviewFailedParkText = (
   retro: string,

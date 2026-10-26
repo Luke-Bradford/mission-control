@@ -523,7 +523,7 @@ describe("reviewBrief", () => {
     );
     expect(t).toContain("report notes, and the findings and reply from the last review.");
     expect(t).toContain(
-      "## Findings and the developer's reply from the last review\n\n1. [Critical] a.ts — s1\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\n2. [Important] b.ts:4 — s2\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
+      "## Findings and the developer's reply from the last review\n\n1. [Critical] a.ts — s1\n   Why: w\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\n2. [Important] b.ts:4 — s2\n   Why: w\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
     );
   });
 

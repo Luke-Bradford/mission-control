@@ -264,7 +264,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
       i.prevFindings
         .map(
           (f, k) =>
-            `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Suggested fix: ${f.fix}\n   Developer's reply: ${i.prevReply ?? "(no separate reply recorded)"}`,
+            `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}\n   Developer's reply: ${i.prevReply ?? "(no separate reply recorded)"}`,
         )
         .join("\n\n"),
     );
