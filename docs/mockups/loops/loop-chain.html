@@ -77,7 +77,7 @@ ol.check li:last-child{border-bottom:0}
     <div class="ph"><span id="chainTitle">The chain</span><span class="sub" id="chainSub">click a step for its details</span>
       <div class="legend"><span><i style="border-color:var(--line-2)"></i>next step</span><span><i style="border-color:var(--warn)"></i>fails → back to Build</span><span><i style="border-color:var(--think);border-top-style:dashed"></i>proposed</span></div>
     </div>
-    <div class="chain"><svg id="svg" viewBox="0 0 1270 350" role="img" aria-label="Feature loop: Plan, Build, CI checks, Review, Merge, Done. CI failures, review changes and merge conflicts return to Build."></svg></div>
+    <div class="chain"><svg id="svg" viewBox="0 0 1270 350" role="img" aria-label="Feature loop: Plan, Build, CI checks, Review, Merge, Done. CI failures and review changes return to Build; a merge conflict parks for FLIGHT, which syncs with main and sends it to CI or Build."></svg></div>
   </section>
 
   <div class="below">
@@ -105,10 +105,10 @@ const S = [
   { id: 'done', name: 'Done', type: 'End', colour: 'var(--ok)', who: 'Board → Done', gate: 'merged', run: 'ticket closed',
     onFail: '—', cap: '—', atCap: '—', prompt: null, note: 'The ticket moves to Done and the seat is free.' },
 ];
-// run #681 (sample): Plan skipped (Size M); Build; CI failed once; Build; CI passed; Review asked for changes; Build; CI running
+// run #681 (sample): Plan accepted (Size M); Build; CI failed once; Build; CI passed; Review asked for changes; Build; CI running
 const RUN = {
   state: { plan: 'done', build: 'done', ci: 'now', review: 'next', merge: 'next', done: 'next' },
-  used: { ci: '1/3', review: '1/3', merge: '0' },
+  used: { ci: '1/3', review: '1/3' },
   list: [
     ['done', 'Plan', 'Plan accepted (Size M)', '88k · 14m'],
     ['done', 'Build', 'First version committed', '236k · 25m'],
@@ -156,8 +156,7 @@ function draw() {
   const returns = [
     { from: 'ci', depth: 34, entry: cx('build') + 30, label: 'CI fail ≤3', used: 'ci' },
     { from: 'review', depth: 74, entry: cx('build'), label: 'changes ≤3', used: 'review' },
-    { from: 'merge', depth: 114, entry: cx('build') - 30, label: 'file conflict · after sync', used: 'merge' },
-  ];
+      ];
   returns.forEach(r => {
     const y = bottom + r.depth, sx = cx(r.from), rad = 10;
     const active = showRun && RUN.used[r.used] && RUN.used[r.used] !== '0';
@@ -166,12 +165,16 @@ function draw() {
     pill(svg, (sx + r.entry) / 2, y, text, 'var(--warn)');
   });
 
-  // FLIGHT box: where every cap ends up (no lines: one rule for all three)
-  el('rect', { class: 'flight', x: 1060, y: bottom + 40, width: 170, height: 88, rx: 8 }, svg);
-  txt(svg, 1072, bottom + 60, 'stype', 'AT ANY CAP', { style: 'fill:var(--crit)' });
+  // merge conflict: parks for FLIGHT, which syncs with main (clean → CI, real conflict → Build)
+  el('path', { class: 'ret', d: `M${cx('merge')},${bottom + 2} V${bottom + 84} H1056`, style: 'stroke:var(--crit);stroke-width:1.6;stroke-dasharray:5 4', 'marker-end': 'url(#a-ret)' }, svg);
+  pill(svg, cx('merge') + 2, bottom + 40, 'conflict → parks', 'var(--crit)');
+  // FLIGHT box: where every cap and a merge conflict end up
+  el('rect', { class: 'flight', x: 1060, y: bottom + 40, width: 190, height: 108, rx: 8 }, svg);
+  txt(svg, 1072, bottom + 60, 'stype', 'AT ANY CAP · ON CONFLICT', { style: 'fill:var(--crit)' });
   txt(svg, 1072, bottom + 80, 'sname', 'FLIGHT decides');
   txt(svg, 1072, bottom + 98, 'swho', 're-plan · reassign · split');
   txt(svg, 1072, bottom + 114, 'swho', 'or ask CAPCOM (default)');
+  txt(svg, 1072, bottom + 134, 'sgate', 'sync → CI or Build');
 
   // step cards
   S.forEach(s => {
