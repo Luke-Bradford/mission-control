@@ -26,4 +26,7 @@ it("uses one timeline scale and only square-ended, non-zero-width blocks", () =>
   expect(timeline.segment(10_000, 10_001)?.width).toBeGreaterThan(0);
   expect(timeline.segment(10_000, 20_000)?.borderRadius).toBe(0);
   expect(timeline.tick(30_000)).toMatchObject({ left: 50, width: 1, borderRadius: 0 });
+
+  const hour = timelineGeometry({ from: 0, to: 3_600_000 });
+  expect(hour.segment(0, 1)?.width).toBeGreaterThan(0);
 });

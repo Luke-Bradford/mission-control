@@ -51,8 +51,9 @@ export function timelineGeometry({ from, to }: { from: number; to: number }) {
   const duration = Math.max(1, to - from);
   const position = (at: number) => Math.round(((100 * (at - from)) / duration) * 1000) / 1000;
   const segment = (start: number, end: number) => {
-    const width = position(end) - position(start);
-    return width > 0 ? { left: position(start), width, borderRadius: 0 } : null;
+    if (end <= start) return null;
+    const width = (100 * (end - start)) / duration;
+    return { left: position(start), width, borderRadius: 0 };
   };
   return {
     baseline: 0,

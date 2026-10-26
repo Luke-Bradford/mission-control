@@ -1191,6 +1191,7 @@ main > section {
   position: absolute;
   top: 3px;
   bottom: 3px;
+  min-width: 1px;
   border-radius: 0;
 }
 .overview-tick {
