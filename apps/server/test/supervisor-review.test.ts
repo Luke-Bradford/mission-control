@@ -18,6 +18,7 @@ import {
   retiringText,
   reworkFirstText,
   seatBusyText,
+  ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
@@ -1162,6 +1163,44 @@ describe("a run set aside in review", () => {
     const same = await sup.startRun("guido-1", 42);
     expect(same).toEqual({ runId, branch: BRANCH });
     expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", worktree: wt() });
+  });
+
+  it("does not wake another seat's run set aside for the ticket", async () => {
+    const { sup } = make({
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["libs/**"],
+      },
+    });
+    sup.start();
+    const runId = "guido-1:aside";
+    store.upsertRun({
+      id: runId,
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: null,
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+    const blocked = await refusal(sup.startRun("guido-2", 42));
+    expect([blocked.status, blocked.message]).toEqual([409, ticketInReviewText("mc#42")]);
+    expect(store.seatSession("guido-1")).toBeNull();
+    expect(store.seatSession("guido-2")).toBeNull();
+    expect(store.run(runId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
   });
 
   it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {

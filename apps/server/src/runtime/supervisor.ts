@@ -105,6 +105,7 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
+  ticketInReviewText,
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
@@ -2670,7 +2671,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // `wakeRun` retains its worktree and session guards, rather than creating a competing run.
     const waiting = store.asideRuns();
     const ref = `${info.repo.id}#${issue}`;
-    const inReview = !readOnly ? waiting.find((r) => r.ticket === ref) : undefined;
+    const inReview = !readOnly
+      ? waiting.find((r) => r.ticket === ref && r.agentId === seatId)
+      : undefined;
     if (inReview !== undefined) {
       const branch = inReview.branch;
       if (branch === null) throw new SupervisorError(409, NOT_ASIDE);
@@ -2681,6 +2684,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const rework = wakeDueAsideRun(store, seatId);
     if (rework) {
       throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
+    }
+    if (!readOnly && waiting.some((r) => r.ticket === ref)) {
+      throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
     try {

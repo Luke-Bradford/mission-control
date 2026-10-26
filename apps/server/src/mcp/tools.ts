@@ -1787,8 +1787,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         loop.reviewReplyTo !== current.id &&
         reported !== null &&
         reported.id === loop.reportedEvidenceId;
+      const refusedRetry =
+        loop.phase === "parked" &&
+        loop.parked?.kind === "refused" &&
+        newest !== null &&
+        newest.sha === loop.pushFor &&
+        reported !== null &&
+        reported.id === loop.reportedEvidenceId;
       const ciRuling = loop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
-      if (!fresh && !reviewReply && !ciRuling) {
+      if (!fresh && !reviewReply && !refusedRetry && !ciRuling) {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 

@@ -269,6 +269,24 @@ describe("openPr", () => {
     });
   });
 
+  it("does not adopt a same-seat PR from a run that ended after this one started", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        startedAt: START - 1_000,
+        endedAt: START + 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+  });
+
   it("is transient when gh cannot list, or the tool's own failure text comes back", async () => {
     ghAnswers = [() => ({ code: 1, stdout: "" })];
     expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({

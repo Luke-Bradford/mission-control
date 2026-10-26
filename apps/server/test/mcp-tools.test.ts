@@ -3102,6 +3102,23 @@ describe("report_evidence", () => {
     expect(store.latestEvidence(RUN)).toBeNull();
   });
 
+  it("records a refused retry for the same pushed and reported head", async () => {
+    const sha = await committed();
+    expect(await report("first report")).toEqual({ text: EVIDENCE_RECORDED });
+    const reported = store.latestEvidence(RUN);
+    if (reported === null) throw new Error("evidence was not recorded");
+    setLoop({
+      phase: "parked",
+      parked: { kind: "refused", reason: "refused", ended: false },
+      pushFor: sha,
+      reportedEvidenceId: reported.id,
+    });
+
+    expect(await report("retry after refusal")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.evidenceCount(RUN)).toBe(2);
+    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
+  });
+
   it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
     for (let i = 0; i < 12; i++) write(`apps/f${String(i).padStart(2, "0")}.ts`, "x\n");
     const r = await report("done");

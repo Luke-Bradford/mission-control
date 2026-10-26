@@ -578,7 +578,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             (earlier) =>
               earlier.id !== run.id &&
               earlier.agentId === run.agentId &&
+              earlier.startedAt < run.startedAt &&
               earlier.endedAt !== null &&
+              earlier.endedAt <= run.startedAt &&
               earlier.loop?.prNumber === p.number,
           ),
       );
