@@ -656,7 +656,14 @@ export const SEAT_STATUS_LABEL = {
 /** The doing line of a free seat. */
 export const SEAT_FREE_LINE = "Free for work";
 
-const ENGINE_STATES: readonly HudState[] = ["running", "stalled", "blocked", "error", "stopped", "parked"];
+const ENGINE_STATES: readonly HudState[] = [
+  "running",
+  "stalled",
+  "blocked",
+  "error",
+  "stopped",
+  "parked",
+];
 
 /**
  * The one rule for a state pill: an observed loop keeps the engine's state; a crew seat says what

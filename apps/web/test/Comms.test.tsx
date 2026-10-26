@@ -138,9 +138,9 @@ describe("Threads", () => {
     const pill = await within(list).findByText("Paused");
     expect(pill.parentElement?.getAttribute("title")).toBe("Save tokens");
     fireEvent.click(pill.closest("button") as HTMLButtonElement);
-    const conversationPill = await within(document.querySelector("#chatP") as HTMLElement).findByText(
-      "Paused",
-    );
+    const conversationPill = await within(
+      document.querySelector("#chatP") as HTMLElement,
+    ).findByText("Paused");
     expect(conversationPill.parentElement?.getAttribute("title")).toBe("Save tokens");
   });
 });

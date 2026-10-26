@@ -306,12 +306,12 @@ it.each([
   await screen.findByText("short-state");
   const pill = rowsIn(container)[1]?.querySelector(".state-cell .pill");
   expect(pill?.textContent).toBe(label);
-  expect(pill?.textContent).toMatch(/^\\S+$/);
+  expect(pill?.textContent).toMatch(/^\S+$/);
   expect(pill?.textContent?.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
 });
 
 it("renders the Overview crew-pause override as a short pill", async () => {
-  stub([seatRow({ id: "short-state", hudState: "running" })], false, []);
+  stub([seatRow({ id: "short-state", hudState: "idle", run: null })], false, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("short-state");
   const pill = rowsIn(container)[1]?.querySelector(".state-cell .pill");

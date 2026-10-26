@@ -193,7 +193,9 @@ export function cardReviewer(
     if (!rv) return false;
     return (pr && r.repoId === pr.repoId && rv.prNumber === pr.number) || rv.ref === ref;
   });
-  return row ? { id: row.id, index: row.index, hudState: row.hudState, status: seatStatus(row) } : null;
+  return row
+    ? { id: row.id, index: row.index, hudState: row.hudState, status: seatStatus(row) }
+    : null;
 }
 
 const CHECK_WORST: Record<PrCheck["state"], number> = { passing: 0, pending: 1, failing: 2 };

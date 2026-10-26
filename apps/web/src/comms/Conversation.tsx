@@ -91,8 +91,8 @@ export function Conversation({ row }: { row: CrewRow | null }) {
     activity.error && !activity.data
       ? "Could not load activity."
       : !activity.data
-      ? "Loading…"
-      : "No messages yet.";
+        ? "Loading…"
+        : "No messages yet.";
   const status = seatStatus(row);
 
   return (

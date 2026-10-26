@@ -262,11 +262,7 @@ function FlightRow({
         </a>
       </span>
       <ModelCell row={row} />
-      <span
-        role="cell"
-        className={row ? "state-cell" : undefined}
-        title={status?.reason ?? label}
-      >
+      <span role="cell" className={row ? "state-cell" : undefined} title={status?.reason ?? label}>
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
             <span>{label}</span>

@@ -1,6 +1,7 @@
 import {
   type BoardItem,
   type ConfigView,
+  type CrewRow,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
   type PrCheck,
@@ -492,28 +493,36 @@ describe("cards", () => {
   });
 
   it.each([
-    ["paused", { crewPause: { seats: ["RETRO-1"], reason: "Save tokens", at: NOW, by: "operator" } }, "Paused", "Save tokens"],
+    [
+      "paused",
+      { crewPause: { seats: ["RETRO-1"], reason: "Save tokens", at: NOW, by: "operator" } },
+      "Paused",
+      "Save tokens",
+    ],
     ["parked", { hudState: "parked", note: "Awaiting operator" }, "Parked", "Awaiting operator"],
-  ] as const)("shows a %s reviewer's short state and reason tooltip", async (_state, status, label, reason) => {
-    const retro = crewRow({
-      id: "RETRO-1",
-      index: 3,
-      kind: "crew",
-      ticket: null,
-      reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
-      ...status,
-    });
-    stub({
-      shopApp: [todo(3349, { status: "In review", state: "review" })],
-      prs: [pr()],
-      crew: [retro],
-    });
-    const { container } = await open();
-    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
-    const pill = within(c).getByText(label);
-    expect(pill.parentElement?.getAttribute("title")).toBe(reason);
-    expect(container).toBeTruthy();
-  });
+  ] satisfies [string, Partial<CrewRow>, string, string][])(
+    "shows a %s reviewer's short state and reason tooltip",
+    async (_state, status, label, reason) => {
+      const retro = crewRow({
+        id: "RETRO-1",
+        index: 3,
+        kind: "crew",
+        ticket: null,
+        reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
+        ...status,
+      });
+      stub({
+        shopApp: [todo(3349, { status: "In review", state: "review" })],
+        prs: [pr()],
+        crew: [retro],
+      });
+      const { container } = await open();
+      const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+      const pill = within(c).getByText(label);
+      expect(pill.parentElement?.getAttribute("title")).toBe(reason);
+      expect(container).toBeTruthy();
+    },
+  );
 
   it("a card with none of these says so in words", async () => {
     stub({ shopApp: [todo(1), todo(2, { status: "In review", state: "review" })] });

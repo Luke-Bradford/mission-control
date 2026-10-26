@@ -8,6 +8,7 @@ import {
   STATUS_OUT_OF_DATE,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
+import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
