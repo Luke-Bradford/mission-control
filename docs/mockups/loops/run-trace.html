@@ -1,0 +1,148 @@
+<title>Run Trace</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme:dark; --bg:#0e1116;--surface:#151a21;--surface-2:#1c222b;--line:#252c37;--line-2:#354050;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#8db0ff;--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c9d0db;--fg:#121720;--fg-2:#3d4656;--muted:#646e81;--accent:#2456d3;--ok:#157246;--warn:#8d5b00;--crit:#bb2e2b;--think:#5b47c4; } }
+:root[data-theme="light"] { color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c9d0db;--fg:#121720;--fg-2:#3d4656;--muted:#646e81;--accent:#2456d3;--ok:#157246;--warn:#8d5b00;--crit:#bb2e2b;--think:#5b47c4; }
+*{box-sizing:border-box} html,body{height:100%;margin:0} body{overflow:hidden;background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",sans-serif;font-size:13px}.app{height:100%;padding-block:18px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}.topbar{min-height:54px;display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:1px solid var(--line);padding-bottom:14px}.eyebrow,.mono{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.02em;color:var(--muted)}h1,h2,h3,p{margin:0}h1{font:600 19px "Barlow Semi Condensed",sans-serif;letter-spacing:.02em;color:var(--fg)}h1 span{font:500 12px "IBM Plex Sans",sans-serif;color:var(--fg-2);margin-left:9px}.header-meta{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.chip,.tag{border:1px solid var(--line-2);border-radius:999px;padding:5px 8px;font-size:11px;font-weight:500;color:var(--fg-2);white-space:nowrap}.chip.status{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}.chip.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}.tag{color:var(--muted);border-style:dashed}.layout{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px}.main-column,.sidebar{min-height:0;display:flex;flex-direction:column;gap:14px}.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;min-width:0}.loop-panel{height:254px;padding:15px 16px 12px;display:flex;flex-direction:column}.trace-panel{min-height:0;flex:1;padding:15px 16px 12px;display:flex;flex-direction:column}.panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:9px}.panel-head h2,.sidebar h2{font:600 15px "Barlow Semi Condensed",sans-serif;letter-spacing:.04em;text-transform:uppercase}.legend{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:11px}.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}.graph-wrap{min-height:0;flex:1;overflow:auto;border-radius:7px;background:linear-gradient(90deg,color-mix(in srgb,var(--surface-2) 42%,transparent),transparent 35%)}svg{display:block;max-width:none}.graph{width:100%;height:100%;min-height:185px}.trace-wrap{min-height:0;flex:1;overflow:auto;position:relative}.trace{min-width:820px;width:100%;height:100%}.sidebar{overflow:auto;padding-right:1px}.side-section{padding:15px 16px}.side-section+ .side-section{border-top:1px solid var(--line)}.token-total{font:500 11px "IBM Plex Mono",monospace;color:var(--muted)}.bars{margin-top:14px;display:grid;gap:10px}.bar-row{display:grid;grid-template-columns:58px 1fr 38px;gap:8px;align-items:center;font-size:11px;color:var(--fg-2)}.bar-track{height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden}.bar-fill{height:100%;border-radius:99px;background:var(--accent)}.bar-fill.think{background:var(--think)}.bar-value{font:500 10px "IBM Plex Mono",monospace;color:var(--muted);text-align:right}.rule{margin-top:13px}.rule-top{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--fg-2)}.rule-top b{font:500 11px "IBM Plex Mono",monospace;color:var(--fg)}.meter{height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin-top:6px}.meter span{display:block;height:100%;border-radius:99px;background:var(--ok)}.meter.warn span{background:var(--warn)}.next{font-size:12px;line-height:1.55;color:var(--fg-2);margin-top:10px}.next strong{color:var(--fg);font-weight:600}.caption{margin-top:auto;padding:12px 16px;font-size:11px;line-height:1.45;color:var(--muted);border-top:1px solid var(--line)}.tooltip{position:fixed;z-index:10;display:none;max-width:260px;background:var(--surface-2);border:1px solid var(--line-2);box-shadow:0 8px 30px color-mix(in srgb,var(--bg) 50%,transparent);border-radius:7px;padding:9px 10px;color:var(--fg);font-size:11px;line-height:1.55;pointer-events:none}.tooltip .title{font-weight:600;font-size:12px}.tooltip .dim{color:var(--muted)}button{font:inherit}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.theme{border:1px solid var(--line-2);background:var(--surface-2);border-radius:6px;color:var(--fg-2);width:29px;height:28px;display:grid;place-items:center;cursor:pointer}.theme svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7}.edge-label{font:500 9px "IBM Plex Mono",monospace;fill:var(--muted)}.node-label{font:600 11px "IBM Plex Sans",sans-serif;fill:var(--fg)}.node-sub{font:400 9px "IBM Plex Mono",monospace;fill:var(--muted)}.graph-edge{fill:none;stroke:var(--line-2);stroke-width:1.25}.graph-edge.taken{stroke:var(--accent);stroke-width:1.5}.graph-edge.loop{stroke:var(--warn)}.node-base{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1.25}.node-base.unvisited{fill:var(--surface);stroke:var(--line)}.node-current{fill:var(--surface-2);stroke:var(--accent);stroke-width:1.6}.visit-dot{fill:var(--ok)}.pulse{fill:none;stroke:var(--accent);stroke-width:3;opacity:.45;animation:pulse 1.8s ease-out infinite}@keyframes pulse{0%{transform:scale(.92);opacity:.55}100%{transform:scale(1.15);opacity:0}}.axis-text{font:400 10px "IBM Plex Mono",monospace;fill:var(--muted)}.row-label{font:500 11px "IBM Plex Sans",sans-serif;fill:var(--fg-2)}.grid{stroke:var(--line);stroke-width:1}.connector{fill:none;stroke:var(--line-2);stroke-width:1.2}.now-line{stroke:var(--accent);stroke-width:1.2;stroke-dasharray:3 3}.bar{rx:3}.bar-label{font:500 10px "IBM Plex Mono",monospace;fill:var(--bg)}.bar-label.outside{fill:var(--fg-2)}.bar-accent{fill:url(#runningStripe)}.bar-ok{fill:var(--ok)}.bar-crit{fill:var(--crit)}.bar-warn{fill:var(--warn)}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important}.pulse{display:none}}@media(max-width:900px){body{overflow:auto}.app{height:auto;min-height:100%;padding-block:14px}.topbar{align-items:flex-start;flex-direction:column}.header-meta{justify-content:flex-start}.layout{display:flex;flex-direction:column}.loop-panel{height:255px}.trace-panel{height:430px;flex:none}.sidebar{overflow:visible}.side-section{min-height:0}}@media(max-width:500px){h1{font-size:17px}h1 span{display:block;margin:4px 0 0}.chip,.tag{font-size:10px;padding:4px 6px}.app{padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}}
+.loop-panel{height:300px}.graph-wrap{background:none}.graph{min-height:226px}.graph-edge.loop{stroke-dasharray:4 3}.loop-label-text{font:500 9px "IBM Plex Mono",monospace;fill:var(--fg-2)}
+@media(max-width:900px){.loop-panel{height:300px}}
+</style>
+<main class="app">
+  <header class="topbar"><div><div class="eyebrow">AGENT / RUN TRACE</div><h1>Feature loop · #681 Short state words <span>inco-cx (INCO · gpt-5.6-terra · medium)</span></h1></div><div class="header-meta"><span class="chip status">In Checks</span><span class="chip warn">Rework round 1 of 3 used</span><span class="chip">Elapsed 1h 35m</span><span class="chip">637k tokens</span><span class="tag">Spike · sample data</span><button class="theme" id="theme" aria-label="Toggle colour theme"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button></div></header>
+  <div class="layout"><section class="main-column"><article class="panel loop-panel"><div class="panel-head"><h2>The loop</h2><div class="legend"><span><i style="background:var(--accent)"></i>current</span><span><i style="background:var(--ok)"></i>visited</span><span>agent · check · fresh review</span></div></div><div class="graph-wrap"><svg class="graph" id="loopGraph" role="img" aria-label="Feature loop graph, currently at Checks. Back edges show capped CI fix, rework and re-plan routes."></svg></div></article><article class="panel trace-panel"><div class="panel-head"><h2>This run, step by step</h2><span class="mono">09:10–10:50 · current visit in progress</span></div><div class="trace-wrap"><svg class="trace" id="traceGraph" role="img" aria-label="Timeline of the agent run from 09:10 to 10:50, with visits by loop step."></svg></div></article></section>
+  <aside class="panel sidebar"><section class="side-section"><div class="panel-head"><h2>Where the tokens go</h2><span class="token-total" id="tokenTotal">637k total</span></div><div class="bars" id="tokenBars"></div></section><section class="side-section"><h2>Stop rules</h2><div class="rule"><div class="rule-top"><span>Rework rounds</span><b>1 / 3</b></div><div class="meter"><span style="width:33%"></span></div></div><div class="rule"><div class="rule-top"><span>CI fixes</span><b>1 / 3</b></div><div class="meter"><span style="width:33%"></span></div></div><div class="rule"><div class="rule-top"><span>Re-plans</span><b>0 / 1</b></div><div class="meter"><span style="width:0%"></span></div></div></section><section class="side-section"><h2>Next</h2><p class="next"><strong>If Checks pass → Review</strong> (retro-cx, gpt-5.6-sol · high). If they fail → Build (CI fix 2 of 3).</p></section><p class="caption">On the Overview, each card shows a one-line version of this trace.</p></aside></div>
+</main><div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js" integrity="sha384-KO35c6PFq7tFxAEx6FtATwL9vOBOmCzQYr7GM0iTr3oO22s7Jc9OkclOH4AV7jwK" crossorigin="anonymous"></script>
+<script>
+(() => {
+  const steps = [
+    { id: 'explore', label: 'Explore', type: 'agent' }, { id: 'plan', label: 'Plan', type: 'agent' },
+    { id: 'build', label: 'Build', type: 'agent' }, { id: 'checks', label: 'Checks', type: 'check' },
+    { id: 'review', label: 'Review', type: 'review' }, { id: 'merge', label: 'Merge', type: 'agent' }, { id: 'done', label: 'Done', type: 'agent' }
+  ];
+  const visits = [
+    { step:'Explore', start:4, end:13, tokens:41, outcome:'passed', note:'Problem framing and repository reconnaissance.', detail:'inco-cx · gpt-5.6-terra · medium' },
+    { step:'Plan', start:13, end:27, tokens:88, outcome:'passed', note:'Plan accepted; implementation scope fixed.', detail:'inco-cx · gpt-5.6-terra · medium' },
+    { step:'Build', start:27, end:52, tokens:236, outcome:'passed', note:'Initial feature implementation committed.', detail:'inco-cx · gpt-5.6-terra · medium' },
+    { step:'Checks', start:52, end:56, tokens:0, outcome:'failed', note:'Lint + 1 web test failed.', detail:'deterministic checks · scripts' },
+    { step:'Build', start:56, end:63, tokens:38, outcome:'passed', note:'CI fix applied.', detail:'inco-cx · gpt-5.6-terra · medium' },
+    { step:'Checks', start:63, end:66, tokens:0, outcome:'passed', note:'All deterministic checks passed.', detail:'deterministic checks · scripts' },
+    { step:'Review', start:66, end:79, tokens:96, outcome:'rework requested', note:'2 findings from fresh-context review.', detail:'retro-cx · gpt-5.6-sol · high' },
+    { step:'Build', start:79, end:97, tokens:138, outcome:'passed', note:'Rework findings addressed.', detail:'inco-cx · gpt-5.6-terra · medium' },
+    { step:'Checks', start:97, end:100, tokens:0, outcome:'running', note:'Lint, tests and web checks in progress.', detail:'deterministic checks · scripts' }
+  ];
+  const edgeInfo = { 'explore-plan':{count:1}, 'plan-build':{count:1}, 'build-checks':{count:3}, 'checks-review':{count:1}, 'review-merge':{count:0}, 'merge-done':{count:0}, 'checks-build':{count:1, rule:'CI fix ≤3'}, 'review-build':{count:1, rule:'rework ≤3'}, 'build-plan':{count:0, rule:'re-plan ≤1'} };
+  const minuteLabel = m => { const total = 9 * 60 + 10 + m; return String(Math.floor(total / 60)).padStart(2,'0') + ':' + String(total % 60).padStart(2,'0'); };
+  const graph = document.getElementById('loopGraph'); const trace = document.getElementById('traceGraph'); const tooltip = document.getElementById('tooltip');
+  const isReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function tokenBars() { const totals = d3.rollup(visits, v => d3.sum(v, d => d.tokens), d => d.step); const max = d3.max(totals.values()); const box = d3.select('#tokenBars'); box.selectAll('*').remove(); const total = d3.sum(totals.values()); d3.select('#tokenTotal').text(total + 'k total'); steps.filter(s => totals.has(s.label)).forEach(s => { const v=totals.get(s.label); const row=box.append('div').attr('class','bar-row'); row.append('span').text(s.label); row.append('div').attr('class','bar-track').append('div').attr('class','bar-fill' + (s.id === 'review' ? ' think':'')).style('width',(v/max*100)+'%'); row.append('span').attr('class','bar-value').text(v+'k'); }); }
+  function nodePath(type,w,h) { if(type==='check'){const a=8;return `M${a},0H${w-a}L${w},${h/2}L${w-a},${h}H${a}L0,${h/2}Z`;} return null; }
+  async function drawLoop() {
+    const rect=graph.getBoundingClientRect(), width=Math.max(730,rect.width), height=Math.max(180,rect.height);
+    const elk = new ELK(); const children=steps.map(s=>({id:s.id,width:88,height:42})); const edges=[];
+    ['explore-plan','plan-build','build-checks','checks-review','review-merge','merge-done'].forEach(k=>{const [source,target]=k.split('-');edges.push({id:k,sources:[source],targets:[target]});});
+    const layout=await elk.layout({id:'root',layoutOptions:{'elk.algorithm':'layered','elk.direction':'RIGHT','elk.spacing.nodeNode':'25','elk.layered.spacing.nodeNodeBetweenLayers':'25','elk.edgeRouting':'ORTHOGONAL'},children,edges});
+    const minX=d3.min(layout.children,d=>d.x), maxX=d3.max(layout.children,d=>d.x+d.width), minY=d3.min(layout.children,d=>d.y), maxY=d3.max(layout.children,d=>d.y+d.height); const scale=Math.min((width-28)/(maxX-minX),(height-28)/(maxY-minY),1.24); const ox=(width-(maxX-minX)*scale)/2-minX*scale, oy=(height-(maxY-minY)*scale)/2-minY*scale;
+    const svg=d3.select(graph).attr('viewBox',`0 0 ${width} ${height}`);svg.selectAll('*').remove(); const defs=svg.append('defs');defs.append('marker').attr('id','arrow').attr('viewBox','0 -4 8 8').attr('refX',7).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto').append('path').attr('d','M0,-4L8,0L0,4').attr('fill','var(--line-2)');
+    const layer=svg.append('g').attr('transform',`translate(${ox},${oy}) scale(${scale})`); const pos=Object.fromEntries(layout.children.map(d=>[d.id,d]));
+    layout.edges.forEach(e=>{ const info=edgeInfo[e.id], sec=e.sections[0]; const pts=[sec.startPoint,...(sec.bendPoints||[]),sec.endPoint]; layer.append('path').attr('class','graph-edge '+(info.count?'taken':'')).attr('marker-end','url(#arrow)').attr('d','M'+pts.map(p=>p.x+','+p.y).join('L')); if(info.count) layer.append('text').attr('class','edge-label').attr('x',(sec.startPoint.x+sec.endPoint.x)/2).attr('y',(sec.startPoint.y+sec.endPoint.y)/2-5).attr('text-anchor','middle').text('×'+info.count); });
+    const loopDefs=[{from:'checks',to:'build',key:'checks-build',lane:12},{from:'review',to:'build',key:'review-build',lane:29},{from:'build',to:'plan',key:'build-plan',lane:46}];
+    loopDefs.forEach(d=>{const a=pos[d.from],b=pos[d.to],info=edgeInfo[d.key], y=maxY+d.lane;const path=`M${a.x+6},${a.y+a.height}V${y}H${b.x+b.width-6}V${b.y+b.height}`;layer.append('path').attr('class','graph-edge loop '+(info.count?'taken':'')).attr('opacity',info.count?1:.38).attr('d',path).attr('marker-end','url(#arrow)'); layer.append('text').attr('class','edge-label').attr('x',(a.x+b.x+b.width)/2).attr('y',y-3).attr('text-anchor','middle').attr('fill',info.count?'var(--warn)':null).text(`${info.rule} · ×${info.count}`);});
+    layout.children.forEach(n=>{const s=steps.find(x=>x.id===n.id), visited=visits.some(v=>v.step===s.label), current=s.id==='checks';const g=layer.append('g').attr('transform',`translate(${n.x},${n.y})`);if(current&&!isReduced)g.append('rect').attr('class','pulse').attr('x',-5).attr('y',-5).attr('width',n.width+10).attr('height',n.height+10).attr('rx',10); if(s.type==='review'){g.append('rect').attr('class',current?'node-current':'node-base '+(!visited?'unvisited':'')).attr('x',3).attr('y',3).attr('width',n.width-6).attr('height',n.height-6).attr('rx',7);g.append('rect').attr('class',current?'node-current':'node-base '+(!visited?'unvisited':'')).attr('width',n.width).attr('height',n.height).attr('rx',8);}else if(s.type==='check'){g.append('path').attr('class',current?'node-current':'node-base '+(!visited?'unvisited':'')).attr('d',nodePath('check',n.width,n.height));}else g.append('rect').attr('class',current?'node-current':'node-base '+(!visited?'unvisited':'')).attr('width',n.width).attr('height',n.height).attr('rx',8); if(visited)g.append('circle').attr('class','visit-dot').attr('cx',n.width-10).attr('cy',10).attr('r',3.2);g.append('text').attr('class','node-label').attr('x',10).attr('y',19).text(s.label);g.append('text').attr('class','node-sub').attr('x',10).attr('y',32).text(s.type==='check'?'DETERMINISTIC':s.type==='review'?'FRESH CONTEXT':'AGENT');});
+  }
+  function showTooltip(event,d) { tooltip.innerHTML=`<div class="title">${d.step} · ${d.outcome}</div><div class="dim">${minuteLabel(d.start)}–${d.outcome==='running'?'now':minuteLabel(d.end)} · ${d.detail}</div><div>${d.tokens ? d.tokens+'k tokens · ' : ''}${d.note}</div>`; tooltip.style.display='block'; tooltip.style.left=Math.min(event.clientX+12,innerWidth-275)+'px'; tooltip.style.top=Math.max(10,event.clientY-20)+'px'; }
+  function drawTrace() { const rect=trace.getBoundingClientRect(), width=Math.max(820,rect.width), height=Math.max(300,rect.height);const margin={top:32,right:22,bottom:16,left:90}, rows=steps.length, rowH=Math.max(31,(height-margin.top-margin.bottom)/rows), plotH=rowH*rows;const x=d3.scaleLinear().domain([0,100]).range([margin.left,width-margin.right]);const y=i=>margin.top+i*rowH+5;const svg=d3.select(trace).attr('viewBox',`0 0 ${width} ${Math.max(height,margin.top+plotH+margin.bottom)}`);svg.selectAll('*').remove();const defs=svg.append('defs');const pat=defs.append('pattern').attr('id','runningStripe').attr('width',7).attr('height',7).attr('patternUnits','userSpaceOnUse').attr('patternTransform','rotate(45)');pat.append('rect').attr('width',7).attr('height',7).attr('fill','var(--accent)');pat.append('line').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',7).attr('stroke','var(--surface)').attr('stroke-width',2).attr('opacity',.38); for(let t=0;t<=100;t+=10){svg.append('line').attr('class','grid').attr('x1',x(t)).attr('x2',x(t)).attr('y1',margin.top-8).attr('y2',margin.top+plotH).attr('opacity',.65);svg.append('text').attr('class','axis-text').attr('x',x(t)).attr('y',15).attr('text-anchor',t===100?'end':t===0?'start':'middle').text(minuteLabel(t));} steps.forEach((s,i)=>{svg.append('text').attr('class','row-label').attr('x',0).attr('y',y(i)+15).text(s.label);svg.append('line').attr('class','grid').attr('x1',margin.left).attr('x2',width-margin.right).attr('y1',y(i)+25).attr('y2',y(i)+25).attr('opacity',.45);}); const byStep=Object.fromEntries(steps.map((s,i)=>[s.label,i]));visits.slice(0,-1).forEach((v,i)=>{const n=visits[i+1];svg.append('path').attr('class','connector').attr('d',`M${x(v.end)},${y(byStep[v.step])+10} L${x(n.start)},${y(byStep[n.step])+10}`);});svg.append('line').attr('class','now-line').attr('x1',x(100)).attr('x2',x(100)).attr('y1',margin.top-8).attr('y2',margin.top+plotH);svg.append('text').attr('class','axis-text').attr('x',x(100)-3).attr('y',29).attr('text-anchor','end').attr('fill','var(--accent)').text('NOW'); svg.selectAll('.visit').data(visits).enter().append('rect').attr('class',d=>'visit bar bar-'+({passed:'ok',failed:'crit','rework requested':'warn',running:'accent'}[d.outcome])).attr('x',d=>x(d.start)).attr('y',d=>y(byStep[d.step])).attr('width',d=>Math.max(3,x(d.end)-x(d.start))).attr('height',20).on('mouseenter',showTooltip).on('mousemove',showTooltip).on('mouseleave',()=>tooltip.style.display='none');svg.selectAll('.bartext').data(visits.filter(d=>d.tokens)).enter().append('text').attr('class','bar-label').attr('x',d=>x(d.start)+5).attr('y',d=>y(byStep[d.step])+14).text(d=>d.tokens+'k'); }
+  async function drawLoopPolished() {
+    const rect = graph.getBoundingClientRect();
+    const width = Math.max(730, rect.width);
+    const height = Math.max(226, rect.height);
+    const dimensions = { explore:[88,42], plan:[88,42], build:[88,42], checks:[88,42], review:[88,42], merge:[70,42], done:[54,24] };
+    const elk = new ELK();
+    const layout = await elk.layout({
+      id: 'root',
+      layoutOptions: { 'elk.algorithm':'layered', 'elk.direction':'RIGHT', 'elk.spacing.nodeNode':'22', 'elk.layered.spacing.nodeNodeBetweenLayers':'22' },
+      children: steps.map(s => ({ id:s.id, width:dimensions[s.id][0], height:dimensions[s.id][1] })),
+      edges: ['explore-plan','plan-build','build-checks','checks-review','review-merge','merge-done'].map(id => { const [source,target] = id.split('-'); return { id, sources:[source], targets:[target] }; })
+    });
+    const minX = d3.min(layout.children, d => d.x);
+    const maxX = d3.max(layout.children, d => d.x + d.width);
+    const scale = Math.min(1.15, (width - 30) / (maxX - minX));
+    const offsetX = (width - (maxX - minX) * scale) / 2 - minX * scale;
+    const rowY = 14;
+    const pos = Object.fromEntries(layout.children.map(n => [n.id, { ...n, x:n.x * scale + offsetX, y:rowY, width:n.width * scale, height:n.height * scale }]));
+    const svg = d3.select(graph).attr('viewBox', `0 0 ${width} ${height}`);
+    svg.selectAll('*').remove();
+    const defs = svg.append('defs');
+    [['arrow','var(--line-2)'],['arrow-current','var(--accent)'],['arrow-loop','var(--warn)']].forEach(([id, fill]) => {
+      defs.append('marker').attr('id',id).attr('viewBox','0 -4 8 8').attr('refX',7).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto').append('path').attr('d','M0,-4L8,0L0,4').attr('fill',fill);
+    });
+    const layer = svg.append('g');
+    ['explore-plan','plan-build','build-checks','checks-review','review-merge','merge-done'].forEach(key => {
+      const [from,to] = key.split('-'); const a = pos[from], b = pos[to], info = edgeInfo[key];
+      const y = a.y + a.height / 2;
+      layer.append('path').attr('class', 'graph-edge ' + (info.count ? 'taken' : '')).attr('marker-end', info.count ? 'url(#arrow-current)' : 'url(#arrow)').attr('d', `M${a.x+a.width},${y}H${b.x}`);
+      if (info.count) layer.append('text').attr('class','edge-label').attr('x',(a.x+a.width+b.x)/2).attr('y',y-7).attr('text-anchor','middle').text('×'+info.count);
+    });
+    const loops = [
+      { from:'checks', to:'build', key:'checks-build', depth:104 },
+      { from:'review', to:'build', key:'review-build', depth:144 },
+      { from:'build', to:'plan', key:'build-plan', depth:184 }
+    ];
+    loops.forEach(loop => {
+      const a = pos[loop.from], b = pos[loop.to], info = edgeInfo[loop.key];
+      const sx = a.x + a.width / 2, sy = a.y + a.height + 2, tx = b.x + b.width / 2, ty = b.y + b.height + 2;
+      const labelY = (sy + ty) / 8 + loop.depth * .75;
+      const label = `${info.rule} · ×${info.count}`;
+      const labelWidth = label.length * 5.65 + 14;
+      const labelX = (sx + tx) / 2;
+      layer.append('path').attr('class','graph-edge loop ' + (info.count ? 'taken' : '')).attr('opacity',info.count ? 1 : .32).attr('marker-end',info.count ? 'url(#arrow-loop)' : 'url(#arrow)').attr('d',`M${sx},${sy} C${sx},${loop.depth} ${tx},${loop.depth} ${tx},${ty}`);
+      layer.append('rect').attr('x',labelX-labelWidth/2).attr('y',labelY-10).attr('width',labelWidth).attr('height',16).attr('rx',8).attr('fill','var(--surface)').attr('stroke','var(--line)').attr('opacity',info.count ? 1 : .72);
+      layer.append('text').attr('class','loop-label-text').attr('x',labelX).attr('y',labelY+1).attr('text-anchor','middle').attr('opacity',info.count ? 1 : .6).text(label);
+    });
+    layout.children.forEach(raw => {
+      const n = pos[raw.id], s = steps.find(step => step.id === raw.id), visited = visits.some(v => v.step === s.label), current = s.id === 'checks';
+      const g = layer.append('g').attr('transform',`translate(${n.x},${n.y})`);
+      if (current && !isReduced) g.append('rect').attr('class','pulse').attr('x',-5).attr('y',-5).attr('width',n.width+10).attr('height',n.height+10).attr('rx',10);
+      const base = current ? 'node-current' : 'node-base ' + (!visited ? 'unvisited' : '');
+      if (s.id === 'review') {
+        g.append('rect').attr('class',base).attr('x',3).attr('y',3).attr('width',n.width-6).attr('height',n.height-6).attr('rx',7);
+        g.append('rect').attr('class',base).attr('width',n.width).attr('height',n.height).attr('rx',8);
+      } else if (s.id === 'checks' || s.id === 'merge') {
+        g.append('path').attr('class',base).attr('d',nodePath('check',n.width,n.height));
+      } else if (s.id === 'done') {
+        g.append('rect').attr('class',base).attr('width',n.width).attr('height',n.height).attr('rx',n.height/2);
+      } else g.append('rect').attr('class',base).attr('width',n.width).attr('height',n.height).attr('rx',8);
+      if (visited && s.id !== 'done') g.append('circle').attr('class','visit-dot').attr('cx',n.width-10).attr('cy',10).attr('r',3.2);
+      if (s.id === 'done') g.append('text').attr('class','node-label').attr('x',n.width/2).attr('y',n.height/2+4).attr('text-anchor','middle').text('Done');
+      else {
+        g.append('text').attr('class','node-label').attr('x',10).attr('y',19).text(s.label);
+        g.append('text').attr('class','node-sub').attr('x',10).attr('y',32).text(s.id === 'checks' ? 'DETERMINISTIC' : s.id === 'merge' ? 'FREE' : s.id === 'review' ? 'FRESH CONTEXT' : 'AGENT');
+      }
+    });
+  }
+  function addCheckLabels() {
+    const svg = d3.select(trace);
+    const bars = svg.selectAll('.visit').nodes();
+    [bars[3], bars[5]].forEach((bar, index) => {
+      if (!bar) return;
+      const x = +bar.getAttribute('x');
+      const y = +bar.getAttribute('y') - 4;
+      svg.append('text').attr('class','bar-label outside').attr('x',x).attr('y',y).text(index === 0 ? 'lint, 1 test' : 'pass');
+    });
+  }
+  let resizeTimer;
+  function render() {
+    drawLoopPolished();
+    drawTrace();
+    addCheckLabels();
+    document.querySelectorAll('.header-meta .chip')[3].textContent = '637k tokens';
+  }
+  window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(render,100);});
+  document.getElementById('theme').addEventListener('click',()=>{const root=document.documentElement;root.dataset.theme=root.dataset.theme==='light'?'dark':'light';render();});
+  tokenBars(); render();
+})();
+</script>
