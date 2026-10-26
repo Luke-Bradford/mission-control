@@ -134,7 +134,6 @@ async function validate(
         lane: deps.config.crew?.lane,
         laneDefault: deps.config.crew?.laneDefault ?? false,
         body: ticket.body,
-        planRequired: chosen.profile.planRequired,
         closed: (n) => board.find((c) => c.issueNumber === n)?.closed,
       }) !== null
     )

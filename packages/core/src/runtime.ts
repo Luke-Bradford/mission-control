@@ -87,7 +87,10 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
-  writer: { base: ["commit", "sync_main", "ask_operator", "report_evidence"], grantable: [] },
+  writer: {
+    base: ["commit", "sync_main", "ask_operator", "report_evidence"],
+    grantable: [MC_TOOL_NAMES.reportPlan],
+  },
   "read-only": {
     base: ["ask_operator", "report_evidence"],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],

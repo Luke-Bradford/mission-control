@@ -50,6 +50,7 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_WRITTEN,
+  MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
@@ -3228,9 +3229,9 @@ describe("report_plan", () => {
     });
   });
 
-  it("is offered to read-only seats whose role is granted it", () => {
+  it("is offered to planner and build seats", () => {
     expect(tool("report_plan", pt).modes).toEqual([]);
-    expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
+    expect(tool("report_plan", pt).grantable).toEqual(["writer", "read-only"]);
   });
 
   it("refuses report_plan while away without editing GitHub", async () => {
@@ -3287,6 +3288,26 @@ describe("report_plan", () => {
     ]);
     expect(emitted).toContain("agents");
     expect(bodyFiles()).toEqual([]);
+  });
+
+  it("lets a build seat record its own plan and continue its run", async () => {
+    const runId = "guido:1";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual({
+      text: MC_PLAN_WRITTEN_CONTINUE,
+    });
+    expect(told).toEqual([]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.loopEventsOfRun(runId).map((e) => e.text)).toEqual([planWrittenText("mc#7")]);
   });
 
   it("records the plan landing as the planner to CAPCOM when the session has no FLIGHT seat", async () => {
@@ -3542,7 +3563,7 @@ describe("report_plan", () => {
     expect(await plan()).toEqual({ text: MC_PLAN_WRITTEN });
   });
 
-  it("not a planner", async () => {
+  it("not a planner or build seat", async () => {
     store.upsertRun(run({ id: "retro:1", agentId: "retro", branch: null, ticket: "mc#7" }));
     store.setSeatSession({
       seatId: "retro",

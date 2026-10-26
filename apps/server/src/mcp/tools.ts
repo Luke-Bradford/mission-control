@@ -68,6 +68,7 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_WRITTEN,
+  MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
   MC_PR_FAILED,
@@ -201,7 +202,7 @@ export interface McToolsDeps {
   onFindings?: (seatId: string, runId: string) => void;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
-  /** Called after `report_plan` writes a plan (the supervisor ends the run). */
+  /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
 }
 
@@ -1763,7 +1764,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const { run } = live;
     const place = seatPlace(config, ctx.seatId);
     if (place === null) return ENDED;
-    if (seatDef(place.seat).loop !== "plan") return { text: MC_PLAN_NOT_FAO, isError: true };
+    const loop = seatDef(place.seat).loop;
+    if (loop !== "plan" && loop !== "build") return { text: MC_PLAN_NOT_FAO, isError: true };
     const issue = issueOf(run);
     const repo = repoOf(deps, run);
     if (issue === null || repo === "") return ENDED;
@@ -1891,8 +1893,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       text: planned,
     });
     bus.emit("agents");
-    deps.onPlanned?.(ctx.seatId, ctx.runId);
-    return written;
+    if (loop === "plan") deps.onPlanned?.(ctx.seatId, ctx.runId);
+    return loop === "plan" ? written : { text: MC_PLAN_WRITTEN_CONTINUE };
   }
 
   return [
@@ -2071,7 +2073,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportPlan,
       description:
-        "Write your plan into the ticket, once, when it is finished: Mission Control appends it to the issue body under ## Plan, for the developer's brief, then ends this run. It is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.",
+        "Write your plan into the ticket, once, when it is finished: Mission Control appends it to the issue body under ## Plan. A planner run then ends; a build seat continues the ticket. It is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2099,7 +2101,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         additionalProperties: false,
       },
       modes: [],
-      grantable: ["read-only"],
+      grantable: ["writer", "read-only"],
       call: reportPlan,
     },
   ];

@@ -60,6 +60,8 @@ export interface BriefInput {
   fullSuite: readonly string[];
   /** The run's template profile, as snapshotted; absent adds no profile lines. */
   profile?: RunProfile;
+  /** This build ticket has no recorded plan, so its seat must write one before coding. */
+  planless?: boolean;
   /** Every profile's name, for the planner's line about another template. */
   profileNames?: readonly string[];
   /** Quoted porcelain status from a reused ticket worktree. */
@@ -81,6 +83,10 @@ const READONLY_CLOSE =
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
 const PLANNER_CLOSE =
   "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask the operator with mc ask_operator only for a decision you cannot make from the ticket and the code.";
+const WORK_UNTIL_DONE =
+  "There is no turn or time limit. Work until the ticket is done or you are truly blocked; if blocked, name the blocker.";
+const SELF_PLAN =
+  "This ticket has no ## Plan. Before changing code, write its plan with mc report_plan: include a ### Tests part with one entry for every ## Done when item, then continue this run and build it.";
 
 /**
  * One line saying the body is incomplete, or null when it is whole. The body goes to the seat up to
@@ -107,7 +113,7 @@ function profileLines(i: BriefInput): string[] {
       ? `CI checks that must pass: ${p.checks.join(", ")}.`
       : "CI: every check on your pushed commit must pass.",
     ...(p.planRequired
-      ? ["This template needs a ## Plan before a developer starts, at Size M or larger."]
+      ? ["At Size M or larger, write a ## Plan before changing code if the ticket has none."]
       : []),
     ...(p.checklist === "" ? [] : ["Before you report, check:", p.checklist]),
     ...(i.loop === "plan" && i.profileNames !== undefined
@@ -136,8 +142,8 @@ export function ticketBrief(i: BriefInput): string {
   const profile = profileLines(i);
   const last =
     i.loop === "plan"
-      ? PLANNER_CLOSE
-      : `You are working in a checkout of branch ${i.branch}. ${scope} ${writer ? WRITER_CLOSE : READONLY_CLOSE}`;
+      ? `${PLANNER_CLOSE} ${WORK_UNTIL_DONE}`
+      : `You are working in a checkout of branch ${i.branch}. ${scope} ${writer ? WRITER_CLOSE : READONLY_CLOSE} ${WORK_UNTIL_DONE}`;
   // The note goes first: a cut inside an open code fence would swallow a note placed after it.
   return [
     `You are ${i.call}, the ${i.here} on ${i.repo}. Ticket ${i.repo}#${i.issue}: ${i.title}`,
@@ -146,6 +152,7 @@ export function ticketBrief(i: BriefInput): string {
     i.body,
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
+    ...(i.planless ? [SELF_PLAN, ""] : []),
     ran,
     last,
     ...((i.leftoverChanges?.length ?? 0) > 0

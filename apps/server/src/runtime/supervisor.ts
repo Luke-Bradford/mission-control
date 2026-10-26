@@ -70,6 +70,7 @@ import {
   inferTicket,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
+  MC_TOOL_NAMES,
   MCP_PATH,
   type McToolName,
   mainConflictText,
@@ -1489,7 +1490,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           model,
           effort: info.seat.effort,
           mode: def.mode,
-          mcTools: def.mcTools,
+          mcTools:
+            def.loop === "build" && run.plan === undefined
+              ? [...def.mcTools, MC_TOOL_NAMES.reportPlan]
+              : def.mcTools,
           rolePromptFile: promptPath,
           sessionId: cliSessionId,
           resume,
@@ -2694,7 +2698,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
           : {}),
-        planRequired: chosen.profile.planRequired,
         repoId: info.repo.id,
         issue,
         card: {
@@ -2938,6 +2941,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         fullSuite: info.repo.fullSuite ?? [],
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
+        ...(plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
       if (installNote) brief += `\n\n${installNote}`;
