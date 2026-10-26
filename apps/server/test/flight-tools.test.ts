@@ -228,6 +228,7 @@ let ghCalls: string[][];
 let ghInputs: (string | undefined)[];
 let ghImpl: (args: string[]) => Promise<GhResult>;
 let secrets: string[];
+let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
@@ -315,6 +316,7 @@ beforeEach(() => {
   ghInputs = [];
   ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
   secrets = [];
+  secretSource = async () => secrets;
   logs = [];
   stateSeen.mockClear();
   tools = createFlightTools({
@@ -338,7 +340,7 @@ beforeEach(() => {
       return ghImpl(a);
     },
     dbPath: join(dir, "mc.sqlite"),
-    knownSecrets: async () => secrets,
+    knownSecrets: () => secretSource(),
     log: (l) => logs.push(l),
     supervisor: {
       message: async (...a) => {
@@ -568,6 +570,7 @@ describe("tool list", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "comms_pin",
       "flight_state",
       "promote",
       "end_run",
@@ -1582,6 +1585,75 @@ describe("message_seat", () => {
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
     expect(store.comms(0)).toEqual([]);
+  });
+
+  it("does not deliver or store when the seat leaves during secret scanning", async () => {
+    let scanned!: () => void;
+    let release!: () => void;
+    const scanStarted = new Promise<void>((resolve) => (scanned = resolve));
+    const scan = new Promise<readonly string[]>((resolve) => (release = () => resolve([])));
+    secretSource = () => {
+      scanned();
+      return scan;
+    };
+    const pending = call("message_seat", M());
+    await scanStarted;
+    const session = cfg.crew?.sessions[0];
+    if (session === undefined) throw new Error("expected crew session");
+    session.seats = session.seats.filter((member) => member.id !== "guido-1");
+    release();
+    expect(await pending).toEqual(refused("Unknown Comms destination."));
+    expect(messageCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+  });
+});
+
+describe("comms_pin", () => {
+  const message = () =>
+    store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: null,
+      text: "Please decide",
+    });
+
+  it("lets the live FLIGHT run pin and unpin a stored message", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual({
+      text: "Comms message pinned.",
+    });
+    expect(store.commsPins().map((m) => m.id)).toEqual([stored.id]);
+    expect(await call("comms_pin", { id: stored.id, pinned: false })).toEqual({
+      text: "Comms message unpinned.",
+    });
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("refuses every non-FLIGHT caller", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    live("guido-1", "r-guido");
+    expect(
+      await call("comms_pin", { id: stored.id, pinned: true }, ctx("guido-1", "r-guido")),
+    ).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("refuses a guessed private message outside FLIGHT's inbox", async () => {
+    const stored = store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "inco-1",
+      ticket: null,
+      text: "private",
+    });
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual(
+      refused("You cannot pin that Comms message."),
+    );
+    expect(store.commsPins()).toEqual([]);
   });
 });
 

@@ -12,9 +12,14 @@ import {
   areaOwnsFolder,
   type ChangedFiles,
   type CliAccountStatus,
+  COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_LABELS,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_REACTIONS,
+  COMMS_REF,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -118,7 +123,7 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
+import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -209,7 +214,7 @@ import {
   runView,
 } from "./runview.ts";
 import { setSeatFocus } from "./seat-focus.ts";
-import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
+import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
@@ -287,6 +292,8 @@ export interface AppDeps {
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
+  /** Delivers a direct Comms message to a local live seat. */
+  deliverComms?: (seatId: string, text: string, from: string) => void;
   store: Store;
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
@@ -975,6 +982,245 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         store.markThreadRead(id, body.data.messageIds);
         bus.emit("attention");
         bus.emit("agents");
+        return { ok: true };
+      });
+
+      const commsCrew = () =>
+        configuredAgents(config)
+          .filter((agent) => agent.kind === "crew")
+          .map((agent) => agent.id);
+      const commsSendBody = z.strictObject({
+        to: z.string().min(1),
+        text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        label: z.enum(COMMS_LABELS).optional(),
+        ref: z.string().regex(COMMS_REF).optional(),
+        replyTo: z
+          .string()
+          .regex(/^comms:\d+$/)
+          .optional(),
+      });
+      // Reader: apps/web/src/App.tsx#App (operator messages)
+      api.post("/comms", async (req, reply) => {
+        const body = commsSendBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const message = await sendComms(
+            {
+              store,
+              crew: commsCrew,
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              now,
+              seatSender: false,
+              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
+            },
+            COMMS_CAPCOM,
+            body.data,
+          );
+          bus.emit("agents");
+          return { message };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms message refused." });
+        }
+      });
+      // Reader: apps/web/src/App.tsx#App (operator reactions)
+      api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
+        if (commsMessageNumber(req.params.id) === null)
+          return reply.code(400).send({ error: "invalid Comms message id" });
+        const body = z
+          .strictObject({
+            reaction: z.enum(COMMS_REACTIONS),
+            reason: z.string().max(COMMS_CANT_REASON_MAX).optional(),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const reaction = reactComms(
+            store,
+            COMMS_CAPCOM,
+            req.params.id,
+            body.data.reaction,
+            body.data.reason,
+            now(),
+          );
+          bus.emit("agents");
+          return { reaction };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms reaction refused." });
+        }
+      });
+      const pinRoute =
+        (pinned: boolean) =>
+        async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+          if (commsMessageNumber(req.params.id) === null)
+            return reply.code(400).send({ error: "invalid Comms message id" });
+          try {
+            pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
+            bus.emit("agents");
+            return { pinned };
+          } catch (e) {
+            return reply
+              .code(404)
+              .send({ error: e instanceof Error ? e.message : "Unknown Comms message." });
+          }
+        };
+      // Reader: apps/web/src/App.tsx#App (operator pins)
+      api.put<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(true));
+      // Reader: apps/web/src/App.tsx#App (operator pins)
+      api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
+
+      const storedCommsMessage = (row: ReturnType<Store["commsMessage"]>) => {
+        if (row === null) throw new Error("Unknown Comms message.");
+        return {
+          ...row,
+          reactions: store.commsReactions(row.id),
+          pinned: store.commsPins().some((pin) => pin.id === row.id),
+          operator: row.from === COMMS_CAPCOM,
+        };
+      };
+      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
+        rows.map((row) => storedCommsMessage(row));
+      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
+      const unreadAfter = (rows: ReturnType<Store["commsForCrew"]>, cursor: string | null) => {
+        const offset = cursor === null ? 0 : Number(cursor.slice("comms:".length));
+        return rows.filter((row) => Number(row.id.slice("comms:".length)) > offset).length;
+      };
+      const commsScope = (
+        scope: string,
+      ): { key: string; rows: ReturnType<Store["commsForCrew"]> } | null => {
+        if (scope === "crew") return { key: scope, rows: store.commsForCrew() };
+        const flight = flightSeat(config)?.seat.id;
+        if (scope === "flight")
+          return {
+            key: scope,
+            rows: flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight),
+          };
+        const agent = scope.match(/^agent-all:([A-Za-z0-9_-]+)$/)?.[1];
+        if (agent !== undefined && knownCommsAgent(agent))
+          return { key: `agent-all:${agent}`, rows: store.commsForAgent(agent) };
+        const inbox = scope.match(/^inbox:([A-Za-z0-9_-]+)$/)?.[1];
+        if (inbox !== undefined && knownCommsAgent(inbox))
+          return { key: `inbox:${inbox}`, rows: store.commsInbox(inbox) };
+        const pair = scope.match(/^pair:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/);
+        if (pair !== null && knownCommsAgent(pair[1]) && knownCommsAgent(pair[2]))
+          return { key: pairScope(pair[1], pair[2]), rows: store.commsForPair(pair[1], pair[2]) };
+        return null;
+      };
+
+      // Reader: apps/web/src/App.tsx#App (crew Comms)
+      api.get("/comms/crew", () => {
+        const rows = store.commsForCrew();
+        const cursor = store.commsScopeCursor("crew");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
+      api.get("/comms/flight", () => {
+        const flight = flightSeat(config)?.seat.id;
+        const rows = flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight);
+        const cursor = store.commsScopeCursor("flight");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (agent Comms)
+      api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
+        const id = req.params.id;
+        if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
+        const rows = store.commsForAgent(id);
+        const inboxRows = store.commsInbox(id);
+        const messages = storedCommsMessages(rows);
+        const inbox = storedCommsMessages(inboxRows);
+        const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
+          .filter((contact) => contact !== id && contact !== COMMS_CREW)
+          .map((contact) => {
+            const contactRows = store.commsForPair(id, contact);
+            const cursor = store.commsScopeCursor(pairScope(id, contact));
+            const contactMessages = storedCommsMessages(contactRows);
+            return {
+              id: contact,
+              lastMessage: contactMessages.at(-1) ?? null,
+              count: contactMessages.length,
+              unread: unreadAfter(contactRows, cursor),
+            };
+          });
+        return {
+          messages,
+          inbox,
+          contacts,
+          cursor: store.commsScopeCursor(`agent-all:${id}`),
+          unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
+          inboxCursor: store.commsScopeCursor(`inbox:${id}`),
+          inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
+        };
+      });
+      // Reader: apps/web/src/App.tsx#App (agent contact Comms)
+      api.get<{ Params: { id: string; contact: string } }>(
+        "/comms/agents/:id/contacts/:contact",
+        (req, reply) => {
+          if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
+            return reply.code(404).send({ error: "unknown Comms agent" });
+          const rows = store.commsForPair(req.params.id, req.params.contact);
+          const cursor = store.commsScopeCursor(pairScope(req.params.id, req.params.contact));
+          return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+        },
+      );
+      // Reader: apps/web/src/App.tsx#App (pair Comms)
+      api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
+        if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
+          return reply.code(404).send({ error: "unknown Comms agent" });
+        const rows = store.commsForPair(req.params.a, req.params.b);
+        const cursor = store.commsScopeCursor(pairScope(req.params.a, req.params.b));
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (ticket Comms)
+      api.get<{ Params: { ref: string } }>("/comms/tickets/:ref", (req, reply) => {
+        const supplied = decodeURIComponent(req.params.ref);
+        if (!COMMS_REF.test(supplied)) return reply.code(400).send({ error: "invalid Comms ref" });
+        const context = store.commsForTicket(supplied);
+        return {
+          messages: storedCommsMessages(context.rows),
+          ticket: { ref: context.ref, linkedPr: context.linkedPr },
+        };
+      });
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
+      api.get("/comms/mentions", () => ({
+        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+          message: storedCommsMessage(row),
+          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+        })),
+      }));
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
+      api.post("/comms/mentions/seen", (req, reply) => {
+        const body = z
+          .strictObject({ ids: z.array(z.string().regex(/^comms:\d+$/)).max(500) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.ids.some((id) => store.commsMessage(id) === null))
+          return reply.code(400).send({ error: "unknown Comms message" });
+        store.markCommsMentionsSeen(COMMS_CAPCOM, body.data.ids, now());
+        return { ok: true };
+      });
+      // Reader: apps/web/src/App.tsx#App (pinned Comms)
+      api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
+      // Reader: apps/web/src/App.tsx#App (Comms link activity)
+      api.get("/comms/links", () => ({
+        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/App.tsx#App (Comms read cursors)
+      api.post("/comms/read", (req, reply) => {
+        const body = z
+          .strictObject({
+            scope: z.string().min(1).max(200),
+            messageId: z.string().regex(/^comms:\d+$/),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const scope = commsScope(body.data.scope);
+        if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
+        store.markCommsScopeRead(scope.key, body.data.messageId);
         return { ok: true };
       });
 
@@ -2064,8 +2310,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
-          await sup.message(id, b.text, { interrupt: b.interrupt === true });
-          store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
+          try {
+            await sendComms(
+              {
+                store,
+                crew: commsCrew,
+                knownSecrets: deps.knownSecrets ?? (async () => []),
+                now,
+                seatSender: false,
+                notify: async (seatId, text) => {
+                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                },
+              },
+              COMMS_CAPCOM,
+              { to: id, text: b.text, ref: ticket ?? undefined },
+            );
+          } catch (e) {
+            if (e instanceof SupervisorError) throw e;
+            throw new SupervisorError(
+              400,
+              e instanceof Error ? e.message : "Comms message refused.",
+            );
+          }
           // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
           if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };

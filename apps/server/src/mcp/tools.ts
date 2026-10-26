@@ -14,7 +14,11 @@ import {
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_LABELS,
+  COMMS_REACTIONS,
+  COMMS_REF,
   carriedFrom,
   clashText,
   closesIssue,
@@ -159,6 +163,7 @@ import { z } from "zod";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
+import { reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
@@ -193,7 +198,7 @@ export interface McToolsDeps {
    * The secrets the push and PR scans look for verbatim (the GitHub token), read for each call.
    * Never logged: every log line has them redacted.
    */
-  knownSecrets: () => Promise<string[]>;
+  knownSecrets: () => Promise<readonly string[]>;
   /** How long a read of `knownSecrets` may take; default `KNOWN_SECRETS_TIMEOUT_MS`. */
   knownSecretsTimeoutMs?: number;
   /** A line for the server log (a push or gh failure); default: none. */
@@ -208,6 +213,10 @@ export interface McToolsDeps {
   profiles?: () => readonly Profile[] | ProfilesError;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
+  /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
+  crewIds?: () => readonly string[];
+  /** Existing direct-message delivery hook. */
+  onComms?: (to: string, text: string, from: string) => void;
 }
 
 /**
@@ -245,6 +254,28 @@ const CommitArgs = z.strictObject({
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const CommsSendArgs = z.strictObject({
+  to: z.string().min(1),
+  text: text(MC_TEXT_MAX),
+  label: z.enum(COMMS_LABELS).optional(),
+  ref: z.string().regex(COMMS_REF).optional(),
+  replyTo: z
+    .string()
+    .regex(/^comms:\d+$/)
+    .optional(),
+});
+const CommsReactArgs = z
+  .strictObject({
+    id: z.string().regex(/^comms:\d+$/),
+    reaction: z.enum(COMMS_REACTIONS),
+    reason: z.string().max(COMMS_CANT_REASON_MAX).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.reaction === "cant" && (value.reason === undefined || value.reason.trim() === ""))
+      ctx.addIssue({ code: "custom", message: "reason is required for cant" });
+    if (value.reaction !== "cant" && value.reason !== undefined)
+      ctx.addIssue({ code: "custom", message: "reason is only allowed for cant" });
+  });
 const EvidenceArgs = z.strictObject({ note: text(MC_EVIDENCE_MAX) });
 const PlanArgs = z
   .strictObject({
@@ -1094,6 +1125,58 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { run, worktree: row.worktree };
   }
 
+  async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = CommsSendArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    if (liveRun(ctx) === null) return ENDED;
+    try {
+      const sent = await sendComms(
+        {
+          store,
+          crew: () =>
+            deps.crewIds?.() ??
+            config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ??
+            [],
+          knownSecrets: deps.knownSecrets,
+          now,
+          notify: deps.onComms,
+          seatSender: true,
+        },
+        ctx.seatId,
+        parsed.data,
+      );
+      bus.emit("agents");
+      return { text: `Sent ${sent.id}.` };
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : "Comms message refused.", isError: true };
+    }
+  }
+  async function commsReact(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = CommsReactArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    if (liveRun(ctx) === null) return ENDED;
+    const crew =
+      deps.crewIds?.() ??
+      config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ??
+      [];
+    if (!crew.includes(ctx.seatId))
+      return { text: "This seat is no longer in the crew.", isError: true };
+    try {
+      reactComms(
+        store,
+        ctx.seatId,
+        parsed.data.id,
+        parsed.data.reaction,
+        parsed.data.reason,
+        now(),
+      );
+      bus.emit("agents");
+      return { text: "Reaction recorded." };
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };
+    }
+  }
+
   async function restoreFile(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = z.strictObject({ path: removePath }).safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -1927,6 +2010,40 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   }
 
   return [
+    {
+      name: MC_TOOL_NAMES.commsSend,
+      description: "Send a message to a local seat, CAPCOM, or the crew channel.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          to: { type: "string" },
+          text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          label: { type: "string", enum: [...COMMS_LABELS] },
+          ref: { type: "string" },
+          replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
+        },
+        required: ["to", "text"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      call: commsSend,
+    },
+    {
+      name: MC_TOOL_NAMES.commsReact,
+      description: "React to one stored Comms message. Reactions never send or wake a seat.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", pattern: "^comms:[0-9]+$" },
+          reaction: { type: "string", enum: [...COMMS_REACTIONS] },
+          reason: { type: "string", maxLength: COMMS_CANT_REASON_MAX },
+        },
+        required: ["id", "reaction"],
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      call: commsReact,
+    },
     {
       name: MC_TOOL_NAMES.commit,
       description:
