@@ -872,6 +872,22 @@ describe("prepareCheckout", () => {
     expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
   });
 
+  it("verifies a reused manifest before clearing node_modules", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input());
+    const preserved = join(first.path, "node_modules", "preserve-on-refusal");
+    writeFileSync(preserved, "keep\n");
+    commit(first.path, { "package.json": `${PKG}\n` });
+
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("protected");
+    expect(e.message).toBe(
+      `branch ${BRANCH} changes package.json; Mission Control won't install from it`,
+    );
+    expect(readFileSync(preserved, "utf8")).toBe("keep\n");
+  });
+
   it("installs when a base lockfile is over the 4 MiB default read", async () => {
     commit(seed, {
       "package.json": PKG,

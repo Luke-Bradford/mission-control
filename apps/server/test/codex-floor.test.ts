@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +17,7 @@ import {
   crewCliArgs,
   DEFAULT_SEAT_COMMANDS,
   GUARD_HOOK_TIMEOUT_S,
+  PNPM_STORE_ENV,
   SANDBOX_DENY_READ_HOME,
   type SeatCommands,
 } from "@mc/core";
@@ -261,6 +271,74 @@ describe("codexSeatConfig", () => {
     ).toThrow();
   });
 });
+
+describe.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec"))(
+  "Codex seat Seatbelt store confinement",
+  () => {
+    let root: string;
+    let cwd: string;
+    let seatTmp: string;
+
+    beforeEach(() => {
+      root = realpathSync(mkdtempSync(join(tmpdir(), "mc-codex-store-")));
+      cwd = join(root, "worktree");
+      seatTmp = join(root, "seat-tmp");
+      const store = codexPnpmStoreDir(cwd);
+      for (const path of [cwd, seatTmp, store]) mkdirSync(path, { recursive: true });
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it.each(["writer", "read-only"] as const)(
+      "refuses a launched %s seat writing under $pnpm_config_store_dir",
+      (mode) => {
+        const store = codexPnpmStoreDir(cwd);
+        const config = codexSeatConfig(
+          {
+            cwd,
+            gitCommonDir: join(root, "clone", ".git"),
+            worktreeGitDir: join(root, "clone", ".git", "worktrees", "seat"),
+            home: join(root, "operator"),
+            dataDir: join(root, "data"),
+            denyRead: [],
+          },
+          mode,
+          "http://127.0.0.1:7420/mcp",
+          seatTmp,
+        );
+        expect(config).toContain(`${JSON.stringify(store)}="read"`);
+        const profile = [
+          "(version 1)",
+          "(allow default)",
+          "(deny file-write*)",
+          ...(mode === "writer" ? [`(allow file-write* (subpath ${JSON.stringify(cwd)}))`] : []),
+          `(allow file-write* (subpath ${JSON.stringify(seatTmp)}))`,
+          `(deny file-write* (subpath ${JSON.stringify(store)}))`,
+        ].join("\n");
+        const target = join(store, "seat-write");
+
+        expect(() =>
+          execFileSync(
+            "/usr/bin/sandbox-exec",
+            [
+              "-p",
+              profile,
+              process.execPath,
+              "-e",
+              "require('node:fs').writeFileSync(require('node:path').join(process.env.pnpm_config_store_dir, 'seat-write'), 'x')",
+            ],
+            {
+              cwd,
+              env: { ...process.env, [PNPM_STORE_ENV]: store },
+              stdio: "ignore",
+            },
+          ),
+        ).toThrow();
+        expect(existsSync(target)).toBe(false);
+      },
+    );
+  },
+);
+
 describe("Codex seat floor", () => {
   let root: string;
   let cwd: string;

@@ -520,15 +520,19 @@ async function inspectDisk(
   tool: InstallTool,
   found: string[],
   rel = "",
+  allowRootInstallDir = false,
 ): Promise<string | null> {
   const dir = join(root, rel);
   const prefix = rel ? `${rel}/` : "";
-  if (await succeeds(lstat(join(dir, tool.installDir)))) return `has ${prefix}${tool.installDir}`;
+  if (!(allowRootInstallDir && rel === "") && (await succeeds(lstat(join(dir, tool.installDir)))))
+    return `has ${prefix}${tool.installDir}`;
   for (const name of tool.inputs) {
     if (await succeeds(lstat(join(dir, name)))) found.push(`${prefix}${name}`);
   }
   for (const d of await readdir(dir, { withFileTypes: true })) {
     if (rel === "" && d.name === ".git" && d.isFile()) continue;
+    // A reused pnpm worktree verifies its inputs before deleting this one directory.
+    if (allowRootInstallDir && rel === "" && d.name === tool.installDir) continue;
     if (d.isSymbolicLink()) return `has a symlink at ${prefix}${d.name}`;
     if (d.isDirectory()) {
       const unsafe = await inspectDisk(root, tool, found, `${prefix}${d.name}`);
@@ -866,11 +870,15 @@ function refuseUnsafeUvRegistries(lock: string, subject: string): void {
  * Every present tool's checks first, then the installs in table order (pnpm's symlinked
  * node_modules must not meet uv's disk check).
  */
-async function verifyInstall(s: InstallVerification, tool: InstallTool): Promise<void> {
+async function verifyInstall(
+  s: InstallVerification,
+  tool: InstallTool,
+  allowRootInstallDir = false,
+): Promise<void> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
   if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
   const found: string[] = [];
-  const unsafe = await inspectDisk(s.path, tool, found);
+  const unsafe = await inspectDisk(s.path, tool, found, "", allowRootInstallDir);
   if (unsafe !== null) throw refuse(s.subject, unsafe);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
@@ -947,6 +955,7 @@ async function installReusedPnpm(
       throw e;
     }
   }
+  await verifyInstall(s, PNPM_TOOL, true);
   try {
     await rm(modules, { recursive: true, force: true });
   } catch (e) {
@@ -958,7 +967,6 @@ async function installReusedPnpm(
       },
     );
   }
-  await verifyInstall(s, PNPM_TOOL);
   await prepareCodexPnpmStore(s.path, s.name);
   await addMcTmpExclude(s.common);
   await install(PNPM_TOOL, s.path, s.name, run);
