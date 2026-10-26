@@ -23,6 +23,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -68,6 +69,7 @@ import {
   hasPlanSection,
   inferTicket,
   LOOPBACK_HOST,
+  MC_TMP_DIR_NAME,
   MCP_PATH,
   type McToolName,
   mainConflictText,
@@ -329,6 +331,18 @@ function writePrivate(path: string, text: string): void {
     }
     throw e;
   }
+}
+
+/** Keep Codex's worktree-local temp files out of its own `git status`, once per checkout. */
+function addMcTmpExclude(gitCommonDir: string): void {
+  const path = join(gitCommonDir, "info", "exclude");
+  const line = `${MC_TMP_DIR_NAME}/`;
+  mkdirSync(dirname(path), { recursive: true });
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  if (existing.split("\n").includes(line)) return;
+  appendFileSync(path, `${existing === "" || existing.endsWith("\n") ? "" : "\n"}${line}\n`, {
+    mode: 0o600,
+  });
 }
 
 /** What a crew action that failed unexpectedly says to a caller: no path, no git text. */
@@ -1125,6 +1139,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     env.HOME = homedir();
     env.TMPDIR = tmp;
+    env.TMP = tmp;
+    env.TEMP = tmp;
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
     Object.assign(env, crewPythonEnv(tmp, seatId));
@@ -1339,7 +1355,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
             ]
           : [];
-      const tmpPath = seatTmp(run.id);
+      const tmpPath = run.vendor === "codex" ? codexSeatTmp(cwd, run.id) : seatTmp(run.id);
       for (const path of [dirname(tmpPath), tmpPath]) {
         try {
           mkdirSync(path, { mode: 0o700 });
@@ -1351,10 +1367,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      if (run.vendor === "codex")
+        store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
+      const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
       const sandbox = {
         cwd,
         ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
-        gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
+        gitCommonDir,
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
@@ -1367,6 +1386,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
+        addMcTmpExclude(gitCommonDir);
+        const claudeTmpParentPath = dirname(seatTmp(run.id));
+        try {
+          mkdirSync(claudeTmpParentPath, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const parentStat = lstatSync(claudeTmpParentPath);
+        if (
+          !parentStat.isDirectory() ||
+          parentStat.uid !== process.getuid?.() ||
+          (parentStat.mode & 0o777) !== 0o700
+        )
+          throw new Error("crew temp root must be a private directory owned by the server");
+        const claudeTmpParent = realpathSync(claudeTmpParentPath);
         let auth: string;
         try {
           const account = config.accounts.find((a) => a.id === info.seat.accountId);
@@ -1400,6 +1434,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           SHELL: CODEX_SHELL,
           ZDOTDIR: zdotdir,
           TMPDIR: tmp,
+          TMP: tmp,
+          TEMP: tmp,
           [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
@@ -1434,13 +1470,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
-              // Codex uses more-specific grants for the seat's temp root, worktree and
-              // git dirs. Close the shared parent before those grants, including
-              // future sibling runs, without feeding an ancestor deny to the
-              // config builder's validation of the private temp directory.
+              // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
+              // Codex root-read base would otherwise reach them. Codex's own temp root is in
+              // its worktree, so this deny no longer sits above anything the seat resolves.
               codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
                 '":root"="read"',
-                ['":root"="read"', `${JSON.stringify(dirname(tmp))}="deny"`].join("\n"),
+                ['":root"="read"', `${JSON.stringify(claudeTmpParent)}="deny"`].join("\n"),
               ),
             );
             writePrivate(join(home, "auth.json"), auth);
@@ -1519,8 +1554,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeRunFiles(runId: string): void {
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
+      // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
-      rmSync(seatTmp(runId), { recursive: true, force: true });
+      const codexTmp = store.getSetting(codexTmpKey(runId));
+      if (codexTmp === null) rmSync(seatTmp(runId), { recursive: true, force: true });
+      else if (!removeCodexTmp(runId, codexTmp))
+        log(`could not remove run files of ${runId}: temp root changed`);
     } catch (e) {
       log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
@@ -1528,6 +1567,68 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function seatTmp(runId: string): string {
     return crewTempRoot(deps.dbPath, runId, process.getuid?.() ?? 0);
+  }
+
+  function codexSeatTmp(worktree: string, runId: string): string {
+    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 12);
+    return join(worktree, MC_TMP_DIR_NAME, key);
+  }
+
+  function codexTmpKey(runId: string): string {
+    return `codex-tmp:${runId}`;
+  }
+
+  /** A seat can write its worktree, so validate this whole path before recursive cleanup. */
+  function removeCodexTmp(runId: string, value: string): boolean {
+    let saved: { worktree: string; tmp: string };
+    try {
+      saved = JSON.parse(value) as { worktree: string; tmp: string };
+      if (typeof saved.worktree !== "string" || typeof saved.tmp !== "string") return false;
+      const parent = dirname(saved.tmp);
+      const key = basename(saved.tmp);
+      const worktree = realpathSync(saved.worktree);
+      const expected = join(worktree, MC_TMP_DIR_NAME, key);
+      try {
+        const parentStat = lstatSync(parent);
+        if (
+          !parentStat.isDirectory() ||
+          parentStat.uid !== process.getuid?.() ||
+          (parentStat.mode & 0o777) !== 0o700
+        )
+          return false;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+          store.deleteSetting(codexTmpKey(runId));
+          return true;
+        }
+        return false;
+      }
+      try {
+        const tmpStat = lstatSync(saved.tmp);
+        if (
+          !tmpStat.isDirectory() ||
+          tmpStat.uid !== process.getuid?.() ||
+          (tmpStat.mode & 0o777) !== 0o700 ||
+          realpathSync(saved.tmp) !== expected
+        )
+          return false;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+          store.deleteSetting(codexTmpKey(runId));
+          return true;
+        }
+        return false;
+      }
+      rmSync(saved.tmp, { recursive: true, force: true });
+      store.deleteSetting(codexTmpKey(runId));
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        store.deleteSetting(codexTmpKey(runId));
+        return true;
+      }
+      return false;
+    }
   }
 
   /**

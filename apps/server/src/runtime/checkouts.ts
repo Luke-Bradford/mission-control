@@ -15,6 +15,7 @@ import {
   branchFor,
   CANNOT_START,
   DIFF_CUT_LINE,
+  MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
@@ -139,6 +140,7 @@ export interface RepoPeer {
 export const COMMIT_ADD_PATHSPEC = [
   "--",
   ":(top)",
+  `:(top,exclude,glob)**/${MC_TMP_DIR_NAME}/**`,
   `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
   ":(top,exclude,glob)**/__pycache__/**",
   ":(top,exclude,glob)**/.pytest_cache/**",
