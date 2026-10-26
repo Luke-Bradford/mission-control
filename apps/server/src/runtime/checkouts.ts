@@ -176,6 +176,41 @@ async function addMcTmpExclude(gitCommonDir: string): Promise<void> {
   });
 }
 
+/**
+ * Create the stable Codex pnpm store before pnpm does. Checking each component before creating
+ * the next prevents an untrusted worktree from redirecting the host install through a link.
+ */
+async function prepareCodexPnpmStore(worktree: string, name: string): Promise<void> {
+  const privateDirectory = async (path: string, expected: string) => {
+    try {
+      await mkdir(path, { mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const stat = await lstat(path);
+    if (
+      !stat.isDirectory() ||
+      stat.uid !== process.getuid?.() ||
+      (stat.mode & 0o777) !== 0o700 ||
+      (await realpath(path)) !== expected
+    )
+      throw new Error("Codex pnpm store must be a private directory owned by the server");
+  };
+  try {
+    const root = await realpath(worktree);
+    const tmp = join(root, MC_TMP_DIR_NAME);
+    await privateDirectory(tmp, tmp);
+    const store = codexPnpmStoreDir(root);
+    await privateDirectory(store, store);
+  } catch (e) {
+    throw new CheckoutError(
+      "install",
+      `pnpm install failed for ${name} (private store unavailable)`,
+      { cause: e },
+    );
+  }
+}
+
 export type ReuseSync =
   | { kind: "up-to-date" }
   | { kind: "merged"; sha: string; before: string }
@@ -880,7 +915,10 @@ async function installAll(
     }
   }
   for (const tool of picked) {
-    if (tool === PNPM_TOOL) await addMcTmpExclude(s.common);
+    if (tool === PNPM_TOOL) {
+      await prepareCodexPnpmStore(s.path, s.name);
+      await addMcTmpExclude(s.common);
+    }
     await install(tool, s.path, s.name, run);
   }
 }
@@ -1245,6 +1283,8 @@ export async function installAfterSync(
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
     await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, worktree.baseSha, subject);
+    await prepareCodexPnpmStore(worktree.path, worktree.branch);
+    await addMcTmpExclude(common);
     await install(PNPM_TOOL, worktree.path, worktree.branch);
     return uvNote;
   } catch (e) {

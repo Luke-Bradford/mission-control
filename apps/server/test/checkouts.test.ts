@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -129,6 +130,20 @@ const hasBranch = (b: string) => {
     return false;
   }
 };
+
+function expectPrivateCodexPnpmStore(worktree: string): void {
+  const root = realpathSync(worktree);
+  for (const [path, expected] of [
+    [join(worktree, MC_TMP_DIR_NAME), join(root, MC_TMP_DIR_NAME)],
+    [join(worktree, MC_TMP_DIR_NAME, "pnpm-store"), join(root, MC_TMP_DIR_NAME, "pnpm-store")],
+  ]) {
+    const stat = lstatSync(path);
+    expect(stat.isDirectory()).toBe(true);
+    expect(stat.uid).toBe(process.getuid?.());
+    expect(stat.mode & 0o777).toBe(0o700);
+    expect(realpathSync(path)).toBe(expected);
+  }
+}
 
 /** Plant disk changes after worktree creation without configuring a git helper. */
 function afterWorktreeAdd(script: string): void {
@@ -808,6 +823,19 @@ describe("prepareCheckout", () => {
     await prepareCheckout(input());
     expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
+  });
+
+  it("prepares private Codex pnpm directories before fresh and synced installs", async () => {
+    await prepareCheckout(input());
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const next = await syncCheckout();
+    if (next.synced?.kind !== "merged") throw new Error("expected merged checkout");
+    expect(await installAfterSync(clone, next, next.synced.before)).toBeUndefined();
+    expectPrivateCodexPnpmStore(next.path);
+
+    const fresh = await prepareCheckout({ ...input(), issue: 43 });
+    expectPrivateCodexPnpmStore(fresh.path);
   });
 
   it("installs when a base lockfile is over the 4 MiB default read", async () => {
