@@ -221,7 +221,7 @@ import {
   runView,
 } from "./runview.ts";
 import { setSeatFocus } from "./seat-focus.ts";
-import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
+import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
@@ -1029,6 +1029,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       // Reader: apps/web/src/App.tsx#App (operator reactions)
       api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
+        if (commsMessageNumber(req.params.id) === null)
+          return reply.code(400).send({ error: "invalid Comms message id" });
         const body = z
           .strictObject({
             reaction: z.enum(COMMS_REACTIONS),
@@ -1056,6 +1058,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const pinRoute =
         (pinned: boolean) =>
         async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+          if (commsMessageNumber(req.params.id) === null)
+            return reply.code(400).send({ error: "invalid Comms message id" });
           try {
             pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
             bus.emit("agents");

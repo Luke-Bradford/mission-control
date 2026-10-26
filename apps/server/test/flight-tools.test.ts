@@ -1622,6 +1622,21 @@ describe("comms_pin", () => {
     ).toEqual(refused(MC_FLIGHT_ONLY));
     expect(store.commsPins()).toEqual([]);
   });
+
+  it("refuses a guessed private message outside FLIGHT's inbox", async () => {
+    const stored = store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "inco-1",
+      ticket: null,
+      text: "private",
+    });
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual(
+      refused("You cannot pin that Comms message."),
+    );
+    expect(store.commsPins()).toEqual([]);
+  });
 });
 
 describe("message_seat unpark", () => {

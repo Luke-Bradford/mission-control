@@ -584,6 +584,19 @@ describe("Comms API", () => {
     });
   });
 
+  it("rejects malformed reaction and pin message IDs without adding related rows", async () => {
+    const message = commsRow("alpha", "beta", "stored");
+    await withCommsApp(async (comms) => {
+      for (const [method, url, payload] of [
+        ["POST", "/api/comms/1/reactions", { reaction: "seen" }],
+        ["PUT", "/api/comms/1/pin", {}],
+      ] as const)
+        expect((await comms.inject({ method, url, headers: json, payload })).statusCode).toBe(400);
+    });
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703");
     commsRow("beta", "crew", "not #7030");

@@ -613,6 +613,14 @@ export interface NewCommsRow {
   mentions?: readonly string[];
 }
 
+/** Parse the sole external representation of a stored Comms message ID. */
+export function commsMessageNumber(id: string): number | null {
+  const match = /^comms:(\d+)$/.exec(id);
+  if (match === null) return null;
+  const number = Number(match[1]);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
 export const THREAD_COMMS_LIMIT = 500;
 
 /** The source and position of a stable Comms/transcript message ID. */
@@ -2894,6 +2902,10 @@ export class Store {
       chars.length > COMMS_TEXT_MAX
         ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
         : row.text;
+    const replyTo =
+      row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
+    if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
+      throw new Error("Invalid Comms message ID.");
     let id: number | null = null;
     this.transaction(() => {
       if (rate !== undefined) {
@@ -2914,9 +2926,7 @@ export class Store {
           text,
           row.label ?? null,
           row.ref ?? null,
-          row.replyTo === undefined || row.replyTo === null
-            ? null
-            : Number(row.replyTo.replace(/^comms:/, "")),
+          replyTo,
         );
       id = Number(inserted.lastInsertRowid);
       const mention = this.db.prepare(
@@ -2948,9 +2958,13 @@ export class Store {
   }
 
   commsMessage(id: string): CommsRow | null {
-    const n = Number(id.replace(/^comms:/, ""));
-    if (!Number.isSafeInteger(n)) return null;
-    const row = this.db.prepare("SELECT * FROM comms WHERE id = ?").get(n) as Row | undefined;
+    const n = commsMessageNumber(id);
+    if (n === null) return null;
+    return this.commsMessageByNumber(n);
+  }
+
+  private commsMessageByNumber(id: number): CommsRow | null {
+    const row = this.db.prepare("SELECT * FROM comms WHERE id = ?").get(id) as Row | undefined;
     return row === undefined ? null : this.commsRow(row);
   }
 
@@ -2961,20 +2975,22 @@ export class Store {
     reason: string | undefined,
     at: number,
   ): CommsReaction | null {
-    const message = this.commsMessage(messageId);
+    const id = commsMessageNumber(messageId);
+    if (id === null) return null;
+    const message = this.commsMessageByNumber(id);
     if (message === null) return null;
-    const id = Number(messageId.slice(6));
     this.db
       .prepare(`INSERT INTO comms_reactions (message_id, actor_id, reaction, reason, at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(message_id, actor_id) DO UPDATE SET reaction=excluded.reaction, reason=excluded.reason, at=excluded.at`)
       .run(id, actor, reaction, reason ?? null, at);
-    return { messageId, actor, reaction, reason: reason ?? null, at };
+    return { messageId: message.id, actor, reaction, reason: reason ?? null, at };
   }
 
   setCommsPinned(messageId: string, pinned: boolean, actor: string, at: number): boolean {
-    const message = this.commsMessage(messageId);
+    const id = commsMessageNumber(messageId);
+    if (id === null) return false;
+    const message = this.commsMessageByNumber(id);
     if (message === null) return false;
-    const id = Number(messageId.slice(6));
     if (pinned)
       this.db
         .prepare(
@@ -2995,13 +3011,15 @@ export class Store {
     ).map((r) => this.commsRow(r));
   }
   commsReactions(messageId: string): CommsReaction[] {
+    const id = commsMessageNumber(messageId);
+    if (id === null) return [];
     return this.db
       .prepare(
         "SELECT actor_id, reaction, reason, at FROM comms_reactions WHERE message_id=? ORDER BY at,actor_id",
       )
-      .all(Number(messageId.replace(/^comms:/, "")))
+      .all(id)
       .map((r) => ({
-        messageId,
+        messageId: `comms:${id}`,
         actor: r.actor_id as string,
         reaction: r.reaction as CommsReactionKind,
         reason: r.reason as string | null,
@@ -3021,14 +3039,19 @@ export class Store {
     const q = this.db.prepare(
       "UPDATE comms_mentions SET seen_at=? WHERE mentioned_id=? AND message_id=?",
     );
-    for (const id of ids) q.run(at, target, Number(id.replace(/^comms:/, "")));
+    for (const id of ids) {
+      const number = commsMessageNumber(id);
+      if (number !== null) q.run(at, target, number);
+    }
   }
   commsMentionSeen(target: string, id: string): boolean {
+    const number = commsMessageNumber(id);
+    if (number === null) return false;
     return (
       (
         this.db
           .prepare("SELECT seen_at FROM comms_mentions WHERE mentioned_id=? AND message_id=?")
-          .get(target, Number(id.replace(/^comms:/, ""))) as { seen_at: number | null } | undefined
+          .get(target, number) as { seen_at: number | null } | undefined
       )?.seen_at !== null
     );
   }
@@ -3120,11 +3143,13 @@ export class Store {
       .all(since) as { from: string; to: string; count: number }[];
   }
   markCommsScopeRead(scope: string, messageId: string): void {
+    const id = commsMessageNumber(messageId);
+    if (id === null) return;
     this.db
       .prepare(
         `INSERT INTO comms_reads(thread_id,source_id,offset,block) VALUES (?, 'comms', ?, 0) ON CONFLICT(thread_id,source_id) DO UPDATE SET offset=MAX(offset,excluded.offset)`,
       )
-      .run(scope, Number(messageId.replace(/^comms:/, "")));
+      .run(scope, id);
   }
   commsScopeCursor(scope: string): string | null {
     const r = this.db

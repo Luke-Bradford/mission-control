@@ -294,7 +294,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { pinComms, sendComms, threadMessages, validateCommsText } from "../comms.ts";
+import { canReadComms, pinComms, sendComms, threadMessages, validateCommsText } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -840,6 +840,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!checked.ok) return checked.result;
     if (flightSeat(config)?.seat.id !== ctx.seatId) return fail(MC_FLIGHT_ONLY);
     try {
+      const message = store.commsMessage(checked.args.id);
+      if (message === null) return fail("Unknown Comms message.");
+      if (!canReadComms(store, ctx.seatId, message))
+        return fail("You cannot pin that Comms message.");
       pinComms(store, ctx.seatId, checked.args.id, checked.args.pinned, now());
       bus.emit("agents");
       return { text: checked.args.pinned ? "Comms message pinned." : "Comms message unpinned." };

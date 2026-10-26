@@ -1889,6 +1889,16 @@ describe("comms", () => {
     expect(store.commsScopeCursor("crew")).toBe(second.id);
   });
 
+  it("accepts only prefixed Comms IDs for reads and related writes", () => {
+    const message = store.addComms(row("stored"));
+    if (message === null) throw new Error("Comms row was not stored");
+    expect(store.commsMessage("1")).toBeNull();
+    expect(store.addCommsReaction("1", "b", "seen", undefined, 1)).toBeNull();
+    expect(store.setCommsPinned("1", true, "CAPCOM", 1)).toBe(false);
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
   it("enforces SQL reaction and label constraints", () => {
     const db = (store as unknown as { db: DatabaseSync }).db;
     const inserted = db

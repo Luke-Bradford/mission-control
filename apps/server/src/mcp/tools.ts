@@ -1151,6 +1151,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const parsed = CommsReactArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
+    const crew =
+      deps.crewIds?.() ??
+      config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ??
+      [];
+    if (!crew.includes(ctx.seatId))
+      return { text: "This seat is no longer in the crew.", isError: true };
     try {
       reactComms(
         store,

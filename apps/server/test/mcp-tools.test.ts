@@ -1179,6 +1179,23 @@ describe("Comms seat tools", () => {
     });
   });
 
+  it("refuses a live stored run whose seat was removed from the current crew", async () => {
+    const message = store.addComms({
+      at: NOW,
+      from: "guido-2",
+      to: "guido-1",
+      ticket: null,
+      text: "private",
+    });
+    if (message === null) throw new Error("Comms message was not stored");
+    const removed = make({ crewIds: () => ["guido-2"] });
+    expect(await react({ id: message.id, reaction: "seen" }, removed)).toEqual({
+      text: "This seat is no longer in the crew.",
+      isError: true,
+    });
+    expect(store.commsReactions(message.id)).toEqual([]);
+  });
+
   it("refuses ended, inaccessible and rate-limited calls without changing their state", async () => {
     expect(await send({ to: "crew", text: "ended" }, tools, { ...CTX, runId: "gone" })).toEqual({
       text: "This run has ended.",
