@@ -1010,7 +1010,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const message = await sendComms(
             {
               store,
-              crew: commsCrew(),
+              crew: commsCrew,
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
@@ -2336,7 +2336,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           await sendComms(
             {
               store,
-              crew: commsCrew(),
+              crew: commsCrew,
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,

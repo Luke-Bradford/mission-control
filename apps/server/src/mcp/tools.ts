@@ -1125,14 +1125,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
     try {
-      const crew =
-        deps.crewIds?.() ??
-        config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ??
-        [];
       const sent = await sendComms(
         {
           store,
-          crew,
+          crew: () =>
+            deps.crewIds?.() ??
+            config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ??
+            [],
           knownSecrets: deps.knownSecrets,
           now,
           notify: deps.onComms,

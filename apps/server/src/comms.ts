@@ -18,7 +18,7 @@ import { readStream } from "./stream.ts";
 
 export interface CommsServiceDeps {
   store: Store;
-  crew: readonly string[];
+  crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
   now?: () => number;
   /** Only direct seat delivery wakes a worker; reactions never use it. */
@@ -49,7 +49,8 @@ export async function sendComms(
   input: CommsSendInput,
 ): Promise<CommsMessage> {
   const now = deps.now?.() ?? Date.now();
-  const members = new Set([...deps.crew, COMMS_CAPCOM]);
+  let crew = deps.crew();
+  let members = new Set([...crew, COMMS_CAPCOM]);
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
   if (!members.has(from)) throw new Error("Unknown Comms sender.");
@@ -62,6 +63,11 @@ export async function sendComms(
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
   }
+  crew = deps.crew();
+  members = new Set([...crew, COMMS_CAPCOM]);
+  if (input.to !== COMMS_CREW && !members.has(input.to))
+    throw new Error("Unknown Comms destination.");
+  if (!members.has(from)) throw new Error("Unknown Comms sender.");
   const mentions = new Set<string>();
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
@@ -85,8 +91,8 @@ export async function sendComms(
   );
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   const notify = new Set<string>();
-  if (deps.crew.includes(input.to)) notify.add(input.to);
-  for (const mention of mentions) if (deps.crew.includes(mention)) notify.add(mention);
+  if (crew.includes(input.to)) notify.add(input.to);
+  for (const mention of mentions) if (crew.includes(mention)) notify.add(mention);
   for (const to of notify) deps.notify?.(to, input.text, from);
   return message(stored);
 }

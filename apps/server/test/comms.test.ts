@@ -51,7 +51,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
   const first = await sendComms(
     {
       store,
-      crew: ["seat", "other"],
+      crew: () => ["seat", "other"],
       knownSecrets: async () => [],
       now: () => 10,
       notify,
@@ -63,7 +63,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
   const reply = await sendComms(
     {
       store,
-      crew: ["seat", "other"],
+      crew: () => ["seat", "other"],
       knownSecrets: async () => [],
       now: () => 11,
       notify,
@@ -86,7 +86,7 @@ it("notifies direct recipients, mentions and reply authors once each", async () 
   const notify = vi.fn();
   const deps = {
     store,
-    crew: ["seat", "other"],
+    crew: () => ["seat", "other"],
     knownSecrets: async () => [],
     now: () => 10,
     notify,
@@ -108,7 +108,7 @@ it("delivers CAPCOM direct Comms but never wakes for the CAPCOM channel or a rea
   const notify = vi.fn();
   const deps = {
     store,
-    crew: ["seat", "other"],
+    crew: () => ["seat", "other"],
     knownSecrets: async () => [],
     notify,
     seatSender: false,
@@ -121,10 +121,40 @@ it("delivers CAPCOM direct Comms but never wakes for the CAPCOM channel or a rea
   expect(notify).toHaveBeenCalledWith("seat", "direct", "CAPCOM");
 });
 
+it.each(["seat", "other"])(
+  "does not store or deliver after a deferred secret scan removes %s from the crew",
+  async (removed) => {
+    let crew = ["seat", "other"];
+    let resolveSecrets: (secrets: readonly string[]) => void = () => {};
+    const notify = vi.fn();
+    const pending = sendComms(
+      {
+        store,
+        crew: () => crew,
+        knownSecrets: () =>
+          new Promise<readonly string[]>((resolve) => {
+            resolveSecrets = resolve;
+          }),
+        notify,
+        seatSender: true,
+      },
+      "seat",
+      { to: "other", text: "hello" },
+    );
+
+    crew = crew.filter((id) => id !== removed);
+    resolveSecrets([]);
+
+    await expect(pending).rejects.toThrow("Unknown Comms");
+    expect(store.comms(0)).toEqual([]);
+    expect(notify).not.toHaveBeenCalled();
+  },
+);
+
 it("refuses guessed private messages for reactions and replies", async () => {
   const deps = {
     store,
-    crew: ["seat", "other", "third"],
+    crew: () => ["seat", "other", "third"],
     knownSecrets: async () => [],
     seatSender: true,
   };
@@ -145,7 +175,7 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
   let at = 10;
   const deps = {
     store,
-    crew: ["seat", "other"],
+    crew: () => ["seat", "other"],
     knownSecrets: async () => [],
     now: () => at++,
     seatSender: true,
@@ -169,7 +199,7 @@ it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", asy
   let at = 10;
   const deps = {
     store,
-    crew: ["seat", "other"],
+    crew: () => ["seat", "other"],
     knownSecrets: async () => [],
     now: () => at++,
     seatSender: true,

@@ -1274,7 +1274,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     await sendComms(
       {
         store,
-        crew:
+        crew: () =>
           config.crew?.sessions.flatMap((session) => session.seats.map((member) => member.id)) ??
           [],
         knownSecrets: deps.knownSecrets,
