@@ -83,6 +83,8 @@ export interface McpDeps {
   seatMode: (seatId: string) => CrewMode;
   /** The extra tools a seat's role holds; default: none. */
   seatGrants?: (seatId: string) => readonly string[];
+  /** The extra tools this authenticated run holds; default: none. */
+  runGrants?: (who: RunIdentity) => readonly string[];
 }
 
 const Message = z.looseObject({
@@ -130,13 +132,15 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
 
   const visible = (who: RunIdentity) => {
     const mode = deps.seatMode(who.seatId);
-    const grants = deps.seatGrants?.(who.seatId) ?? [];
+    const seatGrants = deps.seatGrants?.(who.seatId) ?? [];
+    const runGrants = deps.runGrants?.(who) ?? [];
     return deps
       .mcpTools()
       .filter(
         (t) =>
           t.modes.includes(mode) ||
-          (t.grantable?.includes(mode) === true && grants.includes(t.name)),
+          (t.grantable?.includes(mode) === true && seatGrants.includes(t.name)) ||
+          (t.name === "report_plan" && mode === "writer" && runGrants.includes(t.name)),
       );
   };
 

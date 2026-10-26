@@ -248,7 +248,8 @@ describe("ticketBrief", () => {
     expect(brief).toContain(
       "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask the operator with mc ask_operator only for a decision you cannot make from the ticket and the code.",
     );
-    expect(brief).toContain("There is no turn or time limit.");
+    expect(brief).toContain("Continue until the plan is recorded or you are truly blocked");
+    expect(brief).not.toContain("Work until the ticket is done");
   });
 
   it("tells a writer to commit with the mc tool and report; Mission Control pushes", () => {
@@ -281,6 +282,11 @@ describe("ticketBrief", () => {
     const brief = ticketBrief({ ...input, planless: true });
     expect(brief).toContain("This ticket has no ## Plan. Before changing code, write its plan");
     expect(brief).toContain("then continue this run and build it.");
+  });
+
+  it("does not tell a planner to build a planless ticket", () => {
+    const brief = ticketBrief({ ...input, loop: "plan", planless: true });
+    expect(brief).not.toContain("then continue this run and build it.");
   });
 });
 

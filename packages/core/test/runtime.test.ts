@@ -229,8 +229,8 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed.at(-1)).toBe(MC_TOOLS.reportPlan);
   });
 
-  it("a planless writer may report its own plan", () => {
-    const a = crewCliArgs({ ...base, mcTools: ["report_plan"] });
+  it("a planless build run may report its own plan", () => {
+    const a = crewCliArgs({ ...base, runTools: ["report_plan"] });
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed).toContain(MC_TOOLS.reportPlan);
   });
@@ -687,7 +687,7 @@ describe("mc tool grants", () => {
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
-    expect(MC_TOOL_GRANTS.writer.grantable).toEqual(["report_plan"]);
+    expect(MC_TOOL_GRANTS.writer.grantable).toEqual([]);
     expect(MC_TOOL_GRANTS.writer.grantable).not.toContain("log_decision");
   });
 

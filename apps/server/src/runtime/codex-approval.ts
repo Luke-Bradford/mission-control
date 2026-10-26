@@ -10,6 +10,7 @@ import {
   lockBusyText,
   MC_MCP_SERVER,
   MC_TOOL_GRANTS,
+  MC_TOOL_NAMES,
   type McToolName,
   mcTool,
   seatCallSign,
@@ -34,6 +35,7 @@ export function createCodexApprover(i: {
   record: (rule: GuardRule, text: string) => void;
   superuserTools?: readonly McToolName[];
   seatGrants?: (seatId: string) => readonly string[];
+  runGrants?: () => readonly string[];
 }): CodexSessionInput["approve"] {
   return async (req, paths, signal) => {
     const params = isObj(req.params) ? req.params : {};
@@ -53,7 +55,8 @@ export function createCodexApprover(i: {
     // The driver also calls here with an already-aborted signal to audit forced refusals.
     if (signal.aborted) return refuse("codex-allowlist");
     const repo = i.config.repos.find((r) => r.id === i.repoId);
-    const seatGrants = i.seatGrants?.(i.seatId) ?? crewSeatGrants(i.config, i.seatId);
+    const seatGrants =
+      i.runGrants?.() ?? i.seatGrants?.(i.seatId) ?? crewSeatGrants(i.config, i.seatId);
     if (req.method === CODEX_MCP_ELICITATION) {
       const call = req.mcpCall;
       const grants = MC_TOOL_GRANTS[i.mode];
@@ -72,7 +75,10 @@ export function createCodexApprover(i: {
           (!Array.isArray(schema.required) || schema.required.length !== 0)) ||
         !(
           grants.base.some((tool) => tool === call.tool) ||
-          (grants.grantable.some((tool) => tool === call.tool) && seatGrants.includes(call.tool))
+          (grants.grantable.some((tool) => tool === call.tool) && seatGrants.includes(call.tool)) ||
+          (i.runGrants !== undefined &&
+            call.tool === MC_TOOL_NAMES.reportPlan &&
+            seatGrants.includes(call.tool))
         )
       )
         return refuse("codex-allowlist");

@@ -374,6 +374,8 @@ export const MC_PLAN_WRITTEN =
 export const MC_PLAN_WRITTEN_CONTINUE =
   "Written to the ticket under ## Plan. Continue this build run now.";
 export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build seats.";
+export const MC_PLAN_PROFILE_ONLY =
+  "Not written: profile and profile_reason are for planner seats.";
 export const MC_PLAN_ALREADY =
   "Not written: the ticket already has a ## Plan section. Ask the operator with mc ask_operator if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";
