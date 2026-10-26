@@ -85,11 +85,12 @@ import {
   removeNotFileText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/api.ts";
+import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
+import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -1083,6 +1084,73 @@ describe("through /mcp", () => {
         arguments: { message: "x" },
       });
       expect(denied.error.message).toBe("unknown tool");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("uses crewGuardDeps run grants to list and call planner and FLIGHT tools", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push(
+      { id: "fao-1", role: "FAO", accountId: "claude-main", model: "haiku", area: [] },
+      { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "haiku", area: [] },
+    );
+    const tokens = new RunTokens();
+    const planner = tokens.issue("fao-1", "fao:mcp");
+    const flight = tokens.issue("flight-1", "flight:mcp");
+    const reportPlan = vi.fn(async () => ({ text: "plan recorded" }));
+    const logDecision = vi.fn(async () => ({ text: "decision recorded" }));
+    const mcpTools: McTool[] = [
+      {
+        name: MC_TOOL_NAMES.reportPlan,
+        description: "record a plan",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: reportPlan,
+      },
+      {
+        name: MC_TOOL_NAMES.logDecision,
+        description: "record a decision",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: logDecision,
+      },
+    ];
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      ...crewGuardDeps(cfg, tokens, new TestLock(), store),
+      mcpTools: () => mcpTools,
+    });
+    await app.ready();
+    try {
+      const rpc = (token: string, method: string, params?: object) =>
+        app
+          .inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { authorization: `Bearer ${token}` },
+            payload: { jsonrpc: "2.0", id: 1, method, params },
+          })
+          .then((r) => r.json());
+      const names = async (token: string) =>
+        (await rpc(token, "tools/list")).result.tools.map((t: { name: string }) => t.name);
+
+      expect(await names(planner)).toContain(MC_TOOL_NAMES.reportPlan);
+      expect(await names(flight)).toContain(MC_TOOL_NAMES.logDecision);
+      expect(
+        (await rpc(planner, "tools/call", { name: MC_TOOL_NAMES.reportPlan, arguments: {} })).result
+          .content[0].text,
+      ).toBe("plan recorded");
+      expect(
+        (await rpc(flight, "tools/call", { name: MC_TOOL_NAMES.logDecision, arguments: {} })).result
+          .content[0].text,
+      ).toBe("decision recorded");
+      expect(reportPlan).toHaveBeenCalledWith({ seatId: "fao-1", runId: "fao:mcp" }, {});
+      expect(logDecision).toHaveBeenCalledWith({ seatId: "flight-1", runId: "flight:mcp" }, {});
     } finally {
       await app.close();
     }

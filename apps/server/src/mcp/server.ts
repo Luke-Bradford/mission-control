@@ -132,15 +132,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
 
   const visible = (who: RunIdentity) => {
     const mode = deps.seatMode(who.seatId);
-    const seatGrants = deps.seatGrants?.(who.seatId) ?? [];
-    const runGrants = deps.runGrants?.(who) ?? [];
+    const grants = deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId) ?? [];
     return deps
       .mcpTools()
       .filter(
         (t) =>
           t.modes.includes(mode) ||
-          (t.grantable?.includes(mode) === true && seatGrants.includes(t.name)) ||
-          (t.name === "report_plan" && mode === "writer" && runGrants.includes(t.name)),
+          (t.grantable?.includes(mode) === true && grants.includes(t.name)) ||
+          (t.name === "report_plan" && mode === "writer" && grants.includes(t.name)),
       );
   };
 
