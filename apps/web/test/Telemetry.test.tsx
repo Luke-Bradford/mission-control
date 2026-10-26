@@ -674,10 +674,14 @@ describe("Agents", () => {
       "cache read",
     ]);
     const svg = within(panel("tTurn")).getByRole("img");
-    fireEvent.pointerEnter(svg.querySelector("rect.hit") as Element);
-    expect(panel("tTurn").querySelector(".tip")?.textContent).toContain(
-      `cache read${kTokens(data.turnUsage[0]?.turns[0]?.cacheRead ?? 0)}`,
-    );
+    const turns = data.turnUsage[0]?.turns ?? [];
+    const hits = svg.querySelectorAll("rect.hit");
+    turns.forEach((turn, i) => {
+      fireEvent.pointerEnter(hits[i] as Element);
+      expect(panel("tTurn").querySelector(".tip")?.textContent).toBe(
+        `turn ${i + 1}cache read${kTokens(turn.cacheRead)}output${kTokens(turn.output)}input${kTokens(turn.input)}`,
+      );
+    });
     setSelectedAgent("codex-ta");
     await within(panel("tTurn")).findByText("codex-ta · latest run");
     within(panel("tTurn")).getByText("No turns recorded for codex-ta yet.");
@@ -742,13 +746,22 @@ describe("Capacity and cost", () => {
   });
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
-    await loaded();
-    expect(panel("tMach").querySelectorAll("path.line")).toHaveLength(2);
-    expect([...panel("tMach").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
+    const data = tel();
+    await loaded(data);
+    const p = panel("tMach");
+    expect(p.querySelectorAll("path.line")).toHaveLength(2);
+    expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "CPU",
       "Memory",
       "test lock held",
     ]);
+    const svg = within(p).getByRole("img");
+    data.machine.forEach((sample, i) => {
+      fireEvent.keyDown(svg, { key: i === 0 ? "Home" : "ArrowRight" });
+      const percent = (value: number | null): string => (value === null ? "—" : `${value}%`);
+      expect(p.querySelector(".tip")?.textContent).toContain(`CPU${percent(sample.cpuPct)}`);
+      expect(p.querySelector(".tip")?.textContent).toContain(`Memory${percent(sample.memPct)}`);
+    });
     within(panel("tLock")).getByText(NOT_TRACKED);
     within(panel("tStepBars")).getByText(NOT_TRACKED);
   });
