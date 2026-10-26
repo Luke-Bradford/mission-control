@@ -1764,44 +1764,57 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const dirty = changedPaths(status);
       if (dirty.length > 0) return { text: evidenceUncommittedText(dirty), isError: true };
 
-      const newest = store.newestRunCommit(run.id);
-      const reported = store.latestEvidence(run.id);
+      // Filesystem reads can take long enough for the engine to park this run. Re-read the loop
+      // before validating or changing evidence so this call cannot undo a newer protected park.
+      const currentLive = liveRun(ctx);
+      if (currentLive === null) return ENDED;
+      const currentRun = currentLive.run;
+      const currentLoop = currentRun.loop;
+      const currentRefusal = loopRefusal(currentLoop);
+      if (currentRefusal !== null) return currentRefusal;
+      if (currentLoop === null || currentLoop === undefined) return ENDED;
+
+      const newest = store.newestRunCommit(currentRun.id);
+      const reported = store.latestEvidence(currentRun.id);
       const fresh =
         newest !== null &&
         (reported === null || newest.at > reported.at) &&
-        newest.sha !== loop.ciFailedSha;
-      const pushed = store.runPush(run.id);
-      const reviews = store.reviewsOfRun(run.id);
+        newest.sha !== currentLoop.ciFailedSha;
+      const pushed = store.runPush(currentRun.id);
+      const reviews = store.reviewsOfRun(currentRun.id);
       const carried =
-        pushed === null ? null : carriedFrom(loop.carry, loop.reviewWaivedSha, pushed.sha);
-      const current = pushed === null ? null : reviewFor(reviews, loop.epoch, pushed.sha, carried);
+        pushed === null
+          ? null
+          : carriedFrom(currentLoop.carry, currentLoop.reviewWaivedSha, pushed.sha);
+      const current =
+        pushed === null ? null : reviewFor(reviews, currentLoop.epoch, pushed.sha, carried);
       const reviewReply =
-        loop.phase === "review" &&
+        currentLoop.phase === "review" &&
         newest !== null &&
         pushed !== null &&
         newest.sha === pushed.sha &&
         current !== null &&
         current.state === "reported" &&
         current.blocking > 0 &&
-        fixKey(run.id, loop.epoch, current.id) in store.claimedKeys(run.id) &&
-        loop.reviewReplyTo !== current.id &&
+        fixKey(currentRun.id, currentLoop.epoch, current.id) in store.claimedKeys(currentRun.id) &&
+        currentLoop.reviewReplyTo !== current.id &&
         reported !== null &&
-        reported.id === loop.reportedEvidenceId;
+        reported.id === currentLoop.reportedEvidenceId;
       const refusedRetry =
-        loop.phase === "parked" &&
-        loop.parked?.kind === "refused" &&
+        currentLoop.phase === "parked" &&
+        currentLoop.parked?.kind === "refused" &&
         newest !== null &&
-        newest.sha === loop.pushFor &&
+        newest.sha === currentLoop.pushFor &&
         reported !== null &&
-        reported.id === loop.reportedEvidenceId;
-      const ciRuling = loop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
+        reported.id === currentLoop.reportedEvidenceId;
+      const ciRuling = currentLoop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
       if (!fresh && !reviewReply && !refusedRetry && !ciRuling) {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
       const problem = prTextProblem(note, {
-        repo: repoOf(deps, run),
-        issue: issueOf(run),
+        repo: repoOf(deps, currentRun),
+        issue: issueOf(currentRun),
         known,
         label: "evidence note",
         unclosed: true,
@@ -1810,7 +1823,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         if (problem.problem === "secret") {
           store.addGuardHit({
             agentId: ctx.seatId,
-            runId: run.id,
+            runId: currentRun.id,
             rule: "secret",
             text: mcToolHitText("secret", "report_evidence"),
             at: now(),
@@ -1819,12 +1832,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(run.id, note, now());
+      store.addEvidence(currentRun.id, note, now());
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
-      if (loop.phase === "parked" && evidenceCanUnpark(loop.parked)) {
-        store.setRunLoop(run.id, {
-          ...loop,
+      if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
+        store.setRunLoop(currentRun.id, {
+          ...currentLoop,
           phase: "working",
           parked: null,
           transient: 0,

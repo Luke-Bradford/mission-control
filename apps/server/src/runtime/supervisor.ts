@@ -2670,7 +2670,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const waiting = store.asideRuns();
     const ref = `${info.repo.id}#${issue}`;
     const inReview = !readOnly
-      ? waiting.find((r) => r.ticket === ref && r.agentId === seatId)
+      ? waiting.find(
+          (r) =>
+            r.ticket === ref &&
+            r.agentId === seatId &&
+            r.loop?.phase === "review" &&
+            r.loop.parked == null,
+        )
       : undefined;
     const rework = wakeDueAsideRun(store, seatId);
     // Rework still goes first, except for the ticket explicitly being resumed.

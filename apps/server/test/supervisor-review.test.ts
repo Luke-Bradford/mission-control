@@ -1178,6 +1178,25 @@ describe("a run set aside in review", () => {
     expect(store.run(otherId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
   });
 
+  it("does not wake a budget-parked aside run for the ticket", async () => {
+    const { sup, runId } = await aside(false);
+    store.setRunLoop(runId, {
+      ...REVIEW,
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+
+    const blocked = await refusal(sup.startRun("guido-1", 42));
+    expect([blocked.status, blocked.message]).toEqual([409, ticketInReviewText("mc#42")]);
+    expect(store.seatSession("guido-1")?.runId).toBeNull();
+    expect(store.run(runId)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+  });
+
   it("does not wake another seat's run set aside for the ticket", async () => {
     const { sup } = make({
       extraSeat: {

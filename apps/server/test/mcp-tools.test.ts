@@ -3192,6 +3192,37 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(0);
   });
 
+  it("does not unpark when a budget hold lands while git status is pending", async () => {
+    await committed();
+    let statusReads = 0;
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delayed = make({
+      now: () => clock,
+      git: async (cwd, args, common, options) => {
+        if (cwd === wt && args[0] === "status") {
+          statusReads++;
+          await pending;
+        }
+        return crewGit(cwd, args, common, options);
+      },
+    });
+    setLoop({ phase: "parked", parked: { kind: "review", reason: "waiting", ended: false } });
+    const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
+    await vi.waitFor(() => expect(statusReads).toBe(1));
+    setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+    release();
+
+    expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(store.run(RUN)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+    });
+  });
+
   it("refuses a report with no commit since the last one, and takes it after a new one", async () => {
     expect(await report("done")).toEqual(refused(EVIDENCE_NO_COMMIT));
     await committed();
