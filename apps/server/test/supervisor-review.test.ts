@@ -1,3 +1,19 @@
+const codexProbe = vi.hoisted(() => ({
+  checks: 0,
+  gate: null as Promise<void> | null,
+}));
+vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/runtime/codex-version.ts")>();
+  return {
+    ...real,
+    probeCodexVersion: async (...args: Parameters<typeof real.probeCodexVersion>) => {
+      codexProbe.checks++;
+      if (codexProbe.gate) await codexProbe.gate;
+      return real.probeCodexVersion(...args);
+    },
+  };
+});
+
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
@@ -1195,6 +1211,59 @@ describe("a run set aside in review", () => {
       parked: { kind: "budget", reason: "held", ended: false },
       aside: { worktree: wt(), wake: false },
     });
+  });
+
+  it("does not launch a Claude review resume when the engine ends it after checkout", async () => {
+    const { sup, runId } = await aside(false);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const accountUpdate = sup.withAccountUpdate(async () => {
+      await gate;
+    });
+    prep.resumeChecks = 0;
+
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(prep.resumeChecks).toBe(1));
+    // The pending account update is one of checkedLaunch's post-checkout awaits.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    store.setRunEnded(runId, Date.now(), "ok", "engine");
+    release();
+
+    const e = await refusal(resuming);
+    await accountUpdate;
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(starts()).toHaveLength(1);
+    expect(store.run(runId)).toMatchObject({ endedAt: expect.any(Number), endedBy: "engine" });
+  });
+
+  it("does not resurrect or launch a Codex review resume ended during its version check", async () => {
+    const { sup } = codexSupervisor();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, { loop: REVIEW });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.setAside(runId);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const spawned = recorded().filter((line) => line.type === "spawn").length;
+    let release = () => {};
+    codexProbe.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const beforeProbe = codexProbe.checks;
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(codexProbe.checks).toBe(beforeProbe + 1));
+
+    try {
+      store.setRunEnded(runId, Date.now(), "ok", "engine");
+      release();
+      const e = await refusal(resuming);
+      expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    } finally {
+      codexProbe.gate = null;
+    }
+    expect(recorded().filter((line) => line.type === "spawn")).toHaveLength(spawned);
+    expect(store.run(runId)).toMatchObject({ endedAt: expect.any(Number), endedBy: "engine" });
   });
 
   it("keeps due rework from another aside run first, even when the ticket is in review", async () => {

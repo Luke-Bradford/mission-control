@@ -1273,6 +1273,15 @@ export class Store {
       );
   }
 
+  /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
+  setRunCliVersionIfLive(runId: string, cliVersion: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE runs SET cli_version = ? WHERE id = ? AND ended_at IS NULL")
+        .run(cliVersion, runId).changes === 1
+    );
+  }
+
   /** Records the template profile chosen for a ticket; a later choice replaces it. */
   setProfileOverride(repoId: RepoId, issue: number, o: ProfileOverride, at: number): void {
     this.db

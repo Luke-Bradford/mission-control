@@ -1258,7 +1258,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     claudeMd: string | null,
     references = "",
     keepPrompt = false,
-    beforeLaunch?: () => void,
+    beforeLaunch?: () => Run | undefined,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1281,12 +1281,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run.vendor === "codex") {
       const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
       if (stopping) throw new Error(SHUTTING_DOWN);
-      run = { ...run, cliVersion };
-      store.upsertRun(run);
+      store.setRunCliVersionIfLive(run.id, cliVersion);
     }
     while (accountUpdate !== null) await accountUpdate;
     if (stopping) throw new Error(SHUTTING_DOWN);
-    beforeLaunch?.();
+    const current = beforeLaunch?.();
+    if (current !== undefined) run = current;
     return launch(info, run, cliSessionId, checkout, resume, claudeMd, references, keepPrompt);
   }
 
@@ -3591,23 +3591,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // the check awaited: the engine may have ended the run meanwhile
       if (store.run(runId)?.endedAt !== null) throw new SupervisorError(409, NOT_ASIDE);
-      const reviewResumeStillAllowed = () => {
-        const loop = store.run(runId)?.loop;
-        return loop?.phase === "review" && loop.parked === null;
+      const reviewResumeStillAllowed = (): Run | null => {
+        const current = store.run(runId);
+        const loop = current?.loop;
+        if (
+          current === null ||
+          current.endedAt !== null ||
+          loop?.phase !== "review" ||
+          loop.parked !== null ||
+          loop.aside?.worktree !== aside.worktree ||
+          loop.aside.wake !== aside.wake
+        )
+          return null;
+        return current;
       };
       let reviewResumeBlocked = false;
       const beforeLaunch = options.reviewResume
         ? () => {
-            if (!reviewResumeStillAllowed()) {
+            const current = reviewResumeStillAllowed();
+            if (current === null) {
               reviewResumeBlocked = true;
               throw new SupervisorError(409, NOT_ASIDE);
             }
             // the seat's last turn was another run's
             store.setSeatTurnEnded(seatId, null);
+            return current;
           }
         : () => {
             // the seat's last turn was another run's
             store.setSeatTurnEnded(seatId, null);
+            return undefined;
           };
       let l: Live;
       try {
