@@ -2276,6 +2276,9 @@ import(${JSON.stringify(fixture)});
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
+      JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
+    );
     const exclude = readFileSync(
       join(realpathSync(join(clone, ".git")), "info", "exclude"),
       "utf8",
@@ -2298,6 +2301,7 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
   });
 
   it.each([false, true])(

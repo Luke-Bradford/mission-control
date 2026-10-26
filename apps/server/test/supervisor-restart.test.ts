@@ -2,9 +2,23 @@
 import "./supervisor-harness.ts";
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { CANNOT_START, DEFAULT_REPO_RULES, freezeRules, otherLaneText } from "@mc/core";
+import {
+  CANNOT_START,
+  DEFAULT_REPO_RULES,
+  freezeRules,
+  MC_TMP_DIR_NAME,
+  otherLaneText,
+} from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
@@ -1386,6 +1400,78 @@ describe("a seat keeps running through a restart", () => {
       }
     },
   );
+
+  it("does not follow a seat-replaced Codex temp parent during cleanup", () => {
+    const runId = "ended-codex-run";
+    const worktree = join(dir, "codex-worktree");
+    const key = "0123456789ab";
+    const parent = join(worktree, MC_TMP_DIR_NAME);
+    const tmp = join(parent, key);
+    const target = join(dir, "outside-temp");
+    const protectedTmp = join(target, key);
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    mkdirSync(protectedTmp, { recursive: true, mode: 0o700 });
+    writeFileSync(join(protectedTmp, "secret"), "keep");
+    rmSync(parent, { recursive: true, force: true });
+    symlinkSync(target, parent);
+    store.upsertRun({
+      id: runId,
+      vendor: "codex",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSetting(`codex-tmp:${runId}`, JSON.stringify({ worktree, tmp }));
+    const { sup, log } = make();
+    sup.start();
+    expect(existsSync(protectedTmp)).toBe(true);
+    expect(log).toHaveBeenCalledWith(`could not remove run files of ${runId}: temp root changed`);
+  });
+
+  it("removes persisted Codex temp roots after restart when the seat row is gone", () => {
+    const runId = "ended-codex-restart";
+    const worktree = join(dir, "codex-restart-worktree");
+    const tmp = join(worktree, MC_TMP_DIR_NAME, "0123456789ab");
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    store.upsertRun({
+      id: runId,
+      vendor: "codex",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSetting(`codex-tmp:${runId}`, JSON.stringify({ worktree, tmp }));
+    const row = store.seatSession("guido-1");
+    if (row) store.setSeatSession({ ...row, runId: null, state: "idle", reason: null });
+    const { sup } = make();
+    sup.start();
+    expect(existsSync(tmp)).toBe(false);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
+  });
 
   it("the start's sweep ends a keeper whose run is not active", async () => {
     const first = make();

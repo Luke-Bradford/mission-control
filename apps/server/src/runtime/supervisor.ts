@@ -725,7 +725,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const transcripts = new Map<string, FoldState>();
   /** Per run: its newest spawn, which owns the run's token, files and test-lock hold. */
   const spawns = new Map<string, object>();
-  const codexTemps = new Map<string, string>();
   const digests = new Map<string, string>();
   let started = false;
   let holdsLock = false;
@@ -1357,7 +1356,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ]
           : [];
       const tmpPath = run.vendor === "codex" ? codexSeatTmp(cwd, run.id) : seatTmp(run.id);
-      if (run.vendor === "codex") codexTemps.set(run.id, tmpPath);
       for (const path of [dirname(tmpPath), tmpPath]) {
         try {
           mkdirSync(path, { mode: 0o700 });
@@ -1369,6 +1367,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      if (run.vendor === "codex")
+        store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
       const sandbox = {
         cwd,
@@ -1534,16 +1534,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeRunFiles(runId: string): void {
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
+      // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
-      const run = store.run(runId);
-      const session = run === null ? null : store.seatSession(run.agentId);
-      const tmp =
-        codexTemps.get(runId) ??
-        (run?.vendor === "codex" && session?.runId === runId && session.worktree !== null
-          ? codexSeatTmp(session.worktree, runId)
-          : seatTmp(runId));
-      rmSync(tmp, { recursive: true, force: true });
-      codexTemps.delete(runId);
+      const codexTmp = store.getSetting(codexTmpKey(runId));
+      if (codexTmp === null) rmSync(seatTmp(runId), { recursive: true, force: true });
+      else if (!removeCodexTmp(runId, codexTmp))
+        log(`could not remove run files of ${runId}: temp root changed`);
     } catch (e) {
       log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
@@ -1556,6 +1552,57 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function codexSeatTmp(worktree: string, runId: string): string {
     const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 12);
     return join(worktree, MC_TMP_DIR_NAME, key);
+  }
+
+  function codexTmpKey(runId: string): string {
+    return `codex-tmp:${runId}`;
+  }
+
+  /** A seat can write its worktree, so validate this whole path before recursive cleanup. */
+  function removeCodexTmp(runId: string, value: string): boolean {
+    let saved: { worktree: string; tmp: string };
+    try {
+      saved = JSON.parse(value) as { worktree: string; tmp: string };
+      if (typeof saved.worktree !== "string" || typeof saved.tmp !== "string") return false;
+      const parent = dirname(saved.tmp);
+      const key = basename(saved.tmp);
+      const worktree = realpathSync(saved.worktree);
+      const expected = join(worktree, MC_TMP_DIR_NAME, key);
+      try {
+        const parentStat = lstatSync(parent);
+        if (!parentStat.isDirectory() || parentStat.uid !== process.getuid?.()) return false;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+          store.deleteSetting(codexTmpKey(runId));
+          return true;
+        }
+        return false;
+      }
+      try {
+        const tmpStat = lstatSync(saved.tmp);
+        if (
+          !tmpStat.isDirectory() ||
+          tmpStat.uid !== process.getuid?.() ||
+          realpathSync(saved.tmp) !== expected
+        )
+          return false;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+          store.deleteSetting(codexTmpKey(runId));
+          return true;
+        }
+        return false;
+      }
+      rmSync(saved.tmp, { recursive: true, force: true });
+      store.deleteSetting(codexTmpKey(runId));
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        store.deleteSetting(codexTmpKey(runId));
+        return true;
+      }
+      return false;
+    }
   }
 
   /**
