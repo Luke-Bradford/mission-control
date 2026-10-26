@@ -1813,17 +1813,61 @@ describe("review decisions", () => {
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
-  it("the third blocking review parks", () => {
+  it("sends an answered finding back to RETRO on the same head", () => {
+    const rows = [fact({ id: 5, blocking: 1 })];
+    const replied = inReview(
+      withReview(rows, [finding]),
+      { evidence: { id: 2, at: NOW, ruling: false }, evidenceCount: 2 },
+      { reportedEvidenceId: 1, cardFor: "review:0" },
+    );
+    const r = reconcile(replied);
+    expect(r.loop.reviewReplyTo).toBe(5);
+    expect(kinds(r.actions, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA, attempt: 2 },
+    ]);
+  });
+
+  it("accepts a developer reply when RETRO's next round is clean", () => {
+    const rows = [fact({ id: 5, blocking: 1 }), fact({ id: 6, attempt: 2 })];
+    const s = inReview(withReview(rows), {}, { reviewReplyTo: 5, reportedEvidenceId: 2 });
+    const a = reconcile(s).actions;
+    expect(kinds(a, "request-review")).toEqual([]);
+    expect(sends(a)).toEqual([]);
+    expect(noteKinds(a)).toEqual(["ready"]);
+  });
+
+  it("counts a reply RETRO holds toward the review cap", () => {
+    const rows = [fact({ id: 1, blocking: 1 }), fact({ id: 2, attempt: 2, blocking: 1 })];
+    const s = inReview(
+      withReview(rows, [finding]),
+      { claimed: { "fix:r1:0:1": 1 } },
+      { reviewReplyTo: 1 },
+    );
+    expect(sends(reconcile(s).actions)).toEqual(["fix:r1:0:2"]);
+  });
+
+  it("the third blocking review sends FLIGHT the last committed-fix report and findings", () => {
     const rows = [
       fact({ id: 1, blocking: 1 }),
       fact({ id: 2, blocking: 1, sha: SHA }),
       fact({ id: 3, blocking: 1 }),
     ];
-    const s = inReview(withReview(rows, [finding]), {
-      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
-    });
+    const s = inReview(
+      withReview(rows, [finding]),
+      {
+        claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+        evidence: { id: 3, at: NOW, ruling: false, note: "Fixed the first two findings." },
+      },
+      { reportedEvidenceId: 3 },
+    );
     const r = reconcile(s);
-    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA) });
+    expect(r.loop.parked).toMatchObject({
+      kind: "review",
+      reason: reviewParkText(RETRO, SHA, 3, {
+        developer: "Fixed the first two findings.",
+        findings: [finding],
+      }),
+    });
     expect(sends(r.actions)).toEqual([]);
   });
 
@@ -1858,7 +1902,7 @@ describe("review decisions", () => {
     ).toContain("ready");
   });
 
-  it("a clean review raises the ready note and the PR body edit", () => {
+  it("a clean review accepts a fixed finding and raises the ready note and PR body edit", () => {
     const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
     const a = reconcile(s).actions;
     expect(a).toContainEqual({
@@ -1946,12 +1990,15 @@ describe("review decisions", () => {
     expect(kinds(reconcile(ci).actions, "supersede-review")).toEqual([]);
   });
 
-  it("a ruling on blocking findings parks; with a new commit it goes to ci", () => {
+  it("a reply to blocking findings returns to RETRO; a new commit goes to ci", () => {
     const rows = withReview([fact({ blocking: 1 })], [finding]);
     const ruling = { evidence: { id: 2, at: NOW, ruling: true }, evidenceCount: 2 };
     const r = reconcile(inReview(rows, ruling));
-    expect(r.loop.parked?.kind).toBe("review-ruling");
+    expect(r.loop.reviewReplyTo).toBe(1);
     expect(r.loop.reportedEvidenceId).toBe(2);
+    expect(kinds(r.actions, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA, attempt: 2 },
+    ]);
     const c = reconcile(inReview(rows, { ...ruling, headCommit: SHA2 }));
     expect(c.loop.phase).toBe("ci");
   });

@@ -39,6 +39,7 @@ import {
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
   findingFileText,
+  fixKey,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
   MC_PLAN_ALREADY,
@@ -77,6 +78,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  type ReviewFinding,
   type Run,
   type RunLoop,
   readOnlyToolText,
@@ -2816,6 +2818,58 @@ describe("report_evidence", () => {
     expect(r.text).toMatch(/^Committed /);
     return head();
   };
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "apps/a.ts",
+    line: 1,
+    summary: "missing case",
+    scenario: "a reply has no test",
+    fix: "add a test",
+  };
+  const startReview = (
+    sha: string,
+    { epoch = 0, attempt = 1, blocking = true, running = false } = {},
+  ): number => {
+    const review = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha,
+      epoch,
+      attempt,
+      round: attempt,
+      at: clock,
+    });
+    if (review === null) throw new Error("review was not queued");
+    store.setReviewState(review, ["queued"], "running", { at: clock, runId: `retro:${review}` });
+    if (!running) {
+      store.recordFindings(review, `retro:${review}`, {
+        verdict: { spec: blocking ? "fail" : "pass", quality: "pass" },
+        summary: blocking ? "hold" : "clean",
+        findings: blocking ? [finding] : [],
+        at: clock,
+      });
+    }
+    return review;
+  };
+  const claimFix = (review: number, epoch = 0) =>
+    store.claimLine(fixKey(RUN, epoch, review), {
+      runId: RUN,
+      seatId: "guido-1",
+      origin: "engine",
+      text: "fix",
+      at: clock,
+    });
+  const reviewedHead = async () => {
+    const sha = await committed();
+    expect(await report("Initial fix report.")).toEqual({ text: EVIDENCE_RECORDED });
+    const evidence = store.latestEvidence(RUN);
+    if (evidence === null) throw new Error("evidence was not recorded");
+    store.setRunPush({ runId: RUN, sha, at: clock });
+    setLoop({ phase: "review", reportedEvidenceId: evidence.id });
+    return sha;
+  };
   const refused = (text: string) => ({ text, isError: true });
 
   beforeEach(() => {
@@ -2833,6 +2887,18 @@ describe("report_evidence", () => {
 
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
+  });
+
+  it("describes a no-commit response as a blocking-review reply", () => {
+    const evidence = tool("report_evidence", ev);
+    expect(evidence.description).toContain(
+      "While responding to blocking review findings on the unchanged head",
+    );
+    const schema = evidence.inputSchema as {
+      properties: { note: { description: string } };
+    };
+    expect(schema.properties.note.description).toContain("unchanged blocking review");
+    expect(schema.properties.note.description).toContain("Ruling: only for a CI decision");
   });
 
   it("answers EVIDENCE_NO_LOOP for a run no loop drives", async () => {
@@ -2967,6 +3033,58 @@ describe("report_evidence", () => {
     });
     expect(await report("Ruling: still no change")).toEqual({ text: EVIDENCE_RECORDED });
     expect(store.evidenceCount(RUN)).toBe(2);
+  });
+
+  it("accepts a plain reply to a blocking RETRO finding without a new commit", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    expect(await report("1. This case is intentionally unsupported.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
+  });
+
+  it("refuses a reply when the blocking review is from a stale epoch", async () => {
+    const sha = await reviewedHead();
+    startReview(sha, { epoch: 1 });
+    setLoop({ phase: "review", epoch: 0, reportedEvidenceId: 1 });
+    expect(await report("Ruling: this old finding no longer applies.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a reply after a later clean review", async () => {
+    const sha = await reviewedHead();
+    startReview(sha);
+    startReview(sha, { attempt: 2, blocking: false });
+    expect(await report("The earlier finding is not applicable.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a reply while the current review is running", async () => {
+    const sha = await reviewedHead();
+    startReview(sha);
+    startReview(sha, { attempt: 2, running: true });
+    expect(await report("The earlier finding is not applicable.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a repeated reply to the same review", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    setLoop({ phase: "review", reportedEvidenceId: 1, reviewReplyTo: review });
+    expect(await report("I already answered this finding.")).toEqual(refused(EVIDENCE_NO_COMMIT));
+  });
+
+  it("refuses a reply while earlier evidence is unprocessed", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    store.addEvidence(RUN, "An earlier report has not been processed.", clock);
+    expect(await report("I am replying to the finding.")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
   it("records the note, answers EVIDENCE_RECORDED, tells the supervisor and the bus", async () => {

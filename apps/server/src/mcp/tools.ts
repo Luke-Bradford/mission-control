@@ -15,6 +15,7 @@ import {
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
+  carriedFrom,
   clashText,
   closesIssue,
   commitMarkersText,
@@ -51,6 +52,7 @@ import {
   firstCommitNotifier,
   firstNamedRef,
   firstPrNotifier,
+  fixKey,
   formerSubmoduleText,
   isProtectedPath,
   MC_BAD_ARGS,
@@ -142,6 +144,7 @@ import {
   removeMissingText,
   removeNotFileText,
   reviewedEventText,
+  reviewFor,
   type StrayKind,
   SYNC_MAIN_GAP_MIN,
   scanSecrets,
@@ -1681,7 +1684,25 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         newest !== null &&
         (reported === null || newest.at > reported.at) &&
         newest.sha !== loop.ciFailedSha;
-      if (!fresh && !note.startsWith(EVIDENCE_RULING_PREFIX)) {
+      const pushed = store.runPush(run.id);
+      const reviews = store.reviewsOfRun(run.id);
+      const carried =
+        pushed === null ? null : carriedFrom(loop.carry, loop.reviewWaivedSha, pushed.sha);
+      const current = pushed === null ? null : reviewFor(reviews, loop.epoch, pushed.sha, carried);
+      const reviewReply =
+        loop.phase === "review" &&
+        newest !== null &&
+        pushed !== null &&
+        newest.sha === pushed.sha &&
+        current !== null &&
+        current.state === "reported" &&
+        current.blocking > 0 &&
+        fixKey(run.id, loop.epoch, current.id) in store.claimedKeys(run.id) &&
+        loop.reviewReplyTo !== current.id &&
+        reported !== null &&
+        reported.id === loop.reportedEvidenceId;
+      const ciRuling = loop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
+      if (!fresh && !reviewReply && !ciRuling) {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
@@ -1963,7 +1984,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. Commit everything first with mc commit; the note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1972,7 +1993,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             minLength: 1,
             maxLength: MC_EVIDENCE_MAX,
             description:
-              "What changed and how to deploy it. Start with Ruling: to report a decision with no change.",
+              "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
         },
         required: ["note"],
@@ -2064,7 +2085,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
                   type: "string",
                   minLength: 1,
                   maxLength: FINDING_FIX_MAX,
-                  description: "The exact change to make: what to write, and where.",
+                  description: "A concrete suggested change: what to write, and where.",
                 },
               },
               required: ["severity", "file", "line", "summary", "scenario", "fix"],

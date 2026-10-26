@@ -164,6 +164,8 @@ export interface RunLoop {
   cardFor: string | null;
   /** CAPCOM waived the review findings on this sha (un-park of a review park). */
   reviewWaivedSha?: string | null;
+  /** A no-commit response to this blocking review; RETRO must judge it in a fresh round. */
+  reviewReplyTo?: number | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
   /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
