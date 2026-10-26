@@ -46,6 +46,21 @@ Supersedes #685 (the old graph fix) and the Comms part of #677.
 15. **Traffic.** Stats and 24h hourly bars for what is in view; for an agent, sent vs received.
 16. All of it live from hub resources. No refresh.
 
+## Where the mockup is simplified, build this
+
+- Every `#n` / `PR n` in message text is a pill, not just the message's own ref. Match on word
+  boundaries (`#68` must not match `#684`).
+- Clicking a reply quote whose original is in another conversation opens that conversation first,
+  then jumps to and highlights the original.
+- When a decision's countdown reaches zero, the default is applied once, the card goes, and the
+  outcome is recorded in CAPCOM ↔ FLIGHT.
+- CAPCOM's messages are blue in every view, including on an agent's page where that agent's own
+  messages sit on the right.
+- In the ticket view, the graph and Traffic cover that ticket's messages, not the whole crew.
+- Open on Board goes to that ticket's card on the Board.
+- Unread counts are tracked for every conversation, FLIGHT ↔ CAPCOM included, and clear when it is
+  read.
+
 ## Not doing
 
 A catch-up summary (one summary can miss context), message → ticket (a ticket still needs its
