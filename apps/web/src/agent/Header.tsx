@@ -464,7 +464,9 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
           {callSign(row)}
           {role.suffix !== null && <span className="rt">{` · ${role.suffix}`}</span>}
         </span>
-        <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+        <span title={seatStatus(row).reason ?? seatStatus(row).label}>
+          <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+        </span>
         <span className="chips">
           {row.kind === "crew" ? (
             <>

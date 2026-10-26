@@ -991,6 +991,8 @@ export interface CrewCliInput {
   hook: CrewHook;
   /** Extra mc tools the seat's role holds, after the mode's own; each must be grantable. Default []. */
   mcTools?: readonly McToolName[];
+  /** Extra tools held only by this authenticated run. Never accepted from role configuration. */
+  runTools?: readonly McToolName[];
   /** The repo's own commands; they replace the default pnpm entries. Default DEFAULT_SEAT_COMMANDS. */
   commands?: SeatCommands;
   /** Extra Edit and Write denies, on top of PROTECTED_FILES. Default []. */
@@ -1039,6 +1041,11 @@ export function crewCliArgs(i: CrewCliInput): string[] {
       throw new Error(`crew rules: ${t} cannot be granted to a ${i.mode} seat`);
     }
   }
+  const runTools = i.runTools ?? [];
+  for (const t of runTools) {
+    if (t !== MC_TOOL_NAMES.reportPlan)
+      throw new Error(`crew rules: ${t} cannot be granted to a single run`);
+  }
   const globs = i.area.length > 0 ? i.area : ["**"];
   // the repo's commands take the place of the default pnpm entries, in the same position
   let placed = false;
@@ -1051,7 +1058,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     placed = true;
     return bashEntries(mine);
   });
-  allowed.push(...granted.map((t) => `mcp__${MC_MCP_SERVER}__${t}`));
+  allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   return [
     "-p",
     "--input-format",

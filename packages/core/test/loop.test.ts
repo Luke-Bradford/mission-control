@@ -24,6 +24,7 @@ import {
   NO_NEW_COMMIT_TEXT,
   NUDGE_TEXT,
   noShaDeleteText,
+  pendingSeatWork,
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
@@ -48,6 +49,63 @@ const SHA = "aaaaaaa1111";
 const SHA2 = "bbbbbbb2222";
 const REF = "owner/repo#7";
 const NOW = 10_000_000;
+
+describe("pendingSeatWork", () => {
+  it("keeps only new failing findings, CI failures and controller messages", () => {
+    expect(
+      pendingSeatWork({
+        lastTurnStartedAt: 100,
+        reviews: [
+          {
+            id: 0,
+            round: 1,
+            state: "reported",
+            blocking: 1,
+            verdict: { spec: "fail", quality: "pass" },
+            endedAt: 100,
+          },
+          {
+            id: 1,
+            round: 2,
+            state: "reported",
+            blocking: 1,
+            verdict: { spec: "fail", quality: "pass" },
+            endedAt: 109,
+          },
+          {
+            id: 2,
+            round: 1,
+            state: "reported",
+            blocking: 0,
+            verdict: { spec: "pass", quality: "pass" },
+            endedAt: 110,
+          },
+        ],
+        events: [
+          { key: "ci-at-start", text: "CI failed on c13fd87 tests", at: 100 },
+          { key: "ci", text: "CI failed on c13fd87 tests", at: 103 },
+        ],
+        messages: [
+          { key: "flight-at-start", from: "flight-1", at: 100 },
+          { key: "cap", from: "CAPCOM", at: 105 },
+          { key: "other", from: "other", at: 106 },
+        ],
+        woken: ["ci:ci"],
+      }),
+    ).toEqual([
+      { key: "ci:ci-at-start", kind: "ci", at: 100, text: "a CI failure on c13fd87" },
+      {
+        key: "message:flight-at-start",
+        kind: "message",
+        at: 100,
+        text: "a message from flight-1",
+      },
+      { key: "review:0", kind: "findings", at: 100, text: "RETRO round 1 findings" },
+      { key: "message:cap", kind: "message", at: 105, text: "a message from CAPCOM" },
+      { key: "review:1", kind: "findings", at: 109, text: "RETRO round 2 findings" },
+    ]);
+  });
+});
 
 function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot {
   return {
@@ -141,6 +199,8 @@ describe("constants and texts", () => {
     expect(CI_FAILED_TEXT.endsWith("The failing output:\n")).toBe(true);
     expect(RESUME_TEXT).toContain("{ref}");
     expect(NUDGE_TEXT).toContain("{ref}");
+    expect(RESUME_TEXT).toContain("no turn or time limit");
+    expect(NUDGE_TEXT).toContain("no turn or time limit");
   });
 });
 
@@ -566,23 +626,23 @@ describe("state step", () => {
     expect(reconcile(inCi({ tokens: 5000 })).loop.phase).toBe("ci");
   });
 
-  describe("16: silent after a nudge", () => {
-    const key = "nudge:r1:0:0";
+  describe("16: silent after three carry-on resumes", () => {
+    const keys = ["nudge:r1:0:0:1", "nudge:r1:0:0:2", "nudge:r1:0:0:3"];
     const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>
       snap(
         {
-          claimed: { [key]: 5000 },
+          claimed: Object.fromEntries(keys.map((key, n) => [key, 5000 + n])),
           seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 6000 },
           ...over,
         },
         loop,
       );
 
-    it("parks when the seat stopped again after the nudge", () => {
+    it("parks when the seat stops after three carry-on resumes", () => {
       const r = reconcile(base());
       expect(r.loop.parked).toEqual({
         kind: "silent",
-        reason: "stopped twice without reporting",
+        reason: "stopped after 3 carry-on resumes without reporting",
         ended: false,
       });
     });
@@ -866,7 +926,7 @@ describe("desired-state step", () => {
         { cardFor: "working:0" },
       );
       expect(reconcile(s).actions).toEqual([
-        { kind: "send", key: "nudge:r1:0:0", text: fillLoopText(NUDGE_TEXT, { ref: REF }) },
+        { kind: "send", key: "nudge:r1:0:0:1", text: fillLoopText(NUDGE_TEXT, { ref: REF }) },
       ]);
       // a turn that ended before the run started, the report or an engine line is not a stop
       for (const over of [
@@ -884,7 +944,9 @@ describe("desired-state step", () => {
       expect(sends(reconcile({ ...s, seat: seat(s, { lastTurnEndedAt: null }) }).actions)).toEqual(
         [],
       );
-      expect(sends(reconcile({ ...s, claimed: { "nudge:r1:0:0": 3500 } }).actions)).toEqual([]);
+      expect(sends(reconcile({ ...s, claimed: { "nudge:r1:0:0:1": 3500 } }).actions)).toEqual([
+        "nudge:r1:0:0:2",
+      ]);
     });
 
     it("nudges in review only when a fix is committed but not reported", () => {
@@ -897,7 +959,7 @@ describe("desired-state step", () => {
         },
         { phase: "review", cardFor: "review:0" },
       );
-      expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:0:0"]);
+      expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:0:0:1"]);
       expect(sends(reconcile({ ...s, headCommit: SHA }).actions)).toEqual([]);
     });
   });
@@ -1068,17 +1130,24 @@ describe("sequences", () => {
     expect(reconcile(s1).actions).toEqual([]);
     // its turn ends without a report: the nudge
     const s2 = { ...s1, seat: seat(s1, { lastTurnEndedAt: 7000 }) };
-    expect(sends(reconcile(s2).actions)).toEqual(["nudge:r1:0:0"]);
+    expect(sends(reconcile(s2).actions)).toEqual(["nudge:r1:0:0:1"]);
     // nudge claimed, nothing yet
-    const s3 = { ...s2, claimed: { ...claimed1, "nudge:r1:0:0": 7100 } };
+    const s3 = { ...s2, claimed: { ...claimed1, "nudge:r1:0:0:1": 7100 } };
     expect(reconcile(s3).loop.phase).toBe("working");
-    // it stops again: park, and no open question could have prevented the nudge
+    // it stops again: another carry-on, rather than a park
     const s4 = { ...s3, seat: seat(s3, { lastTurnEndedAt: 8000 }) };
-    const r4 = reconcile(s4);
-    expect(r4.loop.parked?.kind).toBe("silent");
-    expect(sends(r4.actions)).toEqual([]);
+    expect(sends(reconcile(s4).actions)).toEqual(["nudge:r1:0:0:2"]);
+    const s5 = { ...s4, claimed: { ...s3.claimed, "nudge:r1:0:0:2": 8100 } };
+    const s6 = { ...s5, seat: seat(s5, { lastTurnEndedAt: 9000 }) };
+    expect(sends(reconcile(s6).actions)).toEqual(["nudge:r1:0:0:3"]);
+    const s7 = { ...s6, claimed: { ...s5.claimed, "nudge:r1:0:0:3": 9100 } };
+    const s8 = { ...s7, seat: seat(s7, { lastTurnEndedAt: 10_000 }) };
+    const r8 = reconcile(s8);
+    expect(r8.loop.parked?.kind).toBe("silent");
+    expect(r8.loop.parked?.reason).toBe("stopped after 3 carry-on resumes without reporting");
+    expect(sends(r8.actions)).toEqual([]);
     // with an open question it neither nudges nor parks
-    const q = { ...s4, seat: seat(s4, { openQuestion: true }) };
+    const q = { ...s8, seat: seat(s8, { openQuestion: true }) };
     expect(reconcile(q).loop.phase).toBe("working");
     expect(sends(reconcile({ ...q, claimed: claimed1 }).actions)).toEqual([]);
   });
@@ -1240,10 +1309,10 @@ describe("review round", () => {
       },
       { cardFor: "working:0" },
     );
-    expect(sends(reconcile(base).actions)).toEqual(["nudge:r1:0:0"]);
+    expect(sends(reconcile(base).actions)).toEqual(["nudge:r1:0:0:1"]);
   });
 
-  it("the nudge key is epoch, then report count", () => {
+  it("the nudge key is epoch, report count and carry-on attempt", () => {
     const s = snap(
       {
         seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 3000 },
@@ -1252,7 +1321,7 @@ describe("review round", () => {
       },
       { cardFor: "working:2", epoch: 2, reportedEvidenceId: 1 },
     );
-    expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:2:4"]);
+    expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:2:4:1"]);
   });
 
   it("the review note names the pushed sha, not the newest commit", () => {
@@ -1407,7 +1476,7 @@ describe("review round", () => {
       ]);
       expect(
         sends(reconcile({ ...idle, loop: { ...idle.loop, relayedSha: SHA } }).actions),
-      ).toEqual(["nudge:r1:0:0"]);
+      ).toEqual(["nudge:r1:0:0:1"]);
       // excerpt vs rate-limit
       const rl = snap({}, failed);
       const r = reconcile({ ...rl, seat: limited(rl) });
@@ -1741,7 +1810,7 @@ describe("review decisions", () => {
       ...sent,
       seat: seat(sent, { state: "idle" as const, lastTurnEndedAt: NOW - 1000 }),
     };
-    expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1`]);
+    expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
   it("the third blocking review parks", () => {

@@ -15,7 +15,11 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(cwd, { recursive: true, force: true }));
 
-function approver(mode: CrewMode = "writer", grants: string[] = []) {
+function approver(
+  mode: CrewMode = "writer",
+  grants: string[] = [],
+  runGrants?: () => readonly string[],
+) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
     accounts: [],
@@ -36,6 +40,7 @@ function approver(mode: CrewMode = "writer", grants: string[] = []) {
     lock: new TestLock(),
     record,
     seatGrants,
+    ...(runGrants === undefined ? {} : { runGrants }),
   });
   return { approve, record, seatGrants, config };
 }
@@ -67,6 +72,14 @@ describe("Codex MCP approvals", () => {
     const h = approver(mode, [...grants]);
     expect(await h.approve(elicitation(tool), undefined, signal())).toBe(decision);
     expect(h.seatGrants).toHaveBeenCalledWith("seat");
+  });
+
+  it("accepts report_plan from a planless build run grant", async () => {
+    const h = approver("writer", [], () => [MC_TOOL_NAMES.reportPlan]);
+    expect(await h.approve(elicitation(MC_TOOL_NAMES.reportPlan), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(h.seatGrants).not.toHaveBeenCalled();
   });
 
   it("refuses foreign servers, unknown tools and missing or mismatched call context", async () => {

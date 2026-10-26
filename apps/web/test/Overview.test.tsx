@@ -637,7 +637,7 @@ describe("Agents panel", () => {
     });
     render(<Overview />);
     const el = await screen.findByTitle(/in line for the test lock · 1:05/);
-    expect(el.closest(".trow")?.textContent).toContain("Waiting on lock");
+    expect(el.closest(".trow")?.textContent).toContain("Watching");
   });
 
   it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
@@ -2604,12 +2604,12 @@ describe("Overview: what a seat is doing", () => {
     expect(row.querySelector(".loopstep")?.textContent).toBe("—");
   });
 
-  it("a seat in CI says Waiting on CI and the loop's text", async () => {
+  it("a seat in CI says Watching and the loop's text", async () => {
     stub({ rows: [seatRow({ hudState: "idle", loop: ci })] });
     const { container } = render(<Overview />);
-    await screen.findByText("Waiting on CI");
+    await screen.findByText("Watching");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".pill")?.textContent).toBe("Waiting on CI");
+    expect(row.querySelector(".pill")?.textContent).toBe("Watching");
     expect(row.querySelector(".state-cell")?.textContent).toContain("25m");
     expect(row.title).toBe("CI on 08a7cfc");
     expect(row.textContent).toContain("Quote cache");

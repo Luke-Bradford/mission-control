@@ -101,7 +101,6 @@ import {
   retiredBriefText,
   type SeatSessionRow,
   startMissingNeedsText,
-  startNeedsPlanText,
   type TestLockState,
   type TicketView,
   ticketHasRunText,
@@ -1078,13 +1077,10 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("refuses a Size M card without a plan when its template needs one, and starts it when not", async () => {
+  it("starts a Size M card without a plan so its developer can write it", async () => {
     board(sc(7, { size: "M" }));
     fetchImpl = async (n) => ticket(n, { body: DONE });
-    expect((await start()).text).toBe(startNeedsPlanText("mc#7", "M"));
-    expect(
-      (await start({ profile: "research", profile_reason: "no code" })).isError,
-    ).toBeUndefined();
+    expect((await start()).isError).toBeUndefined();
   });
 
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
@@ -1366,9 +1362,9 @@ describe("start_seat", () => {
       await nothingStarted(startMissingNeedsText("mc#7", ["done_when", "size"]));
     });
 
-    it("10: Size M with no plan", async () => {
+    it("10: starts Size M with no plan", async () => {
       board(sc(7, { labels: ["area:server"], size: "M" }));
-      await nothingStarted(startNeedsPlanText("mc#7", "M"));
+      expect((await start()).isError).toBeUndefined();
     });
   });
 });
@@ -2722,17 +2718,9 @@ describe("promote", () => {
     expect(seen).toContain("flight");
   });
 
-  it("refuses Size M with no plan for Ready, and moves it with a plan or at Size S", async () => {
+  it("moves Size M with no plan to Ready for its developer to plan", async () => {
     board(backlog({ size: "M" }));
-    expect(await call("promote", P())).toEqual(
-      refused(
-        "Not moved: mc#7 is Size M and has no ## Plan; start the planner on it with mc start_seat first.",
-      ),
-    );
-    expect(moveCalls).toEqual([]);
-    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
     expect((await call("promote", P())).isError).toBeUndefined();
-    fetchImpl = async (n) => ticket(n, { body: GOOD });
     board(backlog({ size: "S" }));
     expect((await call("promote", P())).isError).toBeUndefined();
     expect(moveCalls).toHaveLength(2);

@@ -498,7 +498,7 @@ describe("POST /api/guard/check", () => {
   });
 
   it("crewGuardDeps (what main.ts passes) judges a seat by its configured role", async () => {
-    const deps = crewGuardDeps(config(), tokens, lock);
+    const deps = crewGuardDeps(config(), tokens, lock, store);
     expect(deps.tokens).toBe(tokens);
     expect(deps.lock).toBe(lock);
     expect(deps.seatMode("guido-1")).toBe("writer");

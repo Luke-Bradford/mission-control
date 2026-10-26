@@ -1,7 +1,7 @@
 import type { AttentionItem, CrewRow, LimitRow, RunDigest } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { crewOrder, isCurrentWork } from "../src/crew.ts";
+import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
@@ -202,7 +202,7 @@ it("labels Context, leaves quota in Systems and preserves paused state", async (
   await screen.findByText("ctx 40%");
   expect(screen.queryByText("14%")).toBeNull();
   const paused = await screen.findByText("Idle");
-  expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Idle (crew paused)");
+  expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Crew is paused");
   expect(paused.closest<HTMLElement>(".trow")?.title).toBe("Crew is paused");
   expect(paused.closest(".trow")?.querySelector(".doing")).toBeNull();
   expect(rowsIn(container)[1]?.querySelector(".state-cell")?.textContent).toContain("25m");
@@ -238,6 +238,86 @@ it.each([
   stub([seatRow({ id: "flight", hudState })]);
   const { container } = render(<AgentsPanel />);
   await within(container.querySelector(".flight") as HTMLElement).findByText(label);
+});
+
+it.each([
+  ["running engine", () => seatRow({ id: "short-state", hudState: "running" }), "Running"],
+  ["stalled engine", () => seatRow({ id: "short-state", hudState: "stalled" }), "Stalled"],
+  ["blocked engine", () => seatRow({ id: "short-state", hudState: "blocked" }), "Blocked"],
+  ["parked engine", () => seatRow({ id: "short-state", hudState: "parked" }), "Parked"],
+  ["waiting engine", () => seatRow({ id: "short-state", hudState: "waiting" }), "Waiting"],
+  ["idle engine", () => seatRow({ id: "short-state", hudState: "idle" }), "Idle"],
+  ["free seat", () => seatRow({ id: "short-state", hudState: "idle", run: null }), "Free"],
+  ["stopped engine", () => seatRow({ id: "short-state", hudState: "stopped" }), "Stopped"],
+  ["error engine", () => seatRow({ id: "short-state", hudState: "error" }), "Error"],
+  [
+    "working loop",
+    () =>
+      seatRow({
+        id: "short-state",
+        hudState: "idle",
+        loop: { phase: "working", text: "Working", prNumber: null, parked: null },
+      }),
+    "Idle",
+  ],
+  [
+    "CI loop",
+    () =>
+      seatRow({
+        id: "short-state",
+        hudState: "idle",
+        loop: { phase: "ci", text: "CI", prNumber: null, parked: null },
+      }),
+    "Watching",
+  ],
+  [
+    "review loop",
+    () =>
+      seatRow({
+        id: "short-state",
+        hudState: "idle",
+        loop: { phase: "review", text: "Review", prNumber: null, parked: null },
+      }),
+    "Review",
+  ],
+  [
+    "parked loop",
+    () =>
+      seatRow({
+        id: "short-state",
+        hudState: "idle",
+        loop: { phase: "parked", text: "Parked", prNumber: null, parked: "Waiting" },
+      }),
+    "Parked",
+  ],
+  [
+    "done loop",
+    () =>
+      seatRow({
+        id: "short-state",
+        hudState: "idle",
+        loop: { phase: "done", text: "Done", prNumber: null, parked: null },
+      }),
+    "Idle",
+  ],
+] as const)("renders a short one-word pill for %s", async (_name, makeRow, label) => {
+  stub([makeRow()], true, []);
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("short-state");
+  const pill = rowsIn(container)[1]?.querySelector(".state-cell .pill");
+  expect(pill?.textContent).toBe(label);
+  expect(pill?.textContent).toMatch(/^\S+$/);
+  expect(pill?.textContent?.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
+});
+
+it("renders the Overview crew-pause override as a short pill", async () => {
+  stub([seatRow({ id: "short-state", hudState: "idle", run: null })], false, []);
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("short-state");
+  const pill = rowsIn(container)[1]?.querySelector(".state-cell .pill");
+  expect(pill?.textContent).toBe("Idle");
+  expect(pill?.textContent).toMatch(/^\S+$/);
+  expect(pill?.textContent?.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
 });
 
 it("keeps FLIGHT coverage, the latest decision and session turns on the head-agent link", async () => {
@@ -830,9 +910,18 @@ it.each(["idle", "running", "stopped"] as const)(
     ]);
     const { container } = render(<AgentsPanel />);
     const row = container.querySelector(".flight") as HTMLElement;
-    await within(row).findByText("Paused: Save tokens");
+    await within(row).findByText("Paused");
+    expect(row.querySelector(".state-cell")?.getAttribute("title")).toBe("Save tokens");
     expect(within(row).getByText("head agent").getAttribute("title")).toContain(
       "next check paused",
     );
   },
 );
+
+it("keeps a parked FLIGHT reason in the Overview state tooltip", async () => {
+  stub([seatRow({ id: "flight", hudState: "parked", note: "Needs operator approval" })]);
+  const { container } = render(<AgentsPanel />);
+  const row = container.querySelector(".flight") as HTMLElement;
+  await within(row).findByText("Held");
+  expect(row.querySelector(".state-cell")?.getAttribute("title")).toBe("Needs operator approval");
+});

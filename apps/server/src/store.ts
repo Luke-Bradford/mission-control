@@ -828,6 +828,7 @@ const seatRow = (r: Row): SeatSessionRow => ({
   worktree: r.worktree as string | null,
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
+  lastTurnStartedAt: (r.last_turn_started_at as number | null | undefined) ?? null,
   ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
 });
 
@@ -1040,6 +1041,7 @@ export class Store {
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
+    this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
     this.addColumn("board_items", "item_id", "TEXT");
@@ -3506,6 +3508,13 @@ export class Store {
   setSeatTurnEnded(seatId: string, at: number | null): void {
     this.db
       .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
+      .run(at, seatId);
+  }
+
+  /** Records that the seat started a turn at `at`. */
+  setSeatTurnStarted(seatId: string, at: number): void {
+    this.db
+      .prepare("UPDATE seat_sessions SET last_turn_started_at = ? WHERE seat_id = ?")
       .run(at, seatId);
   }
 

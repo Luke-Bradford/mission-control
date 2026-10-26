@@ -15,7 +15,6 @@ import {
   type StartCheck,
   startClosedText,
   startMissingNeedsText,
-  startNeedsPlanText,
   ticketHasRunText,
   twoAreasText,
   waitsOnText,
@@ -277,17 +276,16 @@ describe("eligibleToStart", () => {
     expect(eligibleToStart({ ...c, seat: { ...c.seat, loop: "plan" } })).toBe(text);
   });
 
-  it("10: refuses Size M without a plan, for a developer seat only", () => {
+  it("10: starts a Size M developer ticket with or without a plan", () => {
     const m = base(card({ size: "M" }));
-    expect(eligibleToStart(m)).toBe(startNeedsPlanText(ref, "M"));
+    expect(eligibleToStart(m)).toBeNull();
     expect(eligibleToStart({ ...m, body: "## Done when\n- x\n## Plan\n" })).toBeNull();
     expect(eligibleToStart({ ...m, seat: { ...m.seat, loop: "plan" } })).toBeNull();
   });
 
-  it("a profile that needs no plan lets an M build start without one", () => {
+  it("a profile does not hold an M build behind a separate planner", () => {
     const m = base(card({ size: "M" }));
-    expect(eligibleToStart({ ...m, planRequired: false })).toBeNull();
-    expect(eligibleToStart({ ...m, planRequired: true })).toBe(startNeedsPlanText(ref, "M"));
+    expect(eligibleToStart({ ...m })).toBeNull();
   });
 
   it("gives the first refusal", () => {

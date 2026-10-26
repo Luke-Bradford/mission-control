@@ -49,7 +49,9 @@ import {
   MC_PLAN_NO_ROOM,
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
+  MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
+  MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
@@ -83,11 +85,12 @@ import {
   removeNotFileText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/api.ts";
+import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
+import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -96,6 +99,7 @@ import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mc
 import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
+import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
@@ -1091,6 +1095,73 @@ describe("through /mcp", () => {
         arguments: { message: "x" },
       });
       expect(denied.error.message).toBe("unknown tool");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("uses crewGuardDeps run grants to list and call planner and FLIGHT tools", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push(
+      { id: "fao-1", role: "FAO", accountId: "claude-main", model: "haiku", area: [] },
+      { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "haiku", area: [] },
+    );
+    const tokens = new RunTokens();
+    const planner = tokens.issue("fao-1", "fao:mcp");
+    const flight = tokens.issue("flight-1", "flight:mcp");
+    const reportPlan = vi.fn(async () => ({ text: "plan recorded" }));
+    const logDecision = vi.fn(async () => ({ text: "decision recorded" }));
+    const mcpTools: McTool[] = [
+      {
+        name: MC_TOOL_NAMES.reportPlan,
+        description: "record a plan",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: reportPlan,
+      },
+      {
+        name: MC_TOOL_NAMES.logDecision,
+        description: "record a decision",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: logDecision,
+      },
+    ];
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      ...crewGuardDeps(cfg, tokens, new TestLock(), store),
+      mcpTools: () => mcpTools,
+    });
+    await app.ready();
+    try {
+      const rpc = (token: string, method: string, params?: object) =>
+        app
+          .inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { authorization: `Bearer ${token}` },
+            payload: { jsonrpc: "2.0", id: 1, method, params },
+          })
+          .then((r) => r.json());
+      const names = async (token: string) =>
+        (await rpc(token, "tools/list")).result.tools.map((t: { name: string }) => t.name);
+
+      expect(await names(planner)).toContain(MC_TOOL_NAMES.reportPlan);
+      expect(await names(flight)).toContain(MC_TOOL_NAMES.logDecision);
+      expect(
+        (await rpc(planner, "tools/call", { name: MC_TOOL_NAMES.reportPlan, arguments: {} })).result
+          .content[0].text,
+      ).toBe("plan recorded");
+      expect(
+        (await rpc(flight, "tools/call", { name: MC_TOOL_NAMES.logDecision, arguments: {} })).result
+          .content[0].text,
+      ).toBe("decision recorded");
+      expect(reportPlan).toHaveBeenCalledWith({ seatId: "fao-1", runId: "fao:mcp" }, {});
+      expect(logDecision).toHaveBeenCalledWith({ seatId: "flight-1", runId: "flight:mcp" }, {});
     } finally {
       await app.close();
     }
@@ -3369,7 +3440,7 @@ describe("report_plan", () => {
     });
   });
 
-  it("is offered to read-only seats whose role is granted it", () => {
+  it("is eligible for planners; build visibility is granted per run", () => {
     expect(tool("report_plan", pt).modes).toEqual([]);
     expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
   });
@@ -3429,6 +3500,143 @@ describe("report_plan", () => {
     expect(emitted).toContain("agents");
     expect(bodyFiles()).toEqual([]);
   });
+
+  it("lets a build seat record its own plan and continue its run", async () => {
+    const runId = "guido:1";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual({
+      text: MC_PLAN_WRITTEN_CONTINUE,
+    });
+    expect(told).toEqual([]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.loopEventsOfRun(runId).map((e) => e.text)).toEqual([planWrittenText("mc#7")]);
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual(refused(MC_PLAN_NOT_FAO));
+  });
+
+  it("fails closed for a build run that started with a plan", async () => {
+    const runId = "guido:planned";
+    store.upsertRun(
+      run({
+        id: runId,
+        agentId: "guido-1",
+        branch: "guido/7",
+        ticket: "mc#7",
+        plan: { by: null, at: null, ref: "mc#7" },
+      }),
+    );
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual(refused(MC_PLAN_NOT_FAO));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("refuses profile fields from a build seat", async () => {
+    const runId = "guido:profile";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      await tool("report_plan", pt).call(
+        { seatId: "guido-1", runId },
+        { plan: PLAN, profile: "bugfix", profile_reason: "it is a bug" },
+      ),
+    ).toEqual(refused(MC_PLAN_PROFILE_ONLY));
+    expect(store.profileOverride("mc", 7)).toBeNull();
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "lists and calls report_plan through MCP for a planless %s build run",
+    async (vendor) => {
+      const seatId = `${vendor}-guido`;
+      const runId = `${vendor}:mcp`;
+      const cfg = config();
+      if (vendor === "codex")
+        cfg.accounts.push({ id: "codex-main", vendor, alertAt: 80, stopAt: 95 });
+      cfg.crew?.sessions[0]?.seats.push({
+        id: seatId,
+        role: "GUIDO",
+        accountId: vendor === "codex" ? "codex-main" : "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      });
+      const mcpTools = createMcTools(deps({ config: cfg, gh: createGh(join(ghDir, "gh")) }));
+      store.upsertRun(
+        run({
+          id: runId,
+          agentId: seatId,
+          branch: `${vendor}/7`,
+          ticket: `mc#${vendor === "claude" ? 7 : 8}`,
+          vendor,
+        }),
+      );
+      store.setSeatSession({
+        seatId,
+        runId,
+        cliSessionId: "cli-build",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const tokens = new RunTokens();
+      const token = tokens.issue(seatId, runId);
+      const app = buildApp({
+        config: cfg,
+        store,
+        bus,
+        tokens,
+        seatMode: (id) => crewSeatMode(cfg, id),
+        runGrants: (who) => runSeatGrants(cfg, store, who),
+        mcpTools: () => mcpTools,
+      });
+      await app.ready();
+      const rpc = (method: string, params?: object) =>
+        app.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { authorization: `Bearer ${token}` },
+          payload: { jsonrpc: "2.0", id: 1, method, ...(params === undefined ? {} : { params }) },
+        });
+      try {
+        expect(
+          ((await rpc("tools/list")).json().result.tools as { name: string }[]).map((t) => t.name),
+        ).toContain("report_plan");
+        expect(
+          (await rpc("tools/call", { name: "report_plan", arguments: { plan: PLAN } })).json()
+            .result.content[0].text,
+        ).toBe(MC_PLAN_WRITTEN_CONTINUE);
+        expect(
+          ((await rpc("tools/list")).json().result.tools as { name: string }[]).map((t) => t.name),
+        ).not.toContain("report_plan");
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it("records the plan landing as the planner to CAPCOM when the session has no FLIGHT seat", async () => {
     await plan();
@@ -3683,7 +3891,7 @@ describe("report_plan", () => {
     expect(await plan()).toEqual({ text: MC_PLAN_WRITTEN });
   });
 
-  it("not a planner", async () => {
+  it("not a planner or build seat", async () => {
     store.upsertRun(run({ id: "retro:1", agentId: "retro", branch: null, ticket: "mc#7" }));
     store.setSeatSession({
       seatId: "retro",

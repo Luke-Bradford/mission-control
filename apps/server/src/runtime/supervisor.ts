@@ -182,6 +182,7 @@ import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
 import { assertSeatGitConfig, assertSeatGitVersion, SeatGitError } from "./git.ts";
+import { runSeatGrants } from "./grants.ts";
 import {
   CODEX_DELIVERY,
   endKeeper,
@@ -388,7 +389,6 @@ export interface SupervisorDeps {
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
   codexAuthPath?: string;
   superuserTools?: readonly McToolName[];
-  seatGrants?: (seatId: string) => readonly string[];
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
   claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
@@ -1000,6 +1000,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         break;
       case "turn-start":
         l.inTurn = true;
+        store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);
         break;
       case "tool-result":
@@ -1489,6 +1490,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           effort: info.seat.effort,
           mode: def.mode,
           mcTools: def.mcTools,
+          runTools: runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }).filter(
+            (tool) => !def.mcTools.includes(tool),
+          ),
           rolePromptFile: promptPath,
           sessionId: cliSessionId,
           resume,
@@ -1543,7 +1547,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       cwd,
       lock: deps.lock,
       superuserTools: deps.superuserTools,
-      seatGrants: deps.seatGrants,
+      runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {
         store.addGuardHit({ agentId: info.seat.id, runId: run.id, rule, text, at: now() });
         bus.emit("guard");
@@ -2693,7 +2697,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
           : {}),
-        planRequired: chosen.profile.planRequired,
         repoId: info.repo.id,
         issue,
         card: {
@@ -2937,6 +2940,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         fullSuite: info.repo.fullSuite ?? [],
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
+        ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
       if (installNote) brief += `\n\n${installNote}`;

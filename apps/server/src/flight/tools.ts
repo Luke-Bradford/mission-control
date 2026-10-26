@@ -186,7 +186,6 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
-  needsPlanText,
   needsSuperuserText,
   noOpenQuestionText,
   notAcceptedText,
@@ -1115,7 +1114,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const away = activeAway(store, now(), config.operator.timezone);
     const refusal = eligibleToStart({
       ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
-      planRequired: chosen.profile.planRequired,
       repoId: repo.id,
       issue,
       card,
@@ -1518,9 +1516,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
       );
       if (missing.length > 0) return fail(missingNeedsText(ref, missing));
-      if (card.size !== null && PLAN_SIZES.includes(card.size) && !hasPlanSection(body)) {
-        return fail(needsPlanText(ref, card.size));
-      }
       const areas = areaLabelsOf(rules, card);
       if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
       if (areas.length === 0) return fail(moveNoAreaText(ref));

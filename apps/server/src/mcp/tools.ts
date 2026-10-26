@@ -71,7 +71,9 @@ import {
   MC_PLAN_NO_ROOM,
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
+  MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
+  MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
   MC_PR_FAILED,
@@ -206,7 +208,7 @@ export interface McToolsDeps {
   onFindings?: (seatId: string, runId: string) => void;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
-  /** Called after `report_plan` writes a plan (the supervisor ends the run). */
+  /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
@@ -1846,11 +1848,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const { run } = live;
     const place = seatPlace(config, ctx.seatId);
     if (place === null) return ENDED;
-    if (seatDef(place.seat).loop !== "plan") return { text: MC_PLAN_NOT_FAO, isError: true };
+    const loop = seatDef(place.seat).loop;
+    const planlessBuild = loop === "build" && run.plan === undefined && !store.planLanded(run);
+    if (loop !== "plan" && !planlessBuild) return { text: MC_PLAN_NOT_FAO, isError: true };
     const issue = issueOf(run);
     const repo = repoOf(deps, run);
     if (issue === null || repo === "") return ENDED;
     const call = seatCallSign(ctx.seatId);
+    if (
+      loop === "build" &&
+      (parsed.data.profile !== undefined || parsed.data.profile_reason !== undefined)
+    )
+      return { text: MC_PLAN_PROFILE_ONLY, isError: true };
     const override: ProfileOverride | undefined =
       parsed.data.profile !== undefined && parsed.data.profile_reason !== undefined
         ? { profile: parsed.data.profile, reason: parsed.data.profile_reason, by: "planner" }
@@ -1962,7 +1971,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     });
     if (written.isError === true) return written;
     const at = now();
-    if (override !== undefined) store.setProfileOverride(run.repoId, issue, override, at);
+    if (loop === "plan" && override !== undefined)
+      store.setProfileOverride(run.repoId, issue, override, at);
     const planned = planWrittenText(run.ticket ?? run.id);
     store.addLoopEvent(`${run.id}:plan`, run.id, planned, at);
     const watcher = place.session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");
@@ -1974,8 +1984,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       text: planned,
     });
     bus.emit("agents");
-    deps.onPlanned?.(ctx.seatId, ctx.runId);
-    return written;
+    if (loop === "plan") deps.onPlanned?.(ctx.seatId, ctx.runId);
+    return loop === "plan" ? written : { text: MC_PLAN_WRITTEN_CONTINUE };
   }
 
   return [
@@ -2188,7 +2198,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportPlan,
       description:
-        "Write your plan into the ticket, once, when it is finished: Mission Control appends it to the issue body under ## Plan, for the developer's brief, then ends this run. It is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.",
+        "Write your plan into the ticket, once, when it is finished: Mission Control appends it to the issue body under ## Plan. A planner run then ends; a build seat continues the ticket. It is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.",
       inputSchema: {
         type: "object",
         properties: {

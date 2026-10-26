@@ -1006,6 +1006,34 @@ describe("Setup tabs", () => {
       expect(within(rows[1] as HTMLElement).getAllByRole("cell")[4]?.textContent).toBe("—");
     });
 
+    it.each([
+      [
+        "paused",
+        seatRow({
+          crewPause: { seats: ["guido-1"], reason: "Save tokens", at: NOW, by: "operator" },
+        }),
+        "Paused",
+        "Save tokens",
+      ],
+      [
+        "parked",
+        seatRow({ id: "retro-1", hudState: "parked", note: "Awaiting operator" }),
+        "Parked",
+        "Awaiting operator",
+      ],
+    ] as const)(
+      "Sessions: shows a %s seat's short state and reason tooltip",
+      async (_state, seat, label, reason) => {
+        const p = await seats({
+          "/api/crew": { rows: [seat], firstRunToday: null },
+        });
+        const t = within(p).getByRole("table", { name: "Seats of s/s1 in config.yaml" });
+        const row = within(t).getByText(seat.id).closest("tr") as HTMLElement;
+        const pill = within(row).getByText(label);
+        expect(pill.parentElement?.getAttribute("title")).toBe(reason);
+      },
+    );
+
     it("Sessions: the Reload button's wrapper spans the grid row", async () => {
       await seats();
       const wrap = screen.getByRole("button", { name: "Reload config.yaml" }).parentElement;

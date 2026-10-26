@@ -1112,6 +1112,8 @@ export interface SeatSessionRow {
   errorSince?: number;
   /** When the seat's last turn ended; `setSeatSession` never writes it. Absent on a row not read. */
   lastTurnEndedAt?: number | null;
+  /** When the seat's current (or most recent) turn started. */
+  lastTurnStartedAt?: number | null;
 }
 
 /** A crew session's context window, from its `get_context_usage` control request. */
