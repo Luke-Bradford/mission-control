@@ -57,6 +57,14 @@ describe("pendingSeatWork", () => {
         lastTurnStartedAt: 100,
         reviews: [
           {
+            id: 0,
+            round: 1,
+            state: "reported",
+            blocking: 1,
+            verdict: { spec: "fail", quality: "pass" },
+            endedAt: 100,
+          },
+          {
             id: 1,
             round: 2,
             state: "reported",
@@ -73,14 +81,26 @@ describe("pendingSeatWork", () => {
             endedAt: 110,
           },
         ],
-        events: [{ key: "ci", text: "CI failed on c13fd87 tests", at: 103 }],
+        events: [
+          { key: "ci-at-start", text: "CI failed on c13fd87 tests", at: 100 },
+          { key: "ci", text: "CI failed on c13fd87 tests", at: 103 },
+        ],
         messages: [
+          { key: "flight-at-start", from: "flight-1", at: 100 },
           { key: "cap", from: "CAPCOM", at: 105 },
           { key: "other", from: "other", at: 106 },
         ],
         woken: ["ci:ci"],
       }),
     ).toEqual([
+      { key: "ci:ci-at-start", kind: "ci", at: 100, text: "a CI failure on c13fd87" },
+      {
+        key: "message:flight-at-start",
+        kind: "message",
+        at: 100,
+        text: "a message from flight-1",
+      },
+      { key: "review:0", kind: "findings", at: 100, text: "RETRO round 1 findings" },
       { key: "message:cap", kind: "message", at: 105, text: "a message from CAPCOM" },
       { key: "review:1", kind: "findings", at: 109, text: "RETRO round 2 findings" },
     ]);

@@ -790,21 +790,16 @@ describe("idle-seat wakes", () => {
   });
 
   it("reminds once for a green head without evidence, then raises Needs-you", async () => {
-    config.crew?.sessions[0]?.seats.push({
-      id: RETRO,
-      role: "RETRO",
-      mode: "scratch",
-      accountId: "claude-main",
-      model: "haiku",
-      area: [],
-    });
     setLoop({
-      phase: "parked",
-      parked: { kind: "stuck", reason: "waiting", ended: false },
+      phase: "working",
+      parked: null,
       prNumber: 12,
-      pushStartedAt: clock - EVIDENCE_REMIND_MS - 1,
     });
     setPr({ ci: "passing", headSha: SHA });
+    store.addLoopEvent(`${RUN}:ci-passed:${SHA}`, RUN, `CI passed on ${SHA.slice(0, 7)}`, clock);
+    await h.engine.tick();
+    expect(sentKeys()).not.toContain(`evidence-remind:${RUN}:${SHA}`);
+    clock += EVIDENCE_REMIND_MS;
     await h.engine.tick();
     expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA}`);
     expect(store.claimedKeys(RUN)[`evidence-remind:${RUN}:${SHA}`]).toBe(clock);
@@ -819,6 +814,89 @@ describe("idle-seat wakes", () => {
     ).toBe(true);
     await h.engine.tick();
     expect(sentKeys().filter((key) => key === `evidence-remind:${RUN}:${SHA}`)).toHaveLength(1);
+  });
+
+  it("does not wake or remind a rate-limited, account-stopped, or parked seat", async () => {
+    const setup = () => {
+      store.setSeatTurnStarted(SEAT, clock);
+      store.addLoopEvent(`${RUN}:ci-failed`, RUN, `CI failed on ${SHA.slice(0, 7)}`, clock);
+      store.addLoopEvent(
+        `${RUN}:ci-passed:${SHA}`,
+        RUN,
+        `CI passed on ${SHA.slice(0, 7)}`,
+        clock - EVIDENCE_REMIND_MS - 1,
+      );
+      setLoop({ phase: "working", parked: null, prNumber: 12 });
+      setPr({ ci: "passing", headSha: SHA });
+    };
+    const noWakeOrReminder = () => {
+      expect(sentKeys().some((key) => key.startsWith(`wake:${RUN}:`))).toBe(false);
+      expect(sentKeys()).not.toContain(`evidence-remind:${RUN}:${SHA}`);
+    };
+
+    setup();
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: clock + MIN };
+    await h.engine.tick();
+    noWakeOrReminder();
+
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: clock,
+      pct: 96,
+      resetAt: clock + MIN,
+      source: "test",
+    });
+    await h.engine.tick();
+    noWakeOrReminder();
+
+    clock += MIN + 1;
+    store.setSeatSession({ ...(store.seatSession(SEAT) as SeatSessionRow), state: "idle" });
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "waiting", ended: false },
+    });
+    await h.engine.tick();
+    noWakeOrReminder();
+  });
+
+  it("tracks reminders by head and clears stale evidence flags", async () => {
+    setLoop({ phase: "working", parked: null, prNumber: 12 });
+    setPr({ ci: "passing", headSha: SHA });
+    store.addLoopEvent(
+      `${RUN}:ci-passed:${SHA}`,
+      RUN,
+      `CI passed on ${SHA.slice(0, 7)}`,
+      clock - EVIDENCE_REMIND_MS - 1,
+    );
+    await h.engine.tick();
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA}`);
+
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(true);
+
+    setPr({ ci: "passing", headSha: SHA_B });
+    store.addLoopEvent(
+      `${RUN}:ci-passed:${SHA_B}`,
+      RUN,
+      `CI passed on ${SHA_B.slice(0, 7)}`,
+      clock - EVIDENCE_REMIND_MS - 1,
+    );
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(false);
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA_B}`);
+
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA_B}` && n.clearedAt === null),
+    ).toBe(true);
   });
 });
 

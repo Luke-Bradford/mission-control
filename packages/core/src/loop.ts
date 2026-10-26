@@ -338,7 +338,7 @@ export function pendingSeatWork(input: PendingSeatWorkInput): PendingSeatWork[] 
       r.blocking > 0 &&
       failed &&
       r.endedAt !== null &&
-      r.endedAt > since
+      r.endedAt >= since
     )
       out.push({
         key: `review:${r.id}`,
@@ -348,7 +348,7 @@ export function pendingSeatWork(input: PendingSeatWorkInput): PendingSeatWork[] 
       });
   }
   for (const e of input.events) {
-    if (e.at <= since || !e.text.startsWith(CI_FAILED_EVENT_PREFIX)) continue;
+    if (e.at < since || !e.text.startsWith(CI_FAILED_EVENT_PREFIX)) continue;
     const sha =
       e.text.slice(CI_FAILED_EVENT_PREFIX.length).match(/^[0-9a-f]{7,}/i)?.[0] ?? "the PR head";
     out.push({
@@ -359,7 +359,7 @@ export function pendingSeatWork(input: PendingSeatWorkInput): PendingSeatWork[] 
     });
   }
   for (const m of input.messages) {
-    if (m.at > since && (m.from === "CAPCOM" || m.from === "flight-1"))
+    if (m.at >= since && (m.from === "CAPCOM" || m.from === "flight-1"))
       out.push({
         key: `message:${m.key}`,
         kind: "message",

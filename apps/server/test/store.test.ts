@@ -1257,6 +1257,7 @@ describe("seat sessions", () => {
     worktree: "/w/guido",
     updatedAt: 5,
     lastTurnEndedAt: null,
+    lastTurnStartedAt: null,
     ...over,
   });
 
@@ -1674,6 +1675,7 @@ describe("liveSeatRuns and branchCommitSpan", () => {
     worktree: null,
     updatedAt: 5,
     lastTurnEndedAt: null,
+    lastTurnStartedAt: null,
     ...over,
   });
 
