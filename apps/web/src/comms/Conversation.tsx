@@ -18,10 +18,12 @@ import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { agentPath, followLink } from "../router.ts";
+import { agentPath, commsAgentPath, commsFlightPath, followLink, navigate } from "../router.ts";
 import { FlightChat } from "../shell/Dock.tsx";
+import { AgentContacts } from "./AgentContacts.tsx";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
+import { type CommsView, messagesForView } from "./model.ts";
 
 /** Comms › Conversation (catalogue 2.5.3): FLIGHT's chat, or the selected agent's thread. */
 export function Conversation({ row }: { row: CrewRow | null }) {
@@ -164,5 +166,86 @@ export function Conversation({ row }: { row: CrewRow | null }) {
         />
       )}
     </Panel>
+  );
+}
+
+function AgentConversation({ row, view }: { row: CrewRow; view: CommsView }) {
+  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(row.id));
+  const all = activity.data?.messages ?? [];
+  const messages = messagesForView(view, all);
+  const selected = view.kind === "contact" ? view.contactId : null;
+  return (
+    <div className="comms-agent">
+      <AgentContacts agentId={row.id} messages={all} selected={selected} onNavigate={navigate} />
+      <Panel id="chatP" title={<CommsBreadcrumb view={view} />}>
+        <div className="scroll comms-messages" id="convo">
+          {messages.length === 0 ? (
+            <p className="pb note">No messages yet.</p>
+          ) : (
+            messages.map((message) => (
+              <div
+                className={`msg${message.from === COMMS_CAPCOM ? " mine" : ""}`}
+                key={message.id}
+              >
+                <div className="from">
+                  <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
+                </div>
+                <div className="body">
+                  <MentionText text={message.text} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <SeatComposer row={row} />
+      </Panel>
+    </div>
+  );
+}
+
+/** The route-driven Comms content; unavailable main resources have explicit empty states. */
+export function CommsConversation({ view, row }: { view: CommsView; row: CrewRow | null }) {
+  if (view.kind === "flight") return <Conversation row={null} />;
+  if (view.kind === "crew") {
+    return (
+      <Panel id="chatP" title="#crew">
+        <p className="pb note">Not available yet.</p>
+      </Panel>
+    );
+  }
+  if (row === null) {
+    return (
+      <Panel id="chatP" title="Comms">
+        <p className="pb note">This agent is no longer in the crew.</p>
+      </Panel>
+    );
+  }
+  return <AgentConversation row={row} view={view} />;
+}
+
+export function CommsBreadcrumb({ view }: { view: CommsView }) {
+  if (view.kind === "flight") return <span>Comms</span>;
+  return (
+    <nav className="comms-breadcrumb" aria-label="Breadcrumb">
+      <button type="button" onClick={() => navigate(commsFlightPath())}>
+        Comms
+      </button>
+      {view.kind !== "crew" && (
+        <>
+          <span>›</span>
+          <span>Agents</span>
+          <span>›</span>
+          <button type="button" onClick={() => navigate(commsAgentPath(view.agentId))}>
+            {view.agentId}
+          </button>
+          {view.kind === "contact" && (
+            <>
+              <span>›</span>
+              <span>{view.contactId}</span>
+            </>
+          )}
+        </>
+      )}
+    </nav>
   );
 }

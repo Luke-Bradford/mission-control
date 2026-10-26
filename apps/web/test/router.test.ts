@@ -3,6 +3,10 @@ import {
   addAgentParam,
   agentPath,
   boardPath,
+  commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
+  commsInboxPath,
   isPopout,
   itemPath,
   legacyRedirect,
@@ -28,9 +32,22 @@ describe("route()", () => {
     ["/agent", { page: "agent", id: null }],
     ["/agent/shop-app-ta", { page: "agent", id: "shop-app-ta" }],
     ["/agent/a%20b/", { page: "agent", id: "a b" }],
-    ["/comms", { page: "comms", item: null }],
-    ["/comms/esc:shop-app%233227", { page: "comms", item: "esc:shop-app#3227" }],
-    ["/comms/stall%3Ashop-app-ta%3Ar-12", { page: "comms", item: "stall:shop-app-ta:r-12" }],
+    ["/comms", { page: "comms", item: null, view: { kind: "flight" } }],
+    ["/comms/crew", { page: "comms", item: null, view: { kind: "crew" } }],
+    ["/comms/agents/a%20b", { page: "comms", item: null, view: { kind: "agent", agentId: "a b" } }],
+    ["/comms/agents/a/inbox", { page: "comms", item: null, view: { kind: "inbox", agentId: "a" } }],
+    [
+      "/comms/agents/a/contacts/b%2Fc",
+      { page: "comms", item: null, view: { kind: "contact", agentId: "a", contactId: "b/c" } },
+    ],
+    [
+      "/comms/esc:shop-app%233227",
+      { page: "comms", item: "esc:shop-app#3227", view: { kind: "flight" } },
+    ],
+    [
+      "/comms/stall%3Ashop-app-ta%3Ar-12",
+      { page: "comms", item: "stall:shop-app-ta:r-12", view: { kind: "flight" } },
+    ],
     ["/telemetry", { page: "telemetry" }],
     ["/setup", { page: "setup", tab: "sessions" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
@@ -120,7 +137,20 @@ describe("path helpers", () => {
     expect(route(itemPath("esc:shop-app#3227"))).toEqual({
       page: "comms",
       item: "esc:shop-app#3227",
+      view: { kind: "flight" },
     });
+    expect(route(commsCrewPath())).toEqual({ page: "comms", item: null, view: { kind: "crew" } });
+    expect(route(commsInboxPath("a b"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "inbox", agentId: "a b" },
+    });
+    expect(route(commsContactPath("a", "b/c"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "contact", agentId: "a", contactId: "b/c" },
+    });
+    expect(commsAgentPath("a b")).toBe("/comms/agents/a%20b");
     expect(route(agentPath("x/y"))).toEqual({ page: "agent", id: "x/y" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",
@@ -164,7 +194,11 @@ describe("legacyRedirect()", () => {
   it("sends an old needs link to the same item as its comms path", () => {
     const to = legacyRedirect("/needs/shop-app%233227", "");
     expect(to).toBe("/comms/esc%3Ashop-app%233227");
-    expect(route(to ?? "")).toEqual({ page: "comms", item: "esc:shop-app#3227" });
+    expect(route(to ?? "")).toEqual({
+      page: "comms",
+      item: "esc:shop-app#3227",
+      view: { kind: "flight" },
+    });
     expect(route(to ?? "")).toEqual(route("/comms/esc:shop-app%233227"));
   });
 

@@ -45,12 +45,19 @@ export type SetupTab = (typeof SETUP_TABS)[number];
 
 export type Page = "overview" | "flight" | "board" | "agent" | "comms" | "telemetry" | "setup";
 
+export type CommsView =
+  | { kind: "flight" }
+  | { kind: "crew" }
+  | { kind: "agent"; agentId: string }
+  | { kind: "inbox"; agentId: string }
+  | { kind: "contact"; agentId: string; contactId: string };
+
 export type Route =
   | { page: "overview" }
   | { page: "flight" }
   | { page: "board"; repoId: string | null; ticket: number | null }
   | { page: "agent"; id: string | null }
-  | { page: "comms"; item: string | null }
+  | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
   | { page: "setup"; tab: SetupTab };
 
@@ -72,6 +79,12 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
   `${boardPath(repoId)}/${issueNumber}`;
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
+export const commsFlightPath = (): string => "/comms";
+export const commsCrewPath = (): string => "/comms/crew";
+export const commsAgentPath = (agentId: string): string => `/comms/agents/${enc(agentId)}`;
+export const commsInboxPath = (agentId: string): string => `${commsAgentPath(agentId)}/inbox`;
+export const commsContactPath = (agentId: string, contactId: string): string =>
+  `${commsAgentPath(agentId)}/contacts/${enc(contactId)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
 /** The query parameter that names the session whose Add agent form should open (`?add=s1`). */
 export const ADD_AGENT_PARAM = "add";
@@ -155,8 +168,32 @@ export function route(path: string): Route | null {
   if (ticket) return { page: "board", ...ticket };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
+  if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
+  if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
+  const contact = /^\/comms\/agents\/([^/]+)\/contacts\/([^/]+)$/.exec(p);
+  if (contact) {
+    const agentId = decode(contact[1]);
+    const contactId = decode(contact[2]);
+    if (agentId !== null && contactId !== null)
+      return { page: "comms", item: null, view: { kind: "contact", agentId, contactId } };
+    return null;
+  }
+  const inbox = /^\/comms\/agents\/([^/]+)\/inbox$/.exec(p);
+  if (inbox) {
+    const agentId = decode(inbox[1]);
+    return agentId === null
+      ? null
+      : { page: "comms", item: null, view: { kind: "inbox", agentId } };
+  }
+  const agentComms = /^\/comms\/agents\/([^/]+)$/.exec(p);
+  if (agentComms) {
+    const agentId = decode(agentComms[1]);
+    return agentId === null
+      ? null
+      : { page: "comms", item: null, view: { kind: "agent", agentId } };
+  }
   const comms = withId(path, "comms");
-  if (comms) return { page: "comms", item: comms.id };
+  if (comms?.id) return { page: "comms", item: comms.id, view: { kind: "flight" } };
   const setup = withId(path, "setup");
   if (setup)
     return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "sessions" };
