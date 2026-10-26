@@ -1,0 +1,29 @@
+import { expect, it } from "vitest";
+import {
+  MACHINE_CHART_HEIGHT,
+  machineAreaGeometry,
+  timelineGeometry,
+} from "../src/overview/chartGeometry.ts";
+
+it("uses one fixed chart box and baseline for every machine area", () => {
+  const cpu = machineAreaGeometry([0, 50, 100], 100);
+  const disk = machineAreaGeometry([10, null, 20], 20);
+
+  expect(MACHINE_CHART_HEIGHT).toBeGreaterThan(0);
+  expect(cpu.height).toBe(MACHINE_CHART_HEIGHT);
+  expect(disk.height).toBe(MACHINE_CHART_HEIGHT);
+  expect(cpu.baseline).toBe(disk.baseline);
+  expect(cpu.areas[0]).toContain(`L0.0,${cpu.baseline}Z`);
+  expect(disk.areas).toEqual([]);
+});
+
+it("uses one timeline scale and only square-ended, non-zero-width blocks", () => {
+  const timeline = timelineGeometry({ from: 0, to: 60_000 });
+
+  expect(timeline.baseline).toBe(0);
+  expect(timeline.position(15_000)).toBe(25);
+  expect(timeline.segment(30_000, 30_000)).toBeNull();
+  expect(timeline.segment(10_000, 10_001)?.width).toBeGreaterThan(0);
+  expect(timeline.segment(10_000, 20_000)?.borderRadius).toBe(0);
+  expect(timeline.tick(30_000)).toMatchObject({ left: 50, width: 1, borderRadius: 0 });
+});

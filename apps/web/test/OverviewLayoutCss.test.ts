@@ -51,6 +51,15 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-span`)).toContain("bottom: 3px");
   });
 
+  it("aligns Machine labels, fixed-height charts and values on shared columns", () => {
+    const row = rule("#machP .resrow");
+    expect(row).toContain("grid-template-columns: 42px minmax(24px, 1fr) 128px");
+    expect(row).toContain("align-items: center");
+    expect(rule("#machP .machine-chart")).toContain("height: 24px");
+    expect(rule("#machP .ph")).toContain("flex-wrap: nowrap");
+    expect(rule("#timelineP .ph")).toContain("flex-wrap: nowrap");
+  });
+
   it("wraps KPI labels without ellipses and keeps eight Crew rows below the 45% cap", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
     expect(label).toContain("font-size: 10px");

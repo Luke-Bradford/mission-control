@@ -1,7 +1,7 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { Sparkline } from "../hud/Sparkline.tsx";
+import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 
 const GIB = 2 ** 30;
@@ -35,6 +35,46 @@ function Bar({ segs }: { segs: Seg[] }) {
           />
         ))}
     </span>
+  );
+}
+
+function MachineAreaChart({
+  label,
+  values,
+  max,
+  color,
+}: {
+  label: string;
+  values: (number | null)[];
+  max?: number;
+  color: string;
+}) {
+  const geometry = machineAreaGeometry(
+    values,
+    max ?? Math.max(1, ...values.filter((value) => value !== null)),
+  );
+  if (geometry.line === null) return null;
+  return (
+    <svg
+      className="machine-chart"
+      preserveAspectRatio="none"
+      viewBox={`0 0 100 ${MACHINE_CHART_HEIGHT}`}
+      role="img"
+      aria-label={label}
+      data-max={max ?? Math.max(1, ...values.filter((value) => value !== null))}
+    >
+      <path className="machine-gridline" d={`M0,${geometry.baseline}H100`} />
+      {geometry.areas.map((area) => (
+        <path key={area} d={area} fill={color} fillOpacity={0.18} />
+      ))}
+      <path
+        d={geometry.line}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 
@@ -105,7 +145,7 @@ export function MachinePanel() {
           <div className="resrow">
             <span className="s fg2">CPU</span>
             {summary?.machine?.cpu?.length ? (
-              <Sparkline
+              <MachineAreaChart
                 label="CPU history"
                 values={summary.machine.cpu}
                 max={100}
@@ -145,7 +185,7 @@ export function MachinePanel() {
           <div className="resrow">
             <span className="s fg2">Memory</span>
             {summary?.machine?.mem?.length ? (
-              <Sparkline
+              <MachineAreaChart
                 label="Memory history"
                 values={summary.machine.mem}
                 max={100}
@@ -178,7 +218,7 @@ export function MachinePanel() {
           <div className="resrow">
             <span className="s fg2">Disk</span>
             {summary?.machine?.disk?.length ? (
-              <Sparkline
+              <MachineAreaChart
                 label="Disk history · GB free"
                 values={summary.machine.disk}
                 color="var(--fg-2)"
