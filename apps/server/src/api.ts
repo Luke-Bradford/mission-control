@@ -120,7 +120,14 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
+import {
+  COMMS_SNAPSHOT_LIMIT,
+  pinComms,
+  reactComms,
+  sendComms,
+  threadMessages,
+  validateCommsText,
+} from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -993,7 +1000,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .regex(/^comms:\d+$/)
           .optional(),
       });
-      // Reader: apps/web/src/comms/Comms.tsx (operator messages)
+      // Reader: apps/web/src/App.tsx#App (operator messages)
       api.post("/comms", async (req, reply) => {
         const body = commsSendBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -1002,7 +1009,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             {
               store,
               crew: commsCrew(),
-              knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]),
+              knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
             },
@@ -1017,6 +1024,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .send({ error: e instanceof Error ? e.message : "Comms message refused." });
         }
       });
+      // Reader: apps/web/src/App.tsx#App (operator reactions)
       api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
         const body = z
           .strictObject({
@@ -1055,7 +1063,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send({ error: e instanceof Error ? e.message : "Unknown Comms message." });
           }
         };
+      // Reader: apps/web/src/App.tsx#App (operator pins)
       api.put<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(true));
+      // Reader: apps/web/src/App.tsx#App (operator pins)
       api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
@@ -2145,17 +2155,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await sendComms(
+            await validateCommsText(deps.knownSecrets ?? (async () => []), b.text);
+            /* await sendComms(
               {
                 store,
                 crew: commsCrew(),
-                knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]),
+                knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
               },
               COMMS_CAPCOM,
               { to: id, text: b.text, ref: ticket ?? undefined },
-            );
+            ); */
           } catch (e) {
             throw new SupervisorError(
               400,
@@ -2163,6 +2174,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           await sup.message(id, b.text, { interrupt: b.interrupt === true });
+          await sendComms(
+            {
+              store,
+              crew: commsCrew(),
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              now,
+              seatSender: false,
+            },
+            COMMS_CAPCOM,
+            { to: id, text: b.text, ref: ticket ?? undefined },
+          );
           // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
           if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };
