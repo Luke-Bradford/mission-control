@@ -40,6 +40,7 @@ import {
   MC_TOOL_GRANTS,
   MODE_LOOPS,
   modeOfSeat,
+  PNPM_PROJECT_STORE_DIR_NAME,
   PNPM_STORE_DIR_NAME,
   PNPM_STORE_ENV,
   PROTECTED_FILES,
@@ -298,6 +299,7 @@ describe("the allowlist in phase 2b", () => {
     expect(crewPnpmStoreDir("/tmp/mc-test/run-two", "guido-1")).toBe("/tmp/mc-test/pnpm-store");
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe("pnpm-store");
+    expect(PNPM_PROJECT_STORE_DIR_NAME).toBe(".pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
   });
 });

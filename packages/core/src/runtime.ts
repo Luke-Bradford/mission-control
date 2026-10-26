@@ -711,6 +711,8 @@ export const CODEX_CLI_ENV = {
 
 /** The worktree-local pnpm store directory, kept outside every run's temp root. */
 export const PNPM_STORE_DIR_NAME = "pnpm-store";
+/** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
+export const PNPM_PROJECT_STORE_DIR_NAME = ".pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
