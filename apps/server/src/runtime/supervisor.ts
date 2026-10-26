@@ -3269,6 +3269,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: scratch.path,
       });
       const touches = author.loop?.touches;
+      const evidence = store.evidenceNotes(author.id);
+      const prevReply =
+        prev === null
+          ? null
+          : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
       const brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -3281,11 +3286,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         body: ticket.body,
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
-        notes: store.evidenceNotes(author.id).map((e) => e.note),
+        notes: evidence.map((e) => e.note),
         prevSha: prev?.sha ?? null,
         prevFindings: prev
           ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
           : [],
+        prevReply,
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],

@@ -441,6 +441,7 @@ describe("reviewBrief", () => {
     notes: ["Fixed it."],
     prevSha: null,
     prevFindings: [],
+    prevReply: null,
     diffCut: false,
     since: false,
     touches: [],
@@ -476,7 +477,7 @@ describe("reviewBrief", () => {
         "1. Read the ticket and .mc-review/pr.diff. Open a whole file, or the code that calls it, only where the diff leaves a doubt.",
         "2. Run the test files that cover the change, and check that each new behaviour has a test that would fail without it. Mutation-check only to prove a finding: break the code in this copy, confirm a test fails, then put it back.",
         "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
-        "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and the fix: the exact change the author should make, so that it can be applied without redesigning anything.",
+        "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
         "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
         "",
         "## Ticket o/mc#42",
@@ -506,10 +507,11 @@ describe("reviewBrief", () => {
         { severity: "Critical", file: "a.ts", line: 0, summary: "s1", scenario: "w", fix: "f1" },
         { severity: "Important", file: "b.ts", line: 4, summary: "s2", scenario: "w", fix: "f2" },
       ],
+      prevReply: "I checked this case; the suggested change would break it.",
     });
     expect(t).toContain("to aaaaaaa. It was cut at 1 MiB; read the changed files for the rest.");
     expect(t).toContain(
-      "1. Read the ticket and .mc-review/since-last-review.diff first, and check that each finding below was fixed as asked. Go back to .mc-review/pr.diff only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.",
+      "1. Read the ticket and .mc-review/since-last-review.diff first, and judge each finding and the developer's reply below. Go back to .mc-review/pr.diff only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.",
     );
     expect(t).not.toContain("revert or break");
     expect(t).not.toContain("each changed file in full");
@@ -519,11 +521,9 @@ describe("reviewBrief", () => {
     expect(t).toContain(
       "- This PR touches hard-rule files, which the operator merges by hand: CLAUDE.md, .github/**.",
     );
+    expect(t).toContain("report notes, and the findings and reply from the last review.");
     expect(t).toContain(
-      "report notes, and the findings the author was asked to fix after the last review.",
-    );
-    expect(t).toContain(
-      "## Findings the author was asked to fix after the last review\n\n1. [Critical] a.ts — s1\n   Fix asked: f1\n\n2. [Important] b.ts:4 — s2\n   Fix asked: f2",
+      "## Findings and the developer's reply from the last review\n\n1. [Critical] a.ts — s1\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\n2. [Important] b.ts:4 — s2\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
     );
   });
 
@@ -532,7 +532,7 @@ describe("reviewBrief", () => {
     expect(t).toContain(
       "1. Read the ticket and .mc-review/since-last-review.diff first. Go back to .mc-review/pr.diff only for code those changes reach.",
     );
-    expect(t).not.toContain("fixed as asked");
+    expect(t).not.toContain("developer's reply below");
   });
 
   it("cuts notes oldest first", () => {

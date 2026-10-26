@@ -1679,7 +1679,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         newest !== null &&
         (reported === null || newest.at > reported.at) &&
         newest.sha !== loop.ciFailedSha;
-      if (!fresh && !note.startsWith(EVIDENCE_RULING_PREFIX)) {
+      const reviewReply =
+        loop.phase === "review" &&
+        newest !== null &&
+        newest.sha === store.runPush(run.id)?.sha &&
+        store
+          .reviewsOfRun(run.id)
+          .some((r) => r.state === "reported" && r.sha === newest.sha && r.blocking > 0);
+      if (!fresh && !reviewReply && !note.startsWith(EVIDENCE_RULING_PREFIX)) {
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 
@@ -2054,7 +2061,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
                   type: "string",
                   minLength: 1,
                   maxLength: FINDING_FIX_MAX,
-                  description: "The exact change to make: what to write, and where.",
+                  description: "A concrete suggested change: what to write, and where.",
                 },
               },
               required: ["severity", "file", "line", "summary", "scenario", "fix"],

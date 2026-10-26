@@ -49,7 +49,7 @@ export interface ReviewFinding {
   line: number;
   summary: string;
   scenario: string;
-  /** The exact change the author should make. */
+  /** A concrete suggested change for the author. */
   fix: string;
 }
 
@@ -146,10 +146,10 @@ export function fixText(i: {
 }): string {
   const ordered = BLOCKING_SEVERITIES.flatMap((s) => i.findings.filter((f) => f.severity === s));
   const n = ordered.length;
-  const head = `${i.retro} reviewed ${i.sha.slice(0, 7)} and found ${n} ${n === 1 ? "issue" : "issues"} to fix before this PR can merge. Make each change below as written, commit with mc commit, then call mc report_evidence with a note that says what you changed for each number. If a fix is wrong, do not skip it silently: report with a note starting "Ruling:" that names the number and why; the operator will decide.`;
+  const head = `${i.retro} reviewed ${i.sha.slice(0, 7)} and found ${n} ${n === 1 ? "issue" : "issues"} to resolve before this PR can merge. Please address each finding below, or explain in your evidence note why you think it should not change. Commit any fix with mc commit, then call mc report_evidence and say what changed or which finding you are responding to and why. ${i.retro} will review the response.`;
   const entries = ordered.map(
     (f, k) =>
-      `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Fix: ${f.fix}`,
+      `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}`,
   );
   const more = (k: number): string => `…and ${k} more; the next review lists them again.`;
   const build = (kept: number): string => {
@@ -357,8 +357,21 @@ export const readyHardRuleText = (ref: string, pr: number, paths: readonly strin
   `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
-export const reviewParkText = (retro: string, sha: string, rounds = REVIEW_ROUNDS): string =>
-  `${retro} found blocking issues in ${rounds} reviews; the last on ${sha.slice(0, 7)}`;
+export const reviewParkText = (
+  retro: string,
+  sha: string,
+  rounds = REVIEW_ROUNDS,
+  lastWords?: { developer: string; findings: readonly ReviewFinding[] },
+): string => {
+  const base = `${retro} found blocking issues in ${rounds} reviews; the last on ${sha.slice(0, 7)}`;
+  if (lastWords === undefined) return base;
+  const developer = lastWords.developer.slice(0, 1000);
+  const findings = lastWords.findings
+    .map((f) => f.summary.replace(/\s+/g, " ").trim())
+    .join("; ")
+    .slice(0, 1000);
+  return `${base}. Developer's last reply: ${developer}. ${retro}'s last finding: ${findings}`;
+};
 export const reviewFailedParkText = (
   retro: string,
   sha: string,

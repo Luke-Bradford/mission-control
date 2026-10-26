@@ -75,6 +75,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  type ReviewFinding,
   type Run,
   type RunLoop,
   readOnlyToolText,
@@ -2896,6 +2897,42 @@ describe("report_evidence", () => {
     });
     expect(await report("Ruling: still no change")).toEqual({ text: EVIDENCE_RECORDED });
     expect(store.evidenceCount(RUN)).toBe(2);
+  });
+
+  it("accepts a plain reply to a blocking RETRO finding without a new commit", async () => {
+    const sha = await committed();
+    store.setRunPush({ runId: RUN, sha, at: clock });
+    setLoop({ phase: "review" });
+    const review = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: clock,
+    });
+    if (review === null) throw new Error("review was not queued");
+    store.setReviewState(review, ["queued"], "running", { at: clock, runId: "retro:review" });
+    const finding: ReviewFinding = {
+      severity: "Important",
+      file: "apps/a.ts",
+      line: 1,
+      summary: "missing case",
+      scenario: "a reply has no test",
+      fix: "add a test",
+    };
+    store.recordFindings(review, "retro:review", {
+      verdict: { spec: "fail", quality: "pass" },
+      summary: "hold",
+      findings: [finding],
+      at: clock,
+    });
+    expect(await report("1. This case is intentionally unsupported.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
   });
 
   it("records the note, answers EVIDENCE_RECORDED, tells the supervisor and the bus", async () => {

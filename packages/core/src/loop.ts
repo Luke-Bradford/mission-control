@@ -24,7 +24,6 @@ import {
   reviewFailedParkText,
   reviewFor,
   reviewParkText,
-  reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
 import { globMatches } from "./runtime.ts";
@@ -410,7 +409,7 @@ export interface LoopSnapshot {
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
   /** The latest evidence. */
-  evidence: { id: number; at: number; ruling: boolean } | null;
+  evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
   /** The newest run_commits sha. */
   headCommit: string | null;
@@ -709,22 +708,19 @@ function stateStep(s: LoopSnapshot): Step {
 
   const rv = reviewView(s, loop);
   const reporting = loop.phase === "working" || loop.phase === "review";
+  // A developer may answer a RETRO finding without changing the head.  That answer belongs to
+  // RETRO, not the operator: remember which review it answers and request one fresh judgement.
   if (
     loop.phase === "review" &&
-    rv.R !== null &&
     rv.P !== null &&
+    rv.cur !== null &&
     evidence !== null &&
     evidence.id > loop.reportedEvidenceId &&
-    evidence.ruling &&
     headCommit === rv.P &&
     rv.blocked &&
     !rv.waived
   ) {
-    return park(
-      { ...loop, reportedEvidenceId: evidence.id },
-      "review-ruling",
-      reviewRulingParkText(seat.call, rv.R.retro, rv.P),
-    );
+    return unchanged({ ...loop, reportedEvidenceId: evidence.id, reviewReplyTo: rv.cur.id });
   }
   if (reporting && evidence !== null && evidence.id > loop.reportedEvidenceId) {
     const seen = { ...loop, reportedEvidenceId: evidence.id };
@@ -773,9 +769,23 @@ function stateStep(s: LoopSnapshot): Step {
     } else if (
       rv.blocked &&
       !(fixKey(s.runId, loop.epoch, cur.id) in s.claimed) &&
+      loop.reviewReplyTo !== cur.id &&
       fixesSent(s.claimed, s.runId, loop.epoch) + 1 >= rounds
     ) {
-      return park(loop, "review", reviewParkText(R.retro, P, rounds));
+      return park(
+        loop,
+        "review",
+        reviewParkText(
+          R.retro,
+          P,
+          rounds,
+          loop.reviewReplyTo === null ||
+            loop.reviewReplyTo === undefined ||
+            evidence?.note === undefined
+            ? undefined
+            : { developer: evidence.note, findings: R.findings },
+        ),
+      );
     }
   }
 
@@ -1256,7 +1266,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     const { R, P, cur } = rv;
     if (
       cur === null ||
-      (cur.state === "failed" && failedAttempts(R.rows, loop.epoch, P) < REVIEW_ATTEMPTS)
+      (cur.state === "failed" && failedAttempts(R.rows, loop.epoch, P) < REVIEW_ATTEMPTS) ||
+      (cur.state === "reported" && cur.blocking > 0 && loop.reviewReplyTo === cur.id)
     ) {
       actions.push({ kind: "request-review", sha: P, attempt: nextAttempt(R.rows, loop.epoch, P) });
     } else if (cur.state === "reported" && cur.blocking === 0) {

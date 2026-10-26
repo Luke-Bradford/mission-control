@@ -58,9 +58,12 @@ describe("fixText", () => {
         fin({ summary: "c" }),
       ],
     });
-    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to fix");
+    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to resolve");
+    expect(t).toContain("or explain in your evidence note why you think it should not change");
+    expect(t).not.toContain("as written");
+    expect(t).not.toContain("Ruling:");
     expect(t).toContain(
-      "1. [Critical] a.ts — b\n   Why: w\n   Fix: f\n\n2. [Important] a.ts:3 — a",
+      "1. [Critical] a.ts — b\n   Why: w\n   Suggested fix: f\n\n2. [Important] a.ts:3 — a",
     );
     expect(t.indexOf("3. [Important] a.ts:3 — c")).toBeGreaterThan(t.indexOf("2."));
     expect(t).not.toContain(":0");
@@ -80,7 +83,7 @@ describe("fixText", () => {
       sha: "abcdef1",
       findings: [fin({ severity: "Minor" }), fin({ severity: "Critical" })],
     });
-    expect(t).toContain("found 1 issue to fix");
+    expect(t).toContain("found 1 issue to resolve");
     expect(t).not.toContain("2. ");
   });
 });
