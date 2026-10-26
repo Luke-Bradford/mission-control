@@ -219,9 +219,10 @@ export const mainConflictText = (mainSha: string, n: number): string =>
 /** The Activity row for a park. */
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
-  "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. When the work is committed, call mc report_evidence.";
+  "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. There is no turn or time limit: work until it is done or truly blocked; if blocked, name the blocker. When the work is committed, call mc report_evidence.";
 export const NUDGE_TEXT =
-  "No report yet for {ref}. When the work is committed, call mc report_evidence with a note; if you are blocked, say why.";
+  "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
+export const NUDGE_TRIES = 3;
 
 /** Fills `{name}` placeholders of a loop text; an unknown name is left as written. */
 export const fillLoopText = (template: string, vars: Readonly<Record<string, string>>): string =>
@@ -532,7 +533,13 @@ const park = (loop: RunLoop, kind: string, reason: string): Step => ({
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
 
-const nudgeKey = (s: LoopSnapshot): string => `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
+const nudgePrefix = (s: LoopSnapshot): string =>
+  `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
+const nudges = (s: LoopSnapshot): number[] =>
+  Object.entries(s.claimed).flatMap(([key, at]) =>
+    key === nudgePrefix(s) || key.startsWith(`${nudgePrefix(s)}:`) ? [at] : [],
+  );
+const nudgeKey = (s: LoopSnapshot): string => `${nudgePrefix(s)}:${nudges(s).length + 1}`;
 
 /** Working, or in review with a fix committed but not yet reported: the seat owes a report. */
 const owesReport = (s: LoopSnapshot): boolean => {
@@ -907,8 +914,10 @@ function stateStep(s: LoopSnapshot): Step {
     );
   }
   if (owesReport(s)) {
-    const t = s.claimed[nudgeKey(s)];
+    const tried = nudges(s);
+    const t = tried.length === 0 ? undefined : Math.max(...tried);
     if (
+      tried.length >= NUDGE_TRIES &&
       t !== undefined &&
       seat.state === "idle" &&
       !seat.inTurn &&
@@ -916,7 +925,11 @@ function stateStep(s: LoopSnapshot): Step {
       seat.lastTurnEndedAt !== null &&
       seat.lastTurnEndedAt > t
     ) {
-      return park(loop, "silent", "stopped twice without reporting");
+      return park(
+        loop,
+        "silent",
+        `stopped after ${NUDGE_TRIES} carry-on resumes without reporting`,
+      );
     }
   }
   return unchanged(loop);

@@ -137,7 +137,7 @@ describe("ticketBrief profile lines", () => {
       [
         "Template: feature (picked by the label type:feature). Steps: a → b.",
         "CI checks that must pass: lint, test.",
-        "This template needs a ## Plan before a developer starts, at Size M or larger.",
+        "At Size M or larger, write a ## Plan before changing code if the ticket has none.",
         "Before you report, check:",
         "- one\n- two",
       ].join("\n"),
@@ -237,49 +237,56 @@ describe("ticketBrief", () => {
   });
 
   it("planner brief", () => {
-    const last =
-      ticketBrief({
-        ...input,
-        role: "FAO",
-        mode: "read-only",
-        loop: "plan",
-        call: "FAO-1",
-        branch: "",
-      })
-        .split("\n")
-        .at(-1) ?? "";
-    expect(last).toBe(
+    const brief = ticketBrief({
+      ...input,
+      role: "FAO",
+      mode: "read-only",
+      loop: "plan",
+      call: "FAO-1",
+      branch: "",
+    });
+    expect(brief).toContain(
       "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask the operator with mc ask_operator only for a decision you cannot make from the ticket and the code.",
     );
+    expect(brief).toContain("Continue until the plan is recorded or you are truly blocked");
+    expect(brief).not.toContain("Work until the ticket is done");
   });
 
   it("tells a writer to commit with the mc tool and report; Mission Control pushes", () => {
     for (const role of ["GUIDO", "INCO"] as const) {
-      const last =
-        ticketBrief({ ...input, role })
-          .split("\n")
-          .at(-1) ?? "";
-      expect(last).toBe(
+      const brief = ticketBrief({ ...input, role });
+      expect(brief).toContain(
         `You are working in a checkout of branch feature/42-fix-the-stop-race. Change files only inside your area: apps/**. ${WRITER_CLOSE}`,
       );
-      expect(last).not.toContain(OLD_CLOSE);
+      expect(brief).toContain("There is no turn or time limit.");
+      expect(brief).not.toContain(OLD_CLOSE);
     }
   });
 
   it("tells a read-only seat it reads and reports, and may ask the operator", () => {
-    const last = ticketBrief({
+    const brief = ticketBrief({
       ...input,
       call: "RETRO",
       role: "RETRO",
       mode: "read-only",
       loop: "none",
       area: [],
-    })
-      .split("\n")
-      .at(-1);
-    expect(last).toBe(
+    });
+    expect(brief).toContain(
       `You are working in a checkout of branch feature/42-fix-the-stop-race. Read and report only; do not change files. ${READONLY_CLOSE}`,
     );
+    expect(brief).toContain("There is no turn or time limit.");
+  });
+
+  it("tells a planless build seat to record its plan before coding", () => {
+    const brief = ticketBrief({ ...input, planless: true });
+    expect(brief).toContain("This ticket has no ## Plan. Before changing code, write its plan");
+    expect(brief).toContain("then continue this run and build it.");
+  });
+
+  it("does not tell a planner to build a planless ticket", () => {
+    const brief = ticketBrief({ ...input, loop: "plan", planless: true });
+    expect(brief).not.toContain("then continue this run and build it.");
   });
 });
 

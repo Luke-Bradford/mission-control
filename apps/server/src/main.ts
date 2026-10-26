@@ -459,7 +459,7 @@ export async function main(): Promise<void> {
     engine,
     updater,
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
-    ...crewGuardDeps(config, tokens, lock),
+    ...crewGuardDeps(config, tokens, lock, store),
     mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],
   });

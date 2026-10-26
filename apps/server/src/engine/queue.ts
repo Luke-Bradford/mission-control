@@ -282,7 +282,6 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
           ({ seat }) =>
             eligibleToStart({
               ...(away ? { away: { pickUp: away.may.pickUp, flight: false } } : {}),
-              planRequired: chosen.profile.planRequired,
               repoId,
               issue: card.issueNumber,
               card,
