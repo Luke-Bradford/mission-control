@@ -3074,6 +3074,51 @@ describe("report_evidence", () => {
     expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
+  it.each(["review", "silent", "refused"])(
+    "records fresh evidence and resumes a %s park",
+    async (kind) => {
+      setLoop({
+        phase: "parked",
+        parked: { kind, reason: "parked", ended: false },
+        transient: 2,
+        lastRefusal: "no",
+      });
+      await committed();
+      expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.run(RUN)?.loop).toMatchObject({
+        phase: "working",
+        parked: null,
+        transient: 0,
+        lastRefusal: null,
+      });
+      expect(told).toEqual([["guido-1", RUN]]);
+    },
+  );
+
+  it.each(["budget", "account-stop"])("keeps a %s park held", async (kind) => {
+    setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+    await committed();
+    expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+  });
+
+  it("records a refused retry for the same pushed and reported head", async () => {
+    const sha = await committed();
+    expect(await report("first report")).toEqual({ text: EVIDENCE_RECORDED });
+    const reported = store.latestEvidence(RUN);
+    if (reported === null) throw new Error("evidence was not recorded");
+    setLoop({
+      phase: "parked",
+      parked: { kind: "refused", reason: "refused", ended: false },
+      pushFor: sha,
+      reportedEvidenceId: reported.id,
+    });
+
+    expect(await report("retry after refusal")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.evidenceCount(RUN)).toBe(2);
+    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
+  });
+
   it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
     for (let i = 0; i < 12; i++) write(`apps/f${String(i).padStart(2, "0")}.ts`, "x\n");
     const r = await report("done");
@@ -3145,6 +3190,37 @@ describe("report_evidence", () => {
     expect(await call(moved({ phase: "parked" }))).toEqual(refused(EVIDENCE_PARKED));
     expect(await call(moved({ ciFailedSha: head() }))).toEqual(refused(EVIDENCE_NO_COMMIT));
     expect(store.evidenceCount(RUN)).toBe(0);
+  });
+
+  it("does not unpark when a budget hold lands while git status is pending", async () => {
+    await committed();
+    let statusReads = 0;
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delayed = make({
+      now: () => clock,
+      git: async (cwd, args, common, options) => {
+        if (cwd === wt && args[0] === "status") {
+          statusReads++;
+          await pending;
+        }
+        return crewGit(cwd, args, common, options);
+      },
+    });
+    setLoop({ phase: "parked", parked: { kind: "review", reason: "waiting", ended: false } });
+    const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
+    await vi.waitFor(() => expect(statusReads).toBe(1));
+    setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+    release();
+
+    expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(store.run(RUN)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+    });
   });
 
   it("refuses a report with no commit since the last one, and takes it after a new one", async () => {

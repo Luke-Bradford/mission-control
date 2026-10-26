@@ -70,6 +70,7 @@ export function Header({ page }: { page: Page }) {
       <div className="top-status">
         <Usage />
         <Clock />
+        <MachineButton />
         <SessionSelect />
         <NeedsButton items={attention} />
         <AwayButton />
@@ -79,7 +80,6 @@ export function Header({ page }: { page: Page }) {
       <span className="sr-only">
         <LiveIndicator />
         <Met />
-        <MachineButton />
       </span>
     </header>
   );
@@ -114,9 +114,8 @@ function Usage() {
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const used = (vendor: "claude" | "codex") => {
     const ids = new Set(config?.accounts.filter((a) => a.vendor === vendor).map((a) => a.id) ?? []);
-    const rows = limits.filter((row) => ids.has(row.accountId));
-    const row = rows.find((r) => r.window === "7d") ?? rows[0];
-    return row ? `${Math.round(row.used)}%` : "—";
+    const rows = limits.filter((row) => ids.has(row.accountId) && row.window === "7d");
+    return rows.length > 0 ? `${Math.round(Math.max(...rows.map((row) => row.used)))}%` : "—";
   };
   return (
     <span
@@ -341,7 +340,7 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: toggles the dock; an amber badge counts the asks FLIGHT has put to you. */
+/** FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. */
 function DockButton({ page }: { page: Page }) {
   const dock = useDock();
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -350,17 +349,24 @@ function DockButton({ page }: { page: Page }) {
     () => waitingAsks(attention ?? [], decisions ?? []).length,
     [attention, decisions],
   );
+  const inComms = page === "comms";
+  const inSetup = page === "setup";
+  const title = inComms
+    ? "FLIGHT chat is open in Comms"
+    : inSetup
+      ? "Open FLIGHT chat in Comms (f)"
+      : "Show or hide FLIGHT's chat (f)";
   return (
     <button
       type="button"
-      className={`iconbtn${dock.visible ? " on" : ""}`}
-      title="Show or hide FLIGHT's chat (f)"
+      className={`iconbtn${inComms || (!inSetup && dock.visible) ? " on" : ""}`}
+      title={title}
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={dock.visible}
+      aria-pressed={inComms ? true : inSetup ? undefined : dock.visible}
       onClick={() => {
-        // On the two full-width shells FLIGHT is read in Comms rather than as a competing column.
-        if (page === "comms" || page === "setup") navigate(PAGE_PATHS.comms);
-        else dock.toggle();
+        if (inSetup) navigate(PAGE_PATHS.comms);
+        // Comms already is FLIGHT's full conversation; the dock is not mounted here.
+        else if (!inComms) dock.toggle();
       }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">

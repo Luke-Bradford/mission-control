@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const main = readFileSync(join(import.meta.dirname, "../src/main.tsx"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
@@ -80,6 +81,10 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.top`)).toContain("gap: 8px 20px");
     expect(rule(String.raw`\.top-status`)).toContain("margin-left: auto");
     expect(desktop).not.toContain("display: none");
+  });
+
+  it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
+    expect(main).toContain('"@fontsource/barlow-semi-condensed/latin-700.css"');
   });
 });
 

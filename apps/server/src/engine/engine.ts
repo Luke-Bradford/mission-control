@@ -1707,9 +1707,17 @@ export function createEngine(deps: EngineDeps): Engine {
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
     const author = store.run(row.authorRunId);
     if (author === null) return true;
+    const ownAuthor = store
+      .pullRequests(author.repoId)
+      .find((pr) => pr.number === row.prNumber)?.author;
     const older = store
       .pullRequests(author.repoId)
-      .filter((pr) => pr.state !== "closed" && pr.number < row.prNumber);
+      .filter(
+        (pr) =>
+          pr.state !== "closed" &&
+          pr.number < row.prNumber &&
+          !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
+      );
     if (older.length === 0) return false;
     try {
       const rules = await rulesFor(author.repoId);

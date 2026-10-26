@@ -79,7 +79,7 @@ export function App() {
   }, [path]);
   const dock = useDock();
   // Comms has its own FLIGHT conversation and Setup needs the approved full-width configuration
-  // frame. The dock remains available on the operational pages and through the header shortcut.
+  // frame. The dock remains available on the operational pages.
   const showDock = shown.page !== "comms" && shown.page !== "setup";
   const [buildStatus] = useBuildStatus();
   const cls = [
@@ -221,7 +221,14 @@ function useShellKeys(current: Route, popout: boolean) {
         if (latest.current.popout) return;
         if (route(to)?.page !== latest.current.current.page) navigate(to);
       },
-      toggleDock: () => toggleDock(),
+      toggleDock: () => {
+        const { current: on, popout: isPopout } = latest.current;
+        // Setup opens FLIGHT in its full Comms view. Comms is already that view, and neither
+        // Comms, Setup nor a pop-out mounts the dock, so never change its stored state there.
+        if (isPopout || on.page === "comms") return;
+        if (on.page === "setup") navigate(PAGE_PATHS.comms);
+        else toggleDock();
+      },
       help: openHelp,
       selectNext: () => select(1),
       selectPrev: () => select(-1),

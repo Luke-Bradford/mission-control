@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { navigate } from "../src/router.ts";
+import { toggleDock } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, REPOS } from "./fixtures.ts";
 
@@ -76,6 +77,29 @@ describe("App", () => {
       fireEvent.keyDown(document.body, { key: "?" });
     });
     expect(screen.getByRole("dialog", { name: "Keys and lamps" })).toBeTruthy();
+  });
+
+  it("opens FLIGHT in Comms from Setup without changing the unmounted dock state", async () => {
+    act(() => toggleDock(false));
+    const { container } = at("/setup");
+    await waitFor(() => expect(container.querySelector("#page-setup")).not.toBeNull());
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+    });
+    expect(window.location.pathname).toBe("/comms");
+    await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    // On Comms, FLIGHT is already open: f must not toggle a dock that is not mounted.
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+      navigate("/");
+    });
+    await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   it("i off the agent page toasts", () => {
