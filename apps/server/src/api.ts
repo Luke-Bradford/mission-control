@@ -14,6 +14,7 @@ import {
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_LABELS,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
@@ -296,6 +297,8 @@ export interface AppDeps {
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
+  /** Delivers a direct Comms message to a local live seat. */
+  deliverComms?: (seatId: string, text: string) => Promise<void>;
   store: Store;
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
@@ -990,7 +993,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const commsSendBody = z.strictObject({
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
-        label: z.enum(["question", "handoff", "blocker"]).optional(),
+        label: z.enum(COMMS_LABELS).optional(),
         ref: z
           .string()
           .regex(/^(?:#\d+|PR \d+)$/)
@@ -1012,6 +1015,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              notify: (seatId, text) => void deps.deliverComms?.(seatId, text),
             },
             COMMS_CAPCOM,
             body.data,

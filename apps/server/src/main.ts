@@ -446,6 +446,12 @@ export async function main(): Promise<void> {
     operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
+    deliverComms: async (seatId, text) => {
+      await messageUnpausedSeat(store, supervisor, seatId, text, {
+        interrupt: false,
+        questions: "none",
+      });
+    },
     config,
     store,
     bus,
