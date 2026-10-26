@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LOOPBACK_HOST, type RepoId } from "@mc/core";
+import { COMMS_CAPCOM, LOOPBACK_HOST, type RepoId, seatCallSign } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
@@ -194,6 +194,18 @@ export async function main(): Promise<void> {
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
+  const deliverComms = (seatId: string, text: string, from: string): void => {
+    const sender = from === COMMS_CAPCOM ? COMMS_CAPCOM : seatCallSign(from);
+    const envelope = `Comms from ${sender}: ${text}`;
+    void messageUnpausedSeat(store, supervisor, seatId, envelope, {
+      interrupt: false,
+      questions: "none",
+    }).catch((e: unknown) => {
+      log(
+        `comms: could not deliver ${sender} to ${seatId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    });
+  };
   const mcDeps: McToolsDeps = {
     config,
     store,
@@ -214,6 +226,8 @@ export async function main(): Promise<void> {
         );
       });
     },
+    crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+    onComms: deliverComms,
   };
   const mcTools = createMcTools(mcDeps);
 
@@ -439,6 +453,7 @@ export async function main(): Promise<void> {
     operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
+    deliverComms,
     config,
     store,
     bus,

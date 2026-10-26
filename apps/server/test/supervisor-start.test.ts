@@ -2254,7 +2254,6 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
-      PNPM_STORE_ENV,
       "UV_CACHE_DIR",
       "PYTHONPYCACHEPREFIX",
       "RUFF_CACHE_DIR",
@@ -2263,6 +2262,9 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
+    expect(spawn.env[PNPM_STORE_ENV]).toBe(
+      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+    );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
@@ -2289,6 +2291,7 @@ import(${JSON.stringify(fixture)});
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    expect(config).not.toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
       JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
     );

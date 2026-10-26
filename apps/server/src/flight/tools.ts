@@ -293,7 +293,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { threadMessages } from "../comms.ts";
+import { canReadComms, pinComms, sendComms, threadMessages } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -621,6 +621,10 @@ const MessageSeatArgs = z
       (a.text !== undefined || (a.unpark === undefined && a.runId === undefined)),
     "Provide text, focus or read_focus, separately.",
   );
+const CommsPinArgs = z.strictObject({
+  id: z.string().regex(/^comms:\d+$/),
+  pinned: z.boolean(),
+});
 const QueuePromotionArgs = z.strictObject({
   action: z.literal("queue-reorder"),
   seat: z.string().regex(SEAT_ID),
@@ -829,6 +833,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const runId = store.seatSession(seatId)?.runId ?? null;
     const run = runId === null ? null : store.run(runId);
     return run !== null && run.endedAt === null ? run : null;
+  };
+  const commsPin = async (ctx: McToolContext, args: unknown): Promise<Result> => {
+    const checked = flightCall(deps, ctx, CommsPinArgs, args);
+    if (!checked.ok) return checked.result;
+    if (flightSeat(config)?.seat.id !== ctx.seatId) return fail(MC_FLIGHT_ONLY);
+    try {
+      const message = store.commsMessage(checked.args.id);
+      if (message === null) return fail("Unknown Comms message.");
+      if (!canReadComms(store, ctx.seatId, message))
+        return fail("You cannot pin that Comms message.");
+      pinComms(store, ctx.seatId, checked.args.id, checked.args.pinned, now());
+      bus.emit("agents");
+      return { text: checked.args.pinned ? "Comms message pinned." : "Comms message unpinned." };
+    } catch (e) {
+      return { text: e instanceof Error ? e.message : "Comms pin refused.", isError: true };
+    }
   };
   const record = (
     at: number,
@@ -1232,24 +1252,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         onSeat: store.seatSession(seat)?.runId === run.id,
       };
     }
-    // (a set-aside run has no seat to message: the seat is on another run, or none)
-    if (lift === null || lift.onSeat) {
-      try {
-        await deps.supervisor.message(seat, `FLIGHT: ${body}`, {
-          interrupt: false,
-          questions: "none",
-        });
-      } catch (e) {
-        return fail(notSentText(e instanceof Error ? e.message : String(e)));
-      }
+    // sendComms rechecks the crew after scanning, before its delivery callback runs.
+    try {
+      await sendComms(
+        {
+          store,
+          crew: () =>
+            config.crew?.sessions.flatMap((session) => session.seats.map((member) => member.id)) ??
+            [],
+          knownSecrets: deps.knownSecrets,
+          now: () => at,
+          seatSender: false,
+          notify: async (to, text) => {
+            // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
+            if (to !== seat || (lift !== null && !lift.onSeat)) return;
+            try {
+              await deps.supervisor.message(seat, `FLIGHT: ${text}`, {
+                interrupt: false,
+                questions: "none",
+              });
+            } catch (e) {
+              throw new Error(notSentText(e instanceof Error ? e.message : String(e)));
+            }
+          },
+        },
+        ctx.seatId,
+        { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+      );
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "Message refused.");
     }
-    store.addComms({
-      at,
-      from: ctx.seatId,
-      to: seat,
-      ticket: unendedRun(seat)?.ticket ?? null,
-      text: body,
-    });
     bus.emit("agents");
     const lifted =
       lift !== null &&
@@ -2827,6 +2859,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: messageSeat,
+    },
+    {
+      name: MC_TOOL_NAMES.commsPin,
+      description: "Pin or unpin a stored Comms message. Only the live FLIGHT run may do this.",
+      inputSchema: z.toJSONSchema(CommsPinArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: commsPin,
     },
     {
       name: MC_TOOL_NAMES.flightState,

@@ -211,7 +211,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).toContain("mcp__mc__ask_operator");
   });
 
-  it("a read-only seat may ask the operator, and nothing that writes", () => {
+  it("a read-only seat may ask the operator and send Comms, with no git writes", () => {
     expect(READONLY_TOOLS).toContain(MC_TOOLS.askOperator);
     for (const t of MC_WRITER_TOOLS) expect(READONLY_TOOLS as readonly string[]).not.toContain(t);
     const a = crewCliArgs({ ...base, mode: "read-only" });
@@ -219,6 +219,8 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_operator",
       "mcp__mc__report_evidence",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 
@@ -260,6 +262,9 @@ describe("the allowlist in phase 2b", () => {
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
+      commsSend: "mcp__mc__comms_send",
+      commsReact: "mcp__mc__comms_react",
+      commsPin: "mcp__mc__comms_pin",
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
       endRun: "mcp__mc__end_run",
@@ -298,7 +303,7 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
+  it("keeps Claude pnpm stores private", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
@@ -557,6 +562,7 @@ describe("crew constants", () => {
           "answer_question",
           "start_seat",
           "message_seat",
+          "comms_pin",
           "flight_state",
           "promote",
           "end_run",
@@ -657,6 +663,7 @@ describe("mc tool grants", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "comms_pin",
       "flight_state",
       "promote",
       "end_run",
@@ -756,6 +763,8 @@ describe("scratch mode", () => {
       "Bash(pnpm -s vitest:*)",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 

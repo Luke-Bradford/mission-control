@@ -1842,6 +1842,109 @@ describe("comms", () => {
       text: "late",
     });
   });
+
+  it("migrates a retained legacy comms table additively", () => {
+    const legacyPath = join(dir, "legacy-comms.sqlite");
+    const legacy = new DatabaseSync(legacyPath);
+    legacy.exec(`CREATE TABLE comms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+      to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
+    ); INSERT INTO comms(at,from_id,to_id,ticket,text) VALUES(1,'a','b',NULL,'legacy')`);
+    legacy.close();
+    const migrated = new Store(legacyPath);
+    try {
+      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: null });
+      expect(migrated.addComms({ ...row("new"), label: "question", ref: "#7" })).toMatchObject({
+        label: "question",
+        ref: "#7",
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
+  it("stores complete rows, related facts and monotonic scoped cursors", () => {
+    const first = store.addComms({
+      ...row("@b first"),
+      label: "handoff",
+      ref: "#7",
+      mentions: ["b"],
+    });
+    const second = store.addComms({ ...row("second", 101), replyTo: first?.id });
+    if (first === null || second === null) throw new Error("Comms rows were not stored");
+    expect(store.addCommsReaction(first.id, "b", "cant", "blocked", 102)).toMatchObject({
+      messageId: first.id,
+      reaction: "cant",
+    });
+    expect(store.setCommsPinned(second.id, true, "CAPCOM", 103)).toBe(true);
+    expect(store.commsForAgent("guido-1")[0]).toMatchObject({
+      id: first.id,
+      label: "handoff",
+      ref: "#7",
+      mentions: ["b"],
+    });
+    expect(store.commsReactions(first.id)).toHaveLength(1);
+    expect(store.commsPins().map((m) => m.id)).toEqual([second.id]);
+    expect(store.commsMentions("b").map((m) => m.id)).toEqual([first.id]);
+    store.markCommsScopeRead("crew", second.id);
+    store.markCommsScopeRead("crew", first.id);
+    expect(store.commsScopeCursor("crew")).toBe(second.id);
+  });
+
+  it("accepts only prefixed Comms IDs for reads and related writes", () => {
+    const message = store.addComms(row("stored"));
+    if (message === null) throw new Error("Comms row was not stored");
+    expect(store.commsMessage("1")).toBeNull();
+    expect(store.addCommsReaction("1", "b", "seen", undefined, 1)).toBeNull();
+    expect(store.setCommsPinned("1", true, "CAPCOM", 1)).toBe(false);
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("enforces SQL reaction and label constraints", () => {
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const inserted = db
+      .prepare("INSERT INTO comms(at,from_id,to_id,ticket,text) VALUES(1,'a','b',NULL,'x')")
+      .run();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO comms_reactions(message_id,actor_id,reaction,reason,at) VALUES(?,?,?,?,?)",
+        )
+        .run(inserted.lastInsertRowid, "a", "cant", null, 1),
+    ).toThrow();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO comms(at,from_id,to_id,ticket,text,label) VALUES(1,'a','b',NULL,'x','nope')",
+        )
+        .run(),
+    ).toThrow();
+  });
+
+  it("rate limits atomically and hydrates only ticket candidates with no linked PR", () => {
+    const first = store.addComms({ ...row("first") }, { since: 0, limit: 1 });
+    expect(first).not.toBeNull();
+    expect(store.addComms({ ...row("second", 101) }, { since: 0, limit: 1 })).toBeNull();
+    for (let i = 0; i < 40; i++) store.addComms({ ...row(`unrelated ${i}`, 200 + i) });
+    const ref = store.addComms({ ...row("mentions #703", 300) });
+    const direct = store.addComms({ ...row("ref", 301), ref: "#703" });
+    const hydrate = vi.spyOn(store as never, "commsRow" as never);
+    expect(store.commsForTicket("#703").rows.map((m) => m.id)).toEqual([ref?.id, direct?.id]);
+    expect(hydrate).toHaveBeenCalledTimes(2);
+  });
+
+  it("prunes dependent Comms rows with their retained message", async () => {
+    const old = store.addComms({ ...row("old", 0), mentions: ["b"] });
+    if (old === null) throw new Error("Comms row was not stored");
+    store.addCommsReaction(old.id, "b", "seen", undefined, 1);
+    store.setCommsPinned(old.id, true, "CAPCOM", 1);
+    await store.pruneHistory(91 * 86_400_000);
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_mentions").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_reactions").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_pins").get()).toEqual({ n: 0 });
+  });
 });
 
 describe("test lock history", () => {

@@ -13,16 +13,16 @@ export const COMMS_CAPCOM = "CAPCOM";
 /** `who` of a comms row Mission Control's engine sent. */
 export const COMMS_MC = "MC";
 /** Stored Comms content in code points; longer copies append a cut marker. Delivery stays whole. */
-export const COMMS_TEXT_MAX = 32_000;
+export {
+  COMMS_MESSAGE_BODY_LIMIT,
+  COMMS_MESSAGE_MAX,
+  COMMS_TEXT_MAX,
+  commsCutMarker,
+} from "./comms.ts";
 /** Maximum stored Teams message text. */
 export const TEAMS_TEXT_MAX = 12_000;
 /** A Comms preview in Activity, including the ellipsis when cut. */
 export const COMMS_PREVIEW_MAX = 500;
 
 /** Maximum operator message length accepted at the API boundary. */
-export const COMMS_MESSAGE_MAX = COMMS_TEXT_MAX;
 /** Allow every character to be JSON-escaped, plus the request envelope. */
-export const COMMS_MESSAGE_BODY_LIMIT = COMMS_MESSAGE_MAX * 6 + 1024;
-
-export const commsCutMarker = (kept: number, total: number): string =>
-  `\n[stored text cut at ${kept} of ${total} characters]`;

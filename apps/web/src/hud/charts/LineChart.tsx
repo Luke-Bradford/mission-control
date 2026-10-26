@@ -204,8 +204,14 @@ export function LineChart({
           width={w}
           title={at(hover)}
           rows={series.map((s) => {
-            const p = nearest(valued(s), hover);
-            return { key: s.id, name: s.name, color: s.color, value: p ? pct(p.v) : "—" };
+            // A shared crosshair must not invent a value from another sample time.
+            const value = s.points.find((point) => point.at === hover)?.v;
+            return {
+              key: s.id,
+              name: s.name,
+              color: s.color,
+              value: value === null || value === undefined ? "—" : pct(value),
+            };
           })}
         />
       )}

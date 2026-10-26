@@ -408,6 +408,271 @@ const post = (url: string, headers: Record<string, string> = json, body: object 
 const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
+describe("Comms API", () => {
+  const commsConfig = (): CcConfig => ({
+    ...config,
+    crew: {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 4,
+      sessions: [
+        {
+          id: "crew",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            {
+              id: "flight",
+              role: "FLIGHT",
+              accountId: "claude-main",
+              model: "haiku",
+              area: [],
+            },
+            {
+              id: "alpha",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["apps/**"],
+            },
+            {
+              id: "beta",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["web/**"],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  const withCommsApp = async (
+    fn: (comms: FastifyInstance, delivered: ReturnType<typeof vi.fn>) => Promise<void>,
+  ) => {
+    const delivered = vi.fn();
+    const comms = buildApp({
+      config: commsConfig(),
+      store,
+      bus,
+      now: () => clock,
+      knownSecrets: async () => [],
+      deliverComms: delivered,
+    });
+    await comms.ready();
+    try {
+      await fn(comms, delivered);
+    } finally {
+      await comms.close();
+    }
+  };
+
+  const commsRow = (from: string, to: string, text: string, at = clock) => {
+    const row = store.addComms({
+      at,
+      from,
+      to,
+      ticket: null,
+      text,
+      mentions: text.includes("@CAPCOM") ? ["CAPCOM"] : [],
+    });
+    if (row === null) throw new Error("Comms row was not stored");
+    clock++;
+    return row;
+  };
+
+  it("returns cursor-derived unread counts for every page scope and keeps scopes isolated", async () => {
+    const crew = commsRow("alpha", "crew", "crew");
+    const flight = commsRow("CAPCOM", "flight", "flight");
+    const inbox = commsRow("beta", "alpha", "inbox");
+    const all = commsRow("alpha", "CAPCOM", "all");
+    await withCommsApp(async (comms) => {
+      const getComms = async (url: string) => (await comms.inject({ method: "GET", url })).json();
+      const read = (scope: string, messageId: string) =>
+        comms.inject({
+          method: "POST",
+          url: "/api/comms/read",
+          headers: json,
+          payload: { scope, messageId },
+        });
+      for (const [url, scope, id, key] of [
+        ["/api/comms/crew", "crew", crew.id, "unread"],
+        ["/api/comms/flight", "flight", flight.id, "unread"],
+        ["/api/comms/agents/alpha", "agent-all:alpha", all.id, "unread"],
+        ["/api/comms/agents/alpha", "inbox:alpha", inbox.id, "inboxUnread"],
+      ] as const) {
+        expect((await getComms(url))[key]).toBeGreaterThan(0);
+        expect((await read(scope, id)).statusCode).toBe(200);
+        expect((await getComms(url))[key]).toBe(0);
+      }
+      const agent = await getComms("/api/comms/agents/alpha");
+      expect(agent).toMatchObject({
+        cursor: all.id,
+        inboxCursor: inbox.id,
+        unread: 0,
+        inboxUnread: 0,
+      });
+      expect((await getComms("/api/comms/crew")).cursor).toBe(crew.id);
+      expect((await getComms("/api/comms/flight")).cursor).toBe(flight.id);
+    });
+  });
+
+  it("sends, reacts to, and pins CAPCOM messages with validation and exactly-once direct delivery", async () => {
+    await withCommsApp(async (comms, delivered) => {
+      const postComms = (url: string, payload: object) =>
+        comms.inject({ method: "POST", url, headers: json, payload });
+      const sent = await postComms("/api/comms", {
+        to: "alpha",
+        text: "operator @beta",
+        label: "question",
+        ref: "#703",
+      });
+      expect(sent.statusCode).toBe(200);
+      const message = sent.json().message;
+      expect(message).toMatchObject({
+        from: "CAPCOM",
+        operator: true,
+        label: "question",
+        ref: "#703",
+      });
+      expect(delivered).toHaveBeenCalledTimes(2);
+      expect(delivered).toHaveBeenCalledWith("alpha", "operator @beta", "CAPCOM");
+      expect(delivered).toHaveBeenCalledWith("beta", "operator @beta", "CAPCOM");
+      expect(
+        (
+          await postComms(`/api/comms/${message.id}/reactions`, {
+            reaction: "cant",
+            reason: "blocked",
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await comms.inject({
+            method: "PUT",
+            url: `/api/comms/${message.id}/pin`,
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await comms.inject({
+            method: "DELETE",
+            url: `/api/comms/${message.id}/pin`,
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(200);
+      for (const payload of [
+        { to: "nobody", text: "x" },
+        { to: "alpha", text: "x", label: "wrong" },
+        { to: "alpha", text: "x", ref: "703" },
+        { to: "alpha", text: "x", extra: true },
+      ])
+        expect((await postComms("/api/comms", payload)).statusCode).toBe(400);
+      for (const payload of [
+        { reaction: "nope" },
+        { reaction: "cant" },
+        { reaction: "seen", reason: "why" },
+      ])
+        expect((await postComms(`/api/comms/${message.id}/reactions`, payload)).statusCode).toBe(
+          400,
+        );
+    });
+  });
+
+  it("rejects malformed reaction and pin message IDs without adding related rows", async () => {
+    const message = commsRow("alpha", "beta", "stored");
+    await withCommsApp(async (comms) => {
+      for (const [method, url, payload] of [
+        ["POST", "/api/comms/1/reactions", { reaction: "seen" }],
+        ["PUT", "/api/comms/1/pin", {}],
+      ] as const)
+        expect((await comms.inject({ method, url, headers: json, payload })).statusCode).toBe(400);
+    });
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
+    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703");
+    commsRow("beta", "crew", "not #7030");
+    const pinned = commsRow("beta", "alpha", "pin");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", clock++);
+    await withCommsApp(async (comms) => {
+      const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
+      expect(ticket.json()).toMatchObject({ ticket: { ref: "#703", linkedPr: null } });
+      expect(ticket.json().messages.map((m: { id: string }) => m.id)).toEqual([mention.id]);
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number: 711,
+            title: "linked",
+            url: "",
+            branch: "fix/703",
+            ticket: "shop-app#703",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: clock,
+            updatedAt: clock,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        clock,
+      );
+      const linked = store.addComms({
+        at: clock++,
+        from: "beta",
+        to: "crew",
+        ticket: null,
+        text: "ignored",
+        ref: "PR 711",
+      });
+      const linkedTicket = (
+        await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" })
+      ).json();
+      expect(linkedTicket).toMatchObject({
+        ticket: { ref: "#703", linkedPr: "PR 711" },
+      });
+      expect(linkedTicket.messages.map((m: { id: string }) => m.id)).toContain(linked?.id);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0],
+      ).toMatchObject({
+        message: { id: mention.id },
+        seen: false,
+      });
+      expect(
+        (
+          await comms.inject({
+            method: "POST",
+            url: "/api/comms/mentions/seen",
+            headers: json,
+            payload: { ids: [mention.id] },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+      ).toBe(true);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
+      ).toBe(pinned.id);
+      expect((await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links).toEqual(
+        expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew", count: 1 })]),
+      );
+    });
+  });
+});
+
 const run = (over: Partial<Run>): Run => ({
   id: "r",
   agentId: "shop-app-ta",
@@ -456,6 +721,21 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/agents/shop-app-ta/stream"],
   ["GET", "/api/comms/guido-1"],
   ["POST", "/api/comms/guido-1/read", { messageIds: [] }],
+  ["GET", "/api/comms/crew"],
+  ["GET", "/api/comms/flight"],
+  ["GET", "/api/comms/agents/guido-1"],
+  ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
+  ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
+  ["GET", "/api/comms/tickets/%237"],
+  ["GET", "/api/comms/mentions"],
+  ["POST", "/api/comms/mentions/seen", { ids: [] }],
+  ["GET", "/api/comms/pins"],
+  ["GET", "/api/comms/links"],
+  ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
+  ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
+  ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
+  ["PUT", "/api/comms/comms:1/pin", {}],
+  ["DELETE", "/api/comms/comms:1/pin", {}],
   ["GET", "/api/agents/shop-app-ta/files"],
   ["GET", "/api/agents/shop-app-ta/files/diff?path=a.ts"],
   ["GET", "/api/agents/guido-1/stream"],
@@ -983,6 +1263,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
@@ -1274,9 +1555,14 @@ describe("local access", () => {
           `${m} ${u
             .split("?")[0]
             ?.replace("/attention/unknown", "/attention/:key")
+            .replace("/comms/agents/guido-1/contacts/CAPCOM", "/comms/agents/:id/contacts/:contact")
+            .replace("/comms/agents/guido-1", "/comms/agents/:id")
+            .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
+            .replace("/comms/tickets/%237", "/comms/tickets/:ref")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
+            .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
@@ -5246,7 +5532,7 @@ describe("the first loop's engine", () => {
     touches: null,
     cardFor: null,
   } as const;
-  const engineApp = (seatRunId: string | null) => {
+  const engineApp = (seatRunId: string | null, knownSecrets?: () => Promise<readonly string[]>) => {
     const told: string[] = [];
     const sup = stubSupervisor();
     sup.seat = () =>
@@ -5266,6 +5552,7 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: sup,
+      knownSecrets,
       engine: {
         onOperatorMessage: async (runId) => {
           told.push(runId);
@@ -5394,6 +5681,29 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(409);
     expect(store.comms(0)).toHaveLength(1);
     await none.a.close();
+  });
+
+  it("does not deliver or store when the seat leaves during secret scanning", async () => {
+    let scanned!: () => void;
+    let release!: () => void;
+    const scanStarted = new Promise<void>((resolve) => (scanned = resolve));
+    const scan = new Promise<readonly string[]>((resolve) => (release = () => resolve([])));
+    const { a } = engineApp(null, () => {
+      scanned();
+      return scan;
+    });
+    const pending = message(a);
+    await scanStarted;
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("expected crew session");
+    session.seats = session.seats.filter((seat) => seat.id !== "guido-1");
+    release();
+    const response = await pending;
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Unknown Comms destination." });
+    expect(supervisorCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+    await a.close();
   });
 
   it("does not when the message is refused", async () => {

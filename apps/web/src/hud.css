@@ -1183,7 +1183,7 @@ main > section {
   position: relative;
   height: 100%;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: 0;
   border-right: 2px solid var(--ok);
   background: var(--bg);
 }
@@ -1191,7 +1191,8 @@ main > section {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  border-radius: 2px;
+  min-width: 1px;
+  border-radius: 0;
 }
 .overview-tick {
   position: absolute;
@@ -1800,21 +1801,39 @@ main > section {
   padding: 3px 0;
   font-size: var(--fs-s);
 }
-#machP .ph,
+#machP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+}
 #quotaP .ph {
   padding: 8px 10px;
+  flex-wrap: nowrap;
+}
+#timelineP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
 }
 #machP .pb,
 #quotaP .pb {
   padding: 0 10px 10px;
 }
 #machP .resrow {
-  grid-template-columns: 42px minmax(24px, 1fr) auto;
+  grid-template-columns: 42px minmax(24px, 1fr) 128px;
   gap: 6px;
+  align-items: center;
 }
 #machP .resrow .spark {
   width: 100%;
   height: 24px;
+}
+#machP .machine-chart {
+  width: 100%;
+  height: 24px;
+}
+#machP .machine-gridline {
+  stroke: var(--line-2);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 #machP .resrow .num {
   font-size: var(--fs-xs);
@@ -2632,6 +2651,133 @@ pre.diff .h {
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 12px;
   height: 100%;
+}
+.comms-page,
+.comms-grid,
+.comms-left,
+.comms-agent,
+.comms-agent #chatP,
+.comms-agent #chatP .panel-body {
+  min-height: 0;
+}
+.comms-page {
+  height: 100%;
+}
+.comms-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+}
+.comms-left,
+.comms-nav,
+.comms-contacts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.comms-decisions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  max-height: 46%;
+  min-height: 0;
+}
+.comms-decision-list {
+  min-height: 0;
+  overflow: auto;
+}
+.comms-nav,
+.comms-contacts {
+  flex: 1 1 auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.comms-nav button,
+.comms-contacts button {
+  padding: 10px 12px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.comms-nav button.on,
+.comms-contacts button.on {
+  background: var(--accent-soft);
+}
+.comms-nav p {
+  margin: 12px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.comms-nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comms-nav-row small,
+.comms-contacts small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comms-agent {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+}
+.comms-agent #chatP,
+.comms-agent #chatP .panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.comms-messages {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+.comms-message-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100%;
+}
+.comms-breadcrumb {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.comms-breadcrumb button {
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+}
+.decision-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+}
+.decision-card p,
+.decision-card h3 {
+  margin: 0 0 6px;
+}
+@media (max-width: 390px) {
+  .comms-grid,
+  .comms-agent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comms-nav,
+  .comms-contacts {
+    max-height: 220px;
+  }
 }
 .col > #cThreadsP {
   flex: 1 1 0;

@@ -7,6 +7,7 @@ import {
   type AccountId,
   type AgentId,
   BUILTIN_ROLES,
+  COMMS_CREW,
   CONFIG_SEAT_MODES,
   type ConfigSeatMode,
   CREW_EFFORTS,
@@ -987,6 +988,9 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
     const writers: CrewSeatConfig[] = [];
     session.seats.forEach((seat, i) => {
       const sp = `${at}.seats[${i}]`;
+      if (seat.id === COMMS_CREW) {
+        throw new ConfigError(`${sp}.id`, `"${COMMS_CREW}" is reserved for the Comms channel`);
+      }
       if (seatIds.has(seat.id)) {
         throw new ConfigError(
           `${sp}.id`,

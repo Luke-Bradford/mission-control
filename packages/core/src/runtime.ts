@@ -49,6 +49,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
   MC_TOOL_NAMES.messageSeat,
+  MC_TOOL_NAMES.commsPin,
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.promote,
   MC_TOOL_NAMES.endRun,
@@ -88,14 +89,29 @@ export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
   writer: {
-    base: ["commit", "sync_main", "ask_operator", "report_evidence"],
+    base: [
+      "commit",
+      "sync_main",
+      "ask_operator",
+      "report_evidence",
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
     grantable: [],
   },
   "read-only": {
-    base: ["ask_operator", "report_evidence"],
+    base: ["ask_operator", "report_evidence", MC_TOOL_NAMES.commsSend, MC_TOOL_NAMES.commsReact],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
-  scratch: { base: [MC_TOOL_NAMES.reportFindings, MC_TOOL_NAMES.restoreFile], grantable: [] },
+  scratch: {
+    base: [
+      MC_TOOL_NAMES.reportFindings,
+      MC_TOOL_NAMES.restoreFile,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
+    grantable: [],
+  },
 };
 
 /** A role: what a seat of it runs as, unless its own config says otherwise. */
@@ -279,6 +295,8 @@ export const WRITER_TOOLS = [
   MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const READONLY_TOOLS = [
@@ -290,6 +308,8 @@ export const READONLY_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const SCRATCH_TOOLS = [
@@ -303,6 +323,8 @@ export const SCRATCH_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 /** A scratch seat starts only on a review Mission Control hands it. */
@@ -712,7 +734,7 @@ export const CODEX_CLI_ENV = {
   npm_config_update_notifier: "false",
 } as const;
 
-/** The folder pnpm makes for a project-local store; the commit tool never stages one. */
+/** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
@@ -726,9 +748,8 @@ export const PNPM_STORE_ENV = "pnpm_config_store_dir";
  */
 export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
- * A seat's pnpm store, in the sandbox's temp root. A sandboxed pnpm cannot write the global store
- * in `~/Library`, and with no store set it falls back to `.pnpm-store/` at the top of the worktree,
- * where the commit tool's `add -A` would find it.
+ * A seat's pnpm store in its own sandbox temp root. A sandboxed pnpm cannot write the global store
+ * in `~/Library`, and each Claude seat must not share its store with another seat.
  */
 export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
   `${tempRoot}/mc-pnpm-store/${seatId}`;

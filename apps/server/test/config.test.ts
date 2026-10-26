@@ -839,6 +839,9 @@ ${modelless("flight-2", "FLIGHT")}
   });
 
   it("rejects a seat id that repeats a loop id or another seat, or is malformed", () => {
+    expect(fails(crewText({ seats: [seat("crew", "GUIDO")] })).path).toBe(
+      "crew.sessions[0].seats[0].id",
+    );
     expect(fails(crewText({ seats: [seat("shop-app-ta", "GUIDO")] })).path).toBe(
       "crew.sessions[0].seats[0].id",
     );
