@@ -49,11 +49,11 @@ describe("route()", () => {
       { page: "comms", item: "stall:shop-app-ta:r-12", view: { kind: "flight" } },
     ],
     ["/telemetry", { page: "telemetry" }],
-    ["/setup", { page: "setup", tab: "sessions" }],
+    ["/setup", { page: "setup", tab: "accounts" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
     ["/setup/sources", { page: "setup", tab: "sources" }],
     ["/setup/access/", { page: "setup", tab: "access" }],
-    ["/setup/nope", { page: "setup", tab: "sessions" }],
+    ["/setup/nope", { page: "setup", tab: "accounts" }],
   ])("%s", (path, expected) => {
     expect(route(path)).toEqual(expected);
   });

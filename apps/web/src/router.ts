@@ -196,7 +196,7 @@ export function route(path: string): Route | null {
   if (comms?.id) return { page: "comms", item: comms.id, view: { kind: "flight" } };
   const setup = withId(path, "setup");
   if (setup)
-    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "sessions" };
+    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "accounts" };
   return null;
 }
 

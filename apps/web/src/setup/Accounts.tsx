@@ -1,7 +1,9 @@
 import type { CliAccountStatus, ConfigView, LimitRow } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { wkdTime } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -27,6 +29,7 @@ function newestReading(local?: CliAccountStatus, listed?: CliAccountStatus) {
 export function Accounts({ config }: { config: ConfigView }) {
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const statuses = useResource<CliAccountStatus[]>(RESOURCES.accountStatus);
+  const tz = useTz();
   const [checks, setChecks] = useState<
     Record<
       string,
@@ -88,8 +91,8 @@ export function Accounts({ config }: { config: ConfigView }) {
       setSaving(false);
     }
   }
-  const pct = (account: string, window: "5h" | "7d"): number | null =>
-    limits.find((l) => l.accountId === account && l.window === window)?.used ?? null;
+  const limit = (account: string, window: "5h" | "7d") =>
+    limits.find((entry) => entry.accountId === account && entry.window === window) ?? null;
   return (
     <>
       <Panel
@@ -163,19 +166,19 @@ export function Accounts({ config }: { config: ConfigView }) {
           {config.accounts.length === 0 && <p>No accounts configured.</p>}
         </div>
         {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to scroll the wide table. */}
-        <section className="tw" aria-label="Account details" tabIndex={0}>
-          <table>
+        <section className="tw accounts-table-wrap" aria-label="Account details" tabIndex={0}>
+          <table className="accounts-table">
             <thead>
               <tr>
-                <th>Account</th>
-                <th>Provider</th>
+                <th>Name</th>
+                <th>Vendor</th>
+                <th>Login</th>
                 <th>Plan</th>
-                <th>Signed in as</th>
-                <th>Alert at</th>
-                <th>Stop at</th>
-                <th>Quota</th>
-                <th>Status</th>
-                <th>Check</th>
+                <th>5h</th>
+                <th>7d</th>
+                <th>Resets</th>
+                <th>Alert / stop</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -191,20 +194,15 @@ export function Accounts({ config }: { config: ConfigView }) {
                   !!checkError ||
                   (!!statuses.error && (!local || statuses.error !== checkState?.clearedListError));
                 const status = local && checkState?.unknown ? "unknown" : reading?.status;
+                const fiveHour = limit(a.id, "5h");
+                const sevenDay = limit(a.id, "7d");
+                const reset = sevenDay ?? fiveHour;
                 return (
                   <tr key={a.id}>
-                    <td>{a.id}</td>
+                    <td className="mono">{a.id}</td>
                     <td>{a.vendor}</td>
-                    <td>{reading?.plan ?? "—"}</td>
-                    <td>{reading?.identity ?? "—"}</td>
-                    <td className="num">{a.alertAt}%</td>
-                    <td className="num">{a.stopAt}%</td>
-                    <td title={QUOTA_TITLE}>
-                      <Meter label="5h" pct={pct(a.id, "5h")} />
-                      <span aria-hidden="true"> · </span>
-                      <Meter label="7d" pct={pct(a.id, "7d")} />
-                    </td>
-                    <td>
+                    <td className="account-login">
+                      <span>{reading?.identity ?? "—"}</span>
                       <Pill tone={status === "logged-in" ? "ok" : "neutral"}>
                         {status === "logged-in"
                           ? "Signed in"
@@ -213,7 +211,23 @@ export function Accounts({ config }: { config: ConfigView }) {
                             : "Unknown"}
                       </Pill>
                     </td>
-                    <td>
+                    <td>{reading?.plan ?? "—"}</td>
+                    <td className="account-quota" title={QUOTA_TITLE}>
+                      <Meter label="5h" pct={fiveHour?.used ?? null} />
+                    </td>
+                    <td className="account-quota" title={QUOTA_TITLE}>
+                      <Meter
+                        label="7d"
+                        pct={sevenDay?.used ?? null}
+                        projected={sevenDay?.projected ?? null}
+                      />
+                      {sevenDay?.projected !== null && sevenDay?.projected !== undefined && (
+                        <span className="quota-forecast">{`${Math.round(sevenDay.projected)}% forecast`}</span>
+                      )}
+                    </td>
+                    <td className="mono">{reset && tz ? wkdTime(reset.resetAt, tz) : "—"}</td>
+                    <td className="mono num">{`${a.alertAt}% / ${a.stopAt}%`}</td>
+                    <td className="account-actions">
                       <button
                         type="button"
                         disabled={checkState?.busy}
