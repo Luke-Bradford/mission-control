@@ -27,6 +27,7 @@ import {
   MINOR_WITHHELD,
   minorIntro,
   minorMoreLine,
+  NEW_LOOP,
   prEditedText,
   type Run,
   STDERR_TEXT_MAX,
@@ -229,6 +230,43 @@ describe("openPr", () => {
     });
     expect(EARLIER_PR_OPEN).toBe("an earlier PR is open on this branch");
     expect(tools.openDraftPr).not.toHaveBeenCalled();
+  });
+
+  it("adopts a recorded PR from an ended earlier run of the same seat and ticket", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 29,
+    });
+    expect(tools.openDraftPr).not.toHaveBeenCalled();
+  });
+
+  it("does not adopt an earlier PR recorded by another seat", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        agentId: "other-seat",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
   });
 
   it("is transient when gh cannot list, or the tool's own failure text comes back", async () => {

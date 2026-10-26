@@ -79,6 +79,19 @@ export const EVIDENCE_NO_LOOP =
 /** The run's loop is parked, waiting on the operator. */
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
+/** Parks a new committed report can clear without weakening an operator or budget hold. */
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+
+/** Whether a report of newly committed work is allowed to resume this park. */
+export function evidenceCanUnpark(
+  parked: RunLoop["parked"],
+): parked is NonNullable<RunLoop["parked"]> {
+  return (
+    parked !== null &&
+    !parked.ended &&
+    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(parked.kind)
+  );
+}
 /** The last push is in CI. */
 export const EVIDENCE_IN_CI =
   "CI is running on your last push; Mission Control will message you the result.";

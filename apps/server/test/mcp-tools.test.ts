@@ -2933,6 +2933,34 @@ describe("report_evidence", () => {
     expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
+  it.each(["review", "silent", "refused"])(
+    "records fresh evidence and resumes a %s park",
+    async (kind) => {
+      setLoop({
+        phase: "parked",
+        parked: { kind, reason: "parked", ended: false },
+        transient: 2,
+        lastRefusal: "no",
+      });
+      await committed();
+      expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.run(RUN)?.loop).toMatchObject({
+        phase: "working",
+        parked: null,
+        transient: 0,
+        lastRefusal: null,
+      });
+      expect(told).toEqual([["guido-1", RUN]]);
+    },
+  );
+
+  it.each(["budget", "account-stop"])("keeps a %s park held", async (kind) => {
+    setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+    await committed();
+    expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+  });
+
   it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
     for (let i = 0; i < 12; i++) write(`apps/f${String(i).padStart(2, "0")}.ts`, "x\n");
     const r = await report("done");

@@ -105,7 +105,6 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
-  ticketInReviewText,
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
@@ -2645,15 +2644,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
     }
-    // Rework goes first, and a ticket in review has its run already.
+    // An explicit start of a ticket in review means resume that ticket's own preserved run.
+    // `wakeRun` retains its worktree and session guards, rather than creating a competing run.
     const waiting = store.asideRuns();
+    const ref = `${info.repo.id}#${issue}`;
+    const inReview = !readOnly ? waiting.find((r) => r.ticket === ref) : undefined;
+    if (inReview !== undefined) {
+      const branch = inReview.branch;
+      if (branch === null) throw new SupervisorError(409, NOT_ASIDE);
+      await wakeRun(inReview.id);
+      return { runId: inReview.id, branch };
+    }
+    // Rework on another ticket still goes first.
     const rework = wakeDueAsideRun(store, seatId);
     if (rework) {
       throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
-    }
-    const ref = `${info.repo.id}#${issue}`;
-    if (!readOnly && waiting.some((r) => r.ticket === ref)) {
-      throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
     try {

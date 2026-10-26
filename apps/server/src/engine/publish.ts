@@ -569,6 +569,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
+      // A restarted seat keeps its branch. It may therefore continue its own ended run's PR,
+      // but never adopts a PR merely because it happens to be open on that branch.
+      const adopted = open.find((p) =>
+        deps.store
+          .runsOnTicket(run.repoId, run.ticket ?? "")
+          .some(
+            (earlier) =>
+              earlier.id !== run.id &&
+              earlier.agentId === run.agentId &&
+              earlier.endedAt !== null &&
+              earlier.loop?.prNumber === p.number,
+          ),
+      );
+      if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
       if (open.length > 0) return { ok: false, text: EARLIER_PR_OPEN, transient: false };
 
       const known = await readKnown(deps, "draft_pr");

@@ -18,7 +18,6 @@ import {
   retiringText,
   reworkFirstText,
   seatBusyText,
-  ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
@@ -1154,15 +1153,14 @@ describe("a run set aside in review", () => {
     expect(starts()).toHaveLength(1);
   });
 
-  it("startRun is refused while rework waits and on a ticket in review", async () => {
+  it("startRun keeps another ticket's rework first, but resumes the ticket in review", async () => {
     const { sup, runId } = await aside(true);
     const first = await refusal(sup.startRun("guido-1", 43));
     expect([first.status, first.message]).toEqual([409, reworkFirstText("GUIDO-1", "mc#42")]);
     store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
-    const same = await refusal(sup.startRun("guido-1", 42));
-    expect([same.status, same.message]).toEqual([409, ticketInReviewText("mc#42")]);
-    const next = await sup.startRun("guido-1", 43);
-    expect(store.run(next.runId)).toMatchObject({ endedAt: null });
+    const same = await sup.startRun("guido-1", 42);
+    expect(same).toEqual({ runId, branch: BRANCH });
+    expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", worktree: wt() });
   });
 
   it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {

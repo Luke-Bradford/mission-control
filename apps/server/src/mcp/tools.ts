@@ -34,6 +34,7 @@ import {
   EVIDENCE_RECORDED,
   EVIDENCE_RULING_PREFIX,
   engineHitText,
+  evidenceCanUnpark,
   evidenceTextText,
   evidenceUncommittedText,
   FINDING_FILE_MAX,
@@ -1636,10 +1637,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: ASKED_OPERATOR };
   }
 
-  /** The refusal the run's loop alone decides (no loop, parked, in CI), else null. */
+  /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
   function loopRefusal(loop: Run["loop"]): Result | null {
     if (loop === null || loop === undefined) return { text: EVIDENCE_NO_LOOP, isError: true };
-    if (loop.phase === "parked") return { text: EVIDENCE_PARKED, isError: true };
+    if (loop.phase === "parked" && !evidenceCanUnpark(loop.parked)) {
+      return { text: EVIDENCE_PARKED, isError: true };
+    }
     if (loop.phase === "ci") return { text: EVIDENCE_IN_CI, isError: true };
     return null;
   }
@@ -1727,6 +1730,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
       store.addEvidence(run.id, note, now());
+      // A committed response is enough to resume parks caused by a stalled review, silence, or a
+      // refused publication. Budget, account and every other operator hold stay parked.
+      if (loop.phase === "parked" && evidenceCanUnpark(loop.parked)) {
+        store.setRunLoop(run.id, {
+          ...loop,
+          phase: "working",
+          parked: null,
+          transient: 0,
+          lastRefusal: null,
+          unparkedAt: now(),
+        });
+      }
       return null;
     });
     if (refusal !== null) return refusal;
