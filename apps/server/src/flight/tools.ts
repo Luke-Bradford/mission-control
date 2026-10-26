@@ -294,7 +294,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { canReadComms, pinComms, sendComms, threadMessages, validateCommsText } from "../comms.ts";
+import { canReadComms, pinComms, sendComms, threadMessages } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -1254,36 +1254,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         onSeat: store.seatSession(seat)?.runId === run.id,
       };
     }
-    // Validate and scan before a seat receives the text. FLIGHT messages are not rate charged.
+    // sendComms rechecks the crew after scanning, before its delivery callback runs.
     try {
-      await validateCommsText(deps.knownSecrets, body);
+      await sendComms(
+        {
+          store,
+          crew: () =>
+            config.crew?.sessions.flatMap((session) => session.seats.map((member) => member.id)) ??
+            [],
+          knownSecrets: deps.knownSecrets,
+          now: () => at,
+          seatSender: false,
+          notify: async (to, text) => {
+            // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
+            if (to !== seat || (lift !== null && !lift.onSeat)) return;
+            try {
+              await deps.supervisor.message(seat, `FLIGHT: ${text}`, {
+                interrupt: false,
+                questions: "none",
+              });
+            } catch (e) {
+              throw new Error(notSentText(e instanceof Error ? e.message : String(e)));
+            }
+          },
+        },
+        ctx.seatId,
+        { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+      );
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Message refused.");
     }
-    // (a set-aside run has no seat to message: the seat is on another run, or none)
-    if (lift === null || lift.onSeat) {
-      try {
-        await deps.supervisor.message(seat, `FLIGHT: ${body}`, {
-          interrupt: false,
-          questions: "none",
-        });
-      } catch (e) {
-        return fail(notSentText(e instanceof Error ? e.message : String(e)));
-      }
-    }
-    await sendComms(
-      {
-        store,
-        crew: () =>
-          config.crew?.sessions.flatMap((session) => session.seats.map((member) => member.id)) ??
-          [],
-        knownSecrets: deps.knownSecrets,
-        now: () => at,
-        seatSender: false,
-      },
-      ctx.seatId,
-      { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
-    );
     bus.emit("agents");
     const lifted =
       lift !== null &&

@@ -22,7 +22,7 @@ export interface CommsServiceDeps {
   knownSecrets: () => Promise<readonly string[]>;
   now?: () => number;
   /** Only direct seat delivery wakes a worker; reactions never use it. */
-  notify?: (to: string, text: string, from: string) => void;
+  notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
 }
 
@@ -73,27 +73,33 @@ export async function sendComms(
     if (members.has(found[2])) mentions.add(found[2]);
   }
   if (replyFrom !== undefined) mentions.add(replyFrom);
-  const stored = deps.store.addComms(
-    {
-      at: now,
-      from,
-      to: input.to,
-      ticket: input.ref ?? null,
-      text: input.text,
-      label: input.label,
-      ref: input.ref,
-      replyTo: input.replyTo,
-      mentions: [...mentions],
-    },
-    deps.seatSender
-      ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
-      : undefined,
-  );
-  if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);
-  for (const mention of mentions) if (crew.includes(mention)) notify.add(mention);
-  for (const to of notify) deps.notify?.(to, input.text, from);
+  for (const to of mentions) if (crew.includes(to)) notify.add(to);
+  const storeMessage = () =>
+    deps.store.addComms(
+      {
+        at: now,
+        from,
+        to: input.to,
+        ticket: input.ref ?? null,
+        text: input.text,
+        label: input.label,
+        ref: input.ref,
+        replyTo: input.replyTo,
+        mentions: [...mentions],
+      },
+      deps.seatSender
+        ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
+        : undefined,
+    );
+  // A seat's rate limit is enforced atomically before it can wake anyone.
+  let stored = deps.seatSender ? storeMessage() : null;
+  if (deps.seatSender && stored === null)
+    throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
+  for (const to of notify) await deps.notify?.(to, input.text, from);
+  if (!deps.seatSender) stored = storeMessage();
+  if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   return message(stored);
 }
 

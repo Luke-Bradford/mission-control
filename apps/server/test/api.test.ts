@@ -5532,7 +5532,7 @@ describe("the first loop's engine", () => {
     touches: null,
     cardFor: null,
   } as const;
-  const engineApp = (seatRunId: string | null) => {
+  const engineApp = (seatRunId: string | null, knownSecrets?: () => Promise<readonly string[]>) => {
     const told: string[] = [];
     const sup = stubSupervisor();
     sup.seat = () =>
@@ -5552,6 +5552,7 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: sup,
+      knownSecrets,
       engine: {
         onOperatorMessage: async (runId) => {
           told.push(runId);
@@ -5680,6 +5681,29 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(409);
     expect(store.comms(0)).toHaveLength(1);
     await none.a.close();
+  });
+
+  it("does not deliver or store when the seat leaves during secret scanning", async () => {
+    let scanned!: () => void;
+    let release!: () => void;
+    const scanStarted = new Promise<void>((resolve) => (scanned = resolve));
+    const scan = new Promise<readonly string[]>((resolve) => (release = () => resolve([])));
+    const { a } = engineApp(null, () => {
+      scanned();
+      return scan;
+    });
+    const pending = message(a);
+    await scanStarted;
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("expected crew session");
+    session.seats = session.seats.filter((seat) => seat.id !== "guido-1");
+    release();
+    const response = await pending;
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Unknown Comms destination." });
+    expect(supervisorCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+    await a.close();
   });
 
   it("does not when the message is refused", async () => {

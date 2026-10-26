@@ -193,7 +193,7 @@ export interface McToolsDeps {
    * The secrets the push and PR scans look for verbatim (the GitHub token), read for each call.
    * Never logged: every log line has them redacted.
    */
-  knownSecrets: () => Promise<string[]>;
+  knownSecrets: () => Promise<readonly string[]>;
   /** How long a read of `knownSecrets` may take; default `KNOWN_SECRETS_TIMEOUT_MS`. */
   knownSecretsTimeoutMs?: number;
   /** A line for the server log (a push or gh failure); default: none. */

@@ -123,14 +123,7 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import {
-  COMMS_SNAPSHOT_LIMIT,
-  pinComms,
-  reactComms,
-  sendComms,
-  threadMessages,
-  validateCommsText,
-} from "./comms.ts";
+import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -2314,36 +2307,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await validateCommsText(deps.knownSecrets ?? (async () => []), b.text);
-            /* await sendComms(
+            await sendComms(
               {
                 store,
-                crew: commsCrew(),
+                crew: commsCrew,
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
+                notify: async (seatId, text) => {
+                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                },
               },
               COMMS_CAPCOM,
               { to: id, text: b.text, ref: ticket ?? undefined },
-            ); */
+            );
           } catch (e) {
+            if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
               400,
               e instanceof Error ? e.message : "Comms message refused.",
             );
           }
-          await sup.message(id, b.text, { interrupt: b.interrupt === true });
-          await sendComms(
-            {
-              store,
-              crew: commsCrew,
-              knownSecrets: deps.knownSecrets ?? (async () => []),
-              now,
-              seatSender: false,
-            },
-            COMMS_CAPCOM,
-            { to: id, text: b.text, ref: ticket ?? undefined },
-          );
           // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
           if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };
