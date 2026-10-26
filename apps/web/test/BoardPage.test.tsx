@@ -1546,13 +1546,13 @@ describe("repos together or apart", () => {
 });
 
 describe("Pipeline stage links", () => {
-  it.each(["ready", "building", "checks", "review", "merging", "merged"])(
+  it.each(["ready", "progress", "review", "merging", "merged"])(
     "filters the full Board to %s",
     async (stage) => {
       writeKey(LANE_KEY, "site-builder");
       window.history.replaceState(null, "", `/board?stage=${stage}`);
-      const phase = stage === "checks" ? "ci" : stage === "review" ? "review" : "working";
-      const active = ["building", "checks", "review", "merging"].includes(stage);
+      const phase = stage === "review" ? "review" : "working";
+      const active = ["progress", "review", "merging"].includes(stage);
       stub({
         extra:
           stage === "merging"
@@ -1576,7 +1576,7 @@ describe("Pipeline stage links", () => {
                 id: `seat-${i}`,
                 ticket: `shop-app#${i + 1}`,
                 loop: {
-                  phase,
+                  phase: stage === "progress" && i % 2 ? "ci" : phase,
                   text: "Working",
                   prNumber: null,
                   parked: null,

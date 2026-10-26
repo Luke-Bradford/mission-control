@@ -711,6 +711,8 @@ export const CODEX_CLI_ENV = {
 
 /** The folder pnpm makes for a project-local store; the commit tool never stages one. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
+/** A Codex seat's private, worktree-local temporary directory. */
+export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
  * pnpm 11 reads settings from `pnpm_config_*` variables only: it ignores `npm_config_store_dir`
  * (pnpm 11.0.6's config reader; `pnpm store path` under each, 2026-10-21).

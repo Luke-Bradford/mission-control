@@ -36,6 +36,7 @@ import {
   guardHookCommand,
   isProtectedPath,
   LOOP_KINDS,
+  MC_TMP_DIR_NAME,
   MC_TOOL_GRANTS,
   MODE_LOOPS,
   modeOfSeat,
@@ -299,6 +300,7 @@ describe("the allowlist in phase 2b", () => {
     );
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
+    expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
   });
 });
 

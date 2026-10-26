@@ -27,6 +27,7 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
+import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import {
   BRANCH,
   boardCard,
@@ -670,6 +671,30 @@ describe("startReview", () => {
 
   it("a full-depth review runs on the full-depth model", async () => {
     expect(await reviewModel("full")).toBe(REVIEW_FULL_MODEL);
+  });
+
+  it("a Codex full-depth review runs on the seat's model", async () => {
+    const r = reviewOfPush({
+      profile: {
+        profile: {
+          ...(DEFAULT_PROFILES[0] as Profile),
+          reviewer: { role: "RETRO", depth: "full" },
+        },
+        route: { by: "size", size: "M" },
+        hash: "h",
+      },
+    });
+    const { sup, cfg } = codexSupervisor();
+    const retro = cfg.crew?.sessions[0]?.seats.find((seat) => seat.id === "retro");
+    if (!retro) throw new Error("missing RETRO seat");
+    retro.mode = "scratch";
+    retro.model = "gpt-5.6-sol";
+    const upsert = vi.spyOn(store, "upsertRun");
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    const written = upsert.mock.calls.find(([run]) => run.reviewId === r.reviewId);
+    upsert.mockRestore();
+    expect(written?.[0].model).toBe("gpt-5.6-sol");
   });
 
   it("a light review runs on the seat's model", async () => {

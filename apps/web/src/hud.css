@@ -2211,6 +2211,8 @@ main > section {
   text-overflow: ellipsis;
 }
 .idrow .ctl {
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
   display: flex;
   gap: 6px;
@@ -4475,7 +4477,7 @@ button.nrow.thread.tagged {
 }
 .pipeline-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-content: start;
   gap: 10px;
 }
@@ -4489,11 +4491,8 @@ button.nrow.thread.tagged {
   min-width: 0;
   --stage-colour: var(--muted);
 }
-.pipeline-stage.building {
+.pipeline-stage.progress {
   --stage-colour: var(--accent);
-}
-.pipeline-stage.checks {
-  --stage-colour: var(--ok);
 }
 .pipeline-stage.review {
   --stage-colour: var(--think);
@@ -4518,38 +4517,36 @@ button.nrow.thread.tagged {
   letter-spacing: 0.06em;
   color: var(--muted);
 }
-.pipeline-oldest {
-  margin-left: auto;
-  text-transform: none;
-  letter-spacing: 0;
+.pipeline-stage h3 a {
+  color: inherit;
+  text-decoration: none;
 }
-.pipeline-card {
+.pipeline-stage h3 a:hover {
+  color: var(--fg);
+}
+.pipeline-chip {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 7px 8px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
   margin-top: 6px;
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  background: var(--bg);
+  background: var(--surface-2);
   color: var(--fg);
   text-decoration: none;
   font-size: 12px;
 }
-.pipeline-refs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.pipeline-ticket {
+  flex: none;
   color: var(--accent);
   font-size: 11px;
 }
-.pipeline-age {
-  margin-left: auto;
-}
 .pipeline-skeleton {
-  height: 60px;
+  height: 28px;
 }
-.pipeline-card:hover {
+.pipeline-chip:hover {
   border-color: var(--stage-colour);
 }
 .pipeline-title {
@@ -4559,26 +4556,20 @@ button.nrow.thread.tagged {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pipeline-ci {
+.pipeline-assignee {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 42%;
   font-size: 11px;
 }
-.pipeline-dot {
+.pipeline-assignee i {
   flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-}
-.pipeline-dot.pass {
-  background: var(--ok);
-}
-.pipeline-dot.fail {
-  background: var(--crit);
-}
-.pipeline-dot.pending {
-  background: var(--warn);
+  background: var(--c);
 }
 .pipeline-more {
   display: block;
@@ -4783,4 +4774,23 @@ button.nrow.thread.tagged {
 .crew-pause-form input:not([type="checkbox"]) {
   min-width: 0;
   flex: 1;
+}
+
+.account-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.account-chooser label,
+.account-chooser select {
+  min-width: 0;
+  max-width: 100%;
+}
+.account-chooser select {
+  width: 24ch;
 }

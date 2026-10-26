@@ -136,6 +136,7 @@ export const RESOURCES = {
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
+  repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
@@ -209,6 +210,8 @@ export const ACTIONS = {
   addRepo: "/api/repos",
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
+  /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
+  seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
   /** Body `{ text, interrupt? }`. */
