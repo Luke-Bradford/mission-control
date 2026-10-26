@@ -786,11 +786,9 @@ function stateStep(s: LoopSnapshot): Step {
           R.retro,
           P,
           rounds,
-          loop.reviewReplyTo === null ||
-            loop.reviewReplyTo === undefined ||
-            evidence?.note === undefined
-            ? undefined
-            : { developer: evidence.note, findings: R.findings },
+          evidence?.note !== undefined && evidence.id === loop.reportedEvidenceId
+            ? { developer: evidence.note, findings: R.findings }
+            : undefined,
         ),
       );
     }

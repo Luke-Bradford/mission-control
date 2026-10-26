@@ -1846,7 +1846,7 @@ describe("review decisions", () => {
     expect(sends(reconcile(s).actions)).toEqual(["fix:r1:0:2"]);
   });
 
-  it("the third blocking review parks", () => {
+  it("the third blocking review sends FLIGHT the last committed-fix report and findings", () => {
     const rows = [
       fact({ id: 1, blocking: 1 }),
       fact({ id: 2, blocking: 1, sha: SHA }),
@@ -1856,15 +1856,15 @@ describe("review decisions", () => {
       withReview(rows, [finding]),
       {
         claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
-        evidence: { id: 2, at: NOW, ruling: false, note: "Finding 2 does not apply here." },
+        evidence: { id: 3, at: NOW, ruling: false, note: "Fixed the first two findings." },
       },
-      { reviewReplyTo: 2, reportedEvidenceId: 2 },
+      { reportedEvidenceId: 3 },
     );
     const r = reconcile(s);
     expect(r.loop.parked).toMatchObject({
       kind: "review",
       reason: reviewParkText(RETRO, SHA, 3, {
-        developer: "Finding 2 does not apply here.",
+        developer: "Fixed the first two findings.",
         findings: [finding],
       }),
     });
