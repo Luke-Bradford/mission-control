@@ -22,7 +22,7 @@ export interface CommsServiceDeps {
   knownSecrets: () => Promise<readonly string[]>;
   now?: () => number;
   /** Only direct seat delivery wakes a worker; reactions never use it. */
-  notify?: (to: string) => void;
+  notify?: (to: string, text: string) => void;
   seatSender?: boolean;
 }
 
@@ -30,6 +30,17 @@ const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
   if (row === null) throw new Error("Comms message was not stored.");
   return { ...row, operator: row.from === COMMS_CAPCOM, reactions: [] };
 };
+
+export async function validateCommsText(
+  knownSecrets: () => Promise<readonly string[]>,
+  text: string,
+): Promise<void> {
+  const findings = scanSecrets(`\0commit 0000000\n${text}`, await knownSecrets());
+  if (findings.length)
+    throw new Error(
+      `Refused: message contains ${[...new Set(findings.map((f) => f.kind))].join(", ")}.`,
+    );
+}
 
 /** Store a normal Comms message after validating the small, local address space. */
 export async function sendComms(
@@ -42,11 +53,7 @@ export async function sendComms(
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
   if (!members.has(from)) throw new Error("Unknown Comms sender.");
-  const findings = scanSecrets(`\0commit 0000000\n${input.text}`, await deps.knownSecrets());
-  if (findings.length)
-    throw new Error(
-      `Refused: message contains ${[...new Set(findings.map((f) => f.kind))].join(", ")}.`,
-    );
+  await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
@@ -75,7 +82,7 @@ export async function sendComms(
       : undefined,
   );
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  if (input.to !== COMMS_CREW) deps.notify?.(input.to);
+  if (deps.crew.includes(input.to)) deps.notify?.(input.to, input.text);
   return message(stored);
 }
 

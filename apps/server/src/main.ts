@@ -215,6 +215,12 @@ export async function main(): Promise<void> {
       });
     },
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+    onComms: (seatId, text) => {
+      void messageUnpausedSeat(store, supervisor, seatId, text, {
+        interrupt: false,
+        questions: "none",
+      });
+    },
   };
   const mcTools = createMcTools(mcDeps);
 

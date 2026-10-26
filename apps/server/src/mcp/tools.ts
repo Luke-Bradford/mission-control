@@ -210,7 +210,7 @@ export interface McToolsDeps {
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
-  onComms?: (to: string) => void;
+  onComms?: (to: string, text: string) => void;
 }
 
 /**

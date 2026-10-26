@@ -294,7 +294,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { pinComms, threadMessages } from "../comms.ts";
+import { pinComms, sendComms, threadMessages, validateCommsText } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -1250,6 +1250,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         onSeat: store.seatSession(seat)?.runId === run.id,
       };
     }
+    // Validate and scan before a seat receives the text. FLIGHT messages are not rate charged.
+    try {
+      await validateCommsText(deps.knownSecrets, body);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "Message refused.");
+    }
     // (a set-aside run has no seat to message: the seat is on another run, or none)
     if (lift === null || lift.onSeat) {
       try {
@@ -1261,13 +1267,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail(notSentText(e instanceof Error ? e.message : String(e)));
       }
     }
-    store.addComms({
-      at,
-      from: ctx.seatId,
-      to: seat,
-      ticket: unendedRun(seat)?.ticket ?? null,
-      text: body,
-    });
+    await sendComms(
+      {
+        store,
+        crew:
+          config.crew?.sessions.flatMap((session) => session.seats.map((member) => member.id)) ??
+          [],
+        knownSecrets: deps.knownSecrets,
+        now: () => at,
+        seatSender: false,
+      },
+      ctx.seatId,
+      { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+    );
     bus.emit("agents");
     const lifted =
       lift !== null &&

@@ -12,9 +12,11 @@ import {
   areaOwnsFolder,
   type ChangedFiles,
   type CliAccountStatus,
+  COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_REACTIONS,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -118,7 +120,7 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
+import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -973,6 +975,88 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("agents");
         return { ok: true };
       });
+
+      const commsCrew = () =>
+        configuredAgents(config)
+          .filter((agent) => agent.kind === "crew")
+          .map((agent) => agent.id);
+      const commsSendBody = z.strictObject({
+        to: z.string().min(1),
+        text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        label: z.enum(["question", "handoff", "blocker"]).optional(),
+        ref: z
+          .string()
+          .regex(/^(?:#\d+|PR \d+)$/)
+          .optional(),
+        replyTo: z
+          .string()
+          .regex(/^comms:\d+$/)
+          .optional(),
+      });
+      // Reader: apps/web/src/comms/Comms.tsx (operator messages)
+      api.post("/comms", async (req, reply) => {
+        const body = commsSendBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const message = await sendComms(
+            {
+              store,
+              crew: commsCrew(),
+              knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]),
+              now,
+              seatSender: false,
+            },
+            COMMS_CAPCOM,
+            body.data,
+          );
+          bus.emit("agents");
+          return { message };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms message refused." });
+        }
+      });
+      api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
+        const body = z
+          .strictObject({
+            reaction: z.enum(COMMS_REACTIONS),
+            reason: z.string().max(COMMS_CANT_REASON_MAX).optional(),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const reaction = reactComms(
+            store,
+            COMMS_CAPCOM,
+            req.params.id,
+            body.data.reaction,
+            body.data.reason,
+            now(),
+          );
+          bus.emit("agents");
+          return { reaction };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms reaction refused." });
+        }
+      });
+      const pinRoute =
+        (pinned: boolean) =>
+        async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+          try {
+            pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
+            bus.emit("agents");
+            return { pinned };
+          } catch (e) {
+            return reply
+              .code(404)
+              .send({ error: e instanceof Error ? e.message : "Unknown Comms message." });
+          }
+        };
+      api.put<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(true));
+      api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
@@ -2060,8 +2144,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          try {
+            await sendComms(
+              {
+                store,
+                crew: commsCrew(),
+                knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]),
+                now,
+                seatSender: false,
+              },
+              COMMS_CAPCOM,
+              { to: id, text: b.text, ref: ticket ?? undefined },
+            );
+          } catch (e) {
+            throw new SupervisorError(
+              400,
+              e instanceof Error ? e.message : "Comms message refused.",
+            );
+          }
           await sup.message(id, b.text, { interrupt: b.interrupt === true });
-          store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
           // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
           if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };
