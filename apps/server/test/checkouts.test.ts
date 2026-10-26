@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 import {
@@ -133,9 +133,10 @@ const hasBranch = (b: string) => {
 
 function expectPrivateCodexPnpmStore(worktree: string): void {
   const root = realpathSync(worktree);
+  const store = join(dirname(root), ".mc-pnpm-store", basename(root));
   for (const [path, expected] of [
-    [join(worktree, MC_TMP_DIR_NAME), join(root, MC_TMP_DIR_NAME)],
-    [join(worktree, MC_TMP_DIR_NAME, "pnpm-store"), join(root, MC_TMP_DIR_NAME, "pnpm-store")],
+    [dirname(store), dirname(store)],
+    [store, store],
   ]) {
     const stat = lstatSync(path);
     expect(stat.isDirectory()).toBe(true);
@@ -825,17 +826,30 @@ describe("prepareCheckout", () => {
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
   });
 
-  it("prepares private Codex pnpm directories before fresh and synced installs", async () => {
+  it("keeps the private Codex pnpm store outside the worktree across pnpm script runs", async () => {
     await prepareCheckout(input());
-    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    const scriptPackage = `${JSON.stringify({
+      name: "x",
+      version: "1.0.0",
+      private: true,
+      scripts: { check: 'node -e ""' },
+    })}\n`;
+    commit(seed, {
+      "package.json": scriptPackage,
+      "pnpm-lock.yaml": EMPTY_LOCK,
+    });
     git(seed, "push", "-q", "origin", "main");
     const next = await syncCheckout();
     if (next.synced?.kind !== "merged") throw new Error("expected merged checkout");
     expect(await installAfterSync(clone, next, next.synced.before)).toBeUndefined();
     expectPrivateCodexPnpmStore(next.path);
+    expect(existsSync(join(next.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+    for (let n = 0; n < 2; n++)
+      execFileSync("pnpm", ["-s", "check"], { cwd: next.path, env: installEnv(next.path) });
 
     const fresh = await prepareCheckout({ ...input(), issue: 43 });
     expectPrivateCodexPnpmStore(fresh.path);
+    expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
   });
 
   it("installs when a base lockfile is over the 4 MiB default read", async () => {
@@ -963,7 +977,7 @@ describe("prepareCheckout", () => {
       expect(env.CI).toBe("false");
       // pnpm never walks up to an ancestor's workspace
       expect(env.NPM_CONFIG_WORKSPACE_DIR).toBe("/w/guido-42");
-      expect(env.pnpm_config_store_dir).toBe("/w/guido-42/.mc-tmp/pnpm-store");
+      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/guido-42");
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     } finally {
       for (const [k, v] of Object.entries(saved)) {

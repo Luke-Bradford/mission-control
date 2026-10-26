@@ -729,10 +729,6 @@ export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
   `${tempRoot}/mc-pnpm-store/${seatId}`;
 
-/** A Codex worktree's stable pnpm store, outside its per-run temp root. */
-export const codexPnpmStoreDir = (worktree: string): string =>
-  `${worktree}/${MC_TMP_DIR_NAME}/pnpm-store`;
-
 /** How long a control request (interrupt, get_context_usage…) may go unanswered. */
 export const CONTROL_TIMEOUT_MS = 10_000;
 /**

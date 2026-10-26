@@ -52,7 +52,6 @@ import {
   CREW_GIT_ENV,
   carriedFrom,
   clockHm,
-  codexPnpmStoreDir,
   compactUtc,
   conflictKey,
   conflictText,
@@ -163,6 +162,7 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
+  codexPnpmStoreDir,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -1371,14 +1371,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let codexPnpmStore: string | undefined;
       if (run.vendor === "codex") {
         const storePath = codexPnpmStoreDir(cwd);
-        try {
-          mkdirSync(storePath, { mode: 0o700 });
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        for (const path of [dirname(storePath), storePath]) {
+          try {
+            mkdirSync(path, { mode: 0o700 });
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+          }
+          const stat = lstatSync(path);
+          if (
+            !stat.isDirectory() ||
+            stat.uid !== process.getuid?.() ||
+            (stat.mode & 0o777) !== 0o700 ||
+            realpathSync(path) !== path
+          )
+            throw new Error("Codex pnpm store must be a private directory owned by the server");
         }
-        const stat = lstatSync(storePath);
-        if (!stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o777) !== 0o700)
-          throw new Error("Codex pnpm store must be a private directory owned by the server");
         codexPnpmStore = realpathSync(storePath);
       }
       if (run.vendor === "codex")
@@ -1488,9 +1495,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
               // Codex root-read base would otherwise reach them. Codex's own temp root is in
               // its worktree, so this deny no longer sits above anything the seat resolves.
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp, [
-                codexPnpmStore,
-              ]).replace(
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
                 '":root"="read"',
                 ['":root"="read"', `${JSON.stringify(claudeTmpParent)}="deny"`].join("\n"),
               ),

@@ -2254,7 +2254,9 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
-    expect(spawn.env[PNPM_STORE_ENV]).toBe(join(spawn.cwd, MC_TMP_DIR_NAME, "pnpm-store"));
+    expect(spawn.env[PNPM_STORE_ENV]).toBe(
+      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+    );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
@@ -2281,7 +2283,7 @@ import(${JSON.stringify(fixture)});
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
-    expect(config).toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
+    expect(config).not.toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
       JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
     );
@@ -2308,22 +2310,6 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
-  });
-
-  it("keeps Codex's pnpm store stable across fresh runs of a worktree", async () => {
-    const { sup } = codex();
-    sup.start();
-    await sup.startRun("guido-1", 42);
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
-    const first = recorded().find((m) => m.type === "spawn");
-    await sup.endRun("guido-1");
-    await sup.startRun("guido-1", 42);
-    await until(() => expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(2));
-    const starts = recorded().filter((m) => m.type === "spawn");
-    const second = starts[1];
-    expect(second.env[PNPM_STORE_ENV]).toBe(first.env[PNPM_STORE_ENV]);
-    expect(second.env[PNPM_STORE_ENV]).toBe(join(second.cwd, MC_TMP_DIR_NAME, "pnpm-store"));
-    expect(second.env[PNPM_STORE_ENV]).not.toBe(join(second.env.TMPDIR, "pnpm-store"));
   });
 
   it.each([false, true])(

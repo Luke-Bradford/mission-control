@@ -180,14 +180,17 @@ describe("codexSeatConfig", () => {
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
   });
 
-  it("keeps the read-only workspace read-only", () => {
-    const store = `${sandboxInput.cwd}/.mc-tmp/pnpm-store`;
-    const config = codexSeatConfig(sandboxInput, "read-only", url, tmp, [store]);
-    expect(config).toContain('"."="read"');
-    expect(config).toContain(`"${tmp}"="write"`);
-    expect(config).toContain(`"${store}"="write"`);
-    expect(config).not.toContain('"."="write"');
-  });
+  it.each(["writer", "read-only"] as const)(
+    "keeps Codex's pnpm store read-only for %s seats",
+    (mode) => {
+      const store = "/mc/.mc-pnpm-store/guido-42";
+      const config = codexSeatConfig(sandboxInput, mode, url, tmp);
+      expect(config).toContain('":root"="read"');
+      expect(config).toContain(`"${tmp}"="write"`);
+      expect(config).not.toContain(`"${store}"="write"`);
+      expect(config).toContain(`"."="${mode === "read-only" ? "read" : "write"}"`);
+    },
+  );
 
   it("lets a scratch seat write its throwaway worktree", () => {
     expect(codexSeatConfig(sandboxInput, "scratch", url, tmp)).toContain('"."="write"');

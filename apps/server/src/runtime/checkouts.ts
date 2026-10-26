@@ -14,7 +14,6 @@ import { promisify } from "node:util";
 import {
   branchFor,
   CANNOT_START,
-  codexPnpmStoreDir,
   DIFF_CUT_LINE,
   MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
@@ -96,6 +95,10 @@ const CI_MARKERS = new Set([
 const SHA = /^([0-9a-f]{40}|[0-9a-f]{64})\tHEAD$/m;
 const CHECKOUT_TEXT = "the crew checkout is missing or has uncommitted changes";
 
+/** A Codex worktree's stable store, beside (not inside) the seat-writable worktree. */
+export const codexPnpmStoreDir = (worktree: string): string =>
+  join(dirname(worktree), ".mc-pnpm-store", basename(worktree));
+
 export type CheckoutErrorCode =
   | "checkout"
   | "fetch"
@@ -136,8 +139,8 @@ export interface RepoPeer {
 /**
  * What the commit tool's `add -A` stages: the whole worktree except package stores, Python
  * environments, caches, build metadata and coverage output, at the top or nested. Codex's stable
- * pnpm store is under `.mc-tmp/`; Claude's caches live in its sandbox temp root. This is the
- * backstop for a repo that does not ignore the legacy `.pnpm-store`.
+ * pnpm store is server-controlled beside the worktree; Claude's caches live in its sandbox temp
+ * root. This is the backstop for a repo that does not ignore the legacy `.pnpm-store`.
  */
 export const COMMIT_ADD_PATHSPEC = [
   "--",
@@ -159,7 +162,7 @@ export const COMMIT_ADD_PATHSPEC = [
   ":(top,exclude,glob)**/.ipynb_checkpoints/**",
 ] as const;
 
-/** Keep a worktree-local Codex store out of status as well as the commit pathspec. */
+/** Keep Codex's worktree-local temporary files out of status as well as the commit pathspec. */
 async function addMcTmpExclude(gitCommonDir: string): Promise<void> {
   const path = join(gitCommonDir, "info", "exclude");
   const line = `${MC_TMP_DIR_NAME}/`;
@@ -198,9 +201,9 @@ async function prepareCodexPnpmStore(worktree: string, name: string): Promise<vo
   };
   try {
     const root = await realpath(worktree);
-    const tmp = join(root, MC_TMP_DIR_NAME);
-    await privateDirectory(tmp, tmp);
     const store = codexPnpmStoreDir(root);
+    const storeRoot = dirname(store);
+    await privateDirectory(storeRoot, storeRoot);
     await privateDirectory(store, store);
   } catch (e) {
     throw new CheckoutError(
@@ -685,8 +688,9 @@ async function refuseChangedInputs(
 /**
  * pnpm's environment for an install in `worktree`: the server's, without git's or a parent pnpm
  * run's settings and without CI markers, plus `CI=false` (ci-info then reports not-CI whatever
- * else is set; under CI pnpm purges a mismatched node_modules without asking) and the worktree as
- * the workspace root (pnpm never walks up to an ancestor's workspace).
+ * else is set; under CI pnpm purges a mismatched node_modules without asking), a server-controlled
+ * stable store (pnpm otherwise detects the store mismatch and aborts before a script in a non-TTY),
+ * and the worktree as the workspace root (pnpm never walks up to an ancestor's workspace).
  */
 export function installEnv(worktree: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: "0" };

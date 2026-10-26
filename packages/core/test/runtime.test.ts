@@ -23,7 +23,6 @@ import {
   CREW_CLI_ENV,
   CREW_ISOLATION_FLAGS,
   type CrewCliInput,
-  codexPnpmStoreDir,
   crewAuthorName,
   crewCliArgs,
   crewPnpmStoreDir,
@@ -293,13 +292,12 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps Claude pnpm stores private and Codex's store stable per worktree", () => {
+  it("keeps Claude pnpm stores private", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
       crewPnpmStoreDir("/tmp/mc-test", "guido-1"),
     );
-    expect(codexPnpmStoreDir("/w/guido-42")).toBe("/w/guido-42/.mc-tmp/pnpm-store");
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
