@@ -9,8 +9,6 @@ import {
   type CrewRow,
   type CrewSessionFolders,
   errorText,
-  HUD_STATE_LABEL,
-  HUD_STATE_TONE,
   type ReloadResult,
   type SeatInput,
 } from "@mc/core";
@@ -513,11 +511,12 @@ function CrewSession({
               </thead>
               <tbody>
                 {tableSeats.map((s) => {
-                  const status = changes.pending.find(
+                  const pending = changes.pending.find(
                     (p) => p.sessionId === session.id && p.seatId === s.id,
                   )?.reason;
                   const input = s.input;
-                  const state = crew?.rows.find((c) => c.id === s.id)?.hudState;
+                  const row = crew?.rows.find((c) => c.id === s.id);
+                  const status = row ? seatStatus(row) : null;
                   return (
                     <tr key={s.id}>
                       <td>{s.id}</td>
@@ -525,11 +524,13 @@ function CrewSession({
                       <td>{s.model}</td>
                       <td>{areaCell(s)}</td>
                       <td>
-                        {status ??
-                          (state === undefined ? (
+                        {pending ??
+                          (status === null ? (
                             NO_STATUS
                           ) : (
-                            <Pill tone={HUD_STATE_TONE[state]}>{HUD_STATE_LABEL[state]}</Pill>
+                            <span title={status.reason ?? status.label}>
+                              <Pill tone={status.tone}>{status.label}</Pill>
+                            </span>
                           ))}
                       </td>
                       <td>
