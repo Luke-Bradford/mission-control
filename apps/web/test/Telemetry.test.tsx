@@ -10,6 +10,7 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCES } from "../src/data.ts";
+import { kTokens, narrowDay } from "../src/fmt.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
@@ -486,9 +487,14 @@ describe("KPI tiles", () => {
 
 describe("Flow of work", () => {
   it("throughput: 14 bars, the last in the accent", async () => {
-    await loaded();
+    const data = tel();
+    await loaded(data);
     const svg = within(panel("tThru")).getByRole("img");
-    expect(svg.getAttribute("aria-label")).toMatch(/^Tickets merged per day: /);
+    expect(svg.getAttribute("aria-label")).toBe(
+      `Tickets merged per day: ${data.throughput
+        .map((day) => `${narrowDay(day.day)} ${day.merged}`)
+        .join(", ")}`,
+    );
     const bars = svg.querySelectorAll("path.bar");
     expect(bars).toHaveLength(7); // the odd days and the last; the even days are 0
     expect(bars[bars.length - 1]?.getAttribute("fill")).toBe("var(--accent)");
@@ -657,7 +663,8 @@ describe("Agents", () => {
   });
 
   it("tokens per turn: the selected agent's latest run, else the first", async () => {
-    await loaded();
+    const data = tel();
+    await loaded(data);
     within(panel("tTurn")).getByText("shop-app-ta · latest run");
     // two turns × three kinds
     expect(panel("tTurn").querySelectorAll("path.bar")).toHaveLength(6);
@@ -666,6 +673,11 @@ describe("Agents", () => {
       "output",
       "cache read",
     ]);
+    const svg = within(panel("tTurn")).getByRole("img");
+    fireEvent.pointerEnter(svg.querySelector("rect.hit") as Element);
+    expect(panel("tTurn").querySelector(".tip")?.textContent).toContain(
+      `cache read${kTokens(data.turnUsage[0]?.turns[0]?.cacheRead ?? 0)}`,
+    );
     setSelectedAgent("codex-ta");
     await within(panel("tTurn")).findByText("codex-ta · latest run");
     within(panel("tTurn")).getByText("No turns recorded for codex-ta yet.");
@@ -718,6 +730,15 @@ describe("Capacity and cost", () => {
       "claude-main 5h · 62%",
       "codex-main 7d · 41%",
     ]);
+  });
+
+  it("quota tooltip only reports an account's API reading at the selected sample time", async () => {
+    await loaded();
+    const svg = within(panel("tQuota")).getByRole("img");
+    fireEvent.keyDown(svg, { key: "Home" });
+    const tip = panel("tQuota").querySelector(".tip") as HTMLElement;
+    expect(tip.textContent).toContain("claude-main 5h10%");
+    expect(tip.textContent).toContain("codex-main 7d—");
   });
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
