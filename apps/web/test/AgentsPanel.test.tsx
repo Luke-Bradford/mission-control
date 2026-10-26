@@ -316,6 +316,7 @@ it("renders the Overview crew-pause override as a short pill", async () => {
   await screen.findByText("short-state");
   const pill = rowsIn(container)[1]?.querySelector(".state-cell .pill");
   expect(pill?.textContent).toBe("Idle");
+  expect(pill?.textContent).toMatch(/^\S+$/);
   expect(pill?.textContent?.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
 });
 
