@@ -1183,7 +1183,7 @@ main > section {
   position: relative;
   height: 100%;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: 0;
   border-right: 2px solid var(--ok);
   background: var(--bg);
 }
@@ -1191,7 +1191,8 @@ main > section {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  border-radius: 2px;
+  min-width: 1px;
+  border-radius: 0;
 }
 .overview-tick {
   position: absolute;
@@ -1800,21 +1801,39 @@ main > section {
   padding: 3px 0;
   font-size: var(--fs-s);
 }
-#machP .ph,
+#machP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+}
 #quotaP .ph {
   padding: 8px 10px;
+  flex-wrap: nowrap;
+}
+#timelineP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
 }
 #machP .pb,
 #quotaP .pb {
   padding: 0 10px 10px;
 }
 #machP .resrow {
-  grid-template-columns: 42px minmax(24px, 1fr) auto;
+  grid-template-columns: 42px minmax(24px, 1fr) 128px;
   gap: 6px;
+  align-items: center;
 }
 #machP .resrow .spark {
   width: 100%;
   height: 24px;
+}
+#machP .machine-chart {
+  width: 100%;
+  height: 24px;
+}
+#machP .machine-gridline {
+  stroke: var(--line-2);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 #machP .resrow .num {
   font-size: var(--fs-xs);

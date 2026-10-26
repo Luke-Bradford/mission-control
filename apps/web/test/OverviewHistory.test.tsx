@@ -49,9 +49,9 @@ it("graphs free disk GB with gaps for missing minutes", async () => {
   const graph = await screen.findByRole("img", { name: "Disk history · GB free" });
   expect(graph.getAttribute("data-max")).toBe("80");
   expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
-    "M0.0,3.0M34.7,9.5L52.0,6.3",
+    "M0.0,3.0M66.7,12.5L100.0,7.8",
   );
-  expect(graph.querySelectorAll("path")).toHaveLength(1);
+  expect(graph.querySelectorAll("path")).toHaveLength(3);
 });
 
 it("links run chips to the specific run and preserves chips without a run", async () => {
