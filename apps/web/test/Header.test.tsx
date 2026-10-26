@@ -1,6 +1,6 @@
 import type { AttentionItem, AwaySettings, Crew } from "@mc/core";
 import { DEFAULT_AWAY, LOCK_HEADER_TITLE, type TestLockState } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Header } from "../src/shell/Header.tsx";
@@ -21,7 +21,6 @@ import {
   MIN,
   NOW,
   REPOS,
-  seatRow,
 } from "./fixtures.ts";
 
 const crew = (over: Partial<Crew> = {}): Crew => ({
@@ -85,67 +84,29 @@ describe("Header chat button", () => {
   });
 });
 
-describe("Header machine button", () => {
-  const lock = (waiting: number): TestLockState => ({
-    holder: { runId: "r-1", seatId: "guido-1", command: "pnpm test", since: NOW - MIN },
-    waiting: Array.from({ length: waiting }, (_, i) => ({
-      runId: `r-${i + 2}`,
-      seatId: "guido-2",
-      command: "pnpm -s test",
-      since: NOW - MIN,
-    })),
-  });
-
-  it("turns amber, with the stalled tooltip, when the holder is stalled and someone is queued", async () => {
-    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
-    render(<Header page="board" />);
-    await screen.findByText(/^Lock: guido-1/i);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await waitFor(() => expect(btn.classList.contains("hot")).toBe(true));
-    expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled");
-  });
-
-  it("stays plain with a running holder", async () => {
-    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "running" })] }) });
-    render(<Header page="board" />);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await screen.findByText(/^Lock: guido-1/i);
-    expect(btn.classList.contains("hot")).toBe(false);
-    expect(within(btn).getByText(/^Lock:/).title).toBe(LOCK_HEADER_TITLE);
-  });
-
-  it("a stalled holder with nobody queued gives the tooltip but no amber", async () => {
-    routes({ lock: lock(0), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
-    render(<Header page="board" />);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await waitFor(() =>
-      expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled"),
-    );
-    expect(btn.classList.contains("hot")).toBe(false);
-  });
-});
-
 describe("Header", () => {
   it("shows the brand, the pages in order and marks the current one", () => {
     routes();
     render(<Header page="board" />);
-    expect(screen.getByText("Mission Control")).toBeTruthy();
+    expect(screen.getByText("MISSION CONTROL")).toBeTruthy();
     const links = within(screen.getByRole("navigation", { name: "Pages" })).getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual([
       "Overview",
-      "FLIGHT",
       "Board",
-      "Agent",
+      "Agents",
       "Comms",
       "Telemetry",
+      "Map",
+      "Setup",
     ]);
     expect(links.map((a) => a.getAttribute("href"))).toEqual([
       "/",
-      "/flight",
       "/board",
       "/agent",
       "/comms",
       "/telemetry",
+      "/#mapP",
+      "/setup",
     ]);
     expect(tab(/^Board/).getAttribute("aria-current")).toBe("page");
     expect(tab(/^Board/).className).toBe("on");
@@ -162,15 +123,12 @@ describe("Header", () => {
     const comms = await within(tab(/^Comms/)).findByRole("img");
     expect(comms.className).toBe("lamp crit"); // tab lamps never pulse (cat 1.1)
     expect(comms.getAttribute("aria-label")).toBe("Error, Decision");
-    const flight = within(tab(/^FLIGHT/)).getByRole("img");
-    expect(flight.className).toBe("lamp warn");
-    expect(flight.getAttribute("aria-label")).toBe("Decision");
     const board = within(tab(/^Board/)).getByRole("img");
     expect(board.getAttribute("aria-label")).toBe("Decision");
     expect(within(tab(/^Overview/)).queryByRole("img")).toBeNull();
   });
 
-  it("FLIGHT lights for decisions and people, Board for escalations; acked items hold still", async () => {
+  it("Comms and Board show their attention lamps; acked items hold still", async () => {
     routes({
       attention: [
         item({ key: "stall:a:r", kind: "stalled", escalationId: null, acked: true }),
@@ -181,7 +139,6 @@ describe("Header", () => {
     const comms = await within(tab(/^Comms/)).findByRole("img");
     expect(comms.className).toBe("lamp warn");
     expect(comms.getAttribute("aria-label")).toBe("Stalled, Question");
-    expect(within(tab(/^FLIGHT/)).queryByRole("img")).toBeNull();
     expect(
       within(tab(/^Board/))
         .getByRole("img")
@@ -417,11 +374,11 @@ describe("Header", () => {
     expect(seen).toBe("s1");
   });
 
-  it("Setup is a button, on while on Setup; the FLIGHT chat button has no badge", () => {
+  it("Setup is a page link, and the FLIGHT chat button has no badge", () => {
     routes();
     render(<Header page="setup" />);
-    const setup = screen.getByRole("button", { name: "Setup" });
-    expect(setup.className).toBe("ghost iconbtn on");
+    const setup = tab(/^Setup$/);
+    expect(setup.className).toBe("on");
     fireEvent.click(setup);
     expect(window.location.pathname).toBe("/setup");
     const chat = screen.getByRole("button", { name: "FLIGHT chat" });

@@ -78,6 +78,9 @@ export function App() {
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
+  // Comms has its own FLIGHT conversation and Setup needs the approved full-width configuration
+  // frame. The dock remains available on the operational pages and through the header shortcut.
+  const showDock = shown.page !== "comms" && shown.page !== "setup";
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -113,13 +116,13 @@ export function App() {
   return (
     <div className={cls}>
       <Header page={shown.page} />
-      <div className="shell">
+      <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
           </AwayDigest>
         </main>
-        <Dock />
+        {showDock && <Dock />}
       </div>
       <Footer />
       <Toast />

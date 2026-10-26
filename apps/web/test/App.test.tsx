@@ -27,12 +27,12 @@ const at = (path: string) => {
 describe("App", () => {
   it.each([
     ["/", "page-overview", "Overview"],
-    ["/flight", "page-flight", "FLIGHT"],
+    ["/flight", "page-flight", null],
     ["/board", "page-board", "Board"],
-    ["/agent", "page-agent", "Agent"],
+    ["/agent", "page-agent", "Agents"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
-    ["/setup/loops", "page-setup", null],
+    ["/setup/loops", "page-setup", "Setup"],
   ])("%s renders its page and marks its tab", async (path, id, tabName) => {
     const { container } = at(path);
     await waitFor(() => expect(container.querySelector(`main > section#${id}`)).not.toBeNull());
@@ -171,13 +171,13 @@ describe("App", () => {
     await screen.findByRole("button", { name: "Pop out" });
   });
 
-  it("the setup tabs follow the URL", async () => {
+  it("the Setup sidebar follows the URL", async () => {
     at("/setup");
-    const tabs = await screen.findByRole("group", { name: "Setup" });
+    const tabs = await screen.findByRole("navigation", { name: "Setup sections" });
     expect(
-      within(tabs).getByRole("button", { name: "Sessions" }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    fireEvent.click(within(tabs).getByRole("button", { name: "Sources" }));
-    expect(window.location.pathname).toBe("/setup/sources");
+      within(tabs).getByRole("button", { name: "Accounts" }).getAttribute("aria-current"),
+    ).toBe("page");
+    fireEvent.click(within(tabs).getByRole("button", { name: "Loops" }));
+    expect(window.location.pathname).toBe("/setup/loops");
   });
 });

@@ -95,7 +95,10 @@ export function Decisions({
   );
   return (
     <section className="comms-decisions" aria-label="Decisions">
-      <h2>Decisions</h2>
+      <div className="comms-section-head">
+        <h2>Decisions</h2>
+        <span>{`${decisions.length} for you`}</span>
+      </div>
       <div className="comms-decision-list">
         {decisions.length === 0 ? (
           <p className="note">No decisions need you.</p>

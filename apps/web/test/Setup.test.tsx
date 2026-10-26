@@ -126,15 +126,17 @@ beforeEach(() => vi.useFakeTimers({ toFake: ["Date"], now: NOW }));
 afterEach(() => vi.useRealTimers());
 
 describe("Setup tabs", () => {
-  it("the tabs round-trip with the URL", async () => {
+  it("the dependency-order sidebar routes its five sections", async () => {
     load();
     render(<Setup tab="sessions" />);
-    const tabs = screen.getByRole("group", { name: "Setup" });
+    const tabs = screen.getByRole("navigation", { name: "Setup sections" });
     expect(SETUP_TABS).toHaveLength(7);
     fireEvent.click(within(tabs).getByRole("button", { name: "Accounts" }));
     expect(window.location.pathname).toBe("/setup/accounts");
-    fireEvent.click(within(tabs).getByRole("button", { name: "Roles, guard and test lock" }));
+    fireEvent.click(within(tabs).getByRole("button", { name: "Roles" }));
     expect(window.location.pathname).toBe("/setup/roles");
+    fireEvent.click(within(tabs).getByRole("button", { name: "Safety" }));
+    expect(window.location.pathname).toBe("/setup/access");
   });
 
   it("Sessions marks stray folder tiles with file and time for this session", async () => {
@@ -560,15 +562,15 @@ describe("Setup tabs", () => {
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
     ).toEqual([
-      "Account",
-      "Provider",
-      "Plan",
-      "Signed in as",
-      "Alert at",
-      "Stop at",
-      "Quota",
-      "Status",
-      "Check",
+      "Name",
+      "Vendor",
+      "Login",
+      "Models",
+      "5h",
+      "7d",
+      "Resets",
+      "Alert / stop",
+      "Actions",
     ]);
     const rows = within(table).getAllByRole("row");
     const claude = rows[1] as HTMLElement;
@@ -582,7 +584,7 @@ describe("Setup tabs", () => {
     const codex = rows[2] as HTMLElement;
     expect(codex.textContent).toContain("5h 100%");
     expect(codex.querySelectorAll(".meter.full")).toHaveLength(2);
-    const cell = claude.querySelector("td:nth-child(7)") as HTMLElement;
+    const cell = claude.querySelector("td:nth-child(5)") as HTMLElement;
     expect(cell.title).toMatch(/fixed 80\/100/);
     expect(cell.title).toMatch(/alert\/stop levels are in the columns beside/);
     expect(
@@ -1470,15 +1472,15 @@ describe("Setup › Repos", () => {
   const withProfiles = (over: Record<string, unknown> = {}) =>
     load({ "/api/repos/profiles": PROFILES, ...over });
 
-  it("is a tab of its own at /setup/repos, after Sessions", async () => {
+  it("is in the Repos & seats sidebar section", async () => {
     withProfiles();
     render(<Setup tab="repos" />);
-    const tabs = screen.getByRole("group", { name: "Setup" });
+    const tabs = screen.getByRole("navigation", { name: "Setup sections" });
     expect(
       within(tabs)
         .getAllByRole("button")
         .map((b) => b.textContent)[1],
-    ).toBe("Repos");
+    ).toBe("Repos & seats");
     await screen.findByRole("region", { name: "shop-app" });
   });
 
@@ -1646,7 +1648,7 @@ describe("Setup › Repos", () => {
     await screen.findByRole("region", { name: "shop-app" });
     preview();
     fireEvent.change(await screen.findByLabelText("Repo id"), { target: { value: "  mc  " } });
-    const add = screen.getByRole("button", { name: /^Add/ });
+    const add = screen.getByRole("button", { name: "Add mc" });
     expect(add.textContent).toBe("Add mc");
     fireEvent.click(add);
     await waitFor(() =>

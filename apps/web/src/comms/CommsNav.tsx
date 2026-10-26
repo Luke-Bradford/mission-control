@@ -59,7 +59,10 @@ export function CommsNav({
       >
         #crew
       </button>
-      <p>Agents</p>
+      <div className="comms-section-head">
+        <h2>Agents</h2>
+        <span>{`${rows.filter((row) => row.id !== flightId).length} agents`}</span>
+      </div>
       {rows
         .filter((row) => row.id !== flightId)
         .map((row) => (

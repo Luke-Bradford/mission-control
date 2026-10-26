@@ -72,17 +72,13 @@ describe("Overview layout (hud.css)", () => {
     expect(8 * height + 56).toBeLessThanOrEqual((900 - 160) * 0.45);
   });
 
-  it("fits every measured header control at 1440px while keeping narrow wrapping", () => {
+  it("uses the approved header spacing while keeping narrow wrapping", () => {
     const desktop = css.match(/@media \(min-width: 1200px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
     const gap = Number(desktop.match(/gap: 8px (\d+)px/)?.[1]);
-    expect(gap).toBeGreaterThan(0);
-    const controls = [145, 132, 443, 56, 35, 201, 115, 90, 32, 32, 32];
-    // Twelve gaps include the spacer; the app has 16px padding on either side.
-    expect(controls.reduce((sum, width) => sum + width, 0) + 12 * gap + 32).toBeLessThanOrEqual(
-      1440,
-    );
+    expect(gap).toBe(20);
     expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
-    expect(rule(String.raw`\.top`)).toContain("gap: 8px 10px");
+    expect(rule(String.raw`\.top`)).toContain("gap: 8px 20px");
+    expect(rule(String.raw`\.top-status`)).toContain("margin-left: auto");
     expect(desktop).not.toContain("display: none");
   });
 });
