@@ -1387,6 +1387,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (run.vendor === "codex") {
         addMcTmpExclude(gitCommonDir);
+        const claudeTmpParentPath = dirname(seatTmp(run.id));
+        try {
+          mkdirSync(claudeTmpParentPath, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const parentStat = lstatSync(claudeTmpParentPath);
+        if (
+          !parentStat.isDirectory() ||
+          parentStat.uid !== process.getuid?.() ||
+          (parentStat.mode & 0o777) !== 0o700
+        )
+          throw new Error("crew temp root must be a private directory owned by the server");
+        const claudeTmpParent = realpathSync(claudeTmpParentPath);
         let auth: string;
         try {
           const account = config.accounts.find((a) => a.id === info.seat.accountId);
@@ -1456,7 +1470,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
+              // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
+              // Codex root-read base would otherwise reach them. Codex's own temp root is in
+              // its worktree, so this deny no longer sits above anything the seat resolves.
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
+                '":root"="read"',
+                ['":root"="read"', `${JSON.stringify(claudeTmpParent)}="deny"`].join("\n"),
+              ),
             );
             writePrivate(join(home, "auth.json"), auth);
           },

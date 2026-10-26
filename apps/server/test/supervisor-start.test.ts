@@ -2272,6 +2272,11 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env.TMPDIR).not.toBe(process.env.TMPDIR);
     expect(statSync(parent).mode & 0o777).toBe(0o700);
     expect(config).not.toContain(`${JSON.stringify(parent)}="deny"`);
+    // the Claude seats' shared temp parent stays closed to Codex
+    const claudeParent = realpathSync(
+      dirname(crewTempRoot(dbPath, runId, process.getuid?.() ?? 0)),
+    );
+    expect(config).toContain(`${JSON.stringify(claudeParent)}="deny"`);
     expect(config).not.toContain('"/tmp"="deny"');
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
