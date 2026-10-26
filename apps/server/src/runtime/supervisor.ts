@@ -1570,7 +1570,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const expected = join(worktree, MC_TMP_DIR_NAME, key);
       try {
         const parentStat = lstatSync(parent);
-        if (!parentStat.isDirectory() || parentStat.uid !== process.getuid?.()) return false;
+        if (
+          !parentStat.isDirectory() ||
+          parentStat.uid !== process.getuid?.() ||
+          (parentStat.mode & 0o777) !== 0o700
+        )
+          return false;
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "ENOENT") {
           store.deleteSetting(codexTmpKey(runId));
@@ -1583,6 +1588,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (
           !tmpStat.isDirectory() ||
           tmpStat.uid !== process.getuid?.() ||
+          (tmpStat.mode & 0o777) !== 0o700 ||
           realpathSync(saved.tmp) !== expected
         )
           return false;
