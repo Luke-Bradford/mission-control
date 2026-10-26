@@ -373,7 +373,7 @@ describe("FLIGHT page", () => {
     expect(rows[0]?.querySelector('a[href$="/issues/5"]')).not.toBeNull();
   });
 
-  it("Work in flight shows a looped run without a PR, and a parked one as blocked", async () => {
+  it("Work in flight shows a looped run without a PR, and a blocked one as Blocked", async () => {
     const parked = {
       phase: "parked" as const,
       text: "Blocked: needs you",

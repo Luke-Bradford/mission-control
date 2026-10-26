@@ -145,6 +145,7 @@ function Thread({
   // text only: the row is a button, and a link inside one is invalid
   const doing = doingLine(r, now, tz, useReviewPrs(r));
   const line = last ? commsLine(last, r.id, nameOf) : doing;
+  const status = seatStatus(r);
   return (
     <button
       type="button"
@@ -156,7 +157,9 @@ function Thread({
       <div className="tbody">
         <AgentTag id={r.id} index={r.index} sm />
         {tagged && <Pill tone="warn">Tagged you</Pill>}
-        <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+        <span title={status.reason ?? status.label}>
+          <Pill tone={status.tone}>{status.label}</Pill>
+        </span>
         <span className="s fg2 doing" title={line}>
           {line}
         </span>

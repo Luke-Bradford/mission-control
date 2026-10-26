@@ -93,6 +93,7 @@ export function Conversation({ row }: { row: CrewRow | null }) {
       : !activity.data
         ? "Loading…"
         : "No messages yet.";
+  const status = seatStatus(row);
 
   return (
     <Panel
@@ -101,7 +102,9 @@ export function Conversation({ row }: { row: CrewRow | null }) {
       title={
         <>
           Thread · <AgentTag id={row.id} index={row.index} sm /> ·{" "}
-          <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+          <span title={status.reason ?? status.label}>
+            <Pill tone={status.tone}>{status.label}</Pill>
+          </span>
         </>
       }
       actions={

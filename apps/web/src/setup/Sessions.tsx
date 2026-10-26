@@ -9,15 +9,13 @@ import {
   type CrewRow,
   type CrewSessionFolders,
   errorText,
-  HUD_STATE_LABEL,
-  HUD_STATE_TONE,
   type ReloadResult,
   type SeatInput,
 } from "@mc/core";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
-import { modelLine, seatAreaText } from "../crew.ts";
+import { modelLine, seatAreaText, seatStatus } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -152,7 +150,11 @@ function Seat({ id, area, row }: { id: string; area: string; row: CrewRow | unde
       <span id={info} className="seatinfo">
         <span className="xs muted">{area}</span>
         {row && <span className="xs muted">{modelLine(row)}</span>}
-        {row && <Pill tone={HUD_STATE_TONE[row.hudState]}>{HUD_STATE_LABEL[row.hudState]}</Pill>}
+        {row && (
+          <span title={seatStatus(row).reason ?? seatStatus(row).label}>
+            <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+          </span>
+        )}
       </span>
     </button>
   );
@@ -509,11 +511,12 @@ function CrewSession({
               </thead>
               <tbody>
                 {tableSeats.map((s) => {
-                  const status = changes.pending.find(
+                  const pending = changes.pending.find(
                     (p) => p.sessionId === session.id && p.seatId === s.id,
                   )?.reason;
                   const input = s.input;
-                  const state = crew?.rows.find((c) => c.id === s.id)?.hudState;
+                  const row = crew?.rows.find((c) => c.id === s.id);
+                  const status = row ? seatStatus(row) : null;
                   return (
                     <tr key={s.id}>
                       <td>{s.id}</td>
@@ -521,11 +524,13 @@ function CrewSession({
                       <td>{s.model}</td>
                       <td>{areaCell(s)}</td>
                       <td>
-                        {status ??
-                          (state === undefined ? (
+                        {pending ??
+                          (status === null ? (
                             NO_STATUS
                           ) : (
-                            <Pill tone={HUD_STATE_TONE[state]}>{HUD_STATE_LABEL[state]}</Pill>
+                            <span title={status.reason ?? status.label}>
+                              <Pill tone={status.tone}>{status.label}</Pill>
+                            </span>
                           ))}
                       </td>
                       <td>
@@ -928,7 +933,9 @@ export function Sessions({ config }: { config: ConfigView }) {
                       <button key={c.id} type="button" onClick={() => navigate(agentPath(c.id))}>
                         <AgentTag id={c.id} index={c.index} />
                         <span className="xs muted">observed loop</span>
-                        <Pill tone={HUD_STATE_TONE[c.hudState]}>{HUD_STATE_LABEL[c.hudState]}</Pill>
+                        <span title={seatStatus(c).reason ?? seatStatus(c).label}>
+                          <Pill tone={seatStatus(c).tone}>{seatStatus(c).label}</Pill>
+                        </span>
                       </button>
                     ))}
                   </div>
