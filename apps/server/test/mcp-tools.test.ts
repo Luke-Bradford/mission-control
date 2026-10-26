@@ -304,8 +304,10 @@ afterEach(() => {
 });
 
 describe("the mc tools", () => {
-  it("serves commit (writer), ask_operator and report_evidence (writer and read-only) and report_findings (scratch) under the names the CLI prefixes, and no push or draft_pr", () => {
+  it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
+      [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
       ["ask_operator", ["writer", "read-only"]],
@@ -315,6 +317,8 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.commsSend,
+      MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
       MC_TOOLS.askOperator,
@@ -1026,7 +1030,7 @@ describe("ask_operator", () => {
 });
 
 describe("through /mcp", () => {
-  it("offers a writer seat every tool and a read-only seat ask_operator and report_evidence; commit runs end to end", async () => {
+  it("offers each seat mode its Comms tools; commit runs end to end", async () => {
     const cfg = config();
     const tokens = new RunTokens();
     const writer = tokens.issue("guido-1", RUN);
@@ -1053,6 +1057,8 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "comms_send",
+        "comms_react",
         "commit",
         "sync_main",
         "ask_operator",
@@ -1066,7 +1072,12 @@ describe("through /mcp", () => {
           })
         ).error.message,
       ).toBe("unknown tool");
-      expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
+      expect(await names(reader)).toEqual([
+        "comms_send",
+        "comms_react",
+        "ask_operator",
+        "report_evidence",
+      ]);
       write("apps/a.ts", "a2\n");
       const r = await rpc(writer, "tools/call", {
         name: "commit",

@@ -211,7 +211,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).toContain("mcp__mc__ask_operator");
   });
 
-  it("a read-only seat may ask the operator, and nothing that writes", () => {
+  it("a read-only seat may ask the operator and send Comms, with no git writes", () => {
     expect(READONLY_TOOLS).toContain(MC_TOOLS.askOperator);
     for (const t of MC_WRITER_TOOLS) expect(READONLY_TOOLS as readonly string[]).not.toContain(t);
     const a = crewCliArgs({ ...base, mode: "read-only" });
@@ -219,6 +219,8 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_operator",
       "mcp__mc__report_evidence",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 
@@ -752,6 +754,8 @@ describe("scratch mode", () => {
       "Bash(pnpm -s vitest:*)",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 

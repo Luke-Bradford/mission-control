@@ -87,12 +87,30 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
-  writer: { base: ["commit", "sync_main", "ask_operator", "report_evidence"], grantable: [] },
+  writer: {
+    base: [
+      "commit",
+      "sync_main",
+      "ask_operator",
+      "report_evidence",
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
+    grantable: [],
+  },
   "read-only": {
-    base: ["ask_operator", "report_evidence"],
+    base: ["ask_operator", "report_evidence", MC_TOOL_NAMES.commsSend, MC_TOOL_NAMES.commsReact],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
-  scratch: { base: [MC_TOOL_NAMES.reportFindings, MC_TOOL_NAMES.restoreFile], grantable: [] },
+  scratch: {
+    base: [
+      MC_TOOL_NAMES.reportFindings,
+      MC_TOOL_NAMES.restoreFile,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
+    grantable: [],
+  },
 };
 
 /** A role: what a seat of it runs as, unless its own config says otherwise. */
@@ -276,6 +294,8 @@ export const WRITER_TOOLS = [
   MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const READONLY_TOOLS = [
@@ -287,6 +307,8 @@ export const READONLY_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const SCRATCH_TOOLS = [
@@ -300,6 +322,8 @@ export const SCRATCH_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 /** A scratch seat starts only on a review Mission Control hands it. */
