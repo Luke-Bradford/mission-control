@@ -24,6 +24,7 @@ import {
   NO_NEW_COMMIT_TEXT,
   NUDGE_TEXT,
   noShaDeleteText,
+  pendingSeatWork,
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
@@ -48,6 +49,43 @@ const SHA = "aaaaaaa1111";
 const SHA2 = "bbbbbbb2222";
 const REF = "owner/repo#7";
 const NOW = 10_000_000;
+
+describe("pendingSeatWork", () => {
+  it("keeps only new failing findings, CI failures and controller messages", () => {
+    expect(
+      pendingSeatWork({
+        lastTurnStartedAt: 100,
+        reviews: [
+          {
+            id: 1,
+            round: 2,
+            state: "reported",
+            blocking: 1,
+            verdict: { spec: "fail", quality: "pass" },
+            endedAt: 109,
+          },
+          {
+            id: 2,
+            round: 1,
+            state: "reported",
+            blocking: 0,
+            verdict: { spec: "pass", quality: "pass" },
+            endedAt: 110,
+          },
+        ],
+        events: [{ key: "ci", text: "CI failed on c13fd87 tests", at: 103 }],
+        messages: [
+          { key: "cap", from: "CAPCOM", at: 105 },
+          { key: "other", from: "other", at: 106 },
+        ],
+        woken: ["ci:ci"],
+      }),
+    ).toEqual([
+      { key: "message:cap", kind: "message", at: 105, text: "a message from CAPCOM" },
+      { key: "review:1", kind: "findings", at: 109, text: "RETRO round 2 findings" },
+    ]);
+  });
+});
 
 function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot {
   return {

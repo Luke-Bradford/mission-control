@@ -23,6 +23,7 @@ import {
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
+  EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
@@ -739,6 +740,86 @@ afterEach(() => {
   h.engine.stop();
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("idle-seat wakes", () => {
+  it("wakes once when failing findings arrived during the turn", async () => {
+    store.setSeatTurnStarted(SEAT, clock);
+    const id = store.requestReview({
+      authorRunId: RUN,
+      repoId: REPO,
+      seatId: RETRO,
+      prNumber: 12,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: clock,
+    }) as number;
+    store.setReviewState(id, ["queued"], "running", { at: clock, runId: "retro-run" });
+    clock += 9 * MIN;
+    expect(
+      store.recordFindings(id, "retro-run", {
+        verdict: { spec: "fail", quality: "pass" },
+        summary: "broken",
+        findings: [
+          {
+            severity: "Important",
+            file: "apps/a.ts",
+            line: 1,
+            summary: "bad",
+            scenario: "breaks",
+            fix: "fix",
+          },
+        ],
+        at: clock,
+      }),
+    ).toBe(true);
+    expect(store.seatSession(SEAT)?.lastTurnStartedAt).toBe(START + 10 * MIN);
+    expect(store.reviewsOfRun(RUN)[0]?.endedAt).toBe(clock);
+    for (const listener of h.listeners)
+      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await vi.waitFor(() =>
+      expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1),
+    );
+    expect(h.sent.at(-1)?.text).toContain("RETRO round 2 findings");
+    for (const listener of h.listeners)
+      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await Promise.resolve();
+    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1);
+  });
+
+  it("reminds once for a green head without evidence, then raises Needs-you", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "waiting", ended: false },
+      prNumber: 12,
+      pushStartedAt: clock - EVIDENCE_REMIND_MS - 1,
+    });
+    setPr({ ci: "passing", headSha: SHA });
+    await h.engine.tick();
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA}`);
+    expect(store.claimedKeys(RUN)[`evidence-remind:${RUN}:${SHA}`]).toBe(clock);
+    expect(store.run(RUN)?.endedAt).toBeNull();
+    expect(store.evidenceCount(RUN)).toBe(0);
+    expect(store.run(RUN)?.loop).not.toBeNull();
+    h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(true);
+    await h.engine.tick();
+    expect(sentKeys().filter((key) => key === `evidence-remind:${RUN}:${SHA}`)).toHaveLength(1);
+  });
 });
 
 describe("sync_main", () => {
