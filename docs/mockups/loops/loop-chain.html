@@ -1,4 +1,5 @@
 <title>Feature Loop Chain</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -88,7 +89,7 @@ ol.check li:last-child{border-bottom:0}
 const S = [
   { id: 'plan', name: 'Plan', type: 'Planner', colour: 'var(--think)', opt: true, who: 'Planner seat (FAO)', gate: 'has a ## Plan', run: 'gpt-5.6-sol · high',
     onFail: 'Plan again; a missing decision asks CAPCOM with a default', cap: '—', atCap: '—',
-    prompt: 'Turn {ticket} into a plan a developer can build from the ticket alone. Read {repo_rules} first. If a decision is missing, ask it with a default.', note: 'Only for Size L tickets.' },
+    prompt: 'Turn {ticket} into a plan a developer can build from the ticket alone. Read {repo_rules} first. If a decision is missing, ask it with a default.', note: 'For Size M, L and XL tickets, unless the repo sets planRequired: false.' },
   { id: 'build', name: 'Build', type: 'Developer', colour: 'var(--accent)', who: 'Developer seat', gate: 'evidence reported', run: 'gpt-5.6-terra · medium',
     onFail: 'Stays in Build: the agent keeps working until it can report', cap: 'turn and time limits', atCap: 'FLIGHT',
     prompt: 'Implement {plan} for {ticket}, test-first. If {findings} or failed {checks} came back, fix those first. Run {checks}, commit, then report_evidence.', note: 'Every failure later in the chain comes back here, to the same seat and session, so it keeps its context.' },
@@ -99,17 +100,17 @@ const S = [
     onFail: 'Back to Build with the findings (rework)', cap: '3 rounds (REVIEW_ROUNDS)', atCap: 'Parked for FLIGHT',
     prompt: 'Review {diff} against {done_when} with fresh eyes. Approve, or list findings with the exact fix for each.', note: 'The developer\'s seat is free while review runs; rework returns to that same seat.' },
   { id: 'merge', name: 'Merge', type: 'Engine', colour: 'var(--fg-2)', who: 'Hub engine', gate: 'mergeable', run: 'hard-rule files need clearance',
-    onFail: 'Back to Build: sync with main and fix the conflict', cap: '—', atCap: 'FLIGHT',
+    onFail: 'Parks for FLIGHT; the hub syncs with main: clean → CI again; a real file conflict → Build', cap: '—', atCap: 'FLIGHT',
     prompt: null, note: 'Hard-rule files need FLIGHT clearance before the engine merges.' },
   { id: 'done', name: 'Done', type: 'End', colour: 'var(--ok)', who: 'Board → Done', gate: 'merged', run: 'ticket closed',
     onFail: '—', cap: '—', atCap: '—', prompt: null, note: 'The ticket moves to Done and the seat is free.' },
 ];
 // run #681 (sample): Plan skipped (Size M); Build; CI failed once; Build; CI passed; Review asked for changes; Build; CI running
 const RUN = {
-  state: { plan: 'skip', build: 'done', ci: 'now', review: 'next', merge: 'next', done: 'next' },
+  state: { plan: 'done', build: 'done', ci: 'now', review: 'next', merge: 'next', done: 'next' },
   used: { ci: '1/3', review: '1/3', merge: '0' },
   list: [
-    ['done', 'Plan', 'Skipped: Size M, no plan needed', ''],
+    ['done', 'Plan', 'Plan accepted (Size M)', '88k · 14m'],
     ['done', 'Build', 'First version committed', '236k · 25m'],
     ['back', 'CI checks', 'Failed: lint and 1 web test → back to Build', 'try 1 of 3'],
     ['done', 'Build', 'CI fix', '38k · 7m'],
@@ -155,7 +156,7 @@ function draw() {
   const returns = [
     { from: 'ci', depth: 34, entry: cx('build') + 30, label: 'CI fail ≤3', used: 'ci' },
     { from: 'review', depth: 74, entry: cx('build'), label: 'changes ≤3', used: 'review' },
-    { from: 'merge', depth: 114, entry: cx('build') - 30, label: 'conflict · sync, fix', used: 'merge' },
+    { from: 'merge', depth: 114, entry: cx('build') - 30, label: 'file conflict · after sync', used: 'merge' },
   ];
   returns.forEach(r => {
     const y = bottom + r.depth, sx = cx(r.from), rad = 10;
@@ -179,7 +180,7 @@ function draw() {
     if (state === 'now') el('rect', { x: x - 5, y: Y - 5, width: W + 10, height: H + 10, rx: 12, class: 'pulse', style: 'fill:none;stroke:var(--accent);stroke-width:3' }, g);
     el('rect', { class: 'card' + (s.opt ? ' opt' : ''), x, y: Y, width: W, height: H, rx: 8, style: state === 'now' ? 'stroke:var(--accent);stroke-width:2' : '' }, g);
     el('rect', { class: 'stripe', x: x + 1, y: Y + 1, width: W - 2, height: 22, rx: 7, style: `fill:color-mix(in srgb, ${s.colour} 15%, transparent)` }, g);
-    txt(g, x + 12, Y + 16, 'stype', (s.opt ? s.type.toUpperCase() + ' · SIZE L ONLY' : s.type.toUpperCase()), { style: `fill:${s.colour}` });
+    txt(g, x + 12, Y + 16, 'stype', (s.opt ? s.type.toUpperCase() + ' · SIZE M+' : s.type.toUpperCase()), { style: `fill:${s.colour}` });
     txt(g, x + 12, Y + 44, 'sname', s.name);
     txt(g, x + 12, Y + 63, 'swho', s.who.length > 24 ? s.who.slice(0, 23) + '…' : s.who);
     txt(g, x + 12, Y + 83, 'sgate', 'gate: ' + s.gate);
