@@ -1083,12 +1083,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
         rows.map((row) => storedCommsMessage(row));
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
+      const unreadAfter = (rows: ReturnType<Store["commsForCrew"]>, cursor: string | null) => {
+        const offset = cursor === null ? 0 : Number(cursor.slice("comms:".length));
+        return rows.filter((row) => Number(row.id.slice("comms:".length)) > offset).length;
+      };
+      const commsScope = (
+        scope: string,
+      ): { key: string; rows: ReturnType<Store["commsForCrew"]> } | null => {
+        if (scope === "crew") return { key: scope, rows: store.commsForCrew() };
+        const flight = flightSeat(config)?.seat.id;
+        if (scope === "flight")
+          return {
+            key: scope,
+            rows: flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight),
+          };
+        const agent = scope.match(/^agent-all:([A-Za-z0-9_-]+)$/)?.[1];
+        if (agent !== undefined && knownCommsAgent(agent))
+          return { key: `agent-all:${agent}`, rows: store.commsForAgent(agent) };
+        const inbox = scope.match(/^inbox:([A-Za-z0-9_-]+)$/)?.[1];
+        if (inbox !== undefined && knownCommsAgent(inbox))
+          return { key: `inbox:${inbox}`, rows: store.commsInbox(inbox) };
+        const pair = scope.match(/^pair:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/);
+        if (pair !== null && knownCommsAgent(pair[1]) && knownCommsAgent(pair[2]))
+          return { key: pairScope(pair[1], pair[2]), rows: store.commsForPair(pair[1], pair[2]) };
+        return null;
+      };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
       api.get("/comms/crew", () => ({ messages: storedCommsMessages(store.commsForCrew()) }));
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
       api.get("/comms/flight", () => ({
-        messages: storedCommsMessages(store.commsForPair(COMMS_CAPCOM, "FLIGHT")),
+        messages: storedCommsMessages(
+          flightSeat(config) === null
+            ? []
+            : store.commsForPair(COMMS_CAPCOM, flightSeat(config)?.seat.id ?? ""),
+        ),
       }));
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
@@ -1099,15 +1129,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
           .filter((contact) => contact !== id && contact !== COMMS_CREW)
           .map((contact) => {
-            const contactMessages = messages.filter((m) => m.from === contact || m.to === contact);
+            const contactRows = store.commsForPair(id, contact);
+            const cursor = store.commsScopeCursor(pairScope(id, contact));
+            const contactMessages = storedCommsMessages(contactRows);
             return {
               id: contact,
               lastMessage: contactMessages.at(-1) ?? null,
               count: contactMessages.length,
-              unread: inbox.filter((m) => m.from === contact).length,
+              unread: unreadAfter(contactRows, cursor),
             };
           });
-        return { messages, inbox, contacts };
+        return {
+          messages,
+          inbox,
+          contacts,
+          cursor: store.commsScopeCursor(`agent-all:${id}`),
+          inboxCursor: store.commsScopeCursor(`inbox:${id}`),
+        };
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{ Params: { id: string; contact: string } }>(
@@ -1115,30 +1153,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         (req, reply) => {
           if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
             return reply.code(404).send({ error: "unknown Comms agent" });
-          return {
-            messages: storedCommsMessages(store.commsForPair(req.params.id, req.params.contact)),
-          };
+          const rows = store.commsForPair(req.params.id, req.params.contact);
+          const cursor = store.commsScopeCursor(pairScope(req.params.id, req.params.contact));
+          return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
         },
       );
       // Reader: apps/web/src/App.tsx#App (pair Comms)
       api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
         if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
           return reply.code(404).send({ error: "unknown Comms agent" });
-        return { messages: storedCommsMessages(store.commsForPair(req.params.a, req.params.b)) };
+        const rows = store.commsForPair(req.params.a, req.params.b);
+        const cursor = store.commsScopeCursor(pairScope(req.params.a, req.params.b));
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
       });
       // Reader: apps/web/src/App.tsx#App (ticket Comms)
       api.get<{ Params: { ref: string } }>("/comms/tickets/:ref", (req, reply) => {
         const supplied = decodeURIComponent(req.params.ref);
         if (!COMMS_REF.test(supplied)) return reply.code(400).send({ error: "invalid Comms ref" });
-        const n = supplied.replace(/^(?:#|PR )/, "");
-        const refs = [`#${n}`, `PR ${n}`];
-        const token = new RegExp(`(^|[^A-Za-z0-9])(?:#${n}|PR ${n})(?=$|[^A-Za-z0-9])`);
-        const rows = store
-          .comms(0)
-          .filter((row) => refs.includes(row.ref ?? "") || token.test(row.text));
+        const context = store.commsForTicket(supplied);
         return {
-          messages: storedCommsMessages(rows),
-          ticket: { ref: `#${n}`, linkedPr: store.commsLinkedPr(`#${n}`) },
+          messages: storedCommsMessages(context.rows),
+          ticket: { ref: context.ref, linkedPr: context.linkedPr },
         };
       });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
@@ -1174,13 +1209,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        const validScope =
-          /^(?:crew|flight|agent:[A-Za-z0-9_-]+|inbox:[A-Za-z0-9_-]+|pair:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/.test(
-            body.data.scope,
-          );
-        if (!validScope || store.commsMessage(body.data.messageId) === null)
+        const scope = commsScope(body.data.scope);
+        if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
-        store.markCommsScopeRead(body.data.scope, body.data.messageId);
+        store.markCommsScopeRead(scope.key, body.data.messageId);
         return { ok: true };
       });
 

@@ -165,6 +165,28 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
   ]);
 });
 
+it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", async () => {
+  let at = 10;
+  const deps = {
+    store,
+    crew: ["seat", "other"],
+    knownSecrets: async () => [],
+    now: () => at++,
+    seatSender: true,
+  };
+  const first = await sendComms(deps, "seat", { to: "crew", text: "@CAPCOM first #703" });
+  const falseMatch = await sendComms(deps, "seat", { to: "crew", text: "#7030 is different" });
+  const second = await sendComms(deps, "other", {
+    to: "crew",
+    text: "@CAPCOM second",
+    ref: "#703",
+  });
+
+  expect(store.commsMentions("CAPCOM").map((row) => row.id)).toEqual([second.id, first.id]);
+  expect(store.commsForTicket("#703").rows.map((row) => row.id)).toEqual([first.id, second.id]);
+  expect(store.commsForTicket("#703").rows.map((row) => row.id)).not.toContain(falseMatch.id);
+});
+
 it("reuses parsed transcripts across thread and attention reads", () => {
   expect(messages()[0]?.text).toBe("first");
   expect(threadMessages(store, "seat", true, "attention")).toEqual(messages());

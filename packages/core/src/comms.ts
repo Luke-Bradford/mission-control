@@ -66,10 +66,13 @@ export interface CommsTicketContext {
 }
 export interface CommsMessagesResponse {
   messages: CommsMessage[];
+  cursor?: string | null;
+  unread?: number;
 }
 export interface CommsAgentResponse extends CommsMessagesResponse {
   inbox: CommsMessage[];
   contacts: CommsContact[];
+  inboxCursor?: string | null;
 }
 export interface CommsTicketResponse extends CommsMessagesResponse {
   ticket: CommsTicketContext;

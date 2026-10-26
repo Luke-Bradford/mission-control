@@ -3002,7 +3002,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at,c.id",
+          "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at DESC,c.id DESC",
         )
         .all(target) as Row[]
     ).map((r) => this.commsRow(r));
@@ -3052,6 +3052,42 @@ export class Store {
   commsForRefs(refs: string[]): CommsRow[] {
     if (!refs.length) return [];
     return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
+  }
+  commsForTicket(ref: string): { ref: string; linkedPr: string | null; rows: CommsRow[] } {
+    const prNumber = ref.startsWith("PR ") ? Number(ref.slice(3)) : null;
+    let issueNumber = ref.startsWith("#") ? Number(ref.slice(1)) : null;
+    let linkedPr: string | null = null;
+    if (prNumber !== null) {
+      const row = this.db
+        .prepare("SELECT ticket FROM pull_requests WHERE number=? ORDER BY updated_at DESC LIMIT 1")
+        .get(prNumber) as { ticket: string | null } | undefined;
+      const match = row?.ticket?.match(/#(\d+)$/);
+      issueNumber = match === null || match === undefined ? null : Number(match[1]);
+      linkedPr = `PR ${prNumber}`;
+    } else if (issueNumber !== null) {
+      const row = this.db
+        .prepare(
+          "SELECT number FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC LIMIT 1",
+        )
+        .get(`*#${issueNumber}`) as { number: number } | undefined;
+      linkedPr = row === undefined ? null : `PR ${row.number}`;
+    }
+    const resolvedRef = issueNumber === null ? ref : `#${issueNumber}`;
+    const refs = linkedPr === null ? [resolvedRef] : [resolvedRef, linkedPr];
+    const rows = this.commsForWhere(
+      `ref IN (${refs.map(() => "?").join(",")}) OR text LIKE ? OR text LIKE ?`,
+      ...refs,
+      `%${resolvedRef}%`,
+      linkedPr === null ? "%" : `%${linkedPr}%`,
+    ).filter((row) => {
+      if (refs.includes(row.ref ?? "")) return true;
+      return refs.some((candidate) =>
+        new RegExp(`(^|[^A-Za-z0-9])${candidate.replace("#", "\\#")}(?=$|[^A-Za-z0-9])`).test(
+          row.text,
+        ),
+      );
+    });
+    return { ref: resolvedRef, linkedPr, rows };
   }
   commsLinkedPr(ref: string): string | null {
     const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
