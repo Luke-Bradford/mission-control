@@ -988,6 +988,7 @@ describe("Codex seat floor", () => {
       'rg -n "a|b" docs',
       'rg -n "a|b" docs | head',
       "cat apps/web/a.ts | grep foo",
+      "nl -ba apps/web/a.ts | sed -n 1,5p",
     ]) {
       expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
         true,

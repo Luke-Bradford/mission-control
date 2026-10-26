@@ -2,7 +2,6 @@
 import {
   type CrewMode,
   codexCommand,
-  DEFAULT_SEAT_COMMANDS,
   GUARD_RULES,
   type GuardRule,
   isObj,
@@ -18,7 +17,7 @@ import {
 import { type CcConfig, crewSeatGrants } from "../config.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
 import type { TestLock } from "../guard/lock.ts";
-import { codexApproval, codexCommandAllowed, codexEditAllowed } from "./codex-floor.ts";
+import { codexApproval, codexEditAllowed } from "./codex-floor.ts";
 import { CODEX_MCP_ELICITATION, type CodexSessionInput } from "./codex-session.ts";
 
 const REFUSAL_DETAIL_MAX = 200;
@@ -96,17 +95,6 @@ export function createCodexApprover(i: {
     const events = codexApproval(req, paths, { cwd: i.cwd });
     if (!repo || events === null) return refuse("codex-allowlist");
     for (const event of events) {
-      if (
-        event.tool === "Bash" &&
-        !codexCommandAllowed(
-          event.input.command ?? "",
-          i.mode,
-          repo.commands ?? DEFAULT_SEAT_COMMANDS,
-          typeof params.cwd === "string" ? params.cwd : "",
-          i.cwd,
-        )
-      )
-        return refuse("codex-allowlist");
       if (
         event.tool === "Edit" &&
         !codexEditAllowed(event.input.file_path ?? "", i.cwd, i.area, repo.protectedFiles ?? [])

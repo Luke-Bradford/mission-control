@@ -142,10 +142,7 @@ describe("Codex refusal records", () => {
         signal(),
       ),
     ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith(
-      "codex-allowlist",
-      `${GUARD_RULES["codex-allowlist"]}: ${command}`,
-    );
+    expect(h.record).toHaveBeenCalledWith("network", `${GUARD_RULES.network}: curl: ${command}`);
   });
 
   it.each([false, true])(

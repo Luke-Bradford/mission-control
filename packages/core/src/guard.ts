@@ -1230,6 +1230,7 @@ interface ReadOptions {
 
 /** Known read-only options only: unknown options may run a helper, follow links or write files. */
 export const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
+  nl: { flags: ["-a", "-b", "-d", "-f", "-h", "-i", "-l", "-n", "-p", "-s", "-v", "-w"] },
   pwd: { flags: ["-L", "-P"], maxOperands: 0 },
   ls: {
     flags: [
