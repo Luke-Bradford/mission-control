@@ -162,6 +162,7 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
+  codexPnpmStoreDir,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -1368,6 +1369,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      let codexPnpmStore: string | undefined;
+      if (run.vendor === "codex") {
+        const storePath = codexPnpmStoreDir(cwd);
+        for (const path of [dirname(storePath), storePath]) {
+          try {
+            mkdirSync(path, { mode: 0o700 });
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+          }
+          const stat = lstatSync(path);
+          if (
+            !stat.isDirectory() ||
+            stat.uid !== process.getuid?.() ||
+            (stat.mode & 0o777) !== 0o700 ||
+            realpathSync(path) !== path
+          )
+            throw new Error("Codex pnpm store must be a private directory owned by the server");
+        }
+        codexPnpmStore = realpathSync(storePath);
+      }
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
@@ -1387,6 +1408,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
+        if (codexPnpmStore === undefined) throw new Error("Codex pnpm store is unavailable");
         addMcTmpExclude(gitCommonDir);
         const claudeTmpParentPath = dirname(seatTmp(run.id));
         try {
@@ -1437,7 +1459,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           TMPDIR: tmp,
           TMP: tmp,
           TEMP: tmp,
-          [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
+          [PNPM_STORE_ENV]: codexPnpmStore,
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
           RUFF_CACHE_DIR: join(tmp, "ruff-cache"),

@@ -734,7 +734,7 @@ export const CODEX_CLI_ENV = {
   npm_config_update_notifier: "false",
 } as const;
 
-/** The folder pnpm makes for a project-local store; the commit tool never stages one. */
+/** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
@@ -748,9 +748,8 @@ export const PNPM_STORE_ENV = "pnpm_config_store_dir";
  */
 export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
- * A seat's pnpm store, in the sandbox's temp root. A sandboxed pnpm cannot write the global store
- * in `~/Library`, and with no store set it falls back to `.pnpm-store/` at the top of the worktree,
- * where the commit tool's `add -A` would find it.
+ * A seat's pnpm store in its own sandbox temp root. A sandboxed pnpm cannot write the global store
+ * in `~/Library`, and each Claude seat must not share its store with another seat.
  */
 export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
   `${tempRoot}/mc-pnpm-store/${seatId}`;
