@@ -52,6 +52,7 @@ import {
   CREW_GIT_ENV,
   carriedFrom,
   clockHm,
+  codexPnpmStoreDir,
   compactUtc,
   conflictKey,
   conflictText,
@@ -1367,6 +1368,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      let codexPnpmStore: string | undefined;
+      if (run.vendor === "codex") {
+        const storePath = codexPnpmStoreDir(cwd);
+        try {
+          mkdirSync(storePath, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const stat = lstatSync(storePath);
+        if (!stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o777) !== 0o700)
+          throw new Error("Codex pnpm store must be a private directory owned by the server");
+        codexPnpmStore = realpathSync(storePath);
+      }
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
@@ -1386,6 +1400,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
+        if (codexPnpmStore === undefined) throw new Error("Codex pnpm store is unavailable");
         addMcTmpExclude(gitCommonDir);
         const claudeTmpParentPath = dirname(seatTmp(run.id));
         try {
@@ -1436,7 +1451,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           TMPDIR: tmp,
           TMP: tmp,
           TEMP: tmp,
-          [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
+          [PNPM_STORE_ENV]: codexPnpmStore,
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
           RUFF_CACHE_DIR: join(tmp, "ruff-cache"),
@@ -1473,7 +1488,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
               // Codex root-read base would otherwise reach them. Codex's own temp root is in
               // its worktree, so this deny no longer sits above anything the seat resolves.
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp, [
+                codexPnpmStore,
+              ]).replace(
                 '":root"="read"',
                 ['":root"="read"', `${JSON.stringify(claudeTmpParent)}="deny"`].join("\n"),
               ),

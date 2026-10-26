@@ -23,6 +23,7 @@ import {
   CREW_CLI_ENV,
   CREW_ISOLATION_FLAGS,
   type CrewCliInput,
+  codexPnpmStoreDir,
   crewAuthorName,
   crewCliArgs,
   crewPnpmStoreDir,
@@ -40,7 +41,6 @@ import {
   MC_TOOL_GRANTS,
   MODE_LOOPS,
   modeOfSeat,
-  PNPM_PROJECT_STORE_DIR_NAME,
   PNPM_STORE_DIR_NAME,
   PNPM_STORE_ENV,
   PROTECTED_FILES,
@@ -293,13 +293,15 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps a Codex seat's pnpm store stable beside the per-run temp root", () => {
+  it("keeps Claude pnpm stores private and Codex's store stable per worktree", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
-    expect(crewPnpmStoreDir("/tmp/mc-test/run-one", "guido-1")).toBe("/tmp/mc-test/pnpm-store");
-    expect(crewPnpmStoreDir("/tmp/mc-test/run-two", "guido-1")).toBe("/tmp/mc-test/pnpm-store");
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
+      crewPnpmStoreDir("/tmp/mc-test", "guido-1"),
+    );
+    expect(codexPnpmStoreDir("/w/guido-42")).toBe("/w/guido-42/.mc-tmp/pnpm-store");
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
-    expect(PNPM_STORE_DIR_NAME).toBe("pnpm-store");
-    expect(PNPM_PROJECT_STORE_DIR_NAME).toBe(".pnpm-store");
+    expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
   });
 });

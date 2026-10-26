@@ -709,10 +709,8 @@ export const CODEX_CLI_ENV = {
   npm_config_update_notifier: "false",
 } as const;
 
-/** The worktree-local pnpm store directory, kept outside every run's temp root. */
-export const PNPM_STORE_DIR_NAME = "pnpm-store";
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
-export const PNPM_PROJECT_STORE_DIR_NAME = ".pnpm-store";
+export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
@@ -725,12 +723,15 @@ export const PNPM_STORE_ENV = "pnpm_config_store_dir";
  */
 export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
- * A worktree's pnpm store, beside each run's sandbox temp root. A sandboxed pnpm cannot write the
- * global store in `~/Library`, and this stable path preserves the store that `node_modules` links
- * use across fresh seat runs.
+ * A seat's pnpm store in its own sandbox temp root. A sandboxed pnpm cannot write the global store
+ * in `~/Library`, and each Claude seat must not share its store with another seat.
  */
-export const crewPnpmStoreDir = (tempRoot: string, _seatId: string): string =>
-  `${tempRoot.slice(0, tempRoot.lastIndexOf("/"))}/${PNPM_STORE_DIR_NAME}`;
+export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
+  `${tempRoot}/mc-pnpm-store/${seatId}`;
+
+/** A Codex worktree's stable pnpm store, outside its per-run temp root. */
+export const codexPnpmStoreDir = (worktree: string): string =>
+  `${worktree}/${MC_TMP_DIR_NAME}/pnpm-store`;
 
 /** How long a control request (interrupt, get_context_usage…) may go unanswered. */
 export const CONTROL_TIMEOUT_MS = 10_000;

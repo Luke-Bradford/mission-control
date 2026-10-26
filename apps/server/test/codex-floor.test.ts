@@ -181,9 +181,11 @@ describe("codexSeatConfig", () => {
   });
 
   it("keeps the read-only workspace read-only", () => {
-    const config = codexSeatConfig(sandboxInput, "read-only", url, tmp);
+    const store = `${sandboxInput.cwd}/.mc-tmp/pnpm-store`;
+    const config = codexSeatConfig(sandboxInput, "read-only", url, tmp, [store]);
     expect(config).toContain('"."="read"');
     expect(config).toContain(`"${tmp}"="write"`);
+    expect(config).toContain(`"${store}"="write"`);
     expect(config).not.toContain('"."="write"');
   });
 

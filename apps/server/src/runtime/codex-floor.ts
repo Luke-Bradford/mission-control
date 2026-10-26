@@ -32,8 +32,10 @@ export function codexSeatConfig(
   mode: CrewMode,
   mcpUrl: string,
   tmpDir: string,
+  extraWriteDirs: readonly string[] = [],
 ): string {
   const denied = sandboxReadDenies(i);
+  const writeDirs = [tmpDir, ...extraWriteDirs];
   for (const path of [
     i.cwd,
     i.gitCommonDir,
@@ -41,19 +43,24 @@ export function codexSeatConfig(
     i.home,
     i.dataDir,
     ...denied,
-    tmpDir,
+    ...writeDirs,
   ]) {
     tomlString(path);
   }
-  if (!isAbsolute(tmpDir)) throw new Error("codex seat config: tmpDir must be absolute");
+  if (writeDirs.some((path) => !isAbsolute(path)))
+    throw new Error("codex seat config: write directories must be absolute");
   const contains = (parent: string, path: string) => {
     const rel = relative(resolve(parent), resolve(path));
     return rel === "" || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel));
   };
-  if (denied.some((path) => contains(path, tmpDir)))
-    throw new Error("codex seat config: tmpDir is inside a denied path");
-  if ([i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(tmpDir, path)))
-    throw new Error("codex seat config: tmpDir contains a seat or operator path");
+  if (writeDirs.some((dir) => denied.some((path) => contains(path, dir))))
+    throw new Error("codex seat config: write directory is inside a denied path");
+  if (
+    writeDirs.some((dir) =>
+      [i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(dir, path)),
+    )
+  )
+    throw new Error("codex seat config: write directory contains a seat or operator path");
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
   return [
     `approvals_reviewer = ${tomlString("user")}`,
@@ -71,7 +78,7 @@ export function codexSeatConfig(
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem]`,
     grant(":root", "read"),
     ...denied.map((path) => grant(path, "deny")),
-    grant(tmpDir, "write"),
+    ...[...new Set(writeDirs)].map((path) => grant(path, "write")),
     ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
     grant(".", mode === "read-only" ? "read" : "write"),

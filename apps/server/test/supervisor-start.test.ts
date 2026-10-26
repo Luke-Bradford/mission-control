@@ -690,14 +690,14 @@ describe("startRun", () => {
     for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
   });
 
-  it("keeps pnpm's store stable beside the seat's per-run temp root, outside the worktree", async () => {
+  it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(join(dirname(start.env.TMPDIR as string), "pnpm-store"));
+    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
@@ -2246,7 +2246,6 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
-      PNPM_STORE_ENV,
       "UV_CACHE_DIR",
       "PYTHONPYCACHEPREFIX",
       "RUFF_CACHE_DIR",
@@ -2255,6 +2254,7 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
+    expect(spawn.env[PNPM_STORE_ENV]).toBe(join(spawn.cwd, MC_TMP_DIR_NAME, "pnpm-store"));
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
@@ -2281,6 +2281,7 @@ import(${JSON.stringify(fixture)});
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    expect(config).toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
       JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
     );
@@ -2307,6 +2308,22 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
+  });
+
+  it("keeps Codex's pnpm store stable across fresh runs of a worktree", async () => {
+    const { sup } = codex();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const first = recorded().find((m) => m.type === "spawn");
+    await sup.endRun("guido-1");
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(2));
+    const starts = recorded().filter((m) => m.type === "spawn");
+    const second = starts[1];
+    expect(second.env[PNPM_STORE_ENV]).toBe(first.env[PNPM_STORE_ENV]);
+    expect(second.env[PNPM_STORE_ENV]).toBe(join(second.cwd, MC_TMP_DIR_NAME, "pnpm-store"));
+    expect(second.env[PNPM_STORE_ENV]).not.toBe(join(second.env.TMPDIR, "pnpm-store"));
   });
 
   it.each([false, true])(

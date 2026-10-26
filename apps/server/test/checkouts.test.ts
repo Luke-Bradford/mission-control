@@ -600,6 +600,8 @@ describe("prepareCheckout", () => {
 
   it("keeps Codex worktree temp directories out of commits", () => {
     expect(COMMIT_ADD_PATHSPEC).toContain(`:(top,exclude,glob)**/${MC_TMP_DIR_NAME}/**`);
+    expect(COMMIT_ADD_PATHSPEC).toContain(`:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`);
+    expect(COMMIT_ADD_PATHSPEC).not.toContain(":(top,exclude,glob)**/pnpm-store/**");
   });
 
   it("answers up-to-date when the reused branch contains main", async () => {
@@ -915,7 +917,7 @@ describe("prepareCheckout", () => {
     ]);
   });
 
-  it("installs without CI markers, npm_* or GIT_* from the server's environment", () => {
+  it("installs without inherited CI, npm or git settings, using Codex's stable worktree store", () => {
     const keys = [
       "CI",
       "CONTINUOUS_INTEGRATION",
@@ -933,6 +935,7 @@ describe("prepareCheckout", () => {
       expect(env.CI).toBe("false");
       // pnpm never walks up to an ancestor's workspace
       expect(env.NPM_CONFIG_WORKSPACE_DIR).toBe("/w/guido-42");
+      expect(env.pnpm_config_store_dir).toBe("/w/guido-42/.mc-tmp/pnpm-store");
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     } finally {
       for (const [k, v] of Object.entries(saved)) {

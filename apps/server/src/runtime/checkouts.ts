@@ -14,10 +14,11 @@ import { promisify } from "node:util";
 import {
   branchFor,
   CANNOT_START,
+  codexPnpmStoreDir,
   DIFF_CUT_LINE,
   MC_TMP_DIR_NAME,
-  PNPM_PROJECT_STORE_DIR_NAME,
   PNPM_STORE_DIR_NAME,
+  PNPM_STORE_ENV,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
   REVIEW_DIFF_MAX_BUFFER,
@@ -134,15 +135,14 @@ export interface RepoPeer {
 
 /**
  * What the commit tool's `add -A` stages: the whole worktree except package stores, Python
- * environments, caches, build metadata and coverage output, at the top or nested. The seat's env
- * points the caches to the sandbox's temp root (`crewPnpmStoreDir`, `crewPythonEnv`); this is the
- * backstop for a repo that does not ignore them.
+ * environments, caches, build metadata and coverage output, at the top or nested. Codex's stable
+ * pnpm store is under `.mc-tmp/`; Claude's caches live in its sandbox temp root. This is the
+ * backstop for a repo that does not ignore the legacy `.pnpm-store`.
  */
 export const COMMIT_ADD_PATHSPEC = [
   "--",
   ":(top)",
   `:(top,exclude,glob)**/${MC_TMP_DIR_NAME}/**`,
-  `:(top,exclude,glob)**/${PNPM_PROJECT_STORE_DIR_NAME}/**`,
   `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
   ":(top,exclude,glob)**/__pycache__/**",
   ":(top,exclude,glob)**/.pytest_cache/**",
@@ -158,6 +158,23 @@ export const COMMIT_ADD_PATHSPEC = [
   ":(top,exclude,glob)**/htmlcov/**",
   ":(top,exclude,glob)**/.ipynb_checkpoints/**",
 ] as const;
+
+/** Keep a worktree-local Codex store out of status as well as the commit pathspec. */
+async function addMcTmpExclude(gitCommonDir: string): Promise<void> {
+  const path = join(gitCommonDir, "info", "exclude");
+  const line = `${MC_TMP_DIR_NAME}/`;
+  await mkdir(dirname(path), { recursive: true });
+  let existing = "";
+  try {
+    existing = await readFile(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  if (existing.split("\n").includes(line)) return;
+  await writeFile(path, `${existing === "" || existing.endsWith("\n") ? "" : "\n"}${line}\n`, {
+    mode: 0o600,
+  });
+}
 
 export type ReuseSync =
   | { kind: "up-to-date" }
@@ -643,6 +660,7 @@ export function installEnv(worktree: string): NodeJS.ProcessEnv {
   }
   env.CI = "false";
   env.NPM_CONFIG_WORKSPACE_DIR = worktree;
+  env[PNPM_STORE_ENV] = codexPnpmStoreDir(worktree);
   return env;
 }
 
@@ -861,7 +879,10 @@ async function installAll(
       refuseUnsafeUvRegistries(await readFile(join(s.path, "uv.lock"), "utf8"), s.subject);
     }
   }
-  for (const tool of picked) await install(tool, s.path, s.name, run);
+  for (const tool of picked) {
+    if (tool === PNPM_TOOL) await addMcTmpExclude(s.common);
+    await install(tool, s.path, s.name, run);
+  }
 }
 
 /**
