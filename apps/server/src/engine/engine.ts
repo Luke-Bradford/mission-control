@@ -42,8 +42,10 @@ import {
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
+  EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
   effectiveHardRules,
+  evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
   fillLoopText,
@@ -76,6 +78,8 @@ import {
   modeOfSeat,
   NEW_LOOP,
   parkedEventText,
+  pendingSeatWork,
+  pendingWakeText,
   REFUSAL_TRIES,
   REVIEW_STATUS_CONTEXT,
   REVIEW_STATUS_WAIVED,
@@ -375,6 +379,35 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
+  /** The same safety gate the planner uses before waking an otherwise idle seat. */
+  function mayWakeSeat(run: Run): boolean {
+    const loop = run.loop;
+    const seat = seatConfig(run.agentId);
+    if (
+      loop === null ||
+      loop === undefined ||
+      loop.phase === "parked" ||
+      !seatKnown(run.agentId) ||
+      pausedSeat(store, run.agentId) ||
+      flightHeld(run) ||
+      seat === undefined ||
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
+    )
+      return false;
+    const row = supervisor.seat(run.agentId);
+    const facts = supervisor.seatFacts(run.agentId);
+    return (
+      row !== null &&
+      row.runId === run.id &&
+      row.state === "idle" &&
+      facts?.inTurn !== true &&
+      (facts?.rateLimitedUntil === null ||
+        facts?.rateLimitedUntil === undefined ||
+        facts.rateLimitedUntil <= now()) &&
+      !supervisor.busy().some((b) => b.seatId === run.agentId)
+    );
+  }
+
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
     const prs = store.pullRequests(run.repoId);
@@ -385,6 +418,100 @@ export function createEngine(deps: EngineDeps): Engine {
         .filter((p) => p.branch === run.branch && p.createdAt >= run.startedAt)
         .sort((a, b) => b.number - a.number)[0] ?? null
     );
+  }
+
+  /** Wake an idle seat exactly once for each hub record that arrived during its prior turn. */
+  async function wakePendingWork(runId: string): Promise<void> {
+    const run = store.run(runId);
+    if (!run || run.endedAt !== null || !mayWakeSeat(run)) return;
+    const row = supervisor.seat(run.agentId);
+    if (!row) return;
+    const woken = Object.keys(store.claimedKeys(run.id))
+      .filter((key) => key.startsWith(`wake:${run.id}:`))
+      .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
+    const work = pendingSeatWork({
+      lastTurnStartedAt: row.lastTurnStartedAt ?? null,
+      reviews: store.reviewsOfRun(run.id),
+      events: store.loopEventsOfRun(run.id),
+      messages: store
+        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER)
+        .filter((m) => m.to === run.agentId)
+        .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
+      woken,
+    });
+    if (work.length === 0) return;
+    const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
+    await send(
+      run.id,
+      key,
+      pendingWakeText(work, run.ticket ?? "this run", config.operator.timezone),
+    );
+  }
+
+  /** A green head without any evidence needs one prompt, then operator attention. */
+  async function watchGreenEvidence(run: Run): Promise<void> {
+    const loop = run.loop;
+    if (!loop || run.endedAt !== null) return;
+    const prefix = `evidence-remind:${run.id}:`;
+    const claimed = store.claimedKeys(run.id);
+    const pr = findPr(run, loop);
+    const head = pr?.headSha;
+    const green = pr?.state === "open" && pr.ci === "passing" && !!head;
+    const evidence = store.evidenceCount(run.id);
+    const currentNote = head ? evidenceNoteKey(run.id, head) : null;
+    for (const note of store.notes()) {
+      if (
+        note.runId === run.id &&
+        note.clearedAt === null &&
+        note.key.startsWith(`evidence:${run.id}:`) &&
+        (evidence > 0 || !green || note.key !== currentNote)
+      ) {
+        store.clearNote(note.key, now());
+        bus.emit("attention");
+      }
+    }
+    if (evidence > 0 || !pr || !head || !green) return;
+    const remindKey = `${prefix}${head}`;
+    const remindedAt = claimed[remindKey];
+    if (remindedAt !== undefined) {
+      if (now() - remindedAt < EVIDENCE_REMIND_MS) return;
+      if (store.notes().some((n) => n.key === evidenceNoteKey(run.id, head))) return;
+      store.raiseNote({
+        key: evidenceNoteKey(run.id, head),
+        kind: "flag",
+        runId: run.id,
+        seatId: run.agentId,
+        repoId: run.repoId,
+        text: `${run.ticket ?? "This run"}: CI is green on ${head.slice(0, 7)}, but ${seatCallSign(run.agentId)} has not reported evidence after a reminder.`,
+        at: now(),
+      });
+      bus.emit("attention");
+      return;
+    }
+    const passedAt = store
+      .loopEventsOfRun(run.id)
+      .filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX))
+      .find((e) => {
+        const sha = e.text.slice(CI_PASSED_EVENT_PREFIX.length).match(/^[0-9a-f]{7,}/i)?.[0];
+        return sha !== undefined && head.startsWith(sha);
+      })?.at;
+    const greenKey = `evidence-green:${run.id}:${head}`;
+    const since = passedAt ?? claimed[greenKey] ?? now();
+    if (passedAt === undefined && claimed[greenKey] === undefined)
+      store.claimLine(greenKey, {
+        runId: run.id,
+        seatId: run.agentId,
+        origin: "engine",
+        text: `CI green on ${head.slice(0, 7)}`,
+        at: since,
+      });
+    if (now() - since < EVIDENCE_REMIND_MS) return;
+    if (mayWakeSeat(run))
+      await send(
+        run.id,
+        remindKey,
+        `CI is green on ${head.slice(0, 7)}, but no evidence was reported for ${run.ticket ?? "this run"}. Please report evidence now.`,
+      );
   }
 
   async function rulesFor(repoId: RepoId, mainSha?: string): Promise<RepoRules | null> {
@@ -1934,6 +2061,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         }
         if (e.kind === "run-ended" && e.endedBy === "engine") return;
+        if (e.kind === "idle") void wakePendingWork(e.runId);
         void reconcileRun(e.runId);
       });
       // Nothing is read or written unless this process runs crew (it holds the lock): boot must
@@ -1972,6 +2100,13 @@ export function createEngine(deps: EngineDeps): Engine {
     async tick() {
       if (!live()) return;
       const runs = loopRuns();
+      await Promise.all(runs.map((r) => wakePendingWork(r.id)));
+      await Promise.all(
+        store
+          .runsActiveSince(now())
+          .filter((r) => r.loop !== null && r.loop !== undefined)
+          .map(watchGreenEvidence),
+      );
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
       await refreshRuleNotes(runs);
       await sweepNotes();

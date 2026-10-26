@@ -1000,6 +1000,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         break;
       case "turn-start":
         l.inTurn = true;
+        store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);
         break;
       case "tool-result":
