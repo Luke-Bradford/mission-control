@@ -1,7 +1,8 @@
+import { codexProfile } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
 import type { Store } from "../store.ts";
-import { codexModels, type ModelDeps } from "./codex-models.ts";
+import { codexModelsFor, type ModelDeps } from "./codex-models.ts";
 import type { Supervisor } from "./supervisor.ts";
 
 const DISCOVERY_RETRY_MS = 60_000;
@@ -20,7 +21,19 @@ export function startCodexDiscovery(deps: {
   let timer: NodeJS.Timeout | undefined;
   const discover = async () => {
     try {
-      await codexModels.load({ ...deps.models, signal: abort.signal });
+      await Promise.all(
+        deps.config.accounts
+          .filter((account) => account.vendor === "codex")
+          .map((account) =>
+            codexModelsFor(account).load({
+              ...deps.models,
+              ...(account.cliProfile === undefined
+                ? {}
+                : { authPath: `${codexProfile(account)}/auth.json` }),
+              signal: abort.signal,
+            }),
+          ),
+      );
       if (abort.signal.aborted) return;
       for (const row of deps.store.liveSeatRuns()) {
         const seat = deps.config.crew?.sessions

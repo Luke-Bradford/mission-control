@@ -206,8 +206,9 @@ export function onboardRepo(
   path: string,
   input: z.infer<typeof RepoOnboardBody>,
   now: number,
+  validateRepo?: (repo: Pick<CcConfig["repos"][number], "github" | "project">) => Promise<void>,
 ): Promise<{ config: CcConfig; backup: string }> {
-  const run = queue.then(() => onboard(path, input, now));
+  const run = queue.then(() => onboard(path, input, now, validateRepo));
   queue = run.catch(() => undefined);
   return run;
 }
@@ -216,6 +217,7 @@ async function onboard(
   path: string,
   input: z.infer<typeof RepoOnboardBody>,
   now: number,
+  validateRepo?: (repo: Pick<CcConfig["repos"][number], "github" | "project">) => Promise<void>,
 ): Promise<{ config: CcConfig; backup: string }> {
   const parsed = RepoOnboardBody.safeParse(input);
   if (!parsed.success) throw new ConfigWriteError("invalid", "invalid repo onboarding request");
@@ -246,6 +248,10 @@ async function onboard(
   }
   const repo = body.repo ?? current.repos[existing];
   if (!repo) throw new ConfigWriteError("missing", `unknown repo ${body.repoId}`);
+  // This re-reads the repo from the serialized config operation.  It must precede local checkout
+  // validation: a submitted branch other than GitHub's default has a precise refusal, even when
+  // that branch does not exist in the checkout.
+  await validateRepo?.(repo);
   const crew = current.crew;
   if (body.session && !crew)
     throw new ConfigWriteError("conflict", "configure crew before adding sessions");

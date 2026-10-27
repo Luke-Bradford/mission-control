@@ -213,7 +213,7 @@ import {
   removeSessionCheckout,
   validateSessionCheckout,
 } from "./runtime/checkouts.ts";
-import { codexModels } from "./runtime/codex-models.ts";
+import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
@@ -298,6 +298,8 @@ export interface AppDeps {
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   config: CcConfig;
+  /** Cached Codex model catalogs, isolated by each account's CLI binding. */
+  codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
@@ -1538,15 +1540,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/setup/Repos.tsx (seat model pickers). Only providers which have actually published a catalog
       // are selectable here; role defaults are configuration, not model discovery.
       api.get("/accounts/models", (): AccountModelsView[] => {
-        const codex = codexModels.entries().map(({ model, efforts }) => ({
-          model,
-          efforts: [...efforts],
-        }));
+        const catalogFor = deps.codexModelsFor ?? codexModelsFor;
         return config.accounts.map((account) => ({
           accountId: account.id,
           // Claude currently exposes no model/list equivalent. An empty catalog is more honest
           // than offering values inferred from roles (which can include Codex-only models).
-          models: account.vendor === "codex" ? codex : [],
+          models:
+            account.vendor === "codex"
+              ? catalogFor(account)
+                  .entries()
+                  .map(({ model, efforts }) => ({
+                    model,
+                    efforts: [...efforts],
+                  }))
+              : [],
         }));
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
@@ -1730,22 +1737,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const known = body.data.repo ?? config.repos.find((repo) => repo.id === body.data.repoId);
         if (!known) return reply.code(404).send({ error: `unknown repo ${body.data.repoId}` });
         try {
-          const preview = await repoPreview(
-            await githubGql(),
-            { github: known.github, project: known.project },
-            config,
-            store,
-          );
-          if (body.data.checkout.branch !== preview.defaultBranch) {
-            return reply
-              .code(400)
-              .send({ error: "the checkout branch must match GitHub's default branch" });
+          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
+            const preview = await repoPreview(
+              await githubGql(),
+              { github: repo.github, project: repo.project },
+              config,
+              store,
+            );
+            if (body.data.checkout.branch !== preview.defaultBranch)
+              throw new ConfigWriteError(
+                "invalid",
+                "the checkout branch must match GitHub's default branch",
+              );
+          });
+          const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
+          if (!onboarded)
+            throw new ConfigWriteError("write", "the new config.yaml has no added repo");
+          // Disk can include pending crew edits.  Only make this card's setup live here; the
+          // reloader owns every crew change so it can drain seats before applying it.
+          const index = config.repos.findIndex((repo) => repo.id === body.data.repoId);
+          if (body.data.repo) config.repos.push(onboarded);
+          else if (index >= 0) {
+            const live = config.repos[index];
+            if (!live) throw new ConfigWriteError("missing", `unknown repo ${body.data.repoId}`);
+            if (body.data.defaultAccountId === null) delete live.defaultAccountId;
+            else live.defaultAccountId = onboarded.defaultAccountId;
+            if (onboarded.guidance === undefined) delete live.guidance;
+            else live.guidance = { ...onboarded.guidance };
           }
-          const result = await onboardRepo(configPath, body.data, now());
-          // Do not expose an intermediate repo/setup/session state. The config object backs all
-          // routes, so replace its affected arrays only after the filesystem operation succeeds.
-          config.repos.splice(0, config.repos.length, ...result.config.repos);
-          if (result.config.crew) config.crew = result.config.crew;
           if (body.data.session) await deps.crewReloader?.reload();
           bus.emit("config");
           bus.emit("boards");
