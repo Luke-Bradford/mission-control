@@ -113,7 +113,16 @@ export function CommsGraph({
   }, [flight, known, links]);
   const scoped = edges.filter((edge) => inView(view, flight, edge.a, edge.b));
   const total = scoped.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
-  const active = new Set(scoped.flatMap((edge) => [edge.a, edge.b]));
+  const selected = new Set(
+    view.kind === "crew"
+      ? []
+      : view.kind === "flight"
+        ? [flight, CAPCOM]
+        : view.kind === "contact"
+          ? [view.agentId, view.contactId]
+          : [view.agentId],
+  );
+  const active = new Set([...selected, ...scoped.flatMap((edge) => [edge.a, edge.b])]);
   const ring = [CAPCOM, ...crewRows.map((row) => row.id).filter((id) => id !== flight)];
   const nodes = [flight, ...ring].map((id, index) => {
     const ringIndex = index - 1;
@@ -132,13 +141,14 @@ export function CommsGraph({
       color:
         id === CAPCOM ? "var(--fg)" : id === flight ? "var(--accent)" : agentColor(row?.index ?? 0),
       lit: active.size === 0 || active.has(id),
-      inactive: row !== undefined && (row.paused || row.hudState === "stopped"),
+      inactive:
+        row !== undefined && (row.paused || row.crewPause != null || row.hudState === "stopped"),
     };
   });
   const point = new Map(nodes.map((node) => [node.id, node]));
   const hasData = links !== undefined;
   const chartHours = useMemo(() => {
-    const start = Math.floor((Date.now() - DAY) / HOUR) * HOUR;
+    const start = Math.floor(Date.now() / HOUR) * HOUR - 23 * HOUR;
     return Array.from({ length: 24 }, (_, index) => {
       const hour = start + index * HOUR;
       let agent = 0;
@@ -182,7 +192,6 @@ export function CommsGraph({
         0,
       )
     : 0;
-  const scopedNodes = new Set(scoped.flatMap((edge) => [edge.a, edge.b]));
   const watched = useMemo(
     () =>
       (chatter ?? [])
@@ -192,7 +201,7 @@ export function CommsGraph({
           to: canonicalEndpoint(entry.to, flight),
         }))
         .filter((entry) => known.has(entry.from) && known.has(entry.to) && entry.from !== entry.to)
-        .sort((a, b) => b.rounds - a.rounds)[0],
+        .sort((a, b) => b.rounds - a.rounds),
     [chatter, flight, known],
   );
   const graphLabel = `Comms graph, ${crewRows.length} live seats, ${total} messages in view (${scopeLabel(view)})`;
@@ -239,10 +248,11 @@ export function CommsGraph({
             const dy = b.y - a.y;
             const length = Math.hypot(dx, dy);
             const lit = scoped.includes(edge);
-            const watching =
-              watched !== undefined &&
-              ((watched.from === edge.a && watched.to === edge.b) ||
-                (watched.from === edge.b && watched.to === edge.a));
+            const watching = watched.some(
+              (entry) =>
+                (entry.from === edge.a && entry.to === edge.b) ||
+                (entry.from === edge.b && entry.to === edge.a),
+            );
             const width = metric === "tokens" ? 1 : 1 + Math.min(5, (edge.aToB + edge.bToA) / 8);
             const dots = [
               ...visibleDots(edge, edge.a, edge.b, a.color, lit),
@@ -302,7 +312,7 @@ export function CommsGraph({
             <button
               key={node.id}
               type="button"
-              className={`comms-node${node.lit ? "" : " dim"}${node.inactive ? " inactive" : ""}${scopedNodes.has(node.id) ? " selected" : ""}`}
+              className={`comms-node${node.lit ? "" : " dim"}${node.inactive ? " inactive" : ""}${selected.has(node.id) ? " selected" : ""}`}
               style={
                 {
                   left: node.x,
@@ -335,16 +345,17 @@ export function CommsGraph({
           <div>
             Chatter watch <span>· over 6 rounds on one thing</span>
           </div>
-          {watched === undefined ? (
+          {watched.length === 0 ? (
             <p>Nothing over 6 rounds in 24h.</p>
           ) : (
-            <p>
-              <b>{`${watched.from} ↔ ${watched.to}`}</b> · {watched.rounds} rounds on{" "}
-              {watched.ticket}
-              {watched.tokens === undefined || watched.tokens === null
-                ? ""
-                : ` · ${watched.tokens.toLocaleString()} tokens`}
-            </p>
+            watched.map((entry) => (
+              <p key={`${entry.from}-${entry.to}-${entry.ticket}`}>
+                <b>{`${entry.from} ↔ ${entry.to}`}</b> · {entry.rounds} rounds on {entry.ticket}
+                {entry.tokens === undefined || entry.tokens === null
+                  ? ""
+                  : ` · ${entry.tokens.toLocaleString()} tokens`}
+              </p>
+            ))
           )}
         </div>
       </Panel>

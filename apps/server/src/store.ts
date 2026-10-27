@@ -3165,22 +3165,25 @@ export class Store {
       )
       .all(since) as { hour: number; from: string; to: string; count: number }[];
   }
-  /** Back-and-forth pairs on one ticket; a round is two messages in that pair. */
+  /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
   commsChatter(since: number): { from: string; to: string; ticket: string; rounds: number }[] {
     const rows = this.db
       .prepare(
-        `SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
-          CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
-          COUNT(*) / 2 AS rounds
-        FROM comms
-        WHERE at >= ? AND ticket IS NOT NULL
-          AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
-        GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
-          CASE WHEN from_id < to_id THEN to_id ELSE from_id END
-        HAVING COUNT(*) >= 14
-        ORDER BY rounds DESC, ticket,
-          CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
-          CASE WHEN from_id < to_id THEN to_id ELSE from_id END`,
+        `SELECT "from", "to", ticket,
+          CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
+        FROM (
+          SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
+            SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
+            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
+          FROM comms
+          WHERE at >= ? AND ticket IS NOT NULL
+            AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
+          GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END
+        )
+        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
+        ORDER BY rounds DESC, ticket, "from", "to"`,
       )
       .all(since, COMMS_CAPCOM, COMMS_MC, COMMS_CREW, COMMS_CAPCOM, COMMS_MC, COMMS_CREW) as Row[];
     return rows.map((row) => ({
