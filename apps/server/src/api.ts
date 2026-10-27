@@ -1208,6 +1208,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/comms/links", () => ({
         links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
       }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (24 hour Comms Traffic bars)
+      api.get("/comms/traffic", () => ({
+        hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
+      api.get("/comms/chatter", () => ({
+        pairs: store.commsChatter(now() - 24 * 60 * 60 * 1000),
+      }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
       api.post("/comms/read", (req, reply) => {
         const body = z

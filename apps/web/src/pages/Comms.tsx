@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
+import { CommsGraph } from "../comms/CommsGraph.tsx";
 import { CommsNav } from "../comms/CommsNav.tsx";
 import { CommsConversation, Conversation } from "../comms/Conversation.tsx";
 import { Decisions } from "../comms/Decisions.tsx";
@@ -86,6 +87,7 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
               setPrefill((current) => (current?.token === token ? undefined : current))
             }
           />
+          <CommsGraph rows={rows} flightId={flightId} view={view} />
         </div>
       </section>
     );

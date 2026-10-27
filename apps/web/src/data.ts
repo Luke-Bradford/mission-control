@@ -108,6 +108,9 @@ export const RESOURCES = {
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
   }),
+  commsLinks: { path: "/api/comms/links", topic: "agents" },
+  commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
+  commsChatter: { path: "/api/comms/chatter", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
     topic: "agents",
