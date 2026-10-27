@@ -1618,6 +1618,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         accountModels.clear();
       };
       // Writer: Setup › Accounts (edit an account; its id is deliberately immutable).
+      // Reader: apps/web/src/setup/Accounts.tsx (Edit account, via ACTIONS.account)
       api.put<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const body = AccountBody.safeParse(req.body);
@@ -1664,6 +1665,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return withAccountUpdate(update);
       });
       // Writer: Setup › Accounts (only orphaned accounts can be removed).
+      // Reader: apps/web/src/setup/Accounts.tsx (Remove account, via ACTIONS.account)
       api.delete<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         if (!config.accounts.some((account) => account.id === req.params.id))
