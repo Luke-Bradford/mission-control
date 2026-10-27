@@ -215,17 +215,29 @@ it("recovers a pending transfer after hub restart with its original checkout and
   ).toBe("fictional-destination");
 });
 
-it("refuses a provider without independently isolated profiles", async () => {
+it("refuses a launch with two labels for Claude's shared machine login", async () => {
   const { sup, cfg } = make();
   cfg.accounts.push({ id: "claude-other", vendor: "claude", alertAt: 80, stopAt: 95 });
   sup.start();
-  await sup.startRun("guido-1", 42);
-  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
-  expect(await sup.transferAccount("guido-1", "claude-other")).toMatchObject({
-    outcome: "refused",
-    reason: expect.stringContaining("cannot isolate"),
+  await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
+    status: 409,
+    message: expect.stringContaining("same CLI profile"),
   });
-  expect(recorded().filter((r) => Array.isArray(r.argv))).toHaveLength(1);
+  expect(recorded().filter((r) => Array.isArray(r.argv))).toHaveLength(0);
+});
+
+it("refuses a launch after an external sign-in reuses another Codex login", async () => {
+  const { sup, destination } = setup();
+  writeFileSync(
+    join(destination, "auth.json"),
+    JSON.stringify({ tokens: { account_id: "fictional-source" } }),
+  );
+
+  await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
+    status: 409,
+    message: expect.stringContaining("same Codex login"),
+  });
+  expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(0);
 });
 
 it("retains pending input if a late source receipt rewrites the outbox during transfer", async () => {
@@ -501,6 +513,11 @@ it("excludes launches until a profile update commits its in-memory policy", asyn
     release = resolve;
   });
   const profile = join(dir, "fictional-new-profile");
+  mkdirSync(profile);
+  writeFileSync(
+    join(profile, "auth.json"),
+    JSON.stringify({ tokens: { account_id: "fictional-new" } }),
+  );
   const update = sup.withAccountUpdate(async () => {
     await gate;
     cfg.accounts.push({

@@ -7,6 +7,8 @@ export const COMMS_RATE_LIMIT_WINDOW_MS = 10 * 60_000;
 export const COMMS_CANT_REASON_MAX = 80;
 /** The only ticket references accepted at Comms boundaries. */
 export const COMMS_REF = /^(?:#\d+|PR \d+)$/;
+/** A hub-set ticket keeps the repository alongside its issue number. */
+export const COMMS_TICKET = /^[^#]+#[1-9]\d*$/;
 
 export const COMMS_TEXT_MAX = 32_000;
 export const COMMS_MESSAGE_MAX = COMMS_TEXT_MAX;
@@ -63,6 +65,11 @@ export interface CommsLinkCount {
 export interface CommsTicketContext {
   ref: string;
   linkedPr: string | null;
+  title: string | null;
+  status: string | null;
+  owner: string | null;
+  repoId: string | null;
+  issueNumber: number | null;
 }
 export interface CommsMessagesResponse {
   messages: CommsMessage[];

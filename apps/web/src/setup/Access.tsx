@@ -32,6 +32,14 @@ const SAMPLES = [
   },
 ];
 
+const AUTO_APPROVE = [
+  "GitHub comments",
+  "Labels",
+  "Board moves and Priority changes",
+  "Starting and stopping agents",
+  "Switching accounts",
+];
+
 type Edits = Partial<Omit<NotificationPreferences, "categories" | "quietHours">> & {
   categories?: Partial<NotificationPreferences["categories"]>;
   quietHours?: Partial<NotificationPreferences["quietHours"]>;
@@ -189,6 +197,15 @@ export function Access() {
   const resource = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   return (
     <>
+      <Panel title="Auto-approve" sub="outward writes wait for you until switched on" phase="P2">
+        <div className="pb">
+          {AUTO_APPROVE.map((label) => (
+            <label key={label} className="block s">
+              <input type="checkbox" disabled /> {label}
+            </label>
+          ))}
+        </div>
+      </Panel>
       <Panel
         className="wide"
         title="Devices"

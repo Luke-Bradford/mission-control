@@ -11,7 +11,6 @@ import { useNow, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
-import { Seg } from "../hud/Seg.tsx";
 import { navigate, type SetupTab, setupPath } from "../router.ts";
 import { Access } from "../setup/Access.tsx";
 import { Accounts } from "../setup/Accounts.tsx";
@@ -32,7 +31,21 @@ const TAB_LABEL: Record<SetupTab, string> = {
   sources: "Sources",
   access: "Access and notifications",
 };
-const TABS = (Object.keys(TAB_LABEL) as SetupTab[]).map((t) => ({ value: t, label: TAB_LABEL[t] }));
+
+/** The approved Setup information architecture. Legacy paths below remain valid deep links. */
+const SECTIONS = [
+  { tab: "accounts", label: "Accounts" },
+  { tab: "repos", label: "Repos & seats" },
+  { tab: "roles", label: "Roles" },
+  { tab: "loops", label: "Loops" },
+  { tab: "access", label: "Safety" },
+] as const;
+
+const sectionFor = (tab: SetupTab): SetupTab => {
+  if (tab === "sessions") return "repos";
+  if (tab === "sources") return "loops";
+  return tab;
+};
 
 const UPDATE_CONFIRM = "Update to the latest main and restart? Crew runs resume after the restart.";
 const UPDATING = "Updating… the HUD reconnects when the hub is back.";
@@ -135,36 +148,78 @@ function UpdateControl() {
 /** Setup (catalogue §2.7): sessions, crew controls and hub settings. */
 export function Setup({ tab }: { tab: SetupTab }) {
   const { data: config, error } = useResource<ConfigView>(RESOURCES.config);
+  const section = sectionFor(tab);
+  const loading = !config ? (
+    <p className="muted s">{error ? `Could not load the config: ${error.message}` : "Loading…"}</p>
+  ) : null;
+
+  const body =
+    // Old deep links show their exact old page, while each sidebar route combines the related
+    // settings as the approved dependency-order shell calls for.
+    tab === "sessions" ? (
+      config ? (
+        <Sessions config={config} />
+      ) : (
+        loading
+      )
+    ) : tab === "sources" ? (
+      <Sources config={config} error={error} />
+    ) : tab === "access" ? (
+      <Access />
+    ) : tab === "accounts" ? (
+      config ? (
+        <Accounts config={config} />
+      ) : (
+        loading
+      )
+    ) : tab === "repos" ? (
+      config ? (
+        <Repos config={config} />
+      ) : (
+        loading
+      )
+    ) : tab === "roles" ? (
+      <Roles />
+    ) : (
+      <>
+        {config ? <Loops config={config} /> : loading}
+        <Sources config={config} error={error} />
+      </>
+    );
   return (
-    <section id="page-setup">
-      <div className="toolbar">
-        <h2>Setup</h2>
-        <Seg label="Setup" options={TABS} value={tab} onChange={(t) => navigate(setupPath(t))} />
-        <BuildChips panel={`setup-${tab}`} />
-        <span className="spacer" />
-        <CrewPauseControl />
-        <UpdateControl />
-      </div>
-      <div className="sgrid">
-        {tab === "sources" ? (
-          <Sources config={config} error={error} />
-        ) : tab === "repos" ? (
-          <Repos />
-        ) : tab === "roles" ? (
-          <Roles />
-        ) : tab === "access" ? (
-          <Access />
-        ) : !config ? (
-          <p className="muted s">
-            {error ? `Could not load the config: ${error.message}` : "Loading…"}
-          </p>
-        ) : tab === "sessions" ? (
-          <Sessions config={config} />
-        ) : tab === "loops" ? (
-          <Loops config={config} />
-        ) : (
-          <Accounts config={config} />
-        )}
+    <section id="page-setup" aria-label="Setup">
+      <aside className="panel setup-sidebar">
+        <div className="ph">
+          <h2>Setup</h2>
+          <span className="sub">dependency order</span>
+        </div>
+        <nav className="setup-nav" aria-label="Setup sections">
+          {SECTIONS.map((item) => {
+            const on = section === item.tab;
+            return (
+              <button
+                type="button"
+                key={item.tab}
+                aria-current={on ? "page" : undefined}
+                onClick={() => navigate(setupPath(item.tab))}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+      <div className="panel setup-main">
+        <div className="setup-content scroll">
+          <div className="setup-title toolbar">
+            <h1>{SECTIONS.find((item) => item.tab === section)?.label ?? TAB_LABEL[tab]}</h1>
+            <BuildChips panel={`setup-${tab}`} />
+            <span className="spacer" />
+            <CrewPauseControl />
+            <UpdateControl />
+          </div>
+          <div className="sgrid">{body}</div>
+        </div>
       </div>
     </section>
   );

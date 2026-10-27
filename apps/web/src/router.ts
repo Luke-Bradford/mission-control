@@ -1,3 +1,4 @@
+import { COMMS_TICKET } from "@mc/core";
 import { type MouseEvent, useSyncExternalStore } from "react";
 
 /** A tiny History-API router: seven pages and a few ids do not justify a library. */
@@ -48,10 +49,10 @@ export type Page = "overview" | "flight" | "board" | "agent" | "comms" | "teleme
 export type CommsView =
   | { kind: "flight" }
   | { kind: "crew" }
+  | { kind: "ticket"; ref: string; ticket?: string }
   | { kind: "agent"; agentId: string }
   | { kind: "inbox"; agentId: string }
-  | { kind: "contact"; agentId: string; contactId: string }
-  | { kind: "ticket"; ref: string };
+  | { kind: "contact"; agentId: string; contactId: string };
 
 export type Route =
   | { page: "overview" }
@@ -82,11 +83,12 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
 export const commsCrewPath = (): string => "/comms/crew";
+export const commsTicketPath = (ref: string, ticket?: string | null): string =>
+  `/comms/tickets/${enc(ref)}${ticket && COMMS_TICKET.test(ticket) ? `?ticket=${enc(ticket)}` : ""}`;
 export const commsAgentPath = (agentId: string): string => `/comms/agents/${enc(agentId)}`;
 export const commsInboxPath = (agentId: string): string => `${commsAgentPath(agentId)}/inbox`;
 export const commsContactPath = (agentId: string, contactId: string): string =>
   `${commsAgentPath(agentId)}/contacts/${enc(contactId)}`;
-export const commsTicketPath = (ref: string): string => `/comms/tickets/${enc(ref)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
 /** The query parameter that names the session whose Add agent form should open (`?add=s1`). */
 export const ADD_AGENT_PARAM = "add";
@@ -159,8 +161,9 @@ const bare = (path: string): string =>
   path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 
 /** The page a path shows; null when it is not one (see legacyRedirect, then Overview). */
-export function route(path: string): Route | null {
-  const p = bare(path);
+export function route(path: string, search = ""): Route | null {
+  const [pathname, query = search] = path.split("?", 2);
+  const p = bare(pathname ?? path);
   if (p === "/") return { page: "overview" };
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
@@ -172,10 +175,16 @@ export function route(path: string): Route | null {
   if (agent) return { page: "agent", id: agent.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
-  const commsTicket = /^\/comms\/tickets\/(%23\d+|PR%20\d+)$/.exec(p);
+  const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
   if (commsTicket) {
     const ref = decode(commsTicket[1]);
-    if (ref !== null) return { page: "comms", item: null, view: { kind: "ticket", ref } };
+    const ticket = new URLSearchParams(query).get("ticket");
+    if (ref && /^(?:#\d+|PR \d+)$/.test(ref) && (ticket === null || COMMS_TICKET.test(ticket)))
+      return {
+        page: "comms",
+        item: null,
+        view: { kind: "ticket", ref, ...(ticket === null ? {} : { ticket }) },
+      };
     return null;
   }
   const contact = /^\/comms\/agents\/([^/]+)\/contacts\/([^/]+)$/.exec(p);
@@ -204,7 +213,7 @@ export function route(path: string): Route | null {
   if (comms?.id) return { page: "comms", item: comms.id, view: { kind: "flight" } };
   const setup = withId(path, "setup");
   if (setup)
-    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "sessions" };
+    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "accounts" };
   return null;
 }
 

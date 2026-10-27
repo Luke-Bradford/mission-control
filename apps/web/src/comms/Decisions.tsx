@@ -2,6 +2,7 @@ import type { AttentionHoldCondition, AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { isOperatorItem } from "../attention.ts";
+import { useSecond } from "../clock.ts";
 import { ACTIONS } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import { answerTarget, sendAnswer } from "./answer.ts";
@@ -20,12 +21,20 @@ export function DecisionCard({
   flightSeat: FlightSeat | null;
   onDiscuss: (item: AttentionItem) => void;
 }) {
+  const now = useSecond();
   const [held, setHeld] = useState(false);
   const [holding, setHolding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const option = item.brief?.options.find(
     (choice) => choice.id === item.brief?.recommendedOptionId,
   );
+  const countdown =
+    item.triageDueAt === undefined ? null : Math.max(0, Math.ceil((item.triageDueAt - now) / 1000));
+  const clock =
+    countdown === null
+      ? null
+      : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`;
+  const ticket = item.ticket?.match(/#\d+$/)?.[0] ?? item.ticket;
   const accept = async () => {
     if (!option) return;
     setError(
@@ -50,14 +59,17 @@ export function DecisionCard({
   };
   return (
     <article className="decision-card">
-      <p>{row?.id ?? item.agentId ?? "FLIGHT"}</p>
-      {item.ticket && <p>{item.ticket}</p>}
+      <div className="decision-meta">
+        <span className="decision-from">{row?.displayCallSign ?? item.agentId ?? "FLIGHT"}</span>
+        {ticket && <span className="decision-ticket">{ticket}</span>}
+        {clock && <span className="decision-clock">{`default in ${clock}`}</span>}
+      </div>
       <h3>{item.brief?.ask ?? item.text}</h3>
-      {option && <p>{`Recommended: ${option.label}`}</p>}
+      {option && <p className="decision-recommendation">{`Recommends: ${option.label}`}</p>}
       <div className="acts">
         {option && (
-          <button type="button" onClick={() => void accept()}>
-            Accept default
+          <button className="primary" type="button" onClick={() => void accept()}>
+            {`Accept · ${option.label}`}
           </button>
         )}
         <button type="button" onClick={() => onDiscuss(item)}>
@@ -95,7 +107,10 @@ export function Decisions({
   );
   return (
     <section className="comms-decisions" aria-label="Decisions">
-      <h2>Decisions</h2>
+      <div className="comms-section-head">
+        <h2>Decisions</h2>
+        <span>{`${decisions.length} for you`}</span>
+      </div>
       <div className="comms-decision-list">
         {decisions.length === 0 ? (
           <p className="note">No decisions need you.</p>

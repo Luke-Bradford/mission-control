@@ -217,6 +217,10 @@ poll: { usage_minutes: 30, github_seconds: 60 }
       (await app.inject({ method: "POST", url: "/api/accounts/missing/check", payload: {} }))
         .statusCode,
     ).toBe(404);
+    expect(
+      (await app.inject({ method: "POST", url: "/api/accounts/primary/sign-in", payload: {} }))
+        .statusCode,
+    ).toBe(404);
     expect(state.calls).toHaveLength(count);
   } finally {
     await app.close();

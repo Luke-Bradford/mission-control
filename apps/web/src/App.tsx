@@ -14,6 +14,7 @@ import {
   type Route,
   route,
   usePath,
+  useSearch,
 } from "./router.ts";
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
@@ -59,9 +60,10 @@ const TITLE = "Mission Control";
  */
 export function App() {
   const path = usePath();
+  const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.
   const [popout] = useState(() => isPopout(window.location.search));
-  const r = route(path);
+  const r = route(path, search);
   const moved = r ? null : (legacyRedirect(path, window.location.hash) ?? PAGE_PATHS.overview);
   useEffect(() => {
     if (moved) navigate(moved, { replace: true });
@@ -78,6 +80,9 @@ export function App() {
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
+  // Comms has its own FLIGHT conversation and Setup needs the approved full-width configuration
+  // frame. The dock remains available on the operational pages.
+  const showDock = shown.page !== "comms" && shown.page !== "setup";
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -113,13 +118,13 @@ export function App() {
   return (
     <div className={cls}>
       <Header page={shown.page} />
-      <div className="shell">
+      <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
           </AwayDigest>
         </main>
-        <Dock />
+        {showDock && <Dock />}
       </div>
       <Footer />
       <Toast />
@@ -218,7 +223,14 @@ function useShellKeys(current: Route, popout: boolean) {
         if (latest.current.popout) return;
         if (route(to)?.page !== latest.current.current.page) navigate(to);
       },
-      toggleDock: () => toggleDock(),
+      toggleDock: () => {
+        const { current: on, popout: isPopout } = latest.current;
+        // Setup opens FLIGHT in its full Comms view. Comms is already that view, and neither
+        // Comms, Setup nor a pop-out mounts the dock, so never change its stored state there.
+        if (isPopout || on.page === "comms") return;
+        if (on.page === "setup") navigate(PAGE_PATHS.comms);
+        else toggleDock();
+      },
       help: openHelp,
       selectNext: () => select(1),
       selectPrev: () => select(-1),

@@ -13,6 +13,8 @@ import {
   type BriefOption,
   type ChosenProfile,
   COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_MC,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
@@ -1271,6 +1273,15 @@ export class Store {
         r.vendor ?? "claude",
         r.latestPlan ?? null,
       );
+  }
+
+  /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
+  setRunCliVersionIfLive(runId: string, cliVersion: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE runs SET cli_version = ? WHERE id = ? AND ended_at IS NULL")
+        .run(cliVersion, runId).changes === 1
+    );
   }
 
   /** Records the template profile chosen for a ticket; a later choice replaces it. */
@@ -3088,24 +3099,62 @@ export class Store {
     if (!refs.length) return [];
     return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
   }
-  commsForTicket(ref: string): { ref: string; linkedPr: string | null; rows: CommsRow[] } {
+  commsForTicket(
+    ref: string,
+    ticketContext?: string,
+  ): {
+    ref: string;
+    linkedPr: string | null;
+    repoId: string | null;
+    rows: CommsRow[];
+  } {
     const prNumber = ref.startsWith("PR ") ? Number(ref.slice(3)) : null;
     let issueNumber = ref.startsWith("#") ? Number(ref.slice(1)) : null;
+    const qualified = ticketContext?.match(/^(.+)#(\d+)$/);
+    // A #n link may only carry its own ticket. PR links keep their PR number and use the ticket
+    // solely as repository context.
+    const scopedTicket =
+      qualified && (issueNumber === null || Number(qualified[2]) === issueNumber)
+        ? ticketContext
+        : undefined;
+    const scopedRepoId = scopedTicket === undefined ? undefined : (qualified?.[1] as string);
     let linkedPr: string | null = null;
+    let linkedRows: { number: number; repoId: string; ticket: string | null }[] = [];
     if (prNumber !== null) {
-      const row = this.db
-        .prepare("SELECT ticket FROM pull_requests WHERE number=? ORDER BY updated_at DESC LIMIT 1")
-        .get(prNumber) as { ticket: string | null } | undefined;
+      linkedRows = this.db
+        .prepare(
+          `SELECT number, repo_id, ticket FROM pull_requests WHERE number=?${
+            scopedRepoId === undefined ? "" : " AND repo_id=?"
+          } ORDER BY updated_at DESC`,
+        )
+        .all(prNumber, ...(scopedRepoId === undefined ? [] : [scopedRepoId]))
+        .map((row) => ({
+          number: row.number as number,
+          repoId: row.repo_id as string,
+          ticket: row.ticket as string | null,
+        }));
+      const row = linkedRows[0];
       const match = row?.ticket?.match(/#(\d+)$/);
       issueNumber = match === null || match === undefined ? null : Number(match[1]);
       linkedPr = `PR ${prNumber}`;
     } else if (issueNumber !== null) {
-      const row = this.db
+      linkedRows = this.db
         .prepare(
-          "SELECT number FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC LIMIT 1",
+          scopedRepoId === undefined
+            ? "SELECT number, repo_id, ticket FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC"
+            : "SELECT number, repo_id, ticket FROM pull_requests WHERE ticket=? AND repo_id=? ORDER BY updated_at DESC",
         )
-        .get(`*#${issueNumber}`) as { number: number } | undefined;
-      linkedPr = row === undefined ? null : `PR ${row.number}`;
+        .all(
+          ...(scopedRepoId === undefined
+            ? [`*#${issueNumber}`]
+            : [scopedTicket as string, scopedRepoId]),
+        )
+        .map((row) => ({
+          number: row.number as number,
+          repoId: row.repo_id as string,
+          ticket: row.ticket as string | null,
+        }));
+      linkedPr = linkedRows[0] === undefined ? null : `PR ${linkedRows[0].number}`;
     }
     const resolvedRef = issueNumber === null ? ref : `#${issueNumber}`;
     const refs = linkedPr === null ? [resolvedRef] : [resolvedRef, linkedPr];
@@ -3115,7 +3164,23 @@ export class Store {
       predicates.push("text LIKE ?");
       args.push(`%${linkedPr}%`);
     }
-    const rows = this.commsForWhere(predicates.join(" OR "), ...args).filter((row) => {
+    const ticketPredicate =
+      scopedTicket === undefined
+        ? ""
+        : prNumber === null
+          ? " AND ticket=?"
+          : " AND substr(ticket, 1, length(?))=?";
+    const ticketArgs: SQLInputValue[] =
+      scopedTicket === undefined
+        ? []
+        : prNumber === null
+          ? [scopedTicket]
+          : [`${scopedRepoId}#`, `${scopedRepoId}#`];
+    const rows = this.commsForWhere(
+      `(${predicates.join(" OR ")})${ticketPredicate}`,
+      ...args,
+      ...ticketArgs,
+    ).filter((row) => {
       if (refs.includes(row.ref ?? "")) return true;
       return refs.some((candidate) =>
         new RegExp(`(^|[^A-Za-z0-9])${candidate.replace("#", "\\#")}(?=$|[^A-Za-z0-9])`).test(
@@ -3123,7 +3188,28 @@ export class Store {
         ),
       );
     });
-    return { ref: resolvedRef, linkedPr, rows };
+    const repoIds = new Set<string>();
+    const repoFor = (ticket: string | null): string | null => {
+      const match = ticket?.match(/^(.+)#(\d+)$/);
+      return match?.[2] === String(issueNumber) ? (match[1] ?? null) : null;
+    };
+    // A clicked hub-set ticket is authoritative. Otherwise the linked PR's repo wins; without
+    // either, only rows explicitly tagged with this ref count. A mere text mention never attributes.
+    if (scopedRepoId !== undefined) repoIds.add(scopedRepoId);
+    else for (const row of linkedRows) repoIds.add(row.repoId);
+    if (repoIds.size === 0) {
+      for (const row of rows) {
+        if (!refs.includes(row.ref ?? "")) continue;
+        const repoId = repoFor(row.ticket);
+        if (repoId !== null) repoIds.add(repoId);
+      }
+    }
+    return {
+      ref: resolvedRef,
+      linkedPr,
+      repoId: repoIds.size === 1 ? [...repoIds][0] : null,
+      rows,
+    };
   }
   commsLinkedPr(ref: string): string | null {
     const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
@@ -3143,6 +3229,44 @@ export class Store {
         "SELECT from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY from_id,to_id",
       )
       .all(since) as { from: string; to: string; count: number }[];
+  }
+  /** Hourly direct-link counts for the Comms Traffic chart. */
+  commsHourlyLinkCounts(
+    since: number,
+  ): { hour: number; from: string; to: string; count: number }[] {
+    return this.db
+      .prepare(
+        "SELECT (at / 3600000) * 3600000 AS hour, from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY hour, from_id, to_id ORDER BY hour, from_id, to_id",
+      )
+      .all(since) as { hour: number; from: string; to: string; count: number }[];
+  }
+  /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
+  commsChatter(since: number): { from: string; to: string; ticket: string; rounds: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT "from", "to", ticket,
+          CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
+        FROM (
+          SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
+            SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
+            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
+          FROM comms
+          WHERE at >= ? AND ticket IS NOT NULL
+            AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
+          GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END
+        )
+        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
+        ORDER BY rounds DESC, ticket, "from", "to"`,
+      )
+      .all(since, COMMS_CAPCOM, COMMS_MC, COMMS_CREW, COMMS_CAPCOM, COMMS_MC, COMMS_CREW) as Row[];
+    return rows.map((row) => ({
+      from: row.from as string,
+      to: row.to as string,
+      ticket: row.ticket as string,
+      rounds: row.rounds as number,
+    }));
   }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);

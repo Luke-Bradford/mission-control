@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
+import { CommsGraph } from "../comms/CommsGraph.tsx";
 import { CommsNav } from "../comms/CommsNav.tsx";
 import { CommsConversation, Conversation } from "../comms/Conversation.tsx";
 import { Decisions } from "../comms/Decisions.tsx";
@@ -11,7 +12,10 @@ import type { FlightSeat } from "../flight/flightTypes.ts";
 import {
   type CommsView,
   commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
   commsFlightPath,
+  commsTicketPath,
   navigate,
   PAGE_PATHS,
 } from "../router.ts";
@@ -28,6 +32,7 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
   const { inView: matchesSession } = useSessionScope();
   const [selected, setSelected] = useState({ id: FLIGHT_THREAD, fromNeeds: false });
   const [prefill, setPrefill] = useState<ComposerPrefill | undefined>();
+  const [jump, setJump] = useState<string | null>(null);
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (item === null) {
@@ -82,10 +87,23 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
             view={view}
             row={selectedRow}
             prefill={prefill}
+            jumpId={jump}
+            onJumped={() => setJump(null)}
+            onOpenMessage={(to, messageId) => {
+              setJump(messageId);
+              if (to.kind === "flight") navigate(commsFlightPath());
+              else if (to.kind === "crew") navigate(commsCrewPath());
+              else if (to.kind === "ticket") navigate(commsTicketPath(to.ref));
+              else if (to.kind === "agent") navigate(commsAgentPath(to.agentId));
+              else if (to.kind === "inbox")
+                navigate(`/comms/agents/${encodeURIComponent(to.agentId)}/inbox`);
+              else navigate(commsContactPath(to.agentId, to.contactId));
+            }}
             onPrefillConsumed={(token) =>
               setPrefill((current) => (current?.token === token ? undefined : current))
             }
           />
+          <CommsGraph rows={rows} flightId={flightId} view={view} />
         </div>
       </section>
     );

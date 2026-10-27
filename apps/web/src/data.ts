@@ -108,10 +108,23 @@ export const RESOURCES = {
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
   }),
-  commsTicket: (ref: string): ResourceRef => ({
-    path: `/api/comms/tickets/${enc(ref)}`,
+  /** The stored Comms views.  Unlike the older transcript endpoint above, these include labels,
+   * replies, reactions, pins and read cursors. */
+  commsCrew: { path: "/api/comms/crew", topic: "agents" },
+  commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  commsAgent: (agentId: string): ResourceRef => ({
+    path: `/api/comms/agents/${enc(agentId)}`,
     topic: "agents",
   }),
+  commsContact: (agentId: string, contactId: string): ResourceRef => ({
+    path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
+    topic: "agents",
+  }),
+  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  commsPins: { path: "/api/comms/pins", topic: "agents" },
+  commsLinks: { path: "/api/comms/links", topic: "agents" },
+  commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
+  commsChatter: { path: "/api/comms/chatter", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
     topic: "agents",
@@ -137,6 +150,11 @@ export const RESOURCES = {
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
+  allAccountModels: { path: "/api/accounts/models", topic: "config" },
+  accountModels: (id: string): ResourceRef => ({
+    path: `/api/accounts/${enc(id)}/models`,
+    topic: null,
+  }),
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
@@ -192,7 +210,9 @@ export const ACTIONS = {
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   commsSend: "/api/comms",
   addAccount: "/api/accounts",
+  account: (id: string) => `/api/accounts/${enc(id)}`,
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
+  refreshAccountModels: (id: string) => `/api/accounts/${enc(id)}/models/refresh`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   copyDraft: (id: string) => `/api/drafts/${enc(id)}/copied`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
@@ -211,8 +231,14 @@ export const ACTIONS = {
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",
+  /** Read-only git/remote/branch preflight for adding or converting a crew repo. */
+  previewCheckout: "/api/repos/checkout-preview",
   /** Body: a NewRepo; answers `{ repo, backup }` after writing config.yaml. */
   addRepo: "/api/repos",
+  /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
+  onboardRepo: "/api/repos/onboard",
+  /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */

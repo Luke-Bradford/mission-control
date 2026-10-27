@@ -2892,6 +2892,26 @@ describe("the engine runs reviews", () => {
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
   });
 
+  it("does not make a newer PR wait for the same author's older PR", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((pr) => ({ ...pr, author: "same-author" })),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === RUN2)
+        .map((e) => e.text),
+    ).not.toContain("waits for #12 (shared: packages/core/src/guard.ts)");
+  });
+
   it("ignores older manual PRs without a run", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     const upsert = store.upsertPullRequests.bind(store);

@@ -205,7 +205,7 @@ describe("Setup › Repos › board setup", () => {
   it("encodes the repo id in the path", async () => {
     const odd = "/api/boards/a%2Fb%20c/setup";
     const fn = stubFetch({
-      "/api/config": CONFIG,
+      "/api/config": { ...CONFIG, repos: [{ ...CONFIG.repos[0], id: "a/b c" }] },
       "/api/repos": REPOS,
       "/api/repos/profiles": [{ ...PROFILE, id: "a/b c" }],
       [odd]: READY,

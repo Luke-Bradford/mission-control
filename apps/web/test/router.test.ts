@@ -7,6 +7,7 @@ import {
   commsContactPath,
   commsCrewPath,
   commsInboxPath,
+  commsTicketPath,
   isPopout,
   itemPath,
   legacyRedirect,
@@ -49,11 +50,11 @@ describe("route()", () => {
       { page: "comms", item: "stall:shop-app-ta:r-12", view: { kind: "flight" } },
     ],
     ["/telemetry", { page: "telemetry" }],
-    ["/setup", { page: "setup", tab: "sessions" }],
+    ["/setup", { page: "setup", tab: "accounts" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
     ["/setup/sources", { page: "setup", tab: "sources" }],
     ["/setup/access/", { page: "setup", tab: "access" }],
-    ["/setup/nope", { page: "setup", tab: "sessions" }],
+    ["/setup/nope", { page: "setup", tab: "accounts" }],
   ])("%s", (path, expected) => {
     expect(route(path)).toEqual(expected);
   });
@@ -151,6 +152,14 @@ describe("path helpers", () => {
       view: { kind: "contact", agentId: "a", contactId: "b/c" },
     });
     expect(commsAgentPath("a b")).toBe("/comms/agents/a%20b");
+    expect(commsTicketPath("#703", "shop-app#703")).toBe(
+      "/comms/tickets/%23703?ticket=shop-app%23703",
+    );
+    expect(route(commsTicketPath("#703", "shop-app#703"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "ticket", ref: "#703", ticket: "shop-app#703" },
+    });
     expect(route(agentPath("x/y"))).toEqual({ page: "agent", id: "x/y" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",

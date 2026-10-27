@@ -3,6 +3,7 @@ import {
   type AwaySettings,
   type ConfigView,
   type Crew,
+  type LimitRow,
   LOCK_HEADER_TITLE,
   lockHeaderText,
   type MachineSample,
@@ -25,13 +26,25 @@ import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
-const TABS: readonly { page: Page; label: string; needs?: (i: AttentionItem) => boolean }[] = [
-  { page: "overview", label: "Overview" },
-  { page: "flight", label: "FLIGHT", needs: (i) => i.kind === "decision" || i.kind === "person" },
-  { page: "board", label: "Board", needs: (i) => i.kind === "pr" || i.escalationId !== null },
-  { page: "agent", label: "Agent" },
-  { page: "comms", label: "Comms", needs: () => true },
-  { page: "telemetry", label: "Telemetry" },
+const TABS: readonly {
+  page?: Page;
+  label: string;
+  to: string;
+  map?: true;
+  needs?: (i: AttentionItem) => boolean;
+}[] = [
+  { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
+  {
+    page: "board",
+    label: "Board",
+    to: PAGE_PATHS.board,
+    needs: (i) => i.kind === "pr" || i.escalationId !== null,
+  },
+  { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
+  { page: "comms", label: "Comms", to: PAGE_PATHS.comms, needs: () => true },
+  { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
+  { label: "Map", to: "/#mapP", map: true },
+  { page: "setup", label: "Setup", to: PAGE_PATHS.setup },
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
@@ -39,70 +52,97 @@ export function Header({ page }: { page: Page }) {
   const attention = operatorItems(useResource<AttentionItem[]>(RESOURCES.attention).data ?? []);
   return (
     <header className="top">
-      <span className="brand">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <circle className="ring" cx="10" cy="10" r="8.5" fill="none" strokeWidth="1.5" />
-          <path
-            className="ring"
-            d="M10 3.5v3M10 13.5v3M3.5 10h3M13.5 10h3"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle className="dot" cx="10" cy="10" r="2.2" />
-        </svg>
-        Mission Control
-      </span>
-      <SessionSelect />
+      <span className="brand">MISSION CONTROL</span>
       <nav className="tabs" aria-label="Pages">
         {TABS.map((t) => (
-          <Tab key={t.page} to={PAGE_PATHS[t.page]} on={page === t.page}>
+          <Tab
+            key={t.label}
+            to={t.to}
+            on={t.map ? page === "overview" && window.location.hash === "#mapP" : page === t.page}
+            native={t.map}
+          >
             {t.label}
             {t.needs && <NeedsLamp items={attention.filter(t.needs)} />}
           </Tab>
         ))}
       </nav>
       <span className="spacer" />
-      <LiveIndicator />
-      <Met />
-      <MachineButton />
-      <NeedsButton items={attention} />
-      <AwayButton />
-      <ThemeButton />
-      <button
-        type="button"
-        className={`ghost iconbtn${page === "setup" ? " on" : ""}`}
-        title="Setup: sessions, loops, accounts, guard, access and notifications"
-        aria-label="Setup"
-        onClick={() => navigate(PAGE_PATHS.setup)}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            d="M2 4h12M2 8h12M2 12h12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle className="knob" cx="5" cy="4" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-          <circle className="knob" cx="11" cy="8" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-          <circle className="knob" cx="7" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      </button>
-      <DockButton />
+      <div className="top-status">
+        <Usage />
+        <Clock />
+        <MachineButton />
+        <SessionSelect />
+        <NeedsButton items={attention} />
+        <AwayButton />
+        <ThemeButton />
+        <DockButton page={page} />
+      </div>
+      <span className="sr-only">
+        <LiveIndicator />
+        <Met />
+      </span>
     </header>
   );
 }
 
-function Tab({ to, on, children }: { to: string; on: boolean; children: ReactNode }) {
+function Tab({
+  to,
+  on,
+  native = false,
+  children,
+}: {
+  to: string;
+  on: boolean;
+  native?: boolean;
+  children: ReactNode;
+}) {
   return (
     <a
       href={to}
       className={on ? "on" : undefined}
       aria-current={on ? "page" : undefined}
-      onClick={(e) => followLink(e, to)}
+      onClick={native ? undefined : (e) => followLink(e, to)}
     >
       {children}
     </a>
   );
+}
+
+/** Compact provider usage in the approved top bar. A missing reading stays an honest dash. */
+function Usage() {
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
+  const used = (vendor: "claude" | "codex") => {
+    const ids = new Set(config?.accounts.filter((a) => a.vendor === vendor).map((a) => a.id) ?? []);
+    const rows = limits.filter((row) => ids.has(row.accountId) && row.window === "7d");
+    return rows.length > 0 ? `${Math.round(Math.max(...rows.map((row) => row.used)))}%` : "—";
+  };
+  return (
+    <span
+      className="usage"
+      role="img"
+      aria-label={`Claude ${used("claude")}; Codex ${used("codex")}`}
+    >
+      <span>
+        CLAUDE <b className="usage-claude">{used("claude")}</b>
+      </span>
+      <span>
+        CODEX <b className="usage-codex">{used("codex")}</b>
+      </span>
+    </span>
+  );
+}
+
+function Clock() {
+  const now = useSecond();
+  const tz = useResource<ConfigView>(RESOURCES.config).data?.operator.timezone;
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: tz,
+  }).format(now);
+  return <time className="top-clock">{time}</time>;
 }
 
 /** A tab's lamp; tab lamps never pulse (catalogue 1.1): the Needs-you button carries the pulse. */
@@ -138,7 +178,7 @@ function SessionSelect() {
   );
 }
 
-/** Mission elapsed time: since the first run started today (operator's timezone). */
+/** Kept as a keyboard and assistive shortcut; the approved shell keeps status in Overview. */
 function Met() {
   const now = useSecond();
   const first = useResource<Crew>(RESOURCES.crew).data?.firstRunToday ?? null;
@@ -150,7 +190,6 @@ function Met() {
 }
 
 const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
-
 const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
 function MachineButton() {
@@ -160,9 +199,7 @@ function MachineButton() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const holderStalled =
     lock?.holder != null &&
-    crew?.rows.find((r) => r.id === lock.holder?.seatId)?.hudState === "stalled";
-  // Blocked: the holder is stalled and someone is queued behind it.
-  const blocked = holderStalled && (lock?.waiting.length ?? 0) > 0;
+    crew?.rows.find((row) => row.id === lock.holder?.seatId)?.hudState === "stalled";
   const lockText =
     lock === undefined
       ? "Lock: —"
@@ -174,20 +211,45 @@ function MachineButton() {
     m && m.memUsedBytes !== null && m.memTotalBytes > 0
       ? (100 * m.memUsedBytes) / m.memTotalBytes
       : null;
+  const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
+  const label = `Machine status: ${status}. Opens Overview.`;
+  const lockExplanation = holderStalled
+    ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`
+    : LOCK_HEADER_TITLE;
   return (
     <button
       type="button"
-      className={`mach-btn${blocked ? " hot" : ""}`}
-      title="Machine and test lock (on Overview)"
+      className={`mach-btn iconbtn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
+      aria-label={label}
+      aria-describedby="machine-tooltip"
       onClick={() => {
         navigate(PAGE_PATHS.overview);
-        // once the Overview has rendered
         setTimeout(() => document.getElementById("machP")?.scrollIntoView?.({ block: "nearest" }));
       }}
     >
-      <span className="num">{`CPU ${pct(m?.cpuPct ?? null)}`}</span>
-      <span className="num">{`RAM ${pct(ram)}`}</span>
-      <span title={holderStalled ? LOCK_STALLED_TITLE : LOCK_HEADER_TITLE}>{lockText}</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect
+          x="2"
+          y="2.5"
+          width="12"
+          height="8.5"
+          rx="1.25"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M5.5 13.5h5M8 11v2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      <span id="machine-tooltip" className="mach-tooltip" role="tooltip">
+        <span>{status}</span>
+        <span>{lockExplanation}</span>
+      </span>
     </button>
   );
 }
@@ -304,8 +366,8 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: toggles the dock; an amber badge counts the asks FLIGHT has put to you. */
-function DockButton() {
+/** FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. */
+function DockButton({ page }: { page: Page }) {
   const dock = useDock();
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const decisions = useResource<FlightView>(RESOURCES.flight).data?.decisions;
@@ -313,14 +375,25 @@ function DockButton() {
     () => waitingAsks(attention ?? [], decisions ?? []).length,
     [attention, decisions],
   );
+  const inComms = page === "comms";
+  const inSetup = page === "setup";
+  const title = inComms
+    ? "FLIGHT chat is open in Comms"
+    : inSetup
+      ? "Open FLIGHT chat in Comms (f)"
+      : "Show or hide FLIGHT's chat (f)";
   return (
     <button
       type="button"
-      className={`iconbtn${dock.visible ? " on" : ""}`}
-      title="Show or hide FLIGHT's chat (f)"
+      className={`iconbtn${inComms || (!inSetup && dock.visible) ? " on" : ""}`}
+      title={title}
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={dock.visible}
-      onClick={dock.toggle}
+      aria-pressed={inComms ? true : inSetup ? undefined : dock.visible}
+      onClick={() => {
+        if (inSetup) navigate(PAGE_PATHS.comms);
+        // Comms already is FLIGHT's full conversation; the dock is not mounted here.
+        else if (!inComms) dock.toggle();
+      }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path

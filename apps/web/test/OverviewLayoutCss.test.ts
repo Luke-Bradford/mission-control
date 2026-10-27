@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const main = readFileSync(join(import.meta.dirname, "../src/main.tsx"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
@@ -72,18 +73,48 @@ describe("Overview layout (hud.css)", () => {
     expect(8 * height + 56).toBeLessThanOrEqual((900 - 160) * 0.45);
   });
 
-  it("fits every measured header control at 1440px while keeping narrow wrapping", () => {
+  it("uses the approved header spacing while keeping narrow wrapping", () => {
     const desktop = css.match(/@media \(min-width: 1200px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
     const gap = Number(desktop.match(/gap: 8px (\d+)px/)?.[1]);
-    expect(gap).toBeGreaterThan(0);
-    const controls = [145, 132, 443, 56, 35, 201, 115, 90, 32, 32, 32];
-    // Twelve gaps include the spacer; the app has 16px padding on either side.
-    expect(controls.reduce((sum, width) => sum + width, 0) + 12 * gap + 32).toBeLessThanOrEqual(
-      1440,
-    );
+    expect(gap).toBe(20);
     expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
-    expect(rule(String.raw`\.top`)).toContain("gap: 8px 10px");
+    expect(rule(String.raw`\.top`)).toContain("gap: 8px 20px");
+    expect(rule(String.raw`\.top-status`)).toContain("margin-left: auto");
     expect(desktop).not.toContain("display: none");
+  });
+
+  it("wraps the header before its desktop contents fit and keeps tabs within their row", () => {
+    const desktop = css.match(/@media \(min-width: 1280px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
+    expect(desktop).toContain("flex-wrap: nowrap");
+    expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
+    expect(rule(String.raw`\.tabs`)).toContain("overflow-x: auto");
+    expect(rule(String.raw`\.tabs`)).toContain("max-width: 100%");
+    expect(css).toMatch(
+      /@media \(max-width: 390px\) \{[\s\S]*?\.top-status \{[\s\S]*?display: grid/,
+    );
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: clip/);
+  });
+
+  it("shows the machine tooltip on pointer hover and keyboard focus", () => {
+    expect(css).toMatch(
+      /\.mach-btn:hover \.mach-tooltip,[\s\S]*?\.mach-btn:focus-visible \.mach-tooltip/,
+    );
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("visibility: hidden");
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("position: absolute");
+  });
+
+  it("clamps the machine tooltip to the full status row below 761px", () => {
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.top-status \{\s*position: relative;\s*width: 100%;/,
+    );
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*?\.mach-btn \{\s*position: static;/);
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.mach-tooltip \{\s*top: calc\(100% \+ 6px\);\s*right: 0;\s*left: 0;\s*width: auto;\s*max-width: none;/,
+    );
+  });
+
+  it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
+    expect(main).toContain('"@fontsource/barlow-semi-condensed/latin-700.css"');
   });
 });
 
