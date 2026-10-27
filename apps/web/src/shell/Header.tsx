@@ -211,19 +211,45 @@ function MachineButton() {
     m && m.memUsedBytes !== null && m.memTotalBytes > 0
       ? (100 * m.memUsedBytes) / m.memTotalBytes
       : null;
+  const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
+  const label = `Machine status: ${status}. Opens Overview.`;
+  const lockExplanation = holderStalled
+    ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`
+    : LOCK_HEADER_TITLE;
   return (
     <button
       type="button"
-      className={`mach-btn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
-      title="Machine and test lock (on Overview)"
+      className={`mach-btn iconbtn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
+      aria-label={label}
+      aria-describedby="machine-tooltip"
       onClick={() => {
         navigate(PAGE_PATHS.overview);
         setTimeout(() => document.getElementById("machP")?.scrollIntoView?.({ block: "nearest" }));
       }}
     >
-      <span className="num">{`CPU ${pct(m?.cpuPct ?? null)}`}</span>
-      <span className="num">{`RAM ${pct(ram)}`}</span>
-      <span title={holderStalled ? LOCK_STALLED_TITLE : LOCK_HEADER_TITLE}>{lockText}</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect
+          x="2"
+          y="2.5"
+          width="12"
+          height="8.5"
+          rx="1.25"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M5.5 13.5h5M8 11v2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      <span id="machine-tooltip" className="mach-tooltip" role="tooltip">
+        <span>{status}</span>
+        <span>{lockExplanation}</span>
+      </span>
     </button>
   );
 }
