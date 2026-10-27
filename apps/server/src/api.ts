@@ -1181,11 +1181,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const context = store.commsForTicket(supplied);
         const issueNumber = context.ref.startsWith("#") ? Number(context.ref.slice(1)) : null;
         const board =
-          issueNumber === null
+          issueNumber === null ||
+          context.repoId === null ||
+          !config.repos.some((repo) => repo.id === context.repoId)
             ? undefined
-            : config.repos
-                .flatMap((repo) => store.board(repo.id))
-                .find((item) => item.issueNumber === issueNumber);
+            : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
         return {
           messages: storedCommsMessages(context.rows),
           ticket: {

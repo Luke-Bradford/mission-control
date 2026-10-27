@@ -437,6 +437,7 @@ function Composer({
   messageRef,
   prefill,
   onPrefillConsumed,
+  onSent,
 }: {
   to: string;
   reply: CommsMessage | null;
@@ -446,6 +447,7 @@ function Composer({
   messageRef?: string;
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
+  onSent?: () => void;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -470,6 +472,7 @@ function Composer({
         setText("");
         onCancelReply();
         hub.refetchTopic("agents");
+        onSent?.();
       })
       .catch(() => setError("Could not send message."));
   };
@@ -508,15 +511,20 @@ function MentionsBell({
   const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
+  const [markError, setMarkError] = useState<string[] | null>(null);
   const mentions = resource.data?.mentions ?? [];
   const unseen = mentions.filter((mention) => !mention.seen && !seen.has(mention.message.id));
   const mark = (ids: string[]) => {
-    setSeen((current) => new Set([...current, ...ids]));
-    void apiPost("/api/comms/mentions/seen", { ids }).then(() =>
-      hub.refetch(RESOURCES.commsMentions.path),
-    );
+    void apiPost("/api/comms/mentions/seen", { ids })
+      .then(() => {
+        setSeen((current) => new Set([...current, ...ids]));
+        setMarkError(null);
+        hub.refetch(RESOURCES.commsMentions.path);
+      })
+      .catch(() => setMarkError(ids));
   };
   const openMention = (mention: CommsMention) => {
+    setOpen(false);
     mark([mention.message.id]);
     const message = mention.message;
     onOpenMessage(viewForMessage(message, flightId), message.id);
@@ -567,6 +575,14 @@ function MentionsBell({
           })}
           {mentions.length === 0 && <p>Nobody has tagged you.</p>}
         </section>
+      )}
+      {markError && (
+        <p role="alert">
+          Could not mark mentions read.{" "}
+          <button type="button" onClick={() => mark(markError)}>
+            Retry
+          </button>
+        </p>
       )}
     </div>
   );
@@ -790,6 +806,10 @@ function ModernConversation({
           messageRef={view.kind === "ticket" ? view.ref : undefined}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
+          onSent={() => {
+            if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)
+              navigate(commsContactPath(view.agentId, COMMS_CAPCOM));
+          }}
         />
       ) : (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>

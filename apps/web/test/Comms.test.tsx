@@ -352,7 +352,16 @@ describe("Comms routes", () => {
     fireEvent.click(bell);
     const panel = screen.getByRole("region", { name: "Mentions" });
     fireEvent.click(within(panel).getByText("@CAPCOM please check #707"));
-    await waitFor(() => expect(panel.querySelector("button.seen")).toBeTruthy());
+    expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
+    );
+    fireEvent.click(bell);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+      ).toBeTruthy(),
+    );
     fireEvent.click(screen.getByText("Mark all read"));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
@@ -361,6 +370,101 @@ describe("Comms routes", () => {
     await waitFor(() => {
       const hit = fetch.mock.calls.find(([path]) => path === "/api/comms/comms%3A9/reactions");
       expect(JSON.parse(String(hit?.[1]?.body))).toEqual({ reaction: "seen" });
+    });
+  });
+
+  it("keeps mentions unread when marking them seen fails and lets CAPCOM retry", async () => {
+    const message = {
+      id: "comms:mention",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "@CAPCOM check this",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: ["CAPCOM"],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    let attempts = 0;
+    stubFetch({
+      "/api/comms/crew": { messages: [message] },
+      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms/mentions/seen": () => ({
+        status: ++attempts === 1 ? 500 : 200,
+        body: { ok: true },
+      }),
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    fireEvent.click(bell);
+    fireEvent.click(screen.getByText("@CAPCOM check this"));
+    expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not mark mentions read.",
+    );
+    fireEvent.click(bell);
+    expect(
+      screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(
+      screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+    ).toBeTruthy();
+  });
+
+  it("returns CAPCOM to its contact after sending from an agent-to-agent conversation", async () => {
+    const message = {
+      id: "comms:peer",
+      at: NOW,
+      from: "alpha",
+      to: "beta",
+      text: "handoff",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const fetch = stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: [message],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/alpha/contacts/beta": { messages: [message] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms": { message: { ...message, from: "CAPCOM", to: "alpha" } },
+    });
+    window.history.replaceState(null, "", "/comms/agents/alpha/contacts/beta");
+    render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "beta" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    const composer = await screen.findByLabelText("Message alpha as CAPCOM");
+    fireEvent.change(composer, { target: { value: "Operator reply" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ to: "alpha" });
+      expect(window.location.pathname).toBe("/comms/agents/alpha/contacts/CAPCOM");
     });
   });
 

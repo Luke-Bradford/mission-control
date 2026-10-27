@@ -467,13 +467,21 @@ describe("Comms API", () => {
     }
   };
 
-  const commsRow = (from: string, to: string, text: string, at = clock) => {
+  const commsRow = (
+    from: string,
+    to: string,
+    text: string,
+    at = clock,
+    ticket: string | null = null,
+    ref?: string,
+  ) => {
     const row = store.addComms({
       at,
       from,
       to,
-      ticket: null,
+      ticket,
       text,
+      ref,
       mentions: text.includes("@CAPCOM") ? ["CAPCOM"] : [],
     });
     if (row === null) throw new Error("Comms row was not stored");
@@ -598,7 +606,7 @@ describe("Comms API", () => {
   });
 
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
-    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703");
+    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
     const pinned = commsRow("beta", "alpha", "pin");
     store.setCommsPinned(pinned.id, true, "CAPCOM", clock++);
@@ -705,6 +713,61 @@ describe("Comms API", () => {
       expect((await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links).toEqual(
         expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew", count: 1 })]),
       );
+    });
+  });
+
+  it("returns ticket metadata only when Comms identifies its repository", async () => {
+    commsRow("alpha", "crew", "#703");
+    for (const [repoId, title] of [
+      ["shop-app", "Shop issue"],
+      ["site-builder", "Site issue"],
+    ] as const)
+      store.replaceBoard(repoId, [
+        {
+          repoId,
+          issueNumber: 703,
+          title,
+          status: "In progress",
+          state: "in progress",
+          labels: [],
+          assignees: [],
+          priority: null,
+          updatedAt: clock,
+          url: "",
+          stage: null,
+          owner: "Agent",
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: clock,
+          itemId: null,
+          projectId: null,
+        },
+      ]);
+    await withCommsApp(async (comms) => {
+      const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
+      expect(ticket.json().ticket).toMatchObject({
+        ref: "#703",
+        title: null,
+        status: null,
+        owner: null,
+        repoId: null,
+        issueNumber: null,
+      });
+      commsRow("beta", "crew", "site ticket #703", clock, "site-builder#703", "#703");
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" })).json(),
+      ).toMatchObject({
+        ticket: {
+          title: "Site issue",
+          repoId: "site-builder",
+          issueNumber: 703,
+        },
+      });
     });
   });
 });

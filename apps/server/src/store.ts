@@ -3097,24 +3097,43 @@ export class Store {
     if (!refs.length) return [];
     return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
   }
-  commsForTicket(ref: string): { ref: string; linkedPr: string | null; rows: CommsRow[] } {
+  commsForTicket(ref: string): {
+    ref: string;
+    linkedPr: string | null;
+    repoId: string | null;
+    rows: CommsRow[];
+  } {
     const prNumber = ref.startsWith("PR ") ? Number(ref.slice(3)) : null;
     let issueNumber = ref.startsWith("#") ? Number(ref.slice(1)) : null;
     let linkedPr: string | null = null;
+    let linkedRows: { number: number; repoId: string; ticket: string | null }[] = [];
     if (prNumber !== null) {
-      const row = this.db
-        .prepare("SELECT ticket FROM pull_requests WHERE number=? ORDER BY updated_at DESC LIMIT 1")
-        .get(prNumber) as { ticket: string | null } | undefined;
+      linkedRows = this.db
+        .prepare(
+          "SELECT number, repo_id, ticket FROM pull_requests WHERE number=? ORDER BY updated_at DESC",
+        )
+        .all(prNumber)
+        .map((row) => ({
+          number: row.number as number,
+          repoId: row.repo_id as string,
+          ticket: row.ticket as string | null,
+        }));
+      const row = linkedRows[0];
       const match = row?.ticket?.match(/#(\d+)$/);
       issueNumber = match === null || match === undefined ? null : Number(match[1]);
       linkedPr = `PR ${prNumber}`;
     } else if (issueNumber !== null) {
-      const row = this.db
+      linkedRows = this.db
         .prepare(
-          "SELECT number FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC LIMIT 1",
+          "SELECT number, repo_id, ticket FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC",
         )
-        .get(`*#${issueNumber}`) as { number: number } | undefined;
-      linkedPr = row === undefined ? null : `PR ${row.number}`;
+        .all(`*#${issueNumber}`)
+        .map((row) => ({
+          number: row.number as number,
+          repoId: row.repo_id as string,
+          ticket: row.ticket as string | null,
+        }));
+      linkedPr = linkedRows[0] === undefined ? null : `PR ${linkedRows[0].number}`;
     }
     const resolvedRef = issueNumber === null ? ref : `#${issueNumber}`;
     const refs = linkedPr === null ? [resolvedRef] : [resolvedRef, linkedPr];
@@ -3132,7 +3151,22 @@ export class Store {
         ),
       );
     });
-    return { ref: resolvedRef, linkedPr, rows };
+    const repoIds = new Set<string>();
+    const repoFor = (ticket: string | null): string | null => {
+      const match = ticket?.match(/^(.+)#(\d+)$/);
+      return match?.[2] === String(issueNumber) ? (match[1] ?? null) : null;
+    };
+    for (const row of linkedRows) repoIds.add(row.repoId);
+    for (const row of rows) {
+      const repoId = repoFor(row.ticket);
+      if (repoId !== null) repoIds.add(repoId);
+    }
+    return {
+      ref: resolvedRef,
+      linkedPr,
+      repoId: repoIds.size === 1 ? [...repoIds][0] : null,
+      rows,
+    };
   }
   commsLinkedPr(ref: string): string | null {
     const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
