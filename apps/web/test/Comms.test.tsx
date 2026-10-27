@@ -212,7 +212,7 @@ describe("Comms routes", () => {
     };
     const fetch = stubFetch({
       "/api/comms/crew": { messages: [] },
-      "/api/comms/tickets/%23707": {
+      "/api/comms/tickets/%23707?ticket=shop-app%23707": {
         messages: [],
         ticket: {
           ref: "#707",
@@ -244,7 +244,12 @@ describe("Comms routes", () => {
     expect((crewComposer as HTMLInputElement).value).toBe("Re #707: ");
     expect(consumed).toHaveBeenCalledWith(7);
     fireEvent.change(crewComposer, { target: { value: "crew draft" } });
-    rerender(<CommsConversation view={{ kind: "ticket", ref: "#707" }} row={null} />);
+    rerender(
+      <CommsConversation
+        view={{ kind: "ticket", ref: "#707", ticket: "shop-app#707" }}
+        row={null}
+      />,
+    );
     const ticketComposer = await screen.findByLabelText("Message crew as CAPCOM");
     expect((ticketComposer as HTMLInputElement).value).toBe("");
     expect(screen.getByText("Comms ticket")).toBeTruthy();

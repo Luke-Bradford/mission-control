@@ -20,6 +20,7 @@ import {
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
   COMMS_REF,
+  COMMS_TICKET,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -1175,30 +1176,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
       });
       // Reader: apps/web/src/App.tsx#App (ticket Comms)
-      api.get<{ Params: { ref: string } }>("/comms/tickets/:ref", (req, reply) => {
-        const supplied = decodeURIComponent(req.params.ref);
-        if (!COMMS_REF.test(supplied)) return reply.code(400).send({ error: "invalid Comms ref" });
-        const context = store.commsForTicket(supplied);
-        const issueNumber = context.ref.startsWith("#") ? Number(context.ref.slice(1)) : null;
-        const board =
-          issueNumber === null ||
-          context.repoId === null ||
-          !config.repos.some((repo) => repo.id === context.repoId)
-            ? undefined
-            : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
-        return {
-          messages: storedCommsMessages(context.rows),
-          ticket: {
-            ref: context.ref,
-            linkedPr: context.linkedPr,
-            title: board?.title ?? null,
-            status: board?.status ?? null,
-            owner: board?.owner ?? null,
-            repoId: board?.repoId ?? null,
-            issueNumber: board?.issueNumber ?? null,
-          },
-        };
-      });
+      api.get<{ Params: { ref: string }; Querystring: { ticket?: string } }>(
+        "/comms/tickets/:ref",
+        (req, reply) => {
+          const supplied = decodeURIComponent(req.params.ref);
+          if (!COMMS_REF.test(supplied))
+            return reply.code(400).send({ error: "invalid Comms ref" });
+          if (req.query.ticket !== undefined && !COMMS_TICKET.test(req.query.ticket))
+            return reply.code(400).send({ error: "invalid Comms ticket" });
+          const context = store.commsForTicket(supplied, req.query.ticket);
+          const issueNumber = context.ref.startsWith("#") ? Number(context.ref.slice(1)) : null;
+          const board =
+            issueNumber === null ||
+            context.repoId === null ||
+            !config.repos.some((repo) => repo.id === context.repoId)
+              ? undefined
+              : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
+          return {
+            messages: storedCommsMessages(context.rows),
+            ticket: {
+              ref: context.ref,
+              linkedPr: context.linkedPr,
+              title: board?.title ?? null,
+              status: board?.status ?? null,
+              owner: board?.owner ?? null,
+              repoId: board?.repoId ?? null,
+              issueNumber: board?.issueNumber ?? null,
+            },
+          };
+        },
+      );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
       api.get("/comms/mentions", () => ({
         mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({

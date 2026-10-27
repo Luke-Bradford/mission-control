@@ -7,6 +7,7 @@ import {
   commsContactPath,
   commsCrewPath,
   commsInboxPath,
+  commsTicketPath,
   isPopout,
   itemPath,
   legacyRedirect,
@@ -151,6 +152,14 @@ describe("path helpers", () => {
       view: { kind: "contact", agentId: "a", contactId: "b/c" },
     });
     expect(commsAgentPath("a b")).toBe("/comms/agents/a%20b");
+    expect(commsTicketPath("#703", "shop-app#703")).toBe(
+      "/comms/tickets/%23703?ticket=shop-app%23703",
+    );
+    expect(route(commsTicketPath("#703", "shop-app#703"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "ticket", ref: "#703", ticket: "shop-app#703" },
+    });
     expect(route(agentPath("x/y"))).toEqual({ page: "agent", id: "x/y" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",

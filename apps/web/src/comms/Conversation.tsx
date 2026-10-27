@@ -3,6 +3,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
   type CommsMessage,
@@ -223,7 +224,13 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
   };
 }
 
-function MessageRefs({ text }: { text: string }) {
+function ticketForRef(ref: string, ticket: string | null): string | undefined {
+  if (ticket === null || !COMMS_TICKET.test(ticket)) return undefined;
+  const issue = /^#(\d+)$/.exec(ref)?.[1];
+  return issue === undefined || ticket.endsWith(`#${issue}`) ? ticket : undefined;
+}
+
+function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {
   const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
   const occurrences = new Map<string, number>();
   return (
@@ -237,7 +244,7 @@ function MessageRefs({ text }: { text: string }) {
             className="comms-ref"
             key={key}
             type="button"
-            onClick={() => navigate(commsTicketPath(part))}
+            onClick={() => navigate(commsTicketPath(part, ticketForRef(part, ticket)))}
           >
             {part}
           </button>
@@ -387,7 +394,14 @@ function MessagePane({
                   <button
                     className="comms-ref"
                     type="button"
-                    onClick={() => navigate(commsTicketPath(message.ref as string))}
+                    onClick={() =>
+                      navigate(
+                        commsTicketPath(
+                          message.ref as string,
+                          ticketForRef(message.ref as string, message.ticket),
+                        ),
+                      )
+                    }
                   >
                     {message.ref}
                   </button>
@@ -404,7 +418,7 @@ function MessagePane({
                 </button>
               )}
               <div className="comms-bubble-body">
-                <MessageRefs text={message.text} />
+                <MessageRefs text={message.text} ticket={message.ticket} />
               </div>
               {message.reactions.length > 0 && (
                 <div className="comms-reactions">
@@ -680,7 +694,12 @@ function ModernConversation({
   );
   const ticket = useResource<CommsTicketResponse>(
     view.kind === "ticket"
-      ? { path: `/api/comms/tickets/${encodeURIComponent(view.ref)}`, topic: "agents" }
+      ? {
+          path: `/api/comms/tickets/${encodeURIComponent(view.ref)}${
+            view.ticket ? `?ticket=${encodeURIComponent(view.ticket)}` : ""
+          }`,
+          topic: "agents",
+        }
       : null,
   );
   const pins = useResource<CommsPinsResponse>(RESOURCES.commsPins).data?.messages ?? [];
@@ -704,7 +723,8 @@ function ModernConversation({
   const [readError, setReadError] = useState<string | null>(null);
   const [readRetry, setReadRetry] = useState(0);
   const scope = scopeFor(view);
-  const conversationScope = view.kind === "ticket" ? `ticket:${view.ref}` : scope;
+  const conversationScope =
+    view.kind === "ticket" ? `ticket:${view.ref}:${view.ticket ?? ""}` : scope;
   useEffect(() => {
     if (!scope || messages.length === 0) return;
     if (readRetry > 0) setReadError(null);
@@ -851,7 +871,8 @@ export function CommsConversation({
       </Panel>
     );
   }
-  const conversationScope = view.kind === "ticket" ? `ticket:${view.ref}` : scopeFor(view);
+  const conversationScope =
+    view.kind === "ticket" ? `ticket:${view.ref}:${view.ticket ?? ""}` : scopeFor(view);
   return (
     <ModernConversation
       key={conversationScope}

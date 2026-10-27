@@ -770,6 +770,89 @@ describe("Comms API", () => {
       });
     });
   });
+
+  it("keeps a clicked message's repository when issue numbers and PRs overlap", async () => {
+    const board = (repoId: string, title: string) => ({
+      repoId,
+      issueNumber: 703,
+      title,
+      status: "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [board("shop-app", "Shop issue")]);
+    store.replaceBoard("site-builder", [board("site-builder", "Site issue")]);
+    const clicked = commsRow("alpha", "crew", "Shop ticket #703", clock, "shop-app#703");
+    const other = commsRow("beta", "crew", "Site ticket #703", clock, "site-builder#703");
+    store.upsertPullRequests(
+      "site-builder",
+      [
+        {
+          repoId: "site-builder",
+          number: 711,
+          title: "other repo only",
+          url: "",
+          branch: "fix/703",
+          ticket: "site-builder#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    await withCommsApp(async (comms) => {
+      const shop = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=shop-app%23703",
+        })
+      ).json();
+      expect(shop.ticket).toMatchObject({
+        linkedPr: null,
+        title: "Shop issue",
+        repoId: "shop-app",
+        issueNumber: 703,
+      });
+      expect(shop.messages.map((message: { id: string }) => message.id)).toEqual([clicked.id]);
+
+      const site = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=site-builder%23703",
+        })
+      ).json();
+      expect(site.ticket).toMatchObject({
+        linkedPr: "PR 711",
+        title: "Site issue",
+        repoId: "site-builder",
+        issueNumber: 703,
+      });
+      expect(site.messages.map((message: { id: string }) => message.id)).toEqual([other.id]);
+    });
+  });
 });
 
 const run = (over: Partial<Run>): Run => ({

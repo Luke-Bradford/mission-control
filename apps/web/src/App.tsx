@@ -14,6 +14,7 @@ import {
   type Route,
   route,
   usePath,
+  useSearch,
 } from "./router.ts";
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
@@ -59,9 +60,10 @@ const TITLE = "Mission Control";
  */
 export function App() {
   const path = usePath();
+  const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.
   const [popout] = useState(() => isPopout(window.location.search));
-  const r = route(path);
+  const r = route(path, search);
   const moved = r ? null : (legacyRedirect(path, window.location.hash) ?? PAGE_PATHS.overview);
   useEffect(() => {
     if (moved) navigate(moved, { replace: true });
