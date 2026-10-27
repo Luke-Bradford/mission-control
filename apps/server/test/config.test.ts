@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   BUILTIN_ROLES,
   CREW_EFFORTS,
@@ -36,7 +36,7 @@ import {
   portFromEnv,
   seatUnavailable,
 } from "../src/config.ts";
-import { CodexModels, codexModels } from "../src/runtime/codex-models.ts";
+import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
 import { configView } from "../src/views.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
@@ -1042,6 +1042,61 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     expect(
       fails(crewText({ seats: [seat("retro-1", "RETRO", ", light_model: gpt-6-astra")] })).path,
     ).toBe("crew.sessions[0].seats[0].lightModel");
+  });
+
+  it("uses the configured Codex profile's model catalog", async () => {
+    const profileCatalog = fakeModels({
+      pages: [
+        {
+          data: [
+            {
+              model: "gpt-profile-only",
+              supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+            },
+          ],
+          nextCursor: null,
+        },
+      ],
+    });
+    const profile = dirname(profileCatalog.deps.authPath);
+    writeFileSync(profileCatalog.deps.authPath, '{"tokens":{"account_id":"profile-only"}}');
+    const machineProfile = join(homedir(), ".codex");
+    mkdirSync(machineProfile, { recursive: true });
+    writeFileSync(join(machineProfile, "auth.json"), '{"tokens":{"account_id":"machine"}}');
+    await codexModelsFor({ vendor: "codex", cliProfile: profile }).load(profileCatalog.deps);
+
+    const withProfile = (text: string) =>
+      text
+        .replace("    stop_at: 80\n", `    stop_at: 80\n    cli_profile: ${machineProfile}\n`)
+        .replace(
+          "\nrepos:",
+          `\n  - id: codex-profile\n    vendor: codex\n    alert_at: 70\n    stop_at: 80\n    cli_profile: ${profile}\n\nrepos:`,
+        );
+    const profileSeat = (model: string) =>
+      withProfile(
+        crewText({
+          seats: [seat("guido-1", "GUIDO", "", "codex-profile").replace("sonnet", model)],
+        }),
+      );
+
+    const configured = load(profileSeat("gpt-profile-only")).crew?.sessions[0]?.seats[0];
+    if (!configured) throw new Error("missing profile seat");
+    expect(seatUnavailable(configured)).toBeNull();
+    expect(seatUnavailable({ ...configured, model: "gpt-6-astra" })).toContain(
+      'model "gpt-6-astra" is not listed',
+    );
+    expect(fails(profileSeat("gpt-6-astra")).path).toBe("crew.sessions[0].seats[0].model");
+    expect(
+      fails(
+        withProfile(
+          crewText({
+            seats: [
+              seat("guido-1", "GUIDO", "", "codex-main").replace("sonnet", "gpt-profile-only"),
+            ],
+          }),
+        ),
+      ).path,
+    ).toBe("crew.sessions[0].seats[0].model");
   });
 
   it("refuses Codex seats when the catalog is unavailable, leaving Claude seats usable", () => {
