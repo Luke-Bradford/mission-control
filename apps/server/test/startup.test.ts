@@ -40,6 +40,7 @@ vi.mock("../src/runtime/codex-models.ts", async (original) => {
       efforts: (model: string) => current().efforts(model),
       load: (deps: ModelDeps) => current().load(deps),
     },
+    codexModelsFor: () => current(),
   };
 });
 
