@@ -761,6 +761,7 @@ describe("POST /api/guard/check", () => {
       `${GUARD_RULES["git-write"]}: git push`,
     ]);
     expect(view.counts).toEqual({
+      background: 0,
       "git-write": 2,
       "codex-allowlist": 0,
       "git-env": 0,
