@@ -224,6 +224,12 @@ export interface ConfigView {
   };
 }
 
+/** Models a configured account may use. Codex entries come from its live model/list catalog. */
+export interface AccountModelsView {
+  accountId: AccountId;
+  models: { model: string; efforts: string[] }[];
+}
+
 /** A seat as config.yaml says it (what Setup edits). */
 export interface SeatInput {
   id: string;

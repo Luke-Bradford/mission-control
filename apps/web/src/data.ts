@@ -150,6 +150,7 @@ export const RESOURCES = {
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
+  accountModels: { path: "/api/accounts/models", topic: "config" },
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
@@ -223,6 +224,8 @@ export const ACTIONS = {
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",
+  /** Read-only git/remote/branch preflight for adding or converting a crew repo. */
+  previewCheckout: "/api/repos/checkout-preview",
   /** Body: a NewRepo; answers `{ repo, backup }` after writing config.yaml. */
   addRepo: "/api/repos",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */

@@ -352,7 +352,11 @@ beforeEach(async () => {
             fields: { pageInfo: { hasNextPage: false }, nodes: projectFields },
           },
         },
-        repository: { labels: { nodes: previewLabels.map((name) => ({ name })) } },
+        repository: {
+          labels: { nodes: previewLabels.map((name) => ({ name })) },
+          defaultBranchRef: { name: "main" },
+          workflows: { __typename: "Tree" },
+        },
       };
     }
     return {
@@ -993,6 +997,11 @@ const API_ROUTES: [string, string, object?][] = [
   ],
   ["GET", "/api/repos/profiles"],
   ["POST", "/api/repos/preview", { github: "octo-org/studio", project: 4 }],
+  [
+    "POST",
+    "/api/repos/checkout-preview",
+    { github: "o/shop-app", source: "/nope", branch: "main" },
+  ],
   ["GET", "/api/boards/shop-app"],
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
@@ -1023,6 +1032,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/profiles"],
+  ["GET", "/api/accounts/models"],
   ["GET", "/api/accounts/status"],
   ["GET", "/api/sources/teams"],
   ["POST", "/api/sources/teams/selection", { selected: [] }],
@@ -1302,6 +1312,36 @@ describe("add a repo (POST /api/repos)", () => {
   });
 });
 
+describe("repo setup (POST /api/repos/:repoId/setup)", () => {
+  it("does not apply an unrelated on-disk flight_powers change", async () => {
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8").replace(
+        "    # flight_powers: standard   # standard (default) | superuser.",
+        "    flight_powers: superuser # unapplied manual change",
+      ),
+    );
+    const r = await postBody("/api/repos/shop-app/setup", {
+      defaultAccountId: "codex-main",
+      guidance: {
+        priority: ["P1"],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "focus the next milestone",
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(config.repos[0]).toMatchObject({
+      defaultAccountId: "codex-main",
+      guidance: { priority: ["P1"] },
+    });
+    expect(config.repos[0]?.flightPowers).toBeUndefined();
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
+  });
+});
+
 describe("POST /api/github/refresh", () => {
   it("answers 202 and asks for a refresh", async () => {
     const r = await post("/api/github/refresh");
@@ -1560,6 +1600,11 @@ describe("local access", () => {
       if (url === "/api/github/refresh") {
         // accepted, not done: the read happens later
         expect(r.statusCode, `${method} ${url}`).toBe(202);
+        continue;
+      }
+      if (url === "/api/repos/checkout-preview") {
+        // The shared route table body names no real checkout; route-specific tests supply one.
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
         continue;
       }
       if (

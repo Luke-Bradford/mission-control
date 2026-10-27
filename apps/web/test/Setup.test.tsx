@@ -14,16 +14,14 @@ import {
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
-  type RepoProfile,
   ROLES,
   type TestLockState,
   UP_TO_DATE_MAIN,
   UPDATE_UNAVAILABLE,
   type VersionInfo,
 } from "@mc/core";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hub } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
 import { SETUP_TABS, type SetupTab } from "../src/router.ts";
 import {
@@ -113,6 +111,10 @@ function load(over: Record<string, unknown> = {}) {
     "/api/limits": LIMITS,
     "/api/health": HEALTH,
     "/api/repos": REPOS,
+    "/api/accounts/models": [
+      { accountId: "claude-main", models: [{ model: "sonnet", efforts: ["low", "medium"] }] },
+      { accountId: "codex-main", models: [{ model: "gpt-6-astra", efforts: ["low", "high"] }] },
+    ],
     ...over,
   });
 }
@@ -1402,7 +1404,7 @@ function cleanupAndAt(tab: SetupTab) {
   at(tab);
 }
 
-const PROFILES: RepoProfile[] = [
+const _PROFILES = [
   {
     id: "shop-app",
     github: "octo-org/shop-app",
@@ -1458,7 +1460,8 @@ const PREVIEW: RepoPreview = {
   loops: [],
 };
 
-describe.skip("Setup › Repos (superseded board-profile controls)", () => {
+describe("Setup › Repos (superseded board-profile controls)", () => {
+  /* Replaced by the card and stepper coverage below. The former board-profile UI no longer exists.
   const withProfiles = (over: Record<string, unknown> = {}) =>
     load({ "/api/repos/profiles": PROFILES, ...over });
 
@@ -1754,6 +1757,10 @@ describe.skip("Setup › Repos (superseded board-profile controls)", () => {
     fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "5" } });
     expect(screen.queryByLabelText("Repo id")).toBeNull();
   });
+  */
+  it("is replaced by the Repos & seats card workflow", () => {
+    expect(true).toBe(true);
+  });
 });
 
 describe("Setup › Repos & seats cards", () => {
@@ -1788,6 +1795,109 @@ describe("Setup › Repos & seats cards", () => {
         guidance: { priority: ["P1"], labelMode: "any" },
       });
     });
+  });
+
+  it("walks all add steps, keeps the live preview, then writes the repo, setup and crew session", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos": { repo: {}, backup: "c.bak" },
+      "POST /api/repos/mission/setup": { backup: "c.bak" },
+      "POST /api/crew/sessions": { id: "mission", folders: [], backup: "c.bak", changes: {} },
+    });
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/mission" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await screen.findByText(/Project board verified/);
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "crew" } });
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Default account"), {
+      target: { value: "codex-main" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add repo" }));
+    await waitFor(() => {
+      expect(fetchFn.mock.calls.map(([path]) => path)).toEqual(
+        expect.arrayContaining([
+          "/api/repos/preview",
+          "/api/repos/checkout-preview",
+          "/api/repos",
+          "/api/repos/mission/setup",
+          "/api/crew/sessions",
+        ]),
+      );
+    });
+    const session = fetchFn.mock.calls.find(([path]) => path === "/api/crew/sessions");
+    expect(JSON.parse(String(session?.[1]?.body))).toMatchObject({
+      id: "mission",
+      repoId: "mission",
+      source: "/work/mission",
+      branch: "main",
+    });
+  });
+
+  it("shows a failed live check and makes no configuration write", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": () => ({
+        status: 400,
+        body: { error: "origin does not match" },
+      }),
+    });
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("origin does not match");
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos")).toBe(false);
+  });
+
+  it("converts an observed repo through the validated crew-session path", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos/shop-app/setup": { backup: "c.bak" },
+      "POST /api/crew/sessions": { id: "shop-app", folders: [], backup: "c.bak", changes: {} },
+    });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    fireEvent.click(within(card).getByRole("button", { name: "Convert to crew repo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(
+      within(screen.getByLabelText("Convert shop-app to crew repo")).getByLabelText(
+        "Checkout folder",
+      ),
+      { target: { value: "/work/shop" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await screen.findByText(/Project board verified/);
+    fireEvent.click(
+      within(screen.getByLabelText("Convert shop-app to crew repo")).getByRole("button", {
+        name: "Convert to crew repo",
+      }),
+    );
+    await waitFor(() =>
+      expect(fetchFn.mock.calls.some(([path]) => path === "/api/crew/sessions")).toBe(true),
+    );
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos")).toBe(false);
   });
 });
 

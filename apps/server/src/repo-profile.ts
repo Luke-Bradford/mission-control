@@ -89,6 +89,8 @@ const PREVIEW_QUERY = `query($owner: String!, $number: Int!, $name: String!) {
   }
   repository(owner: $owner, name: $name) {
     labels(first: 20, query: "p") { nodes { name } }
+    defaultBranchRef { name }
+    workflows: object(expression: "HEAD:.github/workflows") { __typename }
   }
 }`;
 
@@ -132,6 +134,14 @@ export async function repoPreview(
   if (!isObj(p)) throw new PreviewError(404, `project ${loc.project} not found for ${owner}`);
   if (!isObj(data.repository)) {
     throw new PreviewError(404, `repository ${loc.github} not found`);
+  }
+  const defaultBranch = data.repository.defaultBranchRef;
+  if (!isObj(defaultBranch) || typeof defaultBranch.name !== "string") {
+    throw new PreviewError(502, `github: could not read the default branch of ${loc.github}`);
+  }
+  const workflows = data.repository.workflows;
+  if (!isObj(workflows) || workflows.__typename !== "Tree") {
+    throw new PreviewError(502, `github: no CI workflow directory on ${loc.github}`);
   }
 
   // Fail closed: a field this read could not see must never be mistaken for a missing one.

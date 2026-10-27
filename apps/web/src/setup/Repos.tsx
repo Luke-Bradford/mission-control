@@ -1,5 +1,12 @@
-import { type ConfigView, CREW_EFFORTS, errorText, type SeatInput } from "@mc/core";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  type AccountModelsView,
+  type ConfigView,
+  errorText,
+  type NewRepo,
+  type RepoPreview,
+  type SeatInput,
+} from "@mc/core";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { toast } from "../shell/Toast.tsx";
@@ -19,18 +26,24 @@ const EMPTY_GUIDANCE: Guidance = {
 
 /** Configuration only: cards do not make board, queue, or live-seat reads. */
 export function Repos({ config }: { config: ConfigView }) {
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<Repo | null | false>(false);
   return (
     <section className="setup-repos" aria-label="Repos and seats">
       <div className="setup-repos-head">
         <span className="cap">Repos &amp; seats</span>
-        <button type="button" className="primary sm" onClick={() => setAdding((open) => !open)}>
+        <button
+          type="button"
+          className="primary sm"
+          onClick={() => setAdding(adding === false ? null : false)}
+        >
           + Add repo
         </button>
       </div>
-      {adding && <AddRepo close={() => setAdding(false)} />}
+      {adding !== false && (
+        <AddRepo repo={adding || undefined} config={config} close={() => setAdding(false)} />
+      )}
       {config.repos.map((repo) => (
-        <RepoCard key={repo.id} repo={repo} config={config} />
+        <RepoCard key={repo.id} repo={repo} config={config} onConvert={() => setAdding(repo)} />
       ))}
     </section>
   );
@@ -77,7 +90,15 @@ function Chips({
   );
 }
 
-function RepoCard({ repo, config }: { repo: Repo; config: ConfigView }) {
+function RepoCard({
+  repo,
+  config,
+  onConvert,
+}: {
+  repo: Repo;
+  config: ConfigView;
+  onConvert: () => void;
+}) {
   const session = config.crew?.sessions.find((item) => item.repoId === repo.id);
   const [open, setOpen] = useState(true);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
@@ -202,7 +223,7 @@ function RepoCard({ repo, config }: { repo: Repo; config: ConfigView }) {
           {session ? (
             <Seats session={session} config={config} defaultAccount={account} />
           ) : (
-            <Observed repo={repo} config={config} />
+            <Observed repo={repo} config={config} onConvert={onConvert} />
           )}
         </>
       )}
@@ -210,7 +231,15 @@ function RepoCard({ repo, config }: { repo: Repo; config: ConfigView }) {
   );
 }
 
-function Observed({ repo, config }: { repo: Repo; config: ConfigView }) {
+function Observed({
+  repo,
+  config,
+  onConvert,
+}: {
+  repo: Repo;
+  config: ConfigView;
+  onConvert: () => void;
+}) {
   const loops = config.loops.filter((loop) => loop.repoId === repo.id);
   return (
     <div className="repo-observed">
@@ -220,7 +249,7 @@ function Observed({ repo, config }: { repo: Repo; config: ConfigView }) {
           ? loops.map((loop) => `${loop.kind} · ${loop.launchdLabel}`).join(", ")
           : "No external loop configured."}
       </p>
-      <button type="button" className="sm" disabled title="Create a crew checkout from Add repo">
+      <button type="button" className="sm" onClick={onConvert}>
         Convert to crew repo
       </button>
     </div>
@@ -258,22 +287,23 @@ function SeatEditor({
 }) {
   const firstRole = config.crew?.roles?.[0]?.name ?? "";
   const [form, setForm] = useState<SeatInput>(
-    seat ?? { id: "", role: firstRole, accountId: defaultAccount, model: "gpt-5.6-sol", area: [] },
+    seat ?? { id: "", role: firstRole, accountId: defaultAccount, model: "", area: [] },
   );
+  const catalog = useResource<AccountModelsView[]>(RESOURCES.accountModels).data;
+  const options = catalog?.find((account) => account.accountId === form.accountId)?.models ?? [];
+  // An old seat may have a model that has since left a provider catalog.  Keep it visible while
+  // editing that seat, but never make it a choice for a new one.
   const models = useMemo(
-    () => [
-      ...new Set([
-        form.model,
-        ...(config.crew?.sessions.flatMap((s) =>
-          s.seats.filter((x) => x.accountId === form.accountId).map((x) => x.model),
-        ) ?? []),
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "sonnet",
-      ]),
-    ],
-    [form.model, form.accountId, config],
+    () =>
+      seat && form.model && !options.some((option) => option.model === form.model)
+        ? [{ model: form.model, efforts: [] }, ...options]
+        : options,
+    [seat, form.model, options],
   );
+  const efforts = options.find((option) => option.model === form.model)?.efforts ?? [];
+  useEffect(() => {
+    if (!seat && form.model === "" && options[0]) setForm({ ...form, model: options[0].model });
+  }, [seat, form, options]);
   return (
     <form
       className="repo-seat-editor"
@@ -305,7 +335,9 @@ function SeatEditor({
         Account
         <select
           value={form.accountId}
-          onChange={(e) => setForm({ ...form, accountId: e.target.value })}
+          onChange={(e) =>
+            setForm({ ...form, accountId: e.target.value, model: "", effort: undefined })
+          }
         >
           {config.accounts.map((account) => (
             <option key={account.id} value={account.id}>
@@ -316,9 +348,16 @@ function SeatEditor({
       </label>
       <label>
         Model
-        <select value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
+        <select
+          value={form.model}
+          onChange={(e) => setForm({ ...form, model: e.target.value, effort: undefined })}
+          disabled={models.length === 0}
+        >
+          <option value="">No discovered models</option>
           {models.map((model) => (
-            <option key={model}>{model}</option>
+            <option key={model.model} value={model.model}>
+              {model.model}
+            </option>
           ))}
         </select>
       </label>
@@ -329,8 +368,10 @@ function SeatEditor({
           onChange={(e) => setForm({ ...form, effort: e.target.value || undefined })}
         >
           <option value="">CLI default</option>
-          {CREW_EFFORTS.map((effort) => (
-            <option key={effort}>{effort}</option>
+          {efforts.map((effort) => (
+            <option key={effort} value={effort}>
+              {effort}
+            </option>
           ))}
         </select>
       </label>
@@ -452,28 +493,94 @@ function Seats({
   );
 }
 
-/** Four explicit steps keep the live repository checks before any configuration write. */
-function AddRepo({ close }: { close: () => void }) {
-  const [github, setGithub] = useState("");
-  const [project, setProject] = useState("");
+/** Four explicit steps keep all read-only checks ahead of config and crew writes. */
+function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; close: () => void }) {
+  const [github, setGithub] = useState(repo?.github ?? "");
+  const [project, setProject] = useState(repo ? String(repo.project) : "");
+  const [id, setId] = useState(repo?.id ?? "");
+  const [source, setSource] = useState("");
+  const [branch, setBranch] = useState("main");
   const [step, setStep] = useState(1);
+  const [mode, setMode] = useState<"observed" | "crew">(repo ? "crew" : "observed");
+  const [account, setAccount] = useState(repo?.defaultAccountId ?? config.accounts[0]?.id ?? "");
+  const [preview, setPreview] = useState<RepoPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const valid = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(github) && Number(project) > 0;
+  const [busy, setBusy] = useState(false);
+  const latest = useRef(0);
+  const repoOk =
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(github) &&
+    Number.isInteger(Number(project)) &&
+    Number(project) > 0;
+  const checkoutOk = source.trim() !== "" && branch.trim() !== "";
+  const resetChecks = () => {
+    latest.current++;
+    setPreview(null);
+    setError(null);
+  };
+  const checks = async () => {
+    if (!repoOk || !checkoutOk || busy) return;
+    const mine = ++latest.current;
+    setBusy(true);
+    setError(null);
+    setPreview(null);
+    try {
+      const [found] = await Promise.all([
+        apiPost<RepoPreview>(ACTIONS.previewRepo, { github, project: Number(project) }),
+        apiPost(ACTIONS.previewCheckout, { github, source: source.trim(), branch: branch.trim() }),
+      ]);
+      if (mine === latest.current) {
+        setPreview(found);
+        setStep(4);
+      }
+    } catch (err) {
+      if (mine === latest.current) setError(errorText(err));
+    } finally {
+      if (mine === latest.current) setBusy(false);
+    }
+  };
+  const submit = async () => {
+    if (!preview || !account || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const repoId = id.trim();
+      if (!repo) {
+        const body: NewRepo = {
+          id: repoId,
+          github,
+          project: Number(project),
+          statusMap: preview.proposedStatusMap,
+        };
+        await apiPost(ACTIONS.addRepo, body);
+      }
+      await apiPost(ACTIONS.repoSetup(repoId), {
+        defaultAccountId: account,
+        guidance: EMPTY_GUIDANCE,
+      });
+      if (mode === "crew") {
+        await apiPost(ACTIONS.addSession, {
+          id: repoId,
+          repoId,
+          source: source.trim(),
+          branch: branch.trim(),
+          checkoutStrategy: "shared",
+        });
+      }
+      toast(repo ? `Converted ${repoId} to a crew repo.` : `Added ${repoId}.`);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crewChanges.path);
+      hub.refetch(RESOURCES.crewSessions.path);
+      close();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <form
+    <section
       className="repo-stepper"
-      aria-label="Add repo"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!valid) return;
-        setError(null);
-        try {
-          await apiPost(ACTIONS.previewRepo, { github, project: Number(project) });
-          setStep(4);
-        } catch (err) {
-          setError(errorText(err));
-        }
-      }}
+      aria-label={repo ? `Convert ${repo.id} to crew repo` : "Add repo"}
     >
       <div className="stepper">
         <span className={step >= 1 ? "on" : ""}>1 repo</span>
@@ -481,33 +588,148 @@ function AddRepo({ close }: { close: () => void }) {
         <span className={step >= 3 ? "on" : ""}>3 live checks</span>
         <span className={step >= 4 ? "on" : ""}>4 mode and account</span>
       </div>
-      <label>
-        GitHub repo
-        <input
-          value={github}
-          placeholder="owner/name"
-          onChange={(e) => setGithub(e.target.value)}
-        />
-      </label>
-      <label>
-        Project number
-        <input inputMode="numeric" value={project} onChange={(e) => setProject(e.target.value)} />
-      </label>
-      <p className="note">
-        Live checks verify the git repo, remote, default branch, GitHub access, CI workflow and
-        Project board before it is added.
-      </p>
+      {step === 1 && (
+        <>
+          <label>
+            GitHub repo
+            <input
+              value={github}
+              disabled={!!repo}
+              placeholder="owner/name"
+              onChange={(e) => {
+                setGithub(e.target.value);
+                resetChecks();
+              }}
+            />
+          </label>
+          <label>
+            Project number
+            <input
+              inputMode="numeric"
+              disabled={!!repo}
+              value={project}
+              onChange={(e) => {
+                setProject(e.target.value);
+                resetChecks();
+              }}
+            />
+          </label>
+          {!repo && (
+            <label>
+              Repo id
+              <input value={id} onChange={(e) => setId(e.target.value)} />
+            </label>
+          )}
+          <button
+            type="button"
+            className="primary sm"
+            disabled={!repoOk || (!repo && !/^[a-z][a-z0-9-]{0,30}$/.test(id.trim()))}
+            onClick={() => setStep(2)}
+          >
+            Next: checkout
+          </button>
+        </>
+      )}
+      {step === 2 && (
+        <>
+          <label>
+            Checkout folder
+            <input
+              value={source}
+              placeholder="/absolute/path/to/clone"
+              onChange={(e) => {
+                setSource(e.target.value);
+                resetChecks();
+              }}
+            />
+          </label>
+          <label>
+            Branch
+            <input
+              value={branch}
+              onChange={(e) => {
+                setBranch(e.target.value);
+                resetChecks();
+              }}
+            />
+          </label>
+          <button type="button" className="sm" onClick={() => setStep(1)}>
+            Back
+          </button>
+          <button
+            type="button"
+            className="primary sm"
+            disabled={!checkoutOk}
+            onClick={() => setStep(3)}
+          >
+            Next: live checks
+          </button>
+        </>
+      )}
+      {step === 3 && (
+        <>
+          <p className="note">
+            Checks verify the local git repository, origin, branch, GitHub access, CI workflow and
+            Project board before anything is written.
+          </p>
+          <button type="button" className="sm" onClick={() => setStep(2)}>
+            Back
+          </button>
+          <button
+            type="button"
+            className="primary sm"
+            disabled={busy}
+            onClick={() => void checks()}
+          >
+            {busy ? "Checking…" : "Run live checks"}
+          </button>
+        </>
+      )}
+      {step === 4 && preview && (
+        <>
+          <p className="note">{preview.projectTitle || github} · Project board verified.</p>
+          <label>
+            Mode
+            <select
+              value={mode}
+              disabled={!!repo}
+              onChange={(e) => setMode(e.target.value as "observed" | "crew")}
+            >
+              <option value="observed">Observed</option>
+              <option value="crew">Crew</option>
+            </select>
+          </label>
+          <label>
+            Default account
+            <select value={account} onChange={(e) => setAccount(e.target.value)}>
+              {config.accounts.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="sm" onClick={() => setStep(3)}>
+            Back
+          </button>
+          <button
+            type="button"
+            className="primary sm"
+            disabled={busy || !account}
+            onClick={() => void submit()}
+          >
+            {busy ? "Saving…" : repo ? "Convert to crew repo" : "Add repo"}
+          </button>
+        </>
+      )}
       {error && (
         <p role="alert" className="crit-t">
           {error}
         </p>
       )}
-      <button type="submit" className="primary sm" disabled={!valid}>
-        Run live checks
-      </button>
       <button type="button" className="sm" onClick={close}>
         Cancel
       </button>
-    </form>
+    </section>
   );
 }

@@ -39,6 +39,11 @@ export class CodexModels {
     return this.models?.get(model);
   }
 
+  /** The successfully discovered catalog, suitable for a read-only setup picker. */
+  entries(): readonly { model: string; efforts: readonly string[] }[] {
+    return [...(this.models ?? new Map())].map(([model, efforts]) => ({ model, efforts }));
+  }
+
   get available(): boolean {
     return this.models !== undefined;
   }

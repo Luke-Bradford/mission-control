@@ -4,12 +4,14 @@ import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
+  type AccountModelsView,
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
+  BUILTIN_ROLES,
   type ChangedFiles,
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
@@ -23,6 +25,7 @@ import {
   COMMS_TICKET,
   type ContextUsage,
   CREW_DISABLED,
+  CREW_EFFORTS,
   type Crew,
   type CrewChanges,
   type CrewMode,
@@ -204,7 +207,13 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
+import {
+  adminDirOf,
+  CheckoutError,
+  removeSessionCheckout,
+  validateSessionCheckout,
+} from "./runtime/checkouts.ts";
+import { codexModels } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
@@ -1526,6 +1535,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
+      // Reader: Setup › Repos & seats. Keep provider catalogs on the server so a Codex model is
+      // never offered to a Claude account (or vice versa).
+      api.get("/accounts/models", (): AccountModelsView[] => {
+        const claude = [
+          ...new Set([
+            ...Object.values(BUILTIN_ROLES).map((role) => role.model),
+            ...Object.values(config.crew?.roles ?? {}).map((role) => role.model),
+          ]),
+        ].map((model) => ({ model, efforts: [...CREW_EFFORTS] }));
+        const codex = codexModels.entries().map(({ model, efforts }) => ({
+          model,
+          efforts: [...efforts],
+        }));
+        return config.accounts.map((account) => ({
+          accountId: account.id,
+          models: account.vendor === "codex" ? codex : claude,
+        }));
+      });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
@@ -1594,10 +1621,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
           const result = await setRepoSetup(configPath, req.params.repoId, body.data, now());
-          const updated = result.config.repos.find((repo) => repo.id === req.params.repoId);
           const index = config.repos.findIndex((repo) => repo.id === req.params.repoId);
-          if (!updated || index < 0) return reply.code(404).send({ error: "unknown repo" });
-          config.repos[index] = updated;
+          if (index < 0) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can contain unapplied crew/rotation changes.  This narrow route must never make
+          // any of them live; it owns only these two card fields.
+          const repo = config.repos[index];
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          if (body.data.defaultAccountId === null) delete repo.defaultAccountId;
+          else repo.defaultAccountId = body.data.defaultAccountId;
+          const guidance = body.data.guidance;
+          if (
+            guidance.priority.length === 0 &&
+            guidance.milestone.length === 0 &&
+            guidance.labels.length === 0 &&
+            guidance.labelMode === "any" &&
+            guidance.avoid.length === 0 &&
+            guidance.direction === ""
+          )
+            delete repo.guidance;
+          else repo.guidance = { ...guidance };
           bus.emit("config");
           return { backup: basename(result.backup) };
         } catch (e) {
@@ -1633,6 +1675,43 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply
             .code(502)
             .send({ error: e instanceof Error ? e.message : "github: request failed" });
+        }
+      });
+
+      // Read-only preflight for the add/convert stepper.  Session creation repeats this check
+      // immediately before its write, but this lets Setup reject a bad checkout before any config
+      // path is changed.
+      api.post("/repos/checkout-preview", async (req, reply) => {
+        const body = z
+          .strictObject({
+            github: z.string().min(3),
+            source: z.string().min(1),
+            branch: z.string().min(1).max(255),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          await validateSessionCheckout(
+            body.data.source,
+            body.data.branch,
+            body.data.github,
+            true,
+            [
+              ...config.loops.map((loop) => ({
+                label: `loop ${loop.id} worktree`,
+                dir: loop.worktree,
+              })),
+              ...(config.crew?.sessions ?? []).map((session) => ({
+                label: `session ${session.id} checkout`,
+                dir: session.checkout,
+              })),
+            ],
+          );
+          return { ok: true };
+        } catch (e) {
+          return reply.code(400).send({
+            error: e instanceof Error ? e.message : "could not validate the checkout",
+          });
         }
       });
 
