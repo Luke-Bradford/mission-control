@@ -1760,10 +1760,20 @@ describe("Codex restart", () => {
     await noKeepers();
     const turns = recorded().filter((m) => m.method === "turn/start").length;
     const next = codexSupervisor({ bad });
+    let off = () => {};
+    const refused = new Promise<void>((resolve) => {
+      off = next.sup.on((e) => {
+        if (e.kind === "run-ended" && e.runId === runId) {
+          off();
+          resolve();
+        }
+      });
+    });
     next.sup.start();
-    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    await refused;
     expect(store.seatSession("guido-1")?.reason).toBeTruthy();
     expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(turns);
+    await until(() => expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false));
     expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
   });
 });
