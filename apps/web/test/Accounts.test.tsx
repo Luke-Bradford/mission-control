@@ -58,6 +58,48 @@ it("shows the nine-column account table, concise login, relative model check and
   expect(screen.getByText(/never displays or stores credentials/)).toBeTruthy();
 });
 
+it("shows an operator-run sign-in command, copies it, and checks status and models again", async () => {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  const fetch = load({
+    "POST /api/accounts/claude-main/check": status,
+    "POST /api/accounts/claude-main/models/refresh": models,
+  });
+  render(<Accounts config={CONFIG} />);
+  fireEvent.click((await screen.findAllByRole("button", { name: "Sign in again" }))[0]);
+  const panel = screen.getByRole("region", { name: "Sign in again for claude-main" });
+  expect(within(panel).getByText("claude login")).toBeTruthy();
+  fireEvent.click(within(panel).getByRole("button", { name: "Copy" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("claude login"));
+  fireEvent.click(within(panel).getByRole("button", { name: "Check again" }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/accounts/claude-main/check",
+      expect.objectContaining({ method: "POST" }),
+    ),
+  );
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/accounts/claude-main/models/refresh",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+
+it("uses the selected Codex profile in the operator command", async () => {
+  load();
+  render(
+    <Accounts
+      config={{
+        ...CONFIG,
+        accounts: [{ ...CONFIG.accounts[1], cliProfile: "/profiles/codex-work" }],
+      }}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in again" }));
+  expect(
+    screen.getByRole("region", { name: "Sign in again for codex-main" }).textContent,
+  ).toContain("CODEX_HOME=/profiles/codex-work codex login");
+});
+
 it("refreshes models and saves a profile-aware Codex account", async () => {
   const fetch = load({
     "/api/config": CONFIG,

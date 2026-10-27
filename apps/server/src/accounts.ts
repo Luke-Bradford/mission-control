@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import type { CliAccountStatus } from "@mc/core";
 import { type CliBinding, codexProfile } from "./account-bindings.ts";
@@ -13,56 +13,11 @@ export type AccountModels = {
   checkedAt: number;
   error: string | null;
 };
-export type AccountSignIn = {
-  /** Always resolves when the child can no longer mutate its login profile. */
-  finished: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-};
 const MAX_BUFFER = 64 * 1024;
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 && value.length <= 200 && !/\p{Cc}/u.test(value)
     ? value
     : null;
-
-/** Launches the vendor-owned interactive login. Credentials stay in the vendor profile, never here. */
-export function startAccountSignIn(account: Account): Promise<AccountSignIn> {
-  return new Promise((resolve, reject) => {
-    let resolveFinished!: (result: { code: number | null; signal: NodeJS.Signals | null }) => void;
-    const finished = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((done) => {
-      resolveFinished = done;
-    });
-    const command = account.vendor;
-    const args = account.vendor === "claude" ? ["auth", "login"] : ["login"];
-    try {
-      const child = spawn(command, args, {
-        env: {
-          ...usageProviderEnv(account.vendor),
-          ...(account.vendor === "codex" && account.cliProfile
-            ? { CODEX_HOME: codexProfile(account) }
-            : {}),
-        },
-        detached: process.platform !== "win32",
-        stdio: "inherit",
-      });
-      let created = false;
-      child.once("spawn", () => {
-        created = true;
-        child.unref();
-        resolve({ finished });
-      });
-      child.once("error", (error) => {
-        if (!created) reject(error);
-        resolveFinished({ code: null, signal: null });
-      });
-      child.once("exit", (code, signal) => {
-        if (!created) reject(new Error("provider CLI exited before starting"));
-        resolveFinished({ code, signal });
-      });
-    } catch (error) {
-      reject(error instanceof Error ? error : new Error("could not start provider CLI"));
-      resolveFinished({ code: null, signal: null });
-    }
-  });
-}
 
 /** Claude's public CLI model family; Codex is read from this account's own profile. */
 export async function discoverAccountModels(account: Account, now: number): Promise<AccountModels> {

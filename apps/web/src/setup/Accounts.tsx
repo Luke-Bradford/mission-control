@@ -1,6 +1,7 @@
 import type { CliAccountStatus, ConfigView, LimitRow } from "@mc/core";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { apiDelete, apiPost, apiPut } from "../api.ts";
+import { copyText } from "../clipboard.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { rel, wkdTime } from "../fmt.ts";
@@ -36,6 +37,15 @@ const fromAccount = (account: Account): Draft => ({
   alertAt: account.alertAt,
   stopAt: account.stopAt,
 });
+
+function signInCommand(account: Account): string {
+  if (account.vendor === "claude") return "claude login";
+  const profile = account.cliProfile ?? "";
+  const quoted = /^[A-Za-z0-9_./:-]+$/.test(profile)
+    ? profile
+    : `'${profile.replaceAll("'", "'\\''")}'`;
+  return `CODEX_HOME=${quoted} codex login`;
+}
 
 function projection(row: Extract<LimitRow, { window: "7d" }> | null, tz: string | null) {
   if (!row) return "—";
@@ -110,6 +120,56 @@ function ModelsCell({ account, now, tz }: { account: Account; now: number; tz: s
       </button>
       {models.data?.error && <span className="warn-t s">{models.data.error}</span>}
     </>
+  );
+}
+
+function SignInPanel({ account }: { account: Account }) {
+  const [checking, setChecking] = useState(false);
+  const command = signInCommand(account);
+  async function checkAgain() {
+    setChecking(true);
+    try {
+      await Promise.all([
+        apiPost(ACTIONS.checkAccount(account.id)),
+        apiPost(ACTIONS.refreshAccountModels(account.id)),
+      ]);
+      hub.refetch(RESOURCES.accountStatus.path);
+      hub.refetch(RESOURCES.accountModels(account.id).path);
+    } catch (error) {
+      toast((error as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
+  return (
+    <tr className="account-signin-panel">
+      <td colSpan={9}>
+        <section aria-label={`Sign in again for ${account.id}`}>
+          <span>Run this in your own terminal:</span> <code>{command}</code>{" "}
+          <button
+            type="button"
+            className="sm"
+            onClick={() =>
+              void copyText(
+                command,
+                "Command copied.",
+                "Copy was blocked here; select the command and copy it.",
+              )
+            }
+          >
+            Copy
+          </button>{" "}
+          <button
+            type="button"
+            className="sm"
+            disabled={checking}
+            onClick={() => void checkAgain()}
+          >
+            {checking ? "Checking…" : "Check again"}
+          </button>
+        </section>
+      </td>
+    </tr>
   );
 }
 
@@ -240,22 +300,10 @@ export function Accounts({ config }: { config: ConfigView }) {
   const tz = useTz();
   const now = useNow();
   const [editor, setEditor] = useState<Account | null | undefined>(undefined);
+  const [signingIn, setSigningIn] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const limit = (id: string, window: "5h" | "7d") =>
     limits.find((row) => row.accountId === id && row.window === window) ?? null;
-  async function signIn(account: Account) {
-    setBusy(`signin:${account.id}`);
-    try {
-      await apiPost(ACTIONS.signInAccount(account.id));
-      toast(
-        `Started ${account.vendor} sign-in for ${account.id}. Complete it in the hub terminal.`,
-      );
-    } catch (error) {
-      toast((error as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
   async function remove(account: Account) {
     if (!window.confirm(`Remove ${account.id}?`)) return;
     setBusy(`remove:${account.id}`);
@@ -306,61 +354,66 @@ export function Accounts({ config }: { config: ConfigView }) {
                     ? "machine login (one per machine)"
                     : (account.cliProfile ?? "profile not configured");
                 return (
-                  <tr key={account.id}>
-                    <td className="mono">{account.id}</td>
-                    <td>{account.vendor === "claude" ? "Claude" : "Codex"}</td>
-                    <td className="account-login">
-                      <span title={status?.identity ?? undefined}>{login}</span>
-                      <span className={status?.status === "logged-in" ? "ok-t" : "muted"}>
-                        {status?.status === "logged-in"
-                          ? "signed in"
-                          : status?.status === "not-logged-in"
-                            ? "not signed in"
-                            : "not checked"}
-                      </span>
-                    </td>
-                    <td>
-                      <ModelsCell account={account} now={now} tz={tz} />
-                    </td>
-                    <td className="account-quota">
-                      <AccountMeter account={account} pct={five?.used ?? null} />
-                    </td>
-                    <td className="account-quota">
-                      <AccountMeter
-                        account={account}
-                        pct={seven?.used ?? null}
-                        projected={seven?.projected ?? null}
-                      />
-                      <span className="quota-forecast">{projection(seven, tz)}</span>
-                    </td>
-                    <td className="mono">
-                      {(seven ?? five) && tz ? wkdTime((seven ?? five)?.resetAt ?? 0, tz) : "—"}
-                    </td>
-                    <td className="mono num">
-                      {account.alertAt}% / {account.stopAt}%
-                    </td>
-                    <td className="account-actions">
-                      <button type="button" className="sm" onClick={() => setEditor(account)}>
-                        Edit
-                      </button>{" "}
-                      <button
-                        type="button"
-                        className="sm"
-                        disabled={busy === `signin:${account.id}`}
-                        onClick={() => void signIn(account)}
-                      >
-                        Sign in again
-                      </button>{" "}
-                      <button
-                        type="button"
-                        className="sm"
-                        disabled={busy === `remove:${account.id}`}
-                        onClick={() => void remove(account)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={account.id}>
+                    <tr>
+                      <td className="mono">{account.id}</td>
+                      <td>{account.vendor === "claude" ? "Claude" : "Codex"}</td>
+                      <td className="account-login">
+                        <span title={status?.identity ?? undefined}>{login}</span>
+                        <span className={status?.status === "logged-in" ? "ok-t" : "muted"}>
+                          {status?.status === "logged-in"
+                            ? "signed in"
+                            : status?.status === "not-logged-in"
+                              ? "not signed in"
+                              : "not checked"}
+                        </span>
+                      </td>
+                      <td>
+                        <ModelsCell account={account} now={now} tz={tz} />
+                      </td>
+                      <td className="account-quota">
+                        <AccountMeter account={account} pct={five?.used ?? null} />
+                      </td>
+                      <td className="account-quota">
+                        <AccountMeter
+                          account={account}
+                          pct={seven?.used ?? null}
+                          projected={seven?.projected ?? null}
+                        />
+                        <span className="quota-forecast">{projection(seven, tz)}</span>
+                      </td>
+                      <td className="mono">
+                        {(seven ?? five) && tz ? wkdTime((seven ?? five)?.resetAt ?? 0, tz) : "—"}
+                      </td>
+                      <td className="mono num">
+                        {account.alertAt}% / {account.stopAt}%
+                      </td>
+                      <td className="account-actions">
+                        <button type="button" className="sm" onClick={() => setEditor(account)}>
+                          Edit
+                        </button>{" "}
+                        <button
+                          type="button"
+                          className="sm"
+                          aria-expanded={signingIn === account.id}
+                          onClick={() =>
+                            setSigningIn((current) => (current === account.id ? null : account.id))
+                          }
+                        >
+                          Sign in again
+                        </button>{" "}
+                        <button
+                          type="button"
+                          className="sm"
+                          disabled={busy === `remove:${account.id}`}
+                          onClick={() => void remove(account)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                    {signingIn === account.id && <SignInPanel account={account} />}
+                  </Fragment>
                 );
               })}
             </tbody>

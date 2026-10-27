@@ -585,7 +585,9 @@ describe("Setup tabs", () => {
     expect(codex.textContent).toContain("100%");
     expect(codex.querySelectorAll(".meter.full")).toHaveLength(2);
     expect(
-      screen.getByText("one profile per login · Mission Control never displays or stores credentials"),
+      screen.getByText(
+        "one profile per login · Mission Control never displays or stores credentials",
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Auto-approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();

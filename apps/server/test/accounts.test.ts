@@ -1,5 +1,4 @@
-import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
@@ -7,15 +6,12 @@ import { afterAll, afterEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   script: "",
   mode: "signed",
-  loginMode: "exit" as "exit" | "hold" | "enoent" | "duplicate",
   calls: [] as string[][],
   envs: [] as NodeJS.ProcessEnv[],
-  loginChildren: [] as ChildProcess[],
 }));
 vi.mock("node:child_process", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:child_process")>();
   const realExecFile = original.execFile;
-  const realSpawn = original.spawn;
   return {
     ...original,
     execFile: (
@@ -28,24 +24,10 @@ vi.mock("node:child_process", async (importOriginal) => {
       state.envs.push(options.env ?? process.env);
       return realExecFile(process.execPath, [state.script, file, state.mode], options, cb);
     },
-    spawn: (_file: string, _args: string[], options: Parameters<typeof realSpawn>[2]) => {
-      const script =
-        state.loginMode === "hold"
-          ? "setInterval(() => {}, 1000)"
-          : state.loginMode === "duplicate"
-            ? 'require("node:fs").writeFileSync(require("node:path").join(process.env.CODEX_HOME, "auth.json"), JSON.stringify({tokens:{account_id:"first"}}))'
-            : "";
-      const child =
-        state.loginMode === "enoent"
-          ? realSpawn("/definitely/missing-provider-cli", [], options)
-          : realSpawn(process.execPath, ["-e", script], options);
-      state.loginChildren.push(child);
-      return child;
-    },
   };
 });
 
-import { readAccountStatus, startAccountSignIn } from "../src/accounts.ts";
+import { readAccountStatus } from "../src/accounts.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "mc-accounts-"));
 state.script = join(dir, "fake.cjs");
@@ -79,9 +61,6 @@ else if (provider === "claude") {
 `,
 );
 afterEach(() => {
-  for (const child of state.loginChildren) child.kill();
-  state.loginChildren = [];
-  state.loginMode = "exit";
   state.calls = [];
   state.envs = [];
   vi.unstubAllEnvs();
@@ -238,6 +217,10 @@ poll: { usage_minutes: 30, github_seconds: 60 }
       (await app.inject({ method: "POST", url: "/api/accounts/missing/check", payload: {} }))
         .statusCode,
     ).toBe(404);
+    expect(
+      (await app.inject({ method: "POST", url: "/api/accounts/primary/sign-in", payload: {} }))
+        .statusCode,
+    ).toBe(404);
     expect(state.calls).toHaveLength(count);
   } finally {
     await app.close();
@@ -334,126 +317,4 @@ it("checks an explicit Codex profile without returning its path or credentials",
   expect(status.binding).toBe("profile");
   expect(JSON.stringify(status)).not.toContain(profile);
   expect(JSON.stringify(status)).not.toContain("secret");
-});
-
-it("reports an asynchronously missing provider CLI instead of leaving an unhandled child error", async () => {
-  state.loginMode = "enoent";
-  await expect(startAccountSignIn({ id: "primary", vendor: "claude" })).rejects.toMatchObject({
-    code: "ENOENT",
-  });
-});
-
-it("serializes login with account edits and refuses a second login while one is active", async () => {
-  const { buildApp } = await import("../src/api.ts");
-  const { ChangeBus } = await import("../src/bus.ts");
-  const { Store } = await import("../src/store.ts");
-  const { loadConfig } = await import("../src/config.ts");
-  const configPath = join(dir, "login-lock-config.yaml");
-  writeFileSync(
-    configPath,
-    `operator: { id: operator, timezone: UTC }
-accounts:
-  - { id: primary, vendor: claude, alert_at: 80, stop_at: 100 }
-repos: []
-loops: []
-poll: { usage_minutes: 30, github_seconds: 60 }
-`,
-  );
-  const store = new Store(join(dir, "login-lock.sqlite"));
-  const app = buildApp({
-    config: loadConfig(configPath),
-    configPath,
-    store,
-    bus: new ChangeBus(),
-  });
-  state.loginMode = "hold";
-  try {
-    expect(
-      (await app.inject({ method: "POST", url: "/api/accounts/primary/sign-in", payload: {} }))
-        .statusCode,
-    ).toBe(200);
-    expect(
-      (await app.inject({ method: "POST", url: "/api/accounts/primary/sign-in", payload: {} }))
-        .statusCode,
-    ).toBe(409);
-    let edited = false;
-    const edit = app
-      .inject({
-        method: "PUT",
-        url: "/api/accounts/primary",
-        payload: { provider: "claude", alertAt: 70, stopAt: 100 },
-      })
-      .then((response) => {
-        edited = true;
-        return response;
-      });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(edited).toBe(false);
-    state.loginChildren.at(-1)?.kill();
-    expect((await edit).statusCode).toBe(200);
-  } finally {
-    await app.close();
-    store.close();
-  }
-});
-
-it("surfaces a duplicate Codex login created by re-sign-in", async () => {
-  const { mkdirSync } = await import("node:fs");
-  const { buildApp } = await import("../src/api.ts");
-  const { ChangeBus } = await import("../src/bus.ts");
-  const { Store } = await import("../src/store.ts");
-  const { loadConfig } = await import("../src/config.ts");
-  const { accountBindingProblem } = await import("../src/account-bindings.ts");
-  const first = join(dir, "first-login");
-  const second = join(dir, "second-login");
-  mkdirSync(first, { recursive: true });
-  mkdirSync(second, { recursive: true });
-  writeFileSync(join(first, "auth.json"), JSON.stringify({ tokens: { account_id: "first" } }));
-  writeFileSync(join(second, "auth.json"), JSON.stringify({ tokens: { account_id: "second" } }));
-  const configPath = join(dir, "login-binding-config.yaml");
-  writeFileSync(
-    configPath,
-    `operator: { id: operator, timezone: UTC }
-accounts:
-  - { id: first, vendor: codex, cli_profile: ${first}, alert_at: 80, stop_at: 100 }
-  - { id: second, vendor: codex, cli_profile: ${second}, alert_at: 80, stop_at: 100 }
-repos: []
-loops: []
-poll: { usage_minutes: 30, github_seconds: 60 }
-`,
-  );
-  const store = new Store(join(dir, "login-binding.sqlite"));
-  const config = loadConfig(configPath);
-  const app = buildApp({ config, configPath, store, bus: new ChangeBus() });
-  state.loginMode = "duplicate";
-  try {
-    expect(
-      (await app.inject({ method: "POST", url: "/api/accounts/second/sign-in", payload: {} }))
-        .statusCode,
-    ).toBe(200);
-    await new Promise<void>((resolve) => {
-      const child = state.loginChildren.at(-1);
-      if (!child || child.exitCode !== null) resolve();
-      else child.once("exit", () => resolve());
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(JSON.parse(readFileSync(join(second, "auth.json"), "utf8"))).toEqual({
-      tokens: { account_id: "first" },
-    });
-    expect(accountBindingProblem(config.accounts)).toBe(
-      "two account labels cannot use the same Codex login",
-    );
-    const statuses = (await app.inject("/api/accounts/status")).json() as {
-      accountId: string;
-      status: string;
-      detail: string | null;
-    }[];
-    expect(statuses.find((status) => status.accountId === "second")).toMatchObject({
-      status: "unknown",
-      detail: "two account labels cannot use the same Codex login",
-    });
-  } finally {
-    await app.close();
-    store.close();
-  }
 });

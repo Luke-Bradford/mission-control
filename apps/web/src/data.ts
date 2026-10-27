@@ -211,7 +211,6 @@ export const ACTIONS = {
   account: (id: string) => `/api/accounts/${enc(id)}`,
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   refreshAccountModels: (id: string) => `/api/accounts/${enc(id)}/models/refresh`,
-  signInAccount: (id: string) => `/api/accounts/${enc(id)}/sign-in`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   copyDraft: (id: string) => `/api/drafts/${enc(id)}/copied`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,

@@ -3780,6 +3780,22 @@ td.wrap {
 .account-login .pill {
   vertical-align: top;
 }
+.account-signin-panel td {
+  padding-top: 0;
+}
+.account-signin-panel section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+.account-signin-panel code {
+  overflow-wrap: anywhere;
+}
 .account-quota .meter {
   flex-direction: column-reverse;
   align-items: stretch;

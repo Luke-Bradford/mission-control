@@ -1014,7 +1014,6 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
   ["POST", "/api/accounts/claude-main/models/refresh"],
-  ["POST", "/api/accounts/claude-main/sign-in"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["PUT", "/api/accounts/claude-main", { provider: "claude", alertAt: 85, stopAt: 95 }],
   ["DELETE", "/api/accounts/claude-main"],
@@ -6213,7 +6212,6 @@ vi.mock("../src/accounts.ts", () => ({
     checkedAt: now,
     error: null,
   }),
-  startAccountSignIn: () => {},
 }));
 
 it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {

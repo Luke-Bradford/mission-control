@@ -93,13 +93,7 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { accountBindingProblem } from "./account-bindings.ts";
-import {
-  type AccountModels,
-  discoverAccountModels,
-  readAccountStatus,
-  startAccountSignIn,
-} from "./accounts.ts";
+import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -562,8 +556,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountModels = new Map<string, AccountModels>();
-  const accountLogins = new Map<string, Promise<void>>();
-  const accountBindingProblems = new Map<string, string>();
   let localAccountUpdate: Promise<void> | null = null;
   const withAccountUpdate = <T>(fn: () => Promise<T>): Promise<T> => {
     if (deps.supervisor) return deps.supervisor.withAccountUpdate(fn);
@@ -594,13 +586,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       .finally(() => accountReads.delete(key));
     accountReads.set(key, read);
     return read;
-  };
-  const visibleAccountStatus = async (account: CcConfig["accounts"][number], refresh = false) => {
-    const status = await accountStatus(account, refresh);
-    const problem = accountBindingProblems.get(account.id);
-    return problem === undefined
-      ? status
-      : { ...status, status: "unknown" as const, identity: null, plan: null, detail: problem };
   };
 
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
@@ -1556,13 +1541,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Reader: apps/web/src/setup/Accounts.tsx (account status)
       api.get("/accounts/status", async () =>
-        Promise.all(config.accounts.map((account) => visibleAccountStatus(account))),
+        Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
         if (!account) return reply.code(404).send({ error: "account not found" });
-        return visibleAccountStatus(account, true);
+        return accountStatus(account, true);
       });
       // Reader/writer: Setup › Accounts model list. A failed refresh is retained and shown stale.
       api.get<{ Params: { id: string } }>("/accounts/:id/models", async (req, reply) => {
@@ -1583,50 +1568,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           models.error === null || !previous ? models : { ...models, models: previous.models };
         accountModels.set(account.id, next);
         return next;
-      });
-      // The CLI owns the interactive credential flow and writes only to its selected profile.
-      api.post<{ Params: { id: string } }>("/accounts/:id/sign-in", async (req, reply) => {
-        const account = config.accounts.find((a) => a.id === req.params.id);
-        if (!account) return reply.code(404).send({ error: "account not found" });
-        if (accountLogins.has(account.id))
-          return reply
-            .code(409)
-            .send({ error: "provider CLI login is already active for this account" });
-        let resolveStarted!: () => void;
-        let rejectStarted!: (error: Error) => void;
-        const started = new Promise<void>((resolve, reject) => {
-          resolveStarted = resolve;
-          rejectStarted = reject;
-        });
-        const login = withAccountUpdate(async () => {
-          try {
-            const process = await startAccountSignIn(account);
-            resolveStarted();
-            const result = await process.finished;
-            // A re-login can replace auth.json. Check its new binding before any queued launch.
-            if (result.code === 0) {
-              const problem = accountBindingProblem(config.accounts);
-              if (problem) accountBindingProblems.set(account.id, problem);
-              else accountBindingProblems.delete(account.id);
-            }
-          } catch (error) {
-            rejectStarted(
-              error instanceof Error ? error : new Error("could not start provider CLI"),
-            );
-          } finally {
-            accountStatuses.clear();
-            bus.emit("config");
-          }
-        })
-          .catch(() => undefined)
-          .finally(() => accountLogins.delete(account.id));
-        accountLogins.set(account.id, login);
-        try {
-          await started;
-          return { started: true };
-        } catch {
-          return reply.code(502).send({ error: "could not start the provider CLI login" });
-        }
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
@@ -1675,7 +1616,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         config.accounts.splice(0, config.accounts.length, ...next.accounts);
         accountStatuses.clear();
         accountModels.clear();
-        accountBindingProblems.clear();
       };
       // Writer: Setup › Accounts (edit an account; its id is deliberately immutable).
       api.put<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
