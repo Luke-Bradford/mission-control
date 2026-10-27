@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
+  type AccountModelsView,
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
@@ -146,10 +147,14 @@ import {
   NewAccountBody,
   NewRepoBody,
   NewSessionBody,
+  onboardRepo,
   RepoLocation,
+  RepoOnboardBody,
+  RepoSetupBody,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
 } from "./config-write.ts";
@@ -205,7 +210,13 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
+import {
+  adminDirOf,
+  CheckoutError,
+  removeSessionCheckout,
+  validateSessionCheckout,
+} from "./runtime/checkouts.ts";
+import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
@@ -290,6 +301,8 @@ export interface AppDeps {
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   config: CcConfig;
+  /** Cached Codex model catalogs, isolated by each account's CLI binding. */
+  codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
@@ -1543,6 +1556,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
+      // Reader: apps/web/src/setup/Repos.tsx (seat model pickers). Only providers which have actually published a catalog
+      // are selectable here; role defaults are configuration, not model discovery.
+      api.get("/accounts/models", (): AccountModelsView[] => {
+        const catalogFor = deps.codexModelsFor ?? codexModelsFor;
+        return config.accounts.map((account) => ({
+          accountId: account.id,
+          // Claude currently exposes no model/list equivalent. An empty catalog is more honest
+          // than offering values inferred from roles (which can include Codex-only models).
+          models:
+            account.vendor === "codex"
+              ? catalogFor(account)
+                  .entries()
+                  .map(({ model, efforts }) => ({
+                    model,
+                    efforts: [...efforts],
+                  }))
+              : [],
+        }));
+      });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
@@ -1712,6 +1744,52 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
 
+      // Configuration-only fields from Setup › Repos & seats. This never reads a board or
+      // changes a queue: guidance is handed to FLIGHT as advice when it next starts.
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/setup", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (configPath === undefined)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoSetupBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoSetup(configPath, req.params.repoId, body.data, now());
+          const index = config.repos.findIndex((repo) => repo.id === req.params.repoId);
+          if (index < 0) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can contain unapplied crew/rotation changes.  This narrow route must never make
+          // any of them live; it owns only these two card fields.
+          const repo = config.repos[index];
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          if (body.data.defaultAccountId === null) delete repo.defaultAccountId;
+          else repo.defaultAccountId = body.data.defaultAccountId;
+          const guidance = body.data.guidance;
+          if (
+            guidance.priority.length === 0 &&
+            guidance.milestone.length === 0 &&
+            guidance.labels.length === 0 &&
+            guidance.labelMode === "any" &&
+            guidance.avoid.length === 0 &&
+            guidance.direction === ""
+          )
+            delete repo.guidance;
+          else repo.guidance = { ...guidance };
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof ConfigWriteError) {
+            const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+              missing: 404,
+              invalid: 400,
+              current: 409,
+            };
+            const code = status[e.kind];
+            if (code !== undefined) return reply.code(code).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -1730,6 +1808,129 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply
             .code(502)
             .send({ error: e instanceof Error ? e.message : "github: request failed" });
+        }
+      });
+
+      // Read-only preflight for the add/convert stepper.  Session creation repeats this check
+      // immediately before its write, but this lets Setup reject a bad checkout before any config
+      // path is changed.
+      api.post("/repos/checkout-preview", async (req, reply) => {
+        const body = z
+          .strictObject({
+            github: z.string().min(3),
+            source: z.string().min(1),
+            branch: z.string().min(1).max(255),
+            defaultBranch: z.string().min(1).max(255),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.branch !== body.data.defaultBranch) {
+          return reply
+            .code(400)
+            .send({ error: "the checkout branch must match GitHub's default branch" });
+        }
+        try {
+          await validateSessionCheckout(
+            body.data.source,
+            body.data.branch,
+            body.data.github,
+            true,
+            [
+              ...config.loops.map((loop) => ({
+                label: `loop ${loop.id} worktree`,
+                dir: loop.worktree,
+              })),
+              ...(config.crew?.sessions ?? []).map((session) => ({
+                label: `session ${session.id} checkout`,
+                dir: session.checkout,
+              })),
+            ],
+          );
+          return { ok: true };
+        } catch (e) {
+          return reply.code(400).send({
+            error: e instanceof Error ? e.message : "could not validate the checkout",
+          });
+        }
+      });
+
+      // The add/convert stepper has exactly one durable operation. Its GitHub and checkout
+      // validation runs again here, immediately before the one atomic config replacement.
+      api.post("/repos/onboard", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoOnboardBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.session && (!deps.crewReloader || !deps.seatWrites)) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const liveRepo = config.repos.find((repo) => repo.id === body.data.repoId);
+        const known = body.data.repo ?? liveRepo;
+        if (!known) return reply.code(404).send({ error: `unknown repo ${body.data.repoId}` });
+        // Conversion updates only this card's setup fields. Capture its live identity before the
+        // writer re-reads config.yaml, so a concurrent/manual config edit cannot apply setup to
+        // a different repo that happens to share the checkout's default branch.
+        const conversionIdentity =
+          body.data.repo === undefined && liveRepo
+            ? { github: liveRepo.github, project: liveRepo.project }
+            : undefined;
+        try {
+          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
+            if (
+              conversionIdentity &&
+              (repo.github !== conversionIdentity.github ||
+                repo.project !== conversionIdentity.project)
+            )
+              throw new ConfigWriteError(
+                "conflict",
+                "the repo identity changed in config.yaml; refresh and try again",
+              );
+            const preview = await repoPreview(
+              await githubGql(),
+              { github: repo.github, project: repo.project },
+              config,
+              store,
+            );
+            if (body.data.checkout.branch !== preview.defaultBranch)
+              throw new ConfigWriteError(
+                "invalid",
+                "the checkout branch must match GitHub's default branch",
+              );
+          });
+          const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
+          if (!onboarded)
+            throw new ConfigWriteError("write", "the new config.yaml has no added repo");
+          // Disk can include pending crew edits.  Only make this card's setup live here; the
+          // reloader owns every crew change so it can drain seats before applying it.
+          const index = config.repos.findIndex((repo) => repo.id === body.data.repoId);
+          if (body.data.repo) config.repos.push(onboarded);
+          else if (index >= 0) {
+            const live = config.repos[index];
+            if (!live) throw new ConfigWriteError("missing", `unknown repo ${body.data.repoId}`);
+            if (body.data.defaultAccountId === null) delete live.defaultAccountId;
+            else live.defaultAccountId = onboarded.defaultAccountId;
+            if (onboarded.guidance === undefined) delete live.guidance;
+            else live.guidance = { ...onboarded.guidance };
+          }
+          if (body.data.session) await deps.crewReloader?.reload();
+          bus.emit("config");
+          bus.emit("boards");
+          if (body.data.repo) refreshBoards();
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof PreviewError) return reply.code(e.status).send({ error: e.message });
+          if (e instanceof ConfigWriteError) {
+            const status = {
+              invalid: 400,
+              missing: 404,
+              duplicate: 409,
+              current: 409,
+              conflict: 409,
+            }[e.kind as string];
+            if (status !== undefined) return reply.code(status).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
         }
       });
 

@@ -1336,9 +1336,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new Error(`crew: ${def.prompt} is outside the roles folder`);
       }
       const roleBrief = readFileSync(promptFile, "utf8");
-      writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd, references), {
-        mode: 0o600,
-      });
+      // Repo guidance is operator-written advice for FLIGHT, not a gate used by the scheduler or
+      // by seats. It is deliberately appended only to the watch seat's prompt.
+      const guidance =
+        def.loop === "watch"
+          ? deps.config.repos.find((repo) => repo.id === info.session.repoId)?.guidance
+          : undefined;
+      const advice =
+        guidance === undefined
+          ? ""
+          : [
+              "# Mission Control work guidance (advice, not rules)",
+              guidance.priority.length ? `Prefer priority: ${guidance.priority.join(", ")}.` : "",
+              guidance.milestone.length
+                ? `Prefer milestone: ${guidance.milestone.join(", ")}.`
+                : "",
+              guidance.labels.length
+                ? `Labels (${guidance.labelMode}): ${guidance.labels.join(", ")}.`
+                : "",
+              guidance.avoid.length ? `Avoid: ${guidance.avoid.join(", ")}.` : "",
+              guidance.direction,
+            ]
+              .filter((line) => line !== "")
+              .join("\n");
+      writeFileSync(
+        promptPath,
+        rolePrompt(roleBrief, claudeMd, [advice, references].filter(Boolean).join("\n\n")),
+        {
+          mode: 0o600,
+        },
+      );
     }
     const keeperSpawn = randomUUID();
     const release = grant(info, run);

@@ -156,6 +156,17 @@ export interface ConfigView {
     needsYouLabels: string[] | null;
     /** Commands that count as a full suite: they take the test lock. */
     fullSuite: string[];
+    /** The account selected for new seats; null lets the repo use the first available account. */
+    defaultAccountId?: string | null;
+    /** Advice supplied to FLIGHT when it works this repo. It is deliberately not an eligibility rule. */
+    guidance?: {
+      priority: string[];
+      milestone: string[];
+      labels: string[];
+      labelMode: "any" | "all";
+      avoid: string[];
+      direction: string;
+    };
   }[];
   loops: {
     id: AgentId;
@@ -213,6 +224,12 @@ export interface ConfigView {
     error: string | null;
     list: ConfigProfile[];
   };
+}
+
+/** Models a configured account may use. Codex entries come from its live model/list catalog. */
+export interface AccountModelsView {
+  accountId: AccountId;
+  models: { model: string; efforts: string[] }[];
 }
 
 /** A seat as config.yaml says it (what Setup edits). */

@@ -146,7 +146,11 @@ const project = () => ({
 });
 const answer = (p: unknown, labels: string[] = [], type = "User") => ({
   repositoryOwner: { __typename: type, projectV2: p },
-  repository: { labels: { nodes: labels.map((name) => ({ name })) } },
+  repository: {
+    labels: { nodes: labels.map((name) => ({ name })) },
+    defaultBranchRef: { name: "main" },
+    workflows: { __typename: "Tree" },
+  },
 });
 const gqlOf =
   (data: unknown, calls: Call[] = []): Gql =>
@@ -177,6 +181,7 @@ describe("repoPreview", () => {
     expect(p).toMatchObject({
       github: "o/new",
       project: 4,
+      defaultBranch: "main",
       projectTitle: "shop-app board",
       items: 250,
       fields: [

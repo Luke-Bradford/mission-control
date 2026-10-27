@@ -352,7 +352,11 @@ beforeEach(async () => {
             fields: { pageInfo: { hasNextPage: false }, nodes: projectFields },
           },
         },
-        repository: { labels: { nodes: previewLabels.map((name) => ({ name })) } },
+        repository: {
+          labels: { nodes: previewLabels.map((name) => ({ name })) },
+          defaultBranchRef: { name: "main" },
+          workflows: { __typename: "Tree" },
+        },
       };
     }
     return {
@@ -976,8 +980,29 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["POST", "/api/repos", NEW_REPO],
+  ["POST", "/api/repos/onboard"],
+  [
+    "POST",
+    "/api/repos/shop-app/setup",
+    {
+      defaultAccountId: "claude-main",
+      guidance: {
+        priority: [],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "",
+      },
+    },
+  ],
   ["GET", "/api/repos/profiles"],
   ["POST", "/api/repos/preview", { github: "octo-org/studio", project: 4 }],
+  [
+    "POST",
+    "/api/repos/checkout-preview",
+    { github: "o/shop-app", source: "/nope", branch: "main" },
+  ],
   ["GET", "/api/boards/shop-app"],
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
@@ -1008,6 +1033,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/profiles"],
+  ["GET", "/api/accounts/models"],
   ["GET", "/api/accounts/status"],
   ["GET", "/api/accounts/claude-main/models"],
   ["GET", "/api/sources/teams"],
@@ -1161,6 +1187,49 @@ describe("repo profiles and the add-repo preview", () => {
   });
 });
 
+describe("account model catalogs", () => {
+  it("does not fabricate Claude choices from configured roles", async () => {
+    const r = await get("/api/accounts/models");
+    expect(r.statusCode).toBe(200);
+    expect(
+      r
+        .json<{ accountId: string; models: unknown[] }[]>()
+        .find((x) => x.accountId === "claude-main"),
+    ).toEqual({ accountId: "claude-main", models: [] });
+  });
+
+  it("returns the catalog discovered for each Codex binding only", async () => {
+    config.accounts.push(
+      { id: "codex-profile", vendor: "codex", alertAt: 70, stopAt: 80, cliProfile: "/profile" },
+      { id: "codex-unavailable", vendor: "codex", alertAt: 70, stopAt: 80, cliProfile: "/none" },
+    );
+    const models = buildApp({
+      config,
+      store,
+      bus,
+      codexModelsFor: (account) => ({
+        entries: () =>
+          account.id === "codex-main"
+            ? [{ model: "machine-only", efforts: ["low"] }]
+            : account.id === "codex-profile"
+              ? [{ model: "profile-only", efforts: ["high"] }]
+              : [],
+      }),
+    });
+    await models.ready();
+    try {
+      expect((await models.inject({ method: "GET", url: "/api/accounts/models" })).json()).toEqual([
+        { accountId: "claude-main", models: [] },
+        { accountId: "codex-main", models: [{ model: "machine-only", efforts: ["low"] }] },
+        { accountId: "codex-profile", models: [{ model: "profile-only", efforts: ["high"] }] },
+        { accountId: "codex-unavailable", models: [] },
+      ]);
+    } finally {
+      await models.close();
+    }
+  });
+});
+
 describe("add a repo (POST /api/repos)", () => {
   const BACKUP = "config.yaml.bak-20261017T120000Z";
   const unchanged = () => {
@@ -1288,6 +1357,242 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("repo onboarding (POST /api/repos/onboard)", () => {
+  const checkout = () => {
+    const path = join(dir, "studio-clone");
+    mkdirSync(path);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: path });
+    writeFileSync(join(path, "README.md"), "studio\n");
+    execFileSync("git", ["add", "README.md"], { cwd: path });
+    execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-qm", "init"], {
+      cwd: path,
+    });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/octo-org/studio.git"], {
+      cwd: path,
+    });
+    return path;
+  };
+  const body = (source: string, over: Record<string, unknown> = {}) => ({
+    repo: NEW_REPO,
+    repoId: "studio",
+    defaultAccountId: "claude-main",
+    guidance: {
+      priority: [],
+      milestone: [],
+      labels: [],
+      labelMode: "any",
+      avoid: [],
+      direction: "",
+    },
+    checkout: { source, branch: "main" },
+    session: null,
+    ...over,
+  });
+
+  it("writes a repo and setup fields together, only applying live state after success", async () => {
+    const source = checkout();
+    const events: string[] = [];
+    bus.subscribe((event) => events.push(event));
+    const r = await postBody("/api/repos/onboard", body(source));
+    expect(r.statusCode).toBe(200);
+    expect(config.repos.at(-1)).toMatchObject({ id: "studio", defaultAccountId: "claude-main" });
+    expect(readFileSync(configPath, "utf8")).toContain("default_account_id: claude-main");
+    expect(events).toContain("config");
+  });
+
+  it("leaves disk and live state unchanged when setup or session preparation is refused", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const badAccount = await postBody(
+      "/api/repos/onboard",
+      body(source, { defaultAccountId: "not-configured" }),
+    );
+    expect(badAccount.statusCode).toBe(400);
+    const badSession = await postBody(
+      "/api/repos/onboard",
+      body(source, { session: { id: "studio", checkoutStrategy: "shared" } }),
+    );
+    expect(badSession.statusCode).toBe(409);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("requires GitHub's default branch again during final submission", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const r = await postBody(
+      "/api/repos/onboard",
+      body(source, { checkout: { source, branch: "other" } }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("rejects converted repo identity drift even when both default branches are main", async () => {
+    const source = checkout();
+    execFileSync(
+      "git",
+      ["remote", "set-url", "origin", "https://github.com/octo-org/current-shop-app.git"],
+      { cwd: source },
+    );
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8")
+        .replace("github: octo-org/shop-app", "github: octo-org/current-shop-app")
+        .replace("    project: 2", "    project: 44"),
+    );
+    const gql: Gql = async (_query, _vars) => ({
+      repositoryOwner: {
+        projectV2: {
+          title: "Current",
+          items: { totalCount: 0 },
+          fields: { pageInfo: { hasNextPage: false }, nodes: [] },
+        },
+      },
+      repository: {
+        labels: { nodes: [] },
+        defaultBranchRef: { name: "main" },
+        workflows: { __typename: "Tree" },
+      },
+    });
+    const onboard = buildApp({
+      config,
+      store,
+      bus,
+      configPath,
+      githubGql: async () => gql,
+    });
+    await onboard.ready();
+    try {
+      const r = await onboard.inject({
+        method: "POST",
+        url: "/api/repos/onboard",
+        headers: json,
+        payload: JSON.stringify(
+          body(source, {
+            repo: undefined,
+            repoId: "shop-app",
+            checkout: { source, branch: "main" },
+          }),
+        ),
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("identity changed");
+      expect(readFileSync(configPath, "utf8")).toContain("github: octo-org/current-shop-app");
+      expect(config.repos.find((repo) => repo.id === "shop-app")).toMatchObject({
+        github: "o/shop-app",
+        project: 2,
+      });
+    } finally {
+      await onboard.close();
+    }
+  });
+
+  it("keeps unrelated disk crew changes out of live state while onboarding", async () => {
+    const source = checkout();
+    config.crew = structuredClone(loadConfig(configPath).crew);
+    const pendingPrivate = join(dir, "pending-private");
+    mkdirSync(pendingPrivate);
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8")
+        .replace("  max_seats: 8", "  max_seats: 7")
+        .replace("  # deny_read: [~/code/work, ~/Documents]", `  deny_read: [${pendingPrivate}]`),
+    );
+    let reloads = 0;
+    const reloader = {
+      ...stubReloader(),
+      reload: async () => {
+        reloads++;
+        return { ...NO_CHANGES, applied: [] };
+      },
+    };
+    const gql: Gql = async () => ({
+      repositoryOwner: {
+        projectV2: {
+          title: "Studio",
+          items: { totalCount: 0 },
+          fields: { pageInfo: { hasNextPage: false }, nodes: [] },
+        },
+      },
+      repository: {
+        labels: { nodes: [] },
+        defaultBranchRef: { name: "main" },
+        workflows: { __typename: "Tree" },
+      },
+    });
+    const onboard = buildApp({
+      config,
+      store,
+      bus,
+      configPath,
+      crewReloader: reloader,
+      seatWrites: true,
+      githubGql: async () => gql,
+    });
+    await onboard.ready();
+    try {
+      const r = await onboard.inject({
+        method: "POST",
+        url: "/api/repos/onboard",
+        headers: json,
+        payload: JSON.stringify(
+          body(source, { session: { id: "studio", checkoutStrategy: "shared" } }),
+        ),
+      });
+      expect(r.statusCode).toBe(200);
+      expect(config.crew).toMatchObject({ maxSeats: 8, denyRead: [] });
+      expect(config.crew?.sessions.some((session) => session.id === "studio")).toBe(false);
+      expect(reloads).toBe(1);
+    } finally {
+      await onboard.close();
+    }
+  });
+
+  it("rejects a non-default branch during checkout preflight", async () => {
+    const r = await postBody("/api/repos/checkout-preview", {
+      github: "octo-org/studio",
+      source: "/not-used-after-branch-check",
+      branch: "other",
+      defaultBranch: "main",
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
+  });
+});
+
+describe("repo setup (POST /api/repos/:repoId/setup)", () => {
+  it("does not apply an unrelated on-disk flight_powers change", async () => {
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8").replace(
+        "    # flight_powers: standard   # standard (default) | superuser.",
+        "    flight_powers: superuser # unapplied manual change",
+      ),
+    );
+    const r = await postBody("/api/repos/shop-app/setup", {
+      defaultAccountId: "codex-main",
+      guidance: {
+        priority: ["P1"],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "focus the next milestone",
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(config.repos[0]).toMatchObject({
+      defaultAccountId: "codex-main",
+      guidance: { priority: ["P1"] },
+    });
+    expect(config.repos[0]?.flightPowers).toBeUndefined();
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
   });
 });
 
@@ -1549,6 +1854,15 @@ describe("local access", () => {
       if (url === "/api/github/refresh") {
         // accepted, not done: the read happens later
         expect(r.statusCode, `${method} ${url}`).toBe(202);
+        continue;
+      }
+      if (url === "/api/repos/checkout-preview") {
+        // The shared route table body names no real checkout; route-specific tests supply one.
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/onboard") {
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
         continue;
       }
       if (

@@ -150,6 +150,7 @@ export const RESOURCES = {
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
+  allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({
     path: `/api/accounts/${enc(id)}/models`,
     topic: null,
@@ -229,8 +230,14 @@ export const ACTIONS = {
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",
+  /** Read-only git/remote/branch preflight for adding or converting a crew repo. */
+  previewCheckout: "/api/repos/checkout-preview",
   /** Body: a NewRepo; answers `{ repo, backup }` after writing config.yaml. */
   addRepo: "/api/repos",
+  /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
+  onboardRepo: "/api/repos/onboard",
+  /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */

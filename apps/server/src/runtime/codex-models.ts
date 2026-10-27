@@ -1,9 +1,9 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { CODEX_COMMAND, CODEX_PROJECT_DOC_CONFIG } from "@mc/core";
 import { z } from "zod";
+import { type CliBinding, codexProfile } from "../account-bindings.ts";
 
 const MODEL_TIMEOUT_MS = 20_000;
 const MAX_MODEL_BYTES = 1024 * 1024;
@@ -29,7 +29,7 @@ export interface ModelDeps {
   dataDir?: string;
 }
 
-/** One catalog per hub boot, shared by startup, reloads and config writes. Failed reads may be retried without restarting. */
+/** One catalog per CLI binding per hub boot. Failed reads may be retried without restarting. */
 export class CodexModels {
   private loading?: Promise<void>;
   private models?: Map<string, readonly string[]>;
@@ -39,13 +39,13 @@ export class CodexModels {
     return this.models?.get(model);
   }
 
-  get available(): boolean {
-    return this.models !== undefined;
+  /** The successfully discovered catalog, suitable for a read-only setup picker. */
+  entries(): readonly { model: string; efforts: readonly string[] }[] {
+    return [...(this.models ?? new Map())].map(([model, efforts]) => ({ model, efforts }));
   }
 
-  /** A copy-safe view for Setup; model discovery never exposes the auth material it read. */
-  entries(): { model: string; efforts: readonly string[] }[] {
-    return [...(this.models ?? new Map())].map(([model, efforts]) => ({ model, efforts }));
+  get available(): boolean {
+    return this.models !== undefined;
   }
 
   load(deps: ModelDeps = {}): Promise<void> {
@@ -65,9 +65,25 @@ export class CodexModels {
 
 export const codexModels = new CodexModels();
 
+// A profile is a separate Codex login, and model/list is permission-scoped to that login. Keep
+// the machine login's long-standing singleton for callers that do not select a profile.
+const modelsByBinding = new Map<string, CodexModels>([
+  [resolve(codexProfile({ vendor: "codex" })), codexModels],
+]);
+
+export function codexModelsFor(account: CliBinding): CodexModels {
+  const binding = resolve(codexProfile(account));
+  let models = modelsByBinding.get(binding);
+  if (!models) {
+    models = new CodexModels();
+    modelsByBinding.set(binding, models);
+  }
+  return models;
+}
+
 /** The deadline includes filesystem preparation and never depends on child `close`. */
 function readModels(deps: ModelDeps): Promise<Map<string, readonly string[]>> {
-  const authPath = deps.authPath ?? join(homedir(), ".codex", "auth.json");
+  const authPath = deps.authPath ?? join(codexProfile({ vendor: "codex" }), "auth.json");
   return new Promise((resolve, reject) => {
     let home: string | undefined;
     let child: ChildProcessWithoutNullStreams | undefined;

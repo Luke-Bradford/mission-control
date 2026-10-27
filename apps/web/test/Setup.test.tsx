@@ -14,7 +14,6 @@ import {
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
-  type RepoProfile,
   ROLES,
   type TestLockState,
   UP_TO_DATE_MAIN,
@@ -23,7 +22,6 @@ import {
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hub } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
 import { SETUP_TABS, type SetupTab } from "../src/router.ts";
 import {
@@ -113,6 +111,10 @@ function load(over: Record<string, unknown> = {}) {
     "/api/limits": LIMITS,
     "/api/health": HEALTH,
     "/api/repos": REPOS,
+    "/api/accounts/models": [
+      { accountId: "claude-main", models: [{ model: "sonnet", efforts: ["low", "medium"] }] },
+      { accountId: "codex-main", models: [{ model: "gpt-6-astra", efforts: ["low", "high"] }] },
+    ],
     ...over,
   });
 }
@@ -1407,45 +1409,10 @@ function cleanupAndAt(tab: SetupTab) {
   at(tab);
 }
 
-const PROFILES: RepoProfile[] = [
-  {
-    id: "shop-app",
-    github: "octo-org/shop-app",
-    project: 2,
-    statuses: [
-      { status: "Todo", state: "planned", column: "Ready", items: 4 },
-      { status: "In Progress", state: "in progress", column: "In progress", items: 2 },
-      { status: "Done", state: "done", column: "Done", items: 9 },
-    ],
-    missingColumns: ["Refinement", "Blocked", "In review", "Ready for QA"],
-    priority: { field: 11, label: 3, none: 1 },
-    budget: { boardPerHour: 900, sweepPerHour: 12, flowPerHour: 8, totalPerHour: 920 },
-    loops: ["shop-app-ta"],
-  },
-  {
-    id: "site-builder",
-    github: "octo-org/site-builder",
-    project: 3,
-    statuses: [
-      { status: "Backlog", state: "planned", column: "Backlog", items: 1 },
-      { status: "Ready", state: "planned", column: "Ready", items: 0 },
-      { status: "Blocked", state: "blocked", column: "Blocked", items: 0 },
-      { status: "In Progress", state: "in progress", column: "In progress", items: 0 },
-      { status: "In review", state: "review", column: "In review", items: 0 },
-      { status: "QA", state: "review", column: "Ready for QA", items: 0 },
-      { status: "Refine", state: "planned", column: "Refinement", items: 0 },
-      { status: "Done", state: "done", column: "Done", items: 0 },
-    ],
-    missingColumns: [],
-    priority: { field: 0, label: 0, none: 1 },
-    budget: { boardPerHour: 300, sweepPerHour: 12, flowPerHour: 2, totalPerHour: 314 },
-    loops: [],
-  },
-];
-
 const PREVIEW: RepoPreview = {
   github: "octo-org/mission-control",
   project: 4,
+  defaultBranch: "main",
   projectTitle: "Mission Control",
   items: 37,
   fields: [{ name: "Status", options: ["Todo", "In Progress", "Done"] }],
@@ -1463,301 +1430,232 @@ const PREVIEW: RepoPreview = {
   loops: [],
 };
 
-describe("Setup › Repos", () => {
-  const withProfiles = (over: Record<string, unknown> = {}) =>
-    load({ "/api/repos/profiles": PROFILES, ...over });
-
-  it("is in the Repos & seats sidebar section", async () => {
-    withProfiles();
-    render(<Setup tab="repos" />);
-    const tabs = screen.getByRole("navigation", { name: "Setup sections" });
-    expect(
-      within(tabs)
-        .getAllByRole("button")
-        .map((b) => b.textContent)[1],
-    ).toBe("Repos & seats");
-    await screen.findByRole("region", { name: "shop-app" });
+describe("Setup › Repos & seats cards", () => {
+  it("shows repo guidance as editable advice without a live board profile", async () => {
+    load();
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    expect(card.textContent).toContain("Observed");
+    expect(card.textContent).toContain("Work guidance · guidance, not rules");
+    expect(within(card).getByRole("button", { name: "Save guidance" })).toBeTruthy();
+    expect(within(card).queryByText("Status on GitHub")).toBeNull();
   });
 
-  it("links an organisation Project at the address GitHub reports", async () => {
-    const projectUrl = "https://github.com/orgs/octo-org/projects/2";
-    withProfiles({
-      "/api/repos/profiles": PROFILES.map((p) => (p.id === "shop-app" ? { ...p, projectUrl } : p)),
+  it("saves account preference and multi-select guidance through the repo setup route", async () => {
+    load({ "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }) });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    const priority = within(
+      within(card).getByRole("group", { name: "Priority" }),
+    ).getByPlaceholderText("+ add");
+    fireEvent.change(priority, { target: { value: "P1" } });
+    fireEvent.keyDown(priority, { key: "Enter" });
+    fireEvent.change(within(card).getByLabelText("Default account"), {
+      target: { value: "codex-main" },
     });
-    at("repos");
-    const a = await screen.findByRole("region", { name: "shop-app" });
-    const link = within(a).getByRole("link", { name: "project 2" }) as HTMLAnchorElement;
-    expect(link.href).toBe(projectUrl);
-  });
-
-  it("a card per repo: status table, Lacks, priority, budget and loops", async () => {
-    withProfiles();
-    at("repos");
-    const a = await screen.findByRole("region", { name: "shop-app" });
-    expect(a.textContent).toContain("octo-org/shop-app");
-    const link = within(a).getByRole("link", { name: "project 2" }) as HTMLAnchorElement;
-    expect(link.href).toBe("https://github.com/users/octo-org/projects/2");
-    const rows = within(a)
-      .getAllByRole("row")
-      .map((r) => r.textContent);
-    expect(rows[0]).toBe("Status on GitHubColumn (state)Items");
-    expect(rows).toContain("In ProgressIn progress (in progress)2");
-    expect(a.textContent).toContain("Lacks: Refinement, Blocked, In review, Ready for QA");
-    expect(a.textContent).toContain("Priority: Project field (11) · p0–p3 labels (3) · none (1)");
-    expect(a.textContent).toContain(
-      "GitHub: ≈920 requests/hour at most (board 900 · PR sweep 12 · flow 8) of 5,000",
-    );
-    expect(a.textContent).toContain("Loops: shop-app-ta");
-    const b = screen.getByRole("region", { name: "site-builder" });
-    expect(b.textContent).toContain("Has every column");
-    expect(b.textContent).toContain("No loop works this repo.");
-  });
-
-  it("refetches the profiles when config changes", async () => {
-    withProfiles();
-    at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    const count = () => fetchFn.mock.calls.filter(([p]) => p === "/api/repos/profiles").length;
-    const before = count();
-    hub.refetchTopic("config");
-    await waitFor(() => expect(count()).toBeGreaterThan(before));
-  });
-
-  it("the first load fetches the profiles once", async () => {
-    withProfiles();
-    at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(fetchFn.mock.calls.filter(([p]) => p === "/api/repos/profiles")).toHaveLength(1);
-  });
-
-  function preview(github = "octo-org/mission-control", project = "4") {
-    fireEvent.change(screen.getByLabelText("GitHub repo"), { target: { value: github } });
-    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: project } });
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-  }
-
-  it("Preview posts {github, project} and shows the proposal before anything is written", async () => {
-    withProfiles({ "POST /api/repos/preview": () => ({ status: 200, body: PREVIEW }) });
-    at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    expect((screen.getByRole("button", { name: "Preview" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    preview();
-    await screen.findByText(/Mission Control · 37 items/);
-    const call = fetchFn.mock.calls.find(([p]) => p === "/api/repos/preview");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      github: "octo-org/mission-control",
-      project: 4,
-    });
-    const todo = screen.getByLabelText("State of Todo") as HTMLSelectElement;
-    expect(todo.value).toBe("planned");
-    expect((screen.getByLabelText("State of In Progress") as HTMLSelectElement).value).toBe(
-      "in progress",
-    );
-    expect(within(todo.closest("tr") as HTMLElement).getByText("Ready")).toBeTruthy();
-    const text = document.querySelector(".sgrid")?.textContent ?? "";
-    expect(text).toContain("Lacks: Refinement, Blocked, In review, Ready for QA");
-    expect(text).toContain("Priority: read from p0–p3 labels");
-    expect(text).toContain("GitHub: 1,234 → 1,748 requests/hour of 5,000");
-    expect(text).toContain("Loops: none yet — a loop is added in config.yaml.");
-    expect((screen.getByLabelText("Repo id") as HTMLInputElement).value).toBe("mission-control");
-    expect(text).toContain(
-      "Mission Control adds this repo to config.yaml and keeps a backup of the current file beside it. It starts reading the project on the next poll. Nothing is written to GitHub.",
-    );
-    expect(screen.getByRole("button", { name: "Add mission-control" })).toBeTruthy();
-    expect(fetchFn.mock.calls.some(([p, i]) => p === "/api/repos" && i?.method === "POST")).toBe(
-      false,
-    );
-  });
-
-  it("changing a select changes the column, Lacks and the posted statusMap; Add posts and toasts", async () => {
-    withProfiles({
-      "POST /api/repos/preview": () => ({ status: 200, body: PREVIEW }),
-      "POST /api/repos": () => ({
-        status: 200,
-        body: { repo: {}, backup: "/c/config.yaml.bak-1" },
-      }),
-    });
-    window.history.replaceState(null, "", "/setup/repos");
-    render(
-      <>
-        <Setup tab="repos" />
-        <Toast />
-      </>,
-    );
-    await screen.findByRole("region", { name: "shop-app" });
-    preview();
-    const todo = (await screen.findByLabelText("State of Todo")) as HTMLSelectElement;
-    expect([...todo.options].map((o) => o.value)).toEqual([
-      "planned",
-      "in progress",
-      "review",
-      "blocked",
-      "done",
-    ]);
-    fireEvent.change(todo, { target: { value: "blocked" } });
-    expect(within(todo.closest("tr") as HTMLElement).getByText("Blocked")).toBeTruthy();
-    expect(document.querySelector(".sgrid")?.textContent).toContain(
-      "Lacks: Refinement, Ready, In review, Ready for QA",
-    );
-    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mc" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add mc" }));
-    await waitFor(() =>
-      expect(document.getElementById("toast")?.textContent).toBe(
-        "Added mc. Backup: /c/config.yaml.bak-1.",
-      ),
-    );
-    const call = fetchFn.mock.calls.find(([p, i]) => p === "/api/repos" && i?.method === "POST");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      id: "mc",
-      github: "octo-org/mission-control",
-      project: 4,
-      statusMap: { Todo: "blocked", "In Progress": "in progress", Done: "done" },
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        defaultAccountId: "codex-main",
+        guidance: { priority: ["P1"], labelMode: "any" },
+      });
     });
   });
 
-  it("says '1 item', not '1 items'", async () => {
-    withProfiles({
-      "POST /api/repos/preview": () => ({ status: 200, body: { ...PREVIEW, items: 1 } }),
+  it("walks all add steps, then atomically onboards the repo and empty crew session", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos/onboard": { backup: "c.bak" },
     });
     at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    preview();
-    expect(await screen.findByText("Mission Control · 1 item")).toBeTruthy();
-  });
-
-  it("posts the repo id trimmed", async () => {
-    withProfiles({
-      "POST /api/repos/preview": () => ({ status: 200, body: PREVIEW }),
-      "POST /api/repos": () => ({ status: 200, body: { repo: {}, backup: "/c/b" } }),
-    });
-    window.history.replaceState(null, "", "/setup/repos");
-    render(
-      <>
-        <Setup tab="repos" />
-        <Toast />
-      </>,
-    );
-    await screen.findByRole("region", { name: "shop-app" });
-    preview();
-    fireEvent.change(await screen.findByLabelText("Repo id"), { target: { value: "  mc  " } });
-    const add = screen.getByRole("button", { name: "Add mc" });
-    expect(add.textContent).toBe("Add mc");
-    fireEvent.click(add);
-    await waitFor(() =>
-      expect(document.getElementById("toast")?.textContent).toBe("Added mc. Backup: /c/b."),
-    );
-    const call = fetchFn.mock.calls.find(([p, i]) => p === "/api/repos" && i?.method === "POST");
-    expect(JSON.parse(String(call?.[1]?.body)).id).toBe("mc");
-  });
-
-  it("ignores a preview answered after a newer one", async () => {
-    withProfiles();
-    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
-    const held: ((r: Response) => void)[] = [];
-    fetchFn.mockImplementation(async (...a: unknown[]) => {
-      if (a[0] !== "/api/repos/preview") return answer(...a);
-      return new Promise<Response>((resolve) => held.push(resolve));
-    });
-    at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    const reply = (p: RepoPreview) => new Response(JSON.stringify(p), { status: 200 });
-    preview("octo-org/old", "4");
-    await waitFor(() => expect(held).toHaveLength(1));
-    // editing discards the first request; the second is the one asked about now
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
     fireEvent.change(screen.getByLabelText("GitHub repo"), {
-      target: { value: "octo-org/new" },
+      target: { value: "octo-org/mission" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-    await waitFor(() => expect(held).toHaveLength(2));
-    await act(async () => {
-      held[1]?.(reply({ ...PREVIEW, github: "octo-org/new", projectTitle: "New" }));
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/mission" },
     });
-    await screen.findByText(/New · 37 items/);
-    await act(async () => {
-      held[0]?.(reply({ ...PREVIEW, github: "octo-org/old", projectTitle: "Old" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await screen.findByText(/Project board verified/);
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "crew" } });
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Default account"), {
+      target: { value: "codex-main" },
     });
-    expect(screen.queryByText(/Old · 37 items/)).toBeNull();
-    expect(screen.getByText(/New · 37 items/)).toBeTruthy();
-  });
-
-  describe("a preview request answered after the form was edited", () => {
-    async function heldPreview() {
-      withProfiles();
-      const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
-      const held: ((r: Response) => void)[] = [];
-      fetchFn.mockImplementation(async (...a: unknown[]) => {
-        if (a[0] !== "/api/repos/preview") return answer(...a);
-        return new Promise<Response>((resolve) => held.push(resolve));
-      });
-      at("repos");
-      await screen.findByRole("region", { name: "shop-app" });
-      preview();
-      await waitFor(() => expect(held).toHaveLength(1));
-      fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "5" } });
-      return held;
-    }
-
-    it("shows no preview", async () => {
-      const held = await heldPreview();
-      await act(async () => {
-        held[0]?.(new Response(JSON.stringify(PREVIEW), { status: 200 }));
-      });
-      expect(screen.queryByLabelText("Repo id")).toBeNull();
-      expect(screen.queryByText(/Mission Control · 37 items/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add repo" }));
+    await waitFor(() => {
+      expect(fetchFn.mock.calls.map(([path]) => path)).toEqual(
+        expect.arrayContaining([
+          "/api/repos/preview",
+          "/api/repos/checkout-preview",
+          "/api/repos/onboard",
+        ]),
+      );
     });
-
-    it("shows no error when it fails", async () => {
-      const held = await heldPreview();
-      await act(async () => {
-        held[0]?.(new Response(JSON.stringify({ error: "project 4 not found" }), { status: 404 }));
-      });
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(screen.queryByText(/project 4 not found/)).toBeNull();
+    const onboard = fetchFn.mock.calls.find(([path]) => path === "/api/repos/onboard");
+    expect(JSON.parse(String(onboard?.[1]?.body))).toMatchObject({
+      repo: { id: "mission", github: "octo-org/mission", project: 4 },
+      repoId: "mission",
+      checkout: { source: "/work/mission", branch: "main" },
+      session: { id: "mission", checkoutStrategy: "shared" },
     });
   });
 
-  it("a 409 shows the server's text inline and the form stays", async () => {
-    withProfiles({
-      "POST /api/repos/preview": () => ({ status: 200, body: PREVIEW }),
-      "POST /api/repos": () => ({
-        status: 409,
-        body: { error: "repo id mission-control already exists" },
+  it("shows a failed live check and makes no configuration write", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": () => ({
+        status: 400,
+        body: { error: "origin does not match" },
       }),
     });
     at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    preview();
-    fireEvent.click(await screen.findByRole("button", { name: "Add mission-control" }));
-    const err = await screen.findByRole("alert");
-    expect(err.textContent).toBe("repo id mission-control already exists");
-    expect(screen.getByRole("button", { name: "Add mission-control" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("origin does not match");
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/onboard")).toBe(false);
   });
 
-  it("a preview failure shows the server's text inline", async () => {
-    withProfiles({
-      "POST /api/repos/preview": () => ({
-        status: 404,
-        body: { error: "project 9 not found for x" },
+  it("ignores a stale repo preview after checkout details change", async () => {
+    load();
+    const answer = fetchFn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
+    let resolve: ((response: Response) => void) | undefined;
+    fetchFn.mockImplementation(async (...args) => {
+      if (args[0] !== "/api/repos/preview") return answer(...args);
+      return new Promise<Response>((done) => {
+        resolve = done;
+      });
+    });
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/mission" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await waitFor(() => expect(resolve).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/new" },
+    });
+    await act(async () => resolve?.(new Response(JSON.stringify(PREVIEW), { status: 200 })));
+    expect(screen.queryByText(/Project board verified/)).toBeNull();
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/checkout-preview")).toBe(false);
+  });
+
+  it("ignores a stale checkout response after its folder changes", async () => {
+    load({ "POST /api/repos/preview": PREVIEW });
+    const answer = fetchFn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
+    let resolve: ((response: Response) => void) | undefined;
+    fetchFn.mockImplementation(async (...args) => {
+      if (args[0] !== "/api/repos/checkout-preview") return answer(...args);
+      return new Promise<Response>((done) => {
+        resolve = done;
+      });
+    });
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/mission" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await waitFor(() => expect(resolve).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/new" },
+    });
+    await act(async () => resolve?.(new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    expect(screen.queryByText(/Project board verified/)).toBeNull();
+  });
+
+  it("keeps the stepper open when atomic onboarding fails without issuing partial writes", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos/onboard": () => ({
+        status: 500,
+        body: { error: "could not write config.yaml" },
       }),
     });
     at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    preview("x/y", "9");
-    expect((await screen.findByRole("alert")).textContent).toBe("project 9 not found for x");
-    expect(screen.queryByLabelText("Repo id")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    fireEvent.change(screen.getByLabelText("GitHub repo"), {
+      target: { value: "octo-org/mission" },
+    });
+    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Repo id"), { target: { value: "mission" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(within(screen.getByLabelText("Add repo")).getByLabelText("Checkout folder"), {
+      target: { value: "/work/mission" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await screen.findByText(/Project board verified/);
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "crew" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add repo" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("could not write config.yaml");
+    expect(fetchFn.mock.calls.filter(([path]) => path === "/api/repos/onboard")).toHaveLength(1);
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos")).toBe(false);
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/crew/sessions")).toBe(false);
   });
 
-  it("editing the repo or project after a preview discards the preview", async () => {
-    withProfiles({ "POST /api/repos/preview": () => ({ status: 200, body: PREVIEW }) });
+  it("converts an observed repo through the validated crew-session path", async () => {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos/onboard": { backup: "c.bak" },
+    });
     at("repos");
-    await screen.findByRole("region", { name: "shop-app" });
-    preview();
-    await screen.findByLabelText("Repo id");
-    fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "5" } });
-    expect(screen.queryByLabelText("Repo id")).toBeNull();
+    const card = await screen.findByLabelText("shop-app");
+    fireEvent.click(within(card).getByRole("button", { name: "Convert to crew repo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next: checkout" }));
+    fireEvent.change(
+      within(screen.getByLabelText("Convert shop-app to crew repo")).getByLabelText(
+        "Checkout folder",
+      ),
+      { target: { value: "/work/shop" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next: live checks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run live checks" }));
+    await screen.findByText(/Project board verified/);
+    fireEvent.click(
+      within(screen.getByLabelText("Convert shop-app to crew repo")).getByRole("button", {
+        name: "Convert to crew repo",
+      }),
+    );
+    await waitFor(() =>
+      expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/onboard")).toBe(true),
+    );
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos")).toBe(false);
   });
 });
 

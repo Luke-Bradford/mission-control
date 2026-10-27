@@ -219,6 +219,17 @@ export interface CcConfig {
     autonomy: RepoAutonomy;
     /** What FLIGHT may do here; only config.yaml sets it. Loaded: always set (default `standard`). */
     flightPowers?: FlightPowers;
+    /** Preferred account for new seats in this repo. */
+    defaultAccountId?: AccountId;
+    /** Non-binding hints handed to FLIGHT for this repo. */
+    guidance?: {
+      priority: string[];
+      milestone: string[];
+      labels: string[];
+      labelMode: "any" | "all";
+      avoid: string[];
+      direction: string;
+    };
   }[];
   loops: AdoptedLoop[];
   poll: {
@@ -466,6 +477,17 @@ const fileSchema = z
         rules: repoRulesSchema.optional(),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
         flight_powers: z.enum(FLIGHT_POWERS).default("standard"),
+        default_account_id: nonEmpty.optional(),
+        guidance: z
+          .strictObject({
+            priority: z.array(nonEmpty).max(20).default([]),
+            milestone: z.array(nonEmpty).max(20).default([]),
+            labels: z.array(nonEmpty).max(30).default([]),
+            label_mode: z.enum(["any", "all"]).default("any"),
+            avoid: z.array(nonEmpty).max(30).default([]),
+            direction: z.string().max(4000).default(""),
+          })
+          .optional(),
       }),
     ),
     loops: z.array(
@@ -564,6 +586,19 @@ const fileSchema = z
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
         autonomy: r.autonomy,
         flightPowers: r.flight_powers,
+        ...(r.default_account_id === undefined ? {} : { defaultAccountId: r.default_account_id }),
+        ...(r.guidance === undefined
+          ? {}
+          : {
+              guidance: {
+                priority: r.guidance.priority,
+                milestone: r.guidance.milestone,
+                labels: r.guidance.labels,
+                labelMode: r.guidance.label_mode,
+                avoid: r.guidance.avoid,
+                direction: r.guidance.direction,
+              },
+            }),
       })),
       loops: f.loops.map((l) => ({
         id: l.id,
