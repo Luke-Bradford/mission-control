@@ -238,7 +238,7 @@ describe("Header", () => {
     await vi.waitFor(() => expect(met.textContent).toBe("MET 01:02:03"));
   });
 
-  it("the machine button reads the latest sample and the lock", async () => {
+  it("keeps machine status reachable by keyboard and opens Overview", async () => {
     routes({
       machine: {
         latest: {
@@ -254,11 +254,17 @@ describe("Header", () => {
       },
     });
     render(<Header page="flight" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toBe("CPU 12%RAM 50%Lock: free"));
+    const btn = await screen.findByRole("button", {
+      name: "Machine status: CPU 12%, RAM 50%, Lock: free. Opens Overview.",
+    });
+    expect(btn.getAttribute("title")).toBe(
+      "Machine status: CPU 12%, RAM 50%, Lock: free. Opens Overview.",
+    );
     expect(btn.closest(".top-status")).not.toBeNull();
     expect(btn.closest(".sr-only")).toBeNull();
-    expect(within(btn).getByText("Lock: free").title).toBe(LOCK_HEADER_TITLE);
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    expect(within(btn).getByText("CPU 12%, RAM 50%, Lock: free").title).toBe(LOCK_HEADER_TITLE);
     fireEvent.click(btn);
     expect(window.location.pathname).toBe("/");
   });
@@ -271,15 +277,17 @@ describe("Header", () => {
       },
     });
     render(<Header page="flight" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toContain("Lock: GUIDO-2 +1"));
+    const btn = await screen.findByRole("button", { name: /Lock: GUIDO-2 \+1/ });
+    expect(btn).toBeTruthy();
   });
 
   it("the machine button shows dashes without a sample", async () => {
     routes();
     render(<Header page="overview" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toBe("CPU —RAM —Lock: free"));
+    const btn = await screen.findByRole("button", {
+      name: "Machine status: CPU —, RAM —, Lock: free. Opens Overview.",
+    });
+    expect(btn).toBeTruthy();
   });
 
   it.each([

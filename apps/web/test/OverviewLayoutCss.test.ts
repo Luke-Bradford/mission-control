@@ -83,6 +83,15 @@ describe("Overview layout (hud.css)", () => {
     expect(desktop).not.toContain("display: none");
   });
 
+  it("keeps desktop header controls on one row and stacks them without horizontal overflow at 390px", () => {
+    const desktop = css.match(/@media \(min-width: 1100px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
+    expect(desktop).toContain("flex-wrap: nowrap");
+    expect(css).toMatch(
+      /@media \(max-width: 390px\) \{[\s\S]*?\.top-status \{[\s\S]*?display: grid/,
+    );
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: hidden/);
+  });
+
   it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
     expect(main).toContain('"@fontsource/barlow-semi-condensed/latin-700.css"');
   });
