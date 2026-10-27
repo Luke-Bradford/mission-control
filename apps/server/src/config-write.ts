@@ -759,6 +759,14 @@ export const NewAccountBody = z.strictObject({
   cliProfile: z.string().min(1).max(4096).refine(isAbsolute, "must be absolute").optional(),
 });
 
+/** `PUT /api/accounts/:id`. Account ids stay stable because seats and loops refer to them. */
+export const AccountBody = NewAccountBody.omit({ name: true })
+  .extend({
+    alertAt: z.number().int().min(0).max(100),
+    stopAt: z.number().int().min(0).max(100),
+  })
+  .refine((account) => account.alertAt <= account.stopAt, "alert must not exceed stop");
+
 export function accountDuplicateReason(
   accounts: CcConfig["accounts"],
   account: z.infer<typeof NewAccountBody>,
@@ -818,6 +826,105 @@ export function addAccount(path: string, account: z.infer<typeof NewAccountBody>
         "the new config.yaml would change more than the added account",
       );
     }
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return { config: next, backup };
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/** Edit one account without touching any unrelated configuration. */
+export function setAccount(
+  path: string,
+  id: string,
+  account: z.infer<typeof AccountBody>,
+  now: number,
+) {
+  const run = queue.then(async () => {
+    const parsed = AccountBody.safeParse(account);
+    if (!parsed.success) throw new ConfigWriteError("invalid", "invalid account settings");
+    const { bytes, text, current } = await readCurrent(path);
+    const index = current.accounts.findIndex((existing) => existing.id === id);
+    if (index < 0) throw new ConfigWriteError("missing", "account not found");
+    const nextAccount = {
+      id,
+      vendor: account.provider,
+      alertAt: account.alertAt,
+      stopAt: account.stopAt,
+      ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+    };
+    const problem = accountBindingProblem(
+      current.accounts.map((existing, i) => (i === index ? nextAccount : existing)),
+    );
+    if (problem) throw new ConfigWriteError("invalid", problem);
+    const doc = parseDocument(text);
+    const accounts = doc.get("accounts", true);
+    const item = isSeq(accounts) ? accounts.items[index] : undefined;
+    if (!isMap(item) || doc.errors.length > 0)
+      throw new ConfigWriteError("current", "config.yaml has no account to update");
+    item.set("vendor", account.provider);
+    item.set("alert_at", account.alertAt);
+    item.set("stop_at", account.stopAt);
+    if (account.cliProfile === undefined) item.delete("cli_profile");
+    else item.set("cli_profile", account.cliProfile);
+    const newText = doc.toString({ lineWidth: 0 });
+    let next: CcConfig;
+    try {
+      next = parseConfig(newText, "the new config.yaml");
+    } catch {
+      throw new ConfigWriteError("invalid", "the updated account config would not load");
+    }
+    const expected = {
+      id,
+      vendor: account.provider,
+      alertAt: account.alertAt,
+      stopAt: account.stopAt,
+      ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+    };
+    if (
+      !isDeepStrictEqual(next, {
+        ...current,
+        accounts: current.accounts.map((a, i) => (i === index ? expected : a)),
+      })
+    )
+      throw new ConfigWriteError("write", "the new config.yaml would change more than the account");
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return { config: next, backup };
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/** Removes an unused account. Callers must establish it has no configured consumers first. */
+export function removeAccount(path: string, id: string, now: number) {
+  const run = queue.then(async () => {
+    const { bytes, text, current } = await readCurrent(path);
+    const index = current.accounts.findIndex((account) => account.id === id);
+    if (index < 0) throw new ConfigWriteError("missing", "account not found");
+    const doc = parseDocument(text);
+    const accounts = doc.get("accounts", true);
+    if (!isSeq(accounts) || doc.errors.length > 0)
+      throw new ConfigWriteError("current", "config.yaml has no accounts list");
+    accounts.items.splice(index, 1);
+    accounts.flow = accounts.items.length === 0;
+    const newText = doc.toString({ lineWidth: 0 });
+    let next: CcConfig;
+    try {
+      next = parseConfig(newText, "the new config.yaml");
+    } catch {
+      throw new ConfigWriteError("invalid", "the updated account config would not load");
+    }
+    if (
+      !isDeepStrictEqual(next, {
+        ...current,
+        accounts: current.accounts.filter((a) => a.id !== id),
+      })
+    )
+      throw new ConfigWriteError("write", "the new config.yaml would change more than the account");
     const backup = await backUp(path, bytes, now);
     await replace(path, newText);
     await pruneBackups(path, basename(backup)).catch(() => undefined);

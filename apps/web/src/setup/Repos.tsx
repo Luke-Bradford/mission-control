@@ -289,7 +289,7 @@ function SeatEditor({
   const [form, setForm] = useState<SeatInput>(
     seat ?? { id: "", role: firstRole, accountId: defaultAccount, model: "", area: [] },
   );
-  const catalog = useResource<AccountModelsView[]>(RESOURCES.accountModels).data;
+  const catalog = useResource<AccountModelsView[]>(RESOURCES.allAccountModels).data;
   const options = catalog?.find((account) => account.accountId === form.accountId)?.models ?? [];
   // An old seat may have a model that has since left a provider catalog.  Keep it visible while
   // editing that seat, but never make it a choice for a new one.

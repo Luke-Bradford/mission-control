@@ -3727,8 +3727,12 @@ td.wrap {
   overflow-x: auto;
 }
 .accounts-table {
-  min-width: 1050px;
+  width: 100%;
+  min-width: 0;
   table-layout: fixed;
+}
+.accounts-table-wrap {
+  width: 100%;
 }
 .accounts-table th,
 .accounts-table td {
@@ -3749,25 +3753,25 @@ td.wrap {
   width: 7%;
 }
 .accounts-table th:nth-child(3) {
-  width: 17%;
+  width: 18%;
 }
 .accounts-table th:nth-child(4) {
-  width: 10%;
+  width: 17%;
 }
 .accounts-table th:nth-child(5) {
-  width: 10%;
+  width: 6%;
 }
 .accounts-table th:nth-child(6) {
-  width: 14%;
+  width: 15%;
 }
 .accounts-table th:nth-child(7) {
-  width: 9%;
+  width: 7%;
 }
 .accounts-table th:nth-child(8) {
-  width: 10%;
+  width: 8%;
 }
 .accounts-table th:nth-child(9) {
-  width: 13%;
+  width: 12%;
 }
 .account-login > span:first-child {
   display: block;
@@ -3775,6 +3779,22 @@ td.wrap {
 }
 .account-login .pill {
   vertical-align: top;
+}
+.account-signin-panel td {
+  padding-top: 0;
+}
+.account-signin-panel section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+.account-signin-panel code {
+  overflow-wrap: anywhere;
 }
 .account-quota .meter {
   flex-direction: column-reverse;
@@ -3785,11 +3805,48 @@ td.wrap {
   width: 100%;
   flex: none;
 }
+.account-meter.ok .track i {
+  background: var(--ok);
+}
 .quota-forecast {
   display: block;
   margin-top: 3px;
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+.accounts-github {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  padding: 4px 8px;
+}
+.accounts-github .githubrate {
+  margin: 0;
+}
+.account-editor {
+  position: fixed;
+  z-index: 30;
+  inset: 0 0 0 auto;
+  width: min(430px, 100vw);
+  padding: 16px;
+  overflow: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px #0008;
+}
+.account-editor .seatform {
+  display: grid;
+  gap: 12px;
+}
+.account-editor label {
+  display: grid;
+  gap: 5px;
+}
+.account-editor input,
+.account-editor select {
+  min-height: 32px;
+}
+.account-profile {
+  grid-column: 1 / -1;
 }
 
 /* setup */

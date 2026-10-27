@@ -505,10 +505,10 @@ describe("Setup tabs", () => {
     at("accounts");
     const table = await screen.findByRole("table");
     const rows = within(table).getAllByRole("row");
-    await waitFor(() => expect(rows[1]?.textContent).toContain("Not signed in"));
-    expect(within(rows[1] as HTMLElement).getByRole("button", { name: "Check" })).toBeTruthy();
-    expect(rows[2]?.textContent).toContain("Signed in");
-    expect(rows[2]?.textContent).toContain("Fictional operator");
+    await waitFor(() => expect(rows[1]?.textContent).toContain("not signed in"));
+    expect(within(rows[1] as HTMLElement).getByRole("button", { name: "Refresh" })).toBeTruthy();
+    expect(rows[2]?.textContent).toContain("signed in");
+    expect(rows[2]?.textContent).not.toContain("Fictional operator");
   });
 
   it("Accounts: the GitHub row shows what is left, the poll cost and the reset", async () => {
@@ -551,11 +551,11 @@ describe("Setup tabs", () => {
     at("accounts");
     const table = await screen.findByRole("table");
     await waitFor(() =>
-      expect(within(table).getAllByRole("row")[1]?.textContent).toContain("Signed in"),
+      expect(within(table).getAllByRole("row")[1]?.textContent).toContain("signed in"),
     );
   });
 
-  it("Accounts: thresholds, rounded quota in amber and red, the fixed-threshold title", async () => {
+  it("Accounts: thresholds, rounded quota and the full nine-column table", async () => {
     load();
     at("accounts");
     const table = await screen.findByRole("table");
@@ -563,32 +563,37 @@ describe("Setup tabs", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
-    ).toEqual(["Name", "Vendor", "Login", "Plan", "5h", "7d", "Resets", "Alert / stop", "Actions"]);
+    ).toEqual([
+      "Name",
+      "Vendor",
+      "Login",
+      "Models",
+      "5h",
+      "7d",
+      "Resets",
+      "Alert / stop",
+      "Actions",
+    ]);
     const rows = within(table).getAllByRole("row");
     const claude = rows[1] as HTMLElement;
     expect(claude.textContent).toContain("claude-main");
     expect(claude.textContent).toContain("85%");
     expect(claude.textContent).toContain("95%");
-    expect(claude.textContent).toContain("5h 38%");
-    expect(claude.textContent).toContain("7d 80%");
-    expect(claude.querySelector(".meter.hi")).not.toBeNull();
+    expect(claude.textContent).toContain("38%");
+    expect(claude.textContent).toContain("80%");
+    expect(claude.querySelector(".meter.hi")).toBeNull();
     expect(claude.querySelector(".meter.full")).toBeNull();
     const codex = rows[2] as HTMLElement;
-    expect(codex.textContent).toContain("5h 100%");
+    expect(codex.textContent).toContain("100%");
     expect(codex.querySelectorAll(".meter.full")).toHaveLength(2);
-    const cell = claude.querySelector("td:nth-child(5)") as HTMLElement;
-    expect(cell.title).toMatch(/fixed 80\/100/);
-    expect(cell.title).toMatch(/alert\/stop levels are in the columns beside/);
     expect(
-      screen.getByText("one profile per login · Mission Control never reads credentials"),
+      screen.getByText(
+        "one profile per login · Mission Control never displays or stores credentials",
+      ),
     ).toBeTruthy();
-    const auto = screen.getByRole("region", { name: "Auto-approve" });
-    const boxes = within(auto).getAllByRole("checkbox") as HTMLInputElement[];
-    expect(boxes).toHaveLength(5);
-    expect(boxes.every((b) => b.disabled)).toBe(true);
-    expect(auto.textContent).toContain("P2");
+    expect(screen.queryByRole("region", { name: "Auto-approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Check" })).toHaveLength(CFG.accounts.length);
+    expect(screen.getAllByRole("button", { name: "Refresh" })).toHaveLength(CFG.accounts.length);
   });
 
   const FREE: TestLockState = { holder: null, waiting: [] };
