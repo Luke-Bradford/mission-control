@@ -22,6 +22,7 @@ import {
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  applySeatAccount,
   type CcConfig,
   ConfigError,
   crewAllowed,
@@ -440,6 +441,20 @@ ${seats.join("\n")}
   }
   const load = (t: string) => parseConfig(t, "test", guard);
   const fails = (t: string) => errorOf(() => load(t));
+
+  it("applies an account's catalog binding with the account id", () => {
+    const config = load(crewText({}));
+    const seat = config.crew?.sessions[0]?.seats[0];
+    const account = config.accounts.find((a) => a.id === "codex-main");
+    if (!seat || !account) throw new Error("missing test seat or account");
+    account.cliProfile = "/profiles/codex-profile";
+    applySeatAccount(seat, account);
+    expect(seat).toMatchObject({
+      accountId: "codex-main",
+      modelVendor: "codex",
+      modelAccount: { vendor: "codex", cliProfile: "/profiles/codex-profile" },
+    });
+  });
 
   it("refuses a relative crew.worktrees", () => {
     const e = fails(crewText({ worktrees: "../mc-crew" }));

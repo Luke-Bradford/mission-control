@@ -113,6 +113,19 @@ export interface CrewSeatConfig {
   retiring?: true;
 }
 
+/** Apply the account whose CLI catalog validates this seat's Codex model. */
+export function applySeatAccount(
+  seat: CrewSeatConfig,
+  account: CcConfig["accounts"][number],
+): void {
+  seat.accountId = account.id;
+  seat.modelVendor = account.vendor;
+  seat.modelAccount = {
+    vendor: account.vendor,
+    ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+  };
+}
+
 export interface CrewSessionConfig {
   id: string;
   repoId: RepoId;
@@ -1068,11 +1081,7 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
       seat.def = def;
       seat.model ||= role.model;
       const vendor = account.vendor;
-      seat.modelVendor = vendor;
-      seat.modelAccount = {
-        vendor,
-        ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
-      };
+      applySeatAccount(seat, account);
       const problem = seatModelProblem(seat, deferModels);
       if (problem && !(deferModels && vendor === "codex")) {
         throw new ConfigError(`${sp}.${problem.key}`, problem.reason);
