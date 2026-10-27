@@ -115,7 +115,7 @@ describe("scratch mode", () => {
     fullSuite: ["pnpm -s test"],
   };
 
-  it("scratch: edits allowed, commit and suite denied", () => {
+  it("scratch: edits allowed, commit denied and suite locked", () => {
     expect(guardDecision({ tool: "Edit", input: { file_path: "/w/a.ts" } }, scratch)).toEqual({
       kind: "allow",
     });
@@ -127,7 +127,10 @@ describe("scratch mode", () => {
       rule: "read-only",
       text: "Read-only roles cannot write: mcp__mc__commit (a scratch copy is never committed)",
     });
-    expect(ruleOf(bash("pnpm -s test"), scratch)).toBe("full-suite");
+    expect(guardDecision(bash("pnpm -s test"), scratch)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
     expect(ruleOf(bash("git commit -m x"), scratch)).toBe("git-write");
     expect(ruleOf(bash("pnpm -s vitest run a.test.ts"), scratch)).toBe("allow");
   });
@@ -189,7 +192,7 @@ describe("GUARD_RULES", () => {
       "Only repos with flight_powers: superuser may use these tools",
     );
     expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(10);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(11);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -347,9 +350,16 @@ describe("guardDecision: the full suite", () => {
   ])("still locks %s (no background &)", (c) => {
     expect(ruleOf(bash(c))).toBe("lock");
   });
-  it("allows a background command that is not a full suite", () => {
-    expect(ruleOf(bash("sleep 1 &"))).toBe("allow");
-  });
+  it.each([bash("sleep 1 &"), bash("sleep 1", { run_in_background: true })])(
+    "denies any background command",
+    (event) => {
+      expect(guardDecision(event, writer)).toEqual({
+        kind: "deny",
+        rule: "background",
+        text: "Do not run commands in the background",
+      });
+    },
+  );
   it("locks a suite in read-only mode", () => {
     expect(guardDecision(bash("pnpm -s vitest run"), readOnly)).toEqual({
       kind: "lock",
@@ -725,7 +735,7 @@ describe("guard fix round 5 (Task 5 review)", () => {
       expect(ruleOf(bash(c))).toBe("git-write");
     },
   );
-  it("allows a background run that is not a suite", () => {
+  it("allows a background wrapper that is not a suite", () => {
     expect(ruleOf(bash("setsid sleep 1"))).toBe("allow");
   });
   it("names a git subcommand in the text only when it is a known one", () => {

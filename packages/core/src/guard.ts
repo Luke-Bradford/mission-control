@@ -7,6 +7,7 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
+  background: "Do not run commands in the background",
   "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
@@ -2068,21 +2069,22 @@ export function guardDecision(
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
     if (suite !== null) {
-      if (ctx.mode === "scratch") return deny("full-suite", suite);
-      if (e.input.run_in_background === true) {
-        return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
-      }
       if (background) backgroundSuite = true;
       lock ??= suite;
     }
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");
   if (githubDenied !== null) return deny("github-write", githubDenied);
-  if (lock === null) return { kind: "allow" };
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
-  if (backgroundSuite || walk.lineBackground) {
+  if (
+    lock !== null &&
+    (e.input.run_in_background === true || backgroundSuite || walk.lineBackground)
+  ) {
     return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   }
+  if (e.input.run_in_background === true || walk.lineBackground)
+    return { kind: "deny", rule: "background", text: GUARD_RULES.background };
+  if (lock === null) return { kind: "allow" };
   return { kind: "lock", command: lock };
 }
 

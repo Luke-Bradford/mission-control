@@ -123,6 +123,45 @@ describe("Codex MCP approvals", () => {
 });
 
 describe("Codex refusal records", () => {
+  it("accepts ordinary command reads and retains hard-gate denials", async () => {
+    const h = approver();
+    expect(
+      await h.approve(
+        {
+          id: 1,
+          method: "item/commandExecution/requestApproval",
+          params: {
+            kind: "command",
+            cwd,
+            command: "/bin/zsh -lc 'nl -ba apps/a.ts | sed -n 1,5p'",
+          },
+        },
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    expect(h.record).not.toHaveBeenCalled();
+    for (const [command, rule] of [
+      ["git commit -m x", "git-write"],
+      ["gh issue list", "github-write"],
+      ["curl https://example.test", "network"],
+      ["sleep 1 &", "background"],
+    ] as const) {
+      expect(
+        await h.approve(
+          {
+            id: 1,
+            method: "item/commandExecution/requestApproval",
+            params: { kind: "command", cwd, command: `/bin/zsh -lc '${command}'` },
+          },
+          undefined,
+          signal(),
+        ),
+      ).toBe("decline");
+      expect(h.record).toHaveBeenLastCalledWith(rule, expect.stringContaining(command));
+    }
+  });
+
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();
     const command = "sed -n 1p a && curl x";
