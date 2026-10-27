@@ -1,3 +1,5 @@
+@import "./comms/CommsGraph.css";
+
 /*
  * The HUD's styles, ported from the mockup (docs/prototype/mission-control-hud.html L1–565) with its
  * class names kept, so later phases can follow it. Rules for features nothing renders yet are left
@@ -908,14 +910,60 @@ textarea {
   border-color: var(--warn-mark);
 }
 .mach-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   color: var(--fg-2);
 }
 .mach-btn.hot {
   color: var(--warn);
   border-color: var(--warn-mark);
+}
+.mach-tooltip {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 28px));
+  padding: 6px 8px;
+  color: var(--fg);
+  font: 11px var(--mono);
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px #0004;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.mach-tooltip > span {
+  display: block;
+}
+.mach-btn:hover .mach-tooltip,
+.mach-btn:focus-visible .mach-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+/* Keep all shell controls in the approved single desktop row only when their intrinsic width fits. */
+@media (min-width: 1280px) {
+  .top {
+    flex-wrap: nowrap;
+    gap: 8px 12px;
+    padding-inline: 14px;
+  }
+  .tabs {
+    min-width: 0;
+  }
+  .tabs a {
+    gap: 4px;
+    padding-inline: 7px;
+  }
+  .top-status {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
 }
 .seg {
   display: inline-flex;
@@ -2705,8 +2753,7 @@ pre.diff .h {
 }
 .comms-grid {
   display: grid;
-  /* Keep the reserved graph element in the markup, without making an empty third band. */
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px);
   gap: 12px;
   height: 100%;
 }
@@ -3210,6 +3257,52 @@ pre.diff .h {
 .decision-card h3 {
   margin: 0 0 6px;
 }
+@media (max-width: 390px) {
+  .top {
+    align-items: stretch;
+    overflow-x: clip;
+  }
+  .top-status {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .top-status > * {
+    min-width: 0;
+  }
+  .top-status .usage {
+    grid-column: 1 / -1;
+  }
+  #sess {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .comms-grid {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .comms-right {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  }
+  .comms-graph-panel {
+    min-height: 380px;
+  }
+}
+@media (max-width: 640px) {
+  .comms-right {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 998px) {
+  .comms-right {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 998px) {
   .comms-grid,
   .comms-agent {
@@ -4523,8 +4616,19 @@ kbd {
     gap: 8px 12px;
   }
   .top-status {
+    position: relative;
     width: 100%;
     margin-left: 0;
+  }
+  .mach-btn {
+    position: static;
+  }
+  .mach-tooltip {
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    width: auto;
+    max-width: none;
   }
   .shell {
     padding: 10px;

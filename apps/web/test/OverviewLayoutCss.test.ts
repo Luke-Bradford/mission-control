@@ -83,6 +83,36 @@ describe("Overview layout (hud.css)", () => {
     expect(desktop).not.toContain("display: none");
   });
 
+  it("wraps the header before its desktop contents fit and keeps tabs within their row", () => {
+    const desktop = css.match(/@media \(min-width: 1280px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
+    expect(desktop).toContain("flex-wrap: nowrap");
+    expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
+    expect(rule(String.raw`\.tabs`)).toContain("overflow-x: auto");
+    expect(rule(String.raw`\.tabs`)).toContain("max-width: 100%");
+    expect(css).toMatch(
+      /@media \(max-width: 390px\) \{[\s\S]*?\.top-status \{[\s\S]*?display: grid/,
+    );
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: clip/);
+  });
+
+  it("shows the machine tooltip on pointer hover and keyboard focus", () => {
+    expect(css).toMatch(
+      /\.mach-btn:hover \.mach-tooltip,[\s\S]*?\.mach-btn:focus-visible \.mach-tooltip/,
+    );
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("visibility: hidden");
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("position: absolute");
+  });
+
+  it("clamps the machine tooltip to the full status row below 761px", () => {
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.top-status \{\s*position: relative;\s*width: 100%;/,
+    );
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*?\.mach-btn \{\s*position: static;/);
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.mach-tooltip \{\s*top: calc\(100% \+ 6px\);\s*right: 0;\s*left: 0;\s*width: auto;\s*max-width: none;/,
+    );
+  });
+
   it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
     expect(main).toContain('"@fontsource/barlow-semi-condensed/latin-700.css"');
   });
