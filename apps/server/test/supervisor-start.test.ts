@@ -1089,8 +1089,8 @@ describe("startRun", () => {
       argv.indexOf("--allowedTools") + 1,
       argv.indexOf("--disallowedTools"),
     );
-    expect(allowed).toContain("Bash(uv run pytest:*)");
-    expect(allowed).not.toContain("Bash(pnpm -s lint:*)");
+    expect(allowed).toContain("Bash");
+    expect(allowed).not.toContain("Bash(uv run pytest:*)");
     const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
     expect(denied).toContain(
       `Edit(/${realpathSync(join(root, "mc-crew", "guido-1-42"))}/pyproject.toml)`,
@@ -2395,7 +2395,15 @@ import(${JSON.stringify(fixture)});
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(
-      expect.objectContaining({ runId, rule: "codex-allowlist" }),
+      expect.objectContaining({
+        runId,
+        rule:
+          scenario.command === "git commit -m x"
+            ? "git-write"
+            : scenario.command === "sleep 1 &"
+              ? "background"
+              : "codex-allowlist",
+      }),
     );
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
