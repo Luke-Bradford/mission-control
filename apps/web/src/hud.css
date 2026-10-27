@@ -2876,7 +2876,7 @@ pre.diff .h {
 @media (max-width: 390px) {
   .top {
     align-items: stretch;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
   .top-status {
     display: grid;

@@ -92,7 +92,7 @@ describe("Overview layout (hud.css)", () => {
     expect(css).toMatch(
       /@media \(max-width: 390px\) \{[\s\S]*?\.top-status \{[\s\S]*?display: grid/,
     );
-    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: hidden/);
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: clip/);
   });
 
   it("shows the machine tooltip on pointer hover and keyboard focus", () => {
