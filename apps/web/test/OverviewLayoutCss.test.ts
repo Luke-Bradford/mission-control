@@ -95,29 +95,22 @@ describe("Overview layout (hud.css)", () => {
     expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: hidden/);
   });
 
-  it.each([
-    [1279, "wrap"],
-    [1280, "single"],
-  ])("keeps header rows and tabs unscrolled at %ipx", (viewport, row) => {
-    const desktopStart = 1280;
-    const headerRows = viewport >= desktopStart ? 1 : 2;
-    // The tab strip has a scrollable viewport only when it is narrower than its content. Below
-    // the desktop breakpoint it occupies its own wrapped row, so its viewport equals its content.
-    const tabs = document.createElement("nav");
-    Object.defineProperties(tabs, {
-      clientWidth: { value: row === "single" ? 420 : 492 },
-      scrollWidth: { value: row === "single" ? 420 : 492 },
-    });
-    expect(headerRows).toBe(row === "single" ? 1 : 2);
-    expect(tabs.scrollWidth).toBeLessThanOrEqual(tabs.clientWidth);
-  });
-
   it("shows the machine tooltip on pointer hover and keyboard focus", () => {
     expect(css).toMatch(
       /\.mach-btn:hover \.mach-tooltip,[\s\S]*?\.mach-btn:focus-visible \.mach-tooltip/,
     );
     expect(rule(String.raw`\.mach-tooltip`)).toContain("visibility: hidden");
     expect(rule(String.raw`\.mach-tooltip`)).toContain("position: absolute");
+  });
+
+  it("clamps the machine tooltip to the full status row below 761px", () => {
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.top-status \{\s*position: relative;\s*width: 100%;/,
+    );
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*?\.mach-btn \{\s*position: static;/);
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.mach-tooltip \{\s*top: calc\(100% \+ 6px\);\s*right: 0;\s*left: 0;\s*width: auto;\s*max-width: none;/,
+    );
   });
 
   it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
