@@ -1285,8 +1285,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     while (accountUpdate !== null) await accountUpdate;
     if (stopping) throw new Error(SHUTTING_DOWN);
-    const bindingProblem = accountBindingProblem(config.accounts);
-    if (bindingProblem) throw new SupervisorError(409, bindingProblem);
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
     return launch(info, run, cliSessionId, checkout, resume, claudeMd, references, keepPrompt);
