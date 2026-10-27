@@ -1864,10 +1864,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (body.data.session && (!deps.crewReloader || !deps.seatWrites)) {
           return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         }
-        const known = body.data.repo ?? config.repos.find((repo) => repo.id === body.data.repoId);
+        const liveRepo = config.repos.find((repo) => repo.id === body.data.repoId);
+        const known = body.data.repo ?? liveRepo;
         if (!known) return reply.code(404).send({ error: `unknown repo ${body.data.repoId}` });
+        // Conversion updates only this card's setup fields. Capture its live identity before the
+        // writer re-reads config.yaml, so a concurrent/manual config edit cannot apply setup to
+        // a different repo that happens to share the checkout's default branch.
+        const conversionIdentity =
+          body.data.repo === undefined && liveRepo
+            ? { github: liveRepo.github, project: liveRepo.project }
+            : undefined;
         try {
           const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
+            if (
+              conversionIdentity &&
+              (repo.github !== conversionIdentity.github ||
+                repo.project !== conversionIdentity.project)
+            )
+              throw new ConfigWriteError(
+                "conflict",
+                "the repo identity changed in config.yaml; refresh and try again",
+              );
             const preview = await repoPreview(
               await githubGql(),
               { github: repo.github, project: repo.project },

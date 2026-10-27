@@ -1433,7 +1433,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
     expect(config.repos).toHaveLength(2);
   });
 
-  it("checks the converted repo's current disk identity before writing", async () => {
+  it("rejects converted repo identity drift even when both default branches are main", async () => {
     const source = checkout();
     execFileSync(
       "git",
@@ -1446,7 +1446,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
         .replace("github: octo-org/shop-app", "github: octo-org/current-shop-app")
         .replace("    project: 2", "    project: 44"),
     );
-    const gql: Gql = async (_query, vars) => ({
+    const gql: Gql = async (_query, _vars) => ({
       repositoryOwner: {
         projectV2: {
           title: "Current",
@@ -1456,7 +1456,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
       },
       repository: {
         labels: { nodes: [] },
-        defaultBranchRef: { name: vars.number === 44 ? "trunk" : "main" },
+        defaultBranchRef: { name: "main" },
         workflows: { __typename: "Tree" },
       },
     });
@@ -1481,9 +1481,13 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
           }),
         ),
       });
-      expect(r.statusCode).toBe(400);
-      expect(r.json().error).toContain("default branch");
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("identity changed");
       expect(readFileSync(configPath, "utf8")).toContain("github: octo-org/current-shop-app");
+      expect(config.repos.find((repo) => repo.id === "shop-app")).toMatchObject({
+        github: "o/shop-app",
+        project: 2,
+      });
     } finally {
       await onboard.close();
     }
