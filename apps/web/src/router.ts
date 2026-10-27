@@ -50,7 +50,8 @@ export type CommsView =
   | { kind: "crew" }
   | { kind: "agent"; agentId: string }
   | { kind: "inbox"; agentId: string }
-  | { kind: "contact"; agentId: string; contactId: string };
+  | { kind: "contact"; agentId: string; contactId: string }
+  | { kind: "ticket"; ref: string };
 
 export type Route =
   | { page: "overview" }
@@ -85,6 +86,7 @@ export const commsAgentPath = (agentId: string): string => `/comms/agents/${enc(
 export const commsInboxPath = (agentId: string): string => `${commsAgentPath(agentId)}/inbox`;
 export const commsContactPath = (agentId: string, contactId: string): string =>
   `${commsAgentPath(agentId)}/contacts/${enc(contactId)}`;
+export const commsTicketPath = (ref: string): string => `/comms/tickets/${enc(ref)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
 /** The query parameter that names the session whose Add agent form should open (`?add=s1`). */
 export const ADD_AGENT_PARAM = "add";
@@ -170,6 +172,12 @@ export function route(path: string): Route | null {
   if (agent) return { page: "agent", id: agent.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
+  const commsTicket = /^\/comms\/tickets\/(%23\d+|PR%20\d+)$/.exec(p);
+  if (commsTicket) {
+    const ref = decode(commsTicket[1]);
+    if (ref !== null) return { page: "comms", item: null, view: { kind: "ticket", ref } };
+    return null;
+  }
   const contact = /^\/comms\/agents\/([^/]+)\/contacts\/([^/]+)$/.exec(p);
   if (contact) {
     const agentId = decode(contact[1]);

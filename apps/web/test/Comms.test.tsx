@@ -31,6 +31,7 @@ import {
   MIN,
   NOW,
   prView,
+  REPOS,
   SEAT_Q,
   SESSION_CONFIG,
   seatRow,
@@ -146,6 +147,106 @@ describe("Threads", () => {
 });
 
 describe("Comms routes", () => {
+  it("opens a ticket's messages across conversations, including its linked PR", async () => {
+    const post = vi.fn();
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [
+        boardItem({
+          issueNumber: 703,
+          title: "Ticket Comms",
+          status: "In progress",
+          owner: "Agent",
+        }),
+      ],
+      "/api/boards/site-builder": [],
+      "/api/comms/tickets/%23703": {
+        ticket: { ref: "#703", linkedPr: "PR 711" },
+        messages: [
+          {
+            id: "m-later",
+            at: NOW - MIN,
+            from: "studio",
+            to: "crew",
+            ticket: null,
+            text: "PR 711 needs review",
+            label: null,
+            ref: "PR 711",
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+          {
+            id: "m-earlier",
+            at: NOW - 2 * MIN,
+            from: "shop-app-ta",
+            to: "studio",
+            ticket: "shop-app#703",
+            text: "Starting #703",
+            label: null,
+            ref: "#703",
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+        ],
+      },
+      "POST /api/comms": (init: RequestInit | undefined) => {
+        post(JSON.parse(String(init?.body)));
+        return { status: 200, body: {} };
+      },
+    });
+    render(<Comms item={null} view={{ kind: "ticket", ref: "#703" }} />);
+
+    expect(await screen.findByText("Ticket Comms")).toBeTruthy();
+    expect(screen.getByText("In progress")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
+      "/board/shop-app/703",
+    );
+    const messages = [...document.querySelectorAll<HTMLElement>("#convo .msg .body")];
+    expect(messages.map((message) => message.textContent)).toEqual([
+      "Starting #703",
+      "PR 711 needs review",
+    ]);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Post to #crew" }), {
+      target: { value: "Ready for review" },
+    });
+    const form = screen.getByRole("textbox", { name: "Post to #crew" }).closest("form");
+    if (!form) throw new Error("ticket composer form missing");
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith({ to: "crew", text: "Ready for review", ref: "#703" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Every message about #703" }));
+    expect(window.location.pathname).toBe("/comms/tickets/%23703");
+    fireEvent.click(screen.getByRole("button", { name: "Every message about PR 711" }));
+    expect(window.location.pathname).toBe("/comms/tickets/PR%20711");
+  });
+
+  it("shows an empty ticket view when its reference has no messages", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/comms/tickets/%23999": {
+        ticket: { ref: "#999", linkedPr: null },
+        messages: [],
+      },
+    });
+    render(<Comms item={null} view={{ kind: "ticket", ref: "#999" }} />);
+    expect(await screen.findByText("No messages yet.")).toBeTruthy();
+  });
+
   it("shows live agent navigation and drills into an agent contact", async () => {
     stubFetch({
       "/api/attention": [],

@@ -108,6 +108,10 @@ export const RESOURCES = {
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
   }),
+  commsTicket: (ref: string): ResourceRef => ({
+    path: `/api/comms/tickets/${enc(ref)}`,
+    topic: "agents",
+  }),
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
     topic: "agents",
@@ -186,6 +190,7 @@ export const ACTIONS = {
   notificationPreferences: RESOURCES.notificationPreferences.path,
   notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
+  commsSend: "/api/comms",
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,

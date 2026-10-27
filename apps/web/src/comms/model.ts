@@ -45,6 +45,7 @@ export function messagesForView(
 export function breadcrumbs(view: CommsView): string[] {
   if (view.kind === "flight") return ["Comms"];
   if (view.kind === "crew") return ["Comms", "#crew"];
+  if (view.kind === "ticket") return ["Comms", view.ref];
   if (view.kind === "contact") return ["Comms", "Agents", view.agentId, view.contactId];
   return ["Comms", "Agents", view.agentId];
 }

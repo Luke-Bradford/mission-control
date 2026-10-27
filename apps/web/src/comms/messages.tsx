@@ -13,6 +13,8 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 
 /** The mention the mockup picks out in a message. */
 export const CAPCOM_TAG = "@CAPCOM";
+const COMMS_TOKEN = /((?<![\w.])@[\w-]+|(?<![A-Za-z0-9])(?:#\d+|PR \d+)(?![A-Za-z0-9]))/;
+const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 
 export const isComms = (r: ActivityRow): r is CommsEvent => r.kind === "comms";
 
@@ -51,18 +53,26 @@ export function commsKeys(list: CommsEvent[]): string[] {
 }
 
 /** Plain text with each mention picked out. */
-export function MentionText({ text }: { text: string }) {
+export function MentionText({ text, onRef }: { text: string; onRef?: (ref: string) => void }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const login = config?.githubLogin;
-  const parts = text.split(/((?<![\w.])@[\w-]+)/);
+  const parts = text.split(COMMS_TOKEN);
   return (
     <>
       {parts.map((part, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
         <Fragment key={i}>
-          {i % 2 === 1 &&
-          (part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
-            (login && part.toLowerCase() === `@${login.toLowerCase()}`)) ? (
+          {COMMS_REF.test(part) && onRef ? (
+            <button
+              type="button"
+              className="comms-ref"
+              aria-label={`Every message about ${part}`}
+              onClick={() => onRef(part)}
+            >
+              {part}
+            </button>
+          ) : part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
+            (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
             <span className="mention">{part}</span>
           ) : (
             part

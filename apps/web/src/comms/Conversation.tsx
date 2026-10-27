@@ -1,24 +1,37 @@
 import {
   ATTENTION_LABEL,
+  type BoardItem,
   COMMS_CAPCOM,
+  COMMS_CREW,
   COMMS_MC,
+  type CommsMessage,
   type CommsThreadMessage,
+  type CommsTicketResponse,
   type CrewRow,
   type FlightView,
+  type RepoView,
 } from "@mc/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SeatComposer } from "../agent/StreamPanel.tsx";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { callSign, seatStatus, seatTurn } from "../crew.ts";
-import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource, useResources } from "../data.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { agentPath, commsAgentPath, commsFlightPath, followLink, navigate } from "../router.ts";
+import {
+  agentPath,
+  commsAgentPath,
+  commsFlightPath,
+  commsTicketPath,
+  followLink,
+  navigate,
+  ticketPath,
+} from "../router.ts";
 import { FlightChat } from "../shell/Dock.tsx";
 import { AgentContacts } from "./AgentContacts.tsx";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
@@ -150,7 +163,7 @@ export function Conversation({
                 </div>
                 <div className="body">
                   <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
-                    <MentionText text={m.text} />
+                    <MentionText text={m.text} onRef={(ref) => navigate(commsTicketPath(ref))} />
                   </Expandable>
                 </div>
               </div>
@@ -285,7 +298,10 @@ function AgentConversation({
                     {message.from === COMMS_CAPCOM && <Pill tone="neutral">operator</Pill>}
                   </div>
                   <div className="body">
-                    <MentionText text={message.text} />
+                    <MentionText
+                      text={message.text}
+                      onRef={(ref) => navigate(commsTicketPath(ref))}
+                    />
                   </div>
                 </div>
               ))
@@ -311,6 +327,7 @@ export function CommsConversation({
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
+  if (view.kind === "ticket") return <TicketConversation ref={view.ref} />;
   if (view.kind === "flight")
     return <Conversation row={null} prefill={prefill} onPrefillConsumed={onPrefillConsumed} />;
   if (view.kind === "crew") {
@@ -337,8 +354,108 @@ export function CommsConversation({
   );
 }
 
+function TicketConversation({ ref }: { ref: string }) {
+  const context = useResource<CommsTicketResponse>(RESOURCES.commsTicket(ref));
+  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? [];
+  const boards = useResources<BoardItem[]>(repos.map((repo) => RESOURCES.boards(repo.id)));
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ticket = context.data?.ticket;
+  const messages = [...(context.data?.messages ?? [])].sort((a, b) => a.at - b.at);
+  const issue = boards
+    .flatMap((board) => board.data ?? [])
+    .find((item) => item.issueNumber === Number(ref.slice(1)));
+  const conversations = new Set(
+    messages.map((message) =>
+      message.to === COMMS_CREW ? COMMS_CREW : [message.from, message.to].sort().join(":"),
+    ),
+  ).size;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (text.trim() === "" || sending) return;
+    setSending(true);
+    setError(null);
+    void apiPost(ACTIONS.commsSend, { to: COMMS_CREW, text, ref })
+      .then(() => {
+        setText("");
+        hub.refetch(RESOURCES.commsTicket(ref).path);
+      })
+      .catch(() => setError("Could not post to #crew."))
+      .finally(() => setSending(false));
+  };
+  return (
+    <Panel id="chatP" title={<span>{ticket?.ref ?? ref}</span>}>
+      <div className="comms-ticket-strip">
+        <span className="comms-ticket-ref">{ticket?.ref ?? ref}</span>
+        <span>{issue?.title ?? "Loading ticket…"}</span>
+        <Pill tone="plain">{issue?.status ?? "—"}</Pill>
+        <span className="muted">{issue?.owner ?? "—"}</span>
+        <span className="muted">{`${messages.length} messages · ${conversations} conversations`}</span>
+        {issue && (
+          <a
+            href={ticketPath(issue.repoId, issue.issueNumber)}
+            onClick={(event) => followLink(event, ticketPath(issue.repoId, issue.issueNumber))}
+          >
+            Open on Board
+          </a>
+        )}
+      </div>
+      {context.error && !context.data ? (
+        <p className="pb crit-t s">Could not load ticket messages.</p>
+      ) : messages.length === 0 ? (
+        <p className="pb note">{context.data ? "No messages yet." : "Loading…"}</p>
+      ) : (
+        <div className="scroll comms-messages" id="convo">
+          <div className="comms-message-stack">
+            {messages.map((message) => (
+              <TicketMessage key={message.id} message={message} />
+            ))}
+          </div>
+        </div>
+      )}
+      {error && <p className="pb crit-t s">{error}</p>}
+      <form className="composer" onSubmit={submit}>
+        <input
+          aria-label="Post to #crew"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={`Post to #crew about ${ticket?.ref ?? ref}…`}
+        />
+        <button type="submit" disabled={sending}>
+          Post
+        </button>
+      </form>
+    </Panel>
+  );
+}
+
+function TicketMessage({ message }: { message: CommsMessage }) {
+  return (
+    <div className={`msg${message.from === COMMS_CAPCOM ? " mine" : ""}`}>
+      <div className="from">
+        <CommsEnd id={message.from} /> → <CommsEnd id={message.to} />
+      </div>
+      <div className="body">
+        <MentionText text={message.text} onRef={(ref) => navigate(commsTicketPath(ref))} />
+      </div>
+    </div>
+  );
+}
+
 export function CommsBreadcrumb({ view }: { view: CommsView }) {
   if (view.kind === "flight") return <span>Comms</span>;
+  if (view.kind === "ticket") {
+    return (
+      <nav className="comms-breadcrumb" aria-label="Breadcrumb">
+        <button type="button" onClick={() => navigate(commsFlightPath())}>
+          Comms
+        </button>
+        <span>›</span>
+        <span>{view.ref}</span>
+      </nav>
+    );
+  }
   return (
     <nav className="comms-breadcrumb" aria-label="Breadcrumb">
       <button type="button" onClick={() => navigate(commsFlightPath())}>
