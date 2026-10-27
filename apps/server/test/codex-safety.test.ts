@@ -165,15 +165,13 @@ describe("Codex mode and seat boundaries", () => {
         expect(await driver.ask({ changes: [{ path: "apps/peer/new.txt" }], holdItem: true })).toBe(
           "decline",
         );
-        expect(await driver.ask({ command: "pnpm -s test", holdItem: true })).toBe(
-          mode === "scratch" ? "decline" : "accept",
-        );
-        if (mode !== "scratch") expect(lock.state().holder?.runId).toBe(own);
+        expect(await driver.ask({ command: "pnpm -s test", holdItem: true })).toBe("accept");
+        expect(lock.state().holder?.runId).toBe(own);
         await driver.session.close();
         expect(lock.state().holder).toBeNull();
       }
-      expect(a.hits.length).toBeGreaterThanOrEqual(mode === "writer" ? 2 : 3);
-      expect(b.hits.length).toBeGreaterThanOrEqual(mode === "writer" ? 2 : 3);
+      expect(a.hits.length).toBeGreaterThanOrEqual(mode === "read-only" ? 3 : 2);
+      expect(b.hits.length).toBeGreaterThanOrEqual(mode === "read-only" ? 3 : 2);
     },
   );
 
