@@ -33,6 +33,8 @@ function canonicalEndpoint(id: string, flight: string): string {
 
 function inView(view: CommsView, flight: string, from: string, to: string): boolean {
   if (view.kind === "crew") return true;
+  // Link telemetry is not ticket-scoped; keep its crew context for a ticket conversation.
+  if (view.kind === "ticket") return true;
   if (view.kind === "flight")
     return (
       new Set([from, to]).size === 2 && [from, to].includes(flight) && [from, to].includes(CAPCOM)
@@ -47,6 +49,7 @@ function inView(view: CommsView, flight: string, from: string, to: string): bool
 
 function scopeLabel(view: CommsView): string {
   if (view.kind === "crew") return "whole crew";
+  if (view.kind === "ticket") return view.ticket ?? view.ref;
   if (view.kind === "flight") return "FLIGHT ↔ CAPCOM";
   if (view.kind === "contact") return `${view.agentId} ↔ ${view.contactId}`;
   if (view.kind === "inbox") return `${view.agentId}, inbox`;
@@ -115,11 +118,13 @@ export function CommsGraph({
   const selected = new Set(
     view.kind === "crew"
       ? []
-      : view.kind === "flight"
-        ? [flight, CAPCOM]
-        : view.kind === "contact"
-          ? [view.agentId, view.contactId]
-          : [view.agentId],
+      : view.kind === "ticket"
+        ? []
+        : view.kind === "flight"
+          ? [flight, CAPCOM]
+          : view.kind === "contact"
+            ? [view.agentId, view.contactId]
+            : [view.agentId],
   );
   const active = new Set([...selected, ...scoped.flatMap((edge) => [edge.a, edge.b])]);
   const ring = [CAPCOM, ...crewRows.map((row) => row.id).filter((id) => id !== flight)];

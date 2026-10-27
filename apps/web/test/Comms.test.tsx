@@ -13,6 +13,7 @@ import {
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -99,10 +100,12 @@ function stub(items = ITEMS, post: (b: unknown) => void = () => {}, guard: unkno
 }
 
 beforeEach(() => {
+  hub.clear();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
 afterEach(() => {
+  hub.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -146,26 +149,454 @@ describe("Threads", () => {
 });
 
 describe("Comms routes", () => {
-  it("shows live agent navigation and drills into an agent contact", async () => {
+  it("waits for a jumped message to render, and routes peer quotes to their actual conversation", async () => {
+    const original = {
+      id: "comms:peer",
+      at: NOW - MIN,
+      from: "alpha",
+      to: "beta",
+      text: "Peer handoff",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const reply = { ...original, id: "comms:reply", from: "beta", replyTo: original.id };
+    const onJumped = vi.fn();
+    const onOpenMessage = vi.fn();
     stubFetch({
+      "/api/comms/crew": { messages: [original, reply] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "crew" }}
+        row={null}
+        jumpId={original.id}
+        onJumped={onJumped}
+        onOpenMessage={onOpenMessage}
+      />,
+    );
+    expect(onJumped).not.toHaveBeenCalled();
+    const quote = await screen.findByRole("button", { name: /alpha.*Peer handoff/ });
+    expect(onJumped).toHaveBeenCalledOnce();
+    fireEvent.click(quote);
+    expect(onOpenMessage).toHaveBeenCalledWith(
+      { kind: "contact", agentId: "alpha", contactId: "beta" },
+      original.id,
+    );
+  });
+
+  it("keys drafts and replies by scope, consumes a prefill once, and includes a ticket ref", async () => {
+    const sent = {
+      id: "comms:sent",
+      at: NOW,
+      from: "CAPCOM",
+      to: "crew",
+      text: "sent",
+      ticket: null,
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: true,
+    };
+    const fetch = stubFetch({
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/tickets/%23707?ticket=shop-app%23707": {
+        messages: [],
+        ticket: {
+          ref: "#707",
+          linkedPr: null,
+          title: "Comms ticket",
+          status: "In progress",
+          owner: "Agent",
+          repoId: "shop-app",
+          issueNumber: 707,
+        },
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms": { message: sent },
+    });
+    const consumed = vi.fn();
+    const { rerender } = render(
+      <CommsConversation
+        view={{ kind: "crew" }}
+        row={null}
+        prefill={{ token: 7, text: "Re #707: " }}
+        onPrefillConsumed={consumed}
+      />,
+    );
+    const crewComposer = await screen.findByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    );
+    expect((crewComposer as HTMLInputElement).value).toBe("Re #707: ");
+    expect(consumed).toHaveBeenCalledWith(7);
+    fireEvent.change(crewComposer, { target: { value: "crew draft" } });
+    rerender(
+      <CommsConversation
+        view={{ kind: "ticket", ref: "#707", ticket: "shop-app#707" }}
+        row={null}
+      />,
+    );
+    const ticketComposer = await screen.findByLabelText("Message crew as CAPCOM");
+    expect((ticketComposer as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Comms ticket")).toBeTruthy();
+    expect(screen.getByText("In progress")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
+      "/board/shop-app/707",
+    );
+    fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sentCall = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sentCall?.[1]?.body))).toMatchObject({
+        to: "crew",
+        text: "Ticket update",
+        ref: "#707",
+      });
+    });
+  });
+
+  it("shows per-contact unread, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
+    const pin = {
+      id: "comms:pin",
+      at: NOW,
+      from: "beta",
+      to: "alpha",
+      text: "Standing order",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: true,
+      operator: false,
+    };
+    let reads = 0;
+    const fetch = stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: [pin],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 3, lastMessage: pin }],
+        unread: 1,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/alpha/contacts/beta": { messages: [pin] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [pin] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": () => ({ status: ++reads === 1 ? 500 : 200, body: { ok: true } }),
+      "DELETE /api/comms/comms%3Apin/pin": { pinned: false },
+    });
+    const { rerender } = render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "beta" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    expect(await screen.findByText(/3 unread/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(reads).toBe(2));
+    rerender(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Unpin" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/comms%3Apin/pin", expect.anything()),
+    );
+    rerender(<CommsConversation view={{ kind: "flight" }} row={null} />);
+    expect(await screen.findByText(FLIGHT_NO_SEAT)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it("shows Comms metadata, marks mentions seen, and writes CAPCOM's Ack as seen", async () => {
+    const message = {
+      id: "comms:9",
+      at: NOW,
+      from: "shop-app-ta",
+      to: "crew",
+      text: "@CAPCOM please check #707",
+      ticket: "#707",
+      label: "question",
+      ref: "#707",
+      replyTo: null,
+      mentions: ["CAPCOM"],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const fetch = stubFetch({
       "/api/attention": [],
       "/api/crew": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
-      "/api/comms/shop-app-ta": {
+      "/api/comms/crew": { messages: [message] },
+      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/pins": { messages: [message] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms/mentions/seen": { ok: true },
+      "POST /api/comms/comms%3A9/reactions": { reaction: { reaction: "seen" } },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    expect(await screen.findByText("question")).toBeTruthy();
+    expect(screen.getByText("Pinned")).toBeTruthy();
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    fireEvent.click(bell);
+    const panel = screen.getByRole("region", { name: "Mentions" });
+    fireEvent.click(within(panel).getByText("@CAPCOM please check #707"));
+    expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
+    );
+    fireEvent.click(bell);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+      ).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByText("Mark all read"));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge shop-app-ta" }));
+    await waitFor(() => {
+      const hit = fetch.mock.calls.find(([path]) => path === "/api/comms/comms%3A9/reactions");
+      expect(JSON.parse(String(hit?.[1]?.body))).toEqual({ reaction: "seen" });
+    });
+  });
+
+  it("keeps mentions unread when marking them seen fails and lets CAPCOM retry", async () => {
+    const message = {
+      id: "comms:mention",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "@CAPCOM check this",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: ["CAPCOM"],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    let attempts = 0;
+    stubFetch({
+      "/api/comms/crew": { messages: [message] },
+      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms/mentions/seen": () => ({
+        status: ++attempts === 1 ? 500 : 200,
+        body: { ok: true },
+      }),
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    fireEvent.click(bell);
+    fireEvent.click(screen.getByText("@CAPCOM check this"));
+    expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not mark mentions read.",
+    );
+    fireEvent.click(bell);
+    expect(
+      screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(
+      screen.getByRole("region", { name: "Mentions" }).querySelector("button.seen"),
+    ).toBeTruthy();
+  });
+
+  it("returns CAPCOM to its contact after sending from an agent-to-agent conversation", async () => {
+    const message = {
+      id: "comms:peer",
+      at: NOW,
+      from: "alpha",
+      to: "beta",
+      text: "handoff",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const fetch = stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: [message],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/alpha/contacts/beta": { messages: [message] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms": { message: { ...message, from: "CAPCOM", to: "alpha" } },
+    });
+    window.history.replaceState(null, "", "/comms/agents/alpha/contacts/beta");
+    render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "beta" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    const composer = await screen.findByLabelText("Message alpha as CAPCOM");
+    fireEvent.change(composer, { target: { value: "Operator reply" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ to: "alpha" });
+      expect(window.location.pathname).toBe("/comms/agents/alpha/contacts/CAPCOM");
+    });
+  });
+
+  it("replies with a quote, pins messages, and keeps the fixed reaction choices", async () => {
+    const original = {
+      id: "comms:8",
+      at: NOW - MIN,
+      from: "shop-app-ta",
+      to: "crew",
+      text: "Please check #707",
+      ticket: "#707",
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const reply = {
+      ...original,
+      id: "comms:9",
+      at: NOW,
+      from: "CAPCOM",
+      text: "I am on it.",
+      replyTo: original.id,
+      operator: true,
+    };
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [original, reply] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms": { message: reply },
+      "PUT /api/comms/comms%3A8/pin": { pinned: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await screen.findByText("I am on it.");
+    expect(screen.getAllByText("seen").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("on it").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("done").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("can't").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "Reply to shop-app-ta" })[0]);
+    expect(screen.getByText(/Replying to shop-app-ta/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Post to #crew as CAPCOM · @name pings one agent"), {
+      target: { value: "Acknowledged" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sent?.[1]?.body))).toEqual({
+        to: "crew",
+        text: "Acknowledged",
+        replyTo: "comms:8",
+      });
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Pin" })[0]);
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/comms%3A8/pin", expect.anything()),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /shop-app-ta.*Please check/ }));
+    await waitFor(() =>
+      expect(document.getElementById("comms-message-comms:8")?.className).toContain("highlighted"),
+    );
+  });
+
+  it("shows live agent navigation and drills into an agent contact", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": {
+        rows: [
+          seatRow({
+            id: "shop-app-ta",
+            displayCallSign: "shop-app-ta",
+            area: ["area:web"],
+            role: "web",
+          }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/agents/shop-app-ta": {
         messages: [
           {
-            id: "m1",
+            id: "comms:1",
             from: "shop-app-ta",
             to: "studio",
             text: "handoff",
             at: NOW,
-            seen: false,
-            tagged: false,
+            ticket: null,
+            label: "handoff",
+            ref: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+        ],
+        inbox: [],
+        contacts: [],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/shop-app-ta/contacts/studio": {
+        messages: [
+          {
+            id: "comms:1",
+            from: "shop-app-ta",
+            to: "studio",
+            text: "handoff",
+            at: NOW,
+            ticket: null,
+            label: "handoff",
+            ref: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
           },
         ],
       },
-      "/api/comms/studio": { messages: [] },
+      "POST /api/comms/read": { ok: true },
     });
     render(
       <Comms item={null} view={{ kind: "contact", agentId: "shop-app-ta", contactId: "studio" }} />,
@@ -179,10 +610,82 @@ describe("Comms routes", () => {
     );
   });
 
-  it("shows the main-resource empty state for crew", async () => {
-    stub([], () => {});
+  it("uses a crew seat's area label or role in the agent nav, never its path globs", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": {
+        rows: [
+          seatRow({
+            id: "guido-cx",
+            displayCallSign: "guido-cx",
+            area: ["area:core", "packages/core/**"],
+            role: "builder",
+          }),
+          seatRow({
+            id: "retro-cx",
+            displayCallSign: "retro-cx",
+            area: ["apps/review/**"],
+            role: "review",
+            hudState: "idle",
+          }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+      "/api/comms/agents/retro-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+    });
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    expect(await screen.findByText("core · running")).toBeTruthy();
+    expect(screen.getByText("review · idle")).toBeTruthy();
+    expect(screen.queryByText("packages/core/**")).toBeNull();
+    expect(screen.queryByText("apps/review/**")).toBeNull();
+  });
+
+  it("does not request stored Comms for observed loops", async () => {
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew": {
+        rows: [
+          crewRow({ id: "studio-builder", repoId: "site-builder", kind: "loop", role: null }),
+          seatRow({
+            id: "guido-cx",
+            displayCallSign: "guido-cx",
+            area: ["area:core"],
+            role: "core",
+          }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+    });
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    await screen.findByText("core · running");
+    expect(fetch.mock.calls.some(([path]) => path === "/api/comms/agents/studio-builder")).toBe(
+      false,
+    );
+    expect(screen.queryByText("studio-builder")).toBeNull();
+  });
+
+  it("shows the stored-Comms empty state for crew", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [] },
+    });
     render(<Comms item={null} view={{ kind: "crew" }} />);
-    expect(await screen.findByText("Not available yet.")).toBeTruthy();
+    expect(await screen.findByText("No messages yet.")).toBeTruthy();
   });
 });
 

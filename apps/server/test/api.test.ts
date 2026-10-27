@@ -467,13 +467,21 @@ describe("Comms API", () => {
     }
   };
 
-  const commsRow = (from: string, to: string, text: string, at = clock) => {
+  const commsRow = (
+    from: string,
+    to: string,
+    text: string,
+    at = clock,
+    ticket: string | null = null,
+    ref?: string,
+  ) => {
     const row = store.addComms({
       at,
       from,
       to,
-      ticket: null,
+      ticket,
       text,
+      ref,
       mentions: text.includes("@CAPCOM") ? ["CAPCOM"] : [],
     });
     if (row === null) throw new Error("Comms row was not stored");
@@ -598,13 +606,49 @@ describe("Comms API", () => {
   });
 
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
-    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703");
+    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
     const pinned = commsRow("beta", "alpha", "pin");
     store.setCommsPinned(pinned.id, true, "CAPCOM", clock++);
+    store.replaceBoard("shop-app", [
+      {
+        repoId: "shop-app",
+        issueNumber: 703,
+        title: "Comms metadata",
+        status: "In progress",
+        state: "in progress",
+        labels: [],
+        assignees: [],
+        priority: null,
+        updatedAt: clock,
+        url: "",
+        stage: null,
+        owner: "Agent",
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: clock,
+        itemId: null,
+        projectId: null,
+      },
+    ]);
     await withCommsApp(async (comms) => {
       const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
-      expect(ticket.json()).toMatchObject({ ticket: { ref: "#703", linkedPr: null } });
+      expect(ticket.json()).toMatchObject({
+        ticket: {
+          ref: "#703",
+          linkedPr: null,
+          title: "Comms metadata",
+          status: "In progress",
+          owner: "Agent",
+          repoId: "shop-app",
+          issueNumber: 703,
+        },
+      });
       expect(ticket.json().messages.map((m: { id: string }) => m.id)).toEqual([mention.id]);
       store.upsertPullRequests(
         "shop-app",
@@ -672,6 +716,189 @@ describe("Comms API", () => {
       expect(
         (await comms.inject({ method: "GET", url: "/api/comms/traffic" })).json().hours,
       ).toEqual(expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew" })]));
+    });
+  });
+
+  it("returns ticket metadata only when Comms identifies its repository", async () => {
+    commsRow("alpha", "crew", "#703");
+    for (const [repoId, title] of [
+      ["shop-app", "Shop issue"],
+      ["site-builder", "Site issue"],
+    ] as const)
+      store.replaceBoard(repoId, [
+        {
+          repoId,
+          issueNumber: 703,
+          title,
+          status: "In progress",
+          state: "in progress",
+          labels: [],
+          assignees: [],
+          priority: null,
+          updatedAt: clock,
+          url: "",
+          stage: null,
+          owner: "Agent",
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: clock,
+          itemId: null,
+          projectId: null,
+        },
+      ]);
+    await withCommsApp(async (comms) => {
+      const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
+      expect(ticket.json().ticket).toMatchObject({
+        ref: "#703",
+        title: null,
+        status: null,
+        owner: null,
+        repoId: null,
+        issueNumber: null,
+      });
+      commsRow("beta", "crew", "site ticket #703", clock, "site-builder#703", "#703");
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" })).json(),
+      ).toMatchObject({
+        ticket: {
+          title: "Site issue",
+          repoId: "site-builder",
+          issueNumber: 703,
+        },
+      });
+    });
+  });
+
+  it("keeps a clicked message's repository when issue numbers and PRs overlap", async () => {
+    const board = (repoId: string, title: string) => ({
+      repoId,
+      issueNumber: 703,
+      title,
+      status: "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [board("shop-app", "Shop issue")]);
+    store.replaceBoard("site-builder", [board("site-builder", "Site issue")]);
+    const clicked = commsRow("alpha", "crew", "Shop ticket #703", clock, "shop-app#703");
+    const other = commsRow("beta", "crew", "Site ticket #703", clock, "site-builder#703");
+    store.upsertPullRequests(
+      "site-builder",
+      [
+        {
+          repoId: "site-builder",
+          number: 711,
+          title: "other repo only",
+          url: "",
+          branch: "fix/703",
+          ticket: "site-builder#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    await withCommsApp(async (comms) => {
+      const shop = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=shop-app%23703",
+        })
+      ).json();
+      expect(shop.ticket).toMatchObject({
+        linkedPr: null,
+        title: "Shop issue",
+        repoId: "shop-app",
+        issueNumber: 703,
+      });
+      expect(shop.messages.map((message: { id: string }) => message.id)).toEqual([clicked.id]);
+
+      const site = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=site-builder%23703",
+        })
+      ).json();
+      expect(site.ticket).toMatchObject({
+        linkedPr: "PR 711",
+        title: "Site issue",
+        repoId: "site-builder",
+        issueNumber: 703,
+      });
+      expect(site.messages.map((message: { id: string }) => message.id)).toEqual([other.id]);
+    });
+  });
+
+  it("uses a PR link's ticket only as repository context", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 711,
+          title: "linked",
+          url: "",
+          branch: "fix/703",
+          ticket: "shop-app#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    const clicked = commsRow("alpha", "crew", "Please review PR 711", clock, "shop-app#999");
+    const thread = commsRow("beta", "crew", "Work on #703", clock, "shop-app#703", "#703");
+    const otherRepo = commsRow("gamma", "crew", "Work on #703", clock, "site-builder#703", "#703");
+    await withCommsApp(async (comms) => {
+      const result = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/PR%20711?ticket=shop-app%23999",
+        })
+      ).json();
+      expect(result.ticket).toMatchObject({ ref: "#703", linkedPr: "PR 711" });
+      expect(result.messages.map((message: { id: string }) => message.id)).toEqual([
+        clicked.id,
+        thread.id,
+      ]);
+      expect(result.messages.map((message: { id: string }) => message.id)).not.toContain(
+        otherRepo.id,
+      );
     });
   });
 });
