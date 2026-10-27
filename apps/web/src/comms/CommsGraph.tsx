@@ -16,7 +16,6 @@ type ChatterPair = {
   tokens?: number | null;
 };
 
-const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const CAPCOM = "CAPCOM";
 const MC = "MC";
