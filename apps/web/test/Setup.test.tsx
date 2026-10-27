@@ -1458,7 +1458,7 @@ const PREVIEW: RepoPreview = {
   loops: [],
 };
 
-describe("Setup › Repos", () => {
+describe.skip("Setup › Repos (superseded board-profile controls)", () => {
   const withProfiles = (over: Record<string, unknown> = {}) =>
     load({ "/api/repos/profiles": PROFILES, ...over });
 
@@ -1753,6 +1753,41 @@ describe("Setup › Repos", () => {
     await screen.findByLabelText("Repo id");
     fireEvent.change(screen.getByLabelText("Project number"), { target: { value: "5" } });
     expect(screen.queryByLabelText("Repo id")).toBeNull();
+  });
+});
+
+describe("Setup › Repos & seats cards", () => {
+  it("shows repo guidance as editable advice without a live board profile", async () => {
+    load();
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    expect(card.textContent).toContain("Observed");
+    expect(card.textContent).toContain("Work guidance · guidance, not rules");
+    expect(within(card).getByRole("button", { name: "Save guidance" })).toBeTruthy();
+    expect(within(card).queryByText("Status on GitHub")).toBeNull();
+  });
+
+  it("saves account preference and multi-select guidance through the repo setup route", async () => {
+    load({ "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }) });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    const priority = within(
+      within(card).getByRole("group", { name: "Priority" }),
+    ).getByPlaceholderText("+ add");
+    fireEvent.change(priority, { target: { value: "P1" } });
+    fireEvent.keyDown(priority, { key: "Enter" });
+    fireEvent.change(within(card).getByLabelText("Default account"), {
+      target: { value: "codex-main" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        defaultAccountId: "codex-main",
+        guidance: { priority: ["P1"], labelMode: "any" },
+      });
+    });
   });
 });
 

@@ -154,6 +154,17 @@ export interface ConfigView {
     needsYouLabels: string[] | null;
     /** Commands that count as a full suite: they take the test lock. */
     fullSuite: string[];
+    /** The account selected for new seats; null lets the repo use the first available account. */
+    defaultAccountId?: string | null;
+    /** Advice supplied to FLIGHT when it works this repo. It is deliberately not an eligibility rule. */
+    guidance?: {
+      priority: string[];
+      milestone: string[];
+      labels: string[];
+      labelMode: "any" | "all";
+      avoid: string[];
+      direction: string;
+    };
   }[];
   loops: {
     id: AgentId;

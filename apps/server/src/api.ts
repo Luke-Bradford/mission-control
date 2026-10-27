@@ -146,7 +146,9 @@ import {
   NewRepoBody,
   NewSessionBody,
   RepoLocation,
+  RepoSetupBody,
   SeatsBody,
+  setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
 } from "./config-write.ts";
@@ -1581,6 +1583,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
+
+      // Configuration-only fields from Setup › Repos & seats. This never reads a board or
+      // changes a queue: guidance is handed to FLIGHT as advice when it next starts.
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/setup", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (configPath === undefined)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoSetupBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoSetup(configPath, req.params.repoId, body.data, now());
+          const updated = result.config.repos.find((repo) => repo.id === req.params.repoId);
+          const index = config.repos.findIndex((repo) => repo.id === req.params.repoId);
+          if (!updated || index < 0) return reply.code(404).send({ error: "unknown repo" });
+          config.repos[index] = updated;
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof ConfigWriteError) {
+            const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+              missing: 404,
+              invalid: 400,
+              current: 409,
+            };
+            const code = status[e.kind];
+            if (code !== undefined) return reply.code(code).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
 
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {

@@ -976,6 +976,21 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["POST", "/api/repos", NEW_REPO],
+  [
+    "POST",
+    "/api/repos/shop-app/setup",
+    {
+      defaultAccountId: "claude-main",
+      guidance: {
+        priority: [],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "",
+      },
+    },
+  ],
   ["GET", "/api/repos/profiles"],
   ["POST", "/api/repos/preview", { github: "octo-org/studio", project: 4 }],
   ["GET", "/api/boards/shop-app"],

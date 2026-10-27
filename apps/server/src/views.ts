@@ -450,6 +450,19 @@ export function configView(
       statusMap: { ...r.statusMap },
       needsYouLabels: r.needsYouLabels ?? null,
       fullSuite: [...(r.fullSuite ?? [])],
+      ...(r.defaultAccountId === undefined ? {} : { defaultAccountId: r.defaultAccountId }),
+      ...(r.guidance === undefined
+        ? {}
+        : {
+            guidance: {
+              priority: [...r.guidance.priority],
+              milestone: [...r.guidance.milestone],
+              labels: [...r.guidance.labels],
+              labelMode: r.guidance.labelMode,
+              avoid: [...r.guidance.avoid],
+              direction: r.guidance.direction,
+            },
+          }),
     })),
     loops: config.loops.map((l) => ({
       id: l.id,

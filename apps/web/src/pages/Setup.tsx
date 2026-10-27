@@ -173,10 +173,11 @@ export function Setup({ tab }: { tab: SetupTab }) {
         loading
       )
     ) : tab === "repos" ? (
-      <>
-        <Repos />
-        {config ? <Sessions config={config} /> : loading}
-      </>
+      config ? (
+        <Repos config={config} />
+      ) : (
+        loading
+      )
     ) : tab === "roles" ? (
       <Roles />
     ) : (

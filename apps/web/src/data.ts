@@ -225,6 +225,8 @@ export const ACTIONS = {
   previewRepo: "/api/repos/preview",
   /** Body: a NewRepo; answers `{ repo, backup }` after writing config.yaml. */
   addRepo: "/api/repos",
+  /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */

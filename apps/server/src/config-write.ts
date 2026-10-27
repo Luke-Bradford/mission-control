@@ -80,6 +80,19 @@ export const NewRepoBody = z.strictObject({
   needsYouLabels: z.array(z.string().min(1).max(50)).max(10).optional(),
 });
 
+/** The editable part of a configured repo card. Guidance is advice, never a dispatch filter. */
+export const RepoSetupBody = z.strictObject({
+  defaultAccountId: z.string().min(1).max(64).nullable(),
+  guidance: z.strictObject({
+    priority: z.array(z.string().min(1).max(100)).max(20),
+    milestone: z.array(z.string().min(1).max(100)).max(20),
+    labels: z.array(z.string().min(1).max(100)).max(30),
+    labelMode: z.enum(["any", "all"]),
+    avoid: z.array(z.string().min(1).max(100)).max(30),
+    direction: z.string().max(4000),
+  }),
+});
+
 export const SEATS_CHANGED = "the seats changed since this page loaded them; reload and try again";
 export const noSessionText = (id: string): string => `no crew session s/${id} in config.yaml`;
 
@@ -198,6 +211,96 @@ export function setSessionSeats(
   const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
   queue = run.catch(() => undefined);
   return run;
+}
+
+/** Replaces only a repo card's account preference and FLIGHT guidance. */
+export function setRepoSetup(
+  path: string,
+  repoId: string,
+  setup: z.infer<typeof RepoSetupBody>,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const run = queue.then(() => setRepo(path, repoId, setup, now));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function setRepo(
+  path: string,
+  repoId: string,
+  setup: z.infer<typeof RepoSetupBody>,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const parsed = RepoSetupBody.safeParse(setup);
+  if (!parsed.success) throw new ConfigWriteError("invalid", "invalid repo setup");
+  const { bytes, text, current } = await readCurrent(path);
+  const index = current.repos.findIndex((repo) => repo.id === repoId);
+  if (index < 0) throw new ConfigWriteError("missing", `unknown repo ${repoId}`);
+  if (
+    parsed.data.defaultAccountId !== null &&
+    !current.accounts.some((account) => account.id === parsed.data.defaultAccountId)
+  )
+    throw new ConfigWriteError("invalid", "the default account is not configured");
+  const doc = parseDocument(text);
+  const repos = doc.get("repos", true);
+  if (doc.errors.length > 0 || !isSeq(repos) || !isMap(repos.items[index]))
+    throw new ConfigWriteError("current", "config.yaml has no repo list to edit");
+  const node = repos.items[index] as YAMLMap;
+  if (parsed.data.defaultAccountId === null) node.delete("default_account_id");
+  else node.set("default_account_id", parsed.data.defaultAccountId);
+  const guidance = parsed.data.guidance;
+  const emptyGuidance =
+    guidance.priority.length === 0 &&
+    guidance.milestone.length === 0 &&
+    guidance.labels.length === 0 &&
+    guidance.labelMode === "any" &&
+    guidance.avoid.length === 0 &&
+    guidance.direction === "";
+  if (emptyGuidance) {
+    node.delete("guidance");
+  } else {
+    node.set(
+      "guidance",
+      doc.createNode({
+        priority: guidance.priority,
+        milestone: guidance.milestone,
+        labels: guidance.labels,
+        label_mode: guidance.labelMode,
+        avoid: guidance.avoid,
+        direction: guidance.direction,
+      }),
+    );
+  }
+  const newText = doc.toString({ lineWidth: 0 });
+  let next: CcConfig;
+  try {
+    next = parseConfig(newText, "the new config.yaml");
+  } catch {
+    throw new ConfigWriteError("write", "the new config.yaml would not load");
+  }
+  const expected = current.repos.map((repo, i) => {
+    if (i !== index) return repo;
+    const updated = { ...repo };
+    if (parsed.data.defaultAccountId === null) delete updated.defaultAccountId;
+    else updated.defaultAccountId = parsed.data.defaultAccountId;
+    if (emptyGuidance) delete updated.guidance;
+    else
+      updated.guidance = {
+        priority: guidance.priority,
+        milestone: guidance.milestone,
+        labels: guidance.labels,
+        labelMode: guidance.labelMode,
+        avoid: guidance.avoid,
+        direction: guidance.direction,
+      };
+    return updated;
+  });
+  if (!isDeepStrictEqual(next, { ...current, repos: expected }))
+    throw new ConfigWriteError("write", "the new config.yaml would change more than this repo");
+  const backup = await backUp(path, bytes, now);
+  await replace(path, newText);
+  await pruneBackups(path, basename(backup)).catch(() => undefined);
+  return { config: next, backup };
 }
 
 async function setSeats(
