@@ -856,6 +856,51 @@ describe("Comms API", () => {
       expect(site.messages.map((message: { id: string }) => message.id)).toEqual([other.id]);
     });
   });
+
+  it("uses a PR link's ticket only as repository context", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 711,
+          title: "linked",
+          url: "",
+          branch: "fix/703",
+          ticket: "shop-app#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    const clicked = commsRow("alpha", "crew", "Please review PR 711", clock, "shop-app#999");
+    const thread = commsRow("beta", "crew", "Work on #703", clock, "shop-app#703", "#703");
+    const otherRepo = commsRow("gamma", "crew", "Work on #703", clock, "site-builder#703", "#703");
+    await withCommsApp(async (comms) => {
+      const result = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/PR%20711?ticket=shop-app%23999",
+        })
+      ).json();
+      expect(result.ticket).toMatchObject({ ref: "#703", linkedPr: "PR 711" });
+      expect(result.messages.map((message: { id: string }) => message.id)).toEqual([
+        clicked.id,
+        thread.id,
+      ]);
+      expect(result.messages.map((message: { id: string }) => message.id)).not.toContain(
+        otherRepo.id,
+      );
+    });
+  });
 });
 
 const run = (over: Partial<Run>): Run => ({

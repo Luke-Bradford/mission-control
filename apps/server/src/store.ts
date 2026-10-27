@@ -3164,10 +3164,22 @@ export class Store {
       predicates.push("text LIKE ?");
       args.push(`%${linkedPr}%`);
     }
+    const ticketPredicate =
+      scopedTicket === undefined
+        ? ""
+        : prNumber === null
+          ? " AND ticket=?"
+          : " AND substr(ticket, 1, length(?))=?";
+    const ticketArgs: SQLInputValue[] =
+      scopedTicket === undefined
+        ? []
+        : prNumber === null
+          ? [scopedTicket]
+          : [`${scopedRepoId}#`, `${scopedRepoId}#`];
     const rows = this.commsForWhere(
-      `(${predicates.join(" OR ")})${scopedTicket === undefined ? "" : " AND ticket=?"}`,
+      `(${predicates.join(" OR ")})${ticketPredicate}`,
       ...args,
-      ...(scopedTicket === undefined ? [] : [scopedTicket]),
+      ...ticketArgs,
     ).filter((row) => {
       if (refs.includes(row.ref ?? "")) return true;
       return refs.some((candidate) =>
