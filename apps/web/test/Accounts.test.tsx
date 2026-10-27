@@ -55,6 +55,7 @@ it("shows the nine-column account table, concise login, relative model check and
   ).toEqual(["Name", "Vendor", "Login", "Models", "5h", "7d", "Resets", "Alert / stop", "Actions"]);
   expect(screen.getAllByRole("button", { name: "Refresh" })).toHaveLength(2);
   expect(screen.getAllByRole("button", { name: "Sign in again" })).toHaveLength(2);
+  expect(screen.getByText(/never displays or stores credentials/)).toBeTruthy();
 });
 
 it("refreshes models and saves a profile-aware Codex account", async () => {
@@ -106,6 +107,9 @@ it("edits thresholds and makes the removal request", async () => {
   render(<Accounts config={CONFIG} />);
   fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0] as HTMLButtonElement);
   const dialog = screen.getByRole("dialog", { name: "Edit account" });
+  const modelCalls = () =>
+    fetch.mock.calls.filter(([path]) => path === "/api/accounts/claude-main/models").length;
+  const beforeEdit = modelCalls();
   fireEvent.change(within(dialog).getByLabelText("Alert at"), { target: { value: "70" } });
   fireEvent.submit(
     within(dialog).getByRole("button", { name: "Save account" }).closest("form") as HTMLFormElement,
@@ -116,6 +120,7 @@ it("edits thresholds and makes the removal request", async () => {
       expect.objectContaining({ method: "PUT" }),
     ),
   );
+  await waitFor(() => expect(modelCalls()).toBeGreaterThan(beforeEdit));
   fireEvent.click(
     (await screen.findAllByRole("button", { name: "Remove" }))[0] as HTMLButtonElement,
   );

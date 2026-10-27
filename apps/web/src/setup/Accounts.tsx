@@ -134,6 +134,7 @@ function AccountEditor({ account, close }: { account: Account | null; close: () 
       else await apiPost(ACTIONS.addAccount, body);
       hub.refetch(RESOURCES.config.path);
       hub.refetch(RESOURCES.accountStatus.path);
+      if (edit) hub.refetch(RESOURCES.accountModels(account.id).path);
       close();
     } catch (cause) {
       setError((cause as Error).message);
@@ -273,7 +274,7 @@ export function Accounts({ config }: { config: ConfigView }) {
       <Panel
         className="wide accounts-panel"
         title="Accounts"
-        sub="one profile per login · Mission Control never reads credentials"
+        sub="one profile per login · Mission Control never displays or stores credentials"
         actions={
           <button type="button" onClick={() => setEditor(null)}>
             + Add account
