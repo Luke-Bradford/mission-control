@@ -1,15 +1,47 @@
 import { execFile } from "node:child_process";
+import { join } from "node:path";
 import type { CliAccountStatus } from "@mc/core";
 import { type CliBinding, codexProfile } from "./account-bindings.ts";
 import { isObj } from "./collectors/usage-common.ts";
 import { usageProviderEnv } from "./collectors/usage-sources.ts";
+import { CodexModels } from "./runtime/codex-models.ts";
 
 type Account = CliBinding & { id: string };
+export type AccountModels = {
+  accountId: string;
+  models: { id: string; efforts: readonly string[] }[];
+  checkedAt: number;
+  error: string | null;
+};
 const MAX_BUFFER = 64 * 1024;
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 && value.length <= 200 && !/\p{Cc}/u.test(value)
     ? value
     : null;
+
+/** Claude's public CLI model family; Codex is read from this account's own profile. */
+export async function discoverAccountModels(account: Account, now: number): Promise<AccountModels> {
+  if (account.vendor === "claude") {
+    return {
+      accountId: account.id,
+      models: ["opus", "sonnet", "haiku"].map((id) => ({ id, efforts: ["low", "medium", "high"] })),
+      checkedAt: now,
+      error: null,
+    };
+  }
+  try {
+    const catalog = new CodexModels();
+    await catalog.load({ authPath: join(codexProfile(account), "auth.json") });
+    return {
+      accountId: account.id,
+      models: catalog.entries().map(({ model, efforts }) => ({ id: model, efforts })),
+      checkedAt: now,
+      error: null,
+    };
+  } catch {
+    return { accountId: account.id, models: [], checkedAt: now, error: "Model discovery failed" };
+  }
+}
 
 /** Read-only CLI commands inherit the usage collectors' machine environment; no token files. */
 export async function readAccountStatus(
