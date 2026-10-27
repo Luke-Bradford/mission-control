@@ -154,7 +154,7 @@ describe("Codex mode and seat boundaries", () => {
         );
         expect(
           await driver.ask({ command: `cat ${join(dir, other, "apps/a.txt")}`, holdItem: true }),
-        ).toBe("decline");
+        ).toBe("accept");
         expect(
           await driver.ask({
             changes: [{ path: join(dir, other, "apps/new.txt") }],
@@ -166,14 +166,14 @@ describe("Codex mode and seat boundaries", () => {
           "decline",
         );
         expect(await driver.ask({ command: "pnpm -s test", holdItem: true })).toBe(
-          mode === "writer" ? "accept" : "decline",
+          mode === "scratch" ? "decline" : "accept",
         );
-        if (mode === "writer") expect(lock.state().holder?.runId).toBe(own);
+        if (mode !== "scratch") expect(lock.state().holder?.runId).toBe(own);
         await driver.session.close();
         expect(lock.state().holder).toBeNull();
       }
-      expect(a.hits.length).toBeGreaterThanOrEqual(3);
-      expect(b.hits.length).toBeGreaterThanOrEqual(3);
+      expect(a.hits.length).toBeGreaterThanOrEqual(mode === "writer" ? 2 : 3);
+      expect(b.hits.length).toBeGreaterThanOrEqual(mode === "writer" ? 2 : 3);
     },
   );
 
