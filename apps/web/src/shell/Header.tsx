@@ -213,12 +213,15 @@ function MachineButton() {
       : null;
   const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
   const label = `Machine status: ${status}. Opens Overview.`;
+  const lockExplanation = holderStalled
+    ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`
+    : LOCK_HEADER_TITLE;
   return (
     <button
       type="button"
       className={`mach-btn iconbtn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
-      title={label}
       aria-label={label}
+      aria-describedby="machine-tooltip"
       onClick={() => {
         navigate(PAGE_PATHS.overview);
         setTimeout(() => document.getElementById("machP")?.scrollIntoView?.({ block: "nearest" }));
@@ -243,8 +246,9 @@ function MachineButton() {
           strokeLinecap="round"
         />
       </svg>
-      <span className="sr-only" title={holderStalled ? LOCK_STALLED_TITLE : LOCK_HEADER_TITLE}>
-        {status}
+      <span id="machine-tooltip" className="mach-tooltip" role="tooltip">
+        <span>{status}</span>
+        <span>{lockExplanation}</span>
       </span>
     </button>
   );

@@ -257,14 +257,15 @@ describe("Header", () => {
     const btn = await screen.findByRole("button", {
       name: "Machine status: CPU 12%, RAM 50%, Lock: free. Opens Overview.",
     });
-    expect(btn.getAttribute("title")).toBe(
-      "Machine status: CPU 12%, RAM 50%, Lock: free. Opens Overview.",
-    );
     expect(btn.closest(".top-status")).not.toBeNull();
     expect(btn.closest(".sr-only")).toBeNull();
+    const tooltip = within(btn).getByRole("tooltip");
+    expect(btn.getAttribute("aria-describedby")).toBe(tooltip.id);
+    expect(tooltip.textContent).toBe(`CPU 12%, RAM 50%, Lock: free${LOCK_HEADER_TITLE}`);
+    expect(btn.hasAttribute("title")).toBe(false);
     btn.focus();
     expect(document.activeElement).toBe(btn);
-    expect(within(btn).getByText("CPU 12%, RAM 50%, Lock: free").title).toBe(LOCK_HEADER_TITLE);
+    expect(tooltip.className).toBe("mach-tooltip");
     fireEvent.click(btn);
     expect(window.location.pathname).toBe("/");
   });
@@ -279,6 +280,21 @@ describe("Header", () => {
     render(<Header page="flight" />);
     const btn = await screen.findByRole("button", { name: /Lock: GUIDO-2 \+1/ });
     expect(btn).toBeTruthy();
+  });
+
+  it("puts a stalled lock warning in the machine tooltip", async () => {
+    routes({
+      crew: crew({ rows: [crewRow({ id: "guido-2", hudState: "stalled" })] }),
+      lock: {
+        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW },
+        waiting: [{ runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW }],
+      },
+    });
+    render(<Header page="flight" />);
+    const btn = await screen.findByRole("button", { name: /Lock: guido-2 \+1/ });
+    expect(within(btn).getByRole("tooltip").textContent).toContain(
+      "The run holding the lock is stalled",
+    );
   });
 
   it("the machine button shows dashes without a sample", async () => {

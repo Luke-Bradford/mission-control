@@ -914,9 +914,37 @@ textarea {
   color: var(--warn);
   border-color: var(--warn-mark);
 }
-/* Keep all shell controls in the approved single desktop row. The machine readings live in the
-   button's tooltip and accessible name, leaving its visible control as a compact status icon. */
-@media (min-width: 1100px) {
+.mach-tooltip {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 28px));
+  padding: 6px 8px;
+  color: var(--fg);
+  font: 11px var(--mono);
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px #0004;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.mach-tooltip > span {
+  display: block;
+}
+.mach-btn:hover .mach-tooltip,
+.mach-btn:focus-visible .mach-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+/* Keep all shell controls in the approved single desktop row only when their intrinsic width fits. */
+@media (min-width: 1280px) {
   .top {
     flex-wrap: nowrap;
     gap: 8px 12px;
