@@ -228,6 +228,8 @@ export const ACTIONS = {
   previewCheckout: "/api/repos/checkout-preview",
   /** Body: a NewRepo; answers `{ repo, backup }` after writing config.yaml. */
   addRepo: "/api/repos",
+  /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
+  onboardRepo: "/api/repos/onboard",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */

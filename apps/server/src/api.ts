@@ -11,7 +11,6 @@ import {
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
-  BUILTIN_ROLES,
   type ChangedFiles,
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
@@ -25,7 +24,6 @@ import {
   COMMS_TICKET,
   type ContextUsage,
   CREW_DISABLED,
-  CREW_EFFORTS,
   type Crew,
   type CrewChanges,
   type CrewMode,
@@ -148,7 +146,9 @@ import {
   NewAccountBody,
   NewRepoBody,
   NewSessionBody,
+  onboardRepo,
   RepoLocation,
+  RepoOnboardBody,
   RepoSetupBody,
   SeatsBody,
   setRepoSetup,
@@ -1535,22 +1535,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
-      // Reader: Setup › Repos & seats. Keep provider catalogs on the server so a Codex model is
-      // never offered to a Claude account (or vice versa).
+      // Reader: apps/web/src/setup/Repos.tsx (seat model pickers). Only providers which have actually published a catalog
+      // are selectable here; role defaults are configuration, not model discovery.
       api.get("/accounts/models", (): AccountModelsView[] => {
-        const claude = [
-          ...new Set([
-            ...Object.values(BUILTIN_ROLES).map((role) => role.model),
-            ...Object.values(config.crew?.roles ?? {}).map((role) => role.model),
-          ]),
-        ].map((model) => ({ model, efforts: [...CREW_EFFORTS] }));
         const codex = codexModels.entries().map(({ model, efforts }) => ({
           model,
           efforts: [...efforts],
         }));
         return config.accounts.map((account) => ({
           accountId: account.id,
-          models: account.vendor === "codex" ? codex : claude,
+          // Claude currently exposes no model/list equivalent. An empty catalog is more honest
+          // than offering values inferred from roles (which can include Codex-only models).
+          models: account.vendor === "codex" ? codex : [],
         }));
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
@@ -1687,9 +1683,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             github: z.string().min(3),
             source: z.string().min(1),
             branch: z.string().min(1).max(255),
+            defaultBranch: z.string().min(1).max(255),
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.branch !== body.data.defaultBranch) {
+          return reply
+            .code(400)
+            .send({ error: "the checkout branch must match GitHub's default branch" });
+        }
         try {
           await validateSessionCheckout(
             body.data.source,
@@ -1712,6 +1714,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(400).send({
             error: e instanceof Error ? e.message : "could not validate the checkout",
           });
+        }
+      });
+
+      // The add/convert stepper has exactly one durable operation. Its GitHub and checkout
+      // validation runs again here, immediately before the one atomic config replacement.
+      api.post("/repos/onboard", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoOnboardBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.session && (!deps.crewReloader || !deps.seatWrites)) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const known = body.data.repo ?? config.repos.find((repo) => repo.id === body.data.repoId);
+        if (!known) return reply.code(404).send({ error: `unknown repo ${body.data.repoId}` });
+        try {
+          const preview = await repoPreview(
+            await githubGql(),
+            { github: known.github, project: known.project },
+            config,
+            store,
+          );
+          if (body.data.checkout.branch !== preview.defaultBranch) {
+            return reply
+              .code(400)
+              .send({ error: "the checkout branch must match GitHub's default branch" });
+          }
+          const result = await onboardRepo(configPath, body.data, now());
+          // Do not expose an intermediate repo/setup/session state. The config object backs all
+          // routes, so replace its affected arrays only after the filesystem operation succeeds.
+          config.repos.splice(0, config.repos.length, ...result.config.repos);
+          if (result.config.crew) config.crew = result.config.crew;
+          if (body.data.session) await deps.crewReloader?.reload();
+          bus.emit("config");
+          bus.emit("boards");
+          if (body.data.repo) refreshBoards();
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof PreviewError) return reply.code(e.status).send({ error: e.message });
+          if (e instanceof ConfigWriteError) {
+            const status = {
+              invalid: 400,
+              missing: 404,
+              duplicate: 409,
+              current: 409,
+              conflict: 409,
+            }[e.kind as string];
+            if (status !== undefined) return reply.code(status).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
         }
       });
 

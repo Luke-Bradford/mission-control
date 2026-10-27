@@ -182,6 +182,7 @@ export async function repoPreview(
   return {
     github: loc.github,
     project: loc.project,
+    defaultBranch: defaultBranch.name,
     projectTitle: typeof p.title === "string" ? p.title : "",
     items,
     fields,

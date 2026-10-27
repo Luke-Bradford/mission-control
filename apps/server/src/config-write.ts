@@ -93,6 +93,30 @@ export const RepoSetupBody = z.strictObject({
   }),
 });
 
+/** One all-or-nothing Add/Convert submission from Setup › Repos & seats. */
+export const RepoOnboardBody = z.strictObject({
+  /** Omitted when converting an observed repo already in config.yaml. */
+  repo: NewRepoBody.optional(),
+  repoId: z.string().regex(REPO_ID, "must be a configured repo id"),
+  defaultAccountId: z.string().min(1).max(64).nullable(),
+  guidance: RepoSetupBody.shape.guidance,
+  checkout: z.strictObject({
+    source: z.string().refine(isAbsolute, "must be an absolute clone path"),
+    branch: z
+      .string()
+      .min(1)
+      .max(255)
+      .refine((s) => !s.startsWith("-") && !CONTROL_CHAR.test(s)),
+  }),
+  /** An empty shared-checkout crew session, or null for an observed repo. */
+  session: z
+    .strictObject({
+      id: z.string().regex(SEAT_ID),
+      checkoutStrategy: z.literal("shared"),
+    })
+    .nullable(),
+});
+
 export const SEATS_CHANGED = "the seats changed since this page loaded them; reload and try again";
 export const noSessionText = (id: string): string => `no crew session s/${id} in config.yaml`;
 
@@ -171,6 +195,190 @@ export function addRepo(
   const run = queue.then(() => add(path, repo, now));
   queue = run.catch(() => undefined);
   return run;
+}
+
+/**
+ * Adds (or updates) a repo card and, when requested, its empty shared-checkout session in one
+ * config replacement.  Checkout validation happens before the replacement, so a retry can never
+ * encounter a repo left behind by a failed later setup/session write.
+ */
+export function onboardRepo(
+  path: string,
+  input: z.infer<typeof RepoOnboardBody>,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const run = queue.then(() => onboard(path, input, now));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function onboard(
+  path: string,
+  input: z.infer<typeof RepoOnboardBody>,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const parsed = RepoOnboardBody.safeParse(input);
+  if (!parsed.success) throw new ConfigWriteError("invalid", "invalid repo onboarding request");
+  const body = parsed.data;
+  if (body.repo && body.repo.id !== body.repoId)
+    throw new ConfigWriteError("invalid", "repo id does not match the repo being added");
+  if (body.session && body.session.id !== body.repoId)
+    throw new ConfigWriteError("invalid", "session id must match the repo id");
+
+  const { bytes, text, current } = await readCurrent(path);
+  if (
+    body.defaultAccountId !== null &&
+    !current.accounts.some((account) => account.id === body.defaultAccountId)
+  )
+    throw new ConfigWriteError("invalid", "the default account is not configured");
+
+  const existing = current.repos.findIndex((repo) => repo.id === body.repoId);
+  if (body.repo && existing >= 0)
+    throw new ConfigWriteError(
+      "duplicate",
+      `a repo with id "${body.repoId}" is already configured`,
+    );
+  if (!body.repo && existing < 0)
+    throw new ConfigWriteError("missing", `unknown repo ${body.repoId}`);
+  if (body.repo) {
+    const duplicate = duplicateReason(current.repos, body.repo);
+    if (duplicate) throw new ConfigWriteError("duplicate", duplicate);
+  }
+  const repo = body.repo ?? current.repos[existing];
+  if (!repo) throw new ConfigWriteError("missing", `unknown repo ${body.repoId}`);
+  const crew = current.crew;
+  if (body.session && !crew)
+    throw new ConfigWriteError("conflict", "configure crew before adding sessions");
+  if (body.session && crew?.sessions.some((session) => session.id === body.session?.id))
+    throw new ConfigWriteError("duplicate", `s/${body.session.id} already exists.`);
+
+  try {
+    await validateSessionCheckout(body.checkout.source, body.checkout.branch, repo.github, true, [
+      ...current.loops.map((loop) => ({ label: `loop ${loop.id} worktree`, dir: loop.worktree })),
+      ...(crew?.sessions ?? []).map((session) => ({
+        label: `session ${session.id} checkout`,
+        dir: session.checkout,
+      })),
+    ]);
+  } catch (e) {
+    throw new ConfigWriteError(
+      "invalid",
+      e instanceof CheckoutError ? e.message : "could not validate the checkout and branch",
+    );
+  }
+
+  const doc = parseDocument(text);
+  const repos = doc.get("repos", true);
+  if (doc.errors.length > 0 || !isSeq(repos))
+    throw new ConfigWriteError("current", "config.yaml has no repos list to edit");
+  let node: YAMLMap;
+  let repoIndex = existing;
+  if (body.repo) {
+    node = doc.createNode({
+      id: body.repo.id,
+      github: body.repo.github,
+      project: body.repo.project,
+      status_map: body.repo.statusMap,
+      ...(body.repo.needsYouLabels === undefined
+        ? {}
+        : { needs_you_labels: body.repo.needsYouLabels }),
+    });
+    if (repos.items.length === 0) {
+      const list = doc.createNode([node]);
+      list.commentBefore = repos.commentBefore;
+      list.comment = repos.comment;
+      doc.set("repos", list);
+    } else repos.add(node);
+    repoIndex = current.repos.length;
+  } else {
+    const found = repos.items[repoIndex];
+    if (!isMap(found))
+      throw new ConfigWriteError("current", "config.yaml has no repo list to edit");
+    node = found;
+  }
+  if (body.defaultAccountId === null) node.delete("default_account_id");
+  else node.set("default_account_id", body.defaultAccountId);
+  const guidance = body.guidance;
+  const emptyGuidance =
+    guidance.priority.length === 0 &&
+    guidance.milestone.length === 0 &&
+    guidance.labels.length === 0 &&
+    guidance.labelMode === "any" &&
+    guidance.avoid.length === 0 &&
+    guidance.direction === "";
+  if (emptyGuidance) node.delete("guidance");
+  else
+    node.set(
+      "guidance",
+      doc.createNode({
+        priority: guidance.priority,
+        milestone: guidance.milestone,
+        labels: guidance.labels,
+        label_mode: guidance.labelMode,
+        avoid: guidance.avoid,
+        direction: guidance.direction,
+      }),
+    );
+
+  if (body.session) {
+    const sessions = doc.getIn(["crew", "sessions"], true);
+    if (!isSeq(sessions)) throw new ConfigWriteError("current", "config.yaml has no sessions list");
+    sessions.add(
+      doc.createNode({
+        id: body.session.id,
+        repo_id: body.repoId,
+        checkout: realish(body.checkout.source),
+        branch: body.checkout.branch,
+        seats: [],
+      }),
+    );
+    sessions.flow = false;
+  }
+  const newText = doc.toString({ lineWidth: 0 });
+  const next = sessionConfig(newText);
+  const nextRepo = next.repos[repoIndex];
+  if (!nextRepo) throw new ConfigWriteError("write", "the new config.yaml has no added repo");
+  const expectedRepo = {
+    ...(body.repo
+      ? {
+          id: body.repo.id,
+          github: body.repo.github,
+          project: body.repo.project,
+          statusMap: body.repo.statusMap,
+          ...(body.repo.needsYouLabels === undefined
+            ? {}
+            : { needsYouLabels: body.repo.needsYouLabels }),
+          fullSuite: [],
+          requiredChecks: [],
+          commands: defaultSeatCommands(),
+          protectedFiles: [],
+          autonomy: "draft" as const,
+          flightPowers: "standard" as const,
+        }
+      : { ...repo }),
+    ...(body.defaultAccountId === null ? {} : { defaultAccountId: body.defaultAccountId }),
+    ...(emptyGuidance ? {} : { guidance: { ...guidance } }),
+  };
+  const expectedRepos = body.repo
+    ? [...current.repos, expectedRepo]
+    : current.repos.map((item, index) => (index === repoIndex ? expectedRepo : item));
+  const addedSession = body.session ? next.crew?.sessions.at(-1) : undefined;
+  const expected = {
+    ...current,
+    repos: expectedRepos,
+    ...(body.session && crew && addedSession
+      ? { crew: { ...crew, sessions: [...crew.sessions, addedSession] } }
+      : {}),
+  };
+  if (!isDeepStrictEqual(next, expected))
+    throw new ConfigWriteError(
+      "write",
+      "the new config.yaml would change more than this repo setup",
+    );
+  const backup = await backUp(path, bytes, now);
+  await replace(path, newText);
+  await pruneBackups(path, basename(backup)).catch(() => undefined);
+  return { config: next, backup };
 }
 
 /**

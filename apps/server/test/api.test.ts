@@ -980,6 +980,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["POST", "/api/repos", NEW_REPO],
+  ["POST", "/api/repos/onboard"],
   [
     "POST",
     "/api/repos/shop-app/setup",
@@ -1182,6 +1183,18 @@ describe("repo profiles and the add-repo preview", () => {
   });
 });
 
+describe("account model catalogs", () => {
+  it("does not fabricate Claude choices from configured roles", async () => {
+    const r = await get("/api/accounts/models");
+    expect(r.statusCode).toBe(200);
+    expect(
+      r
+        .json<{ accountId: string; models: unknown[] }[]>()
+        .find((x) => x.accountId === "claude-main"),
+    ).toEqual({ accountId: "claude-main", models: [] });
+  });
+});
+
 describe("add a repo (POST /api/repos)", () => {
   const BACKUP = "config.yaml.bak-20261017T120000Z";
   const unchanged = () => {
@@ -1309,6 +1322,91 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("repo onboarding (POST /api/repos/onboard)", () => {
+  const checkout = () => {
+    const path = join(dir, "studio-clone");
+    mkdirSync(path);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: path });
+    writeFileSync(join(path, "README.md"), "studio\n");
+    execFileSync("git", ["add", "README.md"], { cwd: path });
+    execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-qm", "init"], {
+      cwd: path,
+    });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/octo-org/studio.git"], {
+      cwd: path,
+    });
+    return path;
+  };
+  const body = (source: string, over: Record<string, unknown> = {}) => ({
+    repo: NEW_REPO,
+    repoId: "studio",
+    defaultAccountId: "claude-main",
+    guidance: {
+      priority: [],
+      milestone: [],
+      labels: [],
+      labelMode: "any",
+      avoid: [],
+      direction: "",
+    },
+    checkout: { source, branch: "main" },
+    session: null,
+    ...over,
+  });
+
+  it("writes a repo and setup fields together, only applying live state after success", async () => {
+    const source = checkout();
+    const events: string[] = [];
+    bus.subscribe((event) => events.push(event));
+    const r = await postBody("/api/repos/onboard", body(source));
+    expect(r.statusCode).toBe(200);
+    expect(config.repos.at(-1)).toMatchObject({ id: "studio", defaultAccountId: "claude-main" });
+    expect(readFileSync(configPath, "utf8")).toContain("default_account_id: claude-main");
+    expect(events).toContain("config");
+  });
+
+  it("leaves disk and live state unchanged when setup or session preparation is refused", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const badAccount = await postBody(
+      "/api/repos/onboard",
+      body(source, { defaultAccountId: "not-configured" }),
+    );
+    expect(badAccount.statusCode).toBe(400);
+    const badSession = await postBody(
+      "/api/repos/onboard",
+      body(source, { session: { id: "studio", checkoutStrategy: "shared" } }),
+    );
+    expect(badSession.statusCode).toBe(409);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("requires GitHub's default branch again during final submission", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const r = await postBody(
+      "/api/repos/onboard",
+      body(source, { checkout: { source, branch: "other" } }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("rejects a non-default branch during checkout preflight", async () => {
+    const r = await postBody("/api/repos/checkout-preview", {
+      github: "octo-org/studio",
+      source: "/not-used-after-branch-check",
+      branch: "other",
+      defaultBranch: "main",
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
   });
 });
 
@@ -1604,6 +1702,10 @@ describe("local access", () => {
       }
       if (url === "/api/repos/checkout-preview") {
         // The shared route table body names no real checkout; route-specific tests supply one.
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
         continue;
       }

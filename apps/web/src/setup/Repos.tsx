@@ -524,10 +524,17 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
     setError(null);
     setPreview(null);
     try {
-      const [found] = await Promise.all([
-        apiPost<RepoPreview>(ACTIONS.previewRepo, { github, project: Number(project) }),
-        apiPost(ACTIONS.previewCheckout, { github, source: source.trim(), branch: branch.trim() }),
-      ]);
+      const found = await apiPost<RepoPreview>(ACTIONS.previewRepo, {
+        github,
+        project: Number(project),
+      });
+      if (mine !== latest.current) return;
+      await apiPost(ACTIONS.previewCheckout, {
+        github,
+        source: source.trim(),
+        branch: branch.trim(),
+        defaultBranch: found.defaultBranch,
+      });
       if (mine === latest.current) {
         setPreview(found);
         setStep(4);
@@ -544,28 +551,24 @@ function AddRepo({ repo, config, close }: { repo?: Repo; config: ConfigView; clo
     setError(null);
     try {
       const repoId = id.trim();
-      if (!repo) {
-        const body: NewRepo = {
-          id: repoId,
-          github,
-          project: Number(project),
-          statusMap: preview.proposedStatusMap,
-        };
-        await apiPost(ACTIONS.addRepo, body);
-      }
-      await apiPost(ACTIONS.repoSetup(repoId), {
+      const body = {
+        ...(repo
+          ? {}
+          : {
+              repo: {
+                id: repoId,
+                github,
+                project: Number(project),
+                statusMap: preview.proposedStatusMap,
+              } satisfies NewRepo,
+            }),
+        repoId,
         defaultAccountId: account,
         guidance: EMPTY_GUIDANCE,
-      });
-      if (mode === "crew") {
-        await apiPost(ACTIONS.addSession, {
-          id: repoId,
-          repoId,
-          source: source.trim(),
-          branch: branch.trim(),
-          checkoutStrategy: "shared",
-        });
-      }
+        checkout: { source: source.trim(), branch: branch.trim() },
+        session: mode === "crew" ? { id: repoId, checkoutStrategy: "shared" as const } : null,
+      };
+      await apiPost(ACTIONS.onboardRepo, body);
       toast(repo ? `Converted ${repoId} to a crew repo.` : `Added ${repoId}.`);
       hub.refetch(RESOURCES.config.path);
       hub.refetch(RESOURCES.crewChanges.path);
