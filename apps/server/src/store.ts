@@ -13,6 +13,8 @@ import {
   type BriefOption,
   type ChosenProfile,
   COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_MC,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
@@ -3152,6 +3154,44 @@ export class Store {
         "SELECT from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY from_id,to_id",
       )
       .all(since) as { from: string; to: string; count: number }[];
+  }
+  /** Hourly direct-link counts for the Comms Traffic chart. */
+  commsHourlyLinkCounts(
+    since: number,
+  ): { hour: number; from: string; to: string; count: number }[] {
+    return this.db
+      .prepare(
+        "SELECT (at / 3600000) * 3600000 AS hour, from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY hour, from_id, to_id ORDER BY hour, from_id, to_id",
+      )
+      .all(since) as { hour: number; from: string; to: string; count: number }[];
+  }
+  /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
+  commsChatter(since: number): { from: string; to: string; ticket: string; rounds: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT "from", "to", ticket,
+          CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
+        FROM (
+          SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
+            SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
+            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
+          FROM comms
+          WHERE at >= ? AND ticket IS NOT NULL
+            AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
+          GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
+            CASE WHEN from_id < to_id THEN to_id ELSE from_id END
+        )
+        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
+        ORDER BY rounds DESC, ticket, "from", "to"`,
+      )
+      .all(since, COMMS_CAPCOM, COMMS_MC, COMMS_CREW, COMMS_CAPCOM, COMMS_MC, COMMS_CREW) as Row[];
+    return rows.map((row) => ({
+      from: row.from as string,
+      to: row.to as string,
+      ticket: row.ticket as string,
+      rounds: row.rounds as number,
+    }));
   }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);

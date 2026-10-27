@@ -669,6 +669,9 @@ describe("Comms API", () => {
       expect((await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links).toEqual(
         expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew", count: 1 })]),
       );
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/traffic" })).json().hours,
+      ).toEqual(expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew" })]));
     });
   });
 });
@@ -731,6 +734,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/mentions/seen", { ids: [] }],
   ["GET", "/api/comms/pins"],
   ["GET", "/api/comms/links"],
+  ["GET", "/api/comms/traffic"],
+  ["GET", "/api/comms/chatter"],
   ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],

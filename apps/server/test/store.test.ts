@@ -1843,6 +1843,34 @@ describe("comms", () => {
     });
   });
 
+  it("counts chatter rounds only when both sides exchanged messages", () => {
+    for (let index = 0; index < 14; index++) {
+      store.addComms({ at: index, from: "alpha", to: "beta", ticket: "mc#one-way", text: "ping" });
+    }
+    for (let index = 0; index < 8; index++) {
+      store.addComms({
+        at: 100 + index,
+        from: "alpha",
+        to: "beta",
+        ticket: "mc#exchange",
+        text: "ping",
+      });
+    }
+    for (let index = 0; index < 7; index++) {
+      store.addComms({
+        at: 200 + index,
+        from: "beta",
+        to: "alpha",
+        ticket: "mc#exchange",
+        text: "pong",
+      });
+    }
+
+    expect(store.commsChatter(0)).toEqual([
+      { from: "alpha", to: "beta", ticket: "mc#exchange", rounds: 7 },
+    ]);
+  });
+
   it("migrates a retained legacy comms table additively", () => {
     const legacyPath = join(dir, "legacy-comms.sqlite");
     const legacy = new DatabaseSync(legacyPath);
