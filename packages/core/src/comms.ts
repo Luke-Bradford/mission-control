@@ -63,6 +63,11 @@ export interface CommsLinkCount {
 export interface CommsTicketContext {
   ref: string;
   linkedPr: string | null;
+  title: string | null;
+  status: string | null;
+  owner: string | null;
+  repoId: string | null;
+  issueNumber: number | null;
 }
 export interface CommsMessagesResponse {
   messages: CommsMessage[];

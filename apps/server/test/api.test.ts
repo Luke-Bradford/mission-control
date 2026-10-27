@@ -602,9 +602,45 @@ describe("Comms API", () => {
     commsRow("beta", "crew", "not #7030");
     const pinned = commsRow("beta", "alpha", "pin");
     store.setCommsPinned(pinned.id, true, "CAPCOM", clock++);
+    store.replaceBoard("shop-app", [
+      {
+        repoId: "shop-app",
+        issueNumber: 703,
+        title: "Comms metadata",
+        status: "In progress",
+        state: "in progress",
+        labels: [],
+        assignees: [],
+        priority: null,
+        updatedAt: clock,
+        url: "",
+        stage: null,
+        owner: "Agent",
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: clock,
+        itemId: null,
+        projectId: null,
+      },
+    ]);
     await withCommsApp(async (comms) => {
       const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
-      expect(ticket.json()).toMatchObject({ ticket: { ref: "#703", linkedPr: null } });
+      expect(ticket.json()).toMatchObject({
+        ticket: {
+          ref: "#703",
+          linkedPr: null,
+          title: "Comms metadata",
+          status: "In progress",
+          owner: "Agent",
+          repoId: "shop-app",
+          issueNumber: 703,
+        },
+      });
       expect(ticket.json().messages.map((m: { id: string }) => m.id)).toEqual([mention.id]);
       store.upsertPullRequests(
         "shop-app",

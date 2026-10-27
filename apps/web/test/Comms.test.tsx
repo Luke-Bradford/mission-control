@@ -13,6 +13,7 @@ import {
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -99,10 +100,12 @@ function stub(items = ITEMS, post: (b: unknown) => void = () => {}, guard: unkno
 }
 
 beforeEach(() => {
+  hub.clear();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
 afterEach(() => {
+  hub.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -146,6 +149,174 @@ describe("Threads", () => {
 });
 
 describe("Comms routes", () => {
+  it("waits for a jumped message to render, and routes peer quotes to their actual conversation", async () => {
+    const original = {
+      id: "comms:peer",
+      at: NOW - MIN,
+      from: "alpha",
+      to: "beta",
+      text: "Peer handoff",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const reply = { ...original, id: "comms:reply", from: "beta", replyTo: original.id };
+    const onJumped = vi.fn();
+    const onOpenMessage = vi.fn();
+    stubFetch({
+      "/api/comms/crew": { messages: [original, reply] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "crew" }}
+        row={null}
+        jumpId={original.id}
+        onJumped={onJumped}
+        onOpenMessage={onOpenMessage}
+      />,
+    );
+    expect(onJumped).not.toHaveBeenCalled();
+    const quote = await screen.findByRole("button", { name: /alpha.*Peer handoff/ });
+    expect(onJumped).toHaveBeenCalledOnce();
+    fireEvent.click(quote);
+    expect(onOpenMessage).toHaveBeenCalledWith(
+      { kind: "contact", agentId: "alpha", contactId: "beta" },
+      original.id,
+    );
+  });
+
+  it("keys drafts and replies by scope, consumes a prefill once, and includes a ticket ref", async () => {
+    const sent = {
+      id: "comms:sent",
+      at: NOW,
+      from: "CAPCOM",
+      to: "crew",
+      text: "sent",
+      ticket: null,
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: true,
+    };
+    const fetch = stubFetch({
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/tickets/%23707": {
+        messages: [],
+        ticket: {
+          ref: "#707",
+          linkedPr: null,
+          title: "Comms ticket",
+          status: "In progress",
+          owner: "Agent",
+          repoId: "shop-app",
+          issueNumber: 707,
+        },
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms": { message: sent },
+    });
+    const consumed = vi.fn();
+    const { rerender } = render(
+      <CommsConversation
+        view={{ kind: "crew" }}
+        row={null}
+        prefill={{ token: 7, text: "Re #707: " }}
+        onPrefillConsumed={consumed}
+      />,
+    );
+    const crewComposer = await screen.findByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    );
+    expect((crewComposer as HTMLInputElement).value).toBe("Re #707: ");
+    expect(consumed).toHaveBeenCalledWith(7);
+    fireEvent.change(crewComposer, { target: { value: "crew draft" } });
+    rerender(<CommsConversation view={{ kind: "ticket", ref: "#707" }} row={null} />);
+    const ticketComposer = await screen.findByLabelText("Message crew as CAPCOM");
+    expect((ticketComposer as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Comms ticket")).toBeTruthy();
+    expect(screen.getByText("In progress")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
+      "/board/shop-app/707",
+    );
+    fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sentCall = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sentCall?.[1]?.body))).toMatchObject({
+        to: "crew",
+        text: "Ticket update",
+        ref: "#707",
+      });
+    });
+  });
+
+  it("shows per-contact unread, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
+    const pin = {
+      id: "comms:pin",
+      at: NOW,
+      from: "beta",
+      to: "alpha",
+      text: "Standing order",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: true,
+      operator: false,
+    };
+    let reads = 0;
+    const fetch = stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: [pin],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 3, lastMessage: pin }],
+        unread: 1,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/alpha/contacts/beta": { messages: [pin] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [pin] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": () => ({ status: ++reads === 1 ? 500 : 200, body: { ok: true } }),
+      "DELETE /api/comms/comms%3Apin/pin": { pinned: false },
+    });
+    const { rerender } = render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "beta" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    expect(await screen.findByText(/3 unread/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(reads).toBe(2));
+    rerender(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Unpin" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/comms%3Apin/pin", expect.anything()),
+    );
+    rerender(<CommsConversation view={{ kind: "flight" }} row={null} />);
+    expect(await screen.findByText(FLIGHT_NO_SEAT)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
   it("shows Comms metadata, marks mentions seen, and writes CAPCOM's Ack as seen", async () => {
     const message = {
       id: "comms:9",

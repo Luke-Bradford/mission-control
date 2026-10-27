@@ -35,6 +35,7 @@ import {
   commsTicketPath,
   followLink,
   navigate,
+  ticketPath,
 } from "../router.ts";
 import { FlightChat } from "../shell/Dock.tsx";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
@@ -207,6 +208,21 @@ function scopeFor(view: CommsView): string | null {
   return null;
 }
 
+function viewForMessage(message: CommsMessage, flightId: string | undefined): CommsView {
+  if (message.from === COMMS_CREW || message.to === COMMS_CREW) return { kind: "crew" };
+  if (
+    flightId !== undefined &&
+    [message.from, message.to].includes(COMMS_CAPCOM) &&
+    [message.from, message.to].includes(flightId)
+  )
+    return { kind: "flight" };
+  return {
+    kind: "contact",
+    agentId: message.from === COMMS_CAPCOM ? message.to : message.from,
+    contactId: message.from === COMMS_CAPCOM ? message.from : message.to,
+  };
+}
+
 function MessageRefs({ text }: { text: string }) {
   const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
   const occurrences = new Map<string, number>();
@@ -321,6 +337,7 @@ function MessagePane({
   onJumped,
   onOpenMessage,
   onReply,
+  flightId,
 }: {
   messages: CommsMessage[];
   lookupMessages?: CommsMessage[];
@@ -328,6 +345,7 @@ function MessagePane({
   onJumped: () => void;
   onOpenMessage: OpenMessage;
   onReply: (message: CommsMessage) => void;
+  flightId: string | undefined;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [highlightId, setHighlightId] = useState(jumpId);
@@ -335,17 +353,15 @@ function MessagePane({
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow the newest rendered message.
   useLayoutEffect(() => {
     if (jumpId) {
-      setHighlightId(jumpId);
-      document.getElementById(`comms-message-${jumpId}`)?.scrollIntoView?.({ block: "center" });
-      onJumped();
+      const target = document.getElementById(`comms-message-${jumpId}`);
+      if (target) {
+        setHighlightId(jumpId);
+        target.scrollIntoView?.({ block: "center" });
+        onJumped();
+      }
     } else if (box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [jumpId, latestId, onJumped]);
   const byId = new Map(lookupMessages.map((message) => [message.id, message]));
-  const targetFor = (message: CommsMessage): CommsView => {
-    if (message.to === COMMS_CREW) return { kind: "crew" };
-    const agentId = message.from === COMMS_CAPCOM ? message.to : message.from;
-    return { kind: "contact", agentId, contactId: COMMS_CAPCOM };
-  };
   return (
     <div className="comms-messages scroll" id="convo" ref={box}>
       <div className="comms-message-stack">
@@ -382,7 +398,7 @@ function MessagePane({
                 <button
                   className="comms-quote"
                   type="button"
-                  onClick={() => onOpenMessage(targetFor(quote), quote.id)}
+                  onClick={() => onOpenMessage(viewForMessage(quote, flightId), quote.id)}
                 >
                   <b>{quote.from}</b> · {time(quote.at)} · {quote.text}
                 </button>
@@ -418,15 +434,28 @@ function Composer({
   onCancelReply,
   label,
   placeholder,
+  messageRef,
+  prefill,
+  onPrefillConsumed,
 }: {
   to: string;
   reply: CommsMessage | null;
   onCancelReply: () => void;
   label: string;
   placeholder: string;
+  messageRef?: string;
+  prefill?: import("./model.ts").ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const consumedPrefills = useRef(new Set<number>());
+  useEffect(() => {
+    if (!prefill || consumedPrefills.current.has(prefill.token)) return;
+    consumedPrefills.current.add(prefill.token);
+    setText(prefill.text);
+    onPrefillConsumed?.(prefill.token);
+  }, [onPrefillConsumed, prefill]);
   const send = (event: React.FormEvent) => {
     event.preventDefault();
     const value = text.trim();
@@ -435,6 +464,7 @@ function Composer({
       to,
       text: value,
       ...(reply ? { replyTo: reply.id } : {}),
+      ...(messageRef ? { ref: messageRef } : {}),
     })
       .then(() => {
         setText("");
@@ -468,7 +498,13 @@ function Composer({
   );
 }
 
-function MentionsBell({ onOpenMessage }: { onOpenMessage: OpenMessage }) {
+function MentionsBell({
+  onOpenMessage,
+  flightId,
+}: {
+  onOpenMessage: OpenMessage;
+  flightId: string | undefined;
+}) {
   const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
@@ -483,12 +519,7 @@ function MentionsBell({ onOpenMessage }: { onOpenMessage: OpenMessage }) {
   const openMention = (mention: CommsMention) => {
     mark([mention.message.id]);
     const message = mention.message;
-    onOpenMessage(
-      message.to === COMMS_CREW
-        ? { kind: "crew" }
-        : { kind: "contact", agentId: message.from, contactId: COMMS_CAPCOM },
-      message.id,
-    );
+    onOpenMessage(viewForMessage(message, flightId), message.id);
   };
   return (
     <div className="comms-mentions">
@@ -575,10 +606,31 @@ function StoredContacts({
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
           {contact.id} · {contact.count}
-          <small>{contact.lastMessage?.text ?? "No messages yet."}</small>
+          <small>
+            {contact.unread > 0 ? `${contact.unread} unread · ` : ""}
+            {contact.lastMessage?.text ?? "No messages yet."}
+          </small>
         </button>
       ))}
     </aside>
+  );
+}
+
+function PinnedMessage({ message }: { message: CommsMessage }) {
+  const [error, setError] = useState<string | null>(null);
+  const unpin = () => {
+    void apiDelete(`/api/comms/${encodeURIComponent(message.id)}/pin`)
+      .then(() => hub.refetchTopic("agents"))
+      .catch(() => setError("Could not unpin message."));
+  };
+  return (
+    <span>
+      {message.from}: {message.text}
+      <button type="button" onClick={unpin}>
+        Unpin
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </span>
   );
 }
 
@@ -587,11 +639,15 @@ function ModernConversation({
   jumpId,
   onJumped,
   onOpenMessage,
+  prefill,
+  onPrefillConsumed,
 }: {
   view: CommsView;
   jumpId: string | null;
   onJumped: () => void;
   onOpenMessage: OpenMessage;
+  prefill?: import("./model.ts").ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const crew = useResource<CommsMessagesResponse>(
     view.kind === "crew" ? RESOURCES.commsCrew : null,
@@ -599,8 +655,7 @@ function ModernConversation({
   const flight = useResource<CommsMessagesResponse>(
     view.kind === "flight" ? RESOURCES.commsFlight : null,
   );
-  const flightSeat = useResource<FlightView>(view.kind === "flight" ? RESOURCES.flight : null).data
-    ?.seat;
+  const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const agent = useResource<CommsAgentResponse>(
     "agentId" in view ? RESOURCES.commsAgent(view.agentId) : null,
   );
@@ -629,25 +684,42 @@ function ModernConversation({
   const [reply, setReply] = useState<CommsMessage | null>(null);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
   const read = useRef(new Set<string>());
+  const pendingRead = useRef(new Set<string>());
+  const [readError, setReadError] = useState<string | null>(null);
+  const [readRetry, setReadRetry] = useState(0);
   const scope = scopeFor(view);
+  const conversationScope = view.kind === "ticket" ? `ticket:${view.ref}` : scope;
   useEffect(() => {
     if (!scope || messages.length === 0) return;
+    if (readRetry > 0) setReadError(null);
     const latest = messages.at(-1);
-    if (!latest || read.current.has(`${scope}:${latest.id}`)) return;
-    read.current.add(`${scope}:${latest.id}`);
-    void apiPost("/api/comms/read", { scope, messageId: latest.id }).then(() =>
-      hub.refetchTopic("agents"),
-    );
-  }, [scope, messages]);
+    const key = latest && `${scope}:${latest.id}`;
+    if (!latest || !key || read.current.has(key) || pendingRead.current.has(key)) return;
+    pendingRead.current.add(key);
+    void apiPost("/api/comms/read", { scope, messageId: latest.id })
+      .then(() => {
+        read.current.add(key);
+        setReadError(null);
+        hub.refetchTopic("agents");
+      })
+      .catch(() => setReadError("Could not mark this conversation read."))
+      .finally(() => pendingRead.current.delete(key));
+  }, [scope, messages, readRetry]);
   const to =
     view.kind === "crew" || view.kind === "ticket"
       ? COMMS_CREW
       : view.kind === "flight"
-        ? (flightSeat?.id ??
-          messages.find((message) => message.from !== COMMS_CAPCOM)?.from ??
-          "FLIGHT")
+        ? flightSeat?.id
         : view.agentId;
   const showPins = view.kind === "crew" || view.kind === "inbox";
+  const ticketContext = ticket.data?.ticket;
+  const ticketBoardPath =
+    ticketContext?.repoId !== null &&
+    ticketContext?.repoId !== undefined &&
+    ticketContext.issueNumber !== null &&
+    ticketContext.issueNumber !== undefined
+      ? ticketPath(ticketContext.repoId, ticketContext.issueNumber)
+      : null;
   const chat = (
     <Panel
       id="chatP"
@@ -657,20 +729,36 @@ function ModernConversation({
           <span className="comms-chat-hint" title={conversationHint(view)}>
             {conversationHint(view)}
           </span>
-          <MentionsBell onOpenMessage={onOpenMessage} />
+          <MentionsBell onOpenMessage={onOpenMessage} flightId={flightSeat?.id} />
         </div>
       }
     >
+      {readError && (
+        <p className="pb crit-t s">
+          {readError}{" "}
+          <button type="button" onClick={() => setReadRetry((attempt) => attempt + 1)}>
+            Retry
+          </button>
+        </p>
+      )}
       {view.kind === "ticket" && (
-        <div className="comms-ticket-strip">Every message about {view.ref}</div>
+        <div className="comms-ticket-strip">
+          <b>{ticketContext?.ref ?? view.ref}</b>
+          <span>{ticketContext?.title ?? "Ticket details unavailable"}</span>
+          <Pill tone="neutral">{ticketContext?.status ?? "Unknown"}</Pill>
+          <span>{ticketContext?.owner ?? "Unassigned"}</span>
+          {ticketBoardPath && (
+            <a href={ticketBoardPath} onClick={(event) => followLink(event, ticketBoardPath)}>
+              Open on Board
+            </a>
+          )}
+        </div>
       )}
       {showPins && pins.length > 0 && (
         <div className="comms-pins">
           <b>Pinned</b>
           {pins.map((pin) => (
-            <span key={pin.id}>
-              {pin.from}: {pin.text}
-            </span>
+            <PinnedMessage key={pin.id} message={pin} />
           ))}
         </div>
       )}
@@ -681,22 +769,31 @@ function ModernConversation({
         onJumped={onJumped}
         onOpenMessage={onOpenMessage}
         onReply={setReply}
+        flightId={flightSeat?.id}
       />
-      <Composer
-        to={to}
-        reply={replyInView}
-        onCancelReply={() => setReply(null)}
-        label={
-          view.kind === "crew"
-            ? "Post to #crew as CAPCOM · @name pings one agent"
-            : view.kind === "flight"
-              ? "Message FLIGHT as CAPCOM"
-              : `Message ${to} as CAPCOM`
-        }
-        placeholder={
-          view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
-        }
-      />
+      {to ? (
+        <Composer
+          key={conversationScope}
+          to={to}
+          reply={replyInView}
+          onCancelReply={() => setReply(null)}
+          label={
+            view.kind === "crew"
+              ? "Post to #crew as CAPCOM · @name pings one agent"
+              : view.kind === "flight"
+                ? "Message FLIGHT as CAPCOM"
+                : `Message ${to} as CAPCOM`
+          }
+          placeholder={
+            view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
+          }
+          messageRef={view.kind === "ticket" ? view.ref : undefined}
+          prefill={prefill}
+          onPrefillConsumed={onPrefillConsumed}
+        />
+      ) : (
+        <p className="pb note">{FLIGHT_NO_SEAT}</p>
+      )}
     </Panel>
   );
   return "agentId" in view ? (
@@ -713,6 +810,8 @@ function ModernConversation({
 export function CommsConversation({
   view,
   row,
+  prefill,
+  onPrefillConsumed,
   jumpId = null,
   onJumped = () => {},
   onOpenMessage = () => {},
@@ -732,12 +831,16 @@ export function CommsConversation({
       </Panel>
     );
   }
+  const conversationScope = view.kind === "ticket" ? `ticket:${view.ref}` : scopeFor(view);
   return (
     <ModernConversation
+      key={conversationScope}
       view={view}
       jumpId={jumpId}
       onJumped={onJumped}
       onOpenMessage={onOpenMessage}
+      prefill={prefill}
+      onPrefillConsumed={onPrefillConsumed}
     />
   );
 }

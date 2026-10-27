@@ -1179,9 +1179,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const supplied = decodeURIComponent(req.params.ref);
         if (!COMMS_REF.test(supplied)) return reply.code(400).send({ error: "invalid Comms ref" });
         const context = store.commsForTicket(supplied);
+        const issueNumber = context.ref.startsWith("#") ? Number(context.ref.slice(1)) : null;
+        const board =
+          issueNumber === null
+            ? undefined
+            : config.repos
+                .flatMap((repo) => store.board(repo.id))
+                .find((item) => item.issueNumber === issueNumber);
         return {
           messages: storedCommsMessages(context.rows),
-          ticket: { ref: context.ref, linkedPr: context.linkedPr },
+          ticket: {
+            ref: context.ref,
+            linkedPr: context.linkedPr,
+            title: board?.title ?? null,
+            status: board?.status ?? null,
+            owner: board?.owner ?? null,
+            repoId: board?.repoId ?? null,
+            issueNumber: board?.issueNumber ?? null,
+          },
         };
       });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
