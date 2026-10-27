@@ -93,7 +93,12 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { readAccountStatus } from "./accounts.ts";
+import {
+  type AccountModels,
+  discoverAccountModels,
+  readAccountStatus,
+  startAccountSignIn,
+} from "./accounts.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -135,6 +140,7 @@ import {
   TeamsSelection,
 } from "./config.ts";
 import {
+  AccountBody,
   accountDuplicateReason,
   addAccount,
   addRepo,
@@ -146,7 +152,9 @@ import {
   NewRepoBody,
   NewSessionBody,
   RepoLocation,
+  removeAccount,
   SeatsBody,
+  setAccount,
   setSessionSeats,
   setTeamsSelection,
 } from "./config-write.ts";
@@ -552,6 +560,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   let stopMapRing: (() => void) | undefined;
 
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const accountModels = new Map<string, AccountModels>();
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
     const key = `${account.vendor}:${account.id}`;
@@ -1530,6 +1539,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!account) return reply.code(404).send({ error: "account not found" });
         return accountStatus(account, true);
       });
+      // Reader/writer: Setup › Accounts model list. A failed refresh is retained and shown stale.
+      api.get<{ Params: { id: string } }>("/accounts/:id/models", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        const listed = accountModels.get(account.id);
+        if (listed) return listed;
+        const models = await discoverAccountModels(account, now());
+        accountModels.set(account.id, models);
+        return models;
+      });
+      api.post<{ Params: { id: string } }>("/accounts/:id/models/refresh", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        const models = await discoverAccountModels(account, now());
+        const previous = accountModels.get(account.id);
+        const next =
+          models.error === null || !previous ? models : { ...models, models: previous.models };
+        accountModels.set(account.id, next);
+        return next;
+      });
+      // The CLI owns the interactive credential flow and writes only to its selected profile.
+      api.post<{ Params: { id: string } }>("/accounts/:id/sign-in", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        try {
+          startAccountSignIn(account);
+          return { started: true };
+        } catch {
+          return reply.code(502).send({ error: "could not start the provider CLI login" });
+        }
+      });
       // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
@@ -1559,6 +1599,95 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
                 .send({ error: e.message });
             }
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+          }
+        };
+        return deps.supervisor ? deps.supervisor.withAccountUpdate(update) : update();
+      });
+
+      const accountUsers = (id: string): string[] => [
+        ...config.loops.filter((loop) => loop.accountId === id).map((loop) => `loop ${loop.id}`),
+        ...(config.crew?.sessions ?? []).flatMap((session) =>
+          session.seats
+            .filter((seat) => seat.accountId === id)
+            .map((seat) => `seat ${seat.id} in ${session.id}`),
+        ),
+      ];
+      const applyAccounts = (next: CcConfig) => {
+        config.accounts.splice(0, config.accounts.length, ...next.accounts);
+        accountStatuses.clear();
+        accountModels.clear();
+      };
+      // Writer: Setup › Accounts (edit an account; its id is deliberately immutable).
+      api.put<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = AccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const current = config.accounts.find((account) => account.id === req.params.id);
+        if (!current) return reply.code(404).send({ error: "account not found" });
+        const bindingChanged =
+          current.vendor !== body.data.provider || current.cliProfile !== body.data.cliProfile;
+        const update = async () => {
+          if (
+            bindingChanged &&
+            (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+          )
+            return reply
+              .code(409)
+              .send({ error: "end existing seat processes before changing a CLI profile" });
+          try {
+            const result = await setAccount(
+              deps.configPath as string,
+              req.params.id,
+              body.data,
+              now(),
+            );
+            applyAccounts(result.config);
+            bus.emit("config");
+            return {
+              account: result.config.accounts.find((account) => account.id === req.params.id),
+            };
+          } catch (e) {
+            captureError(reply, e);
+            if (e instanceof ConfigWriteError)
+              return reply
+                .code(
+                  e.kind === "missing"
+                    ? 404
+                    : e.kind === "current" || e.kind === "invalid"
+                      ? 409
+                      : 500,
+                )
+                .send({ error: e.message });
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+          }
+        };
+        return deps.supervisor ? deps.supervisor.withAccountUpdate(update) : update();
+      });
+      // Writer: Setup › Accounts (only orphaned accounts can be removed).
+      api.delete<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        if (!config.accounts.some((account) => account.id === req.params.id))
+          return reply.code(404).send({ error: "account not found" });
+        const users = accountUsers(req.params.id);
+        if (users.length > 0)
+          return reply.code(409).send({ error: `account is in use by ${users.join(", ")}` });
+        const update = async () => {
+          if (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+            return reply
+              .code(409)
+              .send({ error: "end existing seat processes before removing an account" });
+          try {
+            const result = await removeAccount(deps.configPath as string, req.params.id, now());
+            applyAccounts(result.config);
+            bus.emit("config");
+            return { removed: req.params.id };
+          } catch (e) {
+            captureError(reply, e);
+            if (e instanceof ConfigWriteError)
+              return reply
+                .code(e.kind === "missing" ? 404 : e.kind === "current" ? 409 : 500)
+                .send({ error: e.message });
             return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
           }
         };

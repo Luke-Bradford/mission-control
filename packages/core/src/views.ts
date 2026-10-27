@@ -139,7 +139,9 @@ export interface ConfigView {
     vendor: "claude" | "codex";
     alertAt: number;
     stopAt: number;
-    binding?: "machine";
+    /** An absolute Codex profile directory; never contains credentials itself. */
+    cliProfile?: string;
+    binding?: "machine" | "profile";
     canCheck?: boolean;
     signInHint?: string;
     status?: CliAccountStatus;

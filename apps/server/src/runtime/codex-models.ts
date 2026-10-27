@@ -43,6 +43,11 @@ export class CodexModels {
     return this.models !== undefined;
   }
 
+  /** A copy-safe view for Setup; model discovery never exposes the auth material it read. */
+  entries(): { model: string; efforts: readonly string[] }[] {
+    return [...(this.models ?? new Map())].map(([model, efforts]) => ({ model, efforts }));
+  }
+
   load(deps: ModelDeps = {}): Promise<void> {
     this.loading ??= readModels(deps).then(
       (models) => {

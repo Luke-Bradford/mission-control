@@ -1009,10 +1009,15 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/config"],
   ["POST", "/api/profiles"],
   ["GET", "/api/accounts/status"],
+  ["GET", "/api/accounts/claude-main/models"],
   ["GET", "/api/sources/teams"],
   ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
+  ["POST", "/api/accounts/claude-main/models/refresh"],
+  ["POST", "/api/accounts/claude-main/sign-in"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
+  ["PUT", "/api/accounts/claude-main", { provider: "claude", alertAt: 85, stopAt: 95 }],
+  ["DELETE", "/api/accounts/claude-main"],
   ["POST", "/api/config/reload"],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
@@ -1563,6 +1568,10 @@ describe("local access", () => {
         expect(r.json().error).toContain("one account per provider");
         continue;
       }
+      if (url === "/api/accounts/claude-main" && method === "DELETE") {
+        expect(r.statusCode).toBe(409);
+        continue;
+      }
       if (url === "/api/attention/unknown") {
         expect(r.statusCode).toBe(404);
         continue;
@@ -1796,6 +1805,7 @@ describe("local access", () => {
             .replace(/\/guido-1$/, "/:id")
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
+            .replace(/\/accounts\/claude-main$/, "/accounts/:id")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
@@ -6197,6 +6207,13 @@ vi.mock("../src/accounts.ts", () => ({
     checkedAt: now,
     detail: null,
   }),
+  discoverAccountModels: async (account: { id: string }, now: number) => ({
+    accountId: account.id,
+    models: [{ id: "test-model", efforts: ["medium"] }],
+    checkedAt: now,
+    error: null,
+  }),
+  startAccountSignIn: () => {},
 }));
 
 it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
