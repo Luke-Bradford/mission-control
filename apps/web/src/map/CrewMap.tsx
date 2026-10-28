@@ -266,7 +266,7 @@ export function CrewMapView({
         </div>
         <div className="map-rail">
           <section className="map-card map-card-seats" aria-label="Seats">
-            <h3>Seats</h3>
+            <h2>Seats</h2>
             <SeatSelector
               {...named}
               snapshot={snapshot}
@@ -277,7 +277,7 @@ export function CrewMapView({
             />
           </section>
           <section className="map-card map-card-selected" aria-label="Selected">
-            <h3>Selected</h3>
+            <h2>Selected</h2>
             <input
               type="search"
               className="map-find"

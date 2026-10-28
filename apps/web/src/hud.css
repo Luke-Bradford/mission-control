@@ -1684,7 +1684,7 @@ th {
   gap: 4px;
 }
 #agentsList .need button {
-  min-height: 14px;
+  min-height: 24px;
   padding: 0 4px;
   line-height: 12px;
   font-size: 10px;
@@ -4617,7 +4617,7 @@ td.wrap {
   background: transparent;
 }
 .repo-pick .chip button {
-  min-height: auto;
+  min-height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
