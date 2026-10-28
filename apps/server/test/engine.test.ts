@@ -1851,6 +1851,15 @@ describe("The operator's message", () => {
     expect(loopOf()).toMatchObject({ phase: "working", budgetExtra: 1000 });
   });
 
+  it.each(["ruling", "review-failed"] as const)(
+    "a %s park resumes without a review waiver",
+    async (kind) => {
+      setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+      await h.engine.onOperatorMessage(RUN);
+      expect(loopOf()).toMatchObject({ phase: "review", reviewWaivedSha: null });
+    },
+  );
+
   it("does nothing to a run that is not parked, has ended, or whose PR was closed", async () => {
     const before = JSON.stringify(loopOf());
     await h.engine.onOperatorMessage(RUN);

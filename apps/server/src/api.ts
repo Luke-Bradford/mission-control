@@ -3106,7 +3106,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (deps.engine?.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
-        if (!(await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" }))) {
+        const reviewWaiver =
+          run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+        const lifted = reviewWaiver
+          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
+          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+        if (!lifted) {
           return reply.code(409).send({
             error: "nothing to resume: the run is not parked, or its park is not lifted this way",
           });

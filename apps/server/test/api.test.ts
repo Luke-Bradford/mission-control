@@ -6293,7 +6293,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(told).toEqual(["aside"]);
-    expect(calls).toEqual([["aside", "CAPCOM", { action: "accept" }]]);
+    expect(calls).toEqual([["aside", "CAPCOM"]]);
     expect(r.statusCode).toBe(409);
     expect(
       (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
@@ -6301,6 +6301,52 @@ describe("the first loop's engine", () => {
     ).toBe(404);
     await a.close();
   });
+
+  it.each(["ruling", "review-failed"] as const)(
+    "resumes a %s park without accepting a review waiver",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/resume",
+        headers: json,
+        payload: {},
+      });
+      expect(calls).toEqual([["aside", "CAPCOM"]]);
+      expect(r.statusCode).toBe(409);
+      await a.close();
+    },
+  );
+
+  it.each(["review", "review-ruling"] as const)(
+    "resumes a %s park by explicitly accepting its review waiver",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/resume",
+        headers: json,
+        payload: {},
+      });
+      expect(calls).toEqual([["aside", "CAPCOM", { action: "accept" }]]);
+      expect(r.statusCode).toBe(409);
+      await a.close();
+    },
+  );
 
   it.each([
     ["a body", { x: 1 }, true, "aside", 400],
