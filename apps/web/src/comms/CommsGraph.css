@@ -15,84 +15,154 @@
 .comms-traffic-panel > .ph {
   flex: 0 0 auto;
 }
+
+/* Msgs / Tokens: a segmented switch; the live segment is tinted, never outlined. */
 .comms-metric {
   display: inline-flex;
-  gap: 3px;
   min-width: 0;
   margin: 0;
-  padding: 0;
-  border: 0;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
 }
 .comms-metric button {
-  min-height: 28px;
-  padding: 3px 7px;
-  color: var(--fg-2);
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
-}
-.comms-metric button.on {
-  color: var(--fg);
-  background: var(--surface-2);
-  border-color: var(--accent);
-}
-.comms-graph {
-  position: relative;
-  flex: 1 1 auto;
-  align-self: center;
-  width: min(100%, 340px);
-  min-height: 320px;
-  overflow: hidden;
-}
-.comms-edge-line {
-  position: absolute;
-  display: block;
-  transform-origin: 0 50%;
-}
-.comms-edge-line {
-  background: #3a4658;
-  border-radius: 2px;
-  opacity: 0.58;
-}
-.comms-edge.active .comms-edge-line {
-  background: #7188aa;
-  opacity: 0.92;
-}
-.comms-edge.watching .comms-edge-line {
-  background: var(--warn);
-}
-.comms-edge.live .comms-edge-line {
-  animation: comms-edge-live 1.8s ease-out 1;
-}
-.comms-edge-count {
-  position: absolute;
-  z-index: 1;
-  padding: 0 3px;
-  color: var(--fg-2);
+  min-height: 24px;
+  padding: 2px 8px;
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 10px;
-  line-height: 15px;
-  background: var(--surface);
-  border-radius: 3px;
-  transform: translate(-50%, -50%);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
 }
-.comms-edge.dim .comms-edge-line,
+.comms-metric button:hover {
+  color: var(--fg-2);
+}
+.comms-metric button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Readout: the network's totals in one mono line above the graph. */
+.comms-graph-readout {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 12px 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.comms-graph-readout b {
+  color: var(--fg-2);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.comms-graph-readout .live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+}
+.comms-live-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+/* The stage takes the panel's spare height; the graph lays itself out in the measured box. */
+.comms-graph-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 260px;
+  margin: 4px 12px 0;
+}
+.comms-graph {
+  position: absolute;
+  inset: 0;
+}
+.comms-graph-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.comms-graph-orbit,
+.comms-graph-spine {
+  fill: none;
+  stroke: var(--line);
+  stroke-dasharray: 2 4;
+  stroke-width: 1;
+}
+
+/* Links: weight and brightness both follow the message count (--w, 0..1). */
+.comms-edge-line {
+  fill: none;
+  stroke: var(--fg-2);
+  stroke-linecap: round;
+  opacity: calc(0.28 + var(--w, 0) * 0.5);
+  transition: opacity 150ms ease;
+}
+.comms-edge.focus .comms-edge-line {
+  stroke: var(--accent);
+  opacity: calc(0.55 + var(--w, 0) * 0.45);
+}
+.comms-edge.watching .comms-edge-line {
+  stroke: var(--warn);
+  opacity: 0.9;
+}
+.comms-edge.dim .comms-edge-line {
+  opacity: 0.1;
+}
+.comms-edge-count {
+  fill: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.comms-edge.focus .comms-edge-count {
+  fill: var(--fg);
+}
 .comms-edge.dim .comms-edge-count {
-  opacity: 0.15;
+  opacity: 0.25;
 }
-@keyframes comms-edge-live {
-  0% {
-    filter: brightness(2.2);
-    box-shadow: 0 0 12px #8db0ff;
-    opacity: 1;
-  }
-  100% {
-    filter: brightness(1);
-    box-shadow: 0 0 0 transparent;
+.comms-edge-pulse {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  opacity: 0.9;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .comms-edge-pulse {
+    stroke-dasharray: 14 100;
+    stroke-dashoffset: 114;
+    animation: comms-edge-pulse 1.6s ease-out 1 forwards;
   }
 }
+@keyframes comms-edge-pulse {
+  to {
+    stroke-dashoffset: 0;
+    opacity: 0.2;
+  }
+}
+
+/* Nodes: a filled core whose size and brightness follow traffic (--heat, 0..1). */
 .comms-node {
   position: absolute;
   z-index: 2;
@@ -100,105 +170,326 @@
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  min-width: 44px;
   padding: 0;
   color: var(--fg);
   background: transparent;
   border: 0;
-  transform: translate(-50%, -50%);
-  transition: opacity 0.18s ease;
+  transform: translate(-50%, calc(-1 * var(--dot) / 2 - 1px));
+  transition: opacity 150ms ease;
+  --dot: calc(12px + var(--heat, 0) * 14px);
+}
+.comms-node.hub {
+  --dot: 26px;
+}
+.comms-node-dot {
+  position: relative;
+  display: block;
+  width: var(--dot);
+  height: var(--dot);
+  background: color-mix(
+    in srgb,
+    var(--node-color) calc(22% + var(--heat, 0) * 58%),
+    var(--surface)
+  );
+  border: 1px solid color-mix(in srgb, var(--node-color) 70%, var(--surface));
+  border-radius: 50%;
+  box-shadow: 0 0 calc(var(--heat, 0) * 14px) color-mix(in srgb, var(--node-color) 45%, transparent);
+  transition: box-shadow 150ms ease;
+}
+/* A hub is a ring with a core: the network's fixed anchors. */
+.comms-node.hub .comms-node-dot {
+  background: var(--surface);
+  border: 1.5px solid var(--node-color);
+  box-shadow:
+    inset 0 0 0 4px var(--surface),
+    inset 0 0 0 12px
+    color-mix(in srgb, var(--node-color) calc(18% + var(--heat, 0) * 50%), transparent);
+}
+.comms-node-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 120px;
+  padding: 0 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 13px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border-radius: 2px;
+}
+.comms-node-name {
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+.comms-node.hub .comms-node-name {
+  font-weight: 600;
+}
+.comms-node-count {
+  color: var(--fg-2);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.comms-node.quiet .comms-node-name,
+.comms-node.quiet .comms-node-count {
+  color: var(--muted);
+}
+.comms-node:hover .comms-node-dot,
+.comms-node:focus-visible .comms-node-dot {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.comms-node:focus-visible {
+  outline: none;
+}
+.comms-node:focus-visible .comms-node-label {
+  outline: 1px solid var(--accent);
+}
+.comms-node.selected .comms-node-dot {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--surface),
+    0 0 0 4px var(--accent);
+}
+.comms-node.selected .comms-node-name {
+  color: var(--accent);
 }
 .comms-node.dim {
-  opacity: 0.3;
+  opacity: 0.32;
 }
-.comms-node.inactive {
-  opacity: 0.34;
-  filter: saturate(0.55);
+.comms-node.inactive .comms-node-dot {
+  background: var(--surface);
+  border-style: dashed;
+  box-shadow: none;
 }
-.comms-node > span {
-  display: grid;
-  width: clamp(28px, calc(25px + var(--count, 0) * 1px), 46px);
-  height: clamp(28px, calc(25px + var(--count, 0) * 1px), 46px);
-  min-width: 30px;
-  min-height: 30px;
-  place-items: center;
-  color: var(--node-color);
-  font-family: var(--mono);
-  font-size: 10px;
-  background: var(--bg);
-  border: 2px solid var(--node-color);
-  border-radius: 50%;
+@media (prefers-reduced-motion: no-preference) {
+  .comms-node.live .comms-node-dot::after {
+    position: absolute;
+    inset: -1px;
+    border: 1px solid var(--accent);
+    border-radius: 50%;
+    content: "";
+    animation: comms-node-ping 1.6s ease-out 1 forwards;
+  }
+  .comms-live-dot {
+    animation: comms-live 2.4s ease-in-out infinite;
+  }
 }
-.comms-node small {
-  max-width: 88px;
-  overflow: hidden;
-  font-family: var(--mono);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@keyframes comms-node-ping {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.2);
+  }
 }
-.comms-empty {
-  position: absolute;
-  bottom: 8px;
-  left: 12px;
-  right: 12px;
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-s);
-  text-align: center;
+@keyframes comms-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
+
+.comms-empty,
 .comms-token-empty {
   position: absolute;
   right: 12px;
-  bottom: 8px;
+  bottom: 22%;
   left: 12px;
   margin: 0;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
   text-align: center;
+  pointer-events: none;
 }
+.comms-token-empty {
+  bottom: auto;
+  top: 58%;
+}
+
+/* Seats quiet for the whole window: one dimmed rack, not scattered rings. */
+.comms-standby {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 12px 10px;
+  border-top: 1px dashed var(--line);
+}
+.comms-standby-head {
+  padding-top: 3px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.comms-standby-head b {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.comms-standby-seats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.comms-node.idle {
+  position: static;
+  flex-direction: row;
+  gap: 5px;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 7px 1px 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  border-radius: 2px;
+  transform: none;
+  opacity: 1;
+  --dot: 6px;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.comms-node.idle .comms-node-dot {
+  background: color-mix(in srgb, var(--node-color) 45%, var(--surface));
+  border: 0;
+  box-shadow: none;
+}
+.comms-node.idle.inactive .comms-node-dot {
+  background: transparent;
+  border: 1px dashed var(--muted);
+}
+/* Hubs keep their ring when selected or quiet; these follow every other dot rule. */
+.comms-node.hub.selected .comms-node-dot {
+  box-shadow:
+    inset 0 0 0 4px var(--surface),
+    inset 0 0 0 12px color-mix(in srgb, var(--node-color) 60%, transparent),
+    0 0 0 3px var(--surface),
+    0 0 0 4px var(--accent);
+}
+.comms-node.hub.quiet:not(.selected) .comms-node-dot {
+  border-color: color-mix(in srgb, var(--node-color) 45%, var(--surface));
+}
+.comms-node.idle:hover,
+.comms-node.idle:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+.comms-node.idle:focus-visible {
+  outline: 1px solid var(--accent);
+}
+.comms-node.idle.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Chatter watch: a status line, amber only when a pair is going round in circles. */
 .comms-watch {
   flex: 0 0 auto;
-  padding: 8px 12px;
+  padding: 9px 12px 10px;
   border-top: 1px solid var(--line);
 }
-.comms-watch > div {
+.comms-watch-head {
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.comms-watch span {
+.comms-watch-head span {
   color: var(--muted);
   font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
 }
 .comms-watch p {
-  margin: 7px 0 1px;
-  color: var(--muted);
-  font-size: var(--fs-s);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 7px 0 0;
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
 }
+.comms-watch p b {
+  color: var(--warn);
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.comms-watch p.clear {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+.comms-watch p.clear::before {
+  width: 6px;
+  height: 6px;
+  background: var(--ok);
+  border-radius: 50%;
+  content: "";
+}
+.comms-watch-bar {
+  display: block;
+  height: 3px;
+  background: var(--line);
+}
+.comms-watch-bar i {
+  display: block;
+  height: 100%;
+  background: var(--warn);
+}
+
+/* Traffic: four readings with units, then the hourly instrument. */
 .comms-traffic-panel {
   flex: 0 0 auto;
 }
 .comms-traffic-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--line);
+  border-bottom: 1px solid var(--line);
 }
 .comms-traffic-stats > div {
   min-width: 0;
-  padding: 10px 9px 8px;
-  background: var(--surface);
+  padding: 10px 10px 9px;
+}
+.comms-traffic-stats > div + div {
+  border-left: 1px solid var(--line);
+}
+.comms-stat-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
 }
 .comms-traffic-stats strong {
-  display: block;
   color: var(--fg);
   font-family: var(--display);
-  font-size: 24px;
+  font-size: 22px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+.comms-traffic-stats em {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
 }
 .comms-traffic-stats strong.think {
   color: var(--think);
@@ -209,79 +500,124 @@
 .comms-traffic-stats strong.agent {
   color: var(--ok);
 }
-.comms-traffic-stats span {
+.comms-traffic-stats .nil strong {
+  color: var(--muted);
+}
+.comms-traffic-stats > div > span:last-child {
   display: block;
-  margin-top: 4px;
+  margin-top: 5px;
+  overflow: hidden;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 10px;
+  letter-spacing: 0.04em;
   line-height: 1.1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
-.comms-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 60px;
-  padding: 12px 12px 0;
+
+.comms-chart {
+  position: relative;
+  margin: 0;
+  padding: 10px 12px 10px 6px;
 }
-.comms-bar {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  justify-content: flex-end;
-  min-width: 2px;
-  height: 56px;
-}
-.comms-bar i,
-.comms-bar b {
+.comms-chart svg {
   display: block;
-  min-height: 0;
-  border-radius: 1px 1px 0 0;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
-.comms-bar i {
-  background: var(--accent);
+.comms-chart-grid line {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
 }
-.comms-bar b {
-  background: var(--think);
+.comms-chart-grid.base line {
+  stroke: var(--line-2);
+  stroke-dasharray: none;
 }
-.comms-bar-times {
+.comms-chart-grid text,
+.comms-chart-tick {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.comms-chart-trace {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.comms-chart-part {
+  fill: none;
+  stroke: var(--fg-2);
+  stroke-dasharray: 3 2;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+.comms-chart-now {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .comms-chart-now {
+    animation: comms-live 2.4s ease-in-out infinite;
+  }
+}
+.comms-hour {
+  fill: transparent;
+}
+.comms-hour:hover {
+  fill: var(--accent-soft);
+}
+.comms-chart-legend,
+.comms-chart-empty {
   display: flex;
-  justify-content: space-between;
-  padding: 4px 12px 0;
-  color: var(--muted);
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 6px 0 0 6px;
+  color: var(--fg-2);
   font-family: var(--mono);
   font-size: 10px;
+  letter-spacing: 0.04em;
 }
-.comms-bar-legend {
-  display: flex;
-  gap: 14px;
-  padding: 8px 12px 12px;
-  color: var(--fg-2);
-  font-size: var(--fs-xs);
-}
-.comms-bar-legend span {
+.comms-chart-legend span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
-.comms-bar-legend i {
-  width: 8px;
-  height: 8px;
-  background: var(--think);
-  border-radius: 2px;
+.comms-chart-legend i {
+  width: 12px;
+  height: 0;
+  border-top: 1.5px solid var(--accent);
 }
-.comms-bar-legend span + span i {
-  background: var(--accent);
+.comms-chart-legend .part i {
+  border-top: 1px dashed var(--fg-2);
+}
+.comms-chart-legend .unit {
+  margin-left: auto;
+  color: var(--muted);
+}
+.comms-chart-empty {
+  position: absolute;
+  top: 38%;
+  right: 12px;
+  left: 30px;
+  justify-content: center;
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--muted);
+  text-align: center;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
 }
 .comms-traffic-empty {
   margin: 0;
   padding: 18px 12px;
   color: var(--muted);
   font-size: var(--fs-s);
-}
-.comms-node.inactive > span {
-  border-style: dashed;
-}
-.comms-node.selected > span {
-  box-shadow: 0 0 0 4px var(--accent-soft);
 }

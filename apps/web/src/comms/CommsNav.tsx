@@ -43,11 +43,13 @@ function AgentNavRow({
     >
       <i aria-hidden="true" style={{ background: agentColor(row.index) }} />
       <span className="comms-nav-agent">
-        <b style={{ color: agentColor(row.index) }}>{callSign(row)}</b>
+        <b>{callSign(row)}</b>
         <small>{`${commsAgentRole(row)} · ${status.label.toLowerCase()}`}</small>
       </span>
       <span className="comms-nav-counts">
-        <small>{recent}</small>
+        <small className={recent === 0 ? "zero" : undefined} title={`${recent} messages in 24h`}>
+          {recent}
+        </small>
         <CountBadges unread={unread} mentions={mentions} />
       </span>
     </button>
@@ -140,7 +142,7 @@ export function CommsNav({
         className={`comms-nav-top${view.kind === "crew" ? " on" : ""}`}
         onClick={() => onNavigate(commsCrewPath())}
       >
-        <i aria-hidden="true" />
+        <i className="crew" aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>#crew</b>
           <small>{`${crewMembers} members`}</small>

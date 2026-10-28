@@ -14,7 +14,7 @@ const rows = [
 afterEach(() => hub.clear());
 
 it.each([3, 6, 10])(
-  "keeps FLIGHT centred and leaves observed loops off the crew ring for %i seats",
+  "keeps FLIGHT centred, racks quiet seats and leaves observed loops off the graph for %i seats",
   async (seats) => {
     const live = Array.from({ length: seats }, (_, index) =>
       seatRow({
@@ -31,9 +31,13 @@ it.each([3, 6, 10])(
     });
     render(<CommsGraph rows={live} flightId="flight-1" view={{ kind: "crew" }} />);
     const flight = await screen.findByRole("button", { name: /Open FLIGHT/ });
-    expect(document.querySelectorAll(".comms-node")).toHaveLength(seats + 1);
-    expect(flight.getAttribute("style")).toContain("left: 170px");
-    expect(flight.getAttribute("style")).toContain("top: 160px");
+    // CAPCOM, FLIGHT and #crew are hubs; every other live seat is a node.
+    expect(document.querySelectorAll(".comms-node")).toHaveLength(seats + 2);
+    expect(document.querySelectorAll(".comms-node.hub")).toHaveLength(3);
+    expect(flight.getAttribute("style")).toContain("left: 50%");
+    expect(flight.getAttribute("style")).toContain("top: 50%");
+    // With no traffic in the window, every seat waits on the quiet rack, not on the graph.
+    expect(document.querySelectorAll(".comms-standby .comms-node.idle")).toHaveLength(seats - 1);
     expect(screen.queryByRole("button", { name: /Open ebull-ta/ })).toBeNull();
   },
 );
@@ -57,7 +61,9 @@ it("lays out every live seat, draws static link totals, and changes scope with t
   expect(screen.getByRole("button", { name: /Open retro-1/ })).toBeTruthy();
   expect(document.querySelectorAll(".comms-edge-count")).toHaveLength(2);
   expect(document.querySelectorAll(".comms-edge-dot")).toHaveLength(0);
-  expect(screen.getByText("10")).toBeTruthy();
+  expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("10");
+  // Seats with traffic sit on the graph, sized by it; none waits on the quiet rack.
+  expect(document.querySelector(".comms-standby")).toBeNull();
 
   graph.rerender(
     <CommsGraph
@@ -66,7 +72,7 @@ it("lays out every live seat, draws static link totals, and changes scope with t
       view={{ kind: "contact", agentId: "guido-1", contactId: "retro-1" }}
     />,
   );
-  await waitFor(() => expect(screen.getByText("guido-1 ↔ retro-1")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("guido-1 ↔ retro-1 · 24h")).toBeTruthy());
   expect(document.querySelectorAll(".comms-edge:not(.dim)")).toHaveLength(1);
   expect(document.querySelector(".comms-edge:not(.dim) .comms-edge-count")?.textContent).toBe("5");
   expect(screen.getByRole("button", { name: /Open guido-1/ }).classList).toContain("selected");
@@ -153,10 +159,39 @@ it("includes the current hour and every qualifying chatter pair", async () => {
   await screen.findByText(/mc#agents/);
   expect(screen.getByText(/mc#flight/)).toBeTruthy();
   expect(document.querySelectorAll(".comms-edge.watching")).toHaveLength(2);
-  const bars = document.querySelectorAll(".comms-bar");
-  const current = [...bars].find((bar) => bar.getAttribute("title")?.endsWith("· 4 messages"));
-  expect(current).toBe(bars[bars.length - 1]);
-  expect(current?.querySelector("b")?.getAttribute("style")).toContain("height: 56px");
+  const hours = [...document.querySelectorAll(".comms-hour")];
+  expect(hours).toHaveLength(24);
+  // The newest hour is the last band, and the scale tops out at the peak.
+  expect(hours.at(-1)?.textContent).toMatch(/· 4 messages · 0 with capcom$/);
+  expect(hours.slice(0, -1).every((hour) => hour.textContent?.includes("· 0 messages"))).toBe(true);
+  expect(
+    [...document.querySelectorAll(".comms-chart-grid text")].map((tick) => tick.textContent),
+  ).toEqual(["4", "2", "0"]);
+  expect(document.querySelector(".comms-chart-trace")).not.toBeNull();
+});
+
+it("says so when a scope has no traffic, rather than drawing an empty trace", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 2 }] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "flight" }} />);
+  expect(await screen.findByText("No messages in FLIGHT ↔ CAPCOM in the last 24h.")).toBeTruthy();
+  expect(document.querySelector(".comms-chart-trace")).toBeNull();
+  expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("0");
+});
+
+it("draws the #crew channel as a hub with its traffic", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "crew", count: 3 }] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const crew = await screen.findByRole("button", { name: "Open #crew, 3 messages in 24h" });
+  expect(crew.classList).toContain("hub");
+  expect(document.querySelector(".comms-edge-count")?.textContent).toBe("3");
 });
 
 it("has an explicit empty token and chatter state before token telemetry exists", async () => {
@@ -198,5 +233,8 @@ it("resolves the configured FLIGHT seat and MC hub traffic in the open conversat
   const stats = traffic.querySelectorAll(".comms-traffic-stats strong");
   expect(stats[0]?.textContent).toBe("5");
   expect(stats[2]?.textContent).toBe("5");
-  expect(traffic.querySelectorAll(".comms-bar i[style*='height: 56px']")).toHaveLength(1);
+  // MC's reports count as CAPCOM's, so all five land in the current hour, all with CAPCOM.
+  expect(traffic.querySelector(".comms-hour:last-of-type title")?.textContent).toMatch(
+    /· 5 messages · 5 with capcom$/,
+  );
 });

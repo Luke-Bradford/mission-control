@@ -197,8 +197,14 @@ export function Conversation({
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
-const time = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/** A message's time; one from an earlier day carries its date, so old traffic never reads as today's. */
+const time = (at: number) => {
+  const date = new Date(at);
+  const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toDateString() === new Date().toDateString()
+    ? clock
+    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${clock}`;
+};
 
 function scopeFor(view: CommsView): string | null {
   if (view.kind === "crew") return "crew";
@@ -394,7 +400,6 @@ function MessagePane({
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
                 <CommsEnd id={message.from} />
-                {message.from === COMMS_CAPCOM && <Pill tone="warn">operator</Pill>}
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
                     {message.label}

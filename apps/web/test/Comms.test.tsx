@@ -649,9 +649,10 @@ describe("Comms routes", () => {
     render(
       <Comms item={null} view={{ kind: "contact", agentId: "shop-app-ta", contactId: "studio" }} />,
     );
-    expect(await screen.findByRole("navigation", { name: "Comms" })).toBeTruthy();
-    expect(screen.getByText("FLIGHT ↔ CAPCOM")).toBeTruthy();
-    expect(screen.getByText("#crew")).toBeTruthy();
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    expect(within(nav).getByText("FLIGHT ↔ CAPCOM")).toBeTruthy();
+    // The Comms graph names the #crew hub too; the nav entry is the one asserted here.
+    expect(within(nav).getByText("#crew")).toBeTruthy();
     expect((await screen.findAllByText("handoff")).length).toBe(2);
     expect(screen.getByRole("navigation", { name: "Breadcrumb" }).textContent).toContain(
       "shop-app-ta›studio",
