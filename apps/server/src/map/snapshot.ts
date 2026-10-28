@@ -34,11 +34,12 @@ export function mapTree(
           maxBuffer: GIT_MAX_BUFFER,
         })
       ).stdout;
-    const sha = (await git("rev-parse", "--verify", `${ref}^{tree}`)).trim();
-    const key = `${checkout}:${sha}`;
+    const commit = (await git("rev-parse", "--verify", `${ref}^{commit}`)).trim();
+    const key = `${checkout}:${commit}`;
     const found = cache.get(key);
     if (found) return structuredClone(found);
-    const entries = (await git("ls-tree", "-rz", sha)).split("\0").flatMap((row) => {
+    const treeSha = (await git("rev-parse", "--verify", `${commit}^{tree}`)).trim();
+    const entries = (await git("ls-tree", "-rz", treeSha)).split("\0").flatMap((row) => {
       const match = /^(?:100[0-7]{3}|120000) blob ([a-f0-9]+)\t([\s\S]+)$/.exec(row);
       return match ? [{ sha: match[1] as string, path: match[2] as string }] : [];
     });
@@ -172,7 +173,7 @@ export function mapTree(
         .map((pr) => [pr.mergeCommitSha as string, pr]),
     );
     const changes: { pr: PullRequestView; files: string[]; bug: boolean }[] = [];
-    const mergeShas = (await git("log", "--merges", "--first-parent", "--format=%H", ref))
+    const mergeShas = (await git("log", "--merges", "--first-parent", "--format=%H", commit))
       .trim()
       .split("\n")
       .filter(Boolean);
@@ -197,6 +198,7 @@ export function mapTree(
       coupling: [],
     };
     const filePrs = new Map<string, { number: number; mergedAt: number; bug: boolean }[]>();
+    const couplingFiles = new Map<string, number>();
     const pairs = new Map<string, number>();
     for (const change of changes) {
       for (const file of change.files) {
@@ -210,6 +212,7 @@ export function mapTree(
       }
       if (change.files.length > MAP_COUPLING_PR_FILES_MAX) continue;
       const unique = [...new Set(change.files)].sort();
+      for (const file of unique) couplingFiles.set(file, (couplingFiles.get(file) ?? 0) + 1);
       for (let i = 0; i < unique.length; i++)
         for (let j = i + 1; j < unique.length; j++) {
           const key = `${unique[i]}\0${unique[j]}`;
@@ -232,7 +235,7 @@ export function mapTree(
         const [left, right] = key.split("\0");
         const leftIndex = pathIndex.get(left);
         const rightIndex = pathIndex.get(right);
-        const smaller = Math.min(filePrs.get(left)?.length ?? 0, filePrs.get(right)?.length ?? 0);
+        const smaller = Math.min(couplingFiles.get(left) ?? 0, couplingFiles.get(right) ?? 0);
         return leftIndex === undefined ||
           rightIndex === undefined ||
           count < MAP_COUPLING_MIN ||

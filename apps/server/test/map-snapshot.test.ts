@@ -88,6 +88,10 @@ it("reads a fixture repo's committed tree and imports within the snapshot budget
     from: "apps/server/src/map/ring.ts",
     to: "packages/core/src/types.ts",
   });
+  expect(snapshot.imports).toContainEqual({
+    from: "apps/server/src/map/ring.ts",
+    to: "packages/core/src/index.ts",
+  });
   expect(snapshot.tree.every((f) => !f.path.startsWith("/") && f.lines >= 0)).toBe(true);
   expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThan(300_000);
 });
@@ -119,4 +123,47 @@ it("derives first-parent merged history, bug fixes, and bounded change partners"
   expect(data.hist.files[String(map)]).toEqual([5, 2, NOW - 1, [1, 2, 3, 4, 5]]);
   expect(data.hist.coupling).toContainEqual([Math.min(map, types), Math.max(map, types), 4, 1]);
   expect(data.hist.coupling.every((pair) => pair[2] >= 4 && pair[3] >= 0.5)).toBe(true);
+});
+
+it("keeps oversized PRs out of coupling frequency and caps qualifying pairs", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-coupling-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  const merges: string[] = [];
+  let number = 0;
+  const merge = (files: string[]) => {
+    number++;
+    merges.push(mergedFixture(checkout, number, files));
+  };
+  for (let i = 0; i < 5; i++) merge(["coupled-a.ts", "coupled-b.ts"]);
+  for (let i = 0; i < 5; i++) {
+    merge(["coupled-a.ts", ...Array.from({ length: 25 }, (_, n) => `large-a-${i}-${n}.ts`)]);
+    merge(["coupled-b.ts", ...Array.from({ length: 25 }, (_, n) => `large-b-${i}-${n}.ts`)]);
+  }
+  for (let i = 0; i < 4; i++) merge(["below-half-a.ts", "below-half-b.ts"]);
+  for (let i = 0; i < 5; i++) {
+    merge(["below-half-a.ts"]);
+    merge(["below-half-b.ts"]);
+  }
+  for (let group = 0; group < 3; group++) {
+    const files = Array.from({ length: 25 }, (_, n) => `group-${group}-${n}.ts`);
+    for (let i = 0; i < 4; i++) merge(files);
+  }
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const data = await mapTree(
+    checkout,
+    "origin/HEAD",
+    merges.map((sha, i) => storedPr(i + 1, sha)),
+    [],
+    NOW,
+  );
+  const a = data.tree.findIndex((file) => file.path === "coupled-a.ts");
+  const b = data.tree.findIndex((file) => file.path === "coupled-b.ts");
+  const belowA = data.tree.findIndex((file) => file.path === "below-half-a.ts");
+  const belowB = data.tree.findIndex((file) => file.path === "below-half-b.ts");
+  expect(data.hist.coupling).toContainEqual([Math.min(a, b), Math.max(a, b), 5, 1]);
+  expect(data.hist.coupling).not.toContainEqual(
+    expect.arrayContaining([Math.min(belowA, belowB), Math.max(belowA, belowB)]),
+  );
+  expect(data.hist.coupling).toHaveLength(600);
 });
