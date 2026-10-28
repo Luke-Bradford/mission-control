@@ -92,7 +92,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const tz = useTz();
   const now = useNow();
   const { inView } = useSessionScope();
-  const profiles = useResource<RepoProfile[]>(RESOURCES.repoProfiles).data ?? NO_PROFILES;
+  const profilesRes = useResource<RepoProfile[]>(RESOURCES.repoProfiles);
+  const profiles = profilesRes.data ?? NO_PROFILES;
 
   const [stored, setStored] = useState(() => readKey(LANE_KEY));
   const [doneDays, setDoneDays] = useState<DoneRange>(DONE_RANGES[0]);
@@ -205,6 +206,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     Boolean(crewRes.data || crewRes.error) &&
     Boolean(attentionRes.data || attentionRes.error) &&
     Boolean(configRes.data || configRes.error) &&
+    Boolean(profilesRes.data || profilesRes.error) &&
     loopRes.every((res) => Boolean(res.data || res.error));
   const loading = !boardDataReady;
   const detailItem =

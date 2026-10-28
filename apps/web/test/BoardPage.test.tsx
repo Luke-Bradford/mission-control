@@ -1577,6 +1577,32 @@ describe("repos together or apart", () => {
     expect(head?.textContent).toBe("Blocked 1");
   });
 
+  it("Apart waits for profiles before mounting its final column layout", async () => {
+    const normal = seed();
+    let resolveProfiles: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/repos/profiles"
+          ? new Promise<Response>((resolve) => {
+              resolveProfiles = resolve;
+            })
+          : normal(input, init),
+      ),
+    );
+    localStorage.setItem("mc-board-layout", "apart");
+
+    const view = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(resolveProfiles).toBeTypeOf("function"));
+    expect(view.container.querySelector(".board-placeholder")).toBeTruthy();
+    expect(view.container.querySelector(".repokanban")).toBeNull();
+
+    act(() => resolveProfiles?.(Response.json(PROFILES)));
+    await waitFor(() => expect(view.container.querySelectorAll(".repokanban")).toHaveLength(2));
+    const [shopApp] = Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
+    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]);
+  });
+
   it("Apart before profiles load: every column, headed by the repo id alone", async () => {
     const fetch = stub({
       shopApp: [todo(1)],
