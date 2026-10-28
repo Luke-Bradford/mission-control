@@ -2110,21 +2110,42 @@ describe("fileMinorFindings", () => {
       issueNumber: 81,
     });
   });
-  it("falls back when the configured rolling tech-debt issue no longer exists", async () => {
+  it.each([
+    "GraphQL: Could not resolve to an issue or pull request with the number of 656. (repository.issue)",
+    "GraphQL: Could not resolve to an Issue with the number of 656. (repository.issue)",
+    "HTTP 404: Not Found",
+  ])(
+    "falls back when the configured rolling tech-debt issue no longer exists: %s",
+    async (stderr) => {
+      const r = setup();
+      ghAnswers.push(
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+        }),
+        () => ({ code: 1, stdout: "", stderr }),
+        () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
+        () => ({ code: 0, stdout: "" }),
+      );
+      expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toMatchObject({
+        ok: true,
+        issueNumber: 81,
+      });
+    },
+  );
+  it("refuses, without filing, on any other gh error viewing the rolling issue", async () => {
     const r = setup();
     ghAnswers.push(
       () => ({
         code: 0,
         stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
       }),
-      () => ({ code: 1, stdout: "", stderr: "HTTP 404: Not Found" }),
-      () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
-      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 1, stdout: "", stderr: "GraphQL: API rate limit exceeded for user ID 1." }),
     );
     expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toMatchObject({
-      ok: true,
-      issueNumber: 81,
+      ok: false,
     });
+    expect(ghCalls).toHaveLength(2);
   });
   it("refuses RETRO's fallback instead of silently dropping findings", async () => {
     ghAnswers.push(() => ({

@@ -375,8 +375,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return transient(why === "" ? `gh ${what} failed` : `gh ${what} failed: ${why}`);
   };
 
-  /** `gh issue view` identifies a deleted or mistyped issue with GitHub's HTTP 404 response. */
-  const ghNotFound = (stderr: string): boolean => /\bHTTP 404: Not Found\b/i.test(cleanLog(stderr));
+  /**
+   * `gh issue view` reports a deleted or mistyped issue as GraphQL's "Could not resolve to an issue or
+   * pull request with the number of N" (gh 2.95), or as an HTTP 404 from the REST path.
+   */
+  const ghNotFound = (stderr: string): boolean =>
+    /\bHTTP 404: Not Found\b|Could not resolve to an issue(?: or pull request)? with the number of/i.test(
+      cleanLog(stderr),
+    );
 
   /** gh's answer as a JSON object, or a transient refusal naming the call. */
   async function ghJson(args: string[], what: string): Promise<Record<string, unknown> | Refusal> {
