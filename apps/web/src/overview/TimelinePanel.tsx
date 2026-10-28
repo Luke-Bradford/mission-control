@@ -5,7 +5,7 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { agentPath, followLink } from "../router.ts";
+import { agentPath, followLink, PAGE_PATHS } from "../router.ts";
 import { timelineGeometry } from "./chartGeometry.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
@@ -100,7 +100,21 @@ export function TimelinePanel() {
     );
   });
   return (
-    <Panel id="timelineP" title="Timeline" sub="last 60 minutes">
+    <Panel
+      id="timelineP"
+      title="Timeline"
+      sub="last 60 minutes"
+      actions={
+        <a
+          className="ph-link"
+          href={PAGE_PATHS.map}
+          title="Where in each repo the crew is working (g m)"
+          onClick={(e) => followLink(e, PAGE_PATHS.map)}
+        >
+          Activity map →
+        </a>
+      }
+    >
       <div className="pb scroll timeline-body">
         <div
           className="overview-lanes"

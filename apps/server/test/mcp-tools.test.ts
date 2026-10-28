@@ -23,6 +23,7 @@ import {
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  commsCutMarker,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
@@ -42,6 +43,7 @@ import {
   fixKey,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
+  MC_COMMS_READ_MAX,
   MC_PLAN_ALREADY,
   MC_PLAN_BODY_UNCLOSED,
   MC_PLAN_GH_FAILED,
@@ -61,6 +63,7 @@ import {
   MC_RUN_ENDED,
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
+  MC_TEXT_MAX,
   MC_TOOL_GRANTS,
   MC_TOOL_NAMES,
   MC_TOOLS,
@@ -312,6 +315,7 @@ afterEach(() => {
 describe("the mc tools", () => {
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
@@ -323,6 +327,7 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.commsRead,
       MC_TOOLS.commsSend,
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
@@ -1063,6 +1068,7 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "comms_read",
         "comms_send",
         "comms_react",
         "commit",
@@ -1079,6 +1085,7 @@ describe("through /mcp", () => {
         ).error.message,
       ).toBe("unknown tool");
       expect(await names(reader)).toEqual([
+        "comms_read",
         "comms_send",
         "comms_react",
         "ask_operator",
@@ -1171,8 +1178,114 @@ describe("through /mcp", () => {
 });
 
 describe("Comms seat tools", () => {
+  const read = (args: unknown = {}, ts = tools, ctx = CTX) =>
+    tool("comms_read", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
+    store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
+    store.addComms({ at: NOW - 3, from: "guido-2", to: "guido-1", ticket: null, text: "direct" });
+    store.addComms({
+      at: NOW - 2,
+      from: "retro",
+      to: "CAPCOM",
+      ticket: null,
+      text: "mentioned @guido-1",
+      mentions: ["guido-1"],
+    });
+    store.addComms({ at: NOW - 1, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    const result = await read({ limit: 2 });
+    const parsed = JSON.parse(result.text) as { messages: { text: string; id: string }[] };
+    expect(parsed.messages.map((message) => message.text)).toEqual([
+      "direct",
+      "mentioned @guido-1",
+    ]);
+    expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
+    expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
+
+  it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
+    const own = store.addComms({
+      at: NOW - 6,
+      from: "guido-1",
+      to: "retro",
+      ticket: null,
+      text: "mine",
+    });
+    store.addComms({ at: NOW - 5, from: "retro", to: "crew", ticket: null, text: "crew" });
+    const pinned = store.addComms({
+      at: NOW - 4,
+      from: "guido-2",
+      to: "retro",
+      ticket: null,
+      text: "pinned private",
+    });
+    store.addComms({
+      at: NOW - 3,
+      from: "retro",
+      to: "guido-2",
+      ticket: null,
+      text: "reply to mine",
+      replyTo: own?.id,
+    });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    if (own === null || pinned === null) throw new Error("expected stored rows");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
+    const pins = vi.spyOn(store, "commsPins");
+    try {
+      const parsed = JSON.parse((await read({})).text) as {
+        messages: { text: string; pinned: boolean }[];
+      };
+      expect(parsed.messages.map((m) => [m.text, m.pinned])).toEqual([
+        ["mine", false],
+        ["crew", false],
+        ["pinned private", true],
+        ["reply to mine", false],
+      ]);
+      // the pins are read once per call, not once per row
+      expect(pins).toHaveBeenCalledTimes(1);
+    } finally {
+      pins.mockRestore();
+    }
+  });
+
+  it("cuts each message's text at MC_TEXT_MAX with the stored-text marker", async () => {
+    const long = "é".repeat(MC_TEXT_MAX + 5);
+    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: null, text: long });
+    const parsed = JSON.parse((await read({})).text) as { messages: { text: string }[] };
+    expect(parsed.messages[0]?.text).toBe(
+      `${"é".repeat(MC_TEXT_MAX)}${commsCutMarker(MC_TEXT_MAX, MC_TEXT_MAX + 5)}`,
+    );
+  });
+
+  it("keeps the result under MC_COMMS_READ_MAX by leaving out the oldest messages, and says so", async () => {
+    for (let n = 0; n < 30; n++)
+      store.addComms({
+        at: NOW - 100 + n,
+        from: "retro",
+        to: "crew",
+        ticket: null,
+        text: `${n} ${"x".repeat(MC_TEXT_MAX)}`,
+      });
+    const result = await read({ limit: 100 });
+    expect(result.text.length).toBeLessThanOrEqual(MC_COMMS_READ_MAX);
+    const parsed = JSON.parse(result.text) as {
+      omitted: number;
+      note: string;
+      messages: { text: string }[];
+    };
+    expect(parsed.omitted).toBeGreaterThan(0);
+    expect(parsed.omitted + parsed.messages.length).toBe(30);
+    expect(parsed.note).toBe(
+      `${parsed.omitted} older messages were left out to keep this under ${MC_COMMS_READ_MAX} characters.`,
+    );
+    // the newest survive
+    expect(parsed.messages.at(-1)?.text.startsWith("29 ")).toBe(true);
+    expect(parsed.messages[0]?.text.startsWith(`${parsed.omitted} `)).toBe(true);
+    // a small read has no note
+    expect(JSON.parse((await read({ limit: 2 })).text)).not.toHaveProperty("omitted");
+  });
 
   it("persists every supported destination, label, ref, reply and mention", async () => {
     liveSeat("guido-2", "guido-2:live");

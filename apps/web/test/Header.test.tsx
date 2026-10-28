@@ -100,6 +100,7 @@ describe("Header", () => {
       "Flight",
       "Board",
       "Agents",
+      "Map",
       "Comms",
       "Telemetry",
     ]);
@@ -108,6 +109,7 @@ describe("Header", () => {
       "/flight",
       "/board",
       "/agent",
+      "/map",
       "/comms",
       "/telemetry",
     ]);
@@ -143,7 +145,15 @@ describe("Header", () => {
     render(<Header page="overview" />);
     const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
     expect(btn.querySelector(".lamp.crit")).not.toBeNull();
-    for (const name of [/^Overview/, /^Flight/, /^Board/, /^Agents/, /^Comms/, /^Telemetry/])
+    for (const name of [
+      /^Overview/,
+      /^Flight/,
+      /^Board/,
+      /^Agents/,
+      /^Map/,
+      /^Comms/,
+      /^Telemetry/,
+    ])
       expect(within(tab(name)).queryByRole("img")).toBeNull();
   });
 

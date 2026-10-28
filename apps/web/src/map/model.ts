@@ -1,10 +1,16 @@
-import type { FindingSeverity, MapDelta, MapSnapshot } from "@mc/core";
+import type { FindingSeverity, MapDelta, MapSeat, MapSnapshot } from "@mc/core";
+import { areaOf, forceLayout } from "./layout.ts";
+
+export const isDocked = (seat: MapSeat, now: number): boolean =>
+  seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
 
 export const level = (lines: number): number => [10, 50, 200, 500].filter((n) => lines > n).length;
 export const tokenBand = (tokens: number): number =>
   tokens < 100 ? 0 : tokens < 1000 ? 1 : tokens < 4000 ? 2 : 3;
 export const pinToken = (severity: FindingSeverity): string =>
   severity === "Critical" ? "--crit" : severity === "Important" ? "--warn" : "--muted";
+/** A file's brightness in fileStyle: written by a working seat, by a docked one, read, untouched. */
+export const BRIGHTNESS = { written: 1, docked: 0.45, read: 0.55, untouched: 0.3 } as const;
 export interface MapNode {
   path: string;
   parent: string | null;
@@ -18,18 +24,19 @@ const hash = (s: string) => {
   n = Math.imul(n ^ (n >>> 16), 0x45d9f3b);
   return (n ^ (n >>> 16)) >>> 0;
 };
-export const areaTone = (area: string): number => hash(area) / 0xffffffff;
-const areaOf = (path: string) =>
-  ["apps/server", "apps/web", "packages/core", "docs", "roles"].find(
-    (a) => path === a || path.startsWith(`${a}/`),
-  ) ?? path.split("/")[0];
 
-/** Path-derived neighbourhoods keep branch additions from moving the origin tree. */
+/**
+ * The origin tree gets the prototype's force-directed layout (layout.ts), computed once per tree.
+ * Files new on a branch (`base` given) are placed under their folder by path, so the rest never
+ * moves; a tree too large to draw file by file collapses into folders, placed the same way.
+ */
 export function layoutTree(
   tree: MapSnapshot["tree"],
   base: MapNode[] = [],
   collapse = tree.length > 2000,
+  imports: MapSnapshot["imports"] = [],
 ): MapNode[] {
+  if (!base.length && !collapse) return forceLayout(tree, imports);
   const nodes = new Map<string, MapNode>(base.map((n) => [n.path, { ...n, files: [...n.files] }]));
   nodes.set("", { path: "", parent: null, area: "", position: [0, 0, 0], files: [], count: 0 });
   const ensure = (path: string, lines?: number): MapNode => {
@@ -48,7 +55,7 @@ export function layoutTree(
     const node: MapNode = {
       path,
       parent,
-      area: areaOf(path),
+      area: areaOf(path, lines !== undefined),
       position: [
         p.position[0] + Math.cos(direction) * distance,
         p.position[1] + ((h % 101) / 100 - 0.5) * distance,
@@ -86,8 +93,7 @@ export function fileStyle(
 ) {
   const has = (f: string) => files.includes(f);
   const seats = snapshot.seats.map((seat, index) => {
-    const docked =
-      seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
+    const docked = isDocked(seat, now);
     const changes = seat.scope.modified.filter((c) => has(c.file));
     return { seat, index, docked, changes, read: !docked && seat.scope.read.some(has) };
   });
@@ -103,7 +109,13 @@ export function fileStyle(
         : `--s${((indices[owner.seat.seat] ?? owner.index) % 7) + 1}`
       : "--muted",
     area,
-    brightness: owner ? (writers.length ? (owner.docked ? 0.45 : 1) : 0.55) : 0.3,
+    brightness: owner
+      ? writers.length
+        ? owner.docked
+          ? BRIGHTNESS.docked
+          : BRIGHTNESS.written
+        : BRIGHTNESS.read
+      : BRIGHTNESS.untouched,
     level: level(add + rem),
     add,
     rem,
@@ -154,6 +166,7 @@ export function applyDelta(
   if (delta.seq !== snapshot.seq + 1) return null;
   const next = structuredClone(snapshot);
   next.seq = delta.seq;
+  if (delta.type === "message") return null;
   if (!("seat" in delta)) return next;
   const seat = next.seats.find((s) => s.seat === delta.seat);
   if (!seat) return null;
@@ -164,6 +177,8 @@ export function applyDelta(
         if (!seat.scope.read.includes(file)) seat.scope.read.push(file);
       break;
     case "call.end": {
+      // End frames lack a tool id and result time; fetch authoritative badge data.
+      if (delta.error || delta.refused || (delta.tests && delta.tests.runner !== null)) return null;
       const i = seat.calls.findIndex(
         (c) =>
           c.files.length === delta.files.length && c.files.every((f) => delta.files.includes(f)),
@@ -173,12 +188,19 @@ export function applyDelta(
       break;
     }
     case "state":
+      // A state frame does not carry the park reason or test-lock queue data.
+      if (delta.state === "parked" || seat.badges.waiting) return null;
       seat.state = delta.state;
       seat.since = delta.since;
       break;
     case "edit":
     case "diff": {
       let change = seat.scope.modified.find((c) => c.file === delta.file);
+      if (
+        seat.badges.tests &&
+        (delta.type === "edit" || change?.add !== delta.add || change?.rem !== delta.rem)
+      )
+        seat.badges.tests.editedSince = true;
       if (!change) {
         change = {
           file: delta.file,

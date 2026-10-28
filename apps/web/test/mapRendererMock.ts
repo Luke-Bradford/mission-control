@@ -2,7 +2,13 @@ import { vi } from "vitest";
 
 vi.mock("three", async (original) => {
   const { vi } = await import("vitest");
-  const state = { render: vi.fn(), dispose: vi.fn(), fail: false };
+  const state = {
+    render: vi.fn(),
+    dispose: vi.fn(),
+    forceContextLoss: vi.fn(),
+    fail: false,
+    created: 0,
+  };
   return {
     ...(await original<typeof import("three")>()),
     WebGLRenderer: class {
@@ -10,8 +16,10 @@ vi.mock("three", async (original) => {
       domElement = document.createElement("canvas");
       render = state.render;
       dispose = state.dispose;
+      forceContextLoss = state.forceContextLoss;
       constructor() {
         if (state.fail) throw new Error("No WebGL");
+        state.created++;
       }
       setPixelRatio() {}
       setSize() {}
@@ -22,6 +30,12 @@ vi.mock("three", async (original) => {
 import * as THREE from "three";
 export const renderer = (
   THREE.WebGLRenderer as unknown as {
-    state: { render: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; fail: boolean };
+    state: {
+      render: ReturnType<typeof vi.fn>;
+      dispose: ReturnType<typeof vi.fn>;
+      forceContextLoss: ReturnType<typeof vi.fn>;
+      fail: boolean;
+      created: number;
+    };
   }
 ).state;

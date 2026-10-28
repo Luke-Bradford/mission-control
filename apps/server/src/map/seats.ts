@@ -58,6 +58,8 @@ export function mapSeats(
         });
     }
     const modified = new Map<string, MapSeat["scope"]["modified"][number]>();
+    // every branch whose unmerged changes the seat's scope carries: its run's, then set-aside runs'
+    const branches: string[] = [];
     for (const candidate of flight
       ? []
       : [
@@ -70,6 +72,7 @@ export function mapSeats(
           .some((p) => p.branch === candidate.branch && p.state === "merged")
       )
         continue;
+      if (candidate.branch && !branches.includes(candidate.branch)) branches.push(candidate.branch);
       for (const change of ring.scope(candidate.id).modified) {
         const previous = modified.get(change.file);
         if (previous) {
@@ -84,6 +87,7 @@ export function mapSeats(
       since: row.stateSince,
       ticket,
       title: !flight && row.ticketTitle ? safe(row.ticketTitle) : null,
+      branches,
       calls: live
         ? calls
             .filter((c) => c.end === null)
@@ -132,11 +136,26 @@ export function mapSeats(
             ? { sha: pr.headSha, checks: pr.checks, at: pr.updatedAt }
             : null,
         waiting: waiting
-          ? { kind: "test-lock", since: waiting.since, reason: safe(waiting.command) }
+          ? {
+              kind: "test-lock",
+              since: waiting.since,
+              reason: safe(waiting.command),
+              stopped: false,
+            }
           : row.loop?.parked
-            ? { kind: "parked", since: row.stateSince, reason: safe(row.loop.parked) }
+            ? {
+                kind: "parked",
+                since: row.stateSince,
+                reason: safe(row.loop.parked),
+                stopped: run?.endedBy === "operator",
+              }
             : session?.state === "parked"
-              ? { kind: "parked", since: session.updatedAt, reason: safe(session.reason ?? "") }
+              ? {
+                  kind: "parked",
+                  since: session.updatedAt,
+                  reason: safe(session.reason ?? ""),
+                  stopped: false,
+                }
               : null,
       },
     };

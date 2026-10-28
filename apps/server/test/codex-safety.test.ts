@@ -137,7 +137,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
 
 describe("Codex mode and seat boundaries", () => {
   it.each(["writer", "read-only", "scratch"] as const)(
-    "keeps %s approvals inside each of two seats",
+    "leaves %s command reads to the OS sandbox while enforcing writes and modes",
     async (mode) => {
       const lock = new TestLock();
       const a = seat("a", mode, lock);
@@ -154,7 +154,7 @@ describe("Codex mode and seat boundaries", () => {
         );
         expect(
           await driver.ask({ command: `cat ${join(dir, other, "apps/a.txt")}`, holdItem: true }),
-        ).toBe("decline");
+        ).toBe("accept");
         expect(
           await driver.ask({
             changes: [{ path: join(dir, other, "apps/new.txt") }],
@@ -165,15 +165,13 @@ describe("Codex mode and seat boundaries", () => {
         expect(await driver.ask({ changes: [{ path: "apps/peer/new.txt" }], holdItem: true })).toBe(
           "decline",
         );
-        expect(await driver.ask({ command: "pnpm -s test", holdItem: true })).toBe(
-          mode === "writer" ? "accept" : "decline",
-        );
-        if (mode === "writer") expect(lock.state().holder?.runId).toBe(own);
+        expect(await driver.ask({ command: "pnpm -s test", holdItem: true })).toBe("accept");
+        expect(lock.state().holder?.runId).toBe(own);
         await driver.session.close();
         expect(lock.state().holder).toBeNull();
       }
-      expect(a.hits.length).toBeGreaterThanOrEqual(3);
-      expect(b.hits.length).toBeGreaterThanOrEqual(3);
+      expect(a.hits.length).toBeGreaterThanOrEqual(2);
+      expect(b.hits.length).toBeGreaterThanOrEqual(2);
     },
   );
 

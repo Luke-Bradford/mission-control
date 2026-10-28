@@ -16,7 +16,7 @@ import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
+import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
@@ -30,6 +30,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
   { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
+  { page: "map", label: "Map", to: PAGE_PATHS.map },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
 ];
@@ -368,21 +369,21 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
 function DockButton({ page, waiting }: { page: Page; waiting: number }) {
   const dock = useDock();
   const inComms = page === "comms";
-  const inSetup = page === "setup";
+  const fullWidth = FULL_WIDTH_PAGES.has(page);
   const title = inComms
     ? "FLIGHT chat is open in Comms"
-    : inSetup
+    : fullWidth
       ? "Open FLIGHT chat in Comms (f)"
       : "Show or hide FLIGHT's chat (f)";
   return (
     <button
       type="button"
-      className={`iconbtn${inComms || (!inSetup && dock.visible) ? " on" : ""}`}
+      className={`iconbtn${inComms || (!fullWidth && dock.visible) ? " on" : ""}`}
       title={title}
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={inComms ? true : inSetup ? undefined : dock.visible}
+      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible}
       onClick={() => {
-        if (inSetup) navigate(PAGE_PATHS.comms);
+        if (fullWidth) navigate(PAGE_PATHS.comms);
         // Comms already is FLIGHT's full conversation; the dock is not mounted here.
         else if (!inComms) dock.toggle();
       }}

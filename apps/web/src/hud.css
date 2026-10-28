@@ -1150,6 +1150,21 @@ th {
   align-items: center;
   flex-wrap: wrap;
 }
+/* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
+.ph .act .ph-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ph .act .ph-link:hover,
+.ph .act .ph-link:focus-visible {
+  text-decoration: underline;
+}
 .pb {
   padding: 2px 14px 12px;
   min-width: 0;

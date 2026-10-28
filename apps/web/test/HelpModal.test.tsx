@@ -88,7 +88,7 @@ describe("HelpModal", () => {
     act(() => openHelp());
     const text = screen.getByRole("dialog").textContent ?? "";
     for (const line of [
-      "g then o Overview · f FLIGHT · b Board · a Agent · c Comms · t Telemetry · s Setup",
+      "g then o Overview · f FLIGHT · b Board · a Agent · m Map · c Comms · t Telemetry · s Setup",
       "f show or hide FLIGHT · j k next or previous agent · / message the selected agent · i interrupt it · Esc close",
       "Amber breathes slowly where something waits on you; green breathes where an agent is working. Acknowledge an item to stop its pulse; it clears when you act. Colour always comes with a word, so nothing depends on colour alone. @CAPCOM marks a message addressed to you.",
       "Answer, Open and Read the brief all open one panel for that item: what is asked, why, what FLIGHT checked, your choices, and a chat about it. Every item FLIGHT brings starts with a catch-up: new or follow-up, the story so far, and what to be aware of. Show build status (bottom left) marks every panel with how buildable it is today.",
