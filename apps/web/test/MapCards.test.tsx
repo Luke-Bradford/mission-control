@@ -359,7 +359,7 @@ it("opens an arc's exact conversation pair and ticket even without a pending que
   });
   render(<CrewMapView snapshot={s} />);
   await screen.findByText("3D scene");
-  const opener = screen.getByRole("button", { name: "Zoom to GUIDO-1" });
+  const opener = screen.getByRole<HTMLButtonElement>("button", { name: "Zoom to GUIDO-1" });
   act(() =>
     vi
       .mocked(MapScene)
