@@ -1,4 +1,4 @@
-import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CrewMapPanel, CrewMapView } from "../src/map/CrewMap.tsx";
@@ -298,4 +298,39 @@ it("refreshes an open checkout diff after a live map delta", async () => {
   );
   await screen.findByText("after edit");
   expect(screen.queryByText("before edit")).toBeNull();
+});
+
+it("delivers each live animation once, including events that require a snapshot refetch", async () => {
+  const listeners: Record<string, (e: MessageEvent) => void> = {};
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      addEventListener(k: string, cb: (e: MessageEvent) => void) {
+        listeners[k] = cb;
+      }
+      close() {}
+    },
+  );
+  const animate = vi.fn();
+  const get = vi.fn(async () => structuredClone(mapSnapshotFixture));
+  const live = new LiveMap("sample", get, vi.fn(), vi.fn(), vi.fn(), animate);
+  live.start();
+  await waitFor(() => expect(get).toHaveBeenCalledOnce());
+  for (const delta of mapDeltaFixture) {
+    const event = new MessageEvent("map", { data: JSON.stringify(delta) });
+    listeners.map(event);
+    listeners.map(event);
+  }
+  expect(animate.mock.calls.map(([event]) => event.delta)).toEqual(mapDeltaFixture);
+  expect(get.mock.calls.length).toBeGreaterThan(1);
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  listeners.map(
+    new MessageEvent("map", { data: JSON.stringify({ ...mapDeltaFixture[0], seq: 8 }) }),
+  );
+  expect(animate).toHaveBeenCalledTimes(mapDeltaFixture.length);
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(animate).toHaveBeenCalledTimes(mapDeltaFixture.length);
+  live.stop();
+  hidden.mockRestore();
 });

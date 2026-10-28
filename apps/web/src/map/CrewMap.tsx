@@ -1,12 +1,16 @@
 import type { Crew, FileDiff, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
 import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
+import { AgentCards } from "./AgentCards.tsx";
+import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
+import type { BadgeKind } from "./cards.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pickRepo, pinToken } from "./model.ts";
+import type { MessageArc, MotionEvent } from "./motion.ts";
 import "./map.css";
 
 const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
@@ -55,10 +59,14 @@ function LiveCrewMap() {
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [skipped, setSkipped] = useState("");
   const [error, setError] = useState<Error | null>(null);
+  const [events, setEvents] = useState<MotionEvent[]>([]);
+  const [epoch, setEpoch] = useState(0);
   useEffect(() => {
     setSnapshot(null);
     setSkipped("");
     setError(null);
+    setEvents([]);
+    setEpoch(0);
     if (!repo) return;
     const live = new LiveMap(
       repo,
@@ -67,6 +75,11 @@ function LiveCrewMap() {
       setError,
       (calls, messages) =>
         setSkipped(`While this tab was hidden: ${calls} calls, ${messages} messages`),
+      (event) =>
+        setEvents((previous) =>
+          [...previous.filter((e) => e.at > event.at - 6000), event].slice(-200),
+        ),
+      setEpoch,
     );
     live.start();
     return () => live.stop();
@@ -100,6 +113,8 @@ function LiveCrewMap() {
         <CrewMapView
           key={repo}
           snapshot={snapshot}
+          events={events}
+          epoch={epoch}
           indices={Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index]))}
         />
       ) : (
@@ -112,15 +127,43 @@ function LiveCrewMap() {
 export function CrewMapView({
   snapshot,
   indices = {},
+  events = [],
+  epoch = 0,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
+  events?: MotionEvent[];
+  epoch?: number;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
   const [rotate, setRotate] = useState(false);
+  const [agent, setAgent] = useState<string | null>(null);
+  const [agentFocus, setAgentFocus] = useState<{ seat: string; request: number } | null>(null);
+  const [badge, setBadge] = useState<{
+    seat: string;
+    kind: BadgeKind;
+    conversation?: MessageArc;
+  } | null>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const agentsHeading = useRef<HTMLHeadingElement>(null);
+  const drawerId = useId();
+  const badgeSeat = snapshot.seats.find((s) => s.seat === badge?.seat);
+  const closeBadge = useCallback(() => {
+    setBadge(null);
+    queueMicrotask(() => {
+      const target = opener.current?.isConnected ? opener.current : agentsHeading.current;
+      target?.focus();
+    });
+  }, []);
+  useEffect(() => {
+    if (agent && !snapshot.seats.some((s) => s.seat === agent)) setAgent(null);
+  }, [agent, snapshot.seats]);
+  useEffect(() => {
+    if (badge && !badgeSeat && !badge.conversation) closeBadge();
+  }, [badge, badgeSeat, closeBadge]);
   const treeKey = JSON.stringify(snapshot.tree);
   const nodes = useMemo(() => layoutTree(JSON.parse(treeKey)), [treeKey]);
   const allFiles = [
@@ -152,9 +195,11 @@ export function CrewMapView({
     displayNodes.find((n) => n.path === focus) ??
     displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const select = (path: string) => {
+    setBadge(null);
     setSelected(path);
   };
   const searchSelect = (path: string) => {
+    setBadge(null);
     setSelected(path);
     setFocus(null);
     queueMicrotask(() => setFocus(path));
@@ -177,6 +222,7 @@ export function CrewMapView({
           onClick={() => {
             setHome(home + 1);
             setFocus(null);
+            setAgentFocus(null);
           }}
         >
           Home view
@@ -198,54 +244,103 @@ export function CrewMapView({
               selected={selected}
               indices={indices}
               onSelect={select}
+              events={events}
+              epoch={epoch}
+              agent={agent}
+              agentFocus={agentFocus}
+              onAgentSelect={setAgent}
+              onArc={(conversation, button) => {
+                opener.current = button;
+                setSelected(null);
+                const seat = snapshot.seats.find(
+                  (s) =>
+                    s.seat !== "CAPCOM" &&
+                    s.seat !== "HUB" &&
+                    (s.seat === conversation.from || s.seat === conversation.to),
+                );
+                setBadge({ seat: seat?.seat ?? "", kind: "questions", conversation });
+              }}
             />
           </Suspense>
           <p className="map-note">
-            drag to orbit · scroll to zoom · click a file · ⌖ zooms to a file
+            drag to orbit · scroll to zoom · click an orb or card to select · ⌖ zooms
           </p>
         </div>
-        <aside className="map-detail" aria-label="Selected file">
-          {query && (
-            <div className="map-results">
-              {matches.slice(0, 60).map((n) => (
-                <button type="button" key={n} onClick={() => searchSelect(n)}>
-                  {n}
-                </button>
-              ))}
-              {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-              {!matches.length && <p>No matching files.</p>}
-            </div>
-          )}
-          {selected ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setFocus(null);
-                  queueMicrotask(() => setFocus(selected));
-                }}
-              >
-                ⌖ Zoom to file
-              </button>
-              <button type="button" onClick={() => setSelected(null)}>
-                Close
-              </button>
-              <FileDrawer
+        <div className="map-sidebar">
+          <AgentCards
+            snapshot={snapshot}
+            indices={indices}
+            selected={agent}
+            onSelect={setAgent}
+            onZoom={(seat) => {
+              setFocus(null);
+              setRotate(false);
+              setAgentFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
+            }}
+            drawerId={drawerId}
+            headingRef={agentsHeading}
+            onBadge={(seat, kind, button) => {
+              opener.current = button;
+              setSelected(null);
+              setBadge({ seat, kind });
+            }}
+          />
+          <aside
+            id={drawerId}
+            className="map-detail"
+            aria-label={badge ? "Agent details" : "Selected file"}
+          >
+            {query && (
+              <div className="map-results">
+                {matches.slice(0, 60).map((n) => (
+                  <button type="button" key={n} onClick={() => searchSelect(n)}>
+                    {n}
+                  </button>
+                ))}
+                {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
+                {!matches.length && <p>No matching files.</p>}
+              </div>
+            )}
+            {badge && (badgeSeat || badge.conversation) ? (
+              <BadgeDrawer
+                key={`${badge.seat}-${badge.kind}-${badge.conversation?.to ?? ""}-${badge.conversation?.ticket ?? ""}`}
                 snapshot={snapshot}
-                path={selected}
-                files={
-                  displayNodes.find((n) => n.path === selected)?.files.length
-                    ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
-                    : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                        f.startsWith(`${selected}/`),
-                      )
-                }
+                seat={badgeSeat}
+                kind={badge.kind}
+                conversation={badge.conversation}
+                onClose={closeBadge}
               />
-            </>
-          ) : (
-            <p>Click a node, or find one, to see who read or wrote it.</p>
-          )}
-        </aside>
+            ) : selected ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFocus(null);
+                    queueMicrotask(() => setFocus(selected));
+                  }}
+                >
+                  ⌖ Zoom to file
+                </button>
+                <button type="button" onClick={() => setSelected(null)}>
+                  Close
+                </button>
+                <FileDrawer
+                  snapshot={snapshot}
+                  path={selected}
+                  files={
+                    displayNodes.find((n) => n.path === selected)?.files.length
+                      ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
+                      : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
+                          f.startsWith(`${selected}/`),
+                        )
+                  }
+                />
+              </>
+            ) : (
+              <p>Click a node, or find one, to see who read or wrote it.</p>
+            )}
+          </aside>
+        </div>
       </div>
       <div className="map-legend">
         <span>dim: in scope (read on the branch)</span>
@@ -306,16 +401,7 @@ function FileDrawer({
       {snapshot.findings
         .filter((f) => listed.includes(f.file))
         .map((f) => (
-          <div className="map-finding" key={`${f.seat}-${f.file}-${f.line}-${f.summary}`}>
-            <strong style={{ color: `var(${pinToken(f.severity)})` }}>
-              ▲ {f.severity} · {f.seat} · round {f.round}
-            </strong>
-            <p>
-              {f.file}:{f.line} · {f.summary}
-            </p>
-            <p>{f.scenario}</p>
-            <p>Fix: {f.fix}</p>
-          </div>
+          <Finding finding={f} key={`${f.seat}-${f.file}-${f.line}-${f.summary}`} />
         ))}
       {snapshot.conflicts
         .filter((c) => listed.includes(c.file))

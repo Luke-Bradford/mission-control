@@ -1,5 +1,6 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
 import { applyDelta } from "./model.ts";
+import type { MotionEvent } from "./motion.ts";
 
 /** One repo subscription; snapshot requests coalesce while deltas keep their order. */
 export class LiveMap {
@@ -11,6 +12,7 @@ export class LiveMap {
   private again = false;
   private watermark = 0;
   private opened = false;
+  private epoch = 0;
   private retry: ReturnType<typeof setTimeout> | undefined;
   private repo: string;
   private get: () => Promise<MapSnapshot>;
@@ -19,6 +21,8 @@ export class LiveMap {
   private skipped: (calls: number, messages: number) => void;
   private hiddenCalls = 0;
   private hiddenMessages = 0;
+  private animate: (event: MotionEvent) => void;
+  private reconnect: (epoch: number) => void;
   private visibility = () => {
     if (!document.hidden && (this.hiddenCalls || this.hiddenMessages)) {
       this.skipped(this.hiddenCalls, this.hiddenMessages);
@@ -33,12 +37,16 @@ export class LiveMap {
     receive: (s: MapSnapshot) => void,
     error: (e: Error | null) => void,
     skipped: (calls: number, messages: number) => void = () => {},
+    animate: (event: MotionEvent) => void = () => {},
+    reconnect: (epoch: number) => void = () => {},
   ) {
     this.repo = repo;
     this.get = get;
     this.receive = receive;
     this.error = error;
     this.skipped = skipped;
+    this.animate = animate;
+    this.reconnect = reconnect;
   }
 
   start() {
@@ -47,7 +55,11 @@ export class LiveMap {
     this.source.addEventListener("open", () => {
       const first = !this.opened;
       this.opened = true;
-      if (!first) this.watermark = 0;
+      if (!first) {
+        this.watermark = 0;
+        this.pending = [];
+        this.reconnect(++this.epoch);
+      }
       if (!first || !this.fetching) void this.refresh();
     });
     this.source.addEventListener("error", () =>
@@ -72,7 +84,13 @@ export class LiveMap {
         if (document.hidden) {
           if (delta.type === "call.start") this.hiddenCalls++;
           if (delta.type === "message") this.hiddenMessages++;
-        }
+        } else
+          this.animate({
+            delta,
+            at: Date.now(),
+            snapshot: this.snapshot ?? undefined,
+            epoch: this.epoch,
+          });
         if (this.fetching || !this.snapshot) {
           this.pending.push(delta);
           return;
@@ -99,9 +117,14 @@ export class LiveMap {
     }
     clearTimeout(this.retry);
     this.fetching = true;
+    const epoch = this.epoch;
     try {
       let snapshot: MapSnapshot = await this.get();
       if (this.stopped) return;
+      if (epoch !== this.epoch) {
+        this.again = true;
+        return;
+      }
       for (const delta of this.pending) {
         const next: MapSnapshot | null =
           snapshot.seq === 0 ? null : applyDelta(snapshot, delta, Date.now());
