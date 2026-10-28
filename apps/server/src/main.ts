@@ -54,6 +54,7 @@ import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { createFlightTools } from "./flight/tools.ts";
+import { renderHudWithPlaywright } from "./flight/hud-render.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
@@ -329,6 +330,8 @@ export async function main(): Promise<void> {
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    hubOrigin: `http://${HOST}:${port}`,
+    screenshotHud: renderHudWithPlaywright,
     focus: (seatId, focus) => {
       if (preview && process.env.MC_CONFIG === undefined)
         throw new Error("Focus writes unavailable.");

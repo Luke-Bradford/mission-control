@@ -583,6 +583,7 @@ describe("tool list", () => {
       "message_seat",
       "comms_pin",
       "flight_state",
+      "screenshot_hud",
       "promote",
       "end_run",
       "accept_ruling",

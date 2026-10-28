@@ -53,6 +53,7 @@ export const MC_TOOL_NAMES = {
   recall: "recall",
   holdItem: "hold_item",
   releaseHold: "release_hold",
+  screenshotHud: "screenshot_hud",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -108,6 +109,7 @@ export const MC_TOOLS = {
   recall: mcTool(MC_TOOL_NAMES.recall),
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
+  screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
