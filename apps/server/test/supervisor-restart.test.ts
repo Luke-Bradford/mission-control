@@ -50,7 +50,6 @@ import {
   BRANCH,
   boardCard,
   bus,
-  CLEANUP_WAIT_MS,
   clone,
   dbPath,
   dir,
@@ -71,6 +70,7 @@ import {
   store,
   TICKET,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -1885,10 +1885,7 @@ it("ends a reattached Codex run whose live floor changed before answering pendin
   expect(store.seatSession("guido-1")?.reason).toBe(CANNOT_START);
   expect(recorded().some((m) => m.result?.decision === "accept")).toBe(false);
   expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
-  await vi.waitFor(() => expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false), {
-    timeout: CLEANUP_WAIT_MS,
-    interval: 25,
-  });
+  await untilGone(crewCodexDir(dbPath, runId));
 });
 
 it("recovers an acknowledged Codex message queued behind a pending start across stopAll", async () => {
