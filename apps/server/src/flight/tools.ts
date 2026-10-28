@@ -2627,6 +2627,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const SettleArgs = z.strictObject({
     runId: text(200),
     action: z.enum(["lift", "rereview", "accept", "rework"]),
+    note: z.string().min(1).max(2_000).optional(),
     basis: basisArg,
   });
   const EditArgs = z.strictObject({
@@ -2796,7 +2797,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      "Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. Never overrides budgets, accounts or operator holds.",
+      "Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. Rework may grant one extra capped review round per head; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts or operator holds.",
       SettleArgs,
       "settle",
       async (a) => {
@@ -2813,6 +2814,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               : ["review", "review-ruling"];
         if (!kinds.includes(run.loop.parked.kind))
           return fail("This action cannot settle this park.");
+        const head = store.runPush(run.id)?.sha ?? run.loop.awaitingFlight ?? null;
+        if (a.action === "rework" && head && (run.loop.flightReworks?.[head] ?? 0) >= 1)
+          return fail("This head already had FLIGHT's extra rework round; ask the controller.");
         if (a.action === "lift") {
           const n = store.countFlightDecisions({
             kinds: ["unpark"],
@@ -2821,7 +2825,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
           if (n >= FLIGHT_UNPARKS_PER_RUN) return fail(unparkCapText(n));
         }
-        if (!(await deps.engine?.onOperatorMessage(run.id, "FLIGHT", { kinds, action: a.action })))
+        if (
+          !(await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
+            kinds,
+            action: a.action,
+            ...(a.note === undefined ? {} : { note: a.note }),
+          }))
+        )
           return fail("Park cannot be settled: check the head, hold or independent RETRO review.");
         if (a.action === "lift")
           record(now(), {

@@ -206,7 +206,12 @@ export interface Engine {
   onOperatorMessage(
     runId: string,
     by?: "CAPCOM" | "FLIGHT",
-    opts?: { kinds?: readonly string[]; action?: "lift" | "rereview" | "accept" | "rework" },
+    opts?: {
+      kinds?: readonly string[];
+      action?: "lift" | "rereview" | "accept" | "rework";
+      /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
+      note?: string;
+    },
   ): Promise<boolean>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -2179,6 +2184,7 @@ export function createEngine(deps: EngineDeps): Engine {
           )
             return;
           if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2) return;
+          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1) return;
           if (opts.action === "accept") {
             if (pr?.state !== "open" || pr.headSha !== pushed.sha) return;
             const review = store
@@ -2243,6 +2249,11 @@ export function createEngine(deps: EngineDeps): Engine {
               [pushed.sha]: (loop.flightRereviews?.[pushed.sha] ?? 0) + 1,
             };
           if (opts.action === "rework") {
+            if (pushed)
+              next.flightReworks = {
+                ...loop.flightReworks,
+                [pushed.sha]: (loop.flightReworks?.[pushed.sha] ?? 0) + 1,
+              };
             if (next.aside) {
               try {
                 await supervisor.wakeRun(run.id);
@@ -2255,13 +2266,15 @@ export function createEngine(deps: EngineDeps): Engine {
               .reviewsOfRun(run.id)
               .filter((r) => r.state === "reported")
               .at(-1);
-            const message = review
+            const findings = review
               ? fixText({
                   retro: seatCallSign(review.seatId),
                   sha: review.sha,
                   findings: store.findingsOf(review.id),
                 })
               : `FLIGHT requests rework: ${loop.parked.reason}`;
+            const message =
+              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
             const sent = await supervisor.send(
               run.id,
               `${run.id}:flight-rework:${next.epoch}`,
