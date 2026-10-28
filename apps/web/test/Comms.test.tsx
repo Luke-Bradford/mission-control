@@ -281,6 +281,38 @@ describe("Comms routes", () => {
   });
 
   it("keys drafts and replies by scope, consumes a prefill once, and includes a ticket ref", async () => {
+    const ticketMessages = [
+      {
+        id: "comms:later",
+        at: NOW,
+        from: "alpha",
+        to: "crew",
+        text: "Crew discussion for #707",
+        ticket: "shop-app#707",
+        label: null,
+        ref: "#707",
+        replyTo: null,
+        mentions: [],
+        reactions: [],
+        pinned: false,
+        operator: false,
+      },
+      {
+        id: "comms:earlier",
+        at: NOW - MIN,
+        from: "beta",
+        to: "alpha",
+        text: "Handoff on PR 44",
+        ticket: "shop-app#707",
+        label: null,
+        ref: "PR 44",
+        replyTo: null,
+        mentions: [],
+        reactions: [],
+        pinned: false,
+        operator: false,
+      },
+    ];
     const sent = {
       id: "comms:sent",
       at: NOW,
@@ -299,10 +331,10 @@ describe("Comms routes", () => {
     const fetch = stubFetch({
       "/api/comms/crew": { messages: [] },
       "/api/comms/tickets/%23707?ticket=shop-app%23707": {
-        messages: [],
+        messages: ticketMessages,
         ticket: {
           ref: "#707",
-          linkedPr: null,
+          linkedPr: "PR 44",
           title: "Comms ticket",
           status: "In progress",
           owner: "Agent",
@@ -336,7 +368,7 @@ describe("Comms routes", () => {
         row={null}
       />,
     );
-    const ticketComposer = await screen.findByLabelText("Message crew as CAPCOM");
+    const ticketComposer = await screen.findByLabelText("Post to #crew as CAPCOM · tagged #707");
     expect((ticketComposer as HTMLInputElement).value).toBe("");
     expect(screen.getByText("Comms ticket")).toBeTruthy();
     expect(screen.getByText("In progress")).toBeTruthy();
@@ -344,6 +376,11 @@ describe("Comms routes", () => {
     expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
       "/board/shop-app/707",
     );
+    const earlier = document.getElementById("comms-message-comms:earlier") as HTMLElement;
+    const later = document.getElementById("comms-message-comms:later") as HTMLElement;
+    expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(earlier).getAllByRole("button", { name: "PR 44" })[0]);
+    expect(window.location.pathname).toBe("/comms/tickets/PR%2044");
     fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
@@ -352,6 +389,46 @@ describe("Comms routes", () => {
         to: "crew",
         text: "Ticket update",
         ref: "#707",
+      });
+    });
+  });
+
+  it("shows an empty ticket view and posts its ref to crew", async () => {
+    const fetch = stubFetch({
+      "/api/comms/tickets/%23999": {
+        messages: [],
+        ticket: {
+          ref: "#999",
+          linkedPr: null,
+          title: "Empty ticket",
+          status: "Ready",
+          owner: "CAPCOM",
+          repoId: "shop-app",
+          issueNumber: 999,
+        },
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "ticket", ref: "#999" }} row={null} />);
+    expect(await screen.findByText("Empty ticket")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(screen.getByText("CAPCOM")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
+      "/board/shop-app/999",
+    );
+    expect(screen.getByText("No messages yet.")).toBeTruthy();
+    const composer = screen.getByLabelText("Post to #crew as CAPCOM · tagged #999");
+    fireEvent.change(composer, { target: { value: "Starting now" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({
+        to: "crew",
+        text: "Starting now",
+        ref: "#999",
       });
     });
   });

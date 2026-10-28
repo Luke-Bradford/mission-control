@@ -168,7 +168,7 @@ export function Conversation({
                 </div>
                 <div className="body">
                   <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
-                    <MentionText text={m.text} />
+                    <MentionText text={m.text} onRef={(ref) => navigate(commsTicketPath(ref))} />
                   </Expandable>
                 </div>
               </div>
@@ -755,7 +755,7 @@ function ModernConversation({
         : view.kind === "contact"
           ? (contact.data?.messages ?? [])
           : view.kind === "ticket"
-            ? (ticket.data?.messages ?? [])
+            ? [...(ticket.data?.messages ?? [])].sort((a, b) => a.at - b.at)
             : view.kind === "inbox"
               ? (agent.data?.inbox ?? [])
               : (agent.data?.messages ?? []);
@@ -862,9 +862,11 @@ function ModernConversation({
           label={
             view.kind === "crew"
               ? "Post to #crew as CAPCOM · @name pings one agent"
-              : view.kind === "flight"
-                ? "Message FLIGHT as CAPCOM"
-                : `Message ${to} as CAPCOM`
+              : view.kind === "ticket"
+                ? `Post to #crew as CAPCOM · tagged ${view.ref}`
+                : view.kind === "flight"
+                  ? "Message FLIGHT as CAPCOM"
+                  : `Message ${to} as CAPCOM`
           }
           placeholder={
             view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
