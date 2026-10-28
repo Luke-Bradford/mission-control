@@ -105,6 +105,7 @@ import {
 } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
+import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
@@ -604,6 +605,41 @@ interface FlightTriage {
   showsAt: number | null;
 }
 
+/**
+ * The operator's call (#758): FLIGHT may brief it for the operator but never keep it, and it is
+ * never folded into the "FLIGHT is not triaging" item. The decision kinds, the held hub Update,
+ * and a run parked on its budget or account.
+ */
+export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+  if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.kind !== "blocked") return false;
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  return park === "budget" || park === "account";
+}
+
+/**
+ * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
+ * themselves so they notify as they always did: a stuck run is not news to fold into a count.
+ */
+const STUCK_KINDS: readonly AttentionItem["kind"][] = ["stalled", "blocked", "parked", "lock"];
+
+/** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
+const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
+  isOperatorCall(item, store) || STUCK_KINDS.includes(item.kind);
+
+/**
+ * A seat's question FLIGHT passed to the operator with its brief: the operator's to answer, not
+ * FLIGHT's. Passed without one (before #758), it is still FLIGHT's.
+ */
+export function questionWithOperator(
+  q: { passedAt: number | null },
+  brief: AttentionItem["brief"],
+): boolean {
+  return q.passedAt !== null && brief !== undefined && brief.for !== "flight";
+}
+
 /** When this hub process started (main.ts); null in a test or tool that never sets it. */
 let hubStartedAt: number | null = null;
 /** main.ts: a FLIGHT seat with no seat row yet counts as stopped since the hub started. */
@@ -924,11 +960,11 @@ export function attentionItems(
   );
   /**
    * Missed or late: with a FLIGHT seat it stays FLIGHT's, counted by the one not-triaging item,
-   * except an operator's call, which reaches the operator as itself.
+   * except an operator's call or a stuck run, which reaches the operator as itself.
    */
   const missed = (item: AttentionItem, triageDueAt?: number): AttentionItem => ({
     ...item,
-    ...(triage === null || OPERATOR_CALL_KINDS.includes(item.kind) ? {} : { owner: OWNER_FLIGHT }),
+    ...(triage === null || keptRaw(item, store) ? {} : { owner: OWNER_FLIGHT }),
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
@@ -962,8 +998,8 @@ export function attentionItems(
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
-    // nobody is triaging: an operator's call goes straight to the operator
-    if (!live || (!triaging && OPERATOR_CALL_KINDS.includes(i.kind))) return item;
+    // nobody is triaging: an operator's call or a stuck run goes straight to the operator
+    if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     // A PR only becomes an attention item after its existing quiet wait.
     const raisedAt =
@@ -1047,7 +1083,8 @@ function withNotTriaging(
     escalationId: null,
     ticket: null,
     notTriaging: { cause, keys: members.map((i) => i.key), since },
-    acked: ackAt !== undefined && ackAt >= at,
+    // read as it was: a member raised after the ack makes it unread again
+    acked: ackAt !== undefined && ackAt >= Math.max(at, ...members.map((i) => i.at)),
   };
   return [item, ...items];
 }

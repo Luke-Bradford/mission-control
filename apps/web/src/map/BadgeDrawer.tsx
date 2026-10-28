@@ -157,7 +157,11 @@ function QuestionLane({
 }) {
   const displayId = seat?.seat;
   const needsFlight =
-    displayId === "FLIGHT" || conversation?.from === "FLIGHT" || conversation?.to === "FLIGHT";
+    displayId === "FLIGHT" ||
+    conversation?.from === "FLIGHT" ||
+    conversation?.to === "FLIGHT" ||
+    // a seat's questions go to FLIGHT (#758): its thread names FLIGHT by seat id
+    (seat?.badges.questions.some((q) => q.to === "FLIGHT") ?? false);
   const flightId = useResource<FlightView>(needsFlight ? RESOURCES.flight : null).data?.seat?.id;
   const id = displayId === "FLIGHT" ? flightId : displayId;
   const activity = useResource<{ messages: CommsThreadMessage[] }>(id ? RESOURCES.comms(id) : null);

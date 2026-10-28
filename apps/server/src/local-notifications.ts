@@ -133,9 +133,14 @@ const categoryOf = (item: AttentionItem): NotificationCategory | null => {
 function versionOf(category: NotificationCategory, item: AttentionItem): string {
   // Once per episode: its count, reason and time move while FLIGHT stays out, and `seen` keeps only
   // items still present, so it notifies again only after it has cleared and come back.
-  // A new cause in the same episode (stopped, then failing to start) is news, so it is in the version.
+  // Only a coarse class is in the version: the operator's own Stop, or FLIGHT out on its own. So a
+  // failed start after a Stop is news, while down and late flipping within an outage is not.
   if (item.key === FLIGHT_NOT_TRIAGING_KEY)
-    return JSON.stringify([category, item.key, item.notTriaging?.cause ?? null]);
+    return JSON.stringify([
+      category,
+      item.key,
+      item.notTriaging?.cause === "stopped" ? "stopped" : "out",
+    ]);
   if (category === "asks")
     return JSON.stringify([category, item.kind, item.brief?.ask ?? item.text]);
   if (category === "stalls") return JSON.stringify([item.kind, item.at]);
@@ -274,9 +279,12 @@ export class LocalNotifications {
         seen[item.key] = version;
         continue;
       }
-      // The operator's own Stop with nothing waiting tells them nothing: it notifies only once
-      // something waits on FLIGHT, or the cause changes.
-      if (item.notTriaging?.cause === "stopped" && item.notTriaging.keys.length === 0) {
+      // The operator's own Stop tells them nothing with nothing waiting, and, being their choice,
+      // must not wake them: it waits out quiet hours like an ask, staying unseen until then.
+      if (
+        item.notTriaging?.cause === "stopped" &&
+        (item.notTriaging.keys.length === 0 || (quiet && p.enabled !== false))
+      ) {
         if (previous !== undefined) seen[item.key] = previous;
         continue;
       }

@@ -2012,6 +2012,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               mapRing,
               deps.lock?.state() ?? NO_LOCK,
               now(),
+              flightSeat(config)?.seat.id ?? null,
             );
             for (const seat of data.seats) {
               const context = store.seatSession(

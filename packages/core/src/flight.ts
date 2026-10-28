@@ -962,6 +962,9 @@ export const FLIGHT_DOWN_NOTES: readonly string[] = [FLIGHT_NOTE_KEY, FLIGHT_DOW
  * comes back. It notifies under `flightDown`, through quiet hours, once per episode.
  */
 export const FLIGHT_NOT_TRIAGING_KEY = "flight:not-triaging";
+/** hold_item on FLIGHT_NOT_TRIAGING_KEY: FLIGHT clears it by triaging what it counts. */
+export const HOLD_NOT_TRIAGING_REFUSED =
+  "Not held: the not-triaging item is the operator's. Triage the items it counts and it clears.";
 /**
  * Why FLIGHT is not triaging, most telling first: its watch could not keep it running, its watch
  * reports it down, the operator stopped it, it is not running, or it is live and missed a window.

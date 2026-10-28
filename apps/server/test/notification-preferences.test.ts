@@ -114,7 +114,10 @@ const withLiveFlight = async () => {
           id: "s",
           repoId: "demo",
           checkout: dir,
-          seats: [{ id: "flight-1", role: "FLIGHT", accountId: "demo", model: "opus", area: [] }],
+          seats: [
+            { id: "flight-1", role: "FLIGHT", accountId: "demo", model: "opus", area: [] },
+            { id: "guido-1", role: "GUIDO", accountId: "demo", model: "opus", area: [] },
+          ],
         },
       ],
     },
@@ -672,7 +675,7 @@ it("notifies each FLIGHT outage, even after the last one was read", async () => 
   ]);
 });
 
-it("notifies a FLIGHT outage once per cause, however its count and reason text move (#758)", async () => {
+it("notifies a FLIGHT outage once, however its count, cause and reason text move (#758)", async () => {
   await withLiveFlight();
   flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
   expect(await events()).toMatchObject([{ category: "flightDown" }]);
@@ -685,9 +688,9 @@ it("notifies a FLIGHT outage once per cause, however its count and reason text m
   const again = (await app.inject("/api/attention")).json();
   expect(again[0].text).toContain("no output for 31 min");
   expect(await events()).toHaveLength(1);
-  // a new cause in the same episode is news
+  // nor a failed start in the same outage: only a Stop and FLIGHT out on its own differ
   flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: three.");
-  expect(await events()).toHaveLength(2);
+  expect(await events()).toHaveLength(1);
   // cleared, then out again: a new episode
   store.clearNote(FLIGHT_NOTE_KEY, Date.now());
   store.clearNote(FLIGHT_DOWN_NOTE_KEY, Date.now());
@@ -695,7 +698,7 @@ it("notifies a FLIGHT outage once per cause, however its count and reason text m
   expect((await app.inject("/api/attention")).json()).toEqual([]);
   await events();
   flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
-  expect(await events()).toHaveLength(3);
+  expect(await events()).toHaveLength(2);
 });
 
 it("does not notify the operator's own Stop with nothing waiting, but a failed start after it (#758)", async () => {
@@ -718,6 +721,54 @@ it("does not notify the operator's own Stop with nothing waiting, but a failed s
   expect(await events()).toEqual([]);
   // the operator starts it and it fails: a new cause, so it notifies
   flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: no login.");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+});
+
+it("does not notify again when an outage flips between down and late (#758)", async () => {
+  await withLiveFlight();
+  store.raiseNote({
+    key: "late",
+    kind: "question",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "Choose the demo lane",
+    at: Date.now() - 30 * 60_000,
+  });
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
+  expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("down");
+  expect(await events()).toHaveLength(1);
+  store.clearNote(FLIGHT_DOWN_NOTE_KEY, Date.now());
+  bus.emit("attention");
+  expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
+  expect(await events()).toHaveLength(1);
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
+  expect(await events()).toHaveLength(1);
+});
+
+it("holds the operator's own Stop through quiet hours, even once a question waits (#758)", async () => {
+  await withLiveFlight();
+  const p = await preferences();
+  p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: null,
+    cliSessionId: null,
+    state: "stopped",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now(),
+  });
+  store.upsertRun({ ...flightRun("g1", Date.now()), agentId: "guido-1" });
+  store.addQuestion({ agentId: "guido-1", runId: "g1", text: "Which lane?", at: Date.now() });
+  bus.emit("attention");
+  const items = (await app.inject("/api/attention")).json();
+  expect(items[0].text).toMatch(/^FLIGHT is stopped: 1 waiting since/);
+  expect(await events()).toEqual([]);
+  // quiet hours over: it notifies then
+  vi.setSystemTime(new Date("2026-10-23T14:01:00Z"));
+  bus.emit("attention");
   expect(await events()).toMatchObject([{ category: "flightDown" }]);
 });
 

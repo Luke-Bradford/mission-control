@@ -68,7 +68,7 @@ import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { attentionItems, crew, NO_LOCK } from "../hud.ts";
+import { attentionItems, crew, NO_LOCK, questionWithOperator } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -536,7 +536,7 @@ export function flightState(i: {
   const questions = open
     .filter(
       (q) =>
-        q.passedAt === null &&
+        !questionWithOperator(q, briefs.get(`ask:${q.id}`)) &&
         ((briefs.get(`ask:${q.id}`)?.at ?? -1) < q.at ||
           briefs.get(`ask:${q.id}`)?.for === "flight") &&
         mine.some((s) => s.id === q.agentId) &&

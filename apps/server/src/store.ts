@@ -4076,6 +4076,13 @@ export class Store {
     return Number(r.changes) > 0;
   }
 
+  /** Marks one open question answered at `at`. */
+  answerQuestion(id: number, at: number): void {
+    this.db
+      .prepare("UPDATE seat_questions SET answered_at = ? WHERE id = ? AND answered_at IS NULL")
+      .run(at, id);
+  }
+
   /**
    * Marks every open question of the seat answered at `at`; with `unpassedOnly`, leaves the ones
    * passed to the operator open.

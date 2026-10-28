@@ -71,6 +71,7 @@ import {
   GUARD_ACK_PREFIX,
   GUARD_ALLOW_OUTPUT,
   GUARD_CHECK_PATH,
+  HOLD_NOT_TRIAGING_REFUSED,
   headlineSavedText,
   headlineText,
   LEDGER_FULL_TEXT,
@@ -907,13 +908,37 @@ describe("answer_question", () => {
     expect(messageCalls).toHaveLength(1);
   });
 
-  it("answers a question passed without a brief before #758, handing it back first", async () => {
+  it("answers a question passed without a brief before #758, closing it once delivered", async () => {
     const id = ask();
     store.passQuestion(id, NOW);
+    // it is in FLIGHT's digest, being FLIGHT's to answer
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toMatchObject([{ id }]);
+    // a failed delivery leaves it as it was
+    messageImpl = async () => {
+      throw new Error("seat is gone");
+    };
+    expect((await call("answer_question", A(id))).isError).toBe(true);
+    expect(store.question(id)).toMatchObject({ passedAt: NOW, answeredAt: null });
+    messageImpl = async () => {};
     expect((await call("answer_question", A(id))).isError).toBeUndefined();
-    expect(store.question(id)?.passedAt).toBeNull();
-    // the answer's message closes unpassed questions, which now includes this one
-    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
+    expect(store.question(id)).toMatchObject({ passedAt: null, answeredAt: NOW });
+  });
+
+  it("keeps a question passed with FLIGHT's brief out of FLIGHT's digest: it is the operator's", async () => {
+    const id = ask();
+    await passUp(id);
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toEqual([]);
+  });
+
+  it("records the pass when a question passed without a brief is briefed for the operator", async () => {
+    const id = ask();
+    store.passQuestion(id, NOW - 1);
+    expect(await passUp(id)).toEqual({ text: BRIEFED_TEXT });
+    expect(store.question(id)?.passedAt).toBe(NOW - 1);
+    expect(decisions()).toMatchObject([{ kind: "pass", questionId: id }]);
+    // a refreshed brief for the operator is not a second pass
+    await passUp(id, "spend, refreshed");
+    expect(decisions()).toHaveLength(1);
   });
 
   it("refuses an answer with a pass, or neither", async () => {
@@ -3822,7 +3847,7 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
   });
 
-  it("counts a kept item as missed after 24 hours since its brief, under the not-triaging item", async () => {
+  it("returns a kept blocked run to the operator after 24 hours since its brief", async () => {
     expect(FLIGHT_HANDLING_MAX_MS).toBe(24 * 60 * 60_000);
     nowMs += 60 * 60_000;
     expect(
@@ -3835,15 +3860,15 @@ describe("brief_item", () => {
     });
     for (const at of [expiresAt, expiresAt + 1]) {
       const items = attentionItems(cfg, store, at);
-      // still FLIGHT's (#758): the operator sees it counted by the one not-triaging item
+      // a stuck run is never folded into the not-triaging item (#758): it notifies as itself
       expect(items.find((i) => i.key === KEY)).toMatchObject({
-        owner: "flight",
+        owner: "operator",
         flightTriage: "missed",
         brief: { for: "flight", at: nowMs },
       });
-      expect(items.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys).toContain(
-        KEY,
-      );
+      expect(
+        items.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys ?? [],
+      ).not.toContain(KEY);
     }
   });
 
@@ -6421,6 +6446,12 @@ describe("attention hold tools", () => {
     expect(JSON.parse(store.getSetting("attention-holds") ?? "{}")[key].releasedAt).toBe(NOW);
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
+  });
+  it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
+    expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
+      refused(HOLD_NOT_TRIAGING_REFUSED),
+    );
+    expect(store.getSetting("attention-holds")).toBeNull();
   });
   it("refuses other seats without changing holds", async () => {
     live("guido-1", "r-guido");

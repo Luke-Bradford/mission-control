@@ -32,6 +32,7 @@ import {
   attentionItems,
   crew,
   flightNotTriagingDueAt,
+  isOperatorCall,
   markHubStarted,
   NO_LOCK,
 } from "../src/hud.ts";
@@ -2899,6 +2900,60 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(down?.owner).toBe("operator");
     expect(down?.flightTriage).toBeUndefined();
     expect(aggregate()?.notTriaging?.keys).not.toContain("esc:shop-app#9");
+  });
+
+  it("leaves a missed stuck run, budget park and held Update raw, so they notify as before", () => {
+    flight();
+    store.upsertRun(
+      run({
+        id: "r-budget",
+        agentId: "guido-1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "spent", ended: false },
+        } as RunLoop,
+      }),
+    );
+    const raise = (key: string, kind: "blocked" | "question", runId: string | null = null) =>
+      store.raiseNote({
+        key,
+        kind,
+        runId,
+        seatId: null,
+        repoId: "shop-app",
+        text: key,
+        at: NOW - 30 * MIN,
+      });
+    raise("blocked:r-budget:0", "blocked", "r-budget");
+    raise("hub-update-held", "question");
+    raise("plain", "question");
+    const items = all();
+    for (const key of ["note:blocked:r-budget:0", "note:hub-update-held"])
+      expect(items.find((i) => i.key === key)).toMatchObject({
+        owner: "operator",
+        flightTriage: "missed",
+      });
+    expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
+    expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
+    expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
+    // an ordinary missed item is still folded in
+    expect(aggregate()?.notTriaging?.keys).toEqual(["note:plain"]);
+    // reported down while live: a stuck run goes to the operator at once, not into the count
+    raise("blocked:other", "blocked");
+    watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
+    const fresh = all().find((i) => i.key === "note:blocked:other");
+    expect(fresh?.owner).toBe("operator");
+    expect(aggregate()?.notTriaging?.keys).not.toContain("note:blocked:other");
+  });
+
+  it("reads as unread again when a new item joins after the operator acked it", () => {
+    flight({ runId: null, state: "stopped" });
+    ask(NOW - 10 * MIN);
+    store.ack([FLIGHT_NOT_TRIAGING_KEY], NOW - 5 * MIN);
+    expect(aggregate()?.acked).toBe(true);
+    ask(NOW - MIN);
+    expect(aggregate()?.acked).toBe(false);
   });
 
   it("does not reset windows in a crash loop: only a real outage gives a fresh window", () => {

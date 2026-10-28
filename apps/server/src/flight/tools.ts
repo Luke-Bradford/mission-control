@@ -111,6 +111,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
+  FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
@@ -143,6 +144,7 @@ import {
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
   globMatches,
+  HOLD_NOT_TRIAGING_REFUSED,
   HUD_COLUMNS,
   hasDoneWhenSection,
   hasOutcomeSection,
@@ -199,7 +201,6 @@ import {
   notRunOfSeatText,
   notSentText,
   notStartableSeatText,
-  OPERATOR_CALL_KINDS,
   OWN_SEAT_TEXT,
   OWNER_OPERATOR,
   PASSED_DECISION,
@@ -300,7 +301,14 @@ import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/que
 import { RepoRulesError } from "../engine/rules.ts";
 import { seatFocus } from "../focus.ts";
 import type { Move, MoveResult } from "../github-board.ts";
-import { attentionItems, crew, NO_LOCK, NOTE_KEY } from "../hud.ts";
+import {
+  attentionItems,
+  crew,
+  isOperatorCall,
+  NO_LOCK,
+  NOTE_KEY,
+  questionWithOperator,
+} from "../hud.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext } from "../mcp/server.ts";
@@ -989,9 +997,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const q = store.question(id);
     // Passed with FLIGHT's brief for the operator, it is theirs; passed without one (before #758),
     // it is still FLIGHT's to answer.
-    const briefed = store.briefs().get(`ask:${id}`);
-    const operators = q?.passedAt != null && briefed !== undefined && briefed.for !== "flight";
-    if (q === null || q.answeredAt !== null || operators) {
+    if (
+      q === null ||
+      q.answeredAt !== null ||
+      questionWithOperator(q, store.briefs().get(`ask:${id}`))
+    ) {
       return fail(noOpenQuestionText(id));
     }
     if (seatCfg(q.agentId) === undefined) return fail(noOpenQuestionText(id));
@@ -1002,8 +1012,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const about = `${call}: ${q.text}`;
     const capped = messageCap(at, call, q.agentId);
     if (capped !== null) return fail(capped);
-    // the message answers unpassed questions only: a question passed without a brief rejoins them
-    if (q.passedAt !== null) store.unpassQuestion(id);
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
@@ -1012,6 +1020,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
+    // Passed without a brief (before #758): the message closed unpassed questions only, so hand
+    // this one back and close it too, once the answer is delivered.
+    if (q.passedAt !== null && store.unpassQuestion(id)) store.answerQuestion(id, at);
     store.addComms({
       at,
       from: ctx.seatId,
@@ -1842,17 +1853,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(briefNoItemText(key));
     }
     if (structured.for === "flight") {
-      const note = store.notes().find((n) => `note:${n.key}` === key);
-      const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-      if (
-        OPERATOR_CALL_KINDS.includes(item.kind) ||
-        key === "note:hub-update-held" ||
-        (item.kind === "blocked" && (park === "budget" || park === "account"))
-      )
+      if (isOperatorCall(item, store))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
     }
+    // whether the operator already had this item with FLIGHT's brief, before this one replaces it
+    const prior = store.briefs().get(key);
+    const wasOperators = prior !== undefined && prior.for !== "flight";
     try {
       store.addBrief({
         ...structured,
@@ -1877,12 +1885,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // engine no longer holds its run for the operator.
     if (structured.for === "flight" && question !== null && question.passedAt !== null)
       store.unpassQuestion(question.id);
-    if (
-      structured.for === "operator" &&
-      question !== null &&
-      question.passedAt === null &&
-      store.passQuestion(question.id, at)
-    ) {
+    // Handed to the operator now (passed here, or passed earlier without a brief): record the pass.
+    if (structured.for === "operator" && question !== null && !wasOperators) {
+      if (question.passedAt === null) store.passQuestion(question.id, at);
       record(at, {
         kind: "pass",
         seatId: question.agentId,
@@ -2762,6 +2767,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const parsed = holdArgs.safeParse(args);
         if (!parsed.success) return fail(attentionHoldError(parsed.error));
         const a = parsed.data;
+        // the operator's alone: FLIGHT clears it by triaging what it counts, never by holding it
+        if (a.key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
         const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, () => null).rows;
         if (
           !attentionItems(
