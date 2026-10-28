@@ -212,19 +212,15 @@ export function changeTotals(seat: MapSeat): {
  */
 export function stageLine(seat: MapSeat, callSign = seatCallSign(seat.seat)): string {
   const { files, add, rem, churn } = changeTotals(seat);
-  const elsewhere = changedElsewhere(seat);
   return [
     callSign,
     ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
     ...(files
-      ? [
-          `${files} file${files === 1 ? "" : "s"}`,
-          `${churn ? "~" : ""}+${add} −${rem}${elsewhere ? ` on ${elsewhere}` : ""}`,
-        ]
+      ? [`${files} file${files === 1 ? "" : "s"}`, `${churn ? "~" : ""}+${add} −${rem}`]
       : seat.seat === "FLIGHT"
         ? []
         : ["no changes yet"]),
-    ...(!elsewhere && seat.changedOn.length > 1 ? [`${seat.changedOn.length}br`] : []),
+    ...(seat.changedOn.length > 1 ? [`${seat.changedOn.length}br`] : []),
   ].join(" · ");
 }
 
@@ -241,33 +237,16 @@ export const branchList = (seat: MapSeat): string =>
  */
 export function factLine(seat: MapSeat, callSign = seatCallSign(seat.seat)): string {
   const { files, add, rem, churn } = changeTotals(seat);
-  const elsewhere = changedElsewhere(seat);
   return [
     callSign,
     ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
     ...(files
-      ? [
-          `${files} file${files === 1 ? "" : "s"}`,
-          `+${add} −${rem}${churn ? " (churn)" : ""}${elsewhere ? ` on ${elsewhere}` : ""}`,
-        ]
+      ? [`${files} file${files === 1 ? "" : "s"}`, `+${add} −${rem}${churn ? " (churn)" : ""}`]
       : seat.seat === "FLIGHT"
         ? []
         : ["no changes yet"]),
-    ...(!elsewhere && seat.changedOn.length > 1 ? [`${seat.changedOn.length} branches`] : []),
+    ...(seat.changedOn.length > 1 ? [`${seat.changedOn.length} branches`] : []),
+    ...(seat.nowTicket !== null ? [`now #${seat.nowTicket}`] : []),
     ...(waitsOnYou(seat) ? ["waiting on you"] : []),
   ].join(" · ");
-}
-
-/**
- * When none of the changes are on the line's ticket (its current run's), the tickets they are on,
- * `#747` or `#717, #708`; otherwise null. The numbers are then never read as the line's ticket's.
- */
-export function changedElsewhere(seat: MapSeat): string | null {
-  if (!seat.changedOn.length) return null;
-  const tickets = seat.changedOn.map((b) => seat.tickets[b]);
-  if (seat.ticket !== null && tickets.includes(seat.ticket)) return null;
-  if (seat.ticket === null && tickets.every((t) => t === undefined)) return null;
-  return tickets
-    .map((t, i) => (t === undefined ? (seat.changedOn[i] as string) : `#${t}`))
-    .join(", ");
 }

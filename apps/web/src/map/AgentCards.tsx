@@ -7,7 +7,6 @@ import {
   type BadgeKind,
   badgeModels,
   branchList,
-  changedElsewhere,
   changeTotals,
   isActing,
   isWorking,
@@ -139,9 +138,7 @@ function AgentRow({
                 {totals.files} file{totals.files === 1 ? "" : "s"} ·{" "}
                 <b className="add">+{totals.add}</b> <b className="rem">−{totals.rem}</b>
                 {totals.churn && " (churn)"}
-                {changedElsewhere(seat)
-                  ? ` on ${changedElsewhere(seat)}`
-                  : seat.changedOn.length > 1 && ` · ${seat.changedOn.length} branches`}
+                {seat.changedOn.length > 1 && ` · ${seat.changedOn.length} branches`}
               </>
             ) : seat.seat === "FLIGHT" ? null : (
               "no changes yet"
@@ -151,6 +148,8 @@ function AgentRow({
         <span className={card.stuck ? "map-agent-state stuck" : "map-agent-state"}>
           {card.stuck && "Stuck · "}
           {card.state}
+          {/* the line leads with the ticket the changes are on; the current run's is said here */}
+          {!rest && seat.nowTicket !== null && ` · now #${seat.nowTicket}`}
           {!rest && waitsOnYou(seat) && <b className="map-waits"> · waiting on you</b>}
         </span>
       </button>

@@ -4,7 +4,6 @@ import {
   agentCard,
   badgeModels,
   branchList,
-  changedElsewhere,
   changeTotals,
   factLine,
   isStuck,
@@ -96,21 +95,18 @@ describe("who the stage shows, and its one line", () => {
     s.ticket = 747;
     expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #747 · 1 file · +175 −29");
   });
-  it("says which ticket the changes are on when it isn't the line's", () => {
+  it("leads with the ticket the changes are on; the current run's is in the words only", () => {
     const s = seat();
     s.badges.questions = [];
-    // the seat's current run is #698; its unmerged changes are all on a set-aside #747 branch
-    s.ticket = 698;
+    // the seat's current run is #698 with nothing changed; its changes are on a set-aside #747
+    s.ticket = 747;
+    s.nowTicket = 698;
     s.branches = ["feature/698-guard", "feature/747-models"];
     s.changedOn = ["feature/747-models"];
     s.tickets = { "feature/698-guard": 698, "feature/747-models": 747 };
     s.scope.modified = [{ file: "a.ts", add: 175, rem: 29, source: "diff" }];
-    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 on #747");
-    expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 on #747");
-    expect(changedElsewhere(s)).toBe("#747");
-    // changes on the line's own ticket and another: counted as two branches
-    s.changedOn = ["feature/698-guard", "feature/747-models"];
-    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 · 2br");
+    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #747 · 1 file · +175 −29");
+    expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #747 · 1 file · +175 −29 · now #698");
   });
   it("never folds a seat waiting on the operator; a stopped run or the test lock isn't that", () => {
     const s = seat();

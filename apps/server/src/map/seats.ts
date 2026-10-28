@@ -23,6 +23,7 @@ export function mapSeats(
     const modified = new Map<string, MapSeat["scope"]["modified"][number]>();
     const work: { branch: string; owner: Run | null; changed: boolean }[] = [];
     let currentWork: Work | null = null;
+    let currentChanged = false;
     for (const candidate of flight
       ? []
       : [
@@ -40,6 +41,7 @@ export function mapSeats(
         continue;
       // a run with no branch yet still shows its edit churn; it just names no branch
       if (branch) work.push({ branch, owner, changed: changes.length > 0 });
+      if (candidate === run && changes.length > 0) currentChanged = true;
       for (const change of changes) {
         const previous = modified.get(change.file);
         if (previous) {
@@ -50,12 +52,16 @@ export function mapSeats(
         } else modified.set(change.file, { ...change });
       }
     }
-    // The seat's ticket, title, PR and CI are its current run's work (even before it has changes);
-    // only a seat with no current run falls back to its first branch with changes. A worktree on a
-    // branch no run owns (main, a hand checkout) borrows no ticket: the crew row's stands.
+    // The map answers where an agent is working and what it changed, so the seat's ticket, title,
+    // PR and CI are those of the work its changes are on: its current run's when that has changes,
+    // else its first other branch with changes, else its current run's. A worktree on a branch no
+    // run owns (main, a hand checkout) borrows no ticket: the crew row's stands.
+    const firstChanged = work.find((w) => w.changed && w.owner) ?? null;
     const lead = run
-      ? currentWork
-      : (work.find((w) => w.changed && w.owner) ?? work.find((w) => w.owner) ?? null);
+      ? currentChanged
+        ? currentWork
+        : (firstChanged ?? currentWork)
+      : (firstChanged ?? work.find((w) => w.owner) ?? null);
     const owner = lead?.owner ?? null;
     const ticketRef = flight ? null : (owner?.ticket ?? row.ticket ?? null);
     const ticket = ticketNumber(ticketRef);
@@ -64,6 +70,10 @@ export function mapSeats(
         ? (owner.ticketTitle ?? null)
         : (row.ticketTitle ?? null);
     const leadBranch = lead?.branch ?? run?.branch ?? null;
+    // the ticket the seat's current run is on, when the line leads with another (its changes')
+    const currentTicket = ticketNumber(currentWork?.owner?.ticket ?? run?.ticket);
+    const nowTicket =
+      !flight && lead !== currentWork && currentTicket !== ticket ? currentTicket : null;
     const scopeId = flight ? `${run?.id}:${row.repoId}` : (run?.id ?? "");
     const calls = ring
       .calls(row.id)
@@ -110,6 +120,7 @@ export function mapSeats(
       title: !flight && ticketTitle ? safe(ticketTitle) : null,
       branches: work.map((w) => w.branch),
       changedOn: work.filter((w) => w.changed).map((w) => w.branch),
+      nowTicket,
       tickets: Object.fromEntries(
         work.flatMap((w) => {
           const n = ticketNumber(w.owner?.ticket);

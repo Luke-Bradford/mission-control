@@ -234,7 +234,9 @@ describe("mapSeats", () => {
         gone: { diff: [diff("z.ts", 9, 9)], branch: "feature/700-merged" },
       }),
     );
-    expect(seat?.ticket).toBe(800);
+    // the current run (#800) has nothing changed yet: the line leads with the work that has
+    expect(seat?.ticket).toBe(747);
+    expect(seat?.nowTicket).toBe(800);
     expect(seat?.branches).toEqual(["feature/800-new", "feature/747-old"]);
     expect(seat?.changedOn).toEqual(["feature/747-old"]);
     expect(seat?.tickets).toEqual({ "feature/800-new": 800, "feature/747-old": 747 });
@@ -249,6 +251,9 @@ describe("mapSeats", () => {
       }),
     );
     expect(mixed?.scope.modified).toEqual([{ file: "a.ts", add: 4, rem: 1, source: "churn" }]);
+    // a current run with changes of its own leads, as ever
+    expect(mixed?.ticket).toBe(800);
+    expect(mixed?.nowTicket).toBeNull();
   });
 });
 
