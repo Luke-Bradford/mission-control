@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { expect, it, vi } from "vitest";
 import { Accounts } from "../src/setup/Accounts.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG } from "./fixtures.ts";
+import { CONFIG, limit7d } from "./fixtures.ts";
 
 const status = {
   accountId: "claude-main",
@@ -56,6 +56,15 @@ it("shows the nine-column account table, concise login, relative model check and
   expect(screen.getAllByRole("button", { name: "Refresh" })).toHaveLength(2);
   expect(screen.getAllByRole("button", { name: "Sign in again" })).toHaveLength(2);
   expect(screen.getByText(/never displays or stores credentials/)).toBeTruthy();
+});
+
+it("keeps the full quota forecast in a tooltip when the cell truncates it", async () => {
+  load({
+    "/api/limits": [limit7d({ accountId: "claude-main", projected: 100, fullAt: null })],
+  });
+  render(<Accounts config={CONFIG} />);
+  const forecast = await screen.findByTitle("at this rate: reaches 100%");
+  expect(forecast.textContent).toBe("at this rate: reaches 100%");
 });
 
 it("shows an operator-run sign-in command, copies it, and checks status and models again", async () => {
