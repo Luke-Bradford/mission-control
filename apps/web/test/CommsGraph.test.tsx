@@ -150,7 +150,7 @@ it("clears a lit edge after 1.8s even when the crew rows change identity meanwhi
 });
 
 it("sends a particle per new message along its link, and again when the link rises again", async () => {
-  // Particles skip a hidden tab; pin a visible one so the result doesn't depend on the runner's jsdom.
+  // Particles skip a hidden tab; pin a visible one.
   const visible = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
   onTestFinished(() => visible.mockRestore());
   let count = 1;
@@ -192,7 +192,7 @@ it("sends a particle per new message along its link, and again when the link ris
 });
 
 it("sends a particle when a link's newest message changes though its 24h count holds", async () => {
-  // Particles skip a hidden tab; pin a visible one so the result doesn't depend on the runner's jsdom.
+  // Particles skip a hidden tab; pin a visible one.
   const visible = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
   onTestFinished(() => visible.mockRestore());
   let lastId = "comms:1";
@@ -627,9 +627,12 @@ it("keeps a stopped seat that talked in the window, set back; shows link counts 
   expect(edge.classList).toContain("near");
 });
 
-/** Takes over requestAnimationFrame so a test can run frames by hand. */
-function manualFrames() {
-  let clock = performance.now();
+/**
+ * Takes over requestAnimationFrame so a test can run frames by hand. `origin` sets the frame
+ * clock's start, which a browser needn't share with performance.now().
+ */
+function manualFrames(origin = performance.now()) {
+  let clock = origin;
   let next = 1;
   const queue = new Map<number, FrameRequestCallback>();
   const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
@@ -681,6 +684,35 @@ it("with motion on, settles, stops asking for frames, and a same-data refetch mo
     await act(async () => {});
     frames.run(400);
     expect(transforms()).toEqual(before);
+    expect(frames.pending()).toBe(0);
+  } finally {
+    frames.restore();
+  }
+});
+
+it.each([
+  ["behind", -1e9],
+  ["ahead", 1e9],
+])("flies a particle on the frame clock when it runs %s performance.now()", async (_, origin) => {
+  const frames = manualFrames(origin);
+  try {
+    let count = 1;
+    stubRisingLinks(() => count);
+    render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+    await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
+    frames.run(400);
+    count = 2;
+    act(() => hub.refetchTopic("agents"));
+    await waitFor(() => expect(frames.pending()).toBe(1));
+    // It draws within a frame or two and is still flying a third of the way through its flight.
+    frames.run(2);
+    expect(document.querySelectorAll(".comms-particle")).toHaveLength(1);
+    frames.run(10);
+    expect(document.querySelectorAll(".comms-particle")).toHaveLength(1);
+    // A 1.15s flight is done well within 60 frames of 33ms, and the loop then stops.
+    frames.run(60);
+    expect(document.querySelector(".comms-particle")).toBeNull();
+    frames.run(400);
     expect(frames.pending()).toBe(0);
   } finally {
     frames.restore();

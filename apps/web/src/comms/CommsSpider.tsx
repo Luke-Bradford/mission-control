@@ -228,9 +228,12 @@ export function CommsSpider({
     return ref;
   };
 
-  /** Writes every node, link and particle at the simulation's current positions. */
+  /**
+   * Writes every node, link and particle at the simulation's current positions. Particles run on
+   * the frame clock only: a paint outside the loop (`now` null) leaves them to the next frame.
+   */
   const paint = useCallback(
-    (now: number) => {
+    (now: number | null) => {
       const { edges: liveEdges, f: frame } = latest.current;
       const middle = hubPoint(frame, "centre");
       for (const [id, el] of nodeEls.current) {
@@ -253,6 +256,7 @@ export function CommsSpider({
           `translate(${mid.x.toFixed(1)} ${mid.y.toFixed(1)})`,
         );
       }
+      if (now === null) return;
       const layer = particleLayer.current;
       particles.current = particles.current.filter((p) => {
         const c = geometry.get(p.edge);
@@ -304,10 +308,12 @@ export function CommsSpider({
   const wake = useCallback(() => {
     if (reduced || raf.current !== 0 || !visible.current) return;
     if (typeof window.requestAnimationFrame !== "function") return;
-    let last = performance.now() - STEP_MS;
+    // Seeded from the first frame: a frame's timestamp needn't share performance.now()'s origin.
+    let last: number | null = null;
     let quiet = 0;
     const tick = (now: number) => {
       raf.current = 0;
+      last ??= now - STEP_MS;
       if (now - last >= STEP_MS) {
         const moved = sim.step((now - last) / 1000);
         last = now;
@@ -376,7 +382,7 @@ export function CommsSpider({
       hubPoint(latest.current.f, "centre"),
       reduced,
     );
-    paint(performance.now());
+    paint(null);
     wake();
   }, [signature, reduced, sim, paint, wake]);
 
