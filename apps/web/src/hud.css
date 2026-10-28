@@ -2813,12 +2813,24 @@ pre.diff .h {
 }
 .comms-nav button,
 .comms-contacts button {
-  padding: 10px 12px;
+  padding: 9px 12px 9px 14px;
   color: var(--fg);
   text-align: left;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.comms-nav button:hover,
+.comms-contacts button:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.comms-nav button:focus-visible,
+.comms-contacts button:focus-visible {
+  outline-offset: -2px;
 }
 .comms-nav > .comms-section-head {
   border-bottom: 1px solid var(--line);
@@ -2832,13 +2844,25 @@ pre.diff .h {
 }
 .comms-nav-top > i,
 .comms-nav-row > i {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
 }
 .comms-nav-top > i {
-  border-radius: 2px;
+  border-radius: 1px;
+}
+.comms-nav-top > i.crew {
+  background: var(--fg-2);
+}
+.comms-nav-agent b {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.comms-nav-row .comms-nav-agent b {
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  letter-spacing: 0.04em;
 }
 .comms-nav-agent {
   min-width: 0;
@@ -2852,27 +2876,47 @@ pre.diff .h {
 }
 .comms-nav-counts {
   display: inline-flex;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
 }
+.comms-nav-counts > small {
+  min-width: 2ch;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.comms-nav-counts > small.zero {
+  color: var(--muted);
+  opacity: 0.6;
+}
+/* Unread and mention counts: compact filled chips, mono numerals. */
 .comms-nav .comms-unread-count,
 .comms-nav .comms-mention-count {
   min-width: 18px;
-  padding: 0 5px;
-  color: var(--bg);
-  font: 600 var(--fs-xs) var(--mono);
-  font-style: normal;
+  height: 16px;
+  padding: 0 4px;
+  color: var(--accent);
+  font: 600 10px / 16px var(--mono);
+  font-variant-numeric: tabular-nums;
   text-align: center;
-  background: var(--accent);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 2px;
 }
 .comms-nav .comms-mention-count {
-  color: #fff;
-  background: var(--crit);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
+/* Selection is an edge, not a box: a 2px accent bar on the left over a soft tint. */
 .comms-nav button.on,
 .comms-contacts button.on {
   background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.comms-nav button.on .comms-nav-agent b,
+.comms-contacts button.on {
+  color: var(--fg);
 }
 .comms-nav-row small,
 .comms-contacts small {
@@ -2995,10 +3039,17 @@ pre.diff .h {
   width: 40px;
   height: 32px;
   place-items: center;
-  color: var(--warn);
+  color: var(--fg-2);
   background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.comms-bell:hover {
+  color: var(--fg);
+  border-color: var(--line-2);
+}
+.comms-bell:has(b) {
+  color: var(--warn);
 }
 .comms-bell svg {
   width: 18px;
@@ -3013,8 +3064,8 @@ pre.diff .h {
   right: -7px;
   min-width: 17px;
   padding: 0 4px;
-  color: #171108;
-  font-size: 10px;
+  color: var(--bg);
+  font: 600 10px / 16px var(--mono);
   background: var(--warn);
   border-radius: 999px;
 }
@@ -3111,7 +3162,8 @@ pre.diff .h {
   justify-content: flex-end;
 }
 .comms-bubble.highlighted .comms-bubble-body {
-  box-shadow: 0 0 0 2px var(--warn);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .comms-message-stack {
   gap: 12px;
@@ -3125,53 +3177,95 @@ pre.diff .h {
   color: var(--muted);
   font-size: var(--fs-xs);
 }
+/* Bubbles: hairlines only. Who spoke is told by side and tint, never by a coloured outline. */
 .comms-bubble-body {
   padding: 9px 12px;
   overflow-wrap: anywhere;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: 2px 8px 8px;
+  border-radius: 2px;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
 }
 .comms-bubble.capcom .comms-bubble-body {
   color: var(--fg);
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  border-radius: 8px 8px 2px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
+.comms-message-meta > span:first-child {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+/* Message actions float on the bubble's bottom edge on hover or focus, so they never take a line. */
 .comms-actions {
+  position: absolute;
+  z-index: 3;
+  bottom: -13px;
+  left: 10px;
   display: inline-flex;
-  gap: 4px;
-  margin-left: 2px;
+  gap: 1px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.comms-bubble.capcom .comms-actions {
+  right: 10px;
+  left: auto;
 }
 .comms-bubble:hover .comms-actions,
 .comms-bubble:focus-within .comms-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 .comms-actions button,
 .comms-react-set button {
-  padding: 2px 5px;
+  min-height: 20px;
+  padding: 1px 6px;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  font-size: 10px;
   background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border: 0;
+  border-radius: 2px;
+}
+.comms-actions button:hover,
+.comms-react-set button:hover {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+.comms-react-set {
+  margin: 0;
+  padding: 0 0 0 2px;
+  border: 0;
+  border-left: 1px solid var(--line);
 }
 .comms-react-set {
   display: inline-flex;
-  gap: 3px;
+  gap: 1px;
 }
 .comms-quote {
   max-width: 100%;
-  padding: 4px 8px;
+  padding: 3px 8px;
   overflow: hidden;
   color: var(--fg-2);
+  font-size: var(--fs-s);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg);
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line-2);
+  border-radius: 0;
+}
+.comms-quote:hover {
+  color: var(--fg);
+  border-left-color: var(--accent);
 }
 .decision-meta {
   display: flex;
@@ -3181,16 +3275,16 @@ pre.diff .h {
   font: var(--fs-xs) var(--mono);
 }
 .decision-from {
-  padding: 1px 5px;
+  padding: 1px 6px;
   color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 2px;
 }
 .decision-ticket {
   padding: 1px 6px;
-  color: var(--muted);
+  color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: 2px;
 }
 .decision-clock {
   margin-left: auto;
@@ -3220,14 +3314,25 @@ pre.diff .h {
   padding: 1px 6px;
   color: var(--fg-2);
   font-size: var(--fs-xs);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border: 0;
+  border-radius: 2px;
 }
+/* Ticket and PR refs: filled chips, tinted, no outline. */
 .comms-ref {
   margin: 0 1px;
+  padding: 0 4px;
   color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  vertical-align: baseline;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.comms-ref:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .comms-composer {
   flex: 0 0 auto;
@@ -3249,9 +3354,20 @@ pre.diff .h {
   flex: 1;
   min-width: 0;
 }
+.comms-composer input {
+  min-height: 40px;
+  border-color: var(--line-2);
+  border-radius: 2px;
+}
+.comms-composer input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .comms-composer input + button {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 18px;
+  border-radius: 2px;
   color: var(--accent-ink);
   font-weight: 600;
   background: var(--accent);
@@ -3267,8 +3383,10 @@ pre.diff .h {
   color: var(--fg-2);
   white-space: nowrap;
   text-overflow: ellipsis;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r);
+  background: var(--accent-soft);
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
   font-size: var(--fs-s);
 }
 .comms-replying button {

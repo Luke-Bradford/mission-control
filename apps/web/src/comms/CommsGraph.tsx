@@ -1,9 +1,16 @@
-import type { CrewRow } from "@mc/core";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { COMMS_CREW, type CrewRow } from "@mc/core";
+import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { type CommsView, commsAgentPath, commsFlightPath, navigate } from "../router.ts";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsCrewPath,
+  commsFlightPath,
+  navigate,
+} from "../router.ts";
+import { TrafficChart, type TrafficHour } from "./TrafficChart.tsx";
 
 type Link = { from: string; to: string; count: number };
 type Hour = Link & { hour: number };
@@ -19,6 +26,31 @@ type ChatterPair = {
 const HOUR = 60 * 60 * 1000;
 const CAPCOM = "CAPCOM";
 const MC = "MC";
+/** Chatter watch lists a pair once it passes this many rounds on one thing. */
+const CHATTER_ROUNDS = 6;
+
+/** The graph's size before it is measured (and in tests, where nothing is laid out). */
+const DEFAULT_SIZE = { w: 340, h: 300 };
+
+/**
+ * The graph's coordinate space is its measured box, so it fills whatever the panel gives it.
+ * CAPCOM, FLIGHT and #crew sit on the vertical spine; seats with traffic sit on an ellipse round it.
+ */
+type Frame = { w: number; h: number; cx: number; cy: number; rx: number; ry: number };
+type Point = { x: number; y: number };
+
+function frameFor(size: { w: number; h: number }): Frame {
+  const w = Math.max(240, size.w);
+  const h = Math.max(220, size.h);
+  return {
+    w,
+    h,
+    cx: w / 2,
+    cy: h / 2,
+    rx: Math.min(w / 2 - 40, 200),
+    ry: h / 2 - 34,
+  };
+}
 
 function pair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
@@ -56,9 +88,67 @@ function scopeLabel(view: CommsView): string {
   return `${view.agentId}, all contacts`;
 }
 
-function hourLabel(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", hour12: false });
+/** Seats on an ellipse round FLIGHT, alternating right and left, clear of the spine's hubs. */
+function seatPositions(count: number, f: Frame): Point[] {
+  const right = Math.ceil(count / 2);
+  const left = count - right;
+  const side = (n: number, mirror: boolean) =>
+    Array.from({ length: n }, (_, index) => {
+      const degrees = n === 1 ? 0 : -52 + (104 * index) / (n - 1);
+      const angle = ((mirror ? 180 - degrees : degrees) * Math.PI) / 180;
+      return { x: f.cx + f.rx * Math.cos(angle), y: f.cy + f.ry * Math.sin(angle) };
+    });
+  const r = side(right, false);
+  const l = side(left, true);
+  return Array.from({ length: count }, (_, index) =>
+    index % 2 === 0
+      ? (r[index / 2] as { x: number; y: number })
+      : (l[(index - 1) / 2] as { x: number; y: number }),
+  );
 }
+
+/** A spoke from FLIGHT is straight; every other link bows away from the centre. */
+function edgeGeometry(a: Point, b: Point, straight: boolean, avoid: Point[], f: Frame) {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy) || 1;
+  let nx = -dy / length;
+  let ny = dx / length;
+  if (nx * (mx - f.cx) + ny * (my - f.cy) < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const bend = straight ? 0 : length * 0.16;
+  const cx = mx + nx * bend;
+  const cy = my + ny * bend;
+  const at = (t: number) => ({
+    x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * cx + t ** 2 * b.x,
+    y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * cy + t ** 2 * b.y,
+  });
+  // The count sits mid-link unless a node or its label is there; then it slides along the link.
+  const clear = (p: Point) =>
+    avoid.every((node) => Math.abs(p.x - node.x) > 44 || p.y < node.y - 16 || p.y > node.y + 26);
+  // Along the link first, then just off it on the outer side for a short, crowded link.
+  const candidates = [0, 12].flatMap((off) =>
+    [0.5, 0.4, 0.6, 0.32, 0.68].map((t) => {
+      const p = at(t);
+      return { x: p.x + nx * off, y: p.y + ny * off };
+    }),
+  );
+  const room = (p: Point) =>
+    Math.min(...avoid.map((node) => Math.hypot(p.x - node.x, p.y - (node.y + 8))));
+  const label =
+    candidates.find(clear) ??
+    candidates.reduce((best, p) => (room(p) > room(best) ? p : best), at(0.5));
+  return {
+    d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
+    label,
+  };
+}
+
+const pct = (value: number, of: number) => `${Number(((value / of) * 100).toFixed(3))}%`;
 
 /** The live crew's communication map. Token telemetry is intentionally optional until #T3 lands. */
 export function CommsGraph({
@@ -76,11 +166,24 @@ export function CommsGraph({
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
   const [liveEdges, setLiveEdges] = useState<Set<string>>(() => new Set());
   const previousCounts = useRef<Map<string, number> | null>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(DEFAULT_SIZE);
+  useLayoutEffect(() => {
+    const el = stage.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const box = entry?.contentRect;
+      if (box && box.width > 0 && box.height > 0)
+        setSize({ w: Math.round(box.width), h: Math.round(box.height) });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const crewRows = useMemo(() => rows.filter((row) => row.kind === "crew"), [rows]);
   const flight = flightId ?? crewRows.find((row) => row.role === "FLIGHT")?.id ?? "FLIGHT";
   const known = useMemo(
-    () => new Set([CAPCOM, flight, ...crewRows.map((row) => row.id)]),
+    () => new Set([CAPCOM, COMMS_CREW, flight, ...crewRows.map((row) => row.id)]),
     [crewRows, flight],
   );
   const edges = useMemo(() => {
@@ -115,6 +218,7 @@ export function CommsGraph({
   }, [edges, links]);
   const scoped = edges.filter((edge) => inView(view, flight, edge.a, edge.b));
   const total = scoped.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
+  const focusedView = view.kind !== "crew" && view.kind !== "ticket";
   const selected = new Set(
     view.kind === "crew"
       ? []
@@ -127,38 +231,57 @@ export function CommsGraph({
             : [view.agentId],
   );
   const active = new Set([...selected, ...scoped.flatMap((edge) => [edge.a, edge.b])]);
-  const ring = [CAPCOM, ...crewRows.map((row) => row.id).filter((id) => id !== flight)];
-  const nodes = [flight, ...ring].map((id, index) => {
-    const ringIndex = index - 1;
-    const radius = ring.length > 7 ? 128 : 112;
-    const angle = ringIndex < 0 ? 0 : -Math.PI / 2 + (2 * Math.PI * ringIndex) / ring.length;
-    const row = crewRows.find((candidate) => candidate.id === id);
-    const count = edges
+  const countOf = (id: string) =>
+    edges
       .filter((edge) => edge.a === id || edge.b === id)
       .reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
-    return {
-      id,
-      label: id === flight ? "FLIGHT" : id,
-      x: id === flight ? 170 : 170 + radius * Math.cos(angle),
-      y: id === flight ? 160 : 160 + radius * Math.sin(angle),
-      count,
-      color:
-        id === CAPCOM ? "var(--fg)" : id === flight ? "var(--accent)" : agentColor(row?.index ?? 0),
-      lit: active.size === 0 || active.has(id),
-      inactive:
-        row !== undefined && (row.paused || row.crewPause != null || row.hudState === "stopped"),
-    };
-  });
+  const seats = crewRows.filter((row) => row.id !== flight);
+  // A seat with no traffic in the window waits on the standby rack unless the page is about it.
+  const onGraph = seats.filter((row) => countOf(row.id) > 0 || selected.has(row.id));
+  const standby = seats.filter((row) => !onGraph.includes(row));
+  const f = frameFor(size);
+  const seatPoints = seatPositions(onGraph.length, f);
+  const busiest = Math.max(1, ...onGraph.map((row) => countOf(row.id)));
+  const liveIds = new Set(
+    edges
+      .filter((edge) => liveEdges.has(`${edge.a}\0${edge.b}`))
+      .flatMap((edge) => [edge.a, edge.b]),
+  );
+  const rowOf = (id: string) => crewRows.find((candidate) => candidate.id === id);
+  const inactive = (row: CrewRow | undefined) =>
+    row !== undefined && (row.paused || row.crewPause != null || row.hudState === "stopped");
+  type GraphNode = {
+    id: string;
+    label: string;
+    x: number;
+    y: number;
+    hub: boolean;
+    count: number;
+    color: string;
+  };
+  const nodes: GraphNode[] = [
+    { id: CAPCOM, label: CAPCOM, x: f.cx, y: f.cy - f.ry, hub: true, color: "var(--fg)" },
+    { id: flight, label: "FLIGHT", x: f.cx, y: f.cy, hub: true, color: "var(--accent)" },
+    { id: COMMS_CREW, label: "#crew", x: f.cx, y: f.cy + f.ry, hub: true, color: "var(--fg-2)" },
+    ...onGraph.map((row, index) => ({
+      id: row.id,
+      label: row.id,
+      x: seatPoints[index]?.x ?? f.cx,
+      y: seatPoints[index]?.y ?? f.cy,
+      hub: false,
+      color: agentColor(row.index),
+    })),
+  ].map((node) => ({ ...node, count: countOf(node.id) }));
   const point = new Map(nodes.map((node) => [node.id, node]));
+  const heaviest = Math.max(1, ...edges.map((edge) => edge.aToB + edge.bToA));
   const hasData = links !== undefined;
-  const chartHours = useMemo(() => {
+  const agentScope = view.kind === "agent" || view.kind === "inbox" || view.kind === "contact";
+  const chartHours = useMemo<TrafficHour[]>(() => {
     const start = Math.floor(Date.now() / HOUR) * HOUR - 23 * HOUR;
     return Array.from({ length: 24 }, (_, index) => {
       const hour = start + index * HOUR;
-      let agent = 0;
-      let capcom = 0;
-      let sent = 0;
-      let received = 0;
+      let all = 0;
+      let part = 0;
       for (const entry of hours ?? []) {
         const from = canonicalEndpoint(entry.from, flight);
         const to = canonicalEndpoint(entry.to, flight);
@@ -166,25 +289,19 @@ export function CommsGraph({
           entry.hour !== hour ||
           !known.has(from) ||
           !known.has(to) ||
+          from === to ||
           !inView(view, flight, from, to)
         )
           continue;
+        all += entry.count;
         if (view.kind === "agent" || view.kind === "inbox" || view.kind === "contact") {
-          if (from === view.agentId) sent += entry.count;
-          if (to === view.agentId) received += entry.count;
-        } else if (from === CAPCOM || to === CAPCOM) capcom += entry.count;
-        else agent += entry.count;
+          if (from === view.agentId) part += entry.count;
+        } else if (from === CAPCOM || to === CAPCOM) part += entry.count;
       }
-      return { hour, agent, capcom, sent, received };
+      return { hour, total: all, part };
     });
   }, [flight, hours, known, view]);
-  const agentScope = view.kind === "agent" || view.kind === "inbox" || view.kind === "contact";
-  const peak = Math.max(
-    1,
-    ...chartHours.map((item) =>
-      agentScope ? item.sent + item.received : item.agent + item.capcom,
-    ),
-  );
+  const peakHour = Math.max(0, ...chartHours.map((item) => item.total));
   const capcomCount = scoped.reduce(
     (sum, edge) => sum + (edge.a === CAPCOM || edge.b === CAPCOM ? edge.aToB + edge.bToA : 0),
     0,
@@ -208,7 +325,18 @@ export function CommsGraph({
         .sort((a, b) => b.rounds - a.rounds),
     [chatter, flight, known],
   );
+  const mostRounds = Math.max(CHATTER_ROUNDS * 2, ...watched.map((entry) => entry.rounds));
   const graphLabel = `Comms graph, ${crewRows.length} live seats, ${total} messages in view (${scopeLabel(view)})`;
+  const open = (id: string) =>
+    navigate(
+      id === CAPCOM || id === flight
+        ? commsFlightPath()
+        : id === COMMS_CREW
+          ? commsCrewPath()
+          : commsAgentPath(id),
+    );
+  const nodeClass = (id: string, extra: string) =>
+    `comms-node${extra}${active.size === 0 || active.has(id) ? "" : " dim"}${inactive(rowOf(id)) ? " inactive" : ""}${selected.has(id) ? " selected" : ""}${liveIds.has(id) ? " live" : ""}`;
 
   return (
     <aside className="comms-right" aria-label="Comms activity">
@@ -239,89 +367,150 @@ export function CommsGraph({
           </fieldset>
         }
       >
-        <div
-          className={`comms-graph${metric === "tokens" ? " tokens" : ""}`}
-          role="img"
-          aria-label={graphLabel}
-        >
-          {edges.map((edge) => {
-            const a = point.get(edge.a);
-            const b = point.get(edge.b);
-            if (!a || !b) return null;
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const length = Math.hypot(dx, dy);
-            const lit = scoped.includes(edge);
-            const watching = watched.some(
-              (entry) =>
-                (entry.from === edge.a && entry.to === edge.b) ||
-                (entry.from === edge.b && entry.to === edge.a),
-            );
-            const live = liveEdges.has(`${edge.a}\0${edge.b}`);
-            const width = metric === "tokens" ? 1 : 1 + Math.min(5, (edge.aToB + edge.bToA) / 8);
-            return (
-              <div
-                key={`${edge.a}-${edge.b}`}
-                className={`comms-edge${lit ? " active" : " dim"}${watching ? " watching" : ""}${live ? " live" : ""}`}
-              >
-                <span
-                  className="comms-edge-line"
-                  style={{
-                    left: a.x,
-                    top: a.y,
-                    width: length,
-                    height: width,
-                    transform: `rotate(${Math.atan2(dy, dx)}rad)`,
-                  }}
-                />
-                <span
-                  className="comms-edge-count"
-                  style={{ left: a.x + dx / 2, top: a.y + dy / 2 }}
-                >
-                  {metric === "messages" ? edge.aToB + edge.bToA : "—"}
-                </span>
-              </div>
-            );
-          })}
-          {nodes.map((node) => (
-            <button
-              key={node.id}
-              type="button"
-              className={`comms-node${node.lit ? "" : " dim"}${node.inactive ? " inactive" : ""}${selected.has(node.id) ? " selected" : ""}`}
-              style={
-                {
-                  left: node.x,
-                  top: node.y,
-                  "--node-color": node.color,
-                  "--count": Math.min(node.count, 16),
-                } as CSSProperties
-              }
-              onClick={() =>
-                navigate(
-                  node.id === CAPCOM || node.id === flight
-                    ? commsFlightPath()
-                    : commsAgentPath(node.id),
-                )
-              }
-              aria-label={`Open ${node.label}, ${node.count} messages in 24h`}
-            >
-              <span>{node.count}</span>
-              <small>{node.label}</small>
-            </button>
-          ))}
-          {hasData && edges.length === 0 && (
-            <p className="comms-empty">No direct messages in the last 24h.</p>
-          )}
-          {metric === "tokens" && (
-            <p className="comms-token-empty">Token totals are not available yet.</p>
-          )}
+        <div className="comms-graph-readout" aria-hidden="true">
+          <span className="live">
+            <i className="comms-live-dot" />
+            Live
+          </span>
+          <span>
+            <b>{edges.length}</b> links
+          </span>
+          <span>
+            <b>{edges.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0)}</b> msg
+          </span>
+          <span>
+            <b>{onGraph.length}</b>/{seats.length} seats talking
+          </span>
         </div>
+        <div className="comms-graph-stage" ref={stage}>
+          <div
+            className={`comms-graph${metric === "tokens" ? " tokens" : ""}`}
+            role="img"
+            aria-label={graphLabel}
+          >
+            <svg className="comms-graph-links" viewBox={`0 0 ${f.w} ${f.h}`} aria-hidden="true">
+              <ellipse className="comms-graph-orbit" cx={f.cx} cy={f.cy} rx={f.rx} ry={f.ry} />
+              <line
+                className="comms-graph-spine"
+                x1={f.cx}
+                x2={f.cx}
+                y1={f.cy - f.ry}
+                y2={f.cy + f.ry}
+              />
+              {edges.map((edge) => {
+                const a = point.get(edge.a);
+                const b = point.get(edge.b);
+                if (!a || !b) return null;
+                const count = edge.aToB + edge.bToA;
+                const weight = Math.sqrt(count / heaviest);
+                const lit = scoped.includes(edge);
+                const watching = watched.some(
+                  (entry) =>
+                    (entry.from === edge.a && entry.to === edge.b) ||
+                    (entry.from === edge.b && entry.to === edge.a),
+                );
+                const live = liveEdges.has(`${edge.a}\0${edge.b}`);
+                const geometry = edgeGeometry(
+                  a,
+                  b,
+                  edge.a === flight || edge.b === flight,
+                  nodes,
+                  f,
+                );
+                return (
+                  <g
+                    key={`${edge.a}-${edge.b}`}
+                    className={`comms-edge${lit ? (focusedView ? " active focus" : " active") : " dim"}${watching ? " watching" : ""}${live ? " live" : ""}`}
+                    style={{ "--w": weight.toFixed(3) } as CSSProperties}
+                  >
+                    <title>{`${a.label} → ${b.label}: ${edge.aToB} · ${b.label} → ${a.label}: ${edge.bToA}`}</title>
+                    <path
+                      className="comms-edge-line"
+                      d={geometry.d}
+                      strokeWidth={metric === "tokens" ? 1 : 1 + 3 * weight}
+                    />
+                    {live && <path className="comms-edge-pulse" d={geometry.d} pathLength={100} />}
+                    {metric === "messages" && (
+                      <text
+                        className="comms-edge-count"
+                        x={geometry.label.x}
+                        y={geometry.label.y}
+                        dy="0.34em"
+                        textAnchor="middle"
+                      >
+                        {count}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+            {nodes.map((node) => {
+              const heat = node.count === 0 ? 0 : Math.sqrt(node.count / busiest);
+              return (
+                <button
+                  key={node.id}
+                  type="button"
+                  className={nodeClass(
+                    node.id,
+                    `${node.hub ? " hub" : ""}${node.count === 0 ? " quiet" : ""}`,
+                  )}
+                  style={
+                    {
+                      left: pct(node.x, f.w),
+                      top: pct(node.y, f.h),
+                      "--node-color": node.color,
+                      "--heat": heat.toFixed(3),
+                    } as CSSProperties
+                  }
+                  onClick={() => open(node.id)}
+                  aria-label={`Open ${node.label}, ${node.count} messages in 24h`}
+                >
+                  <span className="comms-node-dot" aria-hidden="true" />
+                  <span className="comms-node-label" aria-hidden="true">
+                    <b className="comms-node-name">{node.label}</b>
+                    <em className="comms-node-count">{node.count}</em>
+                  </span>
+                </button>
+              );
+            })}
+            {hasData && edges.length === 0 && (
+              <p className="comms-empty">No direct messages in the last 24h.</p>
+            )}
+            {metric === "tokens" && (
+              <p className="comms-token-empty">Token totals are not available yet.</p>
+            )}
+          </div>
+        </div>
+        {standby.length > 0 && (
+          <div className="comms-standby">
+            <span className="comms-standby-head">
+              Quiet 24h <b>{standby.length}</b>
+            </span>
+            <div className="comms-standby-seats">
+              {standby.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={nodeClass(row.id, " idle")}
+                  style={{ "--node-color": agentColor(row.index) } as CSSProperties}
+                  onClick={() => open(row.id)}
+                  aria-label={`Open ${row.id}, 0 messages in 24h`}
+                  title={inactive(row) ? `${row.id} · paused` : row.id}
+                >
+                  <span className="comms-node-dot" aria-hidden="true" />
+                  <span aria-hidden="true">{row.id}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="comms-watch">
-          <div>
-            Chatter watch <span>· over 6 rounds on one thing</span>
+          <div className="comms-watch-head">
+            Chatter watch <span>· over {CHATTER_ROUNDS} rounds on one thing</span>
           </div>
           {watched.length === 0 ? (
-            <p>Nothing over 6 rounds in 24h.</p>
+            <p className="clear">Nothing over {CHATTER_ROUNDS} rounds in 24h.</p>
           ) : (
             watched.map((entry) => (
               <p key={`${entry.from}-${entry.to}-${entry.ticket}`}>
@@ -329,6 +518,9 @@ export function CommsGraph({
                 {entry.tokens === undefined || entry.tokens === null
                   ? ""
                   : ` · ${entry.tokens.toLocaleString()} tokens`}
+                <span className="comms-watch-bar" aria-hidden="true">
+                  <i style={{ width: pct(entry.rounds, mostRounds) }} />
+                </span>
               </p>
             ))
           )}
@@ -338,68 +530,39 @@ export function CommsGraph({
         id="commsTraffic"
         className="comms-traffic-panel"
         title="Traffic"
-        sub={scopeLabel(view)}
+        sub={`${scopeLabel(view)} · 24h`}
       >
-        <div className="comms-traffic-stats">
+        <div className={`comms-traffic-stats${total === 0 ? " zero" : ""}`}>
           {agentScope ? (
             <>
-              <Stat value={total} label="messages" />
-              <Stat value={sent} label="sent" tone="agent" />
-              <Stat value={total - sent} label="received" />
+              <Stat value={total} unit="msg" label="messages" />
+              <Stat value={sent} unit="msg" label="sent" tone="agent" />
+              <Stat value={total - sent} unit="msg" label="received" />
               <Stat value={scoped.length} label={view.kind === "contact" ? "link" : "contacts"} />
             </>
           ) : (
             <>
-              <Stat value={total} label="messages" />
+              <Stat value={total} unit="msg" label="messages" />
               <Stat
                 value={total ? `${Math.round(((total - capcomCount) / total) * 100)}%` : "—"}
-                label="agent ↔ agent"
+                label="agent↔agent"
                 tone="think"
               />
-              <Stat value={capcomCount} label="with CAPCOM" tone="accent" />
-              <Stat value={crewRows.length} label="agents" />
+              <Stat value={capcomCount} unit="msg" label="with CAPCOM" tone="accent" />
+              <Stat value={peakHour} unit="/h" label="peak hour" />
             </>
           )}
         </div>
         {hours === undefined ? (
           <p className="comms-traffic-empty">Loading traffic…</p>
         ) : (
-          <>
-            <div
-              className="comms-bars"
-              role="img"
-              aria-label={`Hourly messages over the last 24 hours, ${scopeLabel(view)}`}
-            >
-              {chartHours.map((item) => {
-                const first = agentScope ? item.sent : item.agent;
-                const second = agentScope ? item.received : item.capcom;
-                return (
-                  <span
-                    className="comms-bar"
-                    key={item.hour}
-                    title={`${hourLabel(item.hour)} · ${first + second} messages`}
-                  >
-                    <i style={{ height: `${(second / peak) * 56}px` }} />
-                    <b style={{ height: `${(first / peak) * 56}px` }} />
-                  </span>
-                );
-              })}
-            </div>
-            <div className="comms-bar-times">
-              <span>{hourLabel(chartHours[0]?.hour ?? Date.now())}</span>
-              <span>now</span>
-            </div>
-            <div className="comms-bar-legend">
-              <span>
-                <i />
-                {agentScope ? `Sent by ${view.agentId}` : "Agent ↔ agent"}
-              </span>
-              <span>
-                <i />
-                {agentScope ? "Received" : "With CAPCOM"}
-              </span>
-            </div>
-          </>
+          <TrafficChart
+            hours={chartHours}
+            label={`Hourly messages over the last 24 hours, ${scopeLabel(view)}`}
+            totalLabel="All messages"
+            partLabel={agentScope ? `Sent by ${view.agentId}` : "With CAPCOM"}
+            emptyText={`No messages in ${scopeLabel(view)} in the last 24h.`}
+          />
         )}
       </Panel>
     </aside>
@@ -408,16 +571,21 @@ export function CommsGraph({
 
 function Stat({
   value,
+  unit,
   label,
   tone,
 }: {
   value: string | number;
+  unit?: string;
   label: string;
   tone?: "agent" | "think" | "accent";
 }) {
   return (
-    <div>
-      <strong className={tone ?? ""}>{value}</strong>
+    <div className={value === 0 || value === "—" ? "nil" : ""}>
+      <span className="comms-stat-figure">
+        <strong className={tone ?? ""}>{value}</strong>
+        {unit && <em>{unit}</em>}
+      </span>
       <span>{label}</span>
     </div>
   );
