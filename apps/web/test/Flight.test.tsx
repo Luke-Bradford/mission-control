@@ -865,7 +865,7 @@ describe("FLIGHT page", () => {
       expect(pulseValue(container, "WIP")).toBe("1");
     });
 
-    it("scopes the pulse rail to the selected session", async () => {
+    it("scopes WIP and Blocked to the selected session; Needs you stays the whole inbox", async () => {
       stubFetch({
         "/api/config": SESSION_CONFIG,
         "/api/crew": {
@@ -885,7 +885,6 @@ describe("FLIGHT page", () => {
           item({ key: "a" }),
           item({ key: "b", repoId: "site-builder" }),
           item({ key: "c", repoId: "site-builder" }),
-          // no repo: it belongs to no session, so every session counts it
           item({ key: "e", repoId: null }),
         ],
       });
@@ -893,14 +892,15 @@ describe("FLIGHT page", () => {
       await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("4"));
       expect(pulseValue(container, "WIP")).toBe("2");
       expect(pulseValue(container, "Blocked")).toBe("1");
+      // Needs you is the operator's inbox: a session filter never hides what waits on them.
       act(() => setSession("site-builder-session"));
-      await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("3"));
-      expect(pulseValue(container, "WIP")).toBe("1");
+      await waitFor(() => expect(pulseValue(container, "WIP")).toBe("1"));
       expect(pulseValue(container, "Blocked")).toBe("0");
+      expect(pulseValue(container, "Needs you")).toBe("4");
       act(() => setSession("shop-app-session"));
-      await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("2"));
+      await waitFor(() => expect(pulseValue(container, "Blocked")).toBe("1"));
       expect(pulseValue(container, "WIP")).toBe("1");
-      expect(pulseValue(container, "Blocked")).toBe("1");
+      expect(pulseValue(container, "Needs you")).toBe("4");
     });
 
     it("labels each pulse button with its window and sends cycle time to Telemetry", async () => {

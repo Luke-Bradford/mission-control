@@ -1,6 +1,5 @@
 import type { AttentionItem, AttentionOwner } from "@mc/core";
 import { RESOURCES, useResource } from "./data.ts";
-import { useSessionScope } from "./shell/session.ts";
 
 /** The owner of an item from a hub that predates `owner`: the operator's. */
 const DEFAULT_OWNER: AttentionOwner = "operator";
@@ -23,9 +22,11 @@ export function operatorItems(items: AttentionItem[]): AttentionItem[] {
 }
 
 /**
- * The one "Needs you" set: the operator's items in the session's view (an item with no repo
- * belongs to no session, so it stays in view), one per key. The header button, FLIGHT's pulse and
- * Stand-up focus all count this; a panel listing a different subset must not call it Needs you.
+ * The one "Needs you" set: the operator's items, one per key. It is the operator's whole inbox, so
+ * the header's session filter does not narrow it (nothing waiting on them hides behind a filter);
+ * `inRepo` is for a panel that deliberately lists a subset, which must not call itself Needs you.
+ * The header button, FLIGHT's pulse, Stand-up focus, Comms › Needs you and the Overview banner all
+ * count this set.
  */
 export function needsYouItems(
   items: readonly AttentionItem[] | undefined,
@@ -41,11 +42,9 @@ export function needsYouItems(
   });
 }
 
-/** `needsYouItems` over the live attention list and the header's session filter. */
+/** `needsYouItems` over the live attention list. */
 export function useNeedsYou(): AttentionItem[] {
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const { inRepo } = useSessionScope();
-  return needsYouItems(attention, inRepo);
+  return needsYouItems(useResource<AttentionItem[]>(RESOURCES.attention).data);
 }
 
 /** Who is handling an item that is not the operator's. */

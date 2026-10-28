@@ -215,8 +215,8 @@ export function Summary({ mode }: { mode: SummaryMode }) {
   const listed = FLIGHT_SUMMARY_LISTED;
   const row = (item: FlightSummaryItem | FlightLedgerEntry) =>
     !ledger.data && !ledger.error ? (
-      <tr key={`${item.kind}:${item.key}`}>
-        <td>{DASH}</td>
+      <tr key={`${item.kind}:${item.key}`} className="flight-plan-row">
+        <td colSpan={7}>{DASH}</td>
       </tr>
     ) : (
       <PlanRow

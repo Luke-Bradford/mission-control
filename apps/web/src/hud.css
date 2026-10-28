@@ -5421,7 +5421,8 @@ button.flight-pulse:hover {
   font-variant-numeric: tabular-nums;
 }
 .flight-plan-table {
-  min-width: 880px;
+  /* the rows' grid minimum: 850px of tracks, six 14px gaps and 28px of padding */
+  min-width: 962px;
 }
 .flight-plan-head,
 .flight-plan-row,

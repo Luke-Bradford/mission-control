@@ -37,7 +37,9 @@ export function Sparkline({
   const gradient = `spark-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const n = values.length;
   if (n < 2) return null;
-  const max = Math.max(1, sharedMax ?? Math.max(...values.filter((v) => v !== null)));
+  // The top gridline is the real peak (a label on it states that value); 1 only for an all-zero series.
+  const peak = sharedMax ?? Math.max(...values.filter((v) => v !== null));
+  const max = peak > 0 ? peak : 1;
   const quiet = quietSeries(values);
   const x = (i: number): number => (i / (n - 1)) * W;
   const y = (v: number): number => BASE - (Math.max(0, Math.min(v, max)) / max) * (BASE - TOP);
