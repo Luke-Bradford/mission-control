@@ -1523,7 +1523,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const marker = `mc_run="${run.id}"`;
         session = startCodexSession({
           command,
-          args: ["app-server", "-c", marker],
+          // Session flags have higher precedence than every file-backed layer.  Keep the
+          // worktree untrusted even after thread/start records it in this run's private home:
+          // otherwise its committed .codex/config.toml can add tools or replace the seat floor.
+          args: [
+            "app-server",
+            "-c",
+            marker,
+            "-c",
+            `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`,
+          ],
           cwd,
           env,
           transcriptPath: run.transcriptPath,

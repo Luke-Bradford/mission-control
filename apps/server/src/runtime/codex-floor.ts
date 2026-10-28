@@ -20,6 +20,12 @@ import {
 /** The project config folder Codex loads from a thread's cwd: never writable by a seat. */
 export const CODEX_PROJECT_DIR = ".codex";
 
+/** An approval without a filesystem deny can escape Codex's Seatbelt profile. */
+export function requireCodexProfileDeny(denied: readonly string[]): void {
+  if (!denied.some((path) => path !== ""))
+    throw new Error("codex seat config: profile requires at least one deny entry");
+}
+
 /** The hub-written config in one run's isolated CODEX_HOME. */
 export function codexSeatConfig(
   i: CrewSandboxInput,
@@ -28,6 +34,7 @@ export function codexSeatConfig(
   tmpDir: string,
 ): string {
   const denied = sandboxReadDenies(i);
+  requireCodexProfileDeny(denied);
   for (const path of [
     i.cwd,
     i.gitCommonDir,

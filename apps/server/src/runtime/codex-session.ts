@@ -634,6 +634,7 @@ function codexSession(
       !isObj(result.activePermissionProfile) ||
       result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
       !isObj(result.sandbox) ||
+      result.sandbox.type !== "workspaceWrite" ||
       result.sandbox.networkAccess !== false ||
       !Array.isArray(result.instructionSources) ||
       result.instructionSources.length !== 0 ||

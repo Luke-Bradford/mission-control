@@ -108,6 +108,7 @@ rl.on("line", (line) => {
     if (bad === "approvalsReviewer") result.approvalsReviewer = "guardian_subagent";
     if (bad === "activePermissionProfile") result.activePermissionProfile.id = "other";
     if (bad === "networkAccess") result.sandbox.networkAccess = true;
+    if (bad === "sandboxType") result.sandbox.type = "dangerFullAccess";
     if (bad === "instructionSources") result.instructionSources = ["AGENTS.md"];
     const badField =
       handshakes > 1 ? (configured.badReattachField ?? configured.badField) : configured.badField;

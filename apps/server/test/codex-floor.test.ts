@@ -25,6 +25,7 @@ import {
   codexReadAllowed,
   codexSeatConfig,
   codexVersionAllowed,
+  requireCodexProfileDeny,
 } from "../src/runtime/codex-floor.ts";
 
 const sandboxInput: CrewSandboxInput = {
@@ -134,6 +135,12 @@ describe("codexSeatConfig", () => {
     );
     expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
+  });
+
+  it("refuses to generate a seat profile without a filesystem deny", () => {
+    expect(() => requireCodexProfileDeny([])).toThrow("requires at least one deny entry");
+    expect(() => requireCodexProfileDeny([""])).toThrow("requires at least one deny entry");
+    expect(() => requireCodexProfileDeny(["/operator"])).not.toThrow();
   });
 
   it.each(["writer", "read-only"] as const)(

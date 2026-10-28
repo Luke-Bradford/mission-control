@@ -2373,7 +2373,13 @@ import(${JSON.stringify(fixture)});
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     const spawn = recorded().find((m) => m.type === "spawn");
-    expect(spawn.args).toEqual(["app-server", "-c", `mc_run="${runId}"`]);
+    expect(spawn.args).toEqual([
+      "app-server",
+      "-c",
+      `mc_run="${runId}"`,
+      "-c",
+      `projects.${JSON.stringify(spawn.cwd)}.trust_level="untrusted"`,
+    ]);
     const folder = crewCodexDir(dbPath, runId);
     const home = join(folder, "codex-home");
     expect(spawn.env.CODEX_HOME).toBe(home);
@@ -2767,6 +2773,7 @@ import(${JSON.stringify(fixture)});
     "approvalPolicy",
     "approvalsReviewer",
     "activePermissionProfile",
+    "sandboxType",
     "networkAccess",
     "instructionSources",
   ])("refuses a thread with bad %s before the brief runs", async (bad) => {

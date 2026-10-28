@@ -163,6 +163,7 @@ describe("Codex session", () => {
     "approvalPolicy",
     "approvalsReviewer",
     "activePermissionProfile",
+    "sandboxType",
     "networkAccess",
     "instructionSources",
   ])("closes before the first turn when %s does not confirm the floor", async (bad) => {

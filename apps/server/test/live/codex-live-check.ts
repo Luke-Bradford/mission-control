@@ -257,7 +257,13 @@ console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: cur
   });
   session = startCodexSession({
     command,
-    args: ["app-server", "-c", `mc_run="${runId}"`],
+    args: [
+      "app-server",
+      "-c",
+      `mc_run="${runId}"`,
+      "-c",
+      `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`,
+    ],
     cwd,
     env: {
       HOME: operator,
