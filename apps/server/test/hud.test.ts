@@ -2033,15 +2033,15 @@ describe("the engine's notes in Needs you", () => {
   it("shows each kind with its note's text, and drops it when the note clears", () => {
     note("blocked:r1:0", "blocked", NOW - 4 * MIN);
     note("review:r1:abc", "review", NOW - 3 * MIN);
-    note("flag:r1:hard-rules:abc", "flag", NOW - 2 * MIN);
+    note("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag", NOW - 2 * MIN);
     note("ratelimit:r1", "ratelimit", NOW - MIN);
     expect(noteItems().map((i) => [i.key, i.kind, i.text, i.agentId, i.repoId])).toEqual([
       ["note:blocked:r1:0", "blocked", "text of blocked:r1:0", "guido-1", "shop-app"],
       ["note:review:r1:abc", "review", "text of review:r1:abc", "guido-1", "shop-app"],
       [
-        "note:flag:r1:hard-rules:abc",
+        "note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af",
         "flag",
-        "text of flag:r1:hard-rules:abc",
+        "text of flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af",
         "guido-1",
         "shop-app",
       ],

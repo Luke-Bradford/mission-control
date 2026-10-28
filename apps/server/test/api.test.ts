@@ -3014,8 +3014,11 @@ describe("crew and attention", () => {
   });
 
   it("POST /api/attention/:key/dismiss dismisses a hard-rule flag", async () => {
-    store.raiseNote({ ...parked("flag:r1:hard-rules:abc"), kind: "flag" });
-    const key = "note:flag:r1:hard-rules:abc";
+    store.raiseNote({
+      ...parked("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"),
+      kind: "flag",
+    });
+    const key = "note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
     const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ dismissed: key });

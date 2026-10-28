@@ -3742,7 +3742,7 @@ describe("brief_item", () => {
 
   it.each([
     ["hub-update-held", "blocked"],
-    ["flag:r1:hard-rules:abc", "flag"],
+    ["flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag"],
     ["flag:r1:floor:abc", "flag"],
     ["ratelimit:r1", "ratelimit"],
   ])("requires passing up %s with a brief", async (noteKey, kind) => {

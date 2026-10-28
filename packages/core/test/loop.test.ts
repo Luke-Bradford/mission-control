@@ -2887,5 +2887,10 @@ describe("isHardRulesFlagKey", () => {
     expect(isHardRulesFlagKey(`flag:guido-1:20261021T165337Z:other:${sha}`)).toBe(false);
     expect(isHardRulesFlagKey(`flake:guido-1:hard-rules:${sha}`)).toBe(false);
     expect(isHardRulesFlagKey("flag:guido-1:hard-rules:not-a-sha")).toBe(false);
+    expect(isHardRulesFlagKey(`flag:hard-rules:${sha}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.toUpperCase()}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.slice(1)}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}0`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}:x`)).toBe(false);
   });
 });
