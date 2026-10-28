@@ -1323,7 +1323,8 @@ th {
   display: grid;
   grid-template-rows: repeat(2, fit-content(calc(50% - 6px)));
   align-content: start;
-  overflow: visible;
+  /* The column holds its own scrolling panel bodies, so it never spills into a neighbour. */
+  overflow: hidden;
 }
 .ov > .col > .panel {
   overflow: hidden;

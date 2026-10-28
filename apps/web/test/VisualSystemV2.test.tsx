@@ -43,7 +43,8 @@ describe("visual system v2", () => {
     expect(css).toMatch(/\.overview-kpis\s*\{[^}]*border-block:/s);
     expect(css).toMatch(/\.overview-kpi\s*\{[^}]*border:\s*0/s);
     expect(css).toMatch(/#page-overview\s*\{[^}]*overflow:\s*auto/s);
-    expect(css).toMatch(/\.ov\s*>\s*\.col\s*\{[^}]*overflow:\s*visible/s);
+    expect(css).toMatch(/\.ov\s*>\s*\.col\s*\{[^}]*overflow:\s*hidden/s);
+    expect(css).toMatch(/\.ov\s*>\s*\.col\s*>\s*\.panel\s*>\s*\.pb\s*\{[^}]*overflow:\s*auto/s);
     expect(css).toMatch(/select\s*\{[^}]*appearance:/s);
     expect(css).toMatch(/input\[type="radio"\]\s*\{[^}]*accent-color:/s);
   });
