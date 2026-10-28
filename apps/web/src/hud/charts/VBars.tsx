@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Grid, keyStep, PAD, Tip, useChartWidth } from "./Hover.tsx";
+import { Grid, keyStep, PAD, Tip, useChartWidth, XAxis } from "./Hover.tsx";
 
 export interface VBar {
   key: string;
@@ -12,19 +12,20 @@ export interface VBar {
 }
 
 const BAR_MAX = 24;
-const RADIUS = 4;
+/** A bar takes at most this share of its slot; the rest is air. */
+const BAR_SHARE = 0.6;
 
-/** A rect rounded only at its top (the data end); square at the baseline. */
-function topRounded(x: number, y: number, w: number, h: number, round: boolean): string {
-  const r = round ? Math.min(RADIUS, w / 2, h) : 0;
-  return `M${x},${y + h}L${x},${y + r}Q${x},${y} ${x + r},${y}L${x + w - r},${y}Q${x + w},${y} ${x + w},${y + r}L${x + w},${y + h}Z`;
+/** A square-ended bar from (x, y) down `h`. */
+function barPath(x: number, y: number, w: number, h: number): string {
+  return `M${x},${y + h}V${y}H${x + w}V${y + h}Z`;
 }
 
 /**
  * Vertical bars, stacked when a bar has several segments (the mockup's `vbars` and its tokens-per-
- * turn chart): bars at most 24 px wide with a rounded top, 2 px of surface between stacked
- * segments, grid at 0/50/100 % of the tallest bar, every `every`-th label (or sparser, to fit) counted back
- * from the last, the last bar in the accent when `accentLast`. Each bar's whole slot is its hover target.
+ * turn chart): square-ended bars at most 60 % of their slot and 24 px wide, 2 px of surface between
+ * stacked segments, dashed grid at 0/50/100 % of the tallest bar, an x axis, every `every`-th label
+ * (or sparser, to fit) counted back from the last, plain history in a muted tone and the last bar
+ * in the accent when `accentLast`. Each bar's whole slot is its hover target.
  */
 export function VBars({
   bars,
@@ -55,7 +56,7 @@ export function VBars({
   const max = peak * 1.15;
   const Y = (v: number): number => yTop + (1 - v / max) * (yBottom - yTop);
   const slot = (x1 - x0) / n;
-  const bw = Math.max(1, Math.min(BAR_MAX, slot - 4));
+  const bw = Math.max(1, Math.min(BAR_MAX, slot * BAR_SHARE));
   const left = (i: number): number => x0 + i * slot + (slot - bw) / 2;
   // Labels thin out further when they would not fit their slots (~6.5 px a character at 11 px).
   const labelPx = Math.max(...bars.map((b) => b.label.length)) * 6.5 + 8;
@@ -75,6 +76,7 @@ export function VBars({
         {...keyStep(n, hover, setHover)}
       >
         <Grid max={peak} y={Y} x0={x0} x1={x1} label={format} />
+        <XAxis y={yBottom} x0={x0} x1={x1} at={[]} />
         {bars.map((b, i) => {
           const last = i === n - 1;
           const stacked = b.segments.length > 1;
@@ -101,9 +103,9 @@ export function VBars({
                   <path
                     key={s.name}
                     className="bar"
-                    d={topRounded(left(i), yt + gapAbove, bw, h, k === visible.length - 1)}
+                    d={barPath(left(i), yt + gapAbove, bw, h)}
                     fill={fill}
-                    fillOpacity={plain && !(accentLast && last) ? 0.55 : 1}
+                    fillOpacity={plain && !(accentLast && last) ? 0.38 : 1}
                   />
                 );
               })}
@@ -112,7 +114,7 @@ export function VBars({
                 <text
                   className="ct xl"
                   x={last ? x1 : left(i) + bw / 2}
-                  y={height - 4}
+                  y={height - 3}
                   textAnchor={last ? "end" : "middle"}
                 >
                   {b.label}

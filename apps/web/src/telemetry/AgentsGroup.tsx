@@ -80,6 +80,7 @@ function TokensPerMinute({ t, scope }: { t: Telemetry | undefined; scope: Scope 
             xLabels={live ? [`${LIVE_MINUTES} min ago`, "now"] : [`-${scope.range}`, "now"]}
             at={(i, n) => minutesAgo(live ? n - 1 - i : rangeMin * (1 - i / (n - 1)))}
             format={kTokens}
+            live
           />
           <Legend items={series.map((s) => ({ key: s.id, name: s.name, color: s.color }))} />
         </div>

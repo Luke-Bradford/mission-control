@@ -42,10 +42,17 @@ describe("KpiStrip", () => {
       within(screen.getByRole("link", { name: /Agents working/ })).getByText("0"),
     ).toBeTruthy();
     expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0);
-    const line = screen
-      .getByRole("img", { name: /Agents working/ })
-      .querySelector('path[fill="none"]');
-    expect(line?.getAttribute("d")).toBe("M0.0,16.0L26.0,16.0L52.0,16.0");
+    // an all-zero series is the bare baseline (y 23 of 24), labelled as no activity
+    const graph = screen.getByRole("img", {
+      name: "Agents working · last 30 minutes · no activity",
+    });
+    expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
+      "M0.0,23.0L50.0,23.0L100.0,23.0",
+    );
+    expect(graph.querySelectorAll("circle")).toHaveLength(0);
+    expect(
+      within(screen.getByRole("link", { name: /Agents working/ })).getByText("no activity"),
+    ).toBeTruthy();
   });
 
   it("formats eight linked metrics and labels the available histories honestly", async () => {
