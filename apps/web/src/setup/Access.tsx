@@ -7,6 +7,8 @@ import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
 
 const NOTIFY: [NotificationCategory, string][] = [
+  ["asks", "Asks FLIGHT has briefed for me"],
+  ["flightDown", "FLIGHT is down"],
   ["people", "People asking me something in Teams or GitHub"],
   ["decisions", "Decisions waiting for me"],
   ["stalls", "Stalls and stuck runs"],

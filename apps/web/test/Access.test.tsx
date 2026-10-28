@@ -17,6 +17,8 @@ import { stubFetch } from "./fetchStub.ts";
 export const PREFS: NotificationPreferences = {
   enabled: true,
   categories: {
+    asks: true,
+    flightDown: true,
     people: true,
     decisions: true,
     stalls: true,
@@ -65,8 +67,8 @@ it("saves and reloads categories, quiet hours and chime without asking permissio
   const quota = await screen.findByLabelText("Quota above 90%");
   const preferences = screen.getByRole("region", { name: "Notify me about" });
   const boxes = within(preferences).getAllByRole("checkbox") as HTMLInputElement[];
-  expect(boxes).toHaveLength(10);
-  expect(boxes.filter((box) => box.checked)).toHaveLength(8);
+  expect(boxes).toHaveLength(12);
+  expect(boxes.filter((box) => box.checked)).toHaveLength(10);
   expect(boxes.every((box) => !box.disabled)).toBe(true);
   fireEvent.click(quota);
   fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "20:00" } });

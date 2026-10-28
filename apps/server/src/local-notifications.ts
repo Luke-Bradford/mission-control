@@ -1,20 +1,24 @@
 import { randomUUID } from "node:crypto";
-import type {
-  AttentionItem,
-  NotificationCategory,
-  NotificationEvent,
-  NotificationPreferences,
+import {
+  type AttentionItem,
+  FLIGHT_NOTE_KEY,
+  type NotificationCategory,
+  type NotificationEvent,
+  type NotificationPreferences,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { CcConfig } from "./config.ts";
+import { NOTE_KEY } from "./hud.ts";
 import type { Store } from "./store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const NotificationPreferencesBody = z.strictObject({
   enabled: z.boolean().optional(),
   categories: z.strictObject({
+    asks: z.boolean(),
+    flightDown: z.boolean(),
     people: z.boolean(),
     decisions: z.boolean(),
     stalls: z.boolean(),
@@ -43,15 +47,25 @@ export const NotificationPreferencesBody = z.strictObject({
   softChime: z.boolean(),
 }) satisfies z.ZodType<NotificationPreferences>;
 
+/**
+ * Saved preferences of any category set: one saved before a category was added fails the strict
+ * body, and keeps its other settings with today's default categories.
+ */
+const StoredPreferences = NotificationPreferencesBody.extend({
+  categories: z.record(z.string(), z.boolean()),
+});
+
 const defaultNotificationPreferences = (timezone: string): NotificationPreferences => ({
   enabled: true,
   categories: {
-    people: true,
-    decisions: true,
-    stalls: true,
-    prs: true,
-    capcom: true,
-    awayDigest: true,
+    asks: true,
+    flightDown: true,
+    people: false,
+    decisions: false,
+    stalls: false,
+    prs: false,
+    capcom: false,
+    awayDigest: false,
     quota: false,
     agentMessages: false,
   },
@@ -59,7 +73,15 @@ const defaultNotificationPreferences = (timezone: string): NotificationPreferenc
   softChime: true,
 });
 
+/** The item the FLIGHT watch raises when it could not keep FLIGHT running. */
+const FLIGHT_DOWN_KEY = `${NOTE_KEY}${FLIGHT_NOTE_KEY}`;
+
+/** An item FLIGHT has briefed for the operator: the ask the operator is notified of by default. */
+const briefedAsk = (item: AttentionItem): boolean => item.brief?.for === "operator";
+
 const categoryOf = (item: AttentionItem): NotificationCategory | null => {
+  if (briefedAsk(item)) return "asks";
+  if (item.key === FLIGHT_DOWN_KEY) return "flightDown";
   switch (item.kind) {
     case "tag":
       return "capcom";
@@ -121,11 +143,16 @@ export class LocalNotifications {
   }
 
   preferences(): NotificationPreferences {
+    const defaults = defaultNotificationPreferences(this.config.operator.timezone);
     const raw = this.store.getSetting("notification-preferences");
-    const parsed = raw === null ? null : NotificationPreferencesBody.safeParse(JSON.parse(raw));
-    return parsed?.success
-      ? { ...parsed.data, enabled: parsed.data.enabled ?? true }
-      : defaultNotificationPreferences(this.config.operator.timezone);
+    if (raw === null) return defaults;
+    const json: unknown = JSON.parse(raw);
+    const parsed = NotificationPreferencesBody.safeParse(json);
+    if (parsed.success) return { ...parsed.data, enabled: parsed.data.enabled ?? true };
+    const stored = StoredPreferences.safeParse(json);
+    return stored.success
+      ? { ...stored.data, enabled: stored.data.enabled ?? true, categories: defaults.categories }
+      : defaults;
   }
 
   setPreferences(p: NotificationPreferences): void {
@@ -183,12 +210,16 @@ export class LocalNotifications {
     for (const item of items) {
       const category = categoryOf(item);
       if (category === null || (item.owner !== undefined && item.owner !== "operator")) continue;
+      // a brief on an item already seen is a new ask; a refreshed brief with the same ask is not
       const version =
-        category === "stalls"
-          ? JSON.stringify([item.kind, item.at])
-          : JSON.stringify([item.kind, item.text, item.at]);
+        category === "asks"
+          ? JSON.stringify([category, item.kind, item.brief?.ask ?? item.text, item.at])
+          : category === "stalls"
+            ? JSON.stringify([item.kind, item.at])
+            : JSON.stringify([item.kind, item.text, item.at]);
       seen[item.key] = version;
-      if (this.state.seen[item.key] !== version && !item.acked) this.emit(category, item.text);
+      if (this.state.seen[item.key] !== version && !item.acked)
+        this.emit(category, category === "asks" ? (item.brief?.ask ?? item.text) : item.text);
     }
     for (const account of this.config.accounts) {
       for (const window of ["5h", "7d"] as const) {

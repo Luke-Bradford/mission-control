@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FLIGHT_NOTE_KEY, type NotificationCategory } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -58,18 +59,42 @@ const note = (key: string) => {
   });
   bus.emit("attention");
 };
+/** An item FLIGHT has briefed for the operator: the default notification. */
+const ask = (key: string, question = "Which lane should the demo take?") => {
+  note(key);
+  store.addBrief({
+    key: `note:${key}`,
+    context: "The demo needs a lane.",
+    ask: question,
+    recommendation: "Take lane A.",
+    options: [],
+    basis: "product direction",
+    at: Date.now(),
+    for: "operator",
+  });
+  bus.emit("attention");
+};
+/** Turn on categories that are opt-in. */
+const optIn = async (...categories: NotificationCategory[]) => {
+  const p = await preferences();
+  for (const c of categories) p.categories[c] = true;
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  return p;
+};
 
-it("defaults to the catalogue categories and validates guarded preference writes", async () => {
+it("defaults to briefed asks and FLIGHT down only and validates guarded preference writes", async () => {
   expect(await preferences()).toEqual({
     enabled: true,
     softChime: true,
     categories: {
-      people: true,
-      decisions: true,
-      stalls: true,
-      prs: true,
-      capcom: true,
-      awayDigest: true,
+      asks: true,
+      flightDown: true,
+      people: false,
+      decisions: false,
+      stalls: false,
+      prs: false,
+      capcom: false,
+      awayDigest: false,
       quota: false,
       agentMessages: false,
     },
@@ -112,8 +137,10 @@ it("deduplicates unchanged items, persists across restarts and leaves attention 
   p.softChime = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   await app.ready();
-  note("demo");
-  expect(await events()).toMatchObject([{ category: "decisions", text: "Choose the demo lane" }]);
+  ask("demo");
+  expect(await events()).toMatchObject([
+    { category: "asks", text: "Which lane should the demo take?" },
+  ]);
   bus.emit("attention");
   expect(await events()).toHaveLength(1);
   expect((await app.inject("/api/attention")).json()).toMatchObject([{ acked: false }]);
@@ -137,20 +164,20 @@ it.each([
   ["2026-10-23T18:00:00Z", 0],
 ])("honours local midnight and DST at %s", async (time, count) => {
   vi.setSystemTime(new Date(time));
-  await app.ready();
-  note("demo");
+  await optIn("stalls");
+  ask("demo");
   expect(await events()).toHaveLength(count);
   note("stall");
   expect(await events()).toHaveLength(count + 1);
 });
 
 it("filters disabled categories and enabled state without replaying suppressed items", async () => {
-  const p = await preferences();
-  p.categories.decisions = false;
+  const p = await optIn("stalls");
+  p.categories.asks = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  note("demo");
+  ask("demo");
   expect(await events()).toEqual([]);
-  p.categories.decisions = true;
+  p.categories.asks = true;
   p.enabled = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("stall");
@@ -220,6 +247,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, even with mes
   app = buildApp({ config: crewConfig, store, bus });
   const p = await preferences();
   p.categories.agentMessages = true;
+  p.categories.capcom = true;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
     at: Date.now() - 1,
@@ -270,7 +298,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, even with mes
 });
 
 it("emits one away digest on return through settings invalidations", async () => {
-  await app.ready();
+  await optIn("awayDigest");
   const away = {
     on: true,
     until: "",
@@ -285,7 +313,7 @@ it("emits one away digest on return through settings invalidations", async () =>
 });
 
 it("emits one digest when the away end date passes", async () => {
-  await app.ready();
+  await optIn("awayDigest");
   await app.inject({
     method: "POST",
     url: "/api/settings/away",
@@ -304,15 +332,15 @@ it("emits one digest when the away end date passes", async () => {
 });
 
 it("supports same-day quiet windows and never replays suppressed transitions", async () => {
-  const p = await preferences();
+  const p = await optIn("stalls");
   p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  note("quiet");
+  ask("quiet");
   expect(await events()).toEqual([]);
   vi.setSystemTime(new Date("2026-10-23T14:00:00Z"));
   bus.emit("attention");
   expect(await events()).toEqual([]);
-  note("after");
+  ask("after");
   expect(await events()).toHaveLength(1);
   p.categories.stalls = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
@@ -338,7 +366,7 @@ it.each([
 });
 
 it("notifies again when a cleared stall reopens between reconciliations", async () => {
-  await app.ready();
+  await optIn("stalls");
   note("stall");
   expect(await events()).toHaveLength(1);
   store.clearNote("stall", Date.now());
@@ -368,11 +396,11 @@ it("coalesces all notification topics off requests, runs at startup and keeps th
     bus.emit(topic);
   await vi.advanceTimersByTimeAsync(999);
   expect(attention).toHaveBeenCalledTimes(1);
-  note("last");
+  ask("last");
   await vi.advanceTimersByTimeAsync(1);
   expect(attention).toHaveBeenCalledTimes(2);
   expect((await app.inject("/api/notifications/events")).json()).toMatchObject([
-    { category: "decisions", text: "Choose the demo lane" },
+    { category: "asks", text: "Which lane should the demo take?" },
   ]);
   await vi.advanceTimersByTimeAsync(1000);
   expect(attention).toHaveBeenCalledTimes(2);
@@ -380,4 +408,114 @@ it("coalesces all notification topics off requests, runs at startup and keeps th
   await app.close();
   await vi.advanceTimersByTimeAsync(1000);
   expect(attention).toHaveBeenCalledTimes(2);
+});
+
+it("notifies a briefed ask and FLIGHT going down, not stalls, PRs, blocked runs or raw asks", async () => {
+  await app.ready();
+  note("stall");
+  store.raiseNote({
+    key: "blocked:r1:0",
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "mc#7 parked",
+    at: Date.now(),
+  });
+  store.raiseNote({
+    key: "review:r2",
+    kind: "review",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "PR #9 is ready for review",
+    at: Date.now(),
+  });
+  note("raw");
+  bus.emit("attention");
+  expect(await events()).toEqual([]);
+  // FLIGHT's own triage (a brief for FLIGHT) is not an ask of the operator
+  store.addBrief({
+    key: "note:raw",
+    context: "c",
+    recommendation: "r",
+    options: [],
+    basis: "b",
+    at: Date.now(),
+    for: "flight",
+  });
+  bus.emit("attention");
+  expect(await events()).toEqual([]);
+  // the same item, once FLIGHT briefs it for the operator, is a new ask
+  ask("raw", "Ship the demo lane today?");
+  expect(await events()).toMatchObject([{ category: "asks", text: "Ship the demo lane today?" }]);
+  // a refreshed brief with the same ask does not notify again; a changed ask does
+  ask("raw", "Ship the demo lane today?");
+  expect(await events()).toHaveLength(1);
+  ask("raw", "Ship the demo lane tomorrow instead?");
+  expect(await events()).toHaveLength(2);
+  store.raiseNote({
+    key: FLIGHT_NOTE_KEY,
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "FLIGHT could not be kept running",
+    at: Date.now(),
+  });
+  bus.emit("attention");
+  expect((await events()).slice(2)).toMatchObject([
+    { category: "flightDown", text: "FLIGHT could not be kept running" },
+  ]);
+});
+
+it("keeps an opt-in for stalls, PRs, blocked runs and raw decisions", async () => {
+  await optIn("stalls", "prs", "decisions");
+  note("stall");
+  note("raw");
+  store.raiseNote({
+    key: "review:r2",
+    kind: "review",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "PR #9 is ready for review",
+    at: Date.now(),
+  });
+  bus.emit("attention");
+  expect((await events()).map((e: { category: string }) => e.category).sort()).toEqual([
+    "decisions",
+    "prs",
+    "stalls",
+  ]);
+});
+
+it("resets categories saved before briefed asks, keeping the other settings", async () => {
+  const old = {
+    enabled: true,
+    categories: {
+      people: true,
+      decisions: true,
+      stalls: true,
+      prs: true,
+      capcom: true,
+      awayDigest: true,
+      quota: true,
+      agentMessages: false,
+    },
+    quietHours: { start: "20:00", end: "07:00", timezone: "UTC", stallsBypass: true },
+    softChime: false,
+  };
+  store.setSetting("notification-preferences", JSON.stringify(old));
+  const p = await preferences();
+  expect(p).toMatchObject({
+    softChime: false,
+    quietHours: { start: "20:00", end: "07:00", timezone: "UTC" },
+  });
+  expect(Object.entries(p.categories).filter(([, on]) => on)).toEqual([
+    ["asks", true],
+    ["flightDown", true],
+  ]);
+  note("stall");
+  expect(await events()).toEqual([]);
 });

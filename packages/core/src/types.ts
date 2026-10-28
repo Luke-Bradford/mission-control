@@ -1155,7 +1155,14 @@ export interface CliAccountStatus {
   detail: string | null;
 }
 
+/**
+ * What notifies the operator. Only `asks` (an item FLIGHT has briefed for the operator) and
+ * `flightDown` (the hub could not keep FLIGHT running) are on by default; the rest are opt-in, so
+ * the operator is not taught to babysit (roadmap item 7).
+ */
 export type NotificationCategory =
+  | "asks"
+  | "flightDown"
   | "people"
   | "decisions"
   | "stalls"

@@ -93,12 +93,14 @@ it("accepts complete setup contracts while legacy records omit additions", () =>
   } satisfies CliAccountStatus;
   const preferences = {
     categories: {
-      people: true,
-      decisions: true,
-      stalls: true,
-      prs: true,
-      capcom: true,
-      awayDigest: true,
+      asks: true,
+      flightDown: true,
+      people: false,
+      decisions: false,
+      stalls: false,
+      prs: false,
+      capcom: false,
+      awayDigest: false,
       quota: false,
       agentMessages: false,
     },
