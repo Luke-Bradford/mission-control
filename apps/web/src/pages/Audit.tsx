@@ -23,6 +23,7 @@ type Size = {
   deletions?: number | null;
   changedFiles?: number | null;
   runId?: string;
+  agentId?: string;
 };
 type Change = {
   at: number;
@@ -42,7 +43,7 @@ type Audit = {
   modelPromptTimeline?: Change[];
   questions?: { asked: number; answered: number; answerMs: number | null };
   chatter?: { messages: number; unnecessary?: number };
-  flakes?: { name: string; count: number; runId?: string }[];
+  flakes?: { name: string; count: number; runId?: string; agentId?: string }[];
   proposals?: {
     id: string;
     title: string;
@@ -66,12 +67,13 @@ const isOutlier = (s: Size, sizes: readonly Size[]): boolean =>
 export function Audit() {
   const [range, setRange] = useState<AuditRange>("30d");
   const res = useResource<Audit>(RESOURCES.audit(range));
-  const [last, setLast] = useState<Audit>();
+  const [last, setLast] = useState<{ range: AuditRange; data: Audit }>();
   useEffect(() => {
-    if (res.data) setLast(res.data);
-  }, [res.data]);
-  const audit = res.data ?? last;
+    if (res.data) setLast({ range, data: res.data });
+  }, [range, res.data]);
+  const audit = res.data ?? last?.data;
   const loading = res.loading && audit === undefined;
+  const staleRange = res.data === undefined && last?.range !== undefined && last.range !== range;
   return (
     <section id="page-audit" className={res.data === undefined && audit ? "refetching" : undefined}>
       <div className="toolbar">
@@ -82,14 +84,21 @@ export function Audit() {
         </span>
       </div>
       {loading && <p className="s">Loading audit…</p>}
-      {res.error && !audit && <p className="s crit-t">Could not load audit: {res.error.message}</p>}
+      {res.error && !res.data && (
+        <p className="s crit-t">Could not load audit: {res.error.message}</p>
+      )}
+      {staleRange && (
+        <p className="s warn-t">
+          Showing {last.range} data while {range} is unavailable.
+        </p>
+      )}
       {audit && (
         <div className="audit-grid">
           <Improvements audit={audit} />
-          <PrSizes sizes={audit.prSizes ?? []} />
-          <Changes changes={audit.modelPromptTimeline ?? []} />
+          <PrSizes sizes={audit.prSizes} />
+          <Changes changes={audit.modelPromptTimeline} />
           <Checks audit={audit} />
-          <Proposals proposals={audit.proposals ?? []} />
+          <Proposals proposals={audit.proposals} />
         </div>
       )}
     </section>
@@ -110,8 +119,8 @@ function RunLink({
     </a>
   );
 }
-function Empty() {
-  return <p className="s fg2">No findings in this range.</p>;
+function Empty({ collected = true }: { collected?: boolean }) {
+  return <p className="s fg2">{collected ? "No findings in this range." : "Not collected yet."}</p>;
 }
 
 function Improvements({ audit }: { audit: Audit }) {
@@ -161,17 +170,20 @@ function Improvements({ audit }: { audit: Audit }) {
   );
 }
 
-function PrSizes({ sizes }: { sizes: Size[] }) {
-  const max = Math.max(1, ...sizes.map(changes));
+function PrSizes({ sizes }: { sizes?: Size[] }) {
+  const max = Math.max(1, ...(sizes ?? []).map(changes));
   return (
     <Panel title="PR size" className="audit-panel">
       <div className="pb audit-list">
-        {sizes.length === 0 ? (
+        {sizes === undefined ? (
+          <Empty collected={false} />
+        ) : sizes.length === 0 ? (
           <Empty />
         ) : (
           sizes.map((s) => (
             <div className="audit-size" key={`${s.repoId}:${s.number}`}>
               <a href={`/board/${encodeURIComponent(s.repoId)}`}>{prLabel(s.number)}</a>
+              {s.runId && <RunLink row={s}>{`Trace ${s.runId}`}</RunLink>}
               <span className="audit-bar">
                 <i style={{ width: `${(changes(s) / max) * 100}%` }} />
               </span>
@@ -186,11 +198,13 @@ function PrSizes({ sizes }: { sizes: Size[] }) {
   );
 }
 
-function Changes({ changes: rows }: { changes: Change[] }) {
+function Changes({ changes: rows }: { changes?: Change[] }) {
   return (
     <Panel title="Prompt & model changes" className="audit-panel">
       <div className="pb audit-list">
-        {rows.length === 0 ? (
+        {rows === undefined ? (
+          <Empty collected={false} />
+        ) : rows.length === 0 ? (
           <Empty />
         ) : (
           rows.map((x, i) => {
@@ -204,8 +218,15 @@ function Changes({ changes: rows }: { changes: Change[] }) {
                 {changed && (
                   <span>
                     {" "}
-                    changed · cycle {duration(before?.cycleMs)} → {duration(x.metrics?.cycleMs)} ·
-                    cost {cost(before?.costUsd)} → {cost(x.metrics?.costUsd)}
+                    changed ·{" "}
+                    {before && x.metrics ? (
+                      <>
+                        cycle {duration(before.cycleMs)} → {duration(x.metrics.cycleMs)} · cost{" "}
+                        {cost(before.costUsd)} → {cost(x.metrics.costUsd)}
+                      </>
+                    ) : (
+                      "Metrics not collected yet."
+                    )}
                   </span>
                 )}
               </div>
@@ -223,33 +244,41 @@ function Checks({ audit }: { audit: Audit }) {
     <Panel title="Things to check" className="audit-panel">
       <div className="pb audit-list">
         <span>Unanswered questions · {unanswered}</span>
-        {audit.chatter && (
+        {audit.chatter ? (
           <span>
             Chatter · {audit.chatter.unnecessary ?? audit.chatter.messages} of{" "}
             {audit.chatter.messages}
           </span>
+        ) : (
+          <span className="fg2">Chatter · Not collected yet.</span>
         )}
         {(audit.refusalsByRule ?? []).map((x) => (
           <span key={x.rule}>
             Guard refusal spike · {x.rule} · {x.count}
           </span>
         ))}
-        {(audit.flakes ?? []).map((x) => (
-          <span key={x.name}>
-            Flake · {x.name} · {x.count}
-            {x.runId ? ` · ${x.runId}` : ""}
-          </span>
-        ))}
+        {audit.flakes === undefined ? (
+          <span className="fg2">Flakes · Not collected yet.</span>
+        ) : (
+          audit.flakes.map((x) => (
+            <RunLink
+              key={x.name}
+              row={x}
+            >{`Flake · ${x.name} · ${x.count}${x.runId ? ` · ${x.runId}` : ""}`}</RunLink>
+          ))
+        )}
       </div>
     </Panel>
   );
 }
 
-function Proposals({ proposals }: { proposals: NonNullable<Audit["proposals"]> }) {
+function Proposals({ proposals }: { proposals?: NonNullable<Audit["proposals"]> }) {
   return (
     <Panel title="SURGEON proposals" className="audit-panel">
       <div className="pb audit-list">
-        {proposals.length === 0 ? (
+        {proposals === undefined ? (
+          <Empty collected={false} />
+        ) : proposals.length === 0 ? (
           <Empty />
         ) : (
           proposals.map((x) => (
