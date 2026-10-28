@@ -1188,6 +1188,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
+  /** The audit identity includes both generated developer instructions and the first user brief. */
+  function recordPromptVersion(run: Run, rolePath: string, brief: string): void {
+    const payload = [
+      "developer-instructions",
+      readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8"),
+      "first-brief",
+      brief,
+    ].join("\0");
+    store.setRunPromptVersion(
+      run.id,
+      createHash("sha256").update(payload).digest("hex"),
+      rolePath,
+      now(),
+    );
+  }
+
   /**
    * Token and MCP files a hub that went down without seeing its processes exit left behind: their
    * tokens died with its memory. Run once the crew lock is held, before any spawn. The lock lives
@@ -1390,12 +1406,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         },
       );
     }
-    store.setRunPromptVersion(
-      run.id,
-      createHash("sha256").update(readFileSync(promptPath, "utf8")).digest("hex"),
-      def.prompt,
-      now(),
-    );
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
@@ -3067,6 +3077,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
+      recordPromptVersion(run, def.prompt, brief);
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
       // answered: wait for that, so the exit that marks the run failed and the seat in error
@@ -3084,10 +3095,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
     const info = need(seatId);
+    const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
-    if (seatDef(info.seat).loop !== "watch") {
+    if (def.loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
@@ -3132,6 +3144,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: null,
         ticket: null,
@@ -3202,6 +3216,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
         fullSuite: info.repo.fullSuite ?? [],
       });
+      recordPromptVersion(
+        run,
+        def.prompt,
+        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief,
+      );
       await enqueue(l, () =>
         writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
       ).catch(() => {});
@@ -3218,6 +3237,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
@@ -3426,6 +3446,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
       });
+      recordPromptVersion(run, def.prompt, brief);
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       await session.ready;
       if (!session.alive) {

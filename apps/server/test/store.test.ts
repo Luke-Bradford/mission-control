@@ -754,6 +754,30 @@ describe("Store", () => {
     expect(audit.longRunners).toEqual([expect.objectContaining({ runId: "r1", durationMs: 100 })]);
     expect(audit.refusalsByRule).toEqual([{ rule: "read-only", count: 1 }]);
     expect(audit.questions).toEqual({ asked: 1, answered: 1, answerMs: 60 });
+    expect(store.audit(201, 300).questions).toEqual({ asked: 0, answered: 0, answerMs: null });
+  });
+
+  it("counts a merged ticket's cost once when it has multiple PRs", () => {
+    store.upsertRun(run({ ticket: "repo#1", costUsd: 10 }));
+    const pr = (number: number) => ({
+      repoId: "repo",
+      number,
+      title: "t",
+      url: "u",
+      branch: `fix/${number}`,
+      ticket: "repo#1",
+      state: "merged" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: 100,
+      headSha: null,
+      mergeable: null,
+    });
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 101);
+    expect(store.audit(0, 200).costPerMergedTicket).toEqual([{ ticket: "repo#1", costUsd: 10 }]);
   });
 
   // #26 A1: the scheduler emits `boards` / `escalations` only when a write changed a row.

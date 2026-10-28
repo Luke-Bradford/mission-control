@@ -27,6 +27,7 @@ import {
   FLIGHT_MEMORY_FULL,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
+  FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
   FLIGHT_WATCH_LIMIT,
@@ -898,6 +899,36 @@ export class Store {
         "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
       );
     this.migrate();
+    this.backfillAuditHistory();
+  }
+
+  /** One-time-safe reconstruction from sources that already survived retention. */
+  private backfillAuditHistory(): void {
+    this.transaction(() => {
+      const merged = this.pullRequestRows(
+        this.db.prepare("SELECT * FROM pull_requests WHERE merged_at IS NOT NULL").all() as Row[],
+      );
+      const addPr = this.db.prepare(
+        "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
+      );
+      for (const pr of merged) addPr.run(pr.repoId, pr.number, pr.mergedAt, JSON.stringify(pr));
+      const saved = this.db
+        .prepare("SELECT key, value FROM settings WHERE key GLOB ?")
+        .all(`${FLIGHT_RETROSPECTIVE_SETTING}:*`) as { key: string; value: string }[];
+      const addReport = this.db.prepare(
+        "INSERT OR IGNORE INTO retrospectives (repo_id, day, at, report) VALUES (?, ?, ?, ?)",
+      );
+      for (const row of saved) {
+        try {
+          const value = JSON.parse(row.value) as { day?: unknown; report?: { at?: unknown } };
+          const repoId = row.key.slice(`${FLIGHT_RETROSPECTIVE_SETTING}:`.length);
+          if (typeof value.day === "string" && typeof value.report?.at === "number")
+            addReport.run(repoId, value.day, value.report.at, JSON.stringify(value.report));
+        } catch {
+          // A malformed settings value must not prevent the hub from opening.
+        }
+      }
+    });
   }
 
   markCheckoutPending(path: string, at: number): void {
@@ -2210,16 +2241,19 @@ export class Store {
         until,
       ),
       questions: rows(
-        `SELECT COUNT(*) AS asked, SUM(answered_at IS NOT NULL) AS answered,
+        `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
           AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
          FROM seat_questions WHERE at >= ? AND at <= ?`,
         since,
         until,
       )[0] ?? { asked: 0, answered: 0, answerMs: null },
       costPerMergedTicket: rows(
-        `SELECT json_extract(h.record, '$.ticket') AS ticket, SUM(r.cost_usd) AS costUsd FROM pr_history h
-         LEFT JOIN runs r ON r.repo_id = h.repo_id AND r.ticket = json_extract(h.record, '$.ticket')
-         WHERE h.merged_at >= ? AND h.merged_at <= ? GROUP BY h.repo_id, json_extract(h.record, '$.ticket') ORDER BY h.merged_at DESC`,
+        `WITH merged_tickets AS (
+           SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
+           WHERE merged_at >= ? AND merged_at <= ?
+         ) SELECT t.ticket, SUM(r.cost_usd) AS costUsd FROM merged_tickets t
+         LEFT JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
+         GROUP BY t.repo_id, t.ticket ORDER BY t.ticket`,
         since,
         until,
       ),
