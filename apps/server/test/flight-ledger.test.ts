@@ -216,7 +216,6 @@ describe("flightMetrics", () => {
     const claimsLookup = vi.spyOn(store, "claimedKeys");
     expect(flightMetrics(config, store, NOW)).toEqual({
       since: NOW - FLIGHT_METRICS_DAY_MS,
-      merged: 2,
       opened: 1,
       inReview: 1,
       inCi: 1,
@@ -228,7 +227,6 @@ describe("flightMetrics", () => {
         { seat: "flight-1", tokens: 0, costUsd: 0.5 },
       ],
       flight: { wakes: 2, costUsd: 0.5 },
-      readyToMergedMin: 90,
       forTheController: 1,
     });
     expect(runLookup).not.toHaveBeenCalled();
@@ -278,57 +276,6 @@ describe("flightMetrics", () => {
     ]);
   });
 
-  it("uses the latest successful Ready move with a flow-only fallback, omitting post-merge starts", () => {
-    store.upsertPullRequests("mc", [pr(1), pr(2), pr(3)], NOW);
-    for (const [issue, state, at] of [
-      [1, "failed", NOW - 100 * MIN],
-      [1, "pending", NOW - 90 * MIN],
-      [1, "done", NOW - 61 * MIN],
-      [1, "done", NOW - 31 * MIN],
-      [3, "done", NOW],
-    ] as const)
-      store.addBoardMove({
-        runId: "dev",
-        repoId: "mc",
-        issue,
-        column: "Ready",
-        state,
-        at,
-        detail: null,
-      });
-    store.replaceFlow(
-      "mc",
-      [{ repoId: "mc", number: 2, size: "M", startAt: NOW - 500 * MIN, doneAt: NOW }],
-      [],
-    );
-    expect(flightMetrics(config, store, NOW).readyToMergedMin).toBe(265);
-  });
-
-  it("uses the last promotion at or before each merge, even when re-promoted afterwards", () => {
-    store.upsertPullRequests(
-      "mc",
-      [pr(1), pr(2, { ticket: "mc#1", mergedAt: NOW - 40 * MIN })],
-      NOW,
-    );
-    for (const at of [NOW - 100 * MIN, NOW - 40 * MIN, NOW - 11 * MIN, NOW])
-      store.addBoardMove({
-        runId: "dev",
-        repoId: "mc",
-        issue: 1,
-        column: "Ready",
-        state: "done",
-        at,
-        detail: null,
-      });
-    store.replaceFlow(
-      "mc",
-      [{ repoId: "mc", number: 1, size: "M", startAt: NOW - 500 * MIN, doneAt: NOW }],
-      [],
-    );
-    // The first PR took 10 minutes; the second merged exactly at its last Ready move.
-    expect(flightMetrics(config, store, NOW).readyToMergedMin).toBe(5);
-  });
-
   it.each([
     ["ruling-rerun:sha", "FLIGHT re-ran the failed CI jobs on sha", 1, 0],
     ["ruling-rerun:sha:failed", "CI failed again on the re-run of sha", 0, 1],
@@ -345,10 +292,8 @@ describe("flightMetrics", () => {
 
   it("returns zeros without a session", () => {
     expect(flightMetrics({ ...config, crew: undefined }, store, NOW)).toMatchObject({
-      merged: 0,
       seats: [],
       flight: { wakes: 0, costUsd: 0 },
-      readyToMergedMin: null,
     });
   });
 });
