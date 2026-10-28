@@ -136,6 +136,10 @@ export async function main(): Promise<void> {
     lockState: () => lock.state(),
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    // lazy: the supervisor is built below; a default only applies once the scheduler runs
+    deliverDefault: async (seatId, text) => {
+      await supervisor.message(seatId, text, { interrupt: false });
+    },
   });
   const preview = isPreview(port, process.env);
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.

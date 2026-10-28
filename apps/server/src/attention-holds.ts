@@ -1,4 +1,10 @@
-import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
+import {
+  type AttentionHold,
+  type AttentionHoldCondition,
+  type AttentionItem,
+  type BriefOption,
+  DECISION_DEFAULT_WAIT_MS,
+} from "@mc/core";
 import { z } from "zod";
 import type { Store } from "./store.ts";
 
@@ -112,4 +118,26 @@ export function attentionHoldError(e: z.ZodError): string {
   if (!issue) return "invalid body";
   const path = issue.path.map(String).join(".");
   return path === "" ? issue.message : `${path}: ${issue.message}`;
+}
+
+/**
+ * A decision's default: its recommended option and when it applies if nobody has answered. The
+ * wait runs from the ask, and from the hold's release when the operator held it meanwhile (a hold
+ * stops the clock). Null for anything that is not an operator decision with a recommendation.
+ */
+export function decisionDefault(
+  store: Store,
+  item: AttentionItem,
+): { option: BriefOption; briefAt: number; dueAt: number } | null {
+  const brief = item.brief;
+  if (item.kind !== "decision" || item.owner !== "operator" || !brief || brief.for === "flight")
+    return null;
+  const option = brief.options.find(
+    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
+  );
+  if (!option) return null;
+  const briefAt = brief.askAt ?? brief.at;
+  const hold = holds(store)[item.key];
+  const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
+  return { option, briefAt, dueAt: Math.max(briefAt, released) + DECISION_DEFAULT_WAIT_MS };
 }

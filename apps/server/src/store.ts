@@ -145,6 +145,11 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- Acknowledged attention items. absent_since: when the key was first missing from the current
 -- items (null while present); the ack is dropped once it has been absent for ACK_ABSENT_MS.
 CREATE TABLE IF NOT EXISTS acks (key TEXT PRIMARY KEY, at INTEGER NOT NULL, absent_since INTEGER);
+-- A decision's default, claimed once when its deadline passed unanswered; brief_at ties it to the ask.
+CREATE TABLE IF NOT EXISTS decision_defaults (
+  key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT, label TEXT NOT NULL,
+  due_at INTEGER NOT NULL, applied_at INTEGER NOT NULL, PRIMARY KEY (key, brief_at)
+);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -2297,6 +2302,28 @@ export class Store {
       );
       for (const k of keys) ins.run(k, at);
     });
+  }
+
+  /**
+   * Claims a decision's default, then stores its outcome message and acks the card. False when the
+   * default was claimed before (a restart or a second sweep), so it applies at most once: the claim
+   * is one statement, so a crash after it loses the message rather than applying twice.
+   */
+  claimDecisionDefault(
+    d: { key: string; briefAt: number; optionId: string | null; label: string; dueAt: number },
+    message: NewCommsRow,
+    at: number,
+  ): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(d.key, d.briefAt, d.optionId, d.label, d.dueAt, at);
+    if (r.changes === 0) return false;
+    this.addComms(message);
+    this.ack([d.key], at);
+    return true;
   }
 
   /** Every ack: key → when it was acknowledged. */

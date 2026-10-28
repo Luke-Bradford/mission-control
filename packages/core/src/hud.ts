@@ -559,3 +559,10 @@ export const LOCK_OUTCOME_TEXT = { done: "finished", freed: "freed with its run"
 /** Overview timeline window and maximum tool ticks per lane. */
 export const TIMELINE_WINDOW_MS = 60 * 60_000;
 export const TIMELINE_TICKS_MAX = 300;
+
+/** How long a decision with a recommended option waits for the operator before the default applies. */
+export const DECISION_DEFAULT_WAIT_MS = 40 * 60_000;
+
+/** The Comms line that says a decision's default was applied. */
+export const defaultAppliedText = (label: string, ask: string): string =>
+  `Default applied: ${label} (${ask})`;

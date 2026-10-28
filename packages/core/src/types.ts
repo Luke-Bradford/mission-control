@@ -1052,6 +1052,8 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /** When a decision's recommended option is applied if nobody has answered; absent: no default. */
+  defaultDueAt?: number;
   /**
    * Only on the one FLIGHT_NOT_TRIAGING_KEY item: why FLIGHT is not triaging, the keys of the items
    * waiting on it (FLIGHT's, listed under this one, oldest first) and when the oldest was raised.

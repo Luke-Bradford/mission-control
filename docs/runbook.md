@@ -1005,6 +1005,18 @@ step through agents; `/` opens the selected agent (its composer is off for an ob
 smallest panels do not fit, the work area scrolls); below that the page scrolls; at 390 px nothing
 scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
+## Decision defaults
+
+A decision FLIGHT has briefed for the operator with a recommended option carries a deadline
+(`defaultDueAt`): 40 minutes after the ask (`DECISION_DEFAULT_WAIT_MS`). If nobody has answered by
+then, the hub applies the recommended option once: the card is acked (it leaves Decisions),
+"Default applied: <option> (<ask>)" is stored in FLIGHT ↔ CAPCOM, and the option's answer is
+messaged to the seat that asked (a decision answered on GitHub is only recorded; the hub writes
+nothing there). An answer (ack) before the deadline cancels it. Held stops the clock: nothing
+applies while held, and the 40 minutes restart when the hold is released. Each (item, ask) is
+claimed once in the `decision_defaults` table, so a restart or a repeated sweep never applies it
+twice, and an overdue default is applied on the first sweep after a restart.
+
 ## Away mode
 
 The server reads the settings saved by `POST /api/settings/away` before starting work or marking

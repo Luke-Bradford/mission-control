@@ -77,7 +77,7 @@ import {
   type TokenUsage,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
-import { partitionAttention } from "./attention-holds.ts";
+import { decisionDefault, partitionAttention } from "./attention-holds.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
@@ -1034,7 +1034,14 @@ export function attentionItems(
         ? { ...item, owner: OWNER_FLIGHT }
         : { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     });
-  const partition = partitionAttention(store, result, acks);
+  const partition = partitionAttention(
+    store,
+    result.map((item) => {
+      const d = decisionDefault(store, item);
+      return d === null ? item : { ...item, defaultDueAt: d.dueAt };
+    }),
+    acks,
+  );
   const shown =
     triage === null
       ? partition.items
