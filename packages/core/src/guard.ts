@@ -12,8 +12,6 @@ export const GUARD_RULES = {
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
-  "github-write":
-    "No GitHub comments, labels, board moves or Priority changes without your approval",
   "gh-cli": "The GitHub CLI is not available to seats; GitHub goes through Mission Control",
   "merge-push":
     "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
@@ -263,7 +261,16 @@ const MULTIPLEXERS = new Set(["screen", "tmux"]);
  * Programs that hand a command to something outside this tool call (a scheduler, launchd, another
  * app): what they start outlives the call, so they are refused like a detached command.
  */
-const BACKGROUND_LAUNCHERS = new Set(["at", "batch", "crontab", "launchctl", "osascript", "open"]);
+const BACKGROUND_LAUNCHERS = new Set([
+  "at",
+  "batch",
+  "crontab",
+  "launchctl",
+  "osascript",
+  "open",
+  // daemonises, or runs a command under a new agent
+  "ssh-agent",
+]);
 /** tmux's global options that take a value (`tmux -L sock ls`): the value is not the command. */
 const TMUX_VALUED = "cfLST";
 /** tmux commands that start nothing: they list, query, attach to, type into or end what exists. */
@@ -314,6 +321,8 @@ function tmuxStarts(rest: readonly string[]): boolean {
       }
     }
   }
+  // an expansion can become any option, command or `;` sequence
+  if (rest.some((w) => EXPANDS.test(w))) return true;
   const command = rest[at];
   // no command is `new-session`
   if (command === undefined) return true;
@@ -493,6 +502,11 @@ interface Cmd {
   braces?: boolean;
   /** The command receives a pipeline's output (preserved by the Codex walk). */
   piped?: boolean;
+  /**
+   * Judged from a later word of a runner's or multiplexer's arguments (`npx cypress open`: `open`),
+   * which may be an argument, not a command: only rules that fail closed on any word use it.
+   */
+  suffix?: boolean;
 }
 
 /** One decision's walk over a command line. */
@@ -1094,7 +1108,18 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       continue;
     }
     if (braces[at] === true) return [{ argv: [BRACE_WORD], background: bg }];
+    // zsh: `=git` runs the `git` on PATH (EQUALS expansion)
+    if (head.length > 1 && head.startsWith("=")) {
+      words[at] = head.replace(/^=+/, "");
+      if (words[at] === "") return [{ argv: [UNREADABLE_LINE], background: bg }];
+      continue;
+    }
     const base = baseName(head);
+    // zsh: a lone `-` is a precommand modifier (`- git push` runs `git push`)
+    if (head === "-") {
+      at++;
+      continue;
+    }
     if (SHELL_KEYWORDS.has(head)) {
       at++;
     } else if (head === "function") {
@@ -1201,7 +1226,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
-      out.push(...wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix")));
+      const judged = wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix"));
+      out.push(...(i === 0 ? judged : judged.map((cmd) => ({ ...cmd, suffix: true }))));
     }
     for (const w of run) {
       if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
@@ -1656,6 +1682,7 @@ export function guardDecision(
     background,
     braces,
     indirectGit,
+    suffix,
     directories: wrapperDirectories = [],
   } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
@@ -1669,7 +1696,8 @@ export function guardDecision(
     if (program === UNREADABLE_SCRIPT) return deny("unreadable", "shell -c");
     if (program === STDIN_SCRIPT) return deny("unreadable", "shell reading stdin");
     if (program === BRACE_WORD) return deny("unreadable", "brace expansion");
-    if (BACKGROUND_LAUNCHERS.has(program)) return deny("background", program);
+    // only a real command word: `npx cypress open` and `vitest -t batch` pass `open`/`batch` as data
+    if (BACKGROUND_LAUNCHERS.has(program) && suffix !== true) return deny("background", program);
     if (
       program === GIT_ENV_OVERRIDE ||
       (["for", "select"].includes(program) && /^GIT_/.test(args[0] ?? "")) ||

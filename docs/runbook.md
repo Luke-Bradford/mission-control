@@ -532,7 +532,8 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
   permission profile for Codex), and no network.
 - **Area:** a writer's Edit and Write stay in its area and off the protected files, and `mc commit`
   refuses changes outside it; shell commands can touch other files in the worktree, so the seat
-  reverts those before committing. A read-only seat (RETRO, FLIGHT) cannot write its checkout.
+  reverts those before committing. FLIGHT and a read-only RETRO cannot write their checkout; a
+  scratch reviewer edits a throwaway copy.
 - **Git:** no git writes; a seat commits with `mc commit` and brings main in with `mc sync_main`,
   and the engine pushes and opens the draft PR after a report. Its sandbox cannot write the
   clone's git dirs either.

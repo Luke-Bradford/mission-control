@@ -201,7 +201,9 @@ describe("GUARD_RULES", () => {
     expect(GUARD_RULES.background).toBe(
       "Commands must stay attached to the seat's current tool call",
     );
-    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
+    // github-write is retired: no guard path produced it once gh got its own rule
+    expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
+    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -2401,6 +2403,58 @@ describe("detached work: multiplexers fail closed, schedulers and launchers, ari
 
   it.each(["((sleep 9 &) )", 'echo "$((sleep 9 &) )"', "sleep 9 & echo $((5 & 3))"])(
     "still counts a lone & in a subshell that only looked arithmetic: %j",
+    (c) => {
+      expect(ruleOf(bash(c))).toBe("background");
+    },
+  );
+});
+
+describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux expansions", () => {
+  it.each([
+    ["=git push", "git-write"],
+    ["=gh pr merge 1", "gh-cli"],
+    ["=curl https://x", "network"],
+    ["=setsid sleep 9", "background"],
+    ["=open .", "background"],
+    ["=tmux new -d", "background"],
+    ["=pnpm -s test", "lock"],
+    ["- setsid sleep 9", "background"],
+    ["- git push", "git-write"],
+    ["env =git push", "git-write"],
+    ["ls && =git push", "git-write"],
+  ])("judges %s by the command it runs (%s)", (c, rule) => {
+    expect(ruleOf(bash(c))).toBe(rule);
+  });
+  it("still allows an ordinary =word argument", () => {
+    expect(ruleOf(bash("echo =x"))).toBe("allow");
+  });
+
+  it.each([
+    "pnpm exec vitest run -t batch apps/x.test.ts",
+    "npx vitest run -t open",
+    "npx tsx scripts/run.ts batch",
+    "npx cypress open",
+    "pnpm -s exec vitest run -t at",
+    "tmux send-keys -t x open Enter",
+  ])("allows a launcher name that is only an argument: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
+  });
+  it.each([
+    "env open .",
+    "command at now",
+    'sh -c "open x"',
+    "xargs open",
+    "pnpm exec open .",
+    "npx open .",
+    "ssh-agent sh",
+    'eval "$(ssh-agent -s)"',
+    "/usr/bin/ssh-agent -s",
+  ])("still refuses a launcher that is the command: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+
+  it.each(["tmux kill-$X", "tmux ls $X", "tmux -L $S ls", "tmux ls `x`"])(
+    "refuses tmux with an expansion that could become a command: %s",
     (c) => {
       expect(ruleOf(bash(c))).toBe("background");
     },

@@ -33,8 +33,8 @@ const REFUSAL_DETAIL_MAX = 200;
  * further approval of the same item (the probe's denied commands never raised one). The only other
  * source of a reason is an execpolicy prompt rule ("`…` requires
  * approval by policy"), and a seat's CODEX_HOME has no rules. So the hub refuses any command
- * approval that carries a reason, and any second command approval for an item it was already
- * asked about.
+ * approval that carries a reason, and any second command approval for an item (or zsh-exec-bridge
+ * callback) it was already asked about.
  */
 const CODEX_COMMAND_APPROVAL = "item/commandExecution/requestApproval";
 export const CODEX_ESCALATION_TEXT = "Codex asked to run a command outside the seat's sandbox";
@@ -53,7 +53,8 @@ export function createCodexApprover(i: {
   seatGrants?: (seatId: string) => readonly string[];
   runGrants?: () => readonly string[];
 }): CodexSessionInput["approve"] {
-  // Command items this approver was asked about: a second request for one is a sandbox retry.
+  // Command approvals (approvalId, else itemId) this approver was asked about: a second request
+  // for one is a sandbox retry.
   const commandItems = new Set<string>();
   return async (req, paths, signal) => {
     const params = isObj(req.params) ? req.params : {};
@@ -73,7 +74,10 @@ export function createCodexApprover(i: {
     // The driver also calls here with an already-aborted signal to audit forced refusals.
     if (signal.aborted) return refuse("codex-allowlist");
     if (req.method === CODEX_COMMAND_APPROVAL) {
-      const item = typeof params.itemId === "string" ? params.itemId : null;
+      // zsh-exec-bridge callbacks share one itemId and differ by approvalId (the generated
+      // CommandExecutionRequestApprovalParams); the seat config also pins shell_zsh_fork off
+      const key = params.approvalId ?? params.itemId;
+      const item = typeof key === "string" ? key : null;
       const again = item !== null && commandItems.has(item);
       if (item !== null) commandItems.add(item);
       if (again || params.reason != null) return refuse("codex-allowlist", CODEX_ESCALATION_TEXT);

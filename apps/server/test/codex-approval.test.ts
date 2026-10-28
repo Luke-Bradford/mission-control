@@ -248,6 +248,20 @@ describe("Codex sandbox escalation", () => {
     // another approver (another run) starts with no items
     expect(await approver().approve(request(1, "call_1"), undefined, signal())).toBe("accept");
   });
+
+  it("keys repeats on approvalId when Codex gives one (callbacks sharing an itemId)", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1", { approvalId: "cb-1" }), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(await h.approve(request(2, "call_1", { approvalId: "cb-2" }), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(await h.approve(request(3, "call_1", { approvalId: "cb-1" }), undefined, signal())).toBe(
+      "decline",
+    );
+    expect(h.record).toHaveBeenCalledTimes(1);
+  });
 });
 
 it("approves a confined Git path relative to the approved command cwd", async () => {

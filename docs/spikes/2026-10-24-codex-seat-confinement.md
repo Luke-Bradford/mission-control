@@ -161,6 +161,7 @@ The client accepted the first approval of each turn. The command was `cat <denie
 | `sandbox_permissions:"require_escalated"` + `justification`, profile with a `deny` entry | One approval, same keys plus `reason` = the model's justification text | Still sandboxed (both denied). |
 | Plain call, profile with **no** `deny` entry | One approval, no `reason` | **Ran outside the sandbox**: the outside file was written. |
 | `require_escalated`, profile with no `deny` entry | One approval with `reason` | Ran outside the sandbox. |
+| `justification` without `sandbox_permissions`, profile with a `deny` entry | Nothing: no approval request | The CLI rejected the call itself ("`justification` requires an explicit `sandbox_permissions` …"); nothing ran. |
 
 - The approval params have no sandbox or escalation field (`codex app-server generate-ts`:
   `CommandExecutionRequestApprovalParams`); `reason` is the only sign, and for an escalation it is

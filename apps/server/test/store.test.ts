@@ -7,6 +7,7 @@ import type {
   Escalation,
   FlightDecision,
   GuardHit,
+  GuardRule,
   MachineSample,
   Profile,
   ReviewFinding,
@@ -1364,12 +1365,13 @@ describe("guard hits", () => {
     store.addGuardHit(hit({ at: now - 2 * DAY }));
     store.addGuardHit(hit({ at: now - 3 * DAY, rule: "network" }));
     store.addGuardHit(hit({ at: now - 8 * DAY, rule: "read-only" }));
+    // a hit stored under a rule since retired (github-write) is listed but not counted
+    store.addGuardHit(hit({ at: now - DAY, rule: "github-write" as GuardRule }));
     expect(store.guardHitCounts(now - 7 * DAY)).toEqual({
       background: 0,
       "git-write": 2,
       "git-env": 0,
       "codex-allowlist": 0,
-      "github-write": 0,
       "gh-cli": 0,
       "merge-push": 0,
       "flight-powers": 0,

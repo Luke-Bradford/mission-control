@@ -53,6 +53,9 @@ describe("watchBrief", () => {
   });
 
   it("names the whole checkout for a seat with no area", () => {
+    expect(watchBrief({ ...base, seats: [], fullSuite: ["pnpm -s test"] })).toContain(
+      "read the code here to answer the crew's questions. A whole suite (`pnpm -s test`) takes the test lock, one seat at a time, and waits while another seat holds it;",
+    );
     expect(watchBrief({ ...base, seats: [{ call: "DEV-1", area: [] }] })).toContain(
       "DEV-1: the whole checkout.",
     );
@@ -217,6 +220,13 @@ describe("ticketBrief", () => {
       "Configured validation commands: `uv run pytest`, `uv run ruff check`. You may also use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`uv run pytest`) takes the test lock, one seat at a time, and waits while another seat holds it; for one test, give the command a test file path.",
     );
     expect(out).not.toContain("pnpm");
+  });
+
+  it("names the test lock even when the repo configures no validation commands", () => {
+    const out = ticketBrief({ ...input, commands: [], fullSuite: ["make test"] });
+    expect(out.split("\n").at(-2)).toBe(
+      "No repository validation commands are configured. You may still use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`make test`) takes the test lock, one seat at a time, and waits while another seat holds it; for one test, give the command a test file path.",
+    );
   });
 
   it("tells a read-only seat that a whole suite waits for the test lock", () => {

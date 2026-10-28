@@ -3161,6 +3161,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         seats: info.session.seats
           .filter((s) => seatDef(s).mode === "writer")
           .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+        fullSuite: info.repo.fullSuite ?? [],
       });
       await enqueue(l, () =>
         writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),

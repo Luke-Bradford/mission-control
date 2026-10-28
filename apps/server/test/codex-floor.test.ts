@@ -116,7 +116,9 @@ describe("codexSeatConfig", () => {
     // Config permits extra keys; features.unified_exec is listed but false does not take effect
     // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
     expect(config).toContain('web_search = "disabled"');
-    expect(config).toContain("[features]\nunified_exec = false\nshell_snapshot = false");
+    expect(config).toContain(
+      "[features]\nunified_exec = false\nshell_snapshot = false\nshell_zsh_fork = false",
+    );
     expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
     expect(config).toContain(`[mcp_servers.mc]\nurl = "${url}"`);
     expect(config).toContain('bearer_token_env_var = "MC_SEAT_TOKEN"');

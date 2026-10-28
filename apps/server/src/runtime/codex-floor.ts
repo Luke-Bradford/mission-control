@@ -58,6 +58,9 @@ export function codexSeatConfig(
     "[features]",
     "unified_exec = false",
     "shell_snapshot = false",
+    // the zsh fork's exec bridge sends several approvals per item and has its own escalation path
+    // (EscalateRequest in the 0.154.0 binary); it is off by default, and stays off
+    "shell_zsh_fork = false",
     "[shell_environment_policy]",
     `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
     `[mcp_servers.${MC_MCP_SERVER}]`,
