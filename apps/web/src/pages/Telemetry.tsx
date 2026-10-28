@@ -90,7 +90,7 @@ export function Telemetry() {
   return (
     <section id="page-telemetry" className={refetching ? "refetching" : undefined}>
       <div className="toolbar">
-        <h2>Telemetry</h2>
+        <h1>Telemetry</h1>
         <Seg label="Range" options={RANGES} value={range} onChange={setRange} />
         <label className="s fg2" htmlFor={agentSel}>
           Agent

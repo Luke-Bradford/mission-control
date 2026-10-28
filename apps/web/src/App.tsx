@@ -120,6 +120,16 @@ export function App() {
   }
   return (
     <div className={cls}>
+      {shown.page === "board" && (
+        // biome-ignore lint/a11y/useValidAnchor: this fragment link moves focus to the Board heading.
+        <a
+          className="skip-link"
+          href="#board-content"
+          onClick={() => document.getElementById("board-content")?.focus()}
+        >
+          Skip to board
+        </a>
+      )}
       <Header page={shown.page} />
       <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>

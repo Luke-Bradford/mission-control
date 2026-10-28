@@ -240,6 +240,8 @@ button {
   cursor: pointer;
   line-height: 1.3;
   white-space: nowrap;
+  min-width: 24px;
+  min-height: 24px;
 }
 @media (prefers-reduced-motion: no-preference) {
   button {
@@ -311,6 +313,10 @@ textarea {
   border-radius: var(--r-s);
   padding: 4px 8px;
   min-width: 0;
+}
+select {
+  min-width: 24px;
+  min-height: 24px;
 }
 .num {
   font-variant-numeric: tabular-nums;
@@ -4431,8 +4437,24 @@ td.wrap {
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.setup-title h1 {
+.setup-title h2 {
   font: 600 22px var(--display);
+}
+
+/* Kept out of the normal tab sequence until a keyboard user asks to bypass the chrome. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--fg);
+  transform: translateY(-150%);
+}
+.skip-link:focus {
+  transform: translateY(0);
 }
 .sgrid {
   display: grid;

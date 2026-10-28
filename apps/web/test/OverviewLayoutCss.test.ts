@@ -7,6 +7,13 @@ const main = readFileSync(join(import.meta.dirname, "../src/main.tsx"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
+  it("gives compact Overview and Setup controls a 24px minimum target", () => {
+    expect(rule("button")).toContain("min-width: 24px");
+    expect(rule("button")).toContain("min-height: 24px");
+    expect(rule("select")).toContain("min-width: 24px");
+    expect(rule("select")).toContain("min-height: 24px");
+  });
+
   it("caps content-sized rows and gives unused height to the Live log", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
     expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");

@@ -716,7 +716,7 @@ describe("FLIGHT page", () => {
     expect(container.querySelector("#controlP")?.textContent).toContain("Choose a release window");
     expect(container.querySelector("#controlP")?.textContent).toContain("Prepare the release");
     expect(container.querySelector("#controlP")?.textContent).toContain("Spike cache pressure");
-    fireEvent.click(screen.getByRole("button", { name: "Needs you: 1 decisions or replies, now" }));
+    fireEvent.click(screen.getByRole("button", { name: "1 Needs you decisions or replies, now" }));
     expect(window.location.pathname).toBe(PAGE_PATHS.flight);
     expect(window.location.hash).toBe("#askP");
     await waitFor(() =>
@@ -923,11 +923,11 @@ describe("FLIGHT page", () => {
       });
       render(<Flight />);
       const cycle = await screen.findByRole("button", {
-        name: "Cycle time p50: 1.2 h Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
+        name: "1.2 h Cycle time p50 Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
       });
       expect(cycle.getAttribute("title")).toBe(metricHover("cycleTime"));
       expect(
-        await screen.findByRole("button", { name: /^Needs you: 0 decisions or replies, now$/ }),
+        await screen.findByRole("button", { name: /^0 Needs you decisions or replies, now$/ }),
       ).toBeTruthy();
       expect(pulseValue(document.body, "Merged")).toBe("6");
       // Merged and Review / CI are read here only: they lead nowhere.
