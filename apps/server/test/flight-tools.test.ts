@@ -17,6 +17,8 @@ import {
   briefSavedText,
   briefTooLongText,
   CI_LOG_EMPTY,
+  CLOSE_FAILED_DECISION,
+  CLOSE_UNCONFIRMED_DECISION,
   capText,
   ciLogText,
   ciNoCheckText,
@@ -232,7 +234,11 @@ let moveImpl: () => Promise<MoveResult>;
 let ghCalls: string[][];
 let ghInputs: (string | undefined)[];
 let ghImpl: (args: string[]) => Promise<GhResult>;
-let reorderImpl: () => Promise<{ ok: boolean; text: string }>;
+let reorderImpl: (
+  seat: string,
+  move: string,
+  above: string,
+) => Promise<{ ok: boolean; text: string }>;
 let secrets: string[];
 let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
@@ -332,7 +338,7 @@ beforeEach(() => {
       if (!seat) throw new Error("Missing seat");
       seat.focus = focus;
     },
-    queueReorder: async () => reorderImpl(),
+    queueReorder: async (seat, move, above) => reorderImpl(seat, move, above),
     seen: stateSeen,
     config: cfg,
     store,
@@ -6447,15 +6453,33 @@ describe("queue-reorder cap and failures", () => {
     expect(await reorder()).toEqual(refused(capText("moved tickets", FLIGHT_PROMOTES_PER_HOUR)));
   });
 
-  it("lets only one of two parallel reorders through at cap minus one", async () => {
+  it("lets only one of two parallel reorders by different seats through at cap minus one", async () => {
     for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR - 1; i++)
       addDecision({ kind: "reorder", at: NOW - 1000 });
-    reorderImpl = async () => {
+    const seen: string[] = [];
+    reorderImpl = async (seat, move, above) => {
+      seen.push(`${seat}:${move}>${above}`);
       await new Promise((r) => setTimeout(r, 20));
       return { ok: true, text: "Changed Priority on the board." };
     };
-    const results = await Promise.all([reorder(), reorder()]);
+    const results = await Promise.all([
+      call("promote", {
+        action: "queue-reorder",
+        seat: "guido-1",
+        move: "mc#2",
+        above: "mc#1",
+        basis: "b",
+      }),
+      call("promote", {
+        action: "queue-reorder",
+        seat: "inco-1",
+        move: "mc#4",
+        above: "mc#3",
+        basis: "b",
+      }),
+    ]);
     expect(results.filter((r) => r.isError).length).toBe(1);
+    expect(seen).toHaveLength(1);
     expect(decisions().filter((d) => d.kind === "reorder").length).toBe(FLIGHT_PROMOTES_PER_HOUR);
   });
 
@@ -6513,7 +6537,7 @@ describe("close_ticket", () => {
       expect.objectContaining({
         ref: "mc#7",
         about: "mc#7: Ticket 7 (replaced by mc#8)",
-        decision: `Closed as duplicate: https://github.com/o/mc/issues/7 [closedAt ${NOW}]`,
+        decision: `Closed as duplicate: https://github.com/o/mc/issues/7`,
         basis: "#8 replaces it",
       }),
     ]);
@@ -6677,7 +6701,7 @@ describe("close_ticket", () => {
     expect(logs.join("\n")).toContain("gh issue close failed");
     expect(logs.join("\n")).not.toContain("s3cret-token");
     expect(decisions().filter((d) => d.kind === "close")).toEqual([
-      expect.objectContaining({ decision: "Close failed; replacement comment may have posted" }),
+      expect.objectContaining({ decision: CLOSE_FAILED_DECISION }),
     ]);
   });
 
@@ -6685,6 +6709,39 @@ describe("close_ticket", () => {
     ghImpl = async () => ({ code: 1, stdout: "", stderr: "timeout" });
     expect((await closeCall()).isError).not.toBe(true);
     expect(decisions()[0]?.decision).toMatch(/^Closed as duplicate/);
+  });
+
+  it("records an unconfirmed close when gh exits 0 but the re-read fails or shows it open", async () => {
+    for (const reread of [async () => null, async (n: number) => ticket(n)] as const) {
+      fetchImpl = async (n) => (ghCalls.some((c) => c[1] === "close") ? reread(n) : ticket(n));
+      ghCalls.length = 0;
+      const r = await closeCall();
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/unconfirmed/);
+      expect(decisions()[0]).toMatchObject({ kind: "close", decision: CLOSE_UNCONFIRMED_DECISION });
+    }
+  });
+
+  it("refuses before any write when too many tickets wait to check dependents", async () => {
+    board(card(7), card(8), ...Array.from({ length: 61 }, (_, i) => card(100 + i)));
+    await refusedNothingWritten(closeCall(), /too many open tickets/);
+  });
+
+  it("reads the waiting tickets' bodies at most four at a time", async () => {
+    board(card(7), card(8), ...Array.from({ length: 12 }, (_, i) => card(100 + i)));
+    const base = fetchImpl;
+    let live = 0;
+    let peak = 0;
+    fetchImpl = async (n) => {
+      if (n < 100 && n !== 8) return base(n);
+      live++;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 5));
+      live--;
+      return base(n);
+    };
+    expect((await closeCall()).isError).not.toBe(true);
+    expect(peak).toBeLessThanOrEqual(4);
   });
 
   it("does not record a zero-exit close of an issue someone else had already closed", async () => {
@@ -6712,52 +6769,6 @@ describe("close_ticket", () => {
     await refusedNothingWritten(closeCall(), /open sub-issues/);
     board(card(7, { subIssues: { done: 51, total: 51 } }), card(8));
     expect((await closeCall()).isError).not.toBe(true);
-  });
-
-  describe("reopen", () => {
-    const reopen = () => call("close_ticket", { action: "reopen", issue: 7, basis: "wrong call" });
-    const closedNow = (closedAt: number) => async (n: number) =>
-      ticket(n, { state: n === 7 ? "closed" : "open", closedAt });
-
-    it("reopens only a ticket FLIGHT closed itself, and records it", async () => {
-      await refusedNothingWritten(reopen(), /only a ticket you closed/);
-      await closeCall();
-      ghCalls.length = 0;
-      board(card(7, { closed: true }), card(8));
-      fetchImpl = closedNow(NOW);
-      expect((await reopen()).isError).not.toBe(true);
-      expect(ghCalls[0]?.slice(0, 4)).toEqual(["issue", "reopen", "7", "--repo=o/mc"]);
-      expect(decisions()[0]).toMatchObject({ kind: "close", ref: "mc#7" });
-      expect(decisions()[0]?.decision).toMatch(/^Reopened: /);
-      ghCalls.length = 0;
-      expect((await reopen()).isError).toBe(true);
-      expect(ghCalls).toEqual([]);
-    });
-
-    it("refuses when it was reopened and closed again since", async () => {
-      await closeCall();
-      ghCalls.length = 0;
-      fetchImpl = closedNow(NOW + 60_000);
-      const r = await reopen();
-      expect(r.isError).toBe(true);
-      expect(r.text).toMatch(/closed again/);
-      expect(ghCalls).toEqual([]);
-    });
-
-    it("is not refused by the hourly close cap, which closes alone spend", async () => {
-      await closeCall();
-      for (let i = 0; i < FLIGHT_CLOSES_PER_HOUR - 1; i++)
-        addDecision({
-          kind: "close",
-          ref: `mc#${100 + i}`,
-          decision: "Closed as duplicate: u",
-          at: NOW - 1000,
-        });
-      ghCalls.length = 0;
-      fetchImpl = closedNow(NOW);
-      expect((await closeCall({ issue: 9, replacement: 8 })).isError).toBe(true);
-      expect((await reopen()).isError).not.toBe(true);
-    });
   });
 });
 

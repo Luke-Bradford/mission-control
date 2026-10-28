@@ -35,6 +35,7 @@ import {
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   CLOSE_DESCRIPTION,
+  CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
   CLOSED_PREFIX,
   COMMENTED_DECISION,
@@ -47,11 +48,11 @@ import {
   ciNotActionsText,
   ciNotFailedText,
   closeComment,
-  closedAtOf,
   closedDecision,
   closedText,
   closeFailedText,
   closeRefusedText,
+  closeUnconfirmedText,
   commentedText,
   commentFailedText,
   commentTextText,
@@ -90,6 +91,8 @@ import {
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
+  FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
+  FLIGHT_CLOSE_DEPENDENT_READS_MAX,
   FLIGHT_CLOSES_PER_HOUR,
   FLIGHT_COMMENTS_PER_HOUR,
   FLIGHT_DECISION_MAX,
@@ -681,18 +684,12 @@ const CommentTicketArgs = z.strictObject({
   text: text(MC_TEXT_MAX),
   basis: basisArg,
 });
-const CloseOnlyArgs = z.strictObject({
+const CloseTicketArgs = z.strictObject({
   issue: issueNumber,
   replacement: issueNumber,
   reason: z.enum(["duplicate", "not-planned"]),
   basis: basisArg,
 });
-const ReopenArgs = z.strictObject({
-  action: z.literal("reopen"),
-  issue: issueNumber,
-  basis: basisArg,
-});
-const CloseTicketArgs = z.union([CloseOnlyArgs, ReopenArgs]);
 const GhReadArgs = z.strictObject({ path: z.string().min(1).max(FLIGHT_GH_PATH_MAX) });
 const ReadPrArgs = z.strictObject({ pr: issueNumber });
 const ReadCiLogArgs = z.strictObject({
@@ -1800,19 +1797,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     repo: CcConfig["repos"][number],
     ctx: McToolContext,
   ): Promise<Result> {
-    const reopening = "action" in a;
     const refuse = (why: string) => fail(closeRefusedText(why));
     const at = now();
-    // Only closes (and attempts whose comment may have posted) spend the cap; reopens undo one.
-    const closes = reopening
-      ? 0
-      : store
-          .flightDecisions(at - FLIGHT_HOUR_MS, 1000)
-          .filter(
-            (d) =>
-              d.kind === "close" &&
-              (d.decision.startsWith(CLOSED_PREFIX) || d.decision === CLOSE_UNCONFIRMED_DECISION),
-          ).length;
+    // Closes, and attempts whose comment may have posted, spend the cap.
+    const closes = store
+      .flightDecisions(at - FLIGHT_HOUR_MS, 1000)
+      .filter(
+        (d) =>
+          d.kind === "close" &&
+          (d.decision.startsWith(CLOSED_PREFIX) ||
+            d.decision === CLOSE_UNCONFIRMED_DECISION ||
+            d.decision === CLOSE_FAILED_DECISION),
+      ).length;
     if (closes >= FLIGHT_CLOSES_PER_HOUR) return fail(capText("closed tickets", closes));
     const ref = `${repo.id}#${a.issue}`;
     const rules = await deps.rules(repo.id);
@@ -1852,35 +1848,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
       return r.code === 0;
     };
-    if (reopening) {
-      // only FLIGHT's own latest close of this ticket can be undone, and only while that close stands
-      const last = store.flightDecisions(0, 1000).find((d) => d.kind === "close" && d.ref === ref);
-      const closedAt = last ? closedAtOf(last.decision) : null;
-      if (closedAt === null) return refuse("only a ticket you closed yourself can be reopened");
-      const live = await read(a.issue);
-      if (live?.state !== "closed" || live.closedAt !== closedAt)
-        return refuse("it was reopened or closed again since you closed it");
-      const done = await gh(
-        [
-          "issue",
-          "reopen",
-          String(a.issue),
-          `--repo=${repo.github}`,
-          "--comment=Reopened by FLIGHT (Mission Control).",
-        ],
-        "issue reopen",
-      );
-      if (typeof done !== "boolean") return done;
-      if (!done) return fail(closeFailedText());
-      record(at, {
-        kind: "close",
-        ref,
-        about: `${ref}: ${card.title}`,
-        decision: `Reopened: ${live.url}`,
-        basis: a.basis,
-      });
-      return { text: `Reopened ${ref}. Recorded in Decided without you.` };
-    }
     const { replacement, reason } = a;
     const replacementRef = `${repo.id}#${replacement}`;
     if (replacement === a.issue) return refuse("the replacement must be a different ticket");
@@ -1915,7 +1882,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         c.issueNumber !== a.issue &&
         (["Backlog", "Ready", "Refinement", "Blocked"] as string[]).includes(hudColumnOf(c)),
     );
-    const bodies = await Promise.all(waiting.map((c) => read(c.issueNumber)));
+    if (waiting.length > FLIGHT_CLOSE_DEPENDENT_READS_MAX)
+      return refuse("too many open tickets to check dependents; ask the operator");
+    const bodies: (TicketView | null)[] = [];
+    for (let i = 0; i < waiting.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
+      bodies.push(
+        ...(await Promise.all(
+          waiting.slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH).map((c) => read(c.issueNumber)),
+        )),
+      );
     const dependents: string[] = [];
     for (const [i, t] of bodies.entries()) {
       if (t === null || t.bodyTruncated) return refuse("a waiting ticket's body could not be read");
@@ -1962,12 +1937,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // issue, closed at or after the call began (closedAt has whole-second resolution).
     const after = await read(a.issue);
     const closedAt = after?.state === "closed" ? (after.closedAt ?? null) : null;
+    const about = `${ref}: ${card.title} (replaced by ${replacementRef})`;
     if (closedAt !== null && closedAt >= startedAt - 1000) {
       record(at, {
         kind: "close",
         ref,
-        about: `${ref}: ${card.title} (replaced by ${replacementRef})`,
-        decision: closedDecision(reason, target.url, closedAt),
+        about,
+        decision: closedDecision(reason, target.url),
         basis: a.basis,
       });
       return { text: closedText(ref, replacementRef) };
@@ -1977,11 +1953,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     record(at, {
       kind: "close",
       ref,
-      about: `${ref}: ${card.title} (replaced by ${replacementRef})`,
-      decision: CLOSE_UNCONFIRMED_DECISION,
+      about,
+      decision: done ? CLOSE_UNCONFIRMED_DECISION : CLOSE_FAILED_DECISION,
       basis: a.basis,
     });
-    return fail(closeFailedText());
+    return fail(done ? closeUnconfirmedText() : closeFailedText());
   }
 
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3210,7 +3186,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           issue: ISSUE_SCHEMA,
           replacement: ISSUE_SCHEMA,
           reason: { type: "string", enum: ["duplicate", "not-planned"] },
-          action: { type: "string", enum: ["reopen"], description: "Reopen a ticket you closed." },
           basis: BASIS_SCHEMA,
         },
         ["issue", "basis"],
