@@ -704,7 +704,7 @@ describe("cards", () => {
   });
 
   it("collapses Done cards beyond the initial window until requested", () => {
-    const done = Array.from({ length: 30 }, (_, i) =>
+    const done = Array.from({ length: 362 }, (_, i) =>
       todo(i + 1, { status: "Done", state: "done", title: `Done ${i + 1}` }),
     );
     render(
@@ -721,9 +721,10 @@ describe("cards", () => {
     );
 
     expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(10);
-    expect(screen.getByRole("button", { name: "Show 20 more completed cards" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Show 20 more completed cards" }));
-    expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(30);
+    expect(document.querySelectorAll("*").length).toBeLessThan(3000);
+    expect(screen.getByRole("button", { name: "Show 352 more completed cards" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show 352 more completed cards" }));
+    expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(362);
   });
 
   it("a closed issue whose Status says In progress sits in Done with the Status out of date flag", async () => {
