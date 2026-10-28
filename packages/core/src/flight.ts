@@ -959,7 +959,8 @@ export const FLIGHT_DOWN_NOTES: readonly string[] = [FLIGHT_NOTE_KEY, FLIGHT_DOW
  * The one Needs-you item that stands for everything waiting on FLIGHT while FLIGHT is not
  * triaging: not live, stopped, reported down by its watch, or late on an item's triage window.
  * The items it counts stay FLIGHT's and are listed under it; it clears when FLIGHT triages them or
- * comes back. It notifies under `flightDown`, through quiet hours, once per episode.
+ * comes back. It notifies under `flightDown` once per episode, through quiet hours, except after
+ * the operator's own Stop, which waits them out.
  */
 export const FLIGHT_NOT_TRIAGING_KEY = "flight:not-triaging";
 /** hold_item on FLIGHT_NOT_TRIAGING_KEY: FLIGHT clears it by triaging what it counts. */
