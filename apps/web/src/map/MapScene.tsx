@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { dockPosition } from "./agents.ts";
 import { nodeWork } from "./cards.ts";
+import type { LensVisual, MapLens } from "./Lenses.tsx";
 import { declutter, type LabelBox, labelKind } from "./labels.ts";
 import { type LightProps, lightLayer } from "./lights.ts";
 import type { MapNode } from "./model.ts";
@@ -22,7 +23,9 @@ type Props = LightProps & {
   areas?: string[];
   focus: string | null;
   /** Direct import relationships around the focused file, highlighted on the map. */
-  focusLinks?: { from: string; to: string }[];
+  focusLinks?: { from: string; to: string; unlinked?: boolean }[];
+  lens?: MapLens;
+  lensVisual?: Record<string, LensVisual>;
   home: number;
   rotate: boolean;
   /** Every seat on the repo, on stage or not, for the dock's size; the stage's count if absent. */
@@ -78,6 +81,8 @@ export function MapScene(props: Props) {
     areas,
     focus,
     focusLinks,
+    lens,
+    lensVisual,
     home,
     rotate,
     dockSeats,
@@ -97,6 +102,8 @@ export function MapScene(props: Props) {
       areas,
       focus,
       focusLinks,
+      lens,
+      lensVisual,
       home,
       rotate,
       dockSeats,
@@ -115,6 +122,8 @@ export function MapScene(props: Props) {
     areas,
     focus,
     focusLinks,
+    lens,
+    lensVisual,
     home,
     rotate,
     dockSeats,
@@ -515,7 +524,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
             new THREE.Float32BufferAttribute(vertices, 3),
           ),
           new THREE.LineBasicMaterial({
-            color: SIGNAL,
+            color: next.focusLinks?.some((edge) => edge.unlinked) ? "#ff826f" : SIGNAL,
             transparent: true,
             opacity: 0.9,
             depthWrite: false,
@@ -548,14 +557,23 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     const matrix = new THREE.Matrix4();
     const plain = new THREE.Color(NODE);
     const picked = new THREE.Color(SIGNAL);
+    const impact = new THREE.Color("#3f94b5");
+    const history = new THREE.Color("#b56f3f");
     spheres.forEach((node, i) => {
       const chosen = node.path === next.selected;
       // every file is an individual node; selection is the only reason to enlarge one
       const size = (node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4) * (chosen ? 1.8 : 1);
       matrix.makeScale(size, size, size).setPosition(...node.position);
       mesh.setMatrixAt(i, matrix);
-      mesh.setColorAt(i, chosen ? picked : plain);
-      const color = chosen ? picked : plain;
+      const visual = next.lensVisual?.[node.path];
+      const lensColor =
+        next.lens === "impact" && visual?.reach
+          ? impact
+          : next.lens === "history" && visual?.hotspot
+            ? history
+            : plain;
+      mesh.setColorAt(i, chosen ? picked : lensColor);
+      const color = chosen ? picked : lensColor;
       (points.geometry.getAttribute("color") as THREE.BufferAttribute).setXYZ(
         i,
         color.r,

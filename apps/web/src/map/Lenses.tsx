@@ -2,6 +2,11 @@ import type { MapSnapshot } from "@mc/core";
 import { githubItemHref } from "../links.ts";
 
 export type MapLens = "changes" | "impact" | "history";
+export interface LensVisual {
+  reach?: number;
+  hotspot?: number;
+  fixes?: number;
+}
 
 const isTest = (path: string) =>
   /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(path);
@@ -13,7 +18,7 @@ interface Graph {
   cycles: string[][];
 }
 
-function graph(snapshot: MapSnapshot): Graph {
+export function graph(snapshot: MapSnapshot): Graph {
   const paths = new Set(snapshot.tree.map((file) => file.path));
   const forward = new Map<string, Set<string>>();
   const reverse = new Map<string, Set<string>>();
@@ -27,29 +32,35 @@ function graph(snapshot: MapSnapshot): Graph {
     reverse.get(edge.to)?.add(edge.from);
   }
   const cycles: string[][] = [];
-  const seen = new Set<string>();
-  const active = new Set<string>();
-  const chain: string[] = [];
-  const cycleKeys = new Set<string>();
+  const indices = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const stacked = new Set<string>();
+  let index = 0;
   const visit = (path: string) => {
-    seen.add(path);
-    active.add(path);
-    chain.push(path);
+    indices.set(path, index);
+    low.set(path, index++);
+    stack.push(path);
+    stacked.add(path);
     for (const next of forward.get(path) ?? []) {
-      if (!seen.has(next)) visit(next);
-      else if (active.has(next)) {
-        const cycle = chain.slice(chain.indexOf(next)).sort();
-        const key = cycle.join("\n");
-        if (!cycleKeys.has(key)) {
-          cycleKeys.add(key);
-          cycles.push(cycle);
-        }
+      if (!indices.has(next)) {
+        visit(next);
+        low.set(path, Math.min(low.get(path) ?? 0, low.get(next) ?? 0));
+      } else if (stacked.has(next)) {
+        low.set(path, Math.min(low.get(path) ?? 0, indices.get(next) ?? 0));
       }
     }
-    chain.pop();
-    active.delete(path);
+    if (low.get(path) !== indices.get(path)) return;
+    const component: string[] = [];
+    let next: string;
+    do {
+      next = stack.pop() as string;
+      stacked.delete(next);
+      component.push(next);
+    } while (next !== path);
+    if (component.length > 1 || forward.get(path)?.has(path)) cycles.push(component.sort());
   };
-  for (const path of paths) if (!seen.has(path)) visit(path);
+  for (const path of paths) if (!indices.has(path)) visit(path);
   return { forward, reverse, cycles };
 }
 
@@ -66,8 +77,8 @@ export function impactFocusLinks(
   ];
 }
 
-function downstream(path: string, reverse: Map<string, Set<string>>) {
-  const distances = new Map<string, number>();
+export function downstream(path: string, reverse: Map<string, Set<string>>) {
+  const distances = new Map([[path, 0]]);
   const queue = [path];
   while (queue.length) {
     const current = queue.shift() as string;
@@ -78,7 +89,47 @@ function downstream(path: string, reverse: Map<string, Set<string>>) {
       queue.push(next);
     }
   }
+  distances.delete(path);
   return distances;
+}
+
+const isBarrel = (path: string) => /(^|\/)index\.[cm]?[jt]sx?$/.test(path);
+function linked(a: string, b: string, forward: Graph["forward"], reverse: Graph["reverse"]) {
+  if (forward.get(a)?.has(b) || reverse.get(a)?.has(b)) return true;
+  return [a, b].some((from, index) => {
+    const to = index ? a : b;
+    return [...(forward.get(from) ?? [])].some(
+      (barrel) => isBarrel(barrel) && forward.get(barrel)?.has(to),
+    );
+  });
+}
+
+export function historyFocusLinks(snapshot: MapSnapshot, path: string | null) {
+  if (path === null) return [];
+  const { forward, reverse } = graph(snapshot);
+  return snapshot.hist.coupling.flatMap(([left, right]) => {
+    const a = snapshot.tree[left]?.path;
+    const b = snapshot.tree[right]?.path;
+    if (!a || !b || (a !== path && b !== path)) return [];
+    return [{ from: a, to: b, unlinked: !linked(a, b, forward, reverse) }];
+  });
+}
+
+/** Per-file map styling data for the active analytical lens. */
+export function lensVisuals(snapshot: MapSnapshot, lens: MapLens): Record<string, LensVisual> {
+  if (lens === "changes") return {};
+  if (lens === "impact") {
+    const { reverse } = graph(snapshot);
+    return Object.fromEntries(
+      snapshot.tree.map(({ path }) => [path, { reach: downstream(path, reverse).size }]),
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(snapshot.hist.files).flatMap(([index, history]) => {
+      const path = snapshot.tree[Number(index)]?.path;
+      return path ? [[path, { hotspot: history[0], fixes: history[1] }]] : [];
+    }),
+  );
 }
 
 function changed(snapshot: MapSnapshot) {
@@ -321,13 +372,13 @@ export function HistoryLens({
     const a = snapshot.tree[left]?.path;
     const b = snapshot.tree[right]?.path;
     if (!a || !b) continue;
-    const linked = forward.get(a)?.has(b) === true || reverse.get(a)?.has(b) === true;
+    const isLinked = linked(a, b, forward, reverse);
     for (const [path, other] of [
       [a, b],
       [b, a],
     ] as const) {
       const list = partners.get(path) ?? [];
-      list.push({ path: other, count, share, linked });
+      list.push({ path: other, count, share, linked: isLinked });
       partners.set(path, list);
     }
   }
@@ -399,7 +450,9 @@ export function HistoryLens({
     .slice(0, 10);
   const unlinked = [...partners.entries()]
     .flatMap(([source, rows]) =>
-      rows.filter((row) => source < row.path && !row.linked).map((row) => ({ source, ...row })),
+      rows
+        .filter((row) => source < row.path && !row.linked && !isTest(source) && !isTest(row.path))
+        .map((row) => ({ source, ...row })),
     )
     .sort((a, b) => b.count - a.count);
   return (

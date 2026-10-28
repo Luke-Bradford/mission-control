@@ -1,11 +1,17 @@
 import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
+import { graph } from "../src/map/Lenses.tsx";
 
-const scenes = vi.hoisted(() => [] as { focusLinks?: { from: string; to: string }[] }[]);
+const scenes = vi.hoisted(
+  () => [] as { focusLinks?: { from: string; to: string }[]; onSelect?: (path: string) => void }[],
+);
 vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: (props: { focusLinks?: { from: string; to: string }[] }) => {
+  MapScene: (props: {
+    focusLinks?: { from: string; to: string }[];
+    onSelect?: (path: string) => void;
+  }) => {
     scenes.push(props);
     return <div>3D scene</div>;
   },
@@ -78,6 +84,8 @@ it("shows Impact tallies, dependency overlap, untested changes, cycles, and a fo
   expect(lens.textContent).toContain("Imported by");
   expect(lens.textContent).toContain("Tests that reach it");
   expect(lens.textContent).toContain("It imports");
+  expect(lens.textContent).toContain("3depend on it");
+  expect(lens.textContent).not.toContain("Further downstreamsrc/contract.ts");
   await waitFor(() =>
     expect(
       scenes.some((scene) =>
@@ -89,6 +97,26 @@ it("shows Impact tallies, dependency overlap, untested changes, cycles, and a fo
   );
   fireEvent.keyDown(window, { key: "Escape" });
   expect(lens.textContent).toContain("Changes overlap through imports");
+});
+
+it("treats a branching import SCC as one audit unit and map clicks toggle lens focus", async () => {
+  const value = snapshot();
+  value.tree = value.tree.filter((file) => file.path !== "src/untested.ts");
+  value.imports = [
+    { from: "src/contract.ts", to: "src/consumer.ts" },
+    { from: "src/consumer.ts", to: "src/contract.ts" },
+    { from: "src/contract.ts", to: "src/cycle.ts" },
+    { from: "src/cycle.ts", to: "src/contract.ts" },
+  ];
+  expect(graph(value).cycles).toEqual([["src/consumer.ts", "src/contract.ts", "src/cycle.ts"]]);
+  render(<CrewMapView snapshot={snapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  const select = scenes.findLast((entry) => entry.onSelect !== undefined)?.onSelect;
+  if (select === undefined) throw new Error("expected a scene selection callback");
+  act(() => select("src/contract.ts"));
+  expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Latest PRs");
+  act(() => select("src/contract.ts"));
+  expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Hotspots");
 });
 
 it("shows History hotspots, frequent fixes, unlinked change partners, and linked recent PRs on focus", () => {
@@ -108,4 +136,11 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
     "https://github.com/Luke-Bradford/mission-control/pull/837",
   );
   expect(lens.textContent).toContain("Changes together with");
+  expect(
+    scenes.some((scene) =>
+      scene.focusLinks?.some(
+        (edge) => edge.from === "src/contract.ts" && edge.to === "src/untested.ts",
+      ),
+    ),
+  ).toBe(true);
 });

@@ -5,7 +5,15 @@ import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
-import { HistoryLens, ImpactLens, impactFocusLinks, LensTabs, type MapLens } from "./Lenses.tsx";
+import {
+  HistoryLens,
+  historyFocusLinks,
+  ImpactLens,
+  impactFocusLinks,
+  LensTabs,
+  lensVisuals,
+  type MapLens,
+} from "./Lenses.tsx";
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
@@ -229,6 +237,13 @@ export function CrewMapView({
   const selectedFiles = displayNodes.find((n) => n.path === selectedPath)?.files ?? [];
   // stable callbacks, so the scene's props change only when what it shows does
   const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
+  const selectFromScene = useCallback(
+    (path: string) => {
+      if (lens === "changes") selectNode(path);
+      else setFocus((current) => (current === path ? null : path));
+    },
+    [lens, selectNode],
+  );
   const searchSelect = (path: string) => {
     selectNode(path);
     setFocus(null);
@@ -247,9 +262,15 @@ export function CrewMapView({
   );
   const named = { snapshot: stage, indices: colours, names };
   const focusLinks = useMemo(
-    () => (lens === "impact" ? impactFocusLinks(snapshot, focus) : []),
+    () =>
+      lens === "impact"
+        ? impactFocusLinks(snapshot, focus)
+        : lens === "history"
+          ? historyFocusLinks(snapshot, focus)
+          : [],
     [lens, snapshot, focus],
   );
+  const lensVisual = useMemo(() => lensVisuals(snapshot, lens), [snapshot, lens]);
   useEffect(() => {
     const clearFocus = (event: KeyboardEvent) => {
       if (event.key === "Escape" && focus !== null) setFocus(null);
@@ -280,12 +301,14 @@ export function CrewMapView({
               names={names}
               focus={focusNode?.path ?? null}
               focusLinks={focusLinks}
+              lens={lens}
+              lensVisual={lensVisual}
               home={home}
               overview={overview}
               rotate={rotate}
               selected={selectedPath}
               indices={colours}
-              onSelect={selectNode}
+              onSelect={selectFromScene}
               seat={selectedSeat?.seat ?? null}
               seatFocus={seatFocus}
               dockSeats={snapshot.seats.length}

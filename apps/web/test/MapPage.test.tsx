@@ -176,6 +176,41 @@ describe("Map page", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Selected" })).toBeTruthy();
   });
 
+  it("consumes live imports and history, including the configured GitHub PR URL", async () => {
+    const live: MapSnapshot = structuredClone(idle);
+    live.tree = [{ path: "src/live.ts", lines: 8 }];
+    const seat = live.seats[0];
+    if (seat === undefined) throw new Error("expected fixture seat");
+    live.seats[0] = {
+      ...seat,
+      scope: { read: [], modified: [{ file: "src/live.ts", add: 1, rem: 0, source: "diff" }] },
+    };
+    live.hist = {
+      since: 0,
+      prCount: 1,
+      fixCount: 1,
+      files: { "0": [1, 1, 1, [837]] },
+      coupling: [],
+    };
+    stubFetch({
+      "/api/repos": [{ id: "sample", github: "Luke-Bradford/mission-control" }],
+      "/api/config": config,
+      "/api/crew": { rows: [] },
+      "/api/repos/sample/map": live,
+    });
+    at("/map/sample");
+    await screen.findByText("3D scene");
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "src/live.ts" })[0] as HTMLElement);
+    expect(screen.getByRole("link", { name: "#837" }).getAttribute("href")).toBe(
+      "https://github.com/Luke-Bradford/mission-control/pull/837",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+    expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
+      "1 files changed",
+    );
+  });
+
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {
     stubFetch({
       "/api/repos": repos,
