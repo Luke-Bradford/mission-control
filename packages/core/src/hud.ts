@@ -459,7 +459,7 @@ export const FLIGHT_TRIAGE_LABEL = {
   waiting: "Waiting for FLIGHT triage",
   handling: "FLIGHT is handling",
   missed: "FLIGHT hasn't triaged this",
-  down: "Waiting on FLIGHT — FLIGHT is down",
+  down: "Waiting on FLIGHT — not triaging",
 } as const;
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
 export const OWNER_CONTROLLER = "controller" satisfies AttentionOwner;
@@ -500,7 +500,7 @@ export function strayText(path: string, sessionId: string, owner: string | null)
     : `${path} changed in s/${sessionId} inside ${owner}'s area`;
 }
 
-/** A seat's `ask_operator` question in Needs you. */
+/** A seat's `ask_flight` question, as FLIGHT and (once FLIGHT briefs it) the operator see it. */
 export const questionText = (call: string, text: string): string => `${call} asks: ${text}`;
 
 /** The lock item: seats in line behind a holder whose run has stalled. */

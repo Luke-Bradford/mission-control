@@ -20,6 +20,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
@@ -65,12 +66,7 @@ import {
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
-import {
-  type CcConfig,
-  type CrewSeatConfig,
-  type CrewSessionConfig,
-  seatUnavailable,
-} from "../config.ts";
+import { type CcConfig, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_LOCK } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
@@ -79,6 +75,7 @@ import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
+import { flightSeat } from "./seat.ts";
 import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
@@ -93,7 +90,10 @@ interface TeamsDigestState {
   };
 }
 
-/** Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. */
+/**
+ * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
+ * "FLIGHT is not triaging" item is the operator's alone: FLIGHT never triages its own lapse.
+ */
 export function operatorItems(
   config: CcConfig,
   store: Store,
@@ -109,7 +109,10 @@ export function operatorItems(
     lock,
     rows ?? crew(config, store, now, lock, () => null).rows,
     hubLogin,
-  ).filter((i) => i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT);
+  ).filter(
+    (i) =>
+      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) && i.key !== FLIGHT_NOT_TRIAGING_KEY,
+  );
 }
 
 /** All items awaiting FLIGHT triage, before the digest's display cap. */
@@ -123,12 +126,11 @@ export function flightTriageItems(
 ): AttentionItem[] {
   const flightId = flightSeat(config)?.seat.id ?? null;
   if (flightId === null) return [];
+  // a question passed before #758 without a brief is still FLIGHT's to brief
   const questionKeys = new Set(
     store
       .openQuestions()
-      .filter(
-        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
-      )
+      .filter((q) => q.agentId !== flightId && store.run(q.runId)?.endedAt == null)
       .map((q) => `ask:${q.id}`),
   );
   return operatorItems(config, store, now, hubLogin, rows, lock)
@@ -167,18 +169,7 @@ export function flightStartCap(config: CcConfig): number {
   return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
 }
 
-/** The watch seat (the first seat that is not retiring and whose seatDef loop is "watch") and its session, else null. */
-export function flightSeat(
-  config: CcConfig,
-): { seat: CrewSeatConfig; session: CrewSessionConfig } | null {
-  for (const session of config.crew?.sessions ?? []) {
-    const seat = session.seats.find(
-      (s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "watch",
-    );
-    if (seat !== undefined) return { seat, session };
-  }
-  return null;
-}
+export { flightSeat };
 
 /** The seats whose run the HUD shows as stalled. */
 export function stalledSeats(

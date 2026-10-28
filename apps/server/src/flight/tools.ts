@@ -4,7 +4,6 @@
  * from another seat gets nothing. Ticket 3 adds its tools to `createFlightTools`.
  */
 import {
-  ANSWER_ONE_OF,
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
   AWAY_BUG_VERIFIED,
@@ -35,7 +34,6 @@ import {
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   COMMENTED_DECISION,
-  COMMS_CAPCOM,
   CREATE_NO_REPO,
   CREW_LANES,
   capText,
@@ -204,7 +202,6 @@ import {
   OWN_SEAT_TEXT,
   OWNER_OPERATOR,
   PASSED_DECISION,
-  PASSED_TEXT,
   PLAN_SIZES,
   PRIORITIES,
   PROFILE_NAME,
@@ -216,6 +213,7 @@ import {
   type Profile,
   type ProfileOverride,
   parkNotYoursText,
+  passNeedsBriefText,
   planAlreadyText,
   plannerStartedDecision,
   planUnclosedText,
@@ -583,14 +581,16 @@ const UpdateBriefArgs = z
     (a) => [a.section, a.planned, a.watch, a.arrival].some((v) => v !== undefined),
     "Provide section, planned, watch or arrival.",
   );
-const AnswerArgs = z
-  .strictObject({
-    question_id: z.number().int().min(1),
-    answer: text(MC_TEXT_MAX).optional(),
-    pass_to_operator: z.literal(true).optional(),
-    basis: basisArg,
-  })
-  .refine((a) => (a.answer === undefined) !== (a.pass_to_operator === undefined), ANSWER_ONE_OF);
+const AnswerArgs = z.strictObject({
+  question_id: z.number().int().min(1),
+  answer: text(MC_TEXT_MAX),
+  basis: basisArg,
+});
+/** The old pass shape, refused with the brief_item call that replaces it (#758). */
+const PassArgs = z.looseObject({
+  question_id: z.number().int().min(1),
+  pass_to_operator: z.literal(true),
+});
 const StartSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
@@ -977,6 +977,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   async function answerQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
+    const pass = PassArgs.safeParse(args);
+    if (pass.success) {
+      const caller = flightCall(deps, ctx, PassArgs, args);
+      return caller.ok ? fail(passNeedsBriefText(pass.data.question_id)) : caller.result;
+    }
     const c = flightCall(deps, ctx, AnswerArgs, args);
     if (!c.ok) return c.result;
     const { question_id: id, answer, basis } = c.args;
@@ -990,28 +995,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (unendedRun(q.agentId)?.id !== q.runId) return fail(askerRunEndedText(call));
     const at = now();
     const about = `${call}: ${q.text}`;
-    if (answer === undefined) {
-      if (!store.passQuestion(id, at)) return fail(noOpenQuestionText(id));
-      store.addComms({
-        at,
-        from: ctx.seatId,
-        to: COMMS_CAPCOM,
-        ticket: store.run(q.runId)?.ticket ?? null,
-        text: q.text,
-      });
-      bus.emit("agents");
-      record(at, {
-        kind: "pass",
-        seatId: q.agentId,
-        questionId: id,
-        about,
-        decision: PASSED_DECISION,
-        basis,
-      });
-      bus.emit("attention");
-      bus.emit("flight");
-      return { text: PASSED_TEXT };
-    }
     const capped = messageCap(at, call, q.agentId);
     if (capped !== null) return fail(capped);
     try {
@@ -1878,6 +1861,25 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       });
     } catch {
       return fail("Source changed; refresh the item before drafting.");
+    }
+    // A seat's question goes to the operator only this way (#758): briefed, it is passed, so the
+    // engine holds its run for the operator's answer, and the pass is in Decided without you.
+    const ask = /^ask:(\d+)$/.exec(key);
+    const question = ask === null ? null : store.question(Number(ask[1]));
+    if (
+      structured.for === "operator" &&
+      question !== null &&
+      question.passedAt === null &&
+      store.passQuestion(question.id, at)
+    ) {
+      record(at, {
+        kind: "pass",
+        seatId: question.agentId,
+        questionId: question.id,
+        about: `${seatCallSign(question.agentId)}: ${question.text}`,
+        decision: PASSED_DECISION,
+        basis,
+      });
     }
     if (structured.person) {
       const match = /^person:(\d+):(\d+)$/.exec(key);
@@ -2820,15 +2822,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.answerQuestion,
       description:
-        "Answer a seat's question for the operator, or pass it to them (pass_to_operator: true) when it is theirs: irreversible, spending, outside the repo, or a product call the sources do not settle. The answer reaches the seat as a message. The basis is one line naming your source.",
+        'Answer a seat\'s question; the answer reaches the seat as a message. The basis is one line naming your source. A question that is the operator\'s (irreversible, spending, outside the repo, or a product call the sources do not settle) goes to them only with your brief: mc brief_item { key: "ask:<question_id>", for: "operator" }.',
       inputSchema: objectSchema(
         {
           question_id: { type: "integer", minimum: 1 },
           answer: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
-          pass_to_operator: { type: "boolean", const: true },
           basis: BASIS_SCHEMA,
         },
-        ["question_id", "basis"],
+        ["question_id", "answer", "basis"],
       ),
       modes: [],
       grantable: ["read-only"],

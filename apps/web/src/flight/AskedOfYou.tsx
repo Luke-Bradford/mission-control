@@ -17,6 +17,7 @@ import {
 } from "../notifications.ts";
 import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { isNotTriaging, NotTriagingRow } from "./NotTriaging.tsx";
 
 const DASH = "—";
 export const NOBODY_WAITING = "Nobody is waiting on you.";
@@ -43,14 +44,18 @@ export function AskedOfYou() {
     const t = item.kind === "person" ? open.get(item.key) : undefined;
     return t ? [{ t, item }] : [];
   });
-  const items = needsYou.filter((i) => !(i.kind === "person" && open.has(i.key)));
+  const items = needsYou.filter(
+    (i) => !(i.kind === "person" && open.has(i.key)) && !isNotTriaging(i),
+  );
+  // "FLIGHT is not triaging": one item for what waits on FLIGHT, shown open here (Show them)
+  const notTriaging = needsYou.find(isNotTriaging);
   const handled = (notes.data?.handledToday ?? []).filter((h) => inRepo(h.repoId));
   const footer = handled.length > 0 && (
     <p className="s note" data-testid="handled-today">
       {handledLine(handled)}
     </p>
   );
-  if (threads.length === 0 && items.length === 0)
+  if (threads.length === 0 && items.length === 0 && notTriaging === undefined)
     return (
       <>
         <p className="pb note">{NOBODY_WAITING}</p>
@@ -59,6 +64,7 @@ export function AskedOfYou() {
     );
   return (
     <div>
+      {notTriaging && <NotTriagingRow item={notTriaging} items={attention} open />}
       <div className="askcards">
         {threads.map(({ t, item }) => {
           const take = item.brief;

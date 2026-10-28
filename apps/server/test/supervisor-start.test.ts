@@ -443,7 +443,7 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(userLines()).toHaveLength(1));
     expect(userLines()[0]).toContain(
-      "[The ticket body was cut at 20,000 characters; 25,000 more are missing. Do not guess them; ask with mc ask_operator.]",
+      "[The ticket body was cut at 20,000 characters; 25,000 more are missing. Do not guess them; ask FLIGHT with mc ask_flight.]",
     );
   });
 

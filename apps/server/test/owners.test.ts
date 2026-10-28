@@ -156,14 +156,14 @@ afterEach(() => {
 });
 
 describe("Needs-you owners", () => {
-  it("a seat's question is held back while a watch seat is live in its session, else the operator's", () => {
+  it("a seat's question is FLIGHT's wherever a FLIGHT seat exists, and the operator's only once briefed (#758)", () => {
     const c = crewWith(["GUIDO-1", "FLIGHT-1"]);
     const id = store.addQuestion({ agentId: "GUIDO-1", runId: "c1", text: "Q?", at: NOW - MIN });
     const key = `ask:${id}`;
-    // no watch seat in the session
+    // no FLIGHT seat: nobody else can answer it
     expect(owners(crewWith(["GUIDO-1"]))[key]).toBe("operator");
-    // a watch seat that is not running leaves it to the operator
-    expect(owners(c)[key]).toBe("operator");
+    // a FLIGHT seat that is not running: still FLIGHT's, counted by the not-triaging item
+    expect(owners(c)[key]).toBe("flight");
     store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1" }));
     store.setSeatSession({
       seatId: "FLIGHT-1",
@@ -175,8 +175,19 @@ describe("Needs-you owners", () => {
       updatedAt: NOW,
     });
     expect(owners(c)[key]).toBe("flight");
-    // FLIGHT passed it on
+    // a bare pass (before #758) does not hand it over; FLIGHT's brief does
     store.passQuestion(id, NOW);
+    expect(owners(c)[key]).toBe("flight");
+    store.addBrief({
+      key,
+      context: "c",
+      ask: "Q?",
+      recommendation: "r",
+      options: [],
+      basis: "b",
+      at: NOW,
+      for: "operator",
+    });
     expect(owners(c)[key]).toBe("operator");
   });
 

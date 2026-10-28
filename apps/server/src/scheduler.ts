@@ -88,7 +88,7 @@ import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
 import { followPrs } from "./github-board.ts";
-import { attentionItems, crew, NO_LOCK } from "./hud.ts";
+import { attentionItems, crew, flightNotTriagingDueAt, NO_LOCK } from "./hud.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
@@ -420,6 +420,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
       item.triageDueAt !== undefined && item.triageDueAt > at ? [item.triageDueAt] : [],
     );
+    // a FLIGHT that is not running shows as not triaging once its restart grace has passed
+    const shows = flightNotTriagingDueAt(config, store, at);
+    if (shows !== null && shows > at) due.push(shows);
     if (due.length === 0) return;
     triageAt = Math.min(...due);
     triageTimer = setTimeout(() => {

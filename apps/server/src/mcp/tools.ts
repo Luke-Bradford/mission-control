@@ -1,6 +1,6 @@
 /**
  * The mc tools the hub serves at `/mcp`: `commit`, the only way a seat's work becomes a
- * commit, and `ask_operator`. Each call is already tied to one seat and one run by its token, and
+ * commit, and `ask_flight`. Each call is already tied to one seat and one run by its token, and
  * serialised per run by the MCP server; the worktree, branch and repo come from the run's own rows.
  *
  * The commit runs inside the session clone's queue (`inClone`), so it never interleaves with a
@@ -10,7 +10,8 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  ASKED_OPERATOR,
+  ASK_FLIGHT_SELF,
+  ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
@@ -168,6 +169,7 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import { flightSeat } from "../flight/seat.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
@@ -1745,7 +1747,21 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     });
   }
 
-  async function askOperator(ctx: McToolContext, args: unknown): Promise<Result> {
+  /** The seat runs as FLIGHT (a watch seat): it briefs the operator and asks nobody. */
+  const isFlight = (seatId: string): boolean => {
+    const place = seatPlace(config, seatId);
+    return place !== null && seatDef(place.seat).loop === "watch";
+  };
+
+  /**
+   * A seat's question to FLIGHT: stored as a seat question that is FLIGHT's from the start, and
+   * mirrored to Comms as a line to FLIGHT. It reaches the operator only if FLIGHT briefs it for
+   * them (`brief_item { key: "ask:<id>", for: "operator" }`); while FLIGHT is not triaging, the
+   * one "FLIGHT is not triaging" item counts it. With no FLIGHT seat configured, the line goes to
+   * CAPCOM and the question is the operator's, as nobody else can answer it.
+   */
+  async function askFlight(ctx: McToolContext, args: unknown): Promise<Result> {
+    if (isFlight(ctx.seatId)) return { text: ASK_FLIGHT_SELF, isError: true };
     const parsed = AskArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
     const live = liveRun(ctx);
@@ -1760,13 +1776,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     store.addComms({
       at,
       from: ctx.seatId,
-      to: COMMS_CAPCOM,
+      to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
       text: parsed.data.question,
     });
     bus.emit("attention");
     bus.emit("agents");
-    return { text: ASKED_OPERATOR };
+    return { text: ASKED_FLIGHT };
   }
 
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
@@ -2174,9 +2190,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       call: syncMain,
     },
     {
-      name: MC_TOOL_NAMES.askOperator,
+      name: MC_TOOL_NAMES.askFlight,
       description:
-        "Ask the operator a question you cannot answer from the ticket, the code or the repo. The answer arrives later as a message; carry on with what you can meanwhile.",
+        "Ask FLIGHT, the crew's head agent, a question you cannot answer from the ticket, the code or the repo. FLIGHT answers it, or takes it to the operator with its brief when the decision is theirs. The answer arrives later as a message; carry on with what you can meanwhile.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2184,14 +2200,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             type: "string",
             minLength: 1,
             maxLength: MC_TEXT_MAX,
-            description: "The question, with the context the operator needs to answer it.",
+            description: "The question, with the context FLIGHT needs to answer it.",
           },
         },
         required: ["question"],
         additionalProperties: false,
       },
       modes: ["writer", "read-only"],
-      call: askOperator,
+      // FLIGHT is a read-only seat too: it takes decisions to the operator with brief_item
+      offeredTo: (seatId) => !isFlight(seatId),
+      call: askFlight,
     },
     {
       name: MC_TOOL_NAMES.reportEvidence,

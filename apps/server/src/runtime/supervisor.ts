@@ -3947,7 +3947,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
         writeLine(l, text);
-        // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
+        // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's
+        // reply to FLIGHT's brief)
         try {
           if (opts.questions !== "none") {
             store.answerQuestions(seatId, now(), opts.questions === "unpassed");

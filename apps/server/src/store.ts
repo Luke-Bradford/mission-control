@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS strays (
   key TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, agent_id TEXT NOT NULL,
   kind TEXT NOT NULL, at INTEGER NOT NULL
 );
--- A seat's ask_operator questions; answered_at is set by a message to the seat, or the run's end.
+-- A seat's ask_flight questions; answered_at is set by a message to the seat, or the run's end.
 CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
   text TEXT NOT NULL, at INTEGER NOT NULL, answered_at INTEGER
@@ -439,7 +439,7 @@ export interface Stray {
   at: number;
 }
 
-/** A seat's open `ask_operator` question. */
+/** A seat's open `ask_flight` question. */
 export interface SeatQuestion {
   id: number;
   agentId: AgentId;
@@ -4014,7 +4014,7 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
-  /** When the seat asked its questions, answered or not (ask_operator mirrors each to Comms). */
+  /** When the seat asked its questions, answered or not (ask_flight mirrors each to Comms). */
   questionTimes(agentId: AgentId): Set<number> {
     const rows = this.db
       .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")

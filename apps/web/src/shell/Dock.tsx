@@ -8,7 +8,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, sortNeeds } from "../attention.ts";
+import { needsYouItems, openNeedsYou, sortNeeds } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -253,8 +253,13 @@ export function FlightChat({
                 </span>
                 {agent ? <AgentTag bare sm id={agent.id} index={agent.index} /> : i.agentId}
                 <span className="spacer" />
-                <button type="button" className="sm" onClick={() => openItem(i.key)}>
-                  Open
+                <button
+                  type="button"
+                  className="sm"
+                  // "FLIGHT is not triaging" lists its items on Needs you's home
+                  onClick={() => (i.notTriaging ? openNeedsYou() : openItem(i.key))}
+                >
+                  {i.notTriaging ? "Show them" : "Open"}
                 </button>
               </div>
             );
