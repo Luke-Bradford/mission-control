@@ -697,6 +697,26 @@ describe("capacity", () => {
     ]);
   });
 
+  it("does not attach a future merge to a ticket completed in range", () => {
+    const since = NOW - 6 * HOUR;
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 44, size: "S", startAt: since - HOUR, doneAt: NOW - HOUR }],
+      [],
+    );
+    store.replacePullRequests("shop-app", [{ ...pr(11, NOW + HOUR), ticket: "shop-app#44" }], NOW);
+
+    expect(tel("6h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#44",
+        readyAt: since - HOUR,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - HOUR,
+      },
+    ]);
+  });
+
   it("quota points per account window in range", () => {
     const sample = (accountId: string, window: "5h" | "7d", atMs: number, pct: number) =>
       store.addUsage({ accountId, window, at: atMs, pct, resetAt: NOW + DAY, source: "x" });

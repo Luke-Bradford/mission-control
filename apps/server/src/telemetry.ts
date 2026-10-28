@@ -591,7 +591,7 @@ export function telemetry(
       const mergedAt =
         store
           .pullRequests(issue.repoId)
-          .filter((pr) => pr.ticket === ticket && pr.mergedAt !== null)
+          .filter((pr) => pr.ticket === ticket && pr.mergedAt !== null && pr.mergedAt <= now)
           .map((pr) => pr.mergedAt as number)
           .sort((a, b) => a - b)[0] ?? null;
       return {
