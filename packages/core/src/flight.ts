@@ -940,6 +940,15 @@ export const flightTurnText = (n: number, max: number): string =>
   `turn ${n} of ${max}, then a fresh session`;
 export const flightTurnShort = (n: number, max: number): string => `turn ${n} of ${max}`;
 export const FLIGHT_NOTE_KEY = "flight:start-failed";
+/**
+ * The note the watch raises while FLIGHT is down without having failed to start: parked, waiting
+ * on an account at its stop line, or silent in a turn for FLIGHT_DOWN_STALL_MS. Kept apart from
+ * FLIGHT_NOTE_KEY, which also holds back restarts.
+ */
+export const FLIGHT_DOWN_NOTE_KEY = "flight:down";
+export const FLIGHT_DOWN_STALL_MS = 30 * 60_000;
+export const flightDownText = (reason: string): string =>
+  `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
 export const WAKE_ASK =

@@ -16,7 +16,6 @@ const NOTIFY: [NotificationCategory, string][] = [
   ["capcom", "Anything tagged @CAPCOM"],
   ["awayDigest", "The away-mode digest when I come back"],
   ["quota", "Quota above 90%"],
-  ["agentMessages", "Every agent message"],
 ];
 
 const SAMPLES = [
@@ -151,7 +150,9 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             required
           />
         </label>
-        <span className="muted">{prefs.quietHours.timezone} · stalls still notify</span>
+        <span className="muted">
+          {prefs.quietHours.timezone} · FLIGHT down and stalls still notify
+        </span>
       </div>
       <label>
         <input

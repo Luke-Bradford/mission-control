@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AttentionItem,
+  FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_NOTE_KEY,
   type NotificationCategory,
   type NotificationEvent,
@@ -26,7 +27,6 @@ export const NotificationPreferencesBody = z.strictObject({
     capcom: z.boolean(),
     awayDigest: z.boolean(),
     quota: z.boolean(),
-    agentMessages: z.boolean(),
   }),
   quietHours: z.strictObject({
     start: clockTime,
@@ -47,10 +47,7 @@ export const NotificationPreferencesBody = z.strictObject({
   softChime: z.boolean(),
 }) satisfies z.ZodType<NotificationPreferences>;
 
-/**
- * Saved preferences of any category set: one saved before a category was added fails the strict
- * body, and keeps its other settings with today's default categories.
- */
+/** Saved preferences of any category set: a newer or older hub's choices still read. */
 const StoredPreferences = NotificationPreferencesBody.extend({
   categories: z.record(z.string(), z.boolean()),
 });
@@ -65,28 +62,53 @@ const defaultNotificationPreferences = (timezone: string): NotificationPreferenc
     stalls: false,
     prs: false,
     capcom: false,
-    awayDigest: false,
+    awayDigest: true,
     quota: false,
-    agentMessages: false,
   },
   quietHours: { start: "19:00", end: "08:00", timezone, stallsBypass: true },
   softChime: true,
 });
 
-/** The item the FLIGHT watch raises when it could not keep FLIGHT running. */
-const FLIGHT_DOWN_KEY = `${NOTE_KEY}${FLIGHT_NOTE_KEY}`;
+/** Categories that were off by default before briefed asks: a saved true was the operator's choice. */
+const OPT_IN_BEFORE_ASKS: readonly NotificationCategory[] = ["quota"];
 
-/** An item FLIGHT has briefed for the operator: the ask the operator is notified of by default. */
-const briefedAsk = (item: AttentionItem): boolean => item.brief?.for === "operator";
+/**
+ * The categories to use from saved ones. Saved before briefed asks (no `asks` key), they were the
+ * old notify-everything defaults: today's defaults apply, keeping only a category the operator had
+ * turned on that was off by default then. Otherwise each known saved choice is kept and a category
+ * added since takes its default.
+ */
+function storedCategories(
+  saved: Record<string, boolean>,
+  defaults: NotificationPreferences["categories"],
+): NotificationPreferences["categories"] {
+  const categories = { ...defaults };
+  const legacy = !("asks" in saved);
+  for (const c of legacy ? OPT_IN_BEFORE_ASKS : (Object.keys(defaults) as NotificationCategory[])) {
+    const on = saved[c];
+    if (typeof on === "boolean" && (!legacy || on)) categories[c] = on;
+  }
+  return categories;
+}
+
+/** Notes that say FLIGHT is down: it could not be kept running, or is held or stuck. */
+const FLIGHT_DOWN_KEYS: ReadonlySet<string> = new Set(
+  [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
+);
+
+/** Categories that notify through quiet hours. */
+const BYPASS_QUIET: ReadonlySet<NotificationCategory> = new Set(["stalls", "flightDown"]);
+
+/** An item FLIGHT has briefed for the operator (a brief with no `for` predates triage, and was). */
+const briefedAsk = (item: AttentionItem): boolean =>
+  item.brief !== undefined && item.brief.for !== "flight";
 
 const categoryOf = (item: AttentionItem): NotificationCategory | null => {
+  if (FLIGHT_DOWN_KEYS.has(item.key)) return "flightDown";
   if (briefedAsk(item)) return "asks";
-  if (item.key === FLIGHT_DOWN_KEY) return "flightDown";
   switch (item.kind) {
     case "tag":
       return "capcom";
-    case "message":
-      return "agentMessages";
     case "person":
       return "people";
     case "decision":
@@ -107,6 +129,20 @@ const categoryOf = (item: AttentionItem): NotificationCategory | null => {
   }
 };
 
+/**
+ * How an item is told apart from the one last notified. An ask is its question: a refreshed brief
+ * with the same ask is not new, and its `at` is left out because it can move with the item.
+ */
+function versionOf(category: NotificationCategory, item: AttentionItem): string {
+  if (category === "asks")
+    return JSON.stringify([category, item.kind, item.brief?.ask ?? item.text]);
+  if (category === "stalls") return JSON.stringify([item.kind, item.at]);
+  return JSON.stringify([item.kind, item.text, item.at]);
+}
+
+/** Bumped when versionOf changes: the first reconcile after adopts versions without notifying. */
+const VERSION_FORMAT = 2;
+
 function quietAt(p: NotificationPreferences, at: number): boolean {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: p.quietHours.timezone,
@@ -125,6 +161,8 @@ export class LocalNotifications {
     seen: Record<string, string>;
     events: NotificationEvent[];
     away: boolean;
+    /** versionOf's format the seen versions were written in; absent before VERSION_FORMAT 2. */
+    format?: number;
   };
   private publishing = false;
   private readonly store: Store;
@@ -146,12 +184,22 @@ export class LocalNotifications {
     const defaults = defaultNotificationPreferences(this.config.operator.timezone);
     const raw = this.store.getSetting("notification-preferences");
     if (raw === null) return defaults;
-    const json: unknown = JSON.parse(raw);
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      // emit runs from a timer: a bad setting must not throw there
+      return defaults;
+    }
     const parsed = NotificationPreferencesBody.safeParse(json);
     if (parsed.success) return { ...parsed.data, enabled: parsed.data.enabled ?? true };
     const stored = StoredPreferences.safeParse(json);
     return stored.success
-      ? { ...stored.data, enabled: stored.data.enabled ?? true, categories: defaults.categories }
+      ? {
+          ...stored.data,
+          enabled: stored.data.enabled ?? true,
+          categories: storedCategories(stored.data.categories, defaults.categories),
+        }
       : defaults;
   }
 
@@ -178,7 +226,7 @@ export class LocalNotifications {
       !test &&
       (p.enabled === false ||
         !p.categories[category] ||
-        (category !== "stalls" && quietAt(p, this.now())))
+        (!BYPASS_QUIET.has(category) && quietAt(p, this.now())))
     )
       return null;
     const event: NotificationEvent = {
@@ -207,19 +255,30 @@ export class LocalNotifications {
   reconcile(items: AttentionItem[]): void {
     if (this.publishing) return;
     const seen: Record<string, string> = {};
+    const adopt = this.state.format !== VERSION_FORMAT;
+    const p = this.preferences();
+    const quiet = quietAt(p, this.now());
     for (const item of items) {
       const category = categoryOf(item);
       if (category === null || (item.owner !== undefined && item.owner !== "operator")) continue;
-      // a brief on an item already seen is a new ask; a refreshed brief with the same ask is not
-      const version =
-        category === "asks"
-          ? JSON.stringify([category, item.kind, item.brief?.ask ?? item.text, item.at])
-          : category === "stalls"
-            ? JSON.stringify([item.kind, item.at])
-            : JSON.stringify([item.kind, item.text, item.at]);
+      const version = versionOf(category, item);
+      const previous = this.state.seen[item.key];
+      // Updating to a new version format must not replay every open item.
+      if (adopt && previous !== undefined) {
+        seen[item.key] = version;
+        continue;
+      }
+      if (previous === version || item.acked) {
+        seen[item.key] = version;
+        continue;
+      }
+      // An ask held back by quiet hours stays unseen, so it notifies once they end.
+      if (category === "asks" && quiet && p.enabled !== false && p.categories.asks) {
+        if (previous !== undefined) seen[item.key] = previous;
+        continue;
+      }
       seen[item.key] = version;
-      if (this.state.seen[item.key] !== version && !item.acked)
-        this.emit(category, category === "asks" ? (item.brief?.ask ?? item.text) : item.text);
+      this.emit(category, category === "asks" ? (item.brief?.ask ?? item.text) : item.text);
     }
     for (const account of this.config.accounts) {
       for (const window of ["5h", "7d"] as const) {
@@ -236,6 +295,7 @@ export class LocalNotifications {
     if (this.state.away && !away) this.emit("awayDigest", "The away-mode digest when I come back");
     this.state.away = away;
     this.state.seen = seen;
+    this.state.format = VERSION_FORMAT;
     this.save();
   }
 }

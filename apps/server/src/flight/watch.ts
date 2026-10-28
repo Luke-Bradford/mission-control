@@ -6,6 +6,8 @@
  */
 import {
   FLIGHT_DEBOUNCE_MS,
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_DOWN_STALL_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
@@ -14,6 +16,7 @@ import {
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
   type FlightState,
+  flightDownText,
   flightStartFailedText,
   type TestLockState,
   wakeKey,
@@ -23,8 +26,10 @@ import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { transcriptMtime } from "../hud.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { lastOutputAt } from "../stream.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
@@ -131,6 +136,26 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   const noteOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_NOTE_KEY);
+  const downOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+  /** Says FLIGHT is down (parked, at a stop line, silent mid-turn) until it is back. */
+  const raiseDown = (seatId: string, repoId: string, reason: string, t: number): void => {
+    if (downOpen()) return;
+    store.raiseNote({
+      key: FLIGHT_DOWN_NOTE_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId,
+      repoId,
+      text: flightDownText(reason),
+      at: t,
+    });
+    bus.emit("attention");
+  };
+  const clearDown = (t: number): void => {
+    if (!downOpen()) return;
+    store.clearNote(FLIGHT_DOWN_NOTE_KEY, t);
+    bus.emit("attention");
+  };
 
   async function pass(): Promise<void> {
     if (stopped || !enabled || !supervisor.status().enabled) return;
@@ -175,17 +200,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
     const row = store.seatSession(id);
     if (!flightLive(config, store)) {
-      if (
-        row?.state === "stopped" ||
-        row?.state === "parked" ||
-        noteOpen() ||
-        accountAtStop(
-          config,
-          store,
-          runAccountId(store, row?.runId ?? null, found.seat.accountId),
-          t,
-        )
-      ) {
+      const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
+      const atStop = accountAtStop(config, store, accountId, t);
+      // The operator's own Stop is not an outage; parked or held at a stop line is.
+      if (row?.state === "stopped") clearDown(t);
+      else if (row?.state === "parked") raiseDown(id, found.session.repoId, "it is parked", t);
+      else if (atStop) raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
+      if (row?.state === "stopped" || row?.state === "parked" || noteOpen() || atStop) {
         return;
       }
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
@@ -241,6 +262,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     const runId = row?.runId;
     const facts = supervisor.seatFacts(id);
+    const run = runId == null ? null : store.run(runId);
+    const output =
+      run == null
+        ? null
+        : (lastOutputAt(
+            store.digest(run.id)?.lastEventAt ?? null,
+            transcriptMtime(run.transcriptPath),
+          ) ?? run.startedAt);
+    if (facts?.inTurn === true && output !== null && t - output >= FLIGHT_DOWN_STALL_MS)
+      raiseDown(
+        id,
+        found.session.repoId,
+        `no output for ${Math.floor((t - output) / 60_000)} min in a turn`,
+        t,
+      );
+    else clearDown(t);
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
     const n = flightWakes(store, runId);

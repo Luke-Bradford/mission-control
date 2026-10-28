@@ -809,7 +809,7 @@ describe("Store", () => {
     expect(typeof gh?.at).toBe("number");
   });
 
-  it("keeps lastOkAt: set on ok, unchanged on failure, null before any success", () => {
+  it("keeps lastOkAt and failingSince: a run of failures keeps its first time, ok clears it", () => {
     const now = vi.spyOn(Date, "now");
     try {
       now.mockReturnValue(1000);
@@ -820,13 +820,27 @@ describe("Store", () => {
         error: "boom",
         at: 1000,
         lastOkAt: null,
+        failingSince: 1000,
       });
+      now.mockReturnValue(1500);
+      store.setStatus("gh", false, "boom");
+      expect(store.status()[0]).toMatchObject({ at: 1500, failingSince: 1000 });
       now.mockReturnValue(2000);
       store.setStatus("gh", true, null);
-      expect(store.status()[0]).toMatchObject({ ok: true, at: 2000, lastOkAt: 2000 });
+      expect(store.status()[0]).toMatchObject({
+        ok: true,
+        at: 2000,
+        lastOkAt: 2000,
+        failingSince: null,
+      });
       now.mockReturnValue(3000);
       store.setStatus("gh", false, "HTTP 502");
-      expect(store.status()[0]).toMatchObject({ ok: false, at: 3000, lastOkAt: 2000 });
+      expect(store.status()[0]).toMatchObject({
+        ok: false,
+        at: 3000,
+        lastOkAt: 2000,
+        failingSince: 3000,
+      });
     } finally {
       now.mockRestore();
     }

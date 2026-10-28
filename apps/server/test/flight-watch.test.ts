@@ -5,6 +5,8 @@ import {
   type BoardItem,
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_DOWN_STALL_MS,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
@@ -25,6 +27,7 @@ import {
   type FlightSeatState,
   type FlightState,
   type FlightWake,
+  flightDownText,
   flightStartFailedText,
   GITHUB_RATE_SETTING,
   NEW_LOOP,
@@ -1121,6 +1124,61 @@ describe("the FLIGHT watcher", () => {
     }
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  describe("FLIGHT down without a failed start", () => {
+    const down = () => store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+
+    it("says so while FLIGHT is parked, and clears once it is live again", async () => {
+      store.upsertRun(run("r-parked", "flight-1"));
+      store.setSeatSession(row("flight-1", "r-parked", "parked"));
+      await watch.check();
+      expect(down().map((n) => [n.kind, n.text])).toEqual([
+        ["blocked", flightDownText("it is parked")],
+      ]);
+      await watch.check();
+      expect(down()).toHaveLength(1);
+      live("flight-1", "r-flight");
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
+
+    it("says so while FLIGHT waits on its account at the stop line", async () => {
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: T0 - 1000,
+        pct: 95,
+        resetAt: T0 + 60 * MIN,
+        source: "test",
+      });
+      await watch.check();
+      expect(down().map((n) => n.text)).toEqual([
+        flightDownText("claude-main is at its stop line"),
+      ]);
+    });
+
+    it("says nothing when the operator stopped FLIGHT", async () => {
+      store.upsertRun(run("r-stopped", "flight-1", { endedAt: T0, status: "ok" }));
+      store.setSeatSession(row("flight-1", "r-stopped", "stopped"));
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
+
+    it("says so when FLIGHT has been silent in a turn for 30 minutes", async () => {
+      live("flight-1", "r-flight");
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS - MIN;
+      await watch.check();
+      expect(down()).toEqual([]);
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      await watch.check();
+      expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
   });
 
   it("does not wake while FLIGHT is rate-limited", async () => {

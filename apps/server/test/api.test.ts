@@ -1099,9 +1099,8 @@ const API_ROUTES: [string, string, object?][] = [
         stalls: false,
         prs: false,
         capcom: false,
-        awayDigest: false,
+        awayDigest: true,
         quota: false,
-        agentMessages: false,
       },
       quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
       softChime: true,
@@ -4149,6 +4148,7 @@ describe("boards, escalations, health", () => {
         error: "github: HTTP 502",
         at: expect.any(Number),
         lastOkAt: null,
+        failingSince: expect.any(Number),
       },
     ]);
   });

@@ -679,6 +679,35 @@ describe("attention items", () => {
     ]);
   });
 
+  it("a loop that has never succeeded keeps its first failure's time, so a read stays read", () => {
+    const c = "ta-loop:shop-app-ta";
+    statusAt(NOW - 30 * MIN, c, false, "boom");
+    store.ack(["error:shop-app-ta:never"], NOW - 29 * MIN);
+    statusAt(NOW - 10 * MIN, c, false, "boom");
+    expect(attentionItems(config, store, NOW)).toEqual([
+      expect.objectContaining({ key: "error:shop-app-ta:never", at: NOW - 30 * MIN, acked: true }),
+    ]);
+  });
+
+  it("an ack covers the item as read: a re-raised note is unread again", () => {
+    const raise = (at: number) =>
+      store.raiseNote({
+        key: "blocked:x",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "parked",
+        at,
+      });
+    raise(NOW - 20 * MIN);
+    store.ack(["note:blocked:x"], NOW - 10 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: true });
+    store.clearNote("blocked:x", NOW - 5 * MIN);
+    raise(NOW - 2 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: false });
+  });
+
   it("an error that recovers and fails again is a new key, timed at its last success", () => {
     const c = "ta-loop:shop-app-ta";
     statusAt(NOW - 30 * MIN, c, false, "boom");
