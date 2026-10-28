@@ -17,17 +17,17 @@
  */
 :root {
   color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #151a21;
-  --surface-2: #1c222b;
-  --line: #252c37;
-  --line-2: #354050;
+  --bg: #070a0e;
+  --surface: #0c1117;
+  --surface-2: #131a23;
+  --line: #1b2430;
+  --line-2: #2a3646;
   --fg: #e7eaef;
   --fg-2: #aab2bf;
   --muted: #808999;
-  --accent: #8db0ff;
-  --accent-ink: #0b1020;
-  --accent-soft: rgba(141, 176, 255, 0.14);
+  --accent: #56d8e6;
+  --accent-ink: #021417;
+  --accent-soft: rgba(86, 216, 230, 0.14);
   --ok: #45c486;
   --ok-soft: rgba(69, 196, 134, 0.16);
   --warn: #f2b53a;
@@ -53,15 +53,15 @@
   --r7: #a8f0d0;
   --r8: #9cc8f5;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(141, 176, 255, 0.08), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%);
   --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --display: "Barlow Semi Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
   --fs: 13px;
   --fs-s: 12px;
   --fs-xs: 11px;
-  --r: 8px;
-  --r-s: 6px;
+  --r: 3px;
+  --r-s: 2px;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
@@ -74,9 +74,9 @@
     --fg: #121720;
     --fg-2: #4a5465;
     --muted: #646e81;
-    --accent: #2456d3;
+    --accent: #0a6b7d;
     --accent-ink: #ffffff;
-    --accent-soft: rgba(36, 86, 211, 0.1);
+    --accent-soft: rgba(10, 107, 125, 0.1);
     --ok: #157246;
     --ok-soft: rgba(23, 128, 78, 0.12);
     --warn: #8d5b00;
@@ -102,7 +102,7 @@
     --r7: #115e59;
     --r8: #9f1239;
     --shadow: 0 10px 28px rgba(20, 30, 50, 0.16);
-    --glow: radial-gradient(1200px 300px at 20% -120px, rgba(36, 86, 211, 0.06), transparent 70%);
+    --glow: radial-gradient(1200px 300px at 20% -120px, rgba(10, 107, 125, 0.06), transparent 70%);
   }
 }
 :root[data-theme="light"] {
@@ -115,9 +115,9 @@
   --fg: #121720;
   --fg-2: #4a5465;
   --muted: #646e81;
-  --accent: #2456d3;
+  --accent: #0a6b7d;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(36, 86, 211, 0.1);
+  --accent-soft: rgba(10, 107, 125, 0.1);
   --ok: #157246;
   --ok-soft: rgba(23, 128, 78, 0.12);
   --warn: #8d5b00;
@@ -143,21 +143,21 @@
   --r7: #115e59;
   --r8: #9f1239;
   --shadow: 0 10px 28px rgba(20, 30, 50, 0.16);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(36, 86, 211, 0.06), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(10, 107, 125, 0.06), transparent 70%);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #151a21;
-  --surface-2: #1c222b;
-  --line: #252c37;
-  --line-2: #354050;
+  --bg: #070a0e;
+  --surface: #0c1117;
+  --surface-2: #131a23;
+  --line: #1b2430;
+  --line-2: #2a3646;
   --fg: #e7eaef;
   --fg-2: #aab2bf;
   --muted: #808999;
-  --accent: #8db0ff;
-  --accent-ink: #0b1020;
-  --accent-soft: rgba(141, 176, 255, 0.14);
+  --accent: #56d8e6;
+  --accent-ink: #021417;
+  --accent-soft: rgba(86, 216, 230, 0.14);
   --ok: #45c486;
   --ok-soft: rgba(69, 196, 134, 0.16);
   --warn: #f2b53a;
@@ -183,7 +183,7 @@
   --r7: #a8f0d0;
   --r8: #9cc8f5;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(141, 176, 255, 0.08), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%);
 }
 
 * {
@@ -196,9 +196,17 @@ body,
 }
 body {
   margin: 0;
-  background: var(--bg);
+  /* Flight deck (docs/design/flight-deck.md): a faint 24px plotting grid under the panels. */
+  background:
+    var(--glow),
+    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0 0 /
+    24px 24px,
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0
+    0 / 24px 24px,
+    var(--bg);
   color: var(--fg);
   font: 400 var(--fs) / 1.45 var(--sans);
+  font-variant-numeric: tabular-nums;
 }
 .app {
   height: 100%;
@@ -239,9 +247,14 @@ button {
   cursor: pointer;
   line-height: 1.3;
   white-space: nowrap;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    background-color 150ms ease;
 }
 button:hover {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line-2));
+  color: var(--fg);
 }
 button:disabled {
   cursor: not-allowed;
@@ -281,10 +294,12 @@ button.sm {
   padding: 2px 8px;
   font-size: var(--fs-s);
 }
+/* Selection is an edge, not a box (flight-deck.md). */
 button.on {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
   color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -372,7 +387,7 @@ textarea {
   font-size: 10px;
   color: var(--muted);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 0 4px;
   margin-left: 6px;
   font-weight: 500;
@@ -390,8 +405,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 9px 1px 8px;
-  border-radius: 999px;
+  padding: 1px 8px 1px 7px;
+  border-radius: 2px;
   font-size: var(--fs-xs);
   font-weight: 500;
   background: var(--surface-2);
@@ -400,10 +415,11 @@ textarea {
 }
 .pill::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 0 6px currentColor;
 }
 .pill.ok {
   color: var(--ok);
@@ -497,7 +513,7 @@ textarea {
 .vhead:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 .vname {
   font-weight: 500;
@@ -572,7 +588,7 @@ textarea {
   position: relative;
   height: 14px;
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: 2px;
 }
 .tlbars i {
   position: absolute;
@@ -702,17 +718,20 @@ textarea {
 }
 .rchip {
   color: var(--c, var(--fg-2));
-  background: var(--surface-2);
-  border: 1px solid currentColor;
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);
+  border: 0;
+  border-radius: 2px;
   padding: 0 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
 }
 .chipref {
   font-family: var(--mono);
   font-size: var(--fs-xs);
   color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 0 5px;
   white-space: nowrap;
 }
@@ -763,12 +782,12 @@ textarea {
   @keyframes pw {
     0%,
     100% {
-      box-shadow: 0 0 0 0 transparent;
+      box-shadow: inset 2px 0 0 var(--warn-mark);
     }
     50% {
       box-shadow:
-        0 0 0 4px var(--warn-soft),
-        0 0 18px var(--warn-soft);
+        inset 2px 0 0 var(--warn-mark),
+        0 0 14px var(--warn-soft);
     }
   }
   .pulse-ok {
@@ -807,7 +826,15 @@ textarea {
   flex: none;
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 35%, transparent) 50%,
+      transparent
+    )
+    bottom / 100% 1px no-repeat,
+    var(--surface);
 }
 @media (min-width: 1200px) {
   .top {
@@ -843,20 +870,27 @@ textarea {
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 6px 12px;
+  border-radius: 0;
   color: var(--fg-2);
   text-decoration: none;
-  font-weight: 400;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
+  transition:
+    color 150ms ease,
+    box-shadow 150ms ease;
 }
 .tabs a:hover {
   color: var(--fg);
-  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--line-2);
 }
 .tabs a.on {
-  color: var(--fg);
-  background: var(--surface-2);
+  color: var(--accent);
+  background: linear-gradient(to top, var(--accent-soft), transparent 70%);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .top-status {
@@ -931,7 +965,7 @@ textarea {
   white-space: normal;
   background: var(--surface-2);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: 2px;
   box-shadow: 0 4px 12px #0004;
   opacity: 0;
   visibility: hidden;
@@ -967,24 +1001,30 @@ textarea {
 }
 .seg {
   display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-2);
-  border-radius: 7px;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
   flex-wrap: wrap;
 }
 .seg button {
   border: 0;
   background: transparent;
-  padding: 2px 9px;
-  font-size: var(--fs-s);
+  padding: 2px 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
   color: var(--fg-2);
-  border-radius: 5px;
+  border-radius: 0;
+}
+.seg button + button {
+  box-shadow: inset 1px 0 0 var(--line);
 }
 .seg button.on {
-  background: var(--surface);
-  color: var(--fg);
-  box-shadow: 0 0 0 1px var(--line-2);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .iconbtn {
   position: relative;
@@ -1036,6 +1076,7 @@ main > section {
 
 /* panels */
 .panel {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -1043,6 +1084,20 @@ main > section {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+/* The flight-deck corner bracket: a short accent L on the panel's top-left. */
+.panel::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 12px;
+  height: 12px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+  border-top-left-radius: var(--r);
+  opacity: 0.7;
+  pointer-events: none;
 }
 .ph {
   display: flex;
@@ -1052,14 +1107,35 @@ main > section {
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   color: var(--fg-2);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--surface-2) 60%, transparent),
+    transparent
+  );
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .ph h2 {
   font: inherit;
+}
+/* Controls in a panel head keep the body face; only the title is set as a console label. */
+.ph button,
+.ph select,
+.ph input {
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Column heads read as instrument labels everywhere (sizes and colours stay with the table rules). */
+th {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .ph .sub {
   color: var(--muted);
@@ -2170,12 +2246,15 @@ main > section {
 .kcard:hover {
   border-color: var(--line-2);
 }
+/* A card waiting on the operator (or just worked) carries an edge, not a full outline. */
 .kcard.you,
 .kcard.pulse-warn {
-  border-color: var(--warn-mark);
+  border-color: var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 45%), var(--surface);
 }
 .kcard.pulse-ok {
-  border-color: color-mix(in srgb, var(--ok) 60%, var(--line));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
 }
 .kref {
   display: flex;
@@ -2205,10 +2284,12 @@ main > section {
   flex-wrap: wrap;
 }
 .lb {
-  font-size: 10.5px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  padding: 0 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 0;
+  border-radius: 2px;
+  padding: 0 6px;
+  background: var(--surface-2);
   color: var(--fg-2);
   white-space: nowrap;
 }
@@ -2248,6 +2329,8 @@ main > section {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  background: var(--surface);
+  border-color: var(--line);
 }
 .banner {
   display: flex;
@@ -2255,8 +2338,9 @@ main > section {
   align-items: center;
   flex-wrap: wrap;
   padding: 8px 12px;
-  border: 1px solid var(--warn-mark);
-  background: var(--warn-soft);
+  border: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 70%), var(--surface);
   color: var(--warn);
   border-radius: var(--r);
 }
@@ -2305,11 +2389,12 @@ main > section {
 }
 /* a long chip (a branch, an area) is cut at the row's width rather than widening the page */
 .idrow .chips span {
-  font-size: var(--fs-s);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 999px;
-  padding: 1px 9px;
+  border-radius: 2px;
+  padding: 1px 7px;
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -2378,7 +2463,7 @@ main > section {
   display: flex;
   height: 8px;
   gap: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
   overflow: hidden;
   background: var(--surface);
   margin: 2px 0;
@@ -3895,7 +3980,7 @@ td.wrap {
 }
 .setup-nav button {
   border: 0;
-  border-radius: 6px;
+  border-radius: 2px;
   background: transparent;
   box-shadow: none;
   color: var(--fg-2);
