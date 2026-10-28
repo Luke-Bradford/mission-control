@@ -632,6 +632,14 @@ export interface NewCommsRow {
   mentions?: readonly string[];
 }
 
+/** A Comms text stored cut to COMMS_TEXT_MAX characters, with the cut marker. */
+function cutCommsText(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > COMMS_TEXT_MAX
+    ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
+    : text;
+}
+
 /** Parse the sole external representation of a stored Comms message ID. */
 export function commsMessageNumber(id: string): number | null {
   const match = /^comms:(\d+)$/.exec(id);
@@ -2305,25 +2313,34 @@ export class Store {
   }
 
   /**
-   * Claims a decision's default, then stores its outcome message and acks the card. False when the
-   * default was claimed before (a restart or a second sweep), so it applies at most once: the claim
-   * is one statement, so a crash after it loses the message rather than applying twice.
+   * Claims a decision's default, stores its outcome message and acks the card, all in one
+   * transaction: a failed write rolls the claim back, so a later sweep applies it. False when the
+   * default was claimed before (a restart or a second sweep), so it applies at most once.
    */
   claimDecisionDefault(
     d: { key: string; briefAt: number; optionId: string | null; label: string; dueAt: number },
     message: NewCommsRow,
     at: number,
   ): boolean {
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(d.key, d.briefAt, d.optionId, d.label, d.dueAt, at);
-    if (r.changes === 0) return false;
-    this.addComms(message);
-    this.ack([d.key], at);
-    return true;
+    let claimed = false;
+    this.transaction(() => {
+      const r = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(d.key, d.briefAt, d.optionId, d.label, d.dueAt, at);
+      if (r.changes === 0) return;
+      this.insertComms(message, cutCommsText(message.text), null);
+      this.db
+        .prepare(
+          `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
+           ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
+        )
+        .run(d.key, at);
+      claimed = true;
+    }, true);
+    return claimed;
   }
 
   /** Every ack: key → when it was acknowledged. */
@@ -2960,11 +2977,7 @@ export class Store {
 
   /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
   addComms(row: NewCommsRow, rate?: { since: number; limit: number }): CommsRow | null {
-    const chars = Array.from(row.text);
-    const text =
-      chars.length > COMMS_TEXT_MAX
-        ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
-        : row.text;
+    const text = cutCommsText(row.text);
     const replyTo =
       row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
     if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
@@ -2977,27 +2990,24 @@ export class Store {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
-      const inserted = this.db
-        .prepare(
-          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          row.at,
-          row.from,
-          row.to,
-          row.ticket,
-          text,
-          row.label ?? null,
-          row.ref ?? null,
-          replyTo,
-        );
-      id = Number(inserted.lastInsertRowid);
-      const mention = this.db.prepare(
-        "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
-      );
-      for (const target of row.mentions ?? []) mention.run(id, target);
+      id = this.insertComms(row, text, replyTo);
     }, true);
     return id === null ? null : this.commsMessage(`comms:${id}`);
+  }
+
+  /** Inserts one Comms row and its mentions; the caller holds the transaction. */
+  private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    const inserted = this.db
+      .prepare(
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(row.at, row.from, row.to, row.ticket, text, row.label ?? null, row.ref ?? null, replyTo);
+    const id = Number(inserted.lastInsertRowid);
+    const mention = this.db.prepare(
+      "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
+    );
+    for (const target of row.mentions ?? []) mention.run(id, target);
+    return id;
   }
 
   private commsRow(r: Row): CommsRow {

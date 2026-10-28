@@ -17,7 +17,7 @@ export interface DecisionDefaultsDeps {
 /**
  * Applies the default of every decision whose deadline has passed unanswered: the card is acked
  * (it leaves Decisions), "Default applied: …" goes to FLIGHT ↔ CAPCOM, and the answer is handed to
- * the seat that asked (an item answered on GitHub is only recorded: the hub does not write there).
+ * the seat that asked (an escalation is left alone: it is answered on GitHub).
  * Held and acked items are not in the set, so an answer or a hold before the deadline cancels it.
  * Each (key, ask) is claimed once in the store, so a restart or a second sweep never repeats it.
  * Returns how many were applied.
@@ -51,7 +51,9 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
     );
     if (!claimed) continue;
     applied++;
-    const target = item.escalationId !== null ? null : (item.agentId ?? flightId);
+    // the seat that asked, else FLIGHT
+    const asker = item.agentId !== null && store.seatSession(item.agentId) !== null;
+    const target = asker ? item.agentId : flightId;
     if (target !== null) await d.deliver?.(target, def.option.answer).catch(() => undefined);
   }
   return applied;
