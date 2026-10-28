@@ -4,7 +4,9 @@ import { useSecond } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { agentPath, followLink, PAGE_PATHS } from "../router.ts";
 import { timelineGeometry } from "./chartGeometry.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
@@ -135,10 +137,10 @@ export function TimelinePanel() {
         )}
         {!timeline.data && (
           <p className={timeline.error ? "crit-t" : "muted"}>
-            {timeline.error ? "Could not load timeline." : "Loading…"}
+            {timeline.error ? "Could not load timeline." : <Skeleton />}
           </p>
         )}
-        {timeline.data && !active && <p className="muted">No activity in the last hour.</p>}
+        {timeline.data && !active && <EmptyState>No activity in the last hour.</EmptyState>}
         <div className="overview-legend muted">
           {Object.entries(COLORS).map(([kind, color]) => (
             <span key={kind}>

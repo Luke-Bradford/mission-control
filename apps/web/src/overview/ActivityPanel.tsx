@@ -17,10 +17,12 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { activityKey, compareActivity, RESOURCES, useResource } from "../data.ts";
 import { hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { agentPath, followLink, itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 
@@ -460,7 +462,7 @@ export function ActivityPanel() {
           );
         })}
         {rows.length === 0 && resources.every((r) => r.data !== undefined && !r.error) && (
-          <div className="pb muted">No events yet.</div>
+          <EmptyState>No events yet.</EmptyState>
         )}
         {resources.map((r) =>
           r.error ? (
@@ -470,7 +472,10 @@ export function ActivityPanel() {
                 : `Could not load ${r.name}.`}
             </div>
           ) : r.data === undefined ? (
-            <div key={r.name} className="pb muted">{`Loading ${r.name}…`}</div>
+            <div key={r.name} className="pb muted">
+              <Skeleton />
+              <span className="sr-only">{`Loading ${r.name}…`}</span>
+            </div>
           ) : null,
         )}
       </div>

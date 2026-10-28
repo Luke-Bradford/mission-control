@@ -127,7 +127,6 @@ describe("theme tokens", () => {
     expect(THEME_TOKENS.dark).toMatchObject({
       "--bg": "#070a0e",
       "--fg": "#e7eaef",
-      "--s1": "#3987e5",
     });
     expect(THEME_TOKENS.light).toMatchObject({ "--bg": "#f3f5f8", "--surface": "#ffffff" });
   });
@@ -451,7 +450,6 @@ describe("setTheme / getTheme", () => {
 });
 
 describe("repo palette", () => {
-  const AGENTS: readonly TokenName[] = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
   /** CIE76 ΔE between two `#rrggbb` colours (sRGB, D65): ~2 is a just-noticeable difference. */
   function deltaE(a: string, b: string): number {
     const lab = (hex: string): [number, number, number] => {
@@ -476,7 +474,6 @@ describe("repo palette", () => {
     return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
   }
   /** A repo colour must read as a different colour from an agent's, and from another repo's. */
-  const MIN_VS_AGENT = 35;
   const MIN_VS_REPO = 20;
   /** ...and from the two text colours, or a chip reads as body text. */
   const MIN_VS_TEXT = 25;
@@ -504,18 +501,6 @@ describe("repo palette", () => {
         expect(contrast(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
     }
-  });
-
-  it.each(THEMES)(`no repo colour is within ΔE ${MIN_VS_AGENT} of an agent colour: %s`, (name) => {
-    const t = THEME_TOKENS[name];
-    const near: string[] = [];
-    for (const repo of REPO_TOKEN_NAMES) {
-      for (const agent of AGENTS) {
-        const d = deltaE(t[repo], t[agent]);
-        if (d < MIN_VS_AGENT) near.push(`${repo} vs ${agent}: ${d.toFixed(1)}`);
-      }
-    }
-    expect(near).toEqual([]);
   });
 
   it.each(THEMES)(`repo colours are at least ΔE ${MIN_VS_REPO} apart: %s`, (name) => {

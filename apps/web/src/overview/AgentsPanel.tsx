@@ -44,6 +44,7 @@ import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
@@ -592,7 +593,7 @@ export function AgentsPanel() {
             >
               {COLUMNS.map((column) => (
                 <span role="cell" key={column}>
-                  <span className="kpi-skeleton" />
+                  <Skeleton className="kpi-skeleton" />
                 </span>
               ))}
             </div>

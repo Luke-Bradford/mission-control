@@ -5,6 +5,7 @@ import { rel } from "../fmt.ts";
 import { EmptyState } from "../hud/EmptyState.tsx";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { quotaWarnings, resetWhen, timeToFull } from "../quota.ts";
 import { QuotaMeter } from "./QuotaMeter.tsx";
 
@@ -24,8 +25,10 @@ function title(row: LimitRow, now: number, tz: string | null): string {
 
 /** Each account's 5-hour and 7-day windows (catalogue 2.1.5). */
 export function QuotaPanel() {
-  const limits = useResource<LimitRow[]>(RESOURCES.limits).data;
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const limitsResource = useResource<LimitRow[]>(RESOURCES.limits);
+  const configResource = useResource<ConfigView>(RESOURCES.config);
+  const limits = limitsResource.data;
+  const config = configResource.data;
   const now = useNow();
   const tz = useTz();
   const rows = limits ?? [];
@@ -56,7 +59,11 @@ export function QuotaPanel() {
       }
     >
       <div className="pb">
-        {accounts.length === 0 && <EmptyState>No quota accounts configured.</EmptyState>}
+        {limitsResource.loading || configResource.loading ? (
+          <Skeleton />
+        ) : accounts.length === 0 && !limitsResource.error && !configResource.error ? (
+          <EmptyState>No quota accounts configured.</EmptyState>
+        ) : null}
         {accounts.map((a) => {
           const mine = rows.filter((r) => r.accountId === a);
           const read =

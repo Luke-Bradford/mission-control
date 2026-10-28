@@ -19,6 +19,13 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
+function distance(a: string, b: string): number {
+  const rgb = (hex: string) => hex.match(/\w\w/g)?.map((part) => Number.parseInt(part, 16)) ?? [];
+  const [ar, ag, ab] = rgb(a);
+  const [br, bg, bb] = rgb(b);
+  return Math.hypot(ar - br, ag - bg, ab - bb);
+}
+
 describe("visual system v2", () => {
   it("assigns all eight crew slots a distinct non-semantic colour", () => {
     expect(new Set(Array.from({ length: 8 }, (_, index) => agentColor(index)))).toEqual(
@@ -30,6 +37,12 @@ describe("visual system v2", () => {
       expect(agents).not.toContain(theme["--ok"]);
       expect(agents).not.toContain(theme["--warn"]);
       expect(agents).not.toContain(theme["--crit"]);
+      for (const [index, agent] of agents.entries()) {
+        for (const other of agents.slice(index + 1))
+          expect(distance(agent, other), `${agent} / ${other}`).toBeGreaterThanOrEqual(35);
+        for (const state of [theme["--ok"], theme["--warn"], theme["--crit"]])
+          expect(distance(agent, state), `${agent} / ${state}`).toBeGreaterThanOrEqual(55);
+      }
       for (const [index, agent] of agents.entries())
         expect(
           contrast(agent, theme["--surface"]),
