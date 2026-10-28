@@ -8,6 +8,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
+import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -20,7 +21,6 @@ import {
   kindLabel,
   type PendingMsg,
   sameMessage,
-  waitingAsks,
   withPending,
 } from "../flight/conversation.ts";
 import {
@@ -171,8 +171,9 @@ export type ChatPlace = "dock" | "comms";
 const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
 
 /**
- * FLIGHT's conversation: the asks waiting on the operator, the message log and the message box.
- * With no FLIGHT seat the log is empty and the input is switched off.
+ * FLIGHT's conversation: what is waiting on the operator (the whole Needs-you set, as the header
+ * counts it), the message log and the message box. With no FLIGHT seat the log is empty and the
+ * input is switched off; what waits on the operator still shows.
  */
 export function FlightChat({
   where,
@@ -191,8 +192,7 @@ export function FlightChat({
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const decisions = flight?.decisions;
-  const asks = useMemo(() => waitingAsks(attention ?? [], decisions ?? []), [attention, decisions]);
+  const asks = useMemo(() => sortNeeds(needsYouItems(attention)), [attention]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -238,7 +238,7 @@ export function FlightChat({
 
   return (
     <>
-      {seat && asks.length > 0 && (
+      {asks.length > 0 && (
         <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
           <div className="dwh">Waiting on you · {asks.length}</div>
           {asks.map((i) => {

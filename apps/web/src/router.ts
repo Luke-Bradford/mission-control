@@ -102,6 +102,12 @@ export const PAGE_PATHS: Record<Page, string> = {
 };
 
 const enc = encodeURIComponent;
+/** The panel that holds Needs you: Plan › Operator actions until #766 builds FLIGHT › Needs you. */
+export const NEEDS_YOU_PANEL = "askP";
+
+/** Needs you's home, where the header's button, the FLIGHT pulse and every "all of it" link lead. */
+export const NEEDS_YOU_PATH = `${PAGE_PATHS.flight}#${NEEDS_YOU_PANEL}`;
+
 export const agentPath = (id: string): string => `/agent/${enc(id)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
 export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
@@ -255,7 +261,7 @@ const GLOSSARY = `${setupPath("sources")}#glossary`;
  */
 export function legacyRedirect(path: string, hash = ""): string | null {
   const p = bare(path);
-  if (p === "/needs-you" || p === "/needs") return PAGE_PATHS.comms;
+  if (p === "/needs-you" || p === "/needs") return NEEDS_YOU_PATH;
   if (p === "/cto") return PAGE_PATHS.flight;
   if (p === "/metrics") return PAGE_PATHS.telemetry;
   if (p === "/agents" || p === "/loops") return PAGE_PATHS.overview;

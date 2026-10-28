@@ -7,7 +7,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { navigate, PAGE_PATHS } from "../router.ts";
+import { NEEDS_YOU_PATH, navigate, PAGE_PATHS } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { chatRows, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
@@ -17,8 +17,8 @@ import { activeCrewRows } from "./WorkInFlight.tsx";
 const DASH = "—";
 /** Where a pulse leads: the canonical detail behind that reading. */
 const PULSE_TARGET = {
-  /** Plan's Operator actions: the operator's asks and drafts live there. */
-  needs: `${PAGE_PATHS.flight}#askP`,
+  /** Needs you's home. */
+  needs: NEEDS_YOU_PATH,
   /** Telemetry's flow of work shows cycle time over time. */
   cycle: PAGE_PATHS.telemetry,
 } as const;

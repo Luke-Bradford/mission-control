@@ -2386,6 +2386,23 @@ th {
 .kcard:hover {
   border-color: var(--line-2);
 }
+/* The "You:" chip is a pill that opens its Needs-you item's brief; it sits above the cover. */
+.kcard .overlay button.kyou {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  line-height: inherit;
+  padding: 1px 8px 1px 7px;
+  color: var(--warn);
+}
+.kcard .overlay button.kyou:hover,
+.kcard .overlay button.kyou:focus-visible {
+  text-decoration: underline;
+}
+.kyou-more {
+  color: var(--muted);
+}
+
 /* A card waiting on the operator (or just worked) carries an edge, not a full outline. */
 .kcard.you,
 .kcard.pulse-warn {
@@ -3024,6 +3041,18 @@ pre.diff .h {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+}
+/* The Needs-you count beside Decisions: the whole inbox, linked to its home on FLIGHT. */
+.comms-section-head .comms-needs-link {
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  text-decoration: none;
+}
+.comms-section-head .comms-needs-link:hover {
+  text-decoration: underline;
 }
 .comms-decision-list {
   min-height: 0;

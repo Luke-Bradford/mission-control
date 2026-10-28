@@ -161,10 +161,11 @@ describe("Overview panels", () => {
     expect(constructed).toHaveBeenCalledWith("/api/stream");
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     await act(async () => release());
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
     );
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
@@ -183,10 +184,11 @@ describe("Overview panels", () => {
         <Overview />
       </StrictMode>,
     );
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
     );
     expect(
       await within(container.querySelector("#timelineP") as HTMLElement).findByText(
@@ -1376,7 +1378,7 @@ describe("Needs banner", () => {
     expect(container.querySelector(".nbanner")).toBeNull();
   });
 
-  it("counts things by kind and goes to Comms", async () => {
+  it("counts things by kind and goes to Needs you's home on FLIGHT", async () => {
     stub({
       items: [
         item({ key: "1", kind: "decision" }),
@@ -1394,10 +1396,10 @@ describe("Needs banner", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen Comms →",
+      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen in FLIGHT →",
     );
     fireEvent.click(btn);
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
   });
 });
 
@@ -1414,7 +1416,7 @@ describe("Needs banner, acknowledged items", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "3things need you2 decisions1 stall· 1 not acknowledgedOpen Comms →",
+      "3things need you2 decisions1 stall· 1 not acknowledgedOpen in FLIGHT →",
     );
   });
 
@@ -1429,7 +1431,7 @@ describe("Needs banner, acknowledged items", () => {
     });
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
-    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen Comms →");
+    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen in FLIGHT →");
   });
 
   it("is all clear when every item is someone else's", async () => {
@@ -1926,6 +1928,37 @@ describe("Activity panel", () => {
     await screen.findByText("Updated decision");
     expect(list.querySelector(".arow")).toBe(node);
     expect(list.scrollTop).toBe(80);
+  });
+
+  it("Needs you lists the header's set: one row per item, whatever the session", async () => {
+    stub({
+      config: SESSION_CONFIG,
+      items: [
+        // an escalation and a PR on the same ticket are two things to do, so two rows
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({
+          key: "pr:site-builder#9:1",
+          kind: "pr",
+          repoId: "site-builder",
+          text: "PR #9 · You: review",
+          escalationId: null,
+          ticket: "site-builder#2",
+          agentId: null,
+        }),
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({ key: "flight", text: "FLIGHT's to settle", owner: "flight" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
+    await screen.findByText("Pick a layout");
+    // a session on another repo hides nothing waiting on the operator
+    act(() => setSession("shop-app-session"));
+    const rows = () => container.querySelectorAll("#actList .arow");
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByText("PR #9 · You: review")).toBeTruthy();
+    expect(screen.queryByText("FLIGHT's to settle")).toBeNull();
+    act(() => setSession(SESSION_ALL));
   });
 
   it("holds new rows while scrolled down and shows N new without moving the reader", async () => {
