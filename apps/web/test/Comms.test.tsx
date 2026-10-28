@@ -7,6 +7,7 @@ import {
   COMMS_MC,
   type CommsEvent,
   type CommsThreadMessage,
+  type CrewRow,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardSummary,
@@ -2244,10 +2245,11 @@ describe("Needs you: row actions", () => {
   });
 
   it("shows the confirmed waiver and disabled set-aside rework action for a review park", async () => {
+    const currentRun = seatRow().run as NonNullable<CrewRow["run"]>;
     const row = seatRow({
       id: "guido-1",
       ticket: "shop-app#1",
-      run: { ...seatRow().run, id: "r-b" },
+      run: { ...currentRun, id: "r-b" },
       asideRuns: [
         {
           runId: "r-a",
