@@ -6,6 +6,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink } from "../router.ts";
+import { timelineGeometry } from "./chartGeometry.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const COLORS = {
@@ -23,7 +24,7 @@ export function TimelinePanel() {
   const now = useSecond();
   const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
   const from = now - TIMELINE_WINDOW_MS;
-  const position = (at: number) => (100 * (at - from)) / TIMELINE_WINDOW_MS;
+  const geometry = timelineGeometry({ from, to: now });
   const pending = !timeline.data && !timeline.error;
   const fallback =
     crew?.rows.map((row) => ({ id: row.id })) ??
@@ -42,14 +43,16 @@ export function TimelinePanel() {
       const end = Math.min(now, span.to ?? openEnd);
       if (end <= start) return [];
       active = true;
+      const segment = geometry.segment(start, end);
+      if (segment === null) return [];
       return (
         <i
           key={`${span.kind}:${span.from}:${span.to}`}
           className="overview-span"
           title={span.kind}
           style={{
-            left: `${position(start)}%`,
-            width: `${position(end) - position(start)}%`,
+            left: `${segment.left}%`,
+            width: `${segment.width}%`,
             background: COLORS[span.kind],
           }}
         />
@@ -75,9 +78,10 @@ export function TimelinePanel() {
         </span>
         <span className="overview-track" aria-hidden="true">
           {spans}
-          {ticks.map((at) => (
-            <i key={at} className="overview-tick" style={{ left: `${position(at)}%` }} />
-          ))}
+          {ticks.map((at) => {
+            const tick = geometry.tick(at);
+            return <i key={at} className="overview-tick" style={{ left: `${tick.left}%` }} />;
+          })}
         </span>
       </a>
     );

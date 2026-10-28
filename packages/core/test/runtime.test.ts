@@ -303,7 +303,7 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
+  it("keeps Claude pnpm stores private", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(

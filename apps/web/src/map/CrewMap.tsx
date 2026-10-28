@@ -12,9 +12,15 @@ import "./map.css";
 const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
 
 export function CrewMapPanel() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => window.location.hash === "#mapP");
+  useEffect(() => {
+    const onHash = () => setOpen(window.location.hash === "#mapP");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   return (
     <Panel
+      id="mapP"
       title="Crew Activity Map"
       actions={
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>

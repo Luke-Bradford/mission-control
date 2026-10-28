@@ -1084,6 +1084,8 @@ export interface RepoProfile {
 export interface RepoPreview {
   github: string;
   project: number;
+  /** GitHub's default branch, checked against the checkout before it is configured. */
+  defaultBranch: string;
   projectTitle: string;
   items: number;
   fields: { name: string; options: string[] }[];

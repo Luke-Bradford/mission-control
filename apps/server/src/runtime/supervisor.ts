@@ -162,6 +162,7 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
+  codexPnpmStoreDir,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -1248,14 +1249,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * be built (before any token exists) or the spawn itself throws (after undoing the token and
    * files).
    */
-  async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
-    const [configured, run] = args;
+  async function checkedLaunch(
+    configured: SeatInfo,
+    run: Run,
+    cliSessionId: string,
+    checkout: { path: string; branch: string; gitDir: string },
+    resume: boolean,
+    claudeMd: string | null,
+    references = "",
+    keepPrompt = false,
+    beforeLaunch?: () => Run | undefined,
+  ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
       binding === null
         ? configured
         : { ...configured, seat: { ...configured.seat, accountId: binding.target } };
-    args[0] = info;
     if (runBindingProblem(run, info.seat.accountId))
       throw new SupervisorError(
         409,
@@ -1263,8 +1272,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
     await assertSeatGitVersion();
     await assertSeatGitConfig(
-      args[3].path,
-      [...(modeOfSeat(info.seat) === "read-only" ? [] : [args[3].path]), seatTmp(run.id)],
+      checkout.path,
+      [...(modeOfSeat(info.seat) === "read-only" ? [] : [checkout.path]), seatTmp(run.id)],
       [dirname(deps.dbPath)],
     );
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
@@ -1272,12 +1281,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run.vendor === "codex") {
       const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
       if (stopping) throw new Error(SHUTTING_DOWN);
-      args[1] = { ...run, cliVersion };
-      store.upsertRun(args[1]);
+      store.setRunCliVersionIfLive(run.id, cliVersion);
     }
     while (accountUpdate !== null) await accountUpdate;
     if (stopping) throw new Error(SHUTTING_DOWN);
-    return launch(...args);
+    const bindingProblem = accountBindingProblem(config.accounts);
+    if (bindingProblem) throw new SupervisorError(409, bindingProblem);
+    const current = beforeLaunch?.();
+    if (current !== undefined) run = current;
+    return launch(info, run, cliSessionId, checkout, resume, claudeMd, references, keepPrompt);
   }
 
   function launch(
@@ -1324,9 +1336,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new Error(`crew: ${def.prompt} is outside the roles folder`);
       }
       const roleBrief = readFileSync(promptFile, "utf8");
-      writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd, references), {
-        mode: 0o600,
-      });
+      // Repo guidance is operator-written advice for FLIGHT, not a gate used by the scheduler or
+      // by seats. It is deliberately appended only to the watch seat's prompt.
+      const guidance =
+        def.loop === "watch"
+          ? deps.config.repos.find((repo) => repo.id === info.session.repoId)?.guidance
+          : undefined;
+      const advice =
+        guidance === undefined
+          ? ""
+          : [
+              "# Mission Control work guidance (advice, not rules)",
+              guidance.priority.length ? `Prefer priority: ${guidance.priority.join(", ")}.` : "",
+              guidance.milestone.length
+                ? `Prefer milestone: ${guidance.milestone.join(", ")}.`
+                : "",
+              guidance.labels.length
+                ? `Labels (${guidance.labelMode}): ${guidance.labels.join(", ")}.`
+                : "",
+              guidance.avoid.length ? `Avoid: ${guidance.avoid.join(", ")}.` : "",
+              guidance.direction,
+            ]
+              .filter((line) => line !== "")
+              .join("\n");
+      writeFileSync(
+        promptPath,
+        rolePrompt(roleBrief, claudeMd, [advice, references].filter(Boolean).join("\n\n")),
+        {
+          mode: 0o600,
+        },
+      );
     }
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
@@ -1368,6 +1407,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      let codexPnpmStore: string | undefined;
+      if (run.vendor === "codex") {
+        const storePath = codexPnpmStoreDir(cwd);
+        for (const path of [dirname(storePath), storePath]) {
+          try {
+            mkdirSync(path, { mode: 0o700 });
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+          }
+          const stat = lstatSync(path);
+          if (
+            !stat.isDirectory() ||
+            stat.uid !== process.getuid?.() ||
+            (stat.mode & 0o777) !== 0o700 ||
+            realpathSync(path) !== path
+          )
+            throw new Error("Codex pnpm store must be a private directory owned by the server");
+        }
+        codexPnpmStore = realpathSync(storePath);
+      }
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
@@ -1387,6 +1446,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
+        if (codexPnpmStore === undefined) throw new Error("Codex pnpm store is unavailable");
         addMcTmpExclude(gitCommonDir);
         const claudeTmpParentPath = dirname(seatTmp(run.id));
         try {
@@ -1437,7 +1497,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           TMPDIR: tmp,
           TMP: tmp,
           TEMP: tmp,
-          [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
+          [PNPM_STORE_ENV]: codexPnpmStore,
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
           RUFF_CACHE_DIR: join(tmp, "ruff-cache"),
@@ -2645,13 +2705,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
     }
-    // Rework goes first, and a ticket in review has its run already.
     const waiting = store.asideRuns();
+    const ref = `${info.repo.id}#${issue}`;
+    const inReview = !readOnly
+      ? waiting.find(
+          (r) =>
+            r.ticket === ref &&
+            r.agentId === seatId &&
+            r.loop?.phase === "review" &&
+            r.loop.parked == null,
+        )
+      : undefined;
     const rework = wakeDueAsideRun(store, seatId);
-    if (rework) {
+    // Rework still goes first, except for the ticket explicitly being resumed.
+    if (rework && rework.id !== inReview?.id) {
       throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
     }
-    const ref = `${info.repo.id}#${issue}`;
+    // An explicit start of a ticket in review means resume that ticket's own preserved run.
+    // `wakeRun` retains its worktree and session guards, rather than creating a competing run.
+    if (inReview !== undefined) {
+      const branch = inReview.branch;
+      if (branch === null) throw new SupervisorError(409, NOT_ASIDE);
+      await wakeRun(inReview.id, { reviewResume: true });
+      return { runId: inReview.id, branch };
+    }
     if (!readOnly && waiting.some((r) => r.ticket === ref)) {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
@@ -3502,7 +3579,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     await endAside(run, info, aside.worktree, "operator");
   }
 
-  async function wakeRun(runId: string): Promise<void> {
+  async function wakeRun(runId: string, options: { reviewResume?: boolean } = {}): Promise<void> {
     const run = store.run(runId);
     const aside = run?.endedAt === null ? run.loop?.aside : null;
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
@@ -3543,13 +3620,53 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // the check awaited: the engine may have ended the run meanwhile
       if (store.run(runId)?.endedAt !== null) throw new SupervisorError(409, NOT_ASIDE);
-      // the seat's last turn was another run's
-      store.setSeatTurnEnded(seatId, null);
+      const reviewResumeStillAllowed = (): Run | null => {
+        const current = store.run(runId);
+        const loop = current?.loop;
+        if (
+          current === null ||
+          current.endedAt !== null ||
+          loop?.phase !== "review" ||
+          loop.parked !== null ||
+          loop.aside?.worktree !== aside.worktree ||
+          loop.aside.wake !== aside.wake
+        )
+          return null;
+        return current;
+      };
+      let reviewResumeBlocked = false;
+      const beforeLaunch = options.reviewResume
+        ? () => {
+            const current = reviewResumeStillAllowed();
+            if (current === null) {
+              reviewResumeBlocked = true;
+              throw new SupervisorError(409, NOT_ASIDE);
+            }
+            // the seat's last turn was another run's
+            store.setSeatTurnEnded(seatId, null);
+            return current;
+          }
+        : () => {
+            // the seat's last turn was another run's
+            store.setSeatTurnEnded(seatId, null);
+            return undefined;
+          };
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, run.sessionId, checkout, true, null);
+        l = await checkedLaunch(
+          info,
+          run,
+          run.sessionId,
+          checkout,
+          true,
+          null,
+          "",
+          false,
+          beforeLaunch,
+        );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
+        if (reviewResumeBlocked) throw e;
         if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, seatId)) throw e;
         return fail(CANNOT_START, e);
       }
@@ -3587,6 +3704,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         void l.session.close();
         if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, seatId)) throw e;
         return fail(CANNOT_START, e);
+      }
+      if (options.reviewResume) {
+        const current = store.run(runId)?.loop;
+        if (current !== null && current !== undefined)
+          store.setRunLoop(runId, { ...current, aside: null });
       }
     } finally {
       starting.delete(seatId);

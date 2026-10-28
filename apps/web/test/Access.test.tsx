@@ -1,5 +1,5 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   BrowserNotifications,
@@ -40,6 +40,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("keeps auto-approve controls in Safety", () => {
+  stubFetch({ "/api/notification-preferences": PREFS });
+  render(<Access />);
+  const auto = screen.getByRole("region", { name: "Auto-approve" });
+  const boxes = auto.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  expect(boxes).toHaveLength(5);
+  expect([...boxes].every((box) => box.disabled)).toBe(true);
+  expect(auto.textContent).toContain("P2");
+});
+
 it("saves and reloads categories, quiet hours and chime without asking permission", async () => {
   let saved = PREFS;
   const request = vi.fn();
@@ -53,7 +63,8 @@ it("saves and reloads categories, quiet hours and chime without asking permissio
   });
   const view = render(<Access />);
   const quota = await screen.findByLabelText("Quota above 90%");
-  const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+  const preferences = screen.getByRole("region", { name: "Notify me about" });
+  const boxes = within(preferences).getAllByRole("checkbox") as HTMLInputElement[];
   expect(boxes).toHaveLength(10);
   expect(boxes.filter((box) => box.checked)).toHaveLength(8);
   expect(boxes.every((box) => !box.disabled)).toBe(true);

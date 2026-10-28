@@ -2184,6 +2184,74 @@ describe("the mc tools and the guard (phase 2b)", () => {
   });
 });
 
+describe("repo guidance at launch", () => {
+  const FLIGHT: CrewSeatConfig = {
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "opus",
+    area: [],
+  };
+  const guidance = {
+    priority: ["P0", "customer-impact"],
+    milestone: ["Launch"],
+    labels: ["area:server", "urgent"],
+    labelMode: "all" as const,
+    avoid: ["large rewrites"],
+    direction: "Keep the launch path boring.",
+  };
+  const advice = [
+    "# Mission Control work guidance (advice, not rules)",
+    "Prefer priority: P0, customer-impact.",
+    "Prefer milestone: Launch.",
+    "Labels (all): area:server, urgent.",
+    "Avoid: large rewrites.",
+    "Keep the launch path boring.",
+  ].join("\n");
+  const launchGrants = (start: { argv: unknown }) => {
+    const argv = start.argv as string[];
+    const allowedAt = argv.indexOf("--allowedTools");
+    const deniedAt = argv.indexOf("--disallowedTools");
+    const promptAt = argv.indexOf("--append-system-prompt-file");
+    return {
+      tools: argv[argv.indexOf("--tools") + 1],
+      allowed: argv.slice(allowedAt + 1, deniedAt),
+      denied: argv.slice(deniedAt + 1, promptAt),
+    };
+  };
+  const launches = () => recorded().filter((line) => Array.isArray(line.argv));
+
+  it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
+    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    sup.start();
+
+    const plain = await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
+    const plainGrants = launchGrants(launches()[0] as { argv: unknown });
+    await sup.endRun("flight-1");
+
+    const repo = cfg.repos[0];
+    if (!repo) throw new Error("missing test repo");
+    repo.guidance = guidance;
+    const guided = await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(2));
+    const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
+    expect(guidedPrompt).toContain(advice);
+    expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
+    expect(launchGrants(launches()[1] as { argv: unknown })).toEqual(plainGrants);
+    await sup.endRun("flight-1");
+
+    const build = await sup.startRun("guido-1", 42);
+    const review = await sup.startRun("retro", 43);
+    await until(() => expect(launches()).toHaveLength(4));
+    for (const runId of [build.runId, review.runId])
+      expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
+        "# Mission Control work guidance (advice, not rules)",
+      );
+  });
+});
+
 describe("Codex launch through a test-only account", () => {
   afterEach(() => {
     vi.mocked(homedir).mockReset();
@@ -2220,6 +2288,66 @@ import(${JSON.stringify(fixture)});
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
 
+  it("gives Codex FLIGHT guidance only, without changing its prompt or tool grants", async () => {
+    const flight: CrewSeatConfig = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    };
+    const guidance = {
+      priority: ["P0", "customer-impact"],
+      milestone: ["Launch"],
+      labels: ["area:server", "urgent"],
+      labelMode: "all" as const,
+      avoid: ["large rewrites"],
+      direction: "Keep the launch path boring.",
+    };
+    const advice = [
+      "# Mission Control work guidance (advice, not rules)",
+      "Prefer priority: P0, customer-impact.",
+      "Prefer milestone: Launch.",
+      "Labels (all): area:server, urgent.",
+      "Avoid: large rewrites.",
+      "Keep the launch path boring.",
+    ].join("\n");
+    const spawns = () => recorded().filter((line) => line.type === "spawn");
+    const grants = (spawn: { env: Record<string, string> }) =>
+      readFileSync(join(spawn.env.CODEX_HOME, "config.toml"), "utf8").replaceAll(
+        spawn.env.TMPDIR,
+        "<seat-temp>",
+      );
+    const { sup, cfg } = codex();
+    cfg.crew?.sessions[0]?.seats.push(flight);
+    sup.start();
+
+    const plain = await sup.startWatch("flight-1");
+    await until(() => expect(spawns()).toHaveLength(1));
+    const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
+    const plainGrants = grants(spawns()[0] as { env: Record<string, string> });
+    await sup.endRun("flight-1");
+
+    const repo = cfg.repos[0];
+    if (!repo) throw new Error("missing test repo");
+    repo.guidance = guidance;
+    const guided = await sup.startWatch("flight-1");
+    await until(() => expect(spawns()).toHaveLength(2));
+    const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
+    expect(guidedPrompt).toContain(advice);
+    expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
+    expect(grants(spawns()[1] as { env: Record<string, string> })).toBe(plainGrants);
+    await sup.endRun("flight-1");
+
+    const build = await sup.startRun("guido-1", 42);
+    const review = await sup.startRun("retro", 43);
+    await until(() => expect(spawns()).toHaveLength(4));
+    for (const runId of [build.runId, review.runId])
+      expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
+        "# Mission Control work guidance (advice, not rules)",
+      );
+  });
+
   it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
     const { sup, log } = codex();
     unlinkSync(join(dir, "home", ".codex", "auth.json"));
@@ -2254,7 +2382,6 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
-      PNPM_STORE_ENV,
       "UV_CACHE_DIR",
       "PYTHONPYCACHEPREFIX",
       "RUFF_CACHE_DIR",
@@ -2263,6 +2390,9 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
+    expect(spawn.env[PNPM_STORE_ENV]).toBe(
+      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+    );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
@@ -2289,6 +2419,7 @@ import(${JSON.stringify(fixture)});
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    expect(config).not.toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
       JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
     );

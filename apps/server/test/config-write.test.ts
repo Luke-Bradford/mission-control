@@ -25,8 +25,10 @@ import {
   NewRepoBody,
   noSessionText,
   RepoLocation,
+  removeAccount,
   SEATS_CHANGED,
   SeatsBody,
+  setAccount,
   setSessionSeats,
 } from "../src/config-write.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
@@ -879,5 +881,26 @@ describe("addAccount", () => {
     ]) {
       expect(NewAccountBody.safeParse(body).success).toBe(false);
     }
+  });
+});
+
+describe("account edits", () => {
+  it("updates one account and removes an unused one through backed-up atomic writes", async () => {
+    const before = loadConfig(path);
+    const changed = await setAccount(
+      path,
+      "claude-main",
+      { provider: "claude", alertAt: 70, stopAt: 90 },
+      NOW,
+    );
+    expect(changed.config.accounts[0]).toMatchObject({
+      id: "claude-main",
+      alertAt: 70,
+      stopAt: 90,
+    });
+    expect(readFileSync(changed.backup, "utf8")).toBe(COMMENTED);
+    const removed = await removeAccount(path, "codex-main", NOW + 1);
+    expect(removed.config.accounts).toEqual([{ ...before.accounts[0], alertAt: 70, stopAt: 90 }]);
+    expect(loadConfig(path)).toEqual(removed.config);
   });
 });
