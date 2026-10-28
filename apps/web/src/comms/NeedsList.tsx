@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
-import { isOperatorItem, itemOwner, ownerLabel } from "../attention.ts";
+import { isOperatorItem, itemOwner, needsYouItems, ownerLabel } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -151,7 +151,8 @@ export function NeedsList({
   const lock = useTestLock();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const list = sortNeeds((items ?? []).filter(isOperatorItem));
+  // The header's Needs you set: the whole inbox, one per key (attention.ts).
+  const list = sortNeeds(needsYouItems(items));
   const handled = sortNeeds(
     (items ?? []).filter(
       (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",

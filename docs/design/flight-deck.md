@@ -6,8 +6,7 @@ quiet until something needs attention, and visibly live. These rules apply to ev
 ## Surface
 
 - Base is near-black blue with a faint 24px grid; panels are flat, hairline-bordered, radius 2–3px
-  (`--r` 3px, `--r-s` 2px), with a short accent bracket on the top-left corner (`.panel::before`).
-  No drop shadows on panels.
+  (`--r` 3px, `--r-s` 2px). No drop shadows, glows or corner ornaments on panels.
 - Panel headers (`.ph`) are mono, uppercase, letter-spaced, `--fg-2`; a sub-label is `--muted`.
 - Density over decoration: 12–13px body, tabular numerals everywhere a number changes.
 
@@ -23,8 +22,10 @@ Colour means state, never decoration.
 | `--crit` | broken / failing |
 | `--think` | FLIGHT's own judgement |
 
-- **Selection is an edge, not a box.** Selected tabs, nav rows and list rows get a 2px accent
-  bar (bottom for tabs, left for rows) plus `--accent-soft` tint. Never a full coloured outline.
+- **Selection is an edge, not a box.** A selected tab is `--fg` text over a flat 2px accent bar
+  on its bottom edge — no tint or gradient glow. Selected nav and list rows get a 2px left bar and
+  `--accent-soft` tint. A pressed toggle button is a tint plus a hairline accent border. Never a
+  full coloured outline.
 - **Chips are filled, not outlined.** Repo, label and state chips use a tinted fill
   (`color-mix(in srgb, <colour> 14%, transparent)`) and coloured text, border transparent.
 - Message bubbles, cards and tiles use `--line` hairlines. A coloured border is reserved for the
