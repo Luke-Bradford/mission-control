@@ -26,10 +26,11 @@
 //   NONJSON    a stdout line that is not JSON
 //   HANG       keep running after stdin closes (until a signal)
 //   IGNORETERM as HANG, and ignore SIGTERM too (only SIGKILL ends it)
-//   QUIET      print nothing for 1.5 s, then run the turn (its reply says QUIETED)
+//   QUIET      print nothing until `<--record file>.go` exists, then run the turn (its reply
+//              says QUIETED)
 //   ORPHAN     exit 0 at once, leaving a child that holds stdout and stderr open for 3 s
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const argv = process.argv.slice(2);
@@ -130,8 +131,14 @@ const user = (content) =>
 
 function userTurn(text) {
   if (text.includes("QUIET") && !text.includes("QUIETED")) {
-    // prints nothing for 1.5 s, as a CLI that has the line but has not started its turn
-    setTimeout(() => userTurn(text.replace("QUIET", "QUIETED")), 1500);
+    // prints nothing until `<record file>.go` exists, as a CLI that has the line but has not
+    // started its turn (a file, not a timer: the test says when)
+    const gate = `${recordTo}.go`;
+    const wait = setInterval(() => {
+      if (!existsSync(gate)) return;
+      clearInterval(wait);
+      userTurn(text.replace("QUIET", "QUIETED"));
+    }, 20);
     return;
   }
   const cue = cues.shift();

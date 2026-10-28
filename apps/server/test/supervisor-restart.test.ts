@@ -1688,24 +1688,29 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(seatState("flight-1")).toBe("idle"));
     const transcript = store.run(runId)?.transcriptPath ?? "";
     await first.sup.message("flight-1", "QUIET", { interrupt: false });
+    await until(() => expect(userLines()).toContain("QUIET"));
     await first.sup.stopAll();
-    expect(readFileSync(transcript, "utf8")).not.toContain("QUIETED");
     prep.oldKeeperHello = true;
     const { sup } = watchMake();
     const seen: SupervisorEvent[] = [];
     sup.on((e) => seen.push(e));
     sup.start();
     await until(() => expect(sup.sessionAlive?.("flight-1")).toBe(true));
-    // taken as between turns until the CLI speaks; then its turn and its end are seen
+    await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(1));
+    // taken as between turns while the CLI says nothing
+    expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
+    expect(readFileSync(transcript, "utf8")).not.toContain("QUIETED");
+    // the CLI starts its turn: the turn and its own end are seen
+    writeFileSync(`${recordFile}.go`, "");
     await until(() => expect(readFileSync(transcript, "utf8")).toContain("echo: QUIETED"));
-    // the attach's idle, then the turn's own end
     await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(2));
     expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(starts()).toHaveLength(1);
   });
 
-  it("the watch ends a run a take-back left with no session, and its keeper, then starts FLIGHT (#798)", async () => {
+  /** FLIGHT's run left by a restart with no session: its old keeper lives and will not end. */
+  async function ghostFlight(failures: number) {
     const first = watchMake();
     first.sup.start();
     const { runId } = await first.sup.startWatch("flight-1");
@@ -1715,29 +1720,40 @@ describe("a seat keeps running through a restart", () => {
     const keeperPid = readPidFile(dir0, KEEPER_PID_FILE) as number;
     const cliPid = readPidFile(dir0, CLI_PID_FILE) as number;
     // A take-back that returns with the run left as it was: a new CLI profile must be denied to
-    // the run, and its old keeper will not end (twice: at the start and at the watch's take-back).
-    const end = vi.spyOn(keeper, "endKeeper");
-    end.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
-    try {
-      const hub = watchMake();
-      const profile = join(dir, "alt-codex");
-      mkdirSync(profile, { recursive: true });
-      writeFileSync(
-        join(profile, "auth.json"),
-        JSON.stringify({ tokens: { account_id: "acct-alt" } }),
-        { mode: 0o600 },
+    // the run, and its old keeper will not end, `failures` times.
+    const real = keeper.endKeeper;
+    let left = failures;
+    const end = vi
+      .spyOn(keeper, "endKeeper")
+      .mockImplementation(async (d, ...rest) =>
+        d === dir0 && left-- > 0 ? false : real(d, ...rest),
       );
-      hub.cfg.accounts.push({
-        id: "codex-alt",
-        vendor: "codex",
-        cliProfile: profile,
-        alertAt: 80,
-        stopAt: 95,
-      });
-      hub.sup.start();
-      await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
-      expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
-      expect(pidAlive(keeperPid)).toBe(true);
+    const hub = watchMake();
+    const profile = join(dir, "alt-codex");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(
+      join(profile, "auth.json"),
+      JSON.stringify({ tokens: { account_id: "acct-alt" } }),
+      { mode: 0o600 },
+    );
+    hub.cfg.accounts.push({
+      id: "codex-alt",
+      vendor: "codex",
+      cliProfile: profile,
+      alertAt: 80,
+      stopAt: 95,
+    });
+    hub.sup.start();
+    await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(pidAlive(keeperPid)).toBe(true);
+    return { runId, dir0, keeperPid, cliPid, end, real, hub };
+  }
+
+  it("the watch ends a run a take-back left with no session, and its keeper, then starts FLIGHT (#798)", async () => {
+    // fails at the start's take-back and at the watch's
+    const { runId, dir0, keeperPid, cliPid, end, hub } = await ghostFlight(2);
+    try {
       let clock = Date.now();
       const watch = createFlightWatch({
         config: hub.cfg,
@@ -1761,6 +1777,7 @@ describe("a seat keeps running through a restart", () => {
         await until(() => expect([pidAlive(keeperPid), pidAlive(cliPid)]).toEqual([false, false]));
         expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
         expect(existsSync(dir0)).toBe(false);
+        expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toEqual([]);
         // one start before the restart, one fresh one: nothing resumed beside it
         await until(() => expect(starts()).toHaveLength(2));
         expect(starts()[1]?.argv).not.toContain("--resume");
@@ -1774,6 +1791,28 @@ describe("a seat keeps running through a restart", () => {
       }
     } finally {
       end.mockRestore();
+    }
+  });
+
+  it("an engine end whose old keeper will not stop says so in a blocked note", async () => {
+    const { runId, dir0, keeperPid, end, real, hub } = await ghostFlight(Number.POSITIVE_INFINITY);
+    try {
+      await hub.sup.endRunByEngine(runId);
+      expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          runId,
+          text: expect.stringContaining("its CLI could not be stopped and may still be running"),
+        },
+      ]);
+      expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+      expect(existsSync(dir0)).toBe(true);
+      expect(pidAlive(keeperPid)).toBe(true);
+    } finally {
+      end.mockRestore();
+      await real(dir0, 5000);
     }
   });
 
