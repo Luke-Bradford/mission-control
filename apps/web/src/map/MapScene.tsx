@@ -85,7 +85,8 @@ function mountStage(
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   const canvas = renderer.domElement;
-  canvas.setAttribute("role", "img");
+  // focusable and driven by keys (OrbitControls pans on the arrows), so an application, not an image
+  canvas.setAttribute("role", "application");
   canvas.setAttribute(
     "aria-label",
     "Repo map: drag to orbit, scroll to zoom, arrow keys to pan; find a file in Selected",
@@ -266,20 +267,35 @@ function mountStage(
     glow: number;
     burst: number;
   }[] = [];
-  // a focused overlay button that hides or leaves (an arc ending) hands focus to the stage
-  let lastFocus: HTMLElement | null = null;
+  // A focused overlay button (an arc, an orb label) that hides or leaves hands focus to the stage.
+  // `held` is the overlay that has focus; focus moving outside the stage forgets it, so the stage
+  // never takes focus back from wherever the operator went.
+  let held: HTMLElement | null = null;
+  const vanished = (target: HTMLElement) => target.hidden || !target.isConnected;
   const focusIn = (e: FocusEvent) => {
-    lastFocus = e.target instanceof HTMLElement ? e.target : null;
+    held = e.target instanceof HTMLElement && e.target !== canvas ? e.target : null;
+  };
+  const focusOut = (e: FocusEvent) => {
+    const next = e.relatedTarget;
+    if (next instanceof Node && el.contains(next)) return;
+    const target = e.target;
+    held = null;
+    // a button that blurs because it just hid: the stage takes focus, not the page
+    if (next === null && target instanceof HTMLElement && target !== canvas && vanished(target))
+      queueMicrotask(() => {
+        if (document.activeElement === document.body || document.activeElement === null)
+          canvas.focus({ preventScroll: true });
+      });
   };
   el.addEventListener("focusin", focusIn);
+  el.addEventListener("focusout", focusOut);
+  // a removed element may leave without a blur: catch it on the next frame
   const keepFocus = () => {
-    if (!lastFocus || lastFocus === canvas) return;
+    if (!held || !vanished(held)) return;
     const active = document.activeElement;
-    const lost = lastFocus.hidden || !lastFocus.isConnected;
-    if (lost && (active === lastFocus || active === document.body || active === null)) {
+    if (active === held || active === document.body || active === null)
       canvas.focus({ preventScroll: true });
-      lastFocus = canvas;
-    }
+    held = null;
   };
 
   const draw = () => {
@@ -654,6 +670,7 @@ function mountStage(
         g = null;
       }
       el.removeEventListener("focusin", focusIn);
+      el.removeEventListener("focusout", focusOut);
       document.removeEventListener("visibilitychange", visibility);
       reduced.removeEventListener("change", preference);
       themeMedia.removeEventListener("change", preference);

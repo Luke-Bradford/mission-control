@@ -4,7 +4,7 @@ import { apiGet } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { AgentCards } from "./AgentCards.tsx";
 import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
-import type { BadgeKind } from "./cards.ts";
+import { type BadgeKind, uncheckedNotes } from "./cards.ts";
 import { areaColor, mainAreas, repoLayout } from "./layout.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pinToken } from "./model.ts";
@@ -423,16 +423,16 @@ function FileDrawer({
       {snapshot.seats.map((s) => {
         const changes = s.scope.modified.filter((c) => listed.includes(c.file));
         const read = s.scope.read.some((f) => listed.includes(f));
-        const unchecked = s.branch
-          ? snapshot.conflictsUnchecked.find((u) => u.branch === s.branch)
-          : undefined;
+        const unchecked = uncheckedNotes(s, snapshot);
         return read || changes.length ? (
           <div key={s.seat}>
             <strong>{s.seat}</strong>
             {read && <p>Read on the branch</p>}
-            {unchecked && (
-              <p className="map-unchecked">Conflicts not checked: {unchecked.reason}</p>
-            )}
+            {unchecked.map((note) => (
+              <p className="map-unchecked" key={note}>
+                {note}
+              </p>
+            ))}
             {changes.map((c) => (
               <div key={c.file}>
                 <p>

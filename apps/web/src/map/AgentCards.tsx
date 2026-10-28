@@ -2,7 +2,7 @@ import type { MapSnapshot } from "@mc/core";
 import type { CSSProperties, Ref } from "react";
 import { useNow } from "../clock.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
-import { agentCard, type BadgeKind, badgeModels } from "./cards.ts";
+import { agentCard, type BadgeKind, badgeModels, uncheckedNotes } from "./cards.ts";
 
 export function AgentCards({
   snapshot,
@@ -39,9 +39,7 @@ export function AgentCards({
             : null;
         const expanded = !card.docked || selected === seat.seat;
         // shown even on a docked card: its unmerged branch is exactly what a conflict would touch
-        const unchecked = seat.branch
-          ? snapshot.conflictsUnchecked.find((u) => u.branch === seat.branch)
-          : undefined;
+        const unchecked = uncheckedNotes(seat, snapshot);
         return (
           <article
             key={seat.seat}
@@ -76,9 +74,11 @@ export function AgentCards({
             >
               ⌖
             </button>
-            {unchecked && (
-              <p className="map-unchecked">Conflicts not checked: {unchecked.reason}</p>
-            )}
+            {unchecked.map((note) => (
+              <p className="map-unchecked" key={note}>
+                {note}
+              </p>
+            ))}
             {expanded && (
               <>
                 {seat.title && <p className="map-agent-title">{seat.title}</p>}

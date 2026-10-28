@@ -3726,6 +3726,8 @@ describe("boards, escalations, health", () => {
       { file: "file.ts", add: 2, rem: 1, source: "churn" },
     ]);
     expect(response.json().seats[0].scope.read).toEqual([]);
+    // the set-aside branch still names the seat in conflicts and their unchecked notes
+    expect(response.json().seats[0].branches).toContain("aside-branch");
     store.upsertPullRequests(
       "shop-app",
       [
@@ -3754,7 +3756,33 @@ describe("boards, escalations, health", () => {
       ],
       NOW,
     );
-    expect((await get("/api/repos/shop-app/map")).json().seats[0].scope.modified).toEqual([]);
+    const merged = (await get("/api/repos/shop-app/map")).json().seats[0];
+    expect(merged.scope.modified).toEqual([]);
+    expect(merged.branches).not.toContain("aside-branch");
+  });
+
+  it("flags a park from a run the operator stopped, so the map never calls it stuck", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    store.upsertRun(
+      run({
+        id: "stopped-loop",
+        agentId: "guido-1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+        },
+      }),
+    );
+    store.setRunEnded("stopped-loop", NOW, "ok", "operator");
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].badges.waiting).toMatchObject({
+      kind: "parked",
+      reason: "run ended (stopped)",
+      stopped: true,
+    });
   });
 
   it("uses the loop park reason and its state age for waiting", async () => {
@@ -3778,6 +3806,7 @@ describe("boards, escalations, health", () => {
       kind: "parked",
       reason: "Check the plan",
       since: response.json().seats[0].since,
+      stopped: false,
     });
   });
 
@@ -3901,7 +3930,9 @@ describe("boards, escalations, health", () => {
         expect(parked.seats[0]).toMatchObject({
           calls: [],
           scope: { read: [], modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
-          badges: { waiting: { kind: "parked", since: NOW, reason: "Waiting for input" } },
+          badges: {
+            waiting: { kind: "parked", since: NOW, reason: "Waiting for input", stopped: false },
+          },
         });
       } finally {
         await a.close();

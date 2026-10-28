@@ -54,7 +54,9 @@ export function mainAreas(tree: MapSnapshot["tree"]): string[] {
  * The prototype's layout: compact folder neighbourhoods (each area fanned out in its own direction,
  * children in a cone around their folder's, the heaviest first), then 80 steps of relaxation: near
  * nodes repel, each keeps its branch length to its folder, and imports pull faintly. Every file is
- * its own node; folders are line junctions. Deterministic: the same tree gives the same layout.
+ * its own node; folders are line junctions. A cold start is deterministic: the same tree and
+ * imports give the same layout. A warm start (`previous`) keeps every node it knows where it was and
+ * relaxes only the new ones, so its result depends on the layout it started from.
  */
 export function forceLayout(
   tree: MapSnapshot["tree"],
@@ -274,6 +276,8 @@ export function repoLayout(
       STEPS,
       kept[0] && new Map(kept[0].nodes.map((node) => [node.path, node.position])),
     );
+  // delete before set, so the repo moves to the end and the oldest-used repo is dropped first
+  layouts.delete(repoId);
   layouts.set(repoId, [{ key, nodes }, ...kept.filter((k) => k.key !== key)].slice(0, 3));
   if (layouts.size > 8) layouts.delete(layouts.keys().next().value as string);
   return nodes;

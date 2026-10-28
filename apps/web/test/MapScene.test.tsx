@@ -334,7 +334,7 @@ it("keeps one WebGL context per visit: new nodes rebuild the tree, unmount loses
   expect(renderer.created - created).toBe(1);
   expect(renderer.dispose).not.toHaveBeenCalled();
   const canvas = document.querySelector("canvas") as HTMLCanvasElement;
-  expect(canvas.getAttribute("role")).toBe("img");
+  expect(canvas.getAttribute("role")).toBe("application");
   expect(canvas.tabIndex).toBe(0);
   for (const label of document.querySelectorAll<HTMLElement>(".map-orb-label"))
     expect(label.tabIndex).toBe(-1);
@@ -343,4 +343,34 @@ it("keeps one WebGL context per visit: new nodes rebuild the tree, unmount loses
   expect(renderer.forceContextLoss.mock.invocationCallOrder[0]).toBeLessThan(
     renderer.dispose.mock.invocationCallOrder[0] as number,
   );
+});
+
+it("hands focus to the stage when a focused overlay label leaves, never when focus went elsewhere", async () => {
+  const { rerender, unmount } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+  const without = { ...props.snapshot, seats: props.snapshot.seats.slice(1) };
+  const label = () => screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  act(() => label().focus());
+  rerender(<MapScene {...props} snapshot={without} />);
+  await act(async () => {
+    vi.advanceTimersByTime(40);
+    await Promise.resolve();
+  });
+  expect(document.activeElement).toBe(canvas);
+  // focus moved outside the stage first: the stage leaves it there
+  rerender(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  act(() => label().focus());
+  act(() => outside.focus());
+  rerender(<MapScene {...props} snapshot={without} />);
+  await act(async () => {
+    vi.advanceTimersByTime(40);
+    await Promise.resolve();
+  });
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+  unmount();
 });

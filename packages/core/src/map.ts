@@ -39,7 +39,8 @@ export interface MapBadges {
   review: { ticket: number; round: number; counts: MapReviewCounts; at: number } | null;
   tests: (MapTests & { at: number; editedSince: boolean }) | null;
   ci: { sha: string; checks: PrCheck[]; at: number } | null;
-  waiting: { kind: "test-lock" | "parked"; since: number; reason: string } | null;
+  /** `stopped`: parked because the operator stopped the run; waiting on nobody, so never stuck. */
+  waiting: { kind: "test-lock" | "parked"; since: number; reason: string; stopped: boolean } | null;
 }
 
 export interface MapSeat {
@@ -49,8 +50,11 @@ export interface MapSeat {
   since: number;
   ticket: number | null;
   title: string | null;
-  /** The run's branch, which names the seat in conflicts and conflictsUnchecked; null if none. */
-  branch: string | null;
+  /**
+   * Every branch whose unmerged changes are in `scope.modified` (the current run's first, then
+   * runs set aside), which name the seat in conflicts and conflictsUnchecked.
+   */
+  branches: string[];
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };

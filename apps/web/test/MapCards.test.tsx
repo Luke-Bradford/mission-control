@@ -68,7 +68,12 @@ it("shows parked waiting data and marks the state in warn when the wait exceeds 
   s.seats[0].state = "parked";
   s.seats[0].since = 0;
   s.seats[0].calls = [];
-  s.seats[0].badges.waiting = { kind: "parked", since: 65_000 - 900_001, reason: "Needs CAPCOM" };
+  s.seats[0].badges.waiting = {
+    kind: "parked",
+    since: 65_000 - 900_001,
+    reason: "Needs CAPCOM",
+    stopped: false,
+  };
   render(<CrewMapView snapshot={s} />);
   expect(screen.getByText(/Stuck ·/).className).toContain("stuck");
   fireEvent.click(

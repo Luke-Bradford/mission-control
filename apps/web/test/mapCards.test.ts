@@ -5,7 +5,7 @@ import {
   badgeModels,
   isStuck,
   recentFailures,
-  STOPPED_PARK_REASON,
+  uncheckedNotes,
 } from "../src/map/cards.ts";
 import { applyDelta } from "../src/map/model.ts";
 
@@ -17,6 +17,27 @@ function seat(): MapSeat {
   s.badges = { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null };
   return s;
 }
+
+describe("unchecked conflict notes", () => {
+  it("names each unmerged branch's unchecked reason, and the branch when the seat has several", () => {
+    const s = seat();
+    const snapshot: MapSnapshot = {
+      ...structuredClone(mapSnapshotFixture),
+      conflictsUnchecked: [
+        { branch: "set-aside", reason: "head not fetched" },
+        { branch: "someone-else", reason: "merge check failed" },
+      ],
+    };
+    s.branches = ["current"];
+    expect(uncheckedNotes(s, snapshot)).toEqual([]);
+    s.branches = ["current", "set-aside"];
+    expect(uncheckedNotes(s, snapshot)).toEqual([
+      "Conflicts not checked on set-aside: head not fetched",
+    ]);
+    s.branches = ["set-aside"];
+    expect(uncheckedNotes(s, snapshot)).toEqual(["Conflicts not checked: head not fetched"]);
+  });
+});
 
 describe("map stuck rule", () => {
   it("marks a stalled run and otherwise leaves an ordinary running turn alone", () => {
@@ -47,18 +68,23 @@ describe("map stuck rule", () => {
     s.badges.failures = s.badges.failures.filter((f) => f.at <= now);
     expect(isStuck(s, now + 1)).toBe(false);
   });
-  it("never calls a seat whose run was stopped stuck, however long it has been parked", () => {
+  it("never calls a seat whose run the operator stopped stuck, however long it has been parked", () => {
     const s = seat();
-    s.badges.waiting = { kind: "parked", since: now - 86_400_000, reason: STOPPED_PARK_REASON };
+    s.badges.waiting = {
+      kind: "parked",
+      since: now - 86_400_000,
+      reason: "run ended (stopped)",
+      stopped: true,
+    };
     expect(isStuck(s, now)).toBe(false);
-    s.badges.waiting.reason = "run ended (error)";
+    s.badges.waiting.stopped = false;
     expect(isStuck(s, now)).toBe(true);
   });
   it.each(["test-lock", "parked"] as const)(
     "requires a %s wait older than fifteen minutes",
     (kind) => {
       const s = seat();
-      s.badges.waiting = { kind, since: now - 900_000, reason: "waiting" };
+      s.badges.waiting = { kind, since: now - 900_000, reason: "waiting", stopped: false };
       expect(isStuck(s, now)).toBe(false);
       expect(isStuck(s, now + 1)).toBe(true);
     },
@@ -132,7 +158,12 @@ describe("map badge data", () => {
         url: null,
       })),
     };
-    s.badges.waiting = { kind: "test-lock", reason: "pnpm test", since: now - 120_000 };
+    s.badges.waiting = {
+      kind: "test-lock",
+      reason: "pnpm test",
+      since: now - 120_000,
+      stopped: false,
+    };
     expect(badgeModels(s, now).map((b) => [b.text, b.age])).toEqual([
       ["CI @01234567: 1 passing, 1 failing, 1 pending", "9s ago"],
       ["Waiting: test-lock · pnpm test", "2m ago"],
@@ -299,7 +330,12 @@ it("refetches waiting metadata on park and when a waiting seat changes state", (
     applyDelta(s, { seq: 1, type: "state", seat: "GUIDO-1", state: "parked", since: now }, now),
   ).toBeNull();
   const waiting = s as import("@mc/core").MapSnapshot;
-  waiting.seats[0].badges.waiting = { kind: "test-lock", since: now - 1000, reason: "pnpm test" };
+  waiting.seats[0].badges.waiting = {
+    kind: "test-lock",
+    since: now - 1000,
+    reason: "pnpm test",
+    stopped: false,
+  };
   expect(
     applyDelta(
       waiting,
