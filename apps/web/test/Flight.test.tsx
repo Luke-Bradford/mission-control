@@ -923,7 +923,7 @@ describe("FLIGHT page", () => {
       });
       render(<Flight />);
       const cycle = await screen.findByRole("button", {
-        name: "Cycle time p50: 1.2 h Ready → Done · p85 30 h · 8 tickets, 14d",
+        name: "Cycle time p50: 1.2 h Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
       });
       expect(cycle.getAttribute("title")).toBe(metricHover("cycleTime"));
       expect(

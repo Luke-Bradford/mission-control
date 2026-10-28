@@ -104,8 +104,15 @@ describe("KpiStrip", () => {
         .querySelector(".lbl")
         ?.getAttribute("title"),
     ).toBe(metricHover("merged"));
-    await screen.findByText("of 4 agents");
-    for (const text of ["2m oldest", "92%", "10 runs · 1 red now", "1.2 h", "p85 30 h · 8 tickets"])
+    await screen.findByText("of 6 agents");
+    for (const text of [
+      "2m oldest",
+      "92%",
+      "10 runs · 1 red now",
+      "1.2 h",
+      "p85 30 h · 8 tickets · 1 left out",
+      "PRs · +2 loops",
+    ])
       expect(screen.getByText(text)).toBeTruthy();
     expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(1);
     for (const label of ["In progress", "CI pass rate", "Cycle time", "Merged", "Agents working"]) {
@@ -144,6 +151,7 @@ describe("KpiStrip", () => {
 
   it("labels a peak under 1 as itself, not as the scale's floor", async () => {
     stubFetch({
+      ...REGISTRY_ROUTES,
       "/api/overview": {
         ...OVERVIEW,
         kpis: { ...kpis, spendToday: { usd: 0.4, perHour: [0.4], series: [0, 0.2, 0.4] } },
@@ -151,27 +159,41 @@ describe("KpiStrip", () => {
     });
     render(<KpiStrip />);
     const tile = await screen.findByRole("link", { name: /Cost · today/ });
-    await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("$0.40"));
+    // the trace, its peak and its change wear the value's "~$" (API-equivalent)
+    await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("~$0.40"));
+    expect(within(tile).getByText("+~$0.40 · 30m")).toBeTruthy();
     expect(tile.querySelector(".kpi-peak")?.getAttribute("title")).toBe(
       "Peak in the last 30 minutes",
     );
   });
 
-  it("shows eight empty values when the endpoint is unavailable", async () => {
-    stubFetch({ "/api/overview": () => ({ status: 503, body: {} }) });
+  it("shows eight empty values when the endpoints are unavailable, and says both failed", async () => {
+    stubFetch({
+      "/api/overview": () => ({ status: 503, body: {} }),
+      "/api/metrics": () => ({ status: 503, body: { error: "metrics down" } }),
+    });
     const { container } = render(<KpiStrip />);
-    await screen.findByRole("alert");
-    expect(screen.getByRole("alert").textContent).toBe("Could not load overview metrics.");
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Could not load overview metrics. Registry figures could not load: metrics down",
+      ),
+    );
     await waitFor(() => expect(container.querySelectorAll(".overview-kpi .v")).toHaveLength(8));
     expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
       Array(8).fill("—"),
     );
+    // a failed source is not "loading": no skeleton, and the figure's hover says why
+    expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0);
+    expect(
+      container.querySelector('[data-metric="merged"]')?.getAttribute("title")?.split("\n")[0],
+    ).toBe("Could not load: metrics down");
   });
 
   it("keeps cached values marked stale after a failed refresh and clears the warning on recovery", async () => {
     const at = new Date("2026-10-24T10:25:00Z").getTime();
     let failed = false;
     stubFetch({
+      ...REGISTRY_ROUTES,
       "/api/overview": () => ({
         status: failed ? 503 : 200,
         body: failed ? {} : { at, kpis },

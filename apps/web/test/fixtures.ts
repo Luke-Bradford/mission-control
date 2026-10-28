@@ -432,7 +432,6 @@ export const GITHUB_RATE: GithubRateState = {
 export const GITHUB_RATE_LINE = "GitHub API · 4750 left · 7 per poll · resets 15:00";
 
 const overviewKpis: OverviewSummary["kpis"] = {
-  working: { now: 3, of: 5, series: [1, 2, 3] },
   tokensPerMin: { now: 41200, series: [100, 200, 300] },
   spendToday: { usd: 24.31, perHour: [1, 2] },
   inFlight: { count: 4, oldestAt: null },
@@ -444,15 +443,17 @@ const overviewKpis: OverviewSummary["kpis"] = {
 export const METRICS_VIEW: MetricsView = {
   at: NOW,
   inProgress: { count: 4, oldestAt: NOW - 2 * MIN },
-  merged: { count: 6 },
+  merged: { count: 6, loops: 2 },
   cycleTime: { p50Ms: 1.2 * 3_600_000, p85Ms: 30.4 * 3_600_000, n: 8, excluded: 1 },
   cost: { usd: 24.31 },
 };
 
 /**
  * One fixture behind every registry figure: the server's, the crew's and the inbox. It reads:
- * in progress 4, blocked 1, merged 6, cycle time 1.2 h (p85 30 h · 8 tickets), needs you 2,
- * agents live 3 of 4 (the paused loop is not), agents working 1 of 4, cost ~$24.31.
+ * in progress 4, blocked 1, merged 6 (+2 loops), cycle time 1.2 h (p85 30 h · 8 tickets · 1 left
+ * out), needs you 2, agents live 2 of 6, agents working 1 of 6, cost ~$24.31. Not live: the blocked
+ * seat, the paused loop, the rate-limited seat (parked, not paused, not blocked) and the loop
+ * holding for the operator (not blocked either: that hold is in Needs you).
  */
 export const REGISTRY_ROUTES = {
   "/api/metrics": METRICS_VIEW,
@@ -462,6 +463,8 @@ export const REGISTRY_ROUTES = {
       seatRow({ id: "guido-2", hudState: "blocked" }),
       crewRow({ id: "studio-builder", hudState: "parked", paused: true }),
       seatRow({ id: "flight-1", hudState: "idle", ticket: null, run: null }),
+      seatRow({ id: "inco-1", hudState: "parked", note: "rate limited until 14:00" }),
+      crewRow({ id: "ebull-ta", hudState: "blocked" }),
     ],
     firstRunToday: null,
   } satisfies Crew,

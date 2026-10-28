@@ -364,7 +364,7 @@ describe("Agents panel", () => {
     expect(within(agentRows(container)[0] as HTMLElement).getByText("flight-1")).toBeTruthy();
   });
 
-  it("the FLIGHT row shows the live seat, once, and the subtitle leaves it out", async () => {
+  it("the FLIGHT row shows the live seat, once; the subtitle is the registry's working count", async () => {
     const seat = (over: Partial<CrewRow>) =>
       crewRow({ kind: "crew", role: "Developer", mode: "writer", loopKind: "crew", ...over });
     stub({
@@ -376,7 +376,10 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("1 working · 2 agents · FLIGHT not counted");
+    // agents working is the registry's figure: every agent in view, FLIGHT included
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 3 agents working"),
+    );
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     expect(within(flight).getByText("head agent")).toBeTruthy();
@@ -429,7 +432,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
+  it("subtitle reads the registry's agents working", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -437,8 +440,13 @@ describe("Agents panel", () => {
         crewRow({ id: "c", index: 2, hudState: "running" }),
       ],
     });
-    render(<Overview />);
-    await screen.findByText("2 working · 3 agents · FLIGHT not counted");
+    const { container } = render(<Overview />);
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("2 of 3 agents working"),
+    );
+    expect(container.querySelector('#agentsP [data-metric="agentsWorking"]')?.textContent).toBe(
+      "2",
+    );
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
@@ -1342,7 +1350,7 @@ describe("Agents panel", () => {
       "shop-app-ta",
     ]);
     expect(container.querySelector(".trow.flight")).toBeTruthy();
-    expect(screen.getByText("1 working · 1 agents · FLIGHT not counted")).toBeTruthy();
+    expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 1 agents working");
   });
 });
 

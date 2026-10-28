@@ -1,9 +1,10 @@
-import { formatHours, NO_SIZE, type Telemetry } from "@mc/core";
+import { CYCLE_TIME_MIN_FOR_P85, FLOW_DAYS, formatHours, NO_SIZE, type Telemetry } from "@mc/core";
 import { dayLabel, dur, narrowDay } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
+import { MetricName } from "../hud/MetricName.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { metricText, useMetrics } from "../metrics.ts";
+import { metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
@@ -35,9 +36,9 @@ const tickets = (n: number): string => `${n} ${n === 1 ? "ticket" : "tickets"}`;
 export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const nameOf = useSeatName();
   const wait = <p className="pb s muted">{scope.wait}</p>;
-  const { readings } = useMetrics();
-  const overall = readings.cycleTime;
-  const cycleLabel = metricText("cycleTime");
+  const metrics = useMetrics();
+  const overall = metrics.readings.cycleTime;
+  const tag = sessionTag(metrics.session);
   // A size with no tickets has no p50, whatever the number says: no bar, and no say in the scale.
   const p50 = (r: { p50Ms: number | null; tickets: number }): number | null =>
     r.tickets === 0 ? null : r.p50Ms;
@@ -104,14 +105,19 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
       <Panel
         id="tCycle"
         title="Cycle time"
-        sub="Ready to Done, p50 and p85 hours by size · last 14 days"
+        sub={`Ready to Done, p50 and p85 hours by size · last ${FLOW_DAYS} days`}
       >
         {!t ? (
           wait
         ) : (
           <div className="pb">
-            <p className="tcycle-all s" title={cycleLabel.title}>
-              <span className="fg2">{cycleLabel.label}</span>{" "}
+            <p
+              className="tcycle-all s"
+              title={`${metricTitle(metrics, "cycleTime")}${tag ? `\nOn Telemetry this follows the header's session filter (${tag}); the per-size rows do not.` : ""}`}
+            >
+              <span className="fg2">
+                <MetricName id="cycleTime" tag={tag} />
+              </span>{" "}
               <b className="num" data-metric="cycleTime">
                 {overall?.value ?? DASH}
               </b>{" "}
@@ -127,7 +133,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
                   pct={((ms ?? 0) / longest) * 100}
                   value={ms === null ? DASH : formatHours(ms)}
                   extra={
-                    r.tickets === 0 || r.p85Ms === null
+                    r.tickets < CYCLE_TIME_MIN_FOR_P85 || r.p85Ms === null
                       ? tickets(r.tickets)
                       : `p85 ${formatHours(r.p85Ms)} · ${tickets(r.tickets)}`
                   }

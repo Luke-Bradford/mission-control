@@ -1202,7 +1202,6 @@ export interface OverviewTimeline {
 export interface OverviewSummary {
   at: number;
   kpis: {
-    working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
     /** Minute spend buckets, using the same attribution as perHour. */
     spendToday: { usd: number; perHour: number[]; series?: number[] };

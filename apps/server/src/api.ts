@@ -3163,7 +3163,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const session = config.crew?.sessions.find((s) => s.id === selected);
         if (selected !== undefined && session === undefined) return null;
         return {
-          session,
           repoIds: session ? [session.repoId] : config.repos.map((r) => r.id),
           pipelineRepoIds: session
             ? [session.repoId]
@@ -3182,16 +3181,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
         const scope = viewScope(req.query.session);
         if (scope === null) return reply.code(404).send({ error: "unknown session" });
-        const { session } = scope;
         const at = now();
         return overviewSummary(store, at, {
           repoIds: scope.repoIds,
           pipelineRepoIds: scope.pipelineRepoIds,
-          seatIds: configuredAgents(config)
-            .filter(
-              (a) => a.kind === "crew" && (session === undefined || a.sessionId === session.id),
-            )
-            .map((a) => a.id),
           timezone: config.operator.timezone,
           attention: sharedAttention(),
         });

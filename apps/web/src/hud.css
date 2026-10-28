@@ -4140,6 +4140,10 @@ button.nrow.thread.tagged {
 #tCycle .hrow {
   grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 56px 150px;
 }
+/* a registry label's window ("· 24h") never splits; a narrow tile wraps before it */
+.metric-win {
+  white-space: nowrap;
+}
 /* the registry's p50 over every size, above the per-size rows */
 .tcycle-all {
   margin: 0 0 8px;
@@ -7086,7 +7090,8 @@ button.nrow.thread.tagged {
 .overview-kpi {
   display: grid;
   min-width: 0;
-  grid-template-rows: 22px 26px 14px 34px;
+  /* the label row grows when a narrow tile wraps its name above its window */
+  grid-template-rows: minmax(22px, auto) 26px 14px 34px;
   gap: 3px;
   padding: 9px 12px;
   border: 1px solid var(--line);
@@ -7111,7 +7116,7 @@ button.nrow.thread.tagged {
   line-height: 11px;
   color: var(--muted);
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }

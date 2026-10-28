@@ -12,7 +12,6 @@ const END = Math.floor(NOW / MIN) * MIN;
 let store: Store;
 const scope: OverviewScope = {
   repoIds: ["repo"],
-  seatIds: ["seat"],
   timezone: "Europe/London",
   attention: [],
 };
@@ -103,10 +102,9 @@ const digest = (minuteTokens: RunDigest["minuteTokens"]): RunDigest => ({
 });
 
 it("returns zeros and nulls from an empty store", () => {
-  const result = overviewSummary(store, NOW, { ...scope, seatIds: [] });
+  const result = overviewSummary(store, NOW, scope);
   expect(result.at).toBe(NOW);
   expect(result.kpis).toEqual({
-    working: { now: 0, of: 0, series: Array(30).fill(0) },
     tokensPerMin: { now: 0, series: Array(30).fill(0) },
     spendToday: { usd: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
     inFlight: { count: 0, oldestAt: null, series: Array(30).fill(0) },
@@ -190,21 +188,6 @@ it("caps cards at eight without capping totals; merged cards are newest first", 
   expect(result.pipeline[0]?.cards.map((c) => c.ticket)).toEqual([10, 9, 8, 7, 6, 5, 4, 3]);
   expect(result.pipeline[5]?.cards.map((c) => c.ticket)).toEqual([10, 11, 12, 13, 14, 15, 16, 17]);
   expect(result.pipeline[5]?.oldestAt).toBe(NOW - 8 * MIN);
-});
-
-it("counts distinct seats per minute from carried turn state, excluding the incomplete minute", () => {
-  const state = (at: number, to: "running" | "idle") =>
-    store.addAgentEvent({ agentId: "seat", at, from: "idle", to, text: "turn" });
-  state(END - 40 * MIN, "running");
-  state(END - 29 * MIN, "idle");
-  state(END - 2 * MIN, "running");
-  state(END - 2 * MIN + 10, "idle");
-  state(END - 2 * MIN + 20, "running");
-  expect(summary().kpis.working).toEqual({
-    now: 1,
-    of: 1,
-    series: [1, ...Array(27).fill(0), 1, 1],
-  });
 });
 
 it("sums fleet token buckets and falls back to wall-time spend without attempt usage", () => {

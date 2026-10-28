@@ -4,7 +4,8 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dur, kTokens, mss } from "../fmt.ts";
-import { metricText, useMetrics } from "../metrics.ts";
+import { MetricName } from "../hud/MetricName.tsx";
+import { metricText, metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { followLink } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE } from "./common.ts";
@@ -36,6 +37,8 @@ interface Tile {
   metric?: MetricId;
   /** The label's hover text. */
   hint?: string;
+  /** A registry figure's scope tag after its window ("s/mission-control"). */
+  tag?: string | null;
 }
 
 function Kpi({ tile: k }: { tile: Tile }) {
@@ -60,7 +63,7 @@ function Kpi({ tile: k }: { tile: Tile }) {
   return (
     <div className={k.live ? "kpi live" : "kpi"}>
       <span className="lbl" title={k.hint}>
-        {k.label}
+        {k.metric ? <MetricName id={k.metric} tag={k.tag} /> : k.label}
       </span>
       <span
         key={k.value}
@@ -98,7 +101,8 @@ export function Kpis({
   filtered?: boolean;
 }) {
   const nameOf = useSeatName();
-  const { readings: r } = useMetrics();
+  const metrics = useMetrics();
+  const r = metrics.readings;
   const d = t?.today;
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
   const lock = useTestLock();
@@ -128,10 +132,19 @@ export function Kpis({
         : cpr === null
           ? "No finished crew runs in the last 14 days."
           : `${cpr.toFixed(1)} per run, last 14 days`;
-  const registry = (id: MetricId, detail: string): Tile => {
-    const { label, title } = metricText(id);
-    return { key: id, metric: id, label, hint: title, value: r[id]?.value ?? DASH, detail, live };
-  };
+  // Telemetry's own figures ignore the header's session filter; a registry tile names the one it
+  // follows, on its label and in its hover.
+  const tag = sessionTag(metrics.session);
+  const registry = (id: MetricId, detail: string): Tile => ({
+    key: id,
+    metric: id,
+    label: metricText(id).label,
+    tag,
+    hint: `${metricTitle(metrics, id)}${tag ? `\nOn Telemetry this follows the header's session filter (${tag}); the page's own figures do not.` : ""}`,
+    value: r[id]?.value ?? DASH,
+    detail,
+    live,
+  });
   const filteredHint =
     "Only the agents, account or ticket picked above; the registry figure is shown unfiltered.";
   const tiles: Tile[] = [
@@ -176,7 +189,10 @@ export function Kpis({
           live,
         }
       : registry("agentsWorking", r.agentsWorking?.detail ?? ""),
-    { ...registry("merged", "PRs"), live: false },
+    {
+      ...registry("merged", r.merged?.detail ? `PRs · ${r.merged.detail}` : "PRs"),
+      live: false,
+    },
     {
       key: "lock",
       label: "Lock wait",

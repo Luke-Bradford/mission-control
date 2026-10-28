@@ -1561,7 +1561,6 @@ it.each([
   store.setDigest("r", digest({ attemptUsage }));
   const spend = overviewSummary(store, NOW, {
     repoIds: config.repos.map((r) => r.id),
-    seatIds: config.loops.map((l) => l.id),
     timezone: config.operator.timezone,
     attention: [],
   }).kpis.spendToday;

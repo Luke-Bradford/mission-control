@@ -1,8 +1,9 @@
-import type { MetricId, OverviewSummary } from "@mc/core";
+import { type MetricId, type OverviewSummary, usd } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
+import { MetricName } from "../hud/MetricName.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
-import { metricText, useMetrics } from "../metrics.ts";
+import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
@@ -94,10 +95,11 @@ export function KpiStrip() {
     rest: Pick<Tile, "delta" | "series" | "fmt"> & Partial<Pick<Tile, "color">>,
   ): Tile => ({
     metric: id,
-    ...metricText(id),
+    label: metricText(id).label,
+    title: metricTitle(metrics, id),
     page,
     value: r[id]?.value ?? "—",
-    pending: r[id] === null && metrics.error === null,
+    pending: metrics.state(id) === "loading",
     color: "var(--accent)",
     history: "last 30 minutes",
     ...rest,
@@ -122,9 +124,9 @@ export function KpiStrip() {
       history: "last 30 minutes",
     },
     registry("cost", "telemetry", {
-      delta: change(k?.spendToday?.series, (n) => `$${n.toFixed(2)}`),
+      delta: change(k?.spendToday?.series, usd),
       series: k?.spendToday?.series,
-      fmt: (n: number) => `$${n.toFixed(2)}`,
+      fmt: usd,
     }),
     registry("inProgress", "board", {
       delta:
@@ -136,7 +138,11 @@ export function KpiStrip() {
       series: k?.inFlight?.series,
       fmt: String,
     }),
-    registry("merged", "board", { delta: "PRs", series: undefined, fmt: String }),
+    registry("merged", "board", {
+      delta: r.merged?.detail ? `PRs · ${r.merged.detail}` : "PRs",
+      series: undefined,
+      fmt: String,
+    }),
     {
       label: "CI pass rate",
       title: "CI runs that passed in the last 24 hours, of those that finished.",
@@ -169,11 +175,21 @@ export function KpiStrip() {
   ];
   return (
     <>
-      {error && (
+      {(error || metrics.error) && (
         <div className="pb crit-t" role="alert">
-          {summary
-            ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
-            : "Could not load overview metrics."}
+          {[
+            error &&
+              (summary
+                ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
+                : "Could not load overview metrics."),
+            // the registry's figures come from /api/metrics: its failure is said too
+            metrics.error &&
+              (metrics.view
+                ? "Registry figures: refresh failed, showing stale values."
+                : `Registry figures could not load: ${metrics.error.message}`),
+          ]
+            .filter(Boolean)
+            .join(" ")}
         </div>
       )}
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
@@ -190,9 +206,13 @@ export function KpiStrip() {
               onClick={(e) => followLink(e, path)}
             >
               <span className="lbl" title={tile.title}>
-                {tile.label}
+                {tile.metric ? <MetricName id={tile.metric} /> : tile.label}
               </span>
-              <span className="v num" data-metric={tile.metric}>
+              <span
+                className="v num"
+                data-metric={tile.metric}
+                title={tile.metric ? tile.title : undefined}
+              >
                 {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
               </span>
               {!contextOnly && (

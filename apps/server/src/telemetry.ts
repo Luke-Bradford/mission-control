@@ -241,7 +241,8 @@ export function telemetry(
   const bySize = new Map<string, number[]>();
   let excluded = 0;
   for (const i of store.flowIssues(flowSince)) {
-    if (i.doneAt === null) continue;
+    // Like the registry's cycle time (metricsView): a Done stamped after now is not counted yet.
+    if (i.doneAt === null || i.doneAt > now) continue;
     if (i.startAt === null || i.startAt > i.doneAt) {
       excluded += 1;
       continue;

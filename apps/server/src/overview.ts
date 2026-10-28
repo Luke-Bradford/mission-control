@@ -37,7 +37,6 @@ const CI: Record<NonNullable<PullRequestView["ci"]>, PipelineCard["ci"][number]>
 
 export interface OverviewScope {
   repoIds: readonly string[];
-  seatIds: readonly string[];
   pipelineRepoIds?: readonly string[];
   timezone: string;
   /** The same derived open items served by /attention, including acknowledged items. */
@@ -68,25 +67,6 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     for (let i = 0; i < MINUTES; i++) minuteSpend[i] = (minuteSpend[i] ?? 0) + (minutes[i] ?? 0);
     const costs = runSpend(run, digests.get(run.id), midnight, now, HOUR_MS);
     for (let i = 0; i < spend.length; i++) spend[i] = (spend[i] ?? 0) + (costs[i] ?? 0);
-  }
-
-  const working = zeros();
-  let workingNow = 0;
-  const events = store.overviewAgentEvents(scope.seatIds, since, now);
-  for (const id of scope.seatIds) {
-    const changes = events.filter((e) => e.agentId === id);
-    const minutes = new Set<number>();
-    for (let j = 0; j < changes.length; j++) {
-      const event = changes[j];
-      if (event?.to !== "running") continue;
-      const until = changes[j + 1]?.at ?? now;
-      for (let i = 0; i < MINUTES; i++) {
-        const at = since + i * MINUTE_MS;
-        if (event.at < at + MINUTE_MS && until > at) minutes.add(i);
-      }
-    }
-    for (const i of minutes) working[i] = (working[i] ?? 0) + 1;
-    if (changes.at(-1)?.to === "running") workingNow++;
   }
 
   const prs = scope.repoIds.flatMap((id) =>
@@ -193,7 +173,6 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   return {
     at: now,
     kpis: {
-      working: { now: workingNow, of: scope.seatIds.length, series: working },
       tokensPerMin: { now: tokens.at(-1) ?? 0, series: tokens },
       spendToday: {
         usd: spend.reduce((sum, n) => sum + n, 0),

@@ -13,6 +13,7 @@ import { RESOURCES } from "../src/data.ts";
 import { kTokens, narrowDay } from "../src/fmt.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
+import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -475,7 +476,7 @@ describe("KPI tiles", () => {
       { label: "Tool calls", value: "812", detail: "today · 64 turns", title: null },
       { label: "Commits", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
       { label: "Agents working · now", value: "—", detail: "", title: null },
-      { label: "Merged · 24h", value: "6", detail: "PRs", title: null },
+      { label: "Merged · 24h", value: "6", detail: "PRs · +2 loops", title: null },
       { label: "Lock wait", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
       {
         label: "Your response",
@@ -487,6 +488,23 @@ describe("KPI tiles", () => {
       { label: "Guard", value: "—", detail: "", title: null },
       { label: "Test lock", value: "—", detail: "", title: null },
     ]);
+  });
+
+  it("names the session a registry tile follows, since Telemetry's own figures ignore it", async () => {
+    const { container } = await loaded();
+    act(() => setSession("shop-app-session"));
+    const labels = () =>
+      [...container.querySelectorAll(".kpi .lbl")].map((l) => l.textContent ?? "");
+    await waitFor(() => expect(labels()).toContain("Cost · today · s/shop-app-session"));
+    expect(labels()).toContain("Merged · 24h · s/shop-app-session");
+    expect(labels()).toContain("Tokens");
+    const merged = [...container.querySelectorAll(".kpi .lbl")].find((l) =>
+      l.textContent?.startsWith("Merged"),
+    );
+    expect(merged?.getAttribute("title")).toContain(
+      "On Telemetry this follows the header's session filter (s/shop-app-session)",
+    );
+    act(() => resetSession());
   });
 
   it("Commits, Lock wait and Your response read — until the hub answers", async () => {
@@ -531,17 +549,18 @@ describe("Flow of work", () => {
     const p = panel("tCycle");
     screen.getByText("Ready to Done, p50 and p85 hours by size · last 14 days");
     expect([...p.querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
-      "XS6.0 hp85 9.5 h · 4 tickets",
+      // p85 only from five tickets
+      "XS6.0 h4 tickets",
       "S35 hp85 50 h · 11 tickets",
-      "M70 hp85 70 h · 1 ticket",
+      "M70 h1 ticket",
       "L—0 tickets",
       "XL—0 tickets",
-      "no size72 hp85 80 h · 2 tickets",
+      "no size72 h2 tickets",
     ]);
     // the registry's cycle time over all sizes, with its window in the label
     await waitFor(() =>
       expect(p.querySelector(".tcycle-all")?.textContent).toBe(
-        "Cycle time p50 · 14d 1.2 h p85 30 h · 8 tickets",
+        "Cycle time p50 · 14d 1.2 h p85 30 h · 8 tickets · 1 left out",
       ),
     );
     within(p).getByText(
@@ -945,12 +964,10 @@ describe("empty and failing telemetry", () => {
       "No merged PRs with a known first-push CI result in the last 14 days.",
     );
     // the cost tile is the registry's figure, not this page's
-    expect(
-      screen
-        .getByText("Cost · today")
-        .parentElement?.querySelector(".v")
-        ?.getAttribute("data-metric"),
-    ).toBe("cost");
+    const costTile = [...document.querySelectorAll(".kpi")].find(
+      (k) => k.querySelector(".lbl")?.textContent === "Cost · today",
+    );
+    expect(costTile?.querySelector(".v")?.getAttribute("data-metric")).toBe("cost");
   });
 
   it("all-zero tokens show the empty state, not a flat chart", async () => {

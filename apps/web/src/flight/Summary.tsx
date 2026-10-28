@@ -18,7 +18,7 @@ import { dayMonth, dur, hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
-import { metricText, useMetrics } from "../metrics.ts";
+import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
 
 const DASH = "—";
@@ -206,8 +206,9 @@ export function Summary({ mode }: { mode: SummaryMode }) {
   );
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const now = useSecond();
-  const costReading = useMetrics().readings.cost;
-  const costText = metricText("cost");
+  const metrics = useMetrics();
+  const costReading = metrics.readings.cost;
+  const costText = { label: metricText("cost").label, title: metricTitle(metrics, "cost") };
   const view = summary.data;
   const entries = ledger.data?.session === view?.session ? (ledger.data?.entries ?? []) : [];
   // A server that predates summary.done has no outcomes to show: Record says none are recorded.

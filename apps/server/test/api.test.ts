@@ -6972,28 +6972,6 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it("scopes seats by session even when sessions share a repo", async () => {
-    withCrew();
-    const first = config.crew?.sessions[0];
-    const seat = first?.seats[0];
-    if (!first || !seat) throw new Error("missing crew fixture");
-    config.crew?.sessions.push({
-      ...first,
-      id: "s2",
-      seats: [{ ...seat, id: "guido-2" }],
-    });
-    store.addAgentEvent({ agentId: "guido-2", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working).toMatchObject({
-      now: 0,
-      of: 1,
-    });
-    expect((await get("/api/overview?session=s2")).json().kpis.working).toMatchObject({
-      now: 1,
-      of: 1,
-    });
-    expect((await get("/api/overview")).json().kpis.working).toMatchObject({ now: 1, of: 2 });
-  });
-
   it("serves live figures and validates the selected session", async () => {
     withCrew();
     store.raiseNote({
@@ -7009,10 +6987,8 @@ describe("overview", () => {
     expect(first.statusCode).toBe(200);
     expect(first.json()).toMatchObject({
       at: NOW,
-      kpis: { working: { now: 0, of: 1 }, needsYou: { count: 1, overHour: 1 } },
+      kpis: { needsYou: { count: 1, overHour: 1 } },
     });
-    store.addAgentEvent({ agentId: "guido-1", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working.now).toBe(1);
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
   });
@@ -7024,9 +7000,9 @@ describe("overview", () => {
     expect(all.json()).toEqual({
       at: NOW,
       inProgress: { count: 0, oldestAt: null },
-      merged: { count: 0 },
+      merged: { count: 0, loops: 0 },
       cycleTime: { p50Ms: null, p85Ms: null, n: 0, excluded: 0 },
-      cost: { usd: 0 },
+      cost: { usd: null },
     });
     expect((await get("/api/metrics?session=s1")).statusCode).toBe(200);
     expect((await get("/api/metrics?session=missing")).statusCode).toBe(404);

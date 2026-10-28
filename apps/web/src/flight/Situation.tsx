@@ -4,7 +4,6 @@ import {
   type FlightView,
   METRICS,
   type MetricId,
-  metricHover,
 } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -12,7 +11,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { useMetrics } from "../metrics.ts";
+import { metricTitle, useMetrics } from "../metrics.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { chatRows, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
@@ -130,7 +129,8 @@ export function Situation() {
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const now = useSecond();
   // The registry's figures (METRICS in @mc/core), so the rail agrees with every other page.
-  const { readings: r, view } = useMetrics();
+  const metrics = useMetrics();
+  const { readings: r, view } = metrics;
   const blocked = r.blocked?.n ?? 0;
   const inProgress = r.inProgress?.n ?? 0;
   const needsYou = r.needsYou?.n ?? 0;
@@ -177,7 +177,7 @@ export function Situation() {
     );
     // tone-* rather than bare crit/warn: a bare .warn on a button is the global warn button style.
     const cls = `flight-pulse tone-${tone}${idle ? " idle" : ""}`;
-    const title = metric ? metricHover(metric) : undefined;
+    const title = metric ? metricTitle(metrics, metric) : undefined;
     return target ? (
       <button
         type="button"
@@ -245,7 +245,7 @@ export function Situation() {
         {pulse(
           "Oldest",
           oldest === 0 ? DASH : dur(oldest),
-          "in-progress ticket, in its stage",
+          "in-progress ticket, since work started",
           "plain",
           "now",
         )}
@@ -256,7 +256,7 @@ export function Situation() {
           "plain",
           "now",
         )}
-        {figure("merged", "PRs merged")}
+        {figure("merged", r.merged?.detail ? `PRs merged · ${r.merged.detail}` : "PRs merged")}
         {figure("cycleTime", `Ready → Done · ${r.cycleTime?.detail ?? DASH}`, "plain", "cycle")}
         {figure("needsYou", "decisions or replies", pulseTone(needsYou, "warn"), "needs")}
       </div>

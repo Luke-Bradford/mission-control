@@ -67,13 +67,13 @@ it("reads zeros and nulls from an empty store", () => {
   expect(view()).toEqual({
     at: NOW,
     inProgress: { count: 0, oldestAt: null },
-    merged: { count: 0 },
+    merged: { count: 0, loops: 0 },
     cycleTime: { p50Ms: null, p85Ms: null, n: 0, excluded: 0 },
-    cost: { usd: 0 },
+    cost: { usd: null },
   });
 });
 
-it("counts PRs merged in the last 24 hours, linked or not, in the repos in view", () => {
+it("counts PRs merged in the last 24 hours in the crew's repos; loop repos apart", () => {
   store.replacePullRequests(
     "repo",
     [
@@ -86,8 +86,12 @@ it("counts PRs merged in the last 24 hours, linked or not, in the repos in view"
     NOW,
   );
   store.replacePullRequests("other", [pr(6, { repoId: "other", mergedAt: NOW - MIN })], NOW);
-  expect(view().merged.count).toBe(2);
-  expect(view(NOW, { ...scope, repoIds: ["repo", "other"] }).merged.count).toBe(3);
+  expect(view().merged).toEqual({ count: 2, loops: 0 });
+  // "other" is in view but has no crew session: an observed loop's repo
+  expect(view(NOW, { ...scope, repoIds: ["repo", "other"] }).merged).toEqual({
+    count: 2,
+    loops: 1,
+  });
 });
 
 it("measures cycle time p50 and p85 over 14 days, leaving out tickets with no start", () => {
@@ -120,13 +124,15 @@ it("measures cycle time p50 and p85 over 14 days, leaving out tickets with no st
 });
 
 it("sums today's API-equivalent cost in the repos in view, like the Overview's spend", () => {
+  store.upsertRun(run("unpriced", { startedAt: NOW - HOUR, endedAt: NOW }));
+  // a run that reported no cost leaves the figure unknown, not $0
+  expect(view().cost.usd).toBeNull();
   store.upsertRun(run("a", { startedAt: NOW - 2 * HOUR, endedAt: NOW, costUsd: 4 }));
   store.upsertRun(run("b", { startedAt: MIDNIGHT - 2 * HOUR, endedAt: MIDNIGHT, costUsd: 9 }));
   store.upsertRun(run("c", { repoId: "other", costUsd: 5 }));
   expect(view().cost.usd).toBeCloseTo(4);
   const spend = overviewSummary(store, NOW, {
     repoIds: ["repo"],
-    seatIds: [],
     timezone: "Europe/London",
     attention: [],
   }).kpis.spendToday.usd;

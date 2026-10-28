@@ -12,9 +12,9 @@ import type { Store } from "./store.ts";
 const DAY_MS = 24 * 60 * 60_000;
 
 export interface MetricsScope {
-  /** The repos in view: the session's repo, else every configured repo. */
+  /** The repos in view: the session's repo, else every configured repo (cycle time, cost). */
   repoIds: readonly string[];
-  /** The repos the pipeline reads boards from: the session's repo, else the crew sessions' repos. */
+  /** The session's repo, else the crew sessions' repos (in progress, merged). */
   pipelineRepoIds: readonly string[];
   timezone: string;
 }
@@ -36,9 +36,14 @@ export function metricsView(store: Store, now: number, scope: MetricsScope): Met
     midnight,
   });
 
-  const merged = prs.filter(
-    (p) => p.mergedAt !== null && p.mergedAt > now - MERGED_WINDOW_MS && p.mergedAt <= now,
-  ).length;
+  // Merged counts the crew sessions' repos; the observed loops' own repos are a separate figure.
+  const crewRepos = new Set(scope.pipelineRepoIds);
+  const merged = { count: 0, loops: 0 };
+  for (const p of prs) {
+    if (p.mergedAt === null || p.mergedAt <= now - MERGED_WINDOW_MS || p.mergedAt > now) continue;
+    if (crewRepos.has(p.repoId)) merged.count += 1;
+    else merged.loops += 1;
+  }
 
   const cycles: number[] = [];
   let excluded = 0;
@@ -49,15 +54,17 @@ export function metricsView(store: Store, now: number, scope: MetricsScope): Met
   }
 
   const digests = store.digests(runs.map((r) => r.id));
-  const usd = runs.reduce(
-    (sum, run) => sum + (runSpend(run, digests.get(run.id), midnight, now)[0] ?? 0),
-    0,
-  );
+  // Unknown, not $0, when no run in scope reported a cost.
+  let usd: number | null = null;
+  for (const run of runs) {
+    if (run.costUsd === null) continue;
+    usd = (usd ?? 0) + (runSpend(run, digests.get(run.id), midnight, now)[0] ?? 0);
+  }
 
   return {
     at: now,
     inProgress: inProgressOf(pipeline),
-    merged: { count: merged },
+    merged,
     cycleTime: {
       p50Ms: percentile(cycles, 50),
       p85Ms: percentile(cycles, 85),
