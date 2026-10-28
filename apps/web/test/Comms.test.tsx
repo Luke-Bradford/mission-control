@@ -307,6 +307,46 @@ describe("Comms routes", () => {
     });
   });
 
+  it("shows an empty ticket view and posts its ref to crew", async () => {
+    const fetch = stubFetch({
+      "/api/comms/tickets/%23999": {
+        messages: [],
+        ticket: {
+          ref: "#999",
+          linkedPr: null,
+          title: "Empty ticket",
+          status: "Ready",
+          owner: "CAPCOM",
+          repoId: "shop-app",
+          issueNumber: 999,
+        },
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "ticket", ref: "#999" }} row={null} />);
+    expect(await screen.findByText("Empty ticket")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(screen.getByText("CAPCOM")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on Board" }).getAttribute("href")).toBe(
+      "/board/shop-app/999",
+    );
+    expect(screen.getByText("No messages yet.")).toBeTruthy();
+    const composer = screen.getByLabelText("Post to #crew as CAPCOM · tagged #999");
+    fireEvent.change(composer, { target: { value: "Starting now" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
+      expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({
+        to: "crew",
+        text: "Starting now",
+        ref: "#999",
+      });
+    });
+  });
+
   it("shows per-contact unread, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
     const pin = {
       id: "comms:pin",
