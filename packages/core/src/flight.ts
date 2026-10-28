@@ -39,6 +39,8 @@ export const FLIGHT_DECISION_KINDS = [
   "end",
   "ticket",
   "comment",
+  "close",
+  "reorder",
   "rerun",
   "ruling",
   "sync",
@@ -625,6 +627,29 @@ export const commentTextText = (what: string): string =>
   `Not commented: ${what}. The comment is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
 export const commentFailedText = (issue: number): string =>
   `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
+
+/** Superseded tickets FLIGHT may close in an hour; the operator reopens a wrong one. */
+export const FLIGHT_CLOSES_PER_HOUR = 5;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. FLIGHT never reopens: if a close was wrong, ask the operator to reopen it. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
+export const closeComment = (replacement: number): string =>
+  `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
+export const CLOSED_PREFIX = "Closed as";
+export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
+  `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
+/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both spend the cap. */
+export const CLOSE_UNCONFIRMED_DECISION =
+  "Close unconfirmed; the comment and close may have landed";
+export const CLOSE_FAILED_DECISION = "Close failed; the replacement comment may have posted";
+export const closeRefusedText = (why: string): string => `Not closed: ${why}.`;
+export const closedText = (ref: string, replacement: string): string =>
+  `Closed ${ref}; linked its open replacement ${replacement}. Recorded in Decided without you.`;
+export const closeFailedText = (): string =>
+  "Not closed: GitHub refused the comment and close; see the server log.";
+export const closeUnconfirmedText = (): string =>
+  "Close unconfirmed: GitHub accepted the call but the ticket does not read as closed; the comment may have posted. Tell the operator.";
+/** The most waiting tickets whose bodies close_ticket reads for "Depends on", and how many at once. */
+export const FLIGHT_CLOSE_DEPENDENT_READS_MAX = 60;
+export const FLIGHT_CLOSE_DEPENDENT_READ_BATCH = 4;
 
 /** GitHub reads (read_pr, read_ci_log, list_tickets): the calls FLIGHT may make in an hour, together. */
 export const FLIGHT_GH_READS_PER_HOUR = 60;

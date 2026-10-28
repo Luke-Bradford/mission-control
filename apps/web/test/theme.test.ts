@@ -279,7 +279,7 @@ describe("hud.css state rules", () => {
   it("the phone block of hud.css is the width PHONE_QUERY names", () => {
     const px = /^\(max-width: (\d+px)\)$/.exec(PHONE_QUERY)?.[1];
     expect(px, "PHONE_QUERY is a single max-width").toBeDefined();
-    expect(maxWidthBlock(px as string)).toContain(".kcol button.kh");
+    expect(maxWidthBlock(px as string)).toContain(".kcol .kh > button");
   });
 
   it("at phone width a per-repo lane drops its fixed height, so an open column cannot spill", () => {

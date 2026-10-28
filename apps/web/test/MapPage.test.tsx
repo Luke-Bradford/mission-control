@@ -162,6 +162,20 @@ describe("Map page", () => {
     expect(screen.getByText(/2 files/)).toBeTruthy();
   });
 
+  it("uses h2 headings for the mapped page's Seats and Selected sections", async () => {
+    stubFetch({
+      "/api/repos": repos,
+      "/api/config": config,
+      "/api/crew": { rows: [] },
+      "/api/repos/sample/map": idle,
+    });
+    at("/map/sample");
+    await screen.findByText("3D scene");
+    expect(screen.getByRole("heading", { level: 1, name: "Crew activity map" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Seats" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Selected" })).toBeTruthy();
+  });
+
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {
     stubFetch({
       "/api/repos": repos,

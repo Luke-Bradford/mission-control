@@ -35,7 +35,7 @@ it.each([3, 6, 10])(
       "/api/comms/chatter": { pairs: [] },
     });
     render(<CommsGraph rows={live} flightId="flight-1" view={{ kind: "crew" }} />);
-    const flight = await screen.findByRole("button", { name: /Open FLIGHT/ });
+    const flight = await screen.findByRole("button", { name: /FLIGHT.*open FLIGHT/i });
     // CAPCOM, FLIGHT and #crew are hubs; every other seat and the loop is a node, quiet or not.
     expect(document.querySelectorAll(".comms-node")).toHaveLength(seats + 3);
     expect(document.querySelectorAll(".comms-node.hub")).toHaveLength(3);
@@ -43,13 +43,19 @@ it.each([3, 6, 10])(
     expect(flight.getAttribute("transform")).toBe(
       `translate(${f.cx.toFixed(2)} ${f.cy.toFixed(2)})`,
     );
-    expect(screen.getByRole("button", { name: /Open ebull-ta/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ebull-ta.*open ebull-ta/i })).toBeTruthy();
     const spokes = [...document.querySelectorAll(".comms-spoke-name")].map((t) => t.textContent);
     expect(spokes).toEqual(["GUIDO", "RETRO", "LOOPS"]);
     // Names are full call signs, never a role-stripped suffix.
     expect([...document.querySelectorAll(".comms-node-name")].map((t) => t.textContent)).toContain(
       "SEAT-1",
     );
+    for (const node of document.querySelectorAll<HTMLElement>('.comms-node[role="button"]')) {
+      const visibleLabel = node.querySelector(".comms-node-name")?.textContent;
+      if (visibleLabel === undefined || visibleLabel === null)
+        throw new Error("Node label is missing");
+      expect(node.getAttribute("aria-label")).toContain(visibleLabel);
+    }
   },
 );
 
@@ -66,10 +72,10 @@ it("lays out every live seat, draws static link totals, and changes scope with t
     "/api/comms/chatter": { pairs: [] },
   });
   const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  await screen.findByRole("button", { name: /Open FLIGHT/ });
-  expect(screen.getByRole("button", { name: /Open CAPCOM/ })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /Open guido-1/i })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /Open retro-1/i })).toBeTruthy();
+  await screen.findByRole("button", { name: /FLIGHT.*open FLIGHT/i });
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /retro-1.*open retro-1/i })).toBeTruthy();
   expect(document.querySelectorAll(".comms-edge-count")).toHaveLength(2);
   expect(document.querySelectorAll(".comms-edge-dot")).toHaveLength(0);
   expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("10");
@@ -86,10 +92,18 @@ it("lays out every live seat, draws static link totals, and changes scope with t
   await waitFor(() => expect(screen.getByText("guido-1 ↔ retro-1 · 24h")).toBeTruthy());
   expect(document.querySelectorAll(".comms-edge:not(.dim)")).toHaveLength(1);
   expect(document.querySelector(".comms-edge:not(.dim) .comms-edge-count")?.textContent).toBe("5");
-  expect(screen.getByRole("button", { name: /Open guido-1/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /Open retro-1/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /Open FLIGHT/ }).classList).not.toContain("selected");
-  expect(screen.getByRole("button", { name: /Open CAPCOM/ }).classList).not.toContain("selected");
+  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /retro-1.*open retro-1/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).not.toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).not.toContain(
+    "selected",
+  );
 });
 
 it("lights an edge only when its message count increases after the initial load", async () => {
@@ -252,18 +266,24 @@ it("keeps selected seats lit without traffic and dims crew-paused seats", async 
       view={{ kind: "contact", agentId: "guido-1", contactId: "retro-1" }}
     />,
   );
-  const guido = await screen.findByRole("button", { name: /Open guido-1/i });
-  const retro = screen.getByRole("button", { name: /Open retro-1/i });
+  const guido = await screen.findByRole("button", { name: /guido-1.*open guido-1/i });
+  const retro = screen.getByRole("button", { name: /retro-1.*open retro-1/i });
   expect(guido.classList).toContain("selected");
   expect(retro.classList).toContain("selected");
   expect(retro.classList).toContain("inactive");
-  expect(screen.getByRole("button", { name: /Open FLIGHT/ }).classList).toContain("dim");
-  expect(screen.getByRole("button", { name: /Open CAPCOM/ }).classList).toContain("dim");
+  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).toContain("dim");
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).toContain("dim");
 
   graph.rerender(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "flight" }} />);
-  expect(screen.getByRole("button", { name: /Open FLIGHT/ }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /Open CAPCOM/ }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /Open guido-1/i }).classList).not.toContain("selected");
+  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).not.toContain(
+    "selected",
+  );
 
   graph.rerender(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   expect(document.querySelectorAll(".comms-node.selected")).toHaveLength(0);
@@ -322,7 +342,7 @@ it("draws the #crew channel as a hub with its traffic", async () => {
     "/api/comms/chatter": { pairs: [] },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  const crew = await screen.findByRole("button", { name: "Open #crew, 3 messages in 24h" });
+  const crew = await screen.findByRole("button", { name: "#crew, open #crew, 3 messages in 24h" });
   expect(crew.classList).toContain("hub");
   expect(document.querySelector(".comms-edge-count")?.textContent).toBe("3");
 });
@@ -460,7 +480,7 @@ it("shows presence by state and fades a seat out when it leaves, back in when it
   const graph = render(
     <CommsGraph rows={crew({ hudState: "running" })} flightId="flight-1" view={{ kind: "crew" }} />,
   );
-  const node = () => screen.queryByRole("button", { name: /Open retro-1/i });
+  const node = () => screen.queryByRole("button", { name: /retro-1.*open retro-1/i });
   await waitFor(() => expect(node()?.classList).toContain("presence-running"));
   graph.rerender(
     <CommsGraph rows={crew({ hudState: "idle" })} flightId="flight-1" view={{ kind: "crew" }} />,
@@ -516,7 +536,7 @@ it("under reduced motion: no drift loop, no particles, no fade; the new link sti
       <CommsGraph rows={rows.slice(0, 2)} flightId="flight-1" view={{ kind: "crew" }} />,
     );
     expect(document.querySelector(".comms-node.leaving")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Open retro-1/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /retro-1.*open retro-1/i })).toBeNull();
   } finally {
     frames.mockRestore();
     restore();
@@ -549,10 +569,12 @@ it("hovers a node or link for its counts and newest message; clicks and keys ope
     "/api/comms/chatter": { pairs: [] },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  const guido = await screen.findByRole("button", { name: /Open guido-1, 5 messages/i });
+  const guido = await screen.findByRole("button", { name: /guido-1, open guido-1, 5 messages/i });
   // One tab stop for the whole graph: FLIGHT, at the centre.
   expect(guido.getAttribute("tabindex")).toBe("-1");
-  expect(screen.getByRole("button", { name: /Open FLIGHT/ }).getAttribute("tabindex")).toBe("0");
+  expect(
+    screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).getAttribute("tabindex"),
+  ).toBe("0");
   fireEvent.mouseEnter(guido);
   expect(guido.getAttribute("aria-describedby")).toContain(
     screen.getByRole("tooltip").getAttribute("id"),
@@ -570,9 +592,11 @@ it("hovers a node or link for its counts and newest message; clicks and keys ope
   fireEvent.click(edge);
   expect(window.location.pathname).toBe("/comms/agents/guido-1/contacts/retro-1");
 
-  fireEvent.keyDown(screen.getByRole("button", { name: /Open retro-1/i }), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("button", { name: /retro-1.*open retro-1/i }), {
+    key: "Enter",
+  });
   expect(window.location.pathname).toBe("/comms/agents/retro-1");
-  fireEvent.focus(screen.getByRole("button", { name: /Open CAPCOM/ }));
+  fireEvent.focus(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }));
   expect(within(screen.getByRole("tooltip")).getByText("No messages in 24h")).toBeTruthy();
 });
 
@@ -583,17 +607,17 @@ it("walks the graph by keyboard: arrows between nodes, down into a node's links,
     "/api/comms/chatter": { pairs: [] },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  const flight = await screen.findByRole("button", { name: /Open FLIGHT/ });
+  const flight = await screen.findByRole("button", { name: /FLIGHT.*open FLIGHT/i });
   act(() => flight.focus());
   // Clockwise from the top: CAPCOM is next after the centre.
   fireEvent.keyDown(flight, { key: "ArrowRight" });
-  const capcom = screen.getByRole("button", { name: /Open CAPCOM/ });
+  const capcom = screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i });
   expect(document.activeElement).toBe(capcom);
   expect(capcom.getAttribute("tabindex")).toBe("0");
   expect(flight.getAttribute("tabindex")).toBe("-1");
   fireEvent.keyDown(capcom, { key: "ArrowLeft" });
   expect(document.activeElement).toBe(flight);
-  const guido = screen.getByRole("button", { name: /Open guido-1/i });
+  const guido = screen.getByRole("button", { name: /guido-1.*open guido-1/i });
   act(() => guido.focus());
   fireEvent.keyDown(guido, { key: "ArrowDown" });
   const link = screen.getByRole("button", { name: /Conversation GUIDO-1 ↔ RETRO-1, 3 messages/ });
@@ -616,7 +640,7 @@ it("keeps a stopped seat that talked in the window, set back; shows link counts 
     />,
   );
   const retro = await screen.findByRole("button", {
-    name: /Open retro-1, 2 messages in 24h, Paused/i,
+    name: /retro-1, open retro-1, 2 messages in 24h, Paused/i,
   });
   expect(retro.classList).toContain("presence-stopped");
   expect(screen.queryByRole("button", { name: /away/ })).toBeNull();

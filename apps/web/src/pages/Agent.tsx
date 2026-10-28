@@ -69,6 +69,7 @@ export function Agent({ id }: { id: string | null }) {
 
   return (
     <section id="page-agent">
+      <h1 className="sr-only">Agents</h1>
       <Picker rows={inView} items={items} current={shownId} />
       {row ? (
         <>

@@ -788,7 +788,12 @@ A run can stay parked after its seat has moved on. This happens when it was set 
 curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'
 ```
 
-This lifts the park, as your message to a live seat would:
+On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
+and lets the run go on to merge. It is deliberately different from a message to the seat, which sends
+the findings back to the author for rework. The HUD's named waiver and rework actions arrive with #828;
+until then, use this route to waive.
+
+This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 

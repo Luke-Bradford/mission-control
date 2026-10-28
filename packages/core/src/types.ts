@@ -100,6 +100,12 @@ export interface Run {
   plan?: RunPlan;
   /** The `claude` CLI version the run started on; absent on a run that did not record it. */
   cliVersion?: string | null;
+  /** Immutable launch binding, absent on runs stored before audit capture. */
+  accountId?: AccountId | null;
+  /** Immutable launch effort, absent when the CLI used its default. */
+  effort?: string | null;
+  /** SHA-256 of the role brief, generated preamble, and first step prompt. */
+  promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
   endedBy?: "operator" | "engine" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
@@ -401,6 +407,10 @@ export interface PullRequestView {
   assignees?: string[];
   /** The head commit's checks by name; absent on a row stored before them. */
   checks?: PrCheck[];
+  /** PR size as reported by GitHub; absent on rows collected before audit capture. */
+  additions?: number | null;
+  deletions?: number | null;
+  changedFiles?: number | null;
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */

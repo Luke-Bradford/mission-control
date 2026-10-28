@@ -27,6 +27,30 @@ const at = (path: string) => {
 
 describe("App", () => {
   it.each([
+    ["/", "Overview"],
+    ["/flight", "Flight"],
+    ["/board", "Board"],
+    ["/agent", "Agents"],
+    ["/map/sample", "Crew activity map"],
+    ["/comms", "Comms"],
+    ["/telemetry", "Telemetry"],
+    ["/setup/loops", "Setup"],
+  ])("%s has one page heading and the shell landmarks", async (path, heading) => {
+    const { container } = at(path);
+    await screen.findByRole("heading", { level: 1, name: heading });
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(screen.getByRole("main")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+  });
+
+  it("skips from the Board link to the board content", async () => {
+    at("/board");
+    const board = await screen.findByRole("heading", { level: 2, name: "Work board" });
+    fireEvent.click(screen.getByRole("link", { name: "Skip to board" }));
+    expect(document.activeElement).toBe(board);
+  });
+
+  it.each([
     ["/", "page-overview", "Overview"],
     ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],

@@ -6,6 +6,7 @@ import {
   type BoardItem,
   DEFAULT_PROFILES,
   eligibleToStart,
+  globMatches,
   hudColumnOf,
   type Profile,
   priorityRank,
@@ -98,6 +99,9 @@ async function validate(
     refuse("Queue changed; propose again from the current queue.");
   for (const card of cards) {
     const ref = `${repo.id}#${card.issueNumber}`;
+    // FLIGHT applies the swap itself now, so no one approves it: those tickets are the operator's.
+    if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
+      refuse("Card is always_ask; the operator orders it.");
     if (
       card.repoId !== repo.id ||
       !card.itemId ||
@@ -226,7 +230,7 @@ function approvalItem(
   };
 }
 
-export async function proposeQueueReorder(
+async function prepareQueueReorder(
   deps: QueueReorderDeps,
   seatId: string,
   moveRef: string,
@@ -253,6 +257,16 @@ export async function proposeQueueReorder(
     seatSnapshot: seatInput(seat),
     state: "pending",
   };
+  return { key, p };
+}
+
+export async function proposeQueueReorder(
+  deps: QueueReorderDeps,
+  seatId: string,
+  moveRef: string,
+  aboveRef: string,
+) {
+  const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
   const item = approvalItem(key, p, deps.now());
   deps.store.addBrief({ key: item.key, ...item.brief });
   deps.store.saveQueueReorder(key, JSON.stringify(p), item.at, {
@@ -265,6 +279,27 @@ export async function proposeQueueReorder(
     at: item.at,
   });
   return { item };
+}
+
+/** Applies FLIGHT's own queue judgement through the same guarded write and recovery path. */
+export async function reorderQueue(
+  deps: QueueReorderDeps,
+  seatId: string,
+  moveRef: string,
+  aboveRef: string,
+) {
+  const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
+  // The pending proposal is an internal recovery record, not an operator approval: no brief, no note.
+  deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now());
+  try {
+    return await resolveQueueReorder(deps, key, "approve");
+  } catch (e) {
+    // Refused before any write: drop the record, so it can never be approved later.
+    const raw = deps.store.getSetting(key);
+    if (raw !== null && (JSON.parse(raw) as Proposal).state === "pending")
+      deps.store.deleteSetting(key);
+    throw e;
+  }
 }
 
 const approvals = new WeakMap<Store, Promise<unknown>>();
@@ -337,7 +372,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   gate(deps, seatOf(deps, p.seat).seat, p.repoId);
   // Persist before the first external write. A crash or uncertain response must never replay it.
   const recoveryKey = `${key}:recovery`;
-  const recoveryText = `Priority swap incomplete or unconfirmed for ${p.repoId}#${cards[0].issueNumber} and ${p.repoId}#${cards[1].issueNumber}. Refresh the board and check both Priority values. Before approval: ${p.repoId}#${cards[0].issueNumber} ${cards[0].priority}; ${p.repoId}#${cards[1].issueNumber} ${cards[1].priority}. Restore these on the board if needed, then propose again. This approval will not write again.`;
+  const recoveryText = `Priority swap incomplete or unconfirmed for ${p.repoId}#${cards[0].issueNumber} and ${p.repoId}#${cards[1].issueNumber}. Refresh the board and check both Priority values. Before approval: ${p.repoId}#${cards[0].issueNumber} ${cards[0].priority}; ${p.repoId}#${cards[1].issueNumber} ${cards[1].priority}. Restore these on the board if needed, then queue the move again. This record will not write again.`;
   p.state = "writing";
   deps.store.saveQueueReorder(
     key,

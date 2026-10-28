@@ -2107,6 +2107,17 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
   });
 
+  it("does not spawn when recording the prompt version fails", async () => {
+    vi.spyOn(store, "setRunPromptVersion").mockImplementation(() => {
+      throw new Error("audit unavailable");
+    });
+    const { sup } = make();
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(500);
+    expect(recorded()).toEqual([]);
+  });
+
   it("replaces whatever is at the token path rather than writing through it (temp, then rename)", async () => {
     const runId = await leftActive();
     const tokenPath = crewTokenPath(dbPath, runId);
