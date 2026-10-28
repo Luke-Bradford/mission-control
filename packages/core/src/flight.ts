@@ -302,6 +302,8 @@ export interface FlightRetrospective {
   parkReasons: { reason: string; n: number }[];
   redMain: FlightSignal[];
   costlyRuns: { runId: string; seat: string; ticket: string | null; costUsd: number | null }[];
+  /** Daily visual-quality work for FLIGHT, delivered with the retrospective wake. */
+  productPass: { pages: string[]; instruction: string };
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -1077,7 +1079,10 @@ export function wakeLine(
   digest: FlightWake | FlightState = s,
   causes: string[] = ["initial"],
 ): string {
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}\n${JSON.stringify(digest)}`;
+  const productPass = s.prs.some((p) => p.state === "merged")
+    ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap with the screenshot reference."
+    : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

@@ -29,6 +29,9 @@ export const SCREEN_READER_ANNOTATION = /\/\/ Reader:.*apps\/web\//;
 export const SCREEN_ROUTE_START = /^\s*api\.(?:get|post|put|patch|delete)\b/;
 export const SCREEN_ROUTE_DECLARATION =
   /^(\s*)api\.(?:get|post|put|patch|delete)\b[^"']*["'](\/[^"']*)["']/;
+const HUD_PRODUCT_PAGES = ["/", "/map", "/board", "/flight", "/telemetry", "/comms"];
+const PRODUCT_PASS_INSTRUCTION =
+  "Render each page at 1600×1000; compare it with the HUD mockup, direction and repo memory; file or fold gaps, then log pages checked and tickets filed or folded.";
 
 type ScreenGit = (args: string[], input?: string) => Promise<string | Buffer>;
 
@@ -299,6 +302,7 @@ export async function prepareRetrospective(
       .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0) || a.id.localeCompare(b.id))
       .slice(0, FLIGHT_COSTLY_RUNS_MAX)
       .map((r) => ({ runId: r.id, seat: r.agentId, ticket: r.ticket, costUsd: r.costUsd })),
+    productPass: { pages: HUD_PRODUCT_PAGES, instruction: PRODUCT_PASS_INSTRUCTION },
   };
   store.setSetting(
     setting(repoId),
