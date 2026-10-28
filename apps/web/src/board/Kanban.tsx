@@ -28,6 +28,8 @@ import {
 import { usePhone } from "./phone.ts";
 
 const NO_PRS: PullRequestView[] = [];
+/** Keep the Board's historical Done column light until the operator asks for its full history. */
+export const DONE_CARD_WINDOW = 10;
 
 /** What every card on this render shares. */
 interface CardCtx {
@@ -127,6 +129,7 @@ export function Kanban({
   const phone = usePhone();
   const uid = useId();
   const [picked, setPicked] = useState<HudColumn | null>(null);
+  const [doneExpanded, setDoneExpanded] = useState(false);
   const lists = new Map(
     columns.map((col) => [col, sortCards(items.filter((i) => cardColumn(i) === col))]),
   );
@@ -144,6 +147,14 @@ export function Kanban({
           <div className="xs muted knot">not in {lacking.join(", ")}</div>
         ) : null;
         const list = lists.get(col) ?? [];
+        const cards = col === "Done" && !doneExpanded ? list.slice(0, DONE_CARD_WINDOW) : list;
+        const hiddenDone = col === "Done" ? list.length - cards.length : 0;
+        const moreDone =
+          hiddenDone > 0 ? (
+            <button type="button" className="done-more" onClick={() => setDoneExpanded(true)}>
+              Show {hiddenDone} more completed card{hiddenDone === 1 ? "" : "s"}
+            </button>
+          ) : null;
         if (phone && list.length > 0) {
           const on = col === openCol;
           return (
@@ -160,9 +171,10 @@ export function Kanban({
               {note}
               {on && (
                 <div className="kb" id={panelId(col)}>
-                  {list.map((i) => (
+                  {cards.map((i) => (
                     <Card key={ticketRef(i)} {...cardProps(i, col, ctx)} />
                   ))}
+                  {moreDone}
                 </div>
               )}
             </div>
@@ -185,9 +197,10 @@ export function Kanban({
             </div>
             {note}
             <div className="kb">
-              {list.map((i) => (
+              {cards.map((i) => (
                 <Card key={ticketRef(i)} {...cardProps(i, col, ctx)} />
               ))}
+              {moreDone}
             </div>
           </div>
         );
