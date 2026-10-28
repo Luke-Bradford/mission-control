@@ -855,6 +855,8 @@ export interface CodexSeatEffectiveConfig {
   approval: Readonly<Record<string, string>>;
   sandbox: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
   writableRoots: Readonly<Record<string, string>>;
+  execPolicy: Readonly<Record<string, never>>;
+  shellEnvironment: Readonly<Record<string, readonly string[]>>;
 }
 
 /** The config/read values a Codex seat must report for this particular hub endpoint. */
@@ -872,6 +874,8 @@ export function codexSeatEffectiveConfig(
     }),
     sandbox: Object.freeze({ network: Object.freeze({ enabled: false }) }),
     writableRoots: Object.freeze({ ".": mode === "read-only" ? "read" : "write" }),
+    execPolicy: Object.freeze({}),
+    shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
   });
 }
 

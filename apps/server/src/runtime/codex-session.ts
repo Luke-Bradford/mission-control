@@ -144,6 +144,21 @@ function hasConfigFloor(actual: unknown, expected: unknown): boolean {
   return Object.keys(expected).every((key) => hasConfigFloor(actual[key], expected[key]));
 }
 
+function sameConfig(actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (Array.isArray(actual) && Array.isArray(expected))
+    return (
+      actual.length === expected.length && actual.every((item, n) => sameConfig(item, expected[n]))
+    );
+  if (!isObj(actual) || !isObj(expected)) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, n) => key === expectedKeys[n] && sameConfig(actual[key], expected[key]))
+  );
+}
+
 const CODEX_MCP_METADATA_FIELDS = new Set(["environment_id", "enabled", "tool_timeout_sec"]);
 
 function matchesMcpServer(actual: unknown, expected: Readonly<Record<string, string>>): boolean {
@@ -177,7 +192,9 @@ function seatConfigMatches(value: unknown, expected: CodexSeatEffectiveConfig): 
     Object.entries(workspaceRoots).every(
       ([path, access]) => access !== "write" || expected.writableRoots[path] === "write",
     ) &&
-    hasConfigFloor(workspaceRoots, expected.writableRoots)
+    hasConfigFloor(workspaceRoots, expected.writableRoots) &&
+    sameConfig(value.rules, expected.execPolicy) &&
+    sameConfig(value.shell_environment_policy, expected.shellEnvironment)
   );
 }
 

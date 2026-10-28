@@ -105,6 +105,8 @@ function attached(approve = vi.fn<CodexSessionInput["approve"]>(async () => "acc
                     network: { enabled: false },
                   },
                 },
+                rules: {},
+                shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
               },
             },
           }),

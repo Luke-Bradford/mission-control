@@ -192,6 +192,9 @@ describe("Codex session", () => {
     "approvalConfig",
     "sandboxConfig",
     "writableRoot",
+    "execPolicy",
+    "shell",
+    "shellExtra",
     "effectiveHooks",
   ])(
     "closes before the first turn when effective %s settings differ on start and resume",

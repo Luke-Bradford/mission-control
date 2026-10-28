@@ -146,6 +146,8 @@ rl.on("line", (line) => {
           network: { enabled: false },
         },
       },
+      rules: {},
+      shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
     };
     const bad = configured.badConfig;
     if (bad === "mcp") config.mcp_servers.evil = {};
@@ -155,6 +157,9 @@ rl.on("line", (line) => {
     if (bad === "sandboxConfig") config.permissions.mc_seat.network.enabled = true;
     if (bad === "writableRoot")
       config.permissions.mc_seat.filesystem[":workspace_roots"]["."] = "read";
+    if (bad === "execPolicy") config.rules = { allow: ["*"] };
+    if (bad === "shell") config.shell_environment_policy = { exclude: [] };
+    if (bad === "shellExtra") config.shell_environment_policy.inherit = "all";
     if (configured.realConfigShape) {
       config.mcp_servers.mc.environment_id = "local";
       config.mcp_servers.mc.enabled = true;
