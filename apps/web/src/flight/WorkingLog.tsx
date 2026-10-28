@@ -50,21 +50,21 @@ export function WorkingLog() {
     <Panel
       id="logP"
       title="System log"
-      sub="Mission Control wakes and recorded actions · answers shown once, alongside"
+      sub="Mission Control wakes and recorded actions, newest first"
+      actions={seat ? <span className="flight-count">{entriesLabel(rows.length)}</span> : undefined}
     >
       {view === undefined ? (
         <p className="pb note">—</p>
       ) : !seat ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
-        <details className="guard" id="workLog">
-          <summary>{entriesLabel(rows.length)}</summary>
+        <div className="flight-panel-scroll flight-log" id="workLog">
           {rows.length === 0 ? (
-            <p className="note">{NOTHING_LOGGED}</p>
+            <p className="pb note">{NOTHING_LOGGED}</p>
           ) : (
-            rows.map((r) => <LogRow key={r.id} row={r} tz={tz} />)
+            [...rows].reverse().map((r) => <LogRow key={r.id} row={r} tz={tz} />)
           )}
-        </details>
+        </div>
       )}
     </Panel>
   );

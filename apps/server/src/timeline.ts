@@ -5,6 +5,28 @@ import type { Store } from "./store.ts";
 
 type Lane = OverviewTimeline["lanes"][number];
 
+type Span = Lane["spans"][number];
+
+/**
+ * Spans in start order, with overlapping spans of one kind joined. A crew seat's open turn can be
+ * seen twice (its status events and its unended run); drawn twice it would double up on the lane.
+ */
+function mergeSpans(spans: readonly Span[]): Span[] {
+  const out: Span[] = [];
+  const last = new Map<Span["kind"], Span>();
+  for (const span of [...spans].sort((a, b) => a.from - b.from)) {
+    const prev = last.get(span.kind);
+    if (prev && (prev.to === null || span.from < prev.to)) {
+      prev.to = prev.to === null || span.to === null ? null : Math.max(prev.to, span.to);
+      continue;
+    }
+    const copy = { ...span };
+    out.push(copy);
+    last.set(span.kind, copy);
+  }
+  return out;
+}
+
 export function overviewTimeline(config: CcConfig, store: Store, now: number): OverviewTimeline {
   const from = now - TIMELINE_WINDOW_MS;
   const lanes = configuredAgents(config).map(
@@ -64,7 +86,7 @@ export function overviewTimeline(config: CcConfig, store: Store, now: number): O
     byAgent.get(run.agentId)?.ticks.push(...(digests.get(run.id)?.toolStarts ?? []));
   }
   for (const lane of lanes) {
-    lane.spans.sort((a, b) => a.from - b.from);
+    lane.spans = mergeSpans(lane.spans);
     lane.ticks = lane.ticks
       .filter((at) => at >= from && at <= now)
       .sort((a, b) => a - b)

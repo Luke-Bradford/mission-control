@@ -72,7 +72,7 @@ function StepCells({ r }: { r: CrewRow }) {
             aria-current={mark === "cur" || mark === "held" ? "step" : undefined}
           >
             {label}
-            {n > 1 && <span className="titer">×{n}</span>}
+            {n > 1 && <sup className="titer">×{n}</sup>}
           </span>
         );
       })}
@@ -96,6 +96,40 @@ function ledgerWork(row: CrewRow, entries: readonly FlightLedgerEntry[]): Flight
       : undefined) ??
     work.find((entry) => entry.owner === row.id) ??
     null
+  );
+}
+
+/**
+ * FLIGHT's recorded next action and checkpoint for a workstream. Missing ones are a data-quality
+ * gap in FLIGHT's ledger, marked quietly once rather than flagged on every row; no ETA is guessed.
+ */
+function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: number }) {
+  const next = entry?.next ?? null;
+  const due = entry?.due ?? null;
+  if (next === null && due === null) {
+    return (
+      <span className="wif-next min0">
+        <span className="flight-gap" title="FLIGHT has not recorded a next action or checkpoint">
+          Not recorded
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="wif-next min0" title={next ?? undefined}>
+      {next === null ? (
+        <span className="flight-gap">No next action</span>
+      ) : (
+        <span className="wif-next-text">{next}</span>
+      )}
+      {due === null ? (
+        <span className="flight-gap">No checkpoint</span>
+      ) : (
+        <span className={`wif-checkpoint${due <= now ? " crit-t" : ""}`}>
+          {due <= now ? `Checkpoint overdue ${dur(now - due)}` : `Checkpoint in ${dur(due - now)}`}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -126,16 +160,16 @@ function WorkRow({
           </span>
         </div>
         <div className="wif-work min0">
-          <span>
+          {r.ticketTitle && (
+            <b className="wif-title min0 ellip" title={r.ticketTitle}>
+              {r.ticketTitle}
+            </b>
+          )}
+          <span className="wif-meta min0">
             {r.ticket && <TicketRef ticket={r.ticket} />}
-            {r.ticketTitle && (
-              <b className="min0 ellip" title={r.ticketTitle}>
-                {r.ticketTitle}
-              </b>
-            )}
-          </span>
-          <span className="wif-doing s fg2 min0 ellip" title={doing}>
-            <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
+            <span className="wif-doing min0 ellip" title={doing}>
+              <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
+            </span>
           </span>
         </div>
         <div className="wif-stage min0">
@@ -144,17 +178,8 @@ function WorkRow({
             <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
           )}
         </div>
-        <span className="wif-next min0" title={entry?.next ?? "No next action recorded"}>
-          <span className="s ellip">{entry?.next ?? "No next action recorded"}</span>
-          <span className={`s ${entry?.due == null ? "warn-t" : "fg2"}`}>
-            {entry?.due == null || tz === null
-              ? "No checkpoint"
-              : entry.due <= now
-                ? `Checkpoint overdue ${dur(now - entry.due)}`
-                : `Checkpoint in ${dur(entry.due - now)}`}
-          </span>
-        </span>
-        <span className="wif-elapsed s num">{elapsed === null ? DASH : dur(elapsed)}</span>
+        <NextAction entry={entry} now={now} />
+        <span className="wif-elapsed num">{elapsed === null ? DASH : dur(elapsed)}</span>
       </div>
     </li>
   );
