@@ -594,6 +594,11 @@ function otherLogin(
  * stall, on a new run or later in the same one, pulses again) and every loop in error (keyed by
  * its last success, so a failure after a recovery pulses again); the crew's strays, open
  * questions and unacked errors; and the test lock when its holder has stalled with seats in line.
+ * Messages are not needs: unread chatter is counted on its Comms thread. FLIGHT's own lines count
+ * only as an `@CAPCOM` question (a `tag` for the operator); another agent's `@CAPCOM` tag, or a
+ * question on its direct line, is FLIGHT's to triage and reaches the operator only through a brief
+ * FLIGHT writes for them. A seat's `ask_operator` question is its `ask:` item alone, never also the
+ * Comms line that mirrors it.
  * Sorted by ATTENTION_KINDS order, then time; `acked` from the acks table.
  */
 export function attentionItems(
@@ -612,30 +617,32 @@ export function attentionItems(
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const items: OwnedItem[] = [];
 
+  const flightId = flightSeat(config)?.seat.id ?? null;
   for (const agent of configuredAgents(config)) {
+    const own = agent.id === flightId;
+    // with no FLIGHT seat, another agent's chatter has nobody to triage it but its Comms thread
+    if (!own && flightId === null) continue;
     const unread = threadMessages(store, agent.id, agent.kind === "crew", "attention").filter(
-      (m) => !m.seen,
+      (m) =>
+        !m.seen &&
+        !(m.id.startsWith("comms:") && m.from === agent.id && store.askedAt(agent.id, m.at ?? -1)),
     );
-    const tags = unread.filter((m) => m.tagged);
-    const replies = unread.filter((m) => m.direct);
+    const tags = unread.filter((m) => m.tagged && (!own || flightQuestion(m.text)));
+    const questions = own ? [] : unread.filter((m) => m.direct && flightQuestion(m.text));
     for (const [kind, messages] of [
       ["tag", tags],
-      ["message", replies],
+      ["message", questions],
     ] as const) {
-      const question =
-        kind === "message" ? messages.findLast((m) => flightQuestion(m.text)) : undefined;
-      const last = question ?? messages.at(-1);
+      const last = messages.at(-1);
       if (!last) continue;
       items.push({
+        // another agent's line is routed to FLIGHT below, once its brief is read
         owner: OWNER_OPERATOR,
         key: `${kind}:${agent.id}:${last.id}`,
         kind,
         agentId: agent.id,
         repoId: agent.repoId,
-        text:
-          kind === "tag"
-            ? last.text.replace(/^[→←]\s*[^:]+:\s*/, "")
-            : (question?.text ?? `${messages.length} new on your direct line`),
+        text: kind === "tag" ? last.text.replace(/^[→←]\s*[^:]+:\s*/, "") : last.text,
         at: last.at ?? 0,
         messageAt: last.at,
         tool: null,
@@ -766,46 +773,48 @@ export function attentionItems(
   items.push(...crewItems(config, store, lock, rows));
 
   const live = flightLive(config, store);
-  const flightId = flightSeat(config)?.seat.id ?? null;
   const passed = new Set(
     store
       .openQuestions()
       .filter((q) => q.passedAt !== null || q.agentId === flightId)
       .map((q) => `ask:${q.id}`),
   );
+  const route = (i: OwnedItem): AttentionItem => {
+    const saved = briefs.get(i.key);
+    // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
+    const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    const item: AttentionItem = {
+      ...i,
+      ...(brief === undefined ? {} : { brief }),
+      acked: acks.has(i.key),
+    };
+    if (i.owner !== OWNER_OPERATOR || passed.has(i.key) || ownReply(i, flightId)) return item;
+    if (brief !== undefined && brief.for !== "flight") return item;
+    if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS)
+      return { ...item, flightTriage: "missed" };
+    if (!live) return item;
+    if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
+    // A PR only becomes an attention item after its existing quiet wait.
+    const raisedAt =
+      i.kind === "stalled"
+        ? (rows.find((r) => r.id === i.agentId)?.stateSince ?? i.at)
+        : i.at + (i.kind === "pr" ? PR_WAIT_MS : 0);
+    const triageDueAt = raisedAt + FLIGHT_TRIAGE_WAIT_MS;
+    return now < triageDueAt
+      ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
+      : { ...item, flightTriage: "missed", triageDueAt };
+  };
   const result: AttentionItem[] = items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => {
-      const saved = briefs.get(i.key);
-      // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-      const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
-      const item: AttentionItem = {
-        ...i,
-        ...(brief === undefined ? {} : { brief }),
-        acked: acks.has(i.key),
-      };
-      if (
-        i.owner !== OWNER_OPERATOR ||
-        passed.has(i.key) ||
-        ownReply(i, flightId) ||
-        (i.kind === "message" && !flightQuestion(i.text))
-      )
-        return item;
-      if (brief !== undefined && brief.for !== "flight") return item;
-      if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS)
-        return { ...item, flightTriage: "missed" };
-      if (!live) return item;
-      if (brief?.for === "flight")
-        return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
-      // A PR only becomes an attention item after its existing quiet wait.
-      const raisedAt =
-        i.kind === "stalled"
-          ? (rows.find((r) => r.id === i.agentId)?.stateSince ?? i.at)
-          : i.at + (i.kind === "pr" ? PR_WAIT_MS : 0);
-      const triageDueAt = raisedAt + FLIGHT_TRIAGE_WAIT_MS;
-      return now < triageDueAt
-        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
-        : { ...item, flightTriage: "missed", triageDueAt };
+      const item = route(i);
+      // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
+      // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
+      const chatter = (i.kind === "tag" || i.kind === "message") && !ownReply(i, flightId);
+      const briefed = item.brief !== undefined && item.brief.for !== "flight";
+      return chatter && !briefed && item.owner === OWNER_OPERATOR
+        ? { ...item, owner: OWNER_FLIGHT }
+        : item;
     });
   const partition = partitionAttention(store, result, acks);
   return includeHeld ? [...partition.items, ...partition.held] : partition.items;

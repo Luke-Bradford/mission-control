@@ -200,7 +200,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("includes direct-line replies when opted in", async () => {
+it("notifies FLIGHT's @CAPCOM question, not direct-line narration, even with messages opted in", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -235,26 +235,27 @@ it("includes direct-line replies when opted in", async () => {
     ticket: null,
     text: "Demo checks are complete",
   });
-  bus.emit("agents");
-  expect(await events()).toMatchObject([
-    { category: "agentMessages", text: "1 new on your direct line" },
-  ]);
-  bus.emit("agents");
-  expect(await events()).toHaveLength(1);
   store.addComms({
     at: Date.now(),
     from: "demo-seat",
     to: "peer",
     ticket: null,
-    text: "@CAPCOM review this",
+    text: "@CAPCOM nothing needs you",
   });
   bus.emit("agents");
-  expect(await events()).toMatchObject([
-    { category: "agentMessages", text: "1 new on your direct line" },
-    { category: "capcom", text: "@CAPCOM review this" },
-  ]);
+  // messages are not Needs you: narration and FLIGHT's summaries raise nothing to notify
+  expect(await events()).toEqual([]);
+  store.addComms({
+    at: Date.now(),
+    from: "demo-seat",
+    to: "peer",
+    ticket: null,
+    text: "@CAPCOM review this?",
+  });
   bus.emit("agents");
-  expect(await events()).toHaveLength(2);
+  expect(await events()).toMatchObject([{ category: "capcom", text: "@CAPCOM review this?" }]);
+  bus.emit("agents");
+  expect(await events()).toHaveLength(1);
   p.categories.capcom = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
@@ -262,10 +263,10 @@ it("includes direct-line replies when opted in", async () => {
     from: "demo-seat",
     to: "peer",
     ticket: null,
-    text: "@CAPCOM suppressed",
+    text: "@CAPCOM suppressed?",
   });
   bus.emit("agents");
-  expect(await events()).toHaveLength(2);
+  expect(await events()).toHaveLength(1);
 });
 
 it("emits one away digest on return through settings invalidations", async () => {

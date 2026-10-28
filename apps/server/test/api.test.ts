@@ -7018,8 +7018,16 @@ describe("overview", () => {
 });
 
 it("bounds tag text in attention and reads the whole message on open", async () => {
-  const text = `@CAPCOM ${"x".repeat(1000)}`;
-  store.addComms({ at: NOW, from: "shop-app-ta", to: "CAPCOM", ticket: null, text });
+  withCrew();
+  config.crew?.sessions[0]?.seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "opus",
+    area: [],
+  });
+  const text = `@CAPCOM ${"x".repeat(1000)}?`;
+  store.addComms({ at: NOW, from: "flight-1", to: "CAPCOM", ticket: null, text });
   const items = (await get("/api/attention")).json<AttentionItem[]>();
   const tag = items.find((i) => i.kind === "tag");
   expect(tag).toBeDefined();
