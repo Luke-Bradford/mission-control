@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ConfigProfile, type Crew, type CrewLoop, RETRY_NOTE } from "@mc/core";
+import { type ConfigProfile, type Crew, type CrewLoop, RETRY_NOTE, type RunView } from "@mc/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Loops } from "../src/setup/Loops.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
-import { CONFIG, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, CREW_CONFIG, run, seatRow } from "./fixtures.ts";
 
-const TEMPLATES: ConfigProfile[] = [
+const TEMPLATES = [
   {
     name: "feature",
     labels: ["type:feature"],
@@ -40,7 +40,7 @@ const TEMPLATES: ConfigProfile[] = [
     tries: 2,
     rounds: 2,
   },
-];
+] satisfies ConfigProfile[];
 
 const cfg = { ...CONFIG, profiles: { source: "built-in", error: null, list: TEMPLATES } };
 
@@ -53,7 +53,7 @@ const steps = (region: HTMLElement): (string | null)[] =>
     .map((li) => li.textContent);
 
 describe("Setup › Loops templates", () => {
-  it("shows the approved loop chain, selected-step inspector and a ticket run overlay", () => {
+  it("shows the approved loop chain without inventing a run when no ticket is picked", () => {
     render(<Loops config={cfg} />);
 
     const chain = screen.getByRole("region", { name: "Feature loop chain" });
@@ -70,16 +70,16 @@ describe("Setup › Loops templates", () => {
       "DoneBoard → Donegate: merged",
     ]);
     const ciReturn = within(chain).getByLabelText("CI checks returns to Build");
-    expect(ciReturn.getAttribute("class")).toContain("active");
+    expect(ciReturn.getAttribute("class")).not.toContain("active");
     expect(ciReturn.getAttribute("d")).toBe("M 510 108 V 150 H 330 V 108");
-    expect(within(chain).getByText("CI fail ≤3 · used 1/3")).toBeTruthy();
-    expect(within(chain).getByLabelText("Review returns to Build").getAttribute("class")).toContain(
-      "active",
-    );
+    expect(within(chain).queryByText(/used \d\/3/)).toBeNull();
+    expect(
+      within(chain).getByLabelText("Review returns to Build").getAttribute("class"),
+    ).not.toContain("active");
     expect(within(chain).getByLabelText("Review returns to Build").getAttribute("d")).toBe(
       "M 714 108 V 198 H 300 V 108",
     );
-    expect(within(chain).getByText("changes ≤3 · used 1/3")).toBeTruthy();
+    expect(within(chain).queryByText(/changes ≤3 · used/)).toBeNull();
     expect(within(chain).getByLabelText("Merge conflict parks for FLIGHT")).toBeTruthy();
     expect(within(chain).getByLabelText("FLIGHT sync returns to CI checks")).toBeTruthy();
     expect(within(chain).getByLabelText("FLIGHT sync returns to Build")).toBeTruthy();
@@ -95,20 +95,20 @@ describe("Setup › Loops templates", () => {
     fireEvent.click(within(chain).getByRole("button", { name: /Review: gate: approved/ }));
     expect(
       within(chain).getByRole("button", { name: /CI checks: gate: all checks green/ }).className,
-    ).toContain("now");
+    ).not.toContain("now");
     const inspector = screen.getByRole("region", { name: "Step inspector" });
     expect(inspector.textContent).toContain("Gate to move onapproved");
     expect(inspector.textContent).toContain("If it failsBack to Build with findings");
     expect(inspector.textContent).toContain("Cap3 rounds");
     expect(inspector.textContent).toContain("At the capParked for FLIGHT");
-    expect(inspector.textContent).toContain("Model / commandretro-cx · gpt-5.6-sol · high");
+    expect(inspector.textContent).not.toMatch(/gpt-5\.6-(sol|terra)/);
     expect(inspector.textContent).toContain("Review {diff} against {done_when}");
 
-    const overlay = screen.getByRole("region", { name: "Run overlay" });
-    expect(overlay.textContent).toContain("Ticket #681 · inco-cx");
-    expect(overlay.textContent).toContain("Now: CI checks · try 2 of 3");
-    expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
-    expect(overlay.textContent).toContain("Review findings → Build · 1 of 3");
+    expect(screen.queryByRole("region", { name: "Run overlay" })).toBeNull();
+    expect(within(chain).getByRole("button", { name: "With run" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.getByText("No open tickets with runs to show.")).toBeTruthy();
 
     fireEvent.click(within(chain).getByRole("button", { name: "Loop only" }));
     expect(within(chain).getByRole("button", { name: /CI checks: gate/ }).className).not.toContain(
@@ -118,7 +118,78 @@ describe("Setup › Loops templates", () => {
       within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
     ).not.toContain("active");
     expect(within(chain).getByText("CI fail ≤3")).toBeTruthy();
-    expect(within(chain).queryByText("CI fail ≤3 · used 1/3")).toBeNull();
+  });
+
+  it("uses the picked ticket's run history and configured seat models", async () => {
+    const selectedRun = run({
+      id: "run-real",
+      agentId: "guido-1",
+      ticket: "shop-app#3349",
+      ticketTitle: "Quote cache",
+      profile: {
+        hash: "profile",
+        route: { by: "label", label: "type:feature" },
+        profile: { ...TEMPLATES[0], checklist: "", checks: [] },
+      },
+    }) as unknown as RunView;
+    const fetchFn = stubFetch({
+      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/boards/shop-app": [boardItem()],
+      "/api/agents/guido-1/runs?limit=50": [selectedRun],
+      "/api/agents/retro-1/runs?limit=50": [],
+      "/api/runs/run-real/loop": {
+        runId: "run-real",
+        loop: null,
+        events: [],
+        tries: [
+          {
+            step: "working",
+            fix: false,
+            n: 1,
+            startedAt: 1,
+            endedAt: 2,
+            outcome: "pass",
+            reason: null,
+          },
+          {
+            step: "ci",
+            fix: false,
+            n: 1,
+            startedAt: 3,
+            endedAt: 4,
+            outcome: "fail",
+            reason: "CI failed",
+          },
+          {
+            step: "working",
+            fix: false,
+            n: 2,
+            startedAt: 5,
+            endedAt: null,
+            outcome: "running",
+            reason: null,
+          },
+        ],
+        round: 1,
+        budget: null,
+        review: null,
+      },
+    });
+    render(<Loops config={{ ...CREW_CONFIG, profiles: cfg.profiles }} />);
+    await settled(fetchFn, "/api/agents/guido-1/runs?limit=50");
+    fireEvent.change(screen.getByLabelText("Ticket with run"), { target: { value: "run-real" } });
+    await settled(fetchFn, "/api/runs/run-real/loop");
+
+    const chain = screen.getByRole("region", { name: "Feature loop chain" });
+    expect(within(chain).getByText("CI fail ≤3 · used 1/3")).toBeTruthy();
+    const overlay = screen.getByRole("region", { name: "Run overlay" });
+    expect(overlay.textContent).toContain("Ticket #3349 · Quote cache");
+    expect(overlay.textContent).toContain("Now: Build · try 2 of 3");
+    expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
+    fireEvent.click(within(chain).getByRole("button", { name: /Build: gate/ }));
+    expect(screen.getByRole("region", { name: "Step inspector" }).textContent).toContain(
+      "Model / commandsonnet",
+    );
   });
 
   it("keeps phone-width horizontal scrolling inside the chain drawing (hud.css)", () => {

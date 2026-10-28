@@ -1,7 +1,17 @@
-import { type ConfigProfile, type ConfigView, type Crew, RETRY_NOTE, SMALL_SIZES } from "@mc/core";
+import {
+  type BoardItem,
+  type ConfigProfile,
+  type ConfigView,
+  type Crew,
+  type LoopPhase,
+  RETRY_NOTE,
+  type RunLoopView,
+  type RunView,
+  SMALL_SIZES,
+} from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.ts";
-import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource, useResources } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
@@ -292,9 +302,76 @@ const TODAY_CHAIN: readonly ChainStep[] = [
   },
 ];
 
-function LoopChain() {
+const CHAIN_INDEX: Record<LoopPhase, number> = {
+  working: 1,
+  ci: 2,
+  review: 3,
+  parked: 4,
+  done: 5,
+};
+
+type TicketRun = { run: RunView; title: string };
+
+const returnUses = (view: RunLoopView | undefined, step: "ci" | "review") =>
+  view?.tries
+    .filter(
+      (attempt) =>
+        attempt.step === step && (step === "ci" ? attempt.outcome === "fail" : attempt.fix),
+    )
+    .reduce((total, attempt) => total + (attempt.failures ?? 1), 0) ?? 0;
+
+function LoopChain({ config }: { config: ConfigView }) {
   const [selected, setSelected] = useState(2);
-  const [withRun, setWithRun] = useState(true);
+  const [runId, setRunId] = useState("");
+  const [withRun, setWithRun] = useState(false);
+  const seatDefs = config.crew?.sessions.flatMap((session) => session.seats) ?? [];
+  const { data: crew } = useResource<Crew>(RESOURCES.crew);
+  const runs = useResources<RunView[]>(seatDefs.map((seat) => RESOURCES.runs(seat.id)));
+  const boards = useResources<BoardItem[]>(config.repos.map((repo) => RESOURCES.boards(repo.id)));
+  const openTickets = new Map(
+    boards
+      .flatMap((board) => board.data ?? [])
+      .filter((ticket) => !ticket.closed && ticket.state !== "done")
+      .map((ticket) => [`${ticket.repoId}#${ticket.issueNumber}`, ticket]),
+  );
+  const ticketRuns: TicketRun[] = runs
+    .flatMap((resource) => resource.data ?? [])
+    .flatMap((run) => {
+      if (run.ticket === null) return [];
+      const ticket = openTickets.get(run.ticket);
+      return ticket ? [{ run, title: ticket.title }] : [];
+    });
+  const picked = ticketRuns.find(({ run }) => run.id === runId) ?? null;
+  const runLoop = useResource<RunLoopView>(picked ? RESOURCES.runLoop(picked.run.id) : null);
+  const runProfile = picked?.run.profile?.profile;
+  const profile =
+    runProfile ?? config.profiles?.list.find((candidate) => candidate.name === "feature") ?? null;
+  const triesLimit = profile?.tries ?? 3;
+  const reviewLimit = profile?.rounds ?? 3;
+  const currentTry = runLoop.data?.tries.at(-1);
+  const nowIndex = currentTry ? CHAIN_INDEX[currentTry.step] : null;
+  const ciUses = returnUses(runLoop.data, "ci");
+  const reviewUses = returnUses(runLoop.data, "review");
+  const modelForRole = (role: string) =>
+    seatDefs.find((seat) => seat.role === role)?.model ??
+    config.crew?.roles?.find((candidate) => candidate.name === role)?.model ??
+    null;
+  const modelText = (model: string | null, effort: string | null | undefined) =>
+    model ? `${model}${effort ? ` · ${effort}` : ""}` : "No configured model applies.";
+  const modelFor = (stepName: ChainStep["name"]) => {
+    if (stepName === "Build") {
+      const seat = seatDefs.find((candidate) => candidate.id === picked?.run.agentId);
+      const effort = crew?.rows.find((candidate) => candidate.id === seat?.id)?.cli.effort;
+      return modelText(seat?.model ?? modelForRole("INCO"), effort);
+    }
+    if (stepName === "Review") {
+      const role = profile?.reviewer.role ?? "RETRO";
+      const effort = crew?.rows.find((candidate) => candidate.role === role)?.cli.effort;
+      return modelText(modelForRole(role), effort);
+    }
+    if (stepName === "CI checks") return "No configured model applies.";
+    return "No configured model applies.";
+  };
   const step = TODAY_CHAIN[selected] ?? TODAY_CHAIN[0];
   return (
     <>
@@ -303,11 +380,33 @@ function LoopChain() {
         sub="fixed today; loop config API will replace this source"
         actions={
           <fieldset className="loop-show" aria-label="Loop display">
+            <label className="sr-only" htmlFor="loop-run-picker">
+              Ticket with run
+            </label>
+            <select
+              id="loop-run-picker"
+              aria-label="Ticket with run"
+              value={runId}
+              onChange={(event) => {
+                setRunId(event.target.value);
+                setWithRun(event.target.value !== "");
+              }}
+            >
+              <option value="">Pick an open ticket</option>
+              {ticketRuns.map(({ run, title }) => (
+                <option key={run.id} value={run.id}>{`${run.ticket} · ${title}`}</option>
+              ))}
+            </select>
             <button type="button" aria-pressed={!withRun} onClick={() => setWithRun(false)}>
               Loop only
             </button>
-            <button type="button" aria-pressed={withRun} onClick={() => setWithRun(true)}>
-              With run #681
+            <button
+              type="button"
+              aria-pressed={withRun}
+              disabled={!picked}
+              onClick={() => setWithRun(true)}
+            >
+              With run
             </button>
           </fieldset>
         }
@@ -363,7 +462,7 @@ function LoopChain() {
               <button
                 key={item.name}
                 type="button"
-                className={`loop-chain-step${index === selected ? " selected" : ""}${withRun && index === 2 ? " now" : ""}`}
+                className={`loop-chain-step${index === selected ? " selected" : ""}${withRun && index === nowIndex ? " now" : ""}`}
                 onClick={() => setSelected(index)}
                 aria-pressed={index === selected}
                 aria-label={`${item.name}: gate: ${item.gate}`}
@@ -374,10 +473,12 @@ function LoopChain() {
               </button>
             ))}
             <span className="loop-route-label ci-label">
-              CI fail ≤3{withRun ? " · used 1/3" : ""}
+              CI fail ≤{triesLimit}
+              {withRun ? ` · used ${ciUses}/${triesLimit}` : ""}
             </span>
             <span className="loop-route-label review-label">
-              changes ≤3{withRun ? " · used 1/3" : ""}
+              changes ≤{reviewLimit}
+              {withRun ? ` · used ${reviewUses}/${reviewLimit}` : ""}
             </span>
             <div className="loop-flight">
               <b>FLIGHT at cap</b>
@@ -409,19 +510,20 @@ function LoopChain() {
             )}
             <dt>Model / command</dt>
             <dd>
-              <code>{step.command}</code>
+              <code>{modelFor(step.name)}</code>
             </dd>
             <dt>Step prompt</dt>
             <dd>{step.prompt ?? "No prompt: no agent runs this step."}</dd>
           </dl>
         </Panel>
-        {withRun && (
+        {!picked && <p className="pb s muted">No open tickets with runs to show.</p>}
+        {withRun && picked && (
           <Panel title="Run overlay" sub="chosen ticket">
             <div className="loop-run">
-              <b>Ticket #681 · inco-cx</b>
-              <span>Now: CI checks · try 2 of 3</span>
-              <span>CI failure → Build · 1 of 3</span>
-              <span>Review findings → Build · 1 of 3</span>
+              <b>{`Ticket #${picked.run.ticket?.split("#")[1]} · ${picked.title}`}</b>
+              <span>{`Now: ${currentTry ? TODAY_CHAIN[CHAIN_INDEX[currentTry.step]]?.name : "No recorded step"}${currentTry ? ` · try ${currentTry.n} of ${currentTry.step === "ci" ? triesLimit : currentTry.step === "review" ? reviewLimit : triesLimit}` : ""}`}</span>
+              <span>{`CI failure → Build · ${ciUses} of ${triesLimit}`}</span>
+              <span>{`Review findings → Build · ${reviewUses} of ${reviewLimit}`}</span>
             </div>
           </Panel>
         )}
@@ -468,7 +570,7 @@ export function Loops({ config }: { config: ConfigView }) {
           </div>
         )}
       </Panel>
-      <LoopChain />
+      <LoopChain config={config} />
       {config.profiles === undefined ? (
         <Panel title="Templates" sub="loops/*.yaml" actions={<NewTemplate />}>
           <div className="pb">
