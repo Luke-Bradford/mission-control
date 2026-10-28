@@ -222,6 +222,7 @@ type ChainStep = {
   failure: string;
   cap: string;
   atCap: string;
+  conditional?: string;
   command: string;
   prompt: string | null;
 };
@@ -230,11 +231,12 @@ type ChainStep = {
 const TODAY_CHAIN: readonly ChainStep[] = [
   {
     name: "Plan",
-    runner: "Planner seat",
+    runner: "Planner seat (FAO)",
     gate: "has a ## Plan",
     failure: "Plan again; a missing decision asks CAPCOM with a default",
-    cap: "Size M+ unless planRequired is false",
-    atCap: "FLIGHT",
+    cap: "—",
+    atCap: "—",
+    conditional: "Size M+ unless planRequired is false",
     command: "gpt-5.6-sol · high",
     prompt: "Turn {ticket} into a plan a developer can build from the ticket alone.",
   },
@@ -272,7 +274,7 @@ const TODAY_CHAIN: readonly ChainStep[] = [
     name: "Merge",
     runner: "Hub engine",
     gate: "mergeable",
-    failure: "Parks for FLIGHT; sync then returns to Verify or Build",
+    failure: "Parks for FLIGHT; sync then returns to CI checks or Build",
     cap: "—",
     atCap: "FLIGHT",
     command: "hard-rule clearance",
@@ -329,7 +331,7 @@ function LoopChain() {
               <path
                 className={`loop-route ci-return${withRun ? " active" : ""}`}
                 aria-label="CI checks returns to Build"
-                d="M 510 108 V 150 H 300 V 108"
+                d="M 510 108 V 150 H 330 V 108"
                 markerEnd="url(#loop-arrow)"
               />
               <path
@@ -346,8 +348,14 @@ function LoopChain() {
               />
               <path
                 className="loop-route flight-return"
-                aria-label="FLIGHT sync returns to CI checks or Build"
-                d="M 1110 248 H 1040 V 276 H 510 M 300 276 V 108"
+                aria-label="FLIGHT sync returns to CI checks"
+                d="M 1110 248 H 1040 V 228 H 510 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route flight-return"
+                aria-label="FLIGHT sync returns to Build"
+                d="M 1110 248 H 1040 V 276 H 300 V 108"
                 markerEnd="url(#loop-arrow)"
               />
             </svg>
@@ -365,10 +373,17 @@ function LoopChain() {
                 <small>gate: {item.gate}</small>
               </button>
             ))}
+            <span className="loop-route-label ci-label">
+              CI fail ≤3{withRun ? " · used 1/3" : ""}
+            </span>
+            <span className="loop-route-label review-label">
+              changes ≤3{withRun ? " · used 1/3" : ""}
+            </span>
             <div className="loop-flight">
               <b>FLIGHT at cap</b>
               <span>re-plan · reassign · split</span>
-              <small>sync → Verify or Build</small>
+              <span>or ask CAPCOM (default)</span>
+              <small>sync → CI checks or Build</small>
             </div>
           </section>
         </div>
@@ -386,6 +401,12 @@ function LoopChain() {
             <dd>{step.cap}</dd>
             <dt>At the cap</dt>
             <dd>{step.atCap}</dd>
+            {step.conditional && (
+              <>
+                <dt>Conditional</dt>
+                <dd>{step.conditional}</dd>
+              </>
+            )}
             <dt>Model / command</dt>
             <dd>
               <code>{step.command}</code>

@@ -6219,6 +6219,25 @@ kbd {
   stroke-width: 3;
   filter: drop-shadow(0 0 2px var(--warn));
 }
+.loop-route-label {
+  position: absolute;
+  z-index: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--warn);
+  font: var(--fs-xs) var(--mono);
+  white-space: nowrap;
+}
+.ci-label {
+  top: 137px;
+  left: 370px;
+}
+.review-label {
+  top: 185px;
+  left: 430px;
+}
 .loop-chain-step {
   position: relative;
   z-index: 1;

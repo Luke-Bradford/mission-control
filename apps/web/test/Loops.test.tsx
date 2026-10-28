@@ -62,22 +62,35 @@ describe("Setup › Loops templates", () => {
         .getAllByRole("button", { name: /gate:/ })
         .map((button) => button.textContent),
     ).toEqual([
-      "PlanPlanner seatgate: has a ## Plan",
+      "PlanPlanner seat (FAO)gate: has a ## Plan",
       "BuildDeveloper seatgate: evidence reported",
       "CI checksGitHub Actionsgate: all checks green",
       "ReviewRETRO · fresh seatgate: approved",
       "MergeHub enginegate: mergeable",
       "DoneBoard → Donegate: merged",
     ]);
-    expect(
-      within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
-    ).toContain("active");
+    const ciReturn = within(chain).getByLabelText("CI checks returns to Build");
+    expect(ciReturn.getAttribute("class")).toContain("active");
+    expect(ciReturn.getAttribute("d")).toBe("M 510 108 V 150 H 330 V 108");
+    expect(within(chain).getByText("CI fail ≤3 · used 1/3")).toBeTruthy();
     expect(within(chain).getByLabelText("Review returns to Build").getAttribute("class")).toContain(
       "active",
     );
+    expect(within(chain).getByLabelText("Review returns to Build").getAttribute("d")).toBe(
+      "M 714 108 V 198 H 300 V 108",
+    );
+    expect(within(chain).getByText("changes ≤3 · used 1/3")).toBeTruthy();
     expect(within(chain).getByLabelText("Merge conflict parks for FLIGHT")).toBeTruthy();
-    expect(within(chain).getByLabelText("FLIGHT sync returns to CI checks or Build")).toBeTruthy();
+    expect(within(chain).getByLabelText("FLIGHT sync returns to CI checks")).toBeTruthy();
+    expect(within(chain).getByLabelText("FLIGHT sync returns to Build")).toBeTruthy();
     expect(within(chain).getByText("FLIGHT at cap")).toBeTruthy();
+    expect(within(chain).getByText("or ask CAPCOM (default)")).toBeTruthy();
+
+    fireEvent.click(within(chain).getByRole("button", { name: /Plan: gate/ }));
+    const planInspector = screen.getByRole("region", { name: "Step inspector" });
+    expect(planInspector.textContent).toContain("ConditionalSize M+");
+    expect(planInspector.textContent).toContain("Cap—");
+    expect(planInspector.textContent).toContain("At the cap—");
 
     fireEvent.click(within(chain).getByRole("button", { name: /Review: gate: approved/ }));
     expect(
@@ -104,6 +117,8 @@ describe("Setup › Loops templates", () => {
     expect(
       within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
     ).not.toContain("active");
+    expect(within(chain).getByText("CI fail ≤3")).toBeTruthy();
+    expect(within(chain).queryByText("CI fail ≤3 · used 1/3")).toBeNull();
   });
 
   it("keeps phone-width horizontal scrolling inside the chain drawing (hud.css)", () => {
