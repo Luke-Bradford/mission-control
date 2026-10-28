@@ -81,6 +81,8 @@ export interface CommsAgentResponse extends CommsMessagesResponse {
   contacts: CommsContact[];
   inboxCursor?: string | null;
   inboxUnread?: number;
+  /** The agent's unread lines to the operator since CAPCOM's last prompt, transcript replies included. */
+  directUnread?: number;
 }
 export interface CommsTicketResponse extends CommsMessagesResponse {
   ticket: CommsTicketContext;

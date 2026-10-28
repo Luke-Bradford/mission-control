@@ -762,6 +762,8 @@ export interface HealthRow {
   at: number;
   /** When the collector last succeeded, UTC ms; null if it never has. Kept through failures. */
   lastOkAt: number | null;
+  /** When its current run of failures began, UTC ms; null while it succeeds. */
+  failingSince?: number | null;
 }
 
 /**
@@ -1007,6 +1009,8 @@ export interface AttentionBrief {
   assessment?: string;
   did?: { action: string; refs: string[] }[];
   ask?: string;
+  /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
+  askAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -1046,7 +1050,7 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
-  flightTriage?: "waiting" | "handling" | "missed";
+  flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
   acked: boolean;
 }
@@ -1155,15 +1159,22 @@ export interface CliAccountStatus {
   detail: string | null;
 }
 
+/**
+ * What notifies the operator. `asks` (an item FLIGHT has briefed for the operator), `flightDown`
+ * (FLIGHT could not be kept running, is parked or at an account's stop line, or is silent mid-turn)
+ * and `awayDigest` (only in away mode, which the operator switches on) are on by default; the rest
+ * are opt-in, so the operator is not taught to babysit (roadmap item 7).
+ */
 export type NotificationCategory =
+  | "asks"
+  | "flightDown"
   | "people"
   | "decisions"
   | "stalls"
   | "prs"
   | "capcom"
   | "awayDigest"
-  | "quota"
-  | "agentMessages";
+  | "quota";
 
 /** Notify me about, on every signed-in device (catalogue §2.7.6). */
 export interface NotificationPreferences {
@@ -1202,24 +1213,21 @@ export interface OverviewTimeline {
 export interface OverviewSummary {
   at: number;
   kpis: {
-    working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
     /** Minute spend buckets, using the same attribution as perHour. */
     spendToday: { usd: number; perHour: number[]; series?: number[] };
-    /** Distinct tickets in building, checks, review or merging at each minute end. */
+    /**
+     * Distinct tickets in building, checks, review or merging at each minute end; `count` is the
+     * registry's In progress (`MetricsView.inProgress`). Merged and cycle time are registry figures
+     * served by `GET /api/metrics`.
+     */
     inFlight: { count: number; oldestAt: number | null; series?: number[] };
-    /** Merge counts per minute, including minutes before local midnight. */
-    mergedToday: { count: number; perHour: number[]; series?: number[] };
     /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
     ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
-    /** Local-day median at each minute end; null without completed cycles. */
-    cycleTime: {
-      medianMs: number | null;
-      n: number;
-      avg14dMs: number | null;
-      series?: (number | null)[];
-    };
-    /** Operator need episodes open at each minute end, including retained resolved episodes. */
+    /**
+     * The operator's whole inbox (one per key, never narrowed by the session filter), and its
+     * episodes open at each minute end, including retained resolved episodes.
+     */
     needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];

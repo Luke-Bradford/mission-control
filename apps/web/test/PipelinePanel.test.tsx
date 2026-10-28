@@ -75,7 +75,7 @@ describe("Pipeline", () => {
         .getAttribute("href"),
     ).toBe("/board?stage=ready");
 
-    const progressLane = screen.getByRole("region", { name: "In progress" });
+    const progressLane = screen.getByRole("region", { name: "Building · checks" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
     expect(within(progressLane).getByText("Checked ticket")).toBeTruthy();
     expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(

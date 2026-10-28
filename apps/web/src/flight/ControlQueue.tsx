@@ -1,4 +1,9 @@
-import type { AttentionItem, FlightLedgerView, FlightSummaryView } from "@mc/core";
+import {
+  type AttentionItem,
+  FLIGHT_TRIAGE_LABEL,
+  type FlightLedgerView,
+  type FlightSummaryView,
+} from "@mc/core";
 import { ownerLabel, useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -70,7 +75,9 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
                             : ""
                       }`}
                     >
-                      {ownerLabel(item.owner ?? "operator")}
+                      {item.flightTriage === "down"
+                        ? FLIGHT_TRIAGE_LABEL.down
+                        : ownerLabel(item.owner ?? "operator")}
                     </span>
                     {item.at > 0 && tz !== null && <span>{rel(item.at, now, tz)}</span>}
                   </span>

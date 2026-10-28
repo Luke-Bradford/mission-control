@@ -22,7 +22,7 @@ Each seat runs one role. A role is a prompt (this folder), plus defaults for its
 | **SURGEON** | QA engineer | Writes and runs tests beyond the ticket's own: regression and end-to-end. |
 | **BOOSTER** | DevOps | Looks after CI, builds and releases. |
 
-**CAPCOM** is the operator: decisions, approvals, and anything tagged @CAPCOM.
+**CAPCOM** is the operator: decisions and approvals, and FLIGHT's questions tagged @CAPCOM. A seat's @CAPCOM tag or question goes to FLIGHT first, and reaches the operator only with FLIGHT's brief.
 
 ## How work flows
 

@@ -44,6 +44,7 @@ import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { metricTitle, useMetrics } from "../metrics.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -504,7 +505,9 @@ export function AgentsPanel() {
         now,
       )
     : null;
-  const working = rows?.filter((r) => r.hudState === "running").length ?? 0;
+  // The registry's figure (every agent in view, FLIGHT and loops included), not this table's count.
+  const metrics = useMetrics();
+  const working = metrics.readings.agentsWorking;
 
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
@@ -517,7 +520,11 @@ export function AgentsPanel() {
       title="Crew"
       sub={
         <>
-          {rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : null}
+          {working ? (
+            <span className="crew-working" title={metricTitle(metrics, "agentsWorking")}>
+              <span data-metric="agentsWorking">{working.value}</span> {working.detail} working
+            </span>
+          ) : null}
           <CrewOff compact />
         </>
       }

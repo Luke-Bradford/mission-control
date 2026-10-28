@@ -1,8 +1,10 @@
-import type { OverviewSummary } from "@mc/core";
+import { type MetricId, type OverviewSummary, usd } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
+import { MetricName } from "../hud/MetricName.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
-import { followLink, PAGE_PATHS } from "../router.ts";
+import { metricText, metricTitle, useMetrics } from "../metrics.ts";
+import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 const duration = (ms: number | null | undefined): string => {
@@ -10,7 +12,6 @@ const duration = (ms: number | null | undefined): string => {
   const minutes = Math.round(ms / 60_000);
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 };
-const value = (n: number | undefined): string => (n === undefined ? "—" : String(n));
 const change = (series: (number | null)[] | undefined, format = kTokens): string => {
   if (!series || series.length < 2 || series[0] == null || series.at(-1) == null) return "—";
   const delta = (series.at(-1) ?? 0) - (series[0] ?? 0);
@@ -65,77 +66,91 @@ function KpiTrace({
   );
 }
 
+interface Tile {
+  /** A registry figure (`METRICS` in @mc/core): its label, hover and value come from there. */
+  metric?: MetricId;
+  label: string;
+  title: string;
+  page: keyof typeof PAGE_PATHS;
+  /** A link more exact than the page's root (Needs you's panel). */
+  to?: string;
+  value: string;
+  pending: boolean;
+  delta: string;
+  series: (number | null)[] | undefined;
+  fmt: (n: number) => string;
+  color: string;
+  history: string;
+}
+
 /** Live Overview KPIs, scoped by the header's session filter. */
 export function KpiStrip() {
   const [session] = useSession();
   const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
+  const metrics = useMetrics();
+  const r = metrics.readings;
   const pending = !summary && !error;
   const k = summary?.kpis;
-  const tiles = [
-    {
-      label: "Agents working",
-      page: "agent",
-      value: value(k?.working?.now),
-      delta:
-        k?.working?.series !== undefined
-          ? change(k.working.series)
-          : k?.working?.of != null
-            ? `of ${k.working.of} agents`
-            : "—",
-      series: k?.working?.series,
+  const registry = (
+    id: MetricId,
+    page: Tile["page"],
+    rest: Pick<Tile, "delta" | "series" | "fmt"> & Partial<Pick<Tile, "color" | "to">>,
+  ): Tile => ({
+    metric: id,
+    label: metricText(id).label,
+    title: metricTitle(metrics, id),
+    page,
+    value: r[id]?.value ?? "—",
+    pending: metrics.state(id) === "loading",
+    color: "var(--accent)",
+    history: "last 30 minutes",
+    ...rest,
+  });
+  const oldestAt = metrics.view?.inProgress.oldestAt;
+  const tiles: Tile[] = [
+    registry("agentsWorking", "agent", {
+      delta: r.agentsWorking?.detail ?? "—",
+      series: undefined,
       fmt: String,
-      color: "var(--accent)",
-      history: "last 30 minutes",
-    },
+    }),
     {
       label: "Tokens/min",
+      title: "Input and output tokens in the last full minute, crew-wide in the repos in view.",
       page: "telemetry",
       value: k?.tokensPerMin?.now != null ? kTokens(k.tokensPerMin.now) : "—",
+      pending,
       delta: change(k?.tokensPerMin?.series),
       series: k?.tokensPerMin?.series,
       fmt: kTokens,
       color: "var(--accent)",
       history: "last 30 minutes",
     },
-    {
-      label: "Spend today",
-      page: "telemetry",
-      value: k?.spendToday?.usd != null ? `$${k.spendToday.usd.toFixed(2)}` : "—",
-      delta: change(k?.spendToday?.series, (n) => `$${n.toFixed(2)}`),
+    registry("cost", "telemetry", {
+      delta: change(k?.spendToday?.series, usd),
       series: k?.spendToday?.series,
-      fmt: (n: number) => `$${n.toFixed(2)}`,
-      color: "var(--accent)",
-      history: "last 30 minutes",
-    },
-    {
-      label: "In flight",
-      page: "board",
-      value: value(k?.inFlight?.count),
+      fmt: usd,
+    }),
+    registry("inProgress", "board", {
       delta:
         k?.inFlight?.series !== undefined
           ? change(k.inFlight.series)
-          : k?.inFlight?.oldestAt == null
+          : oldestAt == null
             ? "—"
-            : `${duration((summary?.at ?? Date.now()) - k.inFlight.oldestAt)} oldest`,
+            : `${duration((metrics.view?.at ?? Date.now()) - oldestAt)} oldest`,
       series: k?.inFlight?.series,
       fmt: String,
-      history: "last 30 minutes",
-      color: "var(--accent)",
-    },
-    {
-      label: "Merged today",
-      page: "board",
-      value: value(k?.mergedToday?.count),
-      delta: change(k?.mergedToday?.series),
-      series: k?.mergedToday?.series,
+    }),
+    registry("merged", "board", {
+      delta: r.merged?.detail ? `PRs · ${r.merged.detail}` : "PRs",
+      series: undefined,
       fmt: String,
-      color: "var(--accent)",
-      history: "last 30 minutes",
-    },
+    }),
     {
       label: "CI pass rate",
+      title: "CI runs that passed in the last 24 hours, of those that finished.",
       page: "board",
       value: k?.ciPassRate24h?.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
+      pending,
       delta:
         k?.ciPassRate24h?.series !== undefined
           ? change(k.ciPassRate24h.series, (n) => `${kTokens(n)} pp`)
@@ -147,54 +162,45 @@ export function KpiStrip() {
       history: "last 30 minutes",
       color: "var(--accent)",
     },
-    {
-      label: "Cycle time",
-      page: "board",
-      value: duration(k?.cycleTime?.medianMs),
-      delta:
-        k?.cycleTime?.series !== undefined
-          ? change(k.cycleTime.series, duration)
-          : k?.cycleTime?.n == null
-            ? "—"
-            : `n=${k.cycleTime.n} · ${duration(k.cycleTime.avg14dMs)} avg (14d)`,
-      series: k?.cycleTime?.series,
-      fmt: duration,
-      history: "last 30 minutes",
-      color: "var(--accent)",
-    },
-    {
-      label: "Needs you",
-      page: "comms",
-      value: value(k?.needsYou?.count),
-      delta:
-        k?.needsYou?.series !== undefined
-          ? change(k.needsYou.series)
-          : k?.needsYou?.overHour != null
-            ? `${k.needsYou.overHour} over 1 h`
-            : "—",
+    registry("cycleTime", "telemetry", {
+      delta: r.cycleTime?.detail ?? "—",
+      series: undefined,
+      fmt: String,
+    }),
+    registry("needsYou", "flight", {
+      to: NEEDS_YOU_PATH,
+      delta: change(k?.needsYou?.series),
       series: k?.needsYou?.series,
       fmt: String,
-      history: "last 30 minutes",
       // amber only while something waits on the operator
-      color: k?.needsYou?.count ? "var(--warn-mark)" : "var(--accent)",
-    },
-  ] as const;
+      color: r.needsYou?.n ? "var(--warn-mark)" : "var(--accent)",
+    }),
+  ];
   return (
     <>
-      {error && (
+      {(error || metrics.error) && (
         <div className="pb crit-t" role="alert">
-          {summary
-            ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
-            : "Could not load overview metrics."}
+          {[
+            error &&
+              (summary
+                ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
+                : "Could not load overview metrics."),
+            // the registry's figures come from /api/metrics: its failure is said too
+            metrics.error &&
+              (metrics.view
+                ? "Registry figures: refresh failed, showing stale values."
+                : `Registry figures could not load: ${metrics.error.message}`),
+          ]
+            .filter(Boolean)
+            .join(" ")}
         </div>
       )}
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
         {tiles.map((tile) => {
-          const path = PAGE_PATHS[tile.page];
+          const path = tile.to ?? PAGE_PATHS[tile.page];
           const series = tile.series;
-          const contextOnly =
-            series === undefined &&
-            ["In flight", "CI pass rate", "Cycle time", "Needs you"].includes(tile.label);
+          // A figure with no history shows its context where the trace would be.
+          const contextOnly = series === undefined;
           return (
             <a
               className="overview-kpi"
@@ -202,15 +208,19 @@ export function KpiStrip() {
               href={path}
               onClick={(e) => followLink(e, path)}
             >
-              <span className="lbl" title={tile.label}>
-                {tile.label}
+              <span className="lbl" title={tile.title}>
+                {tile.metric ? <MetricName id={tile.metric} /> : tile.label}
               </span>
-              <span className="v num">
-                {pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
+              <span
+                className="v num"
+                data-metric={tile.metric}
+                title={tile.metric ? tile.title : undefined}
+              >
+                {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
               </span>
               {!contextOnly && (
-                <span className="d num" title={pending ? undefined : tile.delta}>
-                  {pending ? null : tile.delta}
+                <span className="d num" title={tile.pending ? undefined : tile.delta}>
+                  {tile.pending ? null : tile.delta}
                 </span>
               )}
               {series && series.length >= 2 ? (
@@ -222,8 +232,11 @@ export function KpiStrip() {
                   live={summary !== undefined && error === null}
                 />
               ) : (
-                <span className="kpi-secondary num" title="History unavailable">
-                  {pending ? null : contextOnly ? tile.delta : "—"}
+                <span
+                  className="kpi-secondary num"
+                  title={contextOnly ? tile.delta : "History unavailable"}
+                >
+                  {tile.pending ? null : contextOnly ? tile.delta : "—"}
                 </span>
               )}
             </a>

@@ -1090,6 +1090,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
+  ["GET", "/api/metrics"],
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
@@ -1126,14 +1127,15 @@ const API_ROUTES: [string, string, object?][] = [
     "/api/notification-preferences",
     {
       categories: {
-        people: true,
-        decisions: true,
-        stalls: true,
-        prs: true,
-        capcom: true,
+        asks: true,
+        flightDown: true,
+        people: false,
+        decisions: false,
+        stalls: false,
+        prs: false,
+        capcom: false,
         awayDigest: true,
         quota: false,
-        agentMessages: false,
       },
       quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
       softChime: true,
@@ -4226,6 +4228,7 @@ describe("boards, escalations, health", () => {
         error: "github: HTTP 502",
         at: expect.any(Number),
         lastOkAt: null,
+        failingSince: expect.any(Number),
       },
     ]);
   });
@@ -7050,28 +7053,6 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it("scopes seats by session even when sessions share a repo", async () => {
-    withCrew();
-    const first = config.crew?.sessions[0];
-    const seat = first?.seats[0];
-    if (!first || !seat) throw new Error("missing crew fixture");
-    config.crew?.sessions.push({
-      ...first,
-      id: "s2",
-      seats: [{ ...seat, id: "guido-2" }],
-    });
-    store.addAgentEvent({ agentId: "guido-2", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working).toMatchObject({
-      now: 0,
-      of: 1,
-    });
-    expect((await get("/api/overview?session=s2")).json().kpis.working).toMatchObject({
-      now: 1,
-      of: 1,
-    });
-    expect((await get("/api/overview")).json().kpis.working).toMatchObject({ now: 1, of: 2 });
-  });
-
   it("serves live figures and validates the selected session", async () => {
     withCrew();
     store.raiseNote({
@@ -7087,18 +7068,39 @@ describe("overview", () => {
     expect(first.statusCode).toBe(200);
     expect(first.json()).toMatchObject({
       at: NOW,
-      kpis: { working: { now: 0, of: 1 }, needsYou: { count: 1, overHour: 1 } },
+      kpis: { needsYou: { count: 1, overHour: 1 } },
     });
-    store.addAgentEvent({ agentId: "guido-1", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working.now).toBe(1);
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
+  });
+
+  it("serves the registry's server figures for the session filter and 404s an unknown session", async () => {
+    withCrew();
+    const all = await get("/api/metrics");
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toEqual({
+      at: NOW,
+      inProgress: { count: 0, oldestAt: null },
+      merged: { count: 0, loops: 0 },
+      cycleTime: { p50Ms: null, p85Ms: null, n: 0, excluded: 0 },
+      cost: { usd: null },
+    });
+    expect((await get("/api/metrics?session=s1")).statusCode).toBe(200);
+    expect((await get("/api/metrics?session=missing")).statusCode).toBe(404);
   });
 });
 
 it("bounds tag text in attention and reads the whole message on open", async () => {
-  const text = `@CAPCOM ${"x".repeat(1000)}`;
-  store.addComms({ at: NOW, from: "shop-app-ta", to: "CAPCOM", ticket: null, text });
+  withCrew();
+  config.crew?.sessions[0]?.seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "opus",
+    area: [],
+  });
+  const text = `@CAPCOM ${"x".repeat(1000)}?`;
+  store.addComms({ at: NOW, from: "flight-1", to: "CAPCOM", ticket: null, text });
   const items = (await get("/api/attention")).json<AttentionItem[]>();
   const tag = items.find((i) => i.kind === "tag");
   expect(tag).toBeDefined();

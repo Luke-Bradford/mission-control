@@ -13,6 +13,20 @@ import { Store } from "../src/store.ts";
 import * as stream from "../src/stream.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
+const FLIGHT_SEAT = {
+  id: "flight-1",
+  role: "FLIGHT",
+  accountId: "demo",
+  model: "opus",
+  area: [],
+};
+
+/** The agent's unread direct replies: counted on its Comms thread, never a Needs-you item. */
+const unreadDirect = (store: Store, id: string, crew: boolean) =>
+  threadMessages(store, id, crew, "attention")
+    .filter((m) => !m.seen && m.direct)
+    .map((m) => m.text);
+
 it("keeps tags and direct replies stable across folds, reload, Ack and a read/arrival race", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mc-comms-"));
   const path = join(dir, "db.sqlite");
@@ -33,6 +47,13 @@ it("keeps tags and direct replies stable across folds, reload, Ack and a read/ar
         launchdLabel: "demo",
       },
     ],
+    crew: {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 1,
+      sessions: [
+        { id: "demo", repoId: "demo", checkout: join(dir, "checkout"), seats: [FLIGHT_SEAT] },
+      ],
+    },
   };
   const add = (from: string, to: string, text: string) =>
     store.addComms({ from, to, text, at: 10, ticket: null });
@@ -46,9 +67,8 @@ it("keeps tags and direct replies stable across folds, reload, Ack and a read/ar
       ["tag", "message"].includes(i.kind),
     );
   const first = needs();
-  expect(first.map((i) => i.text).sort()).toEqual(
-    ["1 new on your direct line", "@CAPCOM check the plan"].sort(),
-  );
+  expect(first.map((i) => i.text)).toEqual(["@CAPCOM check the plan"]);
+  expect(unreadDirect(store, "guido-1", false)).toEqual(["Ready"]);
   expect(needs()).toEqual(first);
   store.close();
   store = new Store(path);
@@ -66,7 +86,7 @@ it("keeps tags and direct replies stable across folds, reload, Ack and a read/ar
     });
     expect(ack.statusCode).toBe(200);
     expect(needs().find((i) => i.key === first[0]?.key)?.acked).toBe(true);
-    expect(needs()).toHaveLength(2);
+    expect(needs()).toHaveLength(1);
     add("guido-1", "CAPCOM", "Later reply");
     const read = await app.inject({
       method: "POST",
@@ -74,13 +94,14 @@ it("keeps tags and direct replies stable across folds, reload, Ack and a read/ar
       payload: { messageIds: snapshot.messages.map((m: { id: string }) => m.id) },
     });
     expect(read.statusCode).toBe(200);
-    expect(needs().map((i) => i.text)).toEqual(["1 new on your direct line"]);
+    expect(needs()).toEqual([]);
+    expect(unreadDirect(store, "guido-1", false)).toEqual(["Later reply"]);
     expect(topics).toContain("attention");
     expect(topics).toContain("agents");
     expect(topics).not.toContain("comms");
     store.close();
     store = new Store(path);
-    expect(needs().map((i) => i.text)).toEqual(["1 new on your direct line"]);
+    expect(unreadDirect(store, "guido-1", false)).toEqual(["Later reply"]);
   } finally {
     await app.close();
     store.close();
@@ -132,7 +153,10 @@ it("uses stable transcript IDs through repeated folds and reads, preserving unkn
         id: "demo",
         repoId: "demo",
         checkout: join(dir, "checkout"),
-        seats: [{ id: "guido-1", role: "GUIDO", accountId: "demo", model: "sonnet", area: [] }],
+        seats: [
+          { id: "guido-1", role: "GUIDO", accountId: "demo", model: "sonnet", area: [] },
+          FLIGHT_SEAT,
+        ],
       },
     ],
   };
@@ -199,13 +223,15 @@ it("uses stable transcript IDs through repeated folds and reads, preserving unkn
       expect(
         (await app.inject({ method: "POST", url: "/api/comms/guido-1/read", payload })).statusCode,
       ).toBe(200);
-      expect(needs().map((item) => item.text)).toEqual(["1 new on your direct line"]);
+      expect(needs()).toEqual([]);
+      expect(unreadDirect(store, "guido-1", true)).toEqual(["Later reply"]);
     }
     appendFileSync(latest, frame("More replies").repeat(201));
     expect(
       (await app.inject({ method: "POST", url: "/api/comms/guido-1/read", payload })).statusCode,
     ).toBe(200);
-    expect(needs().map((item) => item.text)).toEqual(["200 new on your direct line"]);
+    expect(needs()).toEqual([]);
+    expect(unreadDirect(store, "guido-1", true)).toHaveLength(200);
     const current = (await app.inject({ url: "/api/comms/guido-1" })).json();
     expect(current.messages.filter((m: { seen: boolean }) => !m.seen)).toHaveLength(200);
     const readCurrent = await app.inject({
@@ -214,7 +240,7 @@ it("uses stable transcript IDs through repeated folds and reads, preserving unkn
       payload: { messageIds: current.messages.map((m: { id: string }) => m.id) },
     });
     expect(readCurrent.statusCode).toBe(200);
-    expect(needs()).toEqual([]);
+    expect(unreadDirect(store, "guido-1", true)).toEqual([]);
     expect(
       (await app.inject({ method: "POST", url: "/api/comms/guido-1/read", payload })).statusCode,
     ).toBe(200);
@@ -243,7 +269,10 @@ function regressionFixture() {
           id: "demo",
           repoId: "demo",
           checkout: dir,
-          seats: [{ id: "guido-1", role: "GUIDO", accountId: "demo", model: "sonnet", area: [] }],
+          seats: [
+            { id: "guido-1", role: "GUIDO", accountId: "demo", model: "sonnet", area: [] },
+            FLIGHT_SEAT,
+          ],
         },
       ],
     },
@@ -277,7 +306,8 @@ function regressionFixture() {
     attentionItems(config, store, 10000, undefined, []).filter(
       (i) => i.kind === "message" || i.kind === "tag",
     );
-  return { dir, store, config, frame, addRun, needs };
+  const direct = () => unreadDirect(store, "guido-1", true);
+  return { dir, store, config, frame, addRun, needs, direct };
 }
 
 it("reads only the latest transcript for Needs you and at most three for a thread", async () => {
@@ -330,7 +360,12 @@ it("counts only replies after CAPCOM's latest direct message and clears them whe
       ticket: null,
     });
     appendFileSync(path, f.frame("First answer", 3000) + f.frame("Second answer", 4000));
-    expect(f.needs().map((i) => i.text)).toEqual(["2 new on your direct line"]);
+    // narration on the direct line is counted on the thread, not raised as a Needs-you item
+    expect(f.direct()).toEqual(["First answer", "Second answer"]);
+    expect(f.needs()).toEqual([]);
+    const directUnread = async () =>
+      (await app.inject({ url: "/api/comms/agents/guido-1" })).json().directUnread;
+    expect(await directUnread()).toBe(2);
     const snapshot = (await app.inject({ url: "/api/comms/guido-1" })).json();
     expect(snapshot.messages.map((m: { direct: boolean }) => m.direct)).toEqual([
       false,
@@ -347,7 +382,8 @@ it("counts only replies after CAPCOM's latest direct message and clears them whe
         })
       ).statusCode,
     ).toBe(200);
-    expect(f.needs()).toEqual([]);
+    expect(f.direct()).toEqual([]);
+    expect(await directUnread()).toBe(0);
     f.store.addComms({
       from: "CAPCOM",
       to: "guido-1",

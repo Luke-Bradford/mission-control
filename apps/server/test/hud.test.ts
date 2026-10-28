@@ -679,6 +679,66 @@ describe("attention items", () => {
     ]);
   });
 
+  it("a loop that has never succeeded keeps its first failure's time, so a read stays read", () => {
+    const c = "ta-loop:shop-app-ta";
+    statusAt(NOW - 30 * MIN, c, false, "boom");
+    store.ack(["error:shop-app-ta:never"], NOW - 29 * MIN);
+    statusAt(NOW - 10 * MIN, c, false, "boom");
+    expect(attentionItems(config, store, NOW)).toEqual([
+      expect.objectContaining({ key: "error:shop-app-ta:never", at: NOW - 30 * MIN, acked: true }),
+    ]);
+  });
+
+  it("a rebrief with the same ask stays read; a changed ask is unread again", () => {
+    store.raiseNote({
+      key: "blocked:y",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "parked",
+      at: NOW - 30 * MIN,
+    });
+    const brief = (ask: string, at: number) =>
+      store.addBrief({
+        key: "note:blocked:y",
+        context: "c",
+        ask,
+        recommendation: "r",
+        options: [],
+        basis: "b",
+        at,
+        for: "operator",
+      });
+    brief("Unpark it?", NOW - 20 * MIN);
+    store.ack(["note:blocked:y"], NOW - 15 * MIN);
+    brief("Unpark it?", NOW - 10 * MIN);
+    const item = () => attentionItems(config, store, NOW).find((i) => i.key === "note:blocked:y");
+    expect(item()).toMatchObject({ acked: true, brief: { askAt: NOW - 20 * MIN } });
+    brief("End the run instead?", NOW - 5 * MIN);
+    expect(item()).toMatchObject({ acked: false, brief: { at: NOW - 5 * MIN } });
+    expect(item()?.brief).not.toHaveProperty("askAt");
+  });
+
+  it("an ack covers the item as read: a re-raised note is unread again", () => {
+    const raise = (at: number) =>
+      store.raiseNote({
+        key: "blocked:x",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "parked",
+        at,
+      });
+    raise(NOW - 20 * MIN);
+    store.ack(["note:blocked:x"], NOW - 10 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: true });
+    store.clearNote("blocked:x", NOW - 5 * MIN);
+    raise(NOW - 2 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: false });
+  });
+
   it("an error that recovers and fails again is a new key, timed at its last success", () => {
     const c = "ta-loop:shop-app-ta";
     statusAt(NOW - 30 * MIN, c, false, "boom");
@@ -1770,10 +1830,12 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     ]);
   });
 
-  it("re-recording a stray moves it to the latest seat and time, under the same key", () => {
+  it("re-recording a stray moves it to the latest seat, keeping its first time so a read holds", () => {
     store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-1", kind: "outside", at: 1 }]);
+    store.ack([store.strays()[0]?.key ?? ""], 1);
     store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-2", kind: "outside", at: 2 }]);
-    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 2 }]);
+    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 1 }]);
+    expect(attentionItems(config, store, NOW).find((i) => i.kind === "stray")?.acked).toBe(true);
   });
 
   it("lists a seat's open question until it is answered", () => {
@@ -2361,4 +2423,208 @@ it("heartbeat includes completed reviews and sent messages, without counting req
     { kind: "review", at: NOW - 4 * MIN },
     { kind: "message", at: NOW - 3 * MIN },
   ]);
+});
+
+describe("messages are not Needs you", () => {
+  let c: CcConfig;
+  beforeEach(() => {
+    const seat = (id: string, role: string) => ({
+      id,
+      role,
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    c = {
+      ...config,
+      loops: [],
+      crew: {
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            id: "shop-app-1",
+            repoId: "shop-app",
+            checkout: join(dir, "crew-co"),
+            seats: [seat("flight-1", "FLIGHT"), seat("guido-1", "GUIDO")],
+          },
+        ],
+      },
+    };
+  });
+  const say = (at: number, from: string, to: string, text: string) =>
+    store.addComms({ at, from, to, ticket: null, text });
+  const up = (seatId: string) => {
+    store.upsertRun(run({ id: `r-${seatId}`, agentId: seatId }));
+    store.setSeatSession({
+      seatId,
+      runId: `r-${seatId}`,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW - HOUR,
+    });
+  };
+  const chatter = (cfg: CcConfig = c, at = NOW) =>
+    attentionItems(cfg, store, at, NO_LOCK, []).filter(
+      (i) => i.kind === "tag" || i.kind === "message",
+    );
+
+  it("raises no item for a seat's narration on its direct line", () => {
+    up("flight-1");
+    say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
+    say(NOW - 9 * MIN, "guido-1", COMMS_CAPCOM, "Tests are running.");
+    say(NOW - 8 * MIN, "guido-1", COMMS_CAPCOM, "Parser done, moving on to the CLI.");
+    expect(chatter()).toEqual([]);
+  });
+
+  it("never counts FLIGHT's own summaries, on its direct line or tagged", () => {
+    up("flight-1");
+    say(NOW - 10 * MIN, COMMS_CAPCOM, "flight-1", "Anything for me?");
+    say(NOW - 9 * MIN, "flight-1", COMMS_CAPCOM, "Nothing needs you. Shall I keep watching?");
+    say(NOW - 8 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM nothing needs you.");
+    say(NOW - 7 * MIN, "flight-1", "crew", "@CAPCOM FYI: GUIDO-1 merged #42.");
+    expect(chatter()).toEqual([]);
+  });
+
+  it("counts a question to @CAPCOM from FLIGHT as the operator's tag", () => {
+    up("flight-1");
+    say(NOW - 9 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM nothing else needs you.");
+    say(NOW - 8 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM merge #551 now, or wait for #498?");
+    expect(chatter()).toEqual([
+      expect.objectContaining({
+        kind: "tag",
+        agentId: "flight-1",
+        owner: "operator",
+        text: "@CAPCOM merge #551 now, or wait for #498?",
+      }),
+    ]);
+    expect(chatter()[0]?.flightTriage).toBeUndefined();
+  });
+
+  it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
+    up("flight-1");
+    say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
+    say(NOW - 9 * MIN, "guido-1", COMMS_CAPCOM, "Please confirm the target branch.");
+    say(NOW - 8 * MIN, "guido-1", "crew", "@CAPCOM the API key is missing");
+    const items = chatter();
+    expect(items.map((i) => [i.kind, i.owner, i.flightTriage])).toEqual([
+      ["tag", "flight", "waiting"],
+      ["message", "flight", "waiting"],
+    ]);
+    expect(items.find((i) => i.kind === "message")?.text).toBe("Please confirm the target branch.");
+    // past the triage window: FLIGHT has missed it, but it is still not the operator's
+    const late = NOW + FLIGHT_TRIAGE_WAIT_MS;
+    expect(chatter(c, late).map((i) => [i.owner, i.flightTriage])).toEqual([
+      ["flight", "missed"],
+      ["flight", "missed"],
+    ]);
+    // FLIGHT down: nobody triages, it says so, and still nothing reaches Needs you
+    store.upsertRun(run({ id: "r-flight-1", agentId: "flight-1", endedAt: NOW, status: "ok" }));
+    expect(chatter().map((i) => [i.owner, i.flightTriage])).toEqual([
+      ["flight", "down"],
+      ["flight", "down"],
+    ]);
+  });
+
+  it("raises a seat's @CAPCOM line to FLIGHT under the seat only, never as FLIGHT's own", () => {
+    up("flight-1");
+    say(NOW - 8 * MIN, "guido-1", "flight-1", "@CAPCOM should I drop the table?");
+    expect(chatter().map((i) => [i.kind, i.agentId, i.owner])).toEqual([
+      ["tag", "guido-1", "flight"],
+    ]);
+  });
+
+  it.each([
+    ["tag", "guido-1", "crew", "@CAPCOM the API key is missing", "@CAPCOM and the secret too"],
+    [
+      "message",
+      "guido-1",
+      COMMS_CAPCOM,
+      "Which branch should I use?",
+      "Also, which base for the PR?",
+    ],
+  ] as const)(
+    "keeps FLIGHT's brief on a seat's %s for the operator while it writes again",
+    (kind, from, to, first, next) => {
+      up("flight-1");
+      say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
+      say(NOW - 8 * MIN, from, to, first);
+      const key = chatter()[0]?.key ?? "";
+      expect(chatter()).toEqual([expect.objectContaining({ kind, owner: "flight" })]);
+      store.addBrief({
+        key,
+        context: "GUIDO-1 needs the operator.",
+        ask: "Decide for GUIDO-1?",
+        recommendation: "Yes.",
+        options: [],
+        basis: "product direction",
+        at: NOW - 7 * MIN,
+        for: "operator",
+      });
+      // promoted by the brief, and still the same item after the seat writes again
+      expect(chatter()).toEqual([expect.objectContaining({ key, kind, owner: "operator" })]);
+      say(NOW - 5 * MIN, from, to, next);
+      expect(chatter()).toEqual([
+        expect.objectContaining({
+          key,
+          kind,
+          owner: "operator",
+          text: next,
+          brief: expect.objectContaining({ ask: "Decide for GUIDO-1?" }),
+        }),
+      ]);
+    },
+  );
+
+  it("hands a seat's tag to the operator once FLIGHT briefs it for them", () => {
+    up("flight-1");
+    say(NOW - 8 * MIN, "guido-1", "crew", "@CAPCOM the API key is missing");
+    const key = chatter()[0]?.key ?? "";
+    store.addBrief({
+      key,
+      context: "GUIDO-1 needs a production key.",
+      ask: "Add the key to the vault?",
+      recommendation: "Add it.",
+      options: [],
+      basis: "spending",
+      at: NOW - MIN,
+      for: "operator",
+    });
+    expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
+  });
+
+  it("leaves another agent's chatter to its Comms thread when no FLIGHT seat is configured", () => {
+    const noFlight: CcConfig = {
+      ...c,
+      crew: c.crew && {
+        ...c.crew,
+        sessions: c.crew.sessions.map((s) => ({
+          ...s,
+          seats: s.seats.filter((x) => x.id !== "flight-1"),
+        })),
+      },
+    };
+    say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
+    say(NOW - 9 * MIN, "guido-1", COMMS_CAPCOM, "Which branch should I use?");
+    say(NOW - 8 * MIN, "guido-1", "crew", "@CAPCOM the API key is missing");
+    expect(chatter(noFlight)).toEqual([]);
+  });
+
+  it("raises a seat question once, not again for the Comms line ask_operator mirrors it to", () => {
+    up("flight-1");
+    up("guido-1");
+    say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "Carry on with #42.");
+    // ask_operator records the question and writes the same text to CAPCOM at the same instant
+    const text = "@CAPCOM which lane should #42 go in? Please confirm.";
+    const id = store.addQuestion({ agentId: "guido-1", runId: "r-guido-1", text, at: NOW - MIN });
+    say(NOW - MIN, "guido-1", COMMS_CAPCOM, text);
+    const mine = () =>
+      attentionItems(c, store, NOW, NO_LOCK, []).filter((i) => i.agentId === "guido-1");
+    expect(mine().map((i) => [i.kind, i.key])).toEqual([["question", `ask:${id}`]]);
+    // answered, its mirrored line is still no item
+    store.answerQuestions("guido-1", NOW);
+    expect(mine()).toEqual([]);
+  });
 });

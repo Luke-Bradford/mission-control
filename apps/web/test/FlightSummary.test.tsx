@@ -5,7 +5,7 @@ import { hub, RESOURCES } from "../src/data.ts";
 import { Summary } from "../src/flight/Summary.tsx";
 import { dayMonth, hhmm } from "../src/fmt.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CREW_CONFIG, MIN, NOW } from "./fixtures.ts";
+import { CREW_CONFIG, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
 import {
   flightLedger,
   flightSummary,
@@ -260,8 +260,8 @@ it("renders each outcome from the summary, and never stands next in for a missin
   expect(quiet?.textContent).not.toContain("Should not show");
 });
 
-it("keeps outcomes and the 24-hour scorecard together in Record only", async () => {
-  stub();
+it("keeps outcomes and the scorecard together in Record only; cost is the registry's", async () => {
+  stub({ "/api/metrics": METRICS_VIEW });
   render(<Summary mode="record" />);
   expect(await screen.findByRole("table", { name: "Recently done" })).toBeTruthy();
   expect(screen.getByText("Shipped work")).toBeTruthy();
@@ -270,13 +270,15 @@ it("keeps outcomes and the 24-hour scorecard together in Record only", async () 
   expect([...tiles.querySelectorAll("dt")].map((el) => el.textContent)).toEqual([
     "CI failures",
     "Parks",
-    "Spend (24 h)",
+    "Cost · today",
   ]);
-  expect([...tiles.querySelectorAll("dd")].map((el) => el.textContent)).toEqual([
-    "3",
-    "2",
-    "~$3.75",
-  ]);
+  await waitFor(() =>
+    expect([...tiles.querySelectorAll("dd")].map((el) => el.textContent)).toEqual([
+      "3",
+      "2",
+      "~$24.31",
+    ]),
+  );
   expect(screen.queryByText(summary.headline)).toBeNull();
   expect(screen.queryByRole("table", { name: "FLIGHT forward plan" })).toBeNull();
 });

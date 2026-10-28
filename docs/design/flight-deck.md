@@ -5,7 +5,7 @@ quiet until something needs attention, and visibly live. These rules apply to ev
 
 ## Surface
 
-- Base is near-black blue with a faint 24px grid; panels are flat, hairline-bordered, radius 2–3px
+- Base is a flat near-black blue (no grid or texture); panels are flat, hairline-bordered, radius 2–3px
   (`--r` 3px, `--r-s` 2px). No drop shadows, glows or corner ornaments on panels.
 - Panel headers (`.ph`) are mono, uppercase, letter-spaced, `--fg-2`; a sub-label is `--muted`.
 - Density over decoration: 12–13px body, tabular numerals everywhere a number changes.
