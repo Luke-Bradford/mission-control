@@ -295,6 +295,53 @@ describe("columns", () => {
 });
 
 describe("cards", () => {
+  it("waits for linked PR data before mounting card content", async () => {
+    const normal = stub({ shopApp: [todo(1)] });
+    let resolvePr: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/repos/shop-app/prs?linked=1"
+          ? new Promise<Response>((resolve) => {
+              resolvePr = resolve;
+            })
+          : normal(input, init),
+      ),
+    );
+
+    const { container } = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(resolvePr).toBeTypeOf("function"));
+    expect(container.querySelector(".kcard")).toBeNull();
+
+    act(() => resolvePr?.(Response.json([])));
+    expect(await screen.findByText("Ticket 1")).toBeTruthy();
+  });
+
+  it("waits for timezone configuration before mounting Done card content", async () => {
+    const normal = stub({
+      shopApp: [todo(1, { status: "Done", state: "done", updatedAt: NOW - 3 * DAY })],
+    });
+    let resolveConfig: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/config"
+          ? new Promise<Response>((resolve) => {
+              resolveConfig = resolve;
+            })
+          : normal(input, init),
+      ),
+    );
+
+    const { container } = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(resolveConfig).toBeTypeOf("function"));
+    expect(container.querySelector(".kcard")).toBeNull();
+
+    act(() => resolveConfig?.(Response.json(CONFIG)));
+    const card = (await screen.findByText("Ticket 1")).closest(".kcard") as HTMLElement;
+    expect(card.textContent).toContain("3d ago");
+  });
+
   it("shows #n in a repo lane and repo#n in All repos; null size shows nothing", async () => {
     stub({
       shopApp: [todo(1, { size: "M", milestone: "MVP — launch", labels: ["a", "b", "c", "d"] })],
@@ -679,6 +726,30 @@ describe("cards", () => {
     expect(c.textContent).toContain("—");
     expect(c.textContent).not.toContain("ago");
     expect(c.textContent).not.toContain("today");
+  });
+
+  it("collapses Done cards beyond the initial window until requested", () => {
+    const done = Array.from({ length: 362 }, (_, i) =>
+      todo(i + 1, { status: "Done", state: "done", title: `Done ${i + 1}` }),
+    );
+    render(
+      <Kanban
+        items={done}
+        showRepo={false}
+        prs={[]}
+        crew={[]}
+        needsYou={needsYouItems([])}
+        now={NOW}
+        tz="Europe/London"
+        todayStart={NOW}
+      />,
+    );
+
+    expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(10);
+    expect(document.querySelectorAll("*").length).toBeLessThan(3000);
+    expect(screen.getByRole("button", { name: "Show 352 more completed cards" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show 352 more completed cards" }));
+    expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(362);
   });
 
   it("a closed issue whose Status says In progress sits in Done with the Status out of date flag", async () => {
@@ -1324,7 +1395,8 @@ describe("render cost", () => {
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
-    await waitFor(() => expect(container.querySelectorAll(".kcard").length).toBe(300));
+    // Done's 75 cards use the 10-card initial window; the active columns still mount in full.
+    await waitFor(() => expect(container.querySelectorAll(".kcard").length).toBe(235));
     await screen.findByText("studio-builder");
     await screen.findByText("PR #41");
 
@@ -1503,6 +1575,32 @@ describe("repos together or apart", () => {
       ?.closest(".kcol")
       ?.querySelector(".kh");
     expect(head?.textContent).toBe("Blocked 1");
+  });
+
+  it("Apart waits for profiles before mounting its final column layout", async () => {
+    const normal = seed();
+    let resolveProfiles: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/repos/profiles"
+          ? new Promise<Response>((resolve) => {
+              resolveProfiles = resolve;
+            })
+          : normal(input, init),
+      ),
+    );
+    localStorage.setItem("mc-board-layout", "apart");
+
+    const view = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(resolveProfiles).toBeTypeOf("function"));
+    expect(view.container.querySelector(".board-placeholder")).toBeTruthy();
+    expect(view.container.querySelector(".repokanban")).toBeNull();
+
+    act(() => resolveProfiles?.(Response.json(PROFILES)));
+    await waitFor(() => expect(view.container.querySelectorAll(".repokanban")).toHaveLength(2));
+    const [shopApp] = Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
+    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]);
   });
 
   it("Apart before profiles load: every column, headed by the repo id alone", async () => {

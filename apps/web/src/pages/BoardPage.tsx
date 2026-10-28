@@ -76,19 +76,24 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     requestedStage && Object.hasOwn(PIPELINE_STAGES, requestedStage)
       ? (requestedStage as PipelineLane)
       : null;
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
+  const reposRes = useResource<RepoView[]>(RESOURCES.repos);
+  const repos = reposRes.data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
-  const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const crewRes = useResource<Crew>(RESOURCES.crew);
+  const crew = crewRes.data?.rows;
+  const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
+  const attention = attentionRes.data;
   // The GitHub login the hub acts as.`operator.id` is the hub's own
   // operator id, not a GitHub login, so All mine waits for this and is not offered until it is known.
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const config = configRes.data;
   const githubLogin = config?.githubLogin ?? null;
   const tz = useTz();
   const now = useNow();
   const { inView } = useSessionScope();
-  const profiles = useResource<RepoProfile[]>(RESOURCES.repoProfiles).data ?? NO_PROFILES;
+  const profilesRes = useResource<RepoProfile[]>(RESOURCES.repoProfiles);
+  const profiles = profilesRes.data ?? NO_PROFILES;
 
   const [stored, setStored] = useState(() => readKey(LANE_KEY));
   const [doneDays, setDoneDays] = useState<DoneRange>(DONE_RANGES[0]);
@@ -129,7 +134,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const all = useMemo(() => boards.flatMap((b) => b.data ?? []), [boards]);
   const prs = useMemo(() => prRes.flatMap((p) => p.data ?? []), [prRes]);
   const rows = crew ?? [];
-  const loopViews = useResources<RunLoopView>(
+  const loopRes = useResources<RunLoopView>(
     stage === null
       ? []
       : [
@@ -140,7 +145,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
             ]),
           ),
         ].map((id) => RESOURCES.runLoop(id)),
-  ).flatMap((view) => (view.data ? [view.data] : []));
+  );
+  const loopViews = loopRes.flatMap((view) => (view.data ? [view.data] : []));
   // The canonical Needs-you set: the inbox is never narrowed by the session filter; the Board's
   // session view narrows the cards (`inLane`), so Needs me narrows the Board, not the inbox.
   const needsYou = useMemo(() => needsYouItems(attention), [attention]);
@@ -191,7 +197,18 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   };
 
   const errors = boards.flatMap((b, i) => (b.error ? [`${repos[i]?.id}: ${b.error.message}`] : []));
-  const loading = repos.length > 0 && boards.some((b) => !b.data && !b.error);
+  // A card's agent, PR and Needs-you lines arrive independently. Hold the Board's card surface
+  // until each source settles, so those lines never grow a card after its first paint.
+  const boardDataReady =
+    Boolean(reposRes.data || reposRes.error) &&
+    boards.every((res) => Boolean(res.data || res.error)) &&
+    prRes.every((res) => Boolean(res.data || res.error)) &&
+    Boolean(crewRes.data || crewRes.error) &&
+    Boolean(attentionRes.data || attentionRes.error) &&
+    Boolean(configRes.data || configRes.error) &&
+    Boolean(profilesRes.data || profilesRes.error) &&
+    loopRes.every((res) => Boolean(res.data || res.error));
+  const loading = !boardDataReady;
   const detailItem =
     repoId !== null && ticket !== null
       ? all.find((i) => i.repoId === repoId && i.issueNumber === ticket)
@@ -231,7 +248,9 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         </p>
       ))}
       <div className={`boardsplit${ticketRoute ? " withdetail" : ""}`}>
-        {layoutOn && layout === "apart" ? (
+        {!boardDataReady ? (
+          <div className="board-placeholder" />
+        ) : layoutOn && layout === "apart" ? (
           <div className="repokanbans">
             {repos.map((r) => {
               const p = profiles.find((x) => x.id === r.id);

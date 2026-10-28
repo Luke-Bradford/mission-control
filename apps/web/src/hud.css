@@ -2356,6 +2356,13 @@ th {
   min-height: 0;
   align-content: start;
 }
+.done-more {
+  justify-self: start;
+  font-size: var(--fs-s);
+}
+.board-placeholder {
+  min-height: 70vh;
+}
 .kcard {
   background: var(--surface);
   border: 1px solid var(--line);
