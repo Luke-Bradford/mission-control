@@ -1460,3 +1460,15 @@ If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery
 Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
+
+## Audit API
+
+`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
+
+- `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.
+- `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).
+- `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
+- `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
+- `surgeonProposals`: always empty until SURGEON proposals are stored.
+
+The route only reads data the hub already stores.

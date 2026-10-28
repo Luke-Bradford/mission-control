@@ -8,6 +8,14 @@ import {
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_CHANGE_WINDOW_MS,
+  AUDIT_PR_OUTLIER_LINES,
+  AUDIT_REFUSAL_SPIKE,
+  AUDIT_SPEND_OUTLIER_FACTOR,
+  type AuditChange,
+  type AuditMetrics,
+  type AuditPrSize,
+  type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -28,6 +36,7 @@ import {
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
   FLIGHT_RETROSPECTIVE_SETTING,
+  FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
   FLIGHT_WATCH_LIMIT,
@@ -370,6 +379,16 @@ CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER 
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+const DAY_MS = 86_400_000;
+
+/** The median of the values, or null when there are none. */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 /** One notification thread, as stored. */
 export interface NotificationRow {
@@ -2231,9 +2250,18 @@ export class Store {
   }
 
   /** Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP. */
-  audit(since: number, until: number): Record<string, unknown> {
+  audit(since: number, until: number): AuditView {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
+    const prs = this.auditPrSizes(since, until);
+    const spend = rows(
+      `SELECT id AS runId, agent_id AS agentId, ticket, cost_usd AS costUsd FROM runs
+       WHERE started_at >= ? AND started_at <= ? AND cost_usd IS NOT NULL AND cost_usd > 0
+       ORDER BY cost_usd DESC, id`,
+      since,
+      until,
+    ) as unknown as AuditView["spendOutliers"];
+    const medianSpend = median(spend.map((r) => r.costUsd));
     return {
       range: { since, until },
       longRunners: rows(
@@ -2244,34 +2272,54 @@ export class Store {
         until,
         until,
         since,
-      ),
+      ) as unknown as AuditView["longRunners"],
       deathLoops: rows(
-        `SELECT run_id AS runId, COUNT(*) AS parks FROM run_attempts
-         WHERE kind = 'loop' AND at >= ? AND at <= ?
-           AND json_extract(data, '$.parked') IS NOT NULL GROUP BY run_id ORDER BY parks DESC`,
+        `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
+          COUNT(*) AS parks FROM run_attempts a
+         WHERE a.kind = 'loop' AND a.at >= ? AND a.at <= ?
+           AND json_extract(a.data, '$.parked') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["deathLoops"],
       reworkRounds: rows(
-        `SELECT author_run_id AS runId, MAX(0, MAX(round) - 1) AS rounds,
-          MAX(round) AS maxRound FROM reviews
+        `SELECT author_run_id AS runId, (SELECT agent_id FROM runs WHERE id = author_run_id) AS agentId,
+          MAX(0, MAX(round) - 1) AS rounds, MAX(round) AS maxRound FROM reviews
          WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
          GROUP BY author_run_id ORDER BY rounds DESC, runId`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["reworkRounds"],
       refusalsByRule: rows(
         `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
         since,
         until,
-      ),
-      questions: rows(
+      ) as unknown as AuditView["refusalsByRule"],
+      refusals: rows(
+        `SELECT agent_id AS agentId, run_id AS runId, rule, COUNT(*) AS count FROM guard_hits
+         WHERE at >= ? AND at <= ? GROUP BY agent_id, run_id, rule
+         ORDER BY count DESC, agent_id, run_id, rule`,
+        since,
+        until,
+      ) as unknown as AuditView["refusals"],
+      refusalSpikes: rows(
+        `SELECT agent_id AS agentId, (at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS count
+         FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY agent_id, day HAVING count >= ?
+         ORDER BY count DESC, day, agent_id`,
+        since,
+        until,
+        AUDIT_REFUSAL_SPIKE,
+      ) as unknown as AuditView["refusalSpikes"],
+      spendOutliers:
+        medianSpend === null
+          ? []
+          : spend.filter((r) => r.costUsd >= medianSpend * AUDIT_SPEND_OUTLIER_FACTOR),
+      questions: (rows(
         `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
           AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
          FROM seat_questions WHERE at >= ? AND at <= ?`,
         since,
         until,
-      )[0] ?? { asked: 0, answered: 0, answerMs: null },
+      )[0] ?? { asked: 0, answered: 0, answerMs: null }) as unknown as AuditView["questions"],
       costPerMergedTicket: rows(
         `WITH merged_tickets AS (
            SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
@@ -2281,13 +2329,149 @@ export class Store {
          GROUP BY t.repo_id, t.ticket ORDER BY t.ticket`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["costPerMergedTicket"],
       modelPromptTimeline: rows(
         `SELECT started_at AS at, model, account_id AS accountId, effort, prompt_hash AS promptHash
          FROM runs WHERE started_at >= ? AND started_at <= ? ORDER BY started_at`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["modelPromptTimeline"],
+      prSizes: {
+        prs,
+        outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
+      },
+      chatter: this.commsChatter(since, until),
+      flakes: this.auditFlakes(since, until),
+      changes: this.auditChanges(since, until),
+      surgeonProposals: [],
+    };
+  }
+
+  /** Merged PRs in range that have a recorded size, largest first. */
+  private auditPrSizes(since: number, until: number): AuditPrSize[] {
+    const sized: AuditPrSize[] = [];
+    for (const row of this.db
+      .prepare("SELECT repo_id, record FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .all(since, until) as { repo_id: string; record: string }[]) {
+      const pr = JSON.parse(row.record) as PullRequestView;
+      if (pr.additions == null || pr.deletions == null || pr.changedFiles == null) continue;
+      sized.push({
+        repoId: row.repo_id,
+        number: pr.number,
+        ticket: pr.ticket,
+        mergedAt: pr.mergedAt ?? 0,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changedFiles: pr.changedFiles,
+      });
+    }
+    return sized.sort(
+      (a, b) =>
+        b.additions + b.deletions - (a.additions + a.deletions) ||
+        a.repoId.localeCompare(b.repoId) ||
+        a.number - b.number,
+    );
+  }
+
+  /** Failed-then-passed-on-same-head observations FLIGHT kept per repo, grouped by check. */
+  private auditFlakes(since: number, until: number): AuditView["flakes"] {
+    const byKey = new Map<string, { count: number; lastAt: number }>();
+    const prefix = `${FLIGHT_SIGNALS_SETTING}:`;
+    const stored = this.db
+      .prepare("SELECT value FROM settings WHERE substr(key, 1, ?) = ?")
+      .all(prefix.length, prefix) as { value: string }[];
+    for (const { value } of stored) {
+      let flakes: Record<string, { key?: unknown; at?: unknown }> = {};
+      try {
+        flakes = JSON.parse(value)?.flakes ?? {};
+      } catch {}
+      for (const flake of Object.values(flakes ?? {})) {
+        if (typeof flake?.key !== "string" || typeof flake.at !== "number") continue;
+        if (flake.at < since || flake.at > until) continue;
+        const entry = byKey.get(flake.key) ?? { count: 0, lastAt: 0 };
+        entry.count += 1;
+        entry.lastAt = Math.max(entry.lastAt, flake.at);
+        byKey.set(flake.key, entry);
+      }
+    }
+    return [...byKey]
+      .map(([key, v]) => ({ key, ...v }))
+      .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  }
+
+  /** Each seat's first run on a new prompt or model in range, with metrics either side of it. */
+  private auditChanges(since: number, until: number): AuditChange[] {
+    const runs = this.db
+      .prepare(
+        `SELECT agent_id, started_at, model, prompt_hash FROM runs
+         WHERE started_at <= ? ORDER BY agent_id, started_at, id`,
+      )
+      .all(until) as {
+      agent_id: string;
+      started_at: number;
+      model: string | null;
+      prompt_hash: string | null;
+    }[];
+    const changes: AuditChange[] = [];
+    const previous = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) {
+      const last = previous.get(run.agent_id);
+      previous.set(run.agent_id, run);
+      if (!last || run.started_at < since) continue;
+      for (const [kind, from, to] of [
+        ["prompt", last.prompt_hash, run.prompt_hash],
+        ["model", last.model, run.model],
+      ] as const) {
+        if (to === null || to === from) continue;
+        const windowMs = Math.min(AUDIT_CHANGE_WINDOW_MS, until - run.started_at);
+        changes.push({
+          kind,
+          agentId: run.agent_id,
+          at: run.started_at,
+          from,
+          to,
+          windowMs,
+          before: this.auditMetrics(run.started_at - windowMs, run.started_at - 1),
+          after: this.auditMetrics(run.started_at, run.started_at + windowMs - 1),
+        });
+      }
+    }
+    return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
+  }
+
+  /** Crew-wide metrics over one window, both ends inclusive. */
+  private auditMetrics(from: number, to: number): AuditMetrics {
+    const merged = this.db
+      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .get(from, to) as { n: number };
+    const reviews = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(blocking > 0), 0) AS failed FROM reviews
+         WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?`,
+      )
+      .get(from, to) as { n: number; failed: number };
+    const costs = this.db
+      .prepare(
+        `WITH merged_tickets AS (
+           SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
+           WHERE merged_at >= ? AND merged_at <= ?
+         ) SELECT SUM(r.cost_usd) AS costUsd FROM merged_tickets t
+         JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
+         GROUP BY t.repo_id, t.ticket HAVING costUsd IS NOT NULL`,
+      )
+      .all(from, to) as { costUsd: number }[];
+    const rework = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(rounds), 0) AS n FROM (
+           SELECT MAX(0, MAX(round) - 1) AS rounds FROM reviews
+           WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? GROUP BY author_run_id)`,
+      )
+      .get(from, to) as { n: number };
+    return {
+      merged: merged.n,
+      reviewFailRate: reviews.n === 0 ? null : reviews.failed / reviews.n,
+      medianCostPerMergedTicket: median(costs.map((c) => c.costUsd)),
+      reworkRounds: rework.n,
     };
   }
 
@@ -3461,7 +3645,10 @@ export class Store {
       .all(since) as { hour: number; from: string; to: string; count: number }[];
   }
   /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
-  commsChatter(since: number): { from: string; to: string; ticket: string; rounds: number }[] {
+  commsChatter(
+    since: number,
+    until = Number.MAX_SAFE_INTEGER,
+  ): { from: string; to: string; ticket: string; rounds: number }[] {
     const rows = this.db
       .prepare(
         `SELECT "from", "to", ticket,
@@ -3472,7 +3659,7 @@ export class Store {
             SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
             SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
           FROM comms
-          WHERE at >= ? AND ticket IS NOT NULL
+          WHERE at >= ? AND at <= ? AND ticket IS NOT NULL
             AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
           GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END
@@ -3480,7 +3667,16 @@ export class Store {
         WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
         ORDER BY rounds DESC, ticket, "from", "to"`,
       )
-      .all(since, COMMS_CAPCOM, COMMS_MC, COMMS_CREW, COMMS_CAPCOM, COMMS_MC, COMMS_CREW) as Row[];
+      .all(
+        since,
+        until,
+        COMMS_CAPCOM,
+        COMMS_MC,
+        COMMS_CREW,
+        COMMS_CAPCOM,
+        COMMS_MC,
+        COMMS_CREW,
+      ) as Row[];
     return rows.map((row) => ({
       from: row.from as string,
       to: row.to as string,

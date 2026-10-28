@@ -22,6 +22,7 @@ import {
   type ActivityEvent,
   type AgentStream,
   type AttentionItem,
+  type AuditView,
   type AwayDigest,
   type AwaySettings,
   type BoardItem,
@@ -415,7 +416,7 @@ const post = (url: string, headers: Record<string, string> = json, body: object 
   });
 
 describe("audit", () => {
-  const emptyAudit = (days: number) => ({
+  const emptyAudit = (days: number): AuditView => ({
     range: { since: NOW - days * DAY, until: NOW },
     longRunners: [],
     deathLoops: [],
@@ -424,6 +425,14 @@ describe("audit", () => {
     questions: { asked: 0, answered: 0, answerMs: null },
     costPerMergedTicket: [],
     modelPromptTimeline: [],
+    refusals: [],
+    refusalSpikes: [],
+    spendOutliers: [],
+    prSizes: { prs: [], outliers: [] },
+    chatter: [],
+    flakes: [],
+    changes: [],
+    surgeonProposals: [],
   });
 
   it("defaults to 30d and returns the audit response shape", async () => {
