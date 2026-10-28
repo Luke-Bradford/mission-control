@@ -666,7 +666,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function seatForAccount(seat: CrewSeatConfig, accountId: string): CrewSeatConfig {
     const account = config.accounts.find((a) => a.id === accountId);
     const bound = { ...seat };
-    if (account === undefined) bound.accountId = accountId;
+    // Direct supervisor fixtures may omit the loader's resolved model metadata.
+    if (account === undefined || bound.modelVendor === undefined) bound.accountId = accountId;
     else applySeatAccount(bound, account);
     return bound;
   }
