@@ -1181,12 +1181,12 @@ function boot() {
   if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
   drawLanes(); layout(); caption(); renderPane();
   document.getElementById("play").textContent = "▶ Play " + CALL(state.playSeat);
-  if (q.get("lens")) setLens(q.get("lens"));
+  if (q.get("lens") && document.querySelector(`[data-lens="${CSS.escape(q.get("lens"))}"]`)) setLens(q.get("lens"));
   if (q.get("read")) { state.readOpen[q.get("read")] = true; renderPane(); }
   if (q.get("win")) { const [a, b] = q.get("win").split(",").map(Number); state.win = [NOW - a * 60000, NOW - b * 60000]; drawLanes(); onWin(); }
   if (q.get("play")) { state.playSeat = q.get("play"); drawLanes(); startPlay(Number(q.get("step")) || 0); }
   if (q.get("diff")) openDiff(q.get("diff"));
-  if (q.get("focus")) setFocus(q.get("focus"));
+  if (q.get("focus") && files.has(q.get("focus"))) setFocus(q.get("focus"));
   document.addEventListener("keydown", (ev) => { if (ev.key !== "Escape") return; if (state.focus) setFocus(null); else if (state.diff) closeDiff(); });
   if (q.get("hover")) { state.hover = q.get("hover"); paintHl(); document.querySelectorAll(`[data-file="${CSS.escape(q.get("hover"))}"]`).forEach((r) => r.classList.add("hl")); }
 }
