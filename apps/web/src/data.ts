@@ -40,6 +40,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
+const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 /** The one place the web app names API paths and their topics. */
@@ -51,6 +52,11 @@ export const RESOURCES = {
   overview: (session = ""): ResourceRef => ({
     path: `/api/overview${session && session !== "all" ? `?session=${enc(session)}` : ""}`,
     topic: OVERVIEW_TOPICS,
+  }),
+  // The metric registry's server figures (METRICS in @mc/core), for the header's session filter.
+  metrics: (session = ""): ResourceRef => ({
+    path: `/api/metrics${session && session !== "all" ? `?session=${enc(session)}` : ""}`,
+    topic: METRICS_TOPICS,
   }),
   focus: (id: string): ResourceRef => ({ path: `/api/seats/${enc(id)}/focus`, topic: "config" }),
   crew: { path: "/api/crew", topic: "agents" },

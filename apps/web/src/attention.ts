@@ -4,6 +4,8 @@ import {
   type AttentionItem,
   type AttentionKind,
   type AttentionOwner,
+  type NeedsYou,
+  needsYouItems,
 } from "@mc/core";
 import { RESOURCES, useResource } from "./data.ts";
 import { NEEDS_YOU_PANEL, NEEDS_YOU_PATH, navigate } from "./router.ts";
@@ -18,45 +20,11 @@ export function openNeedsYou(): void {
   } else navigate(NEEDS_YOU_PATH);
 }
 
-/** The owner of an item from a hub that predates `owner`: the operator's. */
-const DEFAULT_OWNER: AttentionOwner = "operator";
+/** Lives in @mc/core so the server's Overview history counts the same set (#762). */
+export { isOperatorItem, itemOwner, type NeedsYou, needsYouItems } from "@mc/core";
 
 /** Prefix of a work lane's owner, `lane:<login>`. */
 const LANE_PREFIX = "lane:";
-
-export function itemOwner(i: AttentionItem): AttentionOwner {
-  return i.owner ?? DEFAULT_OWNER;
-}
-
-/** Whether the item is the operator's to act on (an item with no `owner` is). */
-export function isOperatorItem(i: AttentionItem): boolean {
-  return itemOwner(i) === DEFAULT_OWNER;
-}
-
-declare const NEEDS_YOU: unique symbol;
-
-/**
- * `needsYouItems` output, and only that: a function that takes `NeedsYou` (the Board's
- * `cardNeeds`, `needsMe`) is handed the canonical set, never a raw or session-narrowed list.
- */
-export type NeedsYou = readonly AttentionItem[] & { readonly [NEEDS_YOU]: true };
-
-/**
- * The one "Needs you" set: the operator's items, one per key. It is the operator's whole inbox, so
- * the header's session filter never narrows it (nothing waiting on them hides behind a filter).
- * Every surface that says Needs you renders this set: the header button and FLIGHT chat badge, the
- * dock's and Comms' "Waiting on you", Comms' Decisions, FLIGHT's pulse, Stand-up focus and Operator
- * actions, the Overview banner, KPI and Live log filter, and the Board's "You:" chips and Needs-me
- * filter.
- */
-export function needsYouItems(items: readonly AttentionItem[] | undefined): NeedsYou {
-  const seen = new Set<string>();
-  return (items ?? []).filter((i) => {
-    if (!isOperatorItem(i) || seen.has(i.key)) return false;
-    seen.add(i.key);
-    return true;
-  }) as unknown as NeedsYou;
-}
 
 /** `needsYouItems` over the live attention list. */
 export function useNeedsYou(): NeedsYou {

@@ -5,6 +5,7 @@ import {
   FLIGHT_BRIEF_TITLES,
   type FlightBriefSectionKey,
   type FlightBriefView,
+  metricHover,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,6 +53,7 @@ import {
   crewRow,
   HOUR,
   item,
+  METRICS_VIEW,
   MIN,
   NOW,
   prView,
@@ -853,6 +855,7 @@ describe("FLIGHT page", () => {
         "/api/flight": flightView(),
         "/api/flight/summary": () => ({ status: 500, body: { error: "Summary unavailable" } }),
         "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+        "/api/metrics": { ...METRICS_VIEW, inProgress: { count: 1, oldestAt: null } },
         "/api/config": CONFIG,
       });
       const { container } = render(<Flight />);
@@ -862,12 +865,19 @@ describe("FLIGHT page", () => {
       expect(alert.textContent).toBe("FLIGHT summary unavailable: Summary unavailable");
       expect(container.querySelector("#sitP .sittext")?.textContent).toBe("—");
       expect(await screen.findByRole("table", { name: "Crew runs" })).toBeTruthy();
-      expect(pulseValue(container, "WIP")).toBe("1");
+      await waitFor(() => expect(pulseValue(container, "In progress")).toBe("1"));
     });
 
-    it("scopes WIP and Blocked to the selected session; Needs you stays the whole inbox", async () => {
+    it("scopes In progress and Blocked to the selected session; Needs you stays the whole inbox", async () => {
+      const inProgress = (count: number) => ({
+        ...METRICS_VIEW,
+        inProgress: { count, oldestAt: null },
+      });
       stubFetch({
         "/api/config": SESSION_CONFIG,
+        "/api/metrics": inProgress(2),
+        "/api/metrics?session=site-builder-session": inProgress(1),
+        "/api/metrics?session=shop-app-session": inProgress(1),
         "/api/crew": {
           rows: [
             seatRow({ sessionId: "shop-app-session", hudState: "blocked" }),
@@ -890,31 +900,38 @@ describe("FLIGHT page", () => {
       });
       const { container } = render(<Flight />);
       await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("4"));
-      expect(pulseValue(container, "WIP")).toBe("2");
+      await waitFor(() => expect(pulseValue(container, "In progress")).toBe("2"));
       expect(pulseValue(container, "Blocked")).toBe("1");
       // Needs you is the operator's inbox: a session filter never hides what waits on them.
       act(() => setSession("site-builder-session"));
-      await waitFor(() => expect(pulseValue(container, "WIP")).toBe("1"));
+      await waitFor(() => expect(pulseValue(container, "In progress")).toBe("1"));
       expect(pulseValue(container, "Blocked")).toBe("0");
       expect(pulseValue(container, "Needs you")).toBe("4");
       act(() => setSession("shop-app-session"));
       await waitFor(() => expect(pulseValue(container, "Blocked")).toBe("1"));
-      expect(pulseValue(container, "WIP")).toBe("1");
+      expect(pulseValue(container, "In progress")).toBe("1");
       expect(pulseValue(container, "Needs you")).toBe("4");
     });
 
     it("labels each pulse button with its window and sends cycle time to Telemetry", async () => {
       window.history.replaceState(null, "", PAGE_PATHS.flight);
-      stubFetch({ "/api/flight/summary": flightSummary(), "/api/config": CONFIG });
+      stubFetch({
+        "/api/flight/summary": flightSummary(),
+        "/api/config": CONFIG,
+        "/api/metrics": METRICS_VIEW,
+        "/api/attention": [],
+      });
       render(<Flight />);
       const cycle = await screen.findByRole("button", {
-        name: "Cycle time: — median Ready → merged, 24 h",
+        name: "Cycle time p50: 1.2 h Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
       });
+      expect(cycle.getAttribute("title")).toBe(metricHover("cycleTime"));
       expect(
-        screen.getByRole("button", { name: /^Needs you: 0 decisions or replies, now$/ }),
+        await screen.findByRole("button", { name: /^Needs you: 0 decisions or replies, now$/ }),
       ).toBeTruthy();
-      // Throughput and Review / CI are read here only: they lead nowhere.
-      expect(screen.queryByRole("button", { name: /^Throughput/ })).toBeNull();
+      expect(pulseValue(document.body, "Merged")).toBe("6");
+      // Merged and Review / CI are read here only: they lead nowhere.
+      expect(screen.queryByRole("button", { name: /^Merged/ })).toBeNull();
       expect(screen.queryByRole("button", { name: /^Review \/ CI/ })).toBeNull();
       fireEvent.click(cycle);
       expect(window.location.pathname).toBe(PAGE_PATHS.telemetry);

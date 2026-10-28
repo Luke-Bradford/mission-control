@@ -41,6 +41,7 @@ import {
   itemWithoutOwner,
   limit5h,
   limit7d,
+  METRICS_VIEW,
   MIN,
   NOW,
   OVERVIEW,
@@ -92,6 +93,7 @@ function stub(d: Data = {}) {
   return stubFetch({
     ...d.extra,
     "/api/overview": OVERVIEW,
+    "/api/metrics": METRICS_VIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
@@ -165,7 +167,7 @@ describe("Overview panels", () => {
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
@@ -188,7 +190,7 @@ describe("Overview panels", () => {
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(
       await within(container.querySelector("#timelineP") as HTMLElement).findByText(
@@ -379,7 +381,7 @@ describe("Agents panel", () => {
     expect(within(agentRows(container)[0] as HTMLElement).getByText("flight-1")).toBeTruthy();
   });
 
-  it("the FLIGHT row shows the live seat, once, and the subtitle leaves it out", async () => {
+  it("the FLIGHT row shows the live seat, once; the subtitle is the registry's working count", async () => {
     const seat = (over: Partial<CrewRow>) =>
       crewRow({ kind: "crew", role: "Developer", mode: "writer", loopKind: "crew", ...over });
     stub({
@@ -391,7 +393,10 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("1 working · 2 agents · FLIGHT not counted");
+    // agents working is the registry's figure: every agent in view, FLIGHT included
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 3 agents working"),
+    );
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     expect(within(flight).getByText("head agent")).toBeTruthy();
@@ -444,7 +449,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
+  it("subtitle reads the registry's agents working", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -452,8 +457,13 @@ describe("Agents panel", () => {
         crewRow({ id: "c", index: 2, hudState: "running" }),
       ],
     });
-    render(<Overview />);
-    await screen.findByText("2 working · 3 agents · FLIGHT not counted");
+    const { container } = render(<Overview />);
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("2 of 3 agents working"),
+    );
+    expect(container.querySelector('#agentsP [data-metric="agentsWorking"]')?.textContent).toBe(
+      "2",
+    );
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
@@ -1357,7 +1367,7 @@ describe("Agents panel", () => {
       "shop-app-ta",
     ]);
     expect(container.querySelector(".trow.flight")).toBeTruthy();
-    expect(screen.getByText("1 working · 1 agents · FLIGHT not counted")).toBeTruthy();
+    expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 1 agents working");
   });
 });
 
