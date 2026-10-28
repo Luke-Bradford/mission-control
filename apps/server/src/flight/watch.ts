@@ -5,7 +5,10 @@
  * changes. The operator's Stop holds. It starts only the watch seat, never another seat or a loop.
  */
 import {
+  BACKGROUND_STALL_MS,
   FLIGHT_DEBOUNCE_MS,
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_DOWN_STALL_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
@@ -14,6 +17,7 @@ import {
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
   type FlightState,
+  flightDownText,
   flightStartFailedText,
   type TestLockState,
   wakeKey,
@@ -23,8 +27,10 @@ import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { transcriptMtime } from "../hud.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { lastOutputAt } from "../stream.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
@@ -131,11 +137,35 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   }
 
   const noteOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_NOTE_KEY);
+  const downOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+  /** Says FLIGHT is down (parked, at a stop line, silent mid-turn) until it is back. */
+  const raiseDown = (seatId: string, repoId: string, reason: string, t: number): void => {
+    if (downOpen()) return;
+    store.raiseNote({
+      key: FLIGHT_DOWN_NOTE_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId,
+      repoId,
+      text: flightDownText(reason),
+      at: t,
+    });
+    bus.emit("attention");
+  };
+  const clearDown = (t: number): void => {
+    if (!downOpen()) return;
+    store.clearNote(FLIGHT_DOWN_NOTE_KEY, t);
+    bus.emit("attention");
+  };
 
   async function pass(): Promise<void> {
-    if (stopped || !enabled || !supervisor.status().enabled) return;
+    if (stopped) return;
     const found = flightSeat(config);
-    if (found === null) return;
+    // with no FLIGHT seat or the watch off, there is no outage of its own to report
+    if (!enabled || !supervisor.status().enabled || found === null) {
+      clearDown(now());
+      return;
+    }
     const id = found.seat.id;
     const t = now();
     await deps.refreshAuthors?.(found.session.repoId);
@@ -175,21 +205,21 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
     const row = store.seatSession(id);
     if (!flightLive(config, store)) {
-      if (
-        row?.state === "stopped" ||
-        row?.state === "parked" ||
-        noteOpen() ||
-        accountAtStop(
-          config,
-          store,
-          runAccountId(store, row?.runId ?? null, found.seat.accountId),
-          t,
-        )
-      ) {
+      const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
+      const atStop = accountAtStop(config, store, accountId, t);
+      // Parked or held at a stop line is an outage; the operator's own Stop is not, and a failed
+      // start already says so. Once its reason passes, FLIGHT is restarting, not down.
+      if (row?.state === "parked" && !noteOpen())
+        raiseDown(id, found.session.repoId, "it is parked", t);
+      else if (atStop && row?.state !== "stopped" && !noteOpen())
+        raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
+      else clearDown(t);
+      if (row?.state === "stopped" || row?.state === "parked" || noteOpen() || atStop) {
         return;
       }
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
+        clearDown(t);
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",
@@ -241,6 +271,27 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     const runId = row?.runId;
     const facts = supervisor.seatFacts(id);
+    const run = runId == null ? null : store.run(runId);
+    // Unknown facts (just after a hub restart) say nothing either way.
+    if (facts !== null && run != null) {
+      const digest = store.digest(run.id);
+      const output =
+        lastOutputAt(digest?.lastEventAt ?? null, transcriptMtime(run.transcriptPath)) ??
+        run.startedAt;
+      // the same allowance a loop gets while a background task of its own writes nothing
+      const limit =
+        (digest?.background.length ?? 0) > 0
+          ? Math.max(FLIGHT_DOWN_STALL_MS, BACKGROUND_STALL_MS)
+          : FLIGHT_DOWN_STALL_MS;
+      if (facts.inTurn && t - output >= limit)
+        raiseDown(
+          id,
+          found.session.repoId,
+          `no output for ${Math.floor((t - output) / 60_000)} min in a turn`,
+          t,
+        );
+      else clearDown(t);
+    }
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
     const n = flightWakes(store, runId);

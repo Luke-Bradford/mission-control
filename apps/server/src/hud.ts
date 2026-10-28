@@ -26,6 +26,7 @@ import {
   driverStopKey,
   type Escalation,
   escalationKind,
+  FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
   FLIGHT_TRIAGE_WAIT_MS,
   fixesSent,
@@ -109,7 +110,7 @@ const AGENT_RUNS = 50;
 export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
 
 /** A transcript's mtime (whole ms), or null when the run has none or the file is gone. */
-function transcriptMtime(path: string): number | null {
+export function transcriptMtime(path: string): number | null {
   if (path === "") return null;
   try {
     return Math.floor(statSync(path).mtimeMs);
@@ -569,6 +570,11 @@ export function crew(
 
 const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k);
 
+/** The items that say FLIGHT is down: the operator's at once, as FLIGHT can't triage its own outage. */
+export const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
+  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
+);
+
 /** An attention item before its ack is read; the server always knows its owner. */
 type OwnedItem = Omit<AttentionItem, "acked" | "owner"> & { owner: AttentionOwner };
 
@@ -703,7 +709,11 @@ export function attentionItems(
         repoId: row.repoId,
         text: row.sourceError,
         tool: null,
-        at: row.kind === "crew" ? row.stateSince : (st?.lastOkAt ?? st?.at ?? now),
+        // stable while it keeps failing: its ack and brief must not age with every poll
+        at:
+          row.kind === "crew"
+            ? row.stateSince
+            : (st?.lastOkAt ?? st?.failingSince ?? st?.at ?? now),
         url: null,
         escalationId: null,
         ticket: null,
@@ -781,12 +791,22 @@ export function attentionItems(
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
     const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
+    // for the operator is unread again.
+    const ackAt = acks.get(i.key);
+    const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
-      acked: acks.has(i.key),
+      acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
     };
-    if (i.owner !== OWNER_OPERATOR || passed.has(i.key) || ownReply(i, flightId)) return item;
+    if (
+      i.owner !== OWNER_OPERATOR ||
+      passed.has(i.key) ||
+      ownReply(i, flightId) ||
+      FLIGHT_DOWN_ITEMS.has(i.key)
+    )
+      return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS)
       return { ...item, flightTriage: "missed" };

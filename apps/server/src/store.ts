@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS flow_prs (
 CREATE TABLE IF NOT EXISTS file_offsets (path TEXT PRIMARY KEY, offset INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS collector_status (
   collector TEXT PRIMARY KEY, ok INTEGER NOT NULL, error TEXT, at INTEGER NOT NULL,
-  last_ok_at INTEGER
+  last_ok_at INTEGER, failing_since INTEGER
 );
 CREATE TABLE IF NOT EXISTS machine_samples (at INTEGER PRIMARY KEY, sample TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -964,6 +964,8 @@ export class Store {
       this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
       this.db.exec("UPDATE collector_status SET last_ok_at = at WHERE ok = 1");
     });
+    // When a failing collector began failing; a row failing at upgrade takes its next poll's time.
+    this.addColumn("collector_status", "failing_since", "INTEGER");
     // A re-polled fallback reading has the same key every time: keep one row per reading. Once per
     // database (`PRAGMA user_version`); the unique index keeps it true afterwards. An up-to-date
     // database takes no write lock; one that is behind re-checks once it holds it.
@@ -2470,11 +2472,14 @@ export class Store {
     const at = Date.now();
     this.db
       .prepare(
-        `INSERT INTO collector_status (collector, ok, error, at, last_ok_at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO collector_status (collector, ok, error, at, last_ok_at, failing_since)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(collector) DO UPDATE SET ok = excluded.ok, error = excluded.error,
-           at = excluded.at, last_ok_at = COALESCE(excluded.last_ok_at, last_ok_at)`,
+           at = excluded.at, last_ok_at = COALESCE(excluded.last_ok_at, last_ok_at),
+           failing_since = CASE WHEN excluded.ok = 1 THEN NULL
+             ELSE COALESCE(collector_status.failing_since, excluded.at) END`,
       )
-      .run(collector, ok ? 1 : 0, error, at, ok ? at : null);
+      .run(collector, ok ? 1 : 0, error, at, ok ? at : null, ok ? null : at);
   }
 
   status(): HealthRow[] {
@@ -2487,6 +2492,7 @@ export class Store {
       error: r.error as string | null,
       at: r.at as number,
       lastOkAt: r.last_ok_at as number | null,
+      failingSince: (r.failing_since as number | null) ?? null,
     }));
   }
 
@@ -3969,9 +3975,9 @@ export class Store {
   addStrays(strays: Omit<Stray, "key">[]): void {
     this.transaction(() => {
       const ins = this.db.prepare(
+        // `at` stays first-seen: a retry of the same stray is not a new one (its ack holds)
         `INSERT INTO strays (key, session_id, path, agent_id, kind, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind,
-           at = excluded.at`,
+         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind`,
       );
       for (const x of strays) {
         ins.run(strayKey(x.sessionId, x.path), x.sessionId, x.path, x.agentId, x.kind, x.at);
@@ -4704,6 +4710,15 @@ export class Store {
           })),
         };
       }
+      // A rebrief with the same ask (for the same reader) keeps when that ask began; a new or
+      // changed ask begins at its own `at`, so it carries no askAt.
+      delete structured.askAt;
+      const last = this.db
+        .prepare("SELECT at, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+        .get(key) as { at: number; structured: string | null } | undefined;
+      const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
+      if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
+        structured.askAt = prior?.askAt ?? last.at;
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

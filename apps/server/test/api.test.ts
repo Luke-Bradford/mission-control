@@ -1093,14 +1093,15 @@ const API_ROUTES: [string, string, object?][] = [
     "/api/notification-preferences",
     {
       categories: {
-        people: true,
-        decisions: true,
-        stalls: true,
-        prs: true,
-        capcom: true,
+        asks: true,
+        flightDown: true,
+        people: false,
+        decisions: false,
+        stalls: false,
+        prs: false,
+        capcom: false,
         awayDigest: true,
         quota: false,
-        agentMessages: false,
       },
       quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
       softChime: true,
@@ -4193,6 +4194,7 @@ describe("boards, escalations, health", () => {
         error: "github: HTTP 502",
         at: expect.any(Number),
         lastOkAt: null,
+        failingSince: expect.any(Number),
       },
     ]);
   });

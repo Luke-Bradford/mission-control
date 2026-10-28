@@ -679,6 +679,66 @@ describe("attention items", () => {
     ]);
   });
 
+  it("a loop that has never succeeded keeps its first failure's time, so a read stays read", () => {
+    const c = "ta-loop:shop-app-ta";
+    statusAt(NOW - 30 * MIN, c, false, "boom");
+    store.ack(["error:shop-app-ta:never"], NOW - 29 * MIN);
+    statusAt(NOW - 10 * MIN, c, false, "boom");
+    expect(attentionItems(config, store, NOW)).toEqual([
+      expect.objectContaining({ key: "error:shop-app-ta:never", at: NOW - 30 * MIN, acked: true }),
+    ]);
+  });
+
+  it("a rebrief with the same ask stays read; a changed ask is unread again", () => {
+    store.raiseNote({
+      key: "blocked:y",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "parked",
+      at: NOW - 30 * MIN,
+    });
+    const brief = (ask: string, at: number) =>
+      store.addBrief({
+        key: "note:blocked:y",
+        context: "c",
+        ask,
+        recommendation: "r",
+        options: [],
+        basis: "b",
+        at,
+        for: "operator",
+      });
+    brief("Unpark it?", NOW - 20 * MIN);
+    store.ack(["note:blocked:y"], NOW - 15 * MIN);
+    brief("Unpark it?", NOW - 10 * MIN);
+    const item = () => attentionItems(config, store, NOW).find((i) => i.key === "note:blocked:y");
+    expect(item()).toMatchObject({ acked: true, brief: { askAt: NOW - 20 * MIN } });
+    brief("End the run instead?", NOW - 5 * MIN);
+    expect(item()).toMatchObject({ acked: false, brief: { at: NOW - 5 * MIN } });
+    expect(item()?.brief).not.toHaveProperty("askAt");
+  });
+
+  it("an ack covers the item as read: a re-raised note is unread again", () => {
+    const raise = (at: number) =>
+      store.raiseNote({
+        key: "blocked:x",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "parked",
+        at,
+      });
+    raise(NOW - 20 * MIN);
+    store.ack(["note:blocked:x"], NOW - 10 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: true });
+    store.clearNote("blocked:x", NOW - 5 * MIN);
+    raise(NOW - 2 * MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ acked: false });
+  });
+
   it("an error that recovers and fails again is a new key, timed at its last success", () => {
     const c = "ta-loop:shop-app-ta";
     statusAt(NOW - 30 * MIN, c, false, "boom");
@@ -1770,10 +1830,12 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     ]);
   });
 
-  it("re-recording a stray moves it to the latest seat and time, under the same key", () => {
+  it("re-recording a stray moves it to the latest seat, keeping its first time so a read holds", () => {
     store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-1", kind: "outside", at: 1 }]);
+    store.ack([store.strays()[0]?.key ?? ""], 1);
     store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-2", kind: "outside", at: 2 }]);
-    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 2 }]);
+    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 1 }]);
+    expect(attentionItems(config, store, NOW).find((i) => i.kind === "stray")?.acked).toBe(true);
   });
 
   it("lists a seat's open question until it is answered", () => {

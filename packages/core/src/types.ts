@@ -762,6 +762,8 @@ export interface HealthRow {
   at: number;
   /** When the collector last succeeded, UTC ms; null if it never has. Kept through failures. */
   lastOkAt: number | null;
+  /** When its current run of failures began, UTC ms; null while it succeeds. */
+  failingSince?: number | null;
 }
 
 /**
@@ -1007,6 +1009,8 @@ export interface AttentionBrief {
   assessment?: string;
   did?: { action: string; refs: string[] }[];
   ask?: string;
+  /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
+  askAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -1155,15 +1159,22 @@ export interface CliAccountStatus {
   detail: string | null;
 }
 
+/**
+ * What notifies the operator. `asks` (an item FLIGHT has briefed for the operator), `flightDown`
+ * (FLIGHT could not be kept running, is parked or at an account's stop line, or is silent mid-turn)
+ * and `awayDigest` (only in away mode, which the operator switches on) are on by default; the rest
+ * are opt-in, so the operator is not taught to babysit (roadmap item 7).
+ */
 export type NotificationCategory =
+  | "asks"
+  | "flightDown"
   | "people"
   | "decisions"
   | "stalls"
   | "prs"
   | "capcom"
   | "awayDigest"
-  | "quota"
-  | "agentMessages";
+  | "quota";
 
 /** Notify me about, on every signed-in device (catalogue §2.7.6). */
 export interface NotificationPreferences {

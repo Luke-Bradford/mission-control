@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FLIGHT_DOWN_NOTE_KEY, FLIGHT_NOTE_KEY, type NotificationCategory } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -58,20 +59,56 @@ const note = (key: string) => {
   });
   bus.emit("attention");
 };
+/** An item FLIGHT has briefed for the operator: the default notification. */
+const ask = (key: string, question = "Which lane should the demo take?") => {
+  note(key);
+  store.addBrief({
+    key: `note:${key}`,
+    context: "The demo needs a lane.",
+    ask: question,
+    recommendation: "Take lane A.",
+    options: [],
+    basis: "product direction",
+    at: Date.now(),
+    for: "operator",
+  });
+  bus.emit("attention");
+};
+/** One of the notes that say FLIGHT is down, as the FLIGHT watch raises it. */
+const flightDown = (key: string, text: string) => {
+  store.raiseNote({
+    key,
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text,
+    at: Date.now(),
+  });
+  bus.emit("attention");
+};
+/** Turn on categories that are opt-in. */
+const optIn = async (...categories: NotificationCategory[]) => {
+  const p = await preferences();
+  for (const c of categories) p.categories[c] = true;
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  return p;
+};
 
-it("defaults to the catalogue categories and validates guarded preference writes", async () => {
+it("defaults to briefed asks, FLIGHT down and the away digest, and validates guarded writes", async () => {
   expect(await preferences()).toEqual({
     enabled: true,
     softChime: true,
     categories: {
-      people: true,
-      decisions: true,
-      stalls: true,
-      prs: true,
-      capcom: true,
+      asks: true,
+      flightDown: true,
+      people: false,
+      decisions: false,
+      stalls: false,
+      prs: false,
+      capcom: false,
       awayDigest: true,
       quota: false,
-      agentMessages: false,
     },
     quietHours: { start: "19:00", end: "08:00", timezone: "Europe/London", stallsBypass: true },
   });
@@ -112,8 +149,10 @@ it("deduplicates unchanged items, persists across restarts and leaves attention 
   p.softChime = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   await app.ready();
-  note("demo");
-  expect(await events()).toMatchObject([{ category: "decisions", text: "Choose the demo lane" }]);
+  ask("demo");
+  expect(await events()).toMatchObject([
+    { category: "asks", text: "Which lane should the demo take?" },
+  ]);
   bus.emit("attention");
   expect(await events()).toHaveLength(1);
   expect((await app.inject("/api/attention")).json()).toMatchObject([{ acked: false }]);
@@ -137,20 +176,20 @@ it.each([
   ["2026-10-23T18:00:00Z", 0],
 ])("honours local midnight and DST at %s", async (time, count) => {
   vi.setSystemTime(new Date(time));
-  await app.ready();
-  note("demo");
+  await optIn("stalls");
+  ask("demo");
   expect(await events()).toHaveLength(count);
   note("stall");
   expect(await events()).toHaveLength(count + 1);
 });
 
 it("filters disabled categories and enabled state without replaying suppressed items", async () => {
-  const p = await preferences();
-  p.categories.decisions = false;
+  const p = await optIn("stalls");
+  p.categories.asks = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  note("demo");
+  ask("demo");
   expect(await events()).toEqual([]);
-  p.categories.decisions = true;
+  p.categories.asks = true;
   p.enabled = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("stall");
@@ -200,7 +239,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("notifies FLIGHT's @CAPCOM question, not direct-line narration, even with messages opted in", async () => {
+it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM opted in", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -219,7 +258,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, even with mes
   };
   app = buildApp({ config: crewConfig, store, bus });
   const p = await preferences();
-  p.categories.agentMessages = true;
+  p.categories.capcom = true;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
     at: Date.now() - 1,
@@ -303,22 +342,33 @@ it("emits one digest when the away end date passes", async () => {
   expect(await events()).toHaveLength(1);
 });
 
-it("supports same-day quiet windows and never replays suppressed transitions", async () => {
-  const p = await preferences();
+it("supports same-day quiet windows: an ask waits for them to end, nothing else replays", async () => {
+  const p = await optIn("stalls", "decisions");
   p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  note("quiet");
+  note("raw");
+  ask("quiet");
   expect(await events()).toEqual([]);
   vi.setSystemTime(new Date("2026-10-23T14:00:00Z"));
   bus.emit("attention");
-  expect(await events()).toEqual([]);
-  note("after");
+  expect(await events()).toMatchObject([{ category: "asks" }]);
+  bus.emit("attention");
   expect(await events()).toHaveLength(1);
+  ask("after");
+  expect(await events()).toHaveLength(2);
   p.categories.stalls = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("stall");
-  expect(await events()).toHaveLength(1);
-  expect((await app.inject("/api/attention")).json()).toHaveLength(3);
+  expect(await events()).toHaveLength(2);
+  expect((await app.inject("/api/attention")).json()).toHaveLength(4);
+});
+
+it("notifies FLIGHT down through quiet hours", async () => {
+  const p = await preferences();
+  p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
 });
 
 it.each([
@@ -338,7 +388,7 @@ it.each([
 });
 
 it("notifies again when a cleared stall reopens between reconciliations", async () => {
-  await app.ready();
+  await optIn("stalls");
   note("stall");
   expect(await events()).toHaveLength(1);
   store.clearNote("stall", Date.now());
@@ -368,11 +418,11 @@ it("coalesces all notification topics off requests, runs at startup and keeps th
     bus.emit(topic);
   await vi.advanceTimersByTimeAsync(999);
   expect(attention).toHaveBeenCalledTimes(1);
-  note("last");
+  ask("last");
   await vi.advanceTimersByTimeAsync(1);
   expect(attention).toHaveBeenCalledTimes(2);
   expect((await app.inject("/api/notifications/events")).json()).toMatchObject([
-    { category: "decisions", text: "Choose the demo lane" },
+    { category: "asks", text: "Which lane should the demo take?" },
   ]);
   await vi.advanceTimersByTimeAsync(1000);
   expect(attention).toHaveBeenCalledTimes(2);
@@ -380,4 +430,232 @@ it("coalesces all notification topics off requests, runs at startup and keeps th
   await app.close();
   await vi.advanceTimersByTimeAsync(1000);
   expect(attention).toHaveBeenCalledTimes(2);
+});
+
+it("notifies a briefed ask and FLIGHT going down, not stalls, PRs, blocked runs or raw asks", async () => {
+  await app.ready();
+  note("stall");
+  store.raiseNote({
+    key: "blocked:r1:0",
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "mc#7 parked",
+    at: Date.now(),
+  });
+  store.raiseNote({
+    key: "review:r2",
+    kind: "review",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "PR #9 is ready for review",
+    at: Date.now(),
+  });
+  note("raw");
+  bus.emit("attention");
+  expect(await events()).toEqual([]);
+  // FLIGHT's own triage (a brief for FLIGHT) is not an ask of the operator
+  store.addBrief({
+    key: "note:raw",
+    context: "c",
+    recommendation: "r",
+    options: [],
+    basis: "b",
+    at: Date.now(),
+    for: "flight",
+  });
+  bus.emit("attention");
+  expect(await events()).toEqual([]);
+  // the same item, once FLIGHT briefs it for the operator, is a new ask
+  ask("raw", "Ship the demo lane today?");
+  expect(await events()).toMatchObject([{ category: "asks", text: "Ship the demo lane today?" }]);
+  // a refreshed brief with the same ask does not notify again; a changed ask does
+  ask("raw", "Ship the demo lane today?");
+  expect(await events()).toHaveLength(1);
+  ask("raw", "Ship the demo lane tomorrow instead?");
+  expect(await events()).toHaveLength(2);
+  store.raiseNote({
+    key: FLIGHT_NOTE_KEY,
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "FLIGHT could not be kept running",
+    at: Date.now(),
+  });
+  bus.emit("attention");
+  expect((await events()).slice(2)).toMatchObject([
+    { category: "flightDown", text: "FLIGHT could not be kept running" },
+  ]);
+});
+
+it("keeps an opt-in for stalls, PRs, blocked runs and raw decisions", async () => {
+  await optIn("stalls", "prs", "decisions");
+  note("stall");
+  note("raw");
+  store.raiseNote({
+    key: "review:r2",
+    kind: "review",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "PR #9 is ready for review",
+    at: Date.now(),
+  });
+  bus.emit("attention");
+  expect((await events()).map((e: { category: string }) => e.category).sort()).toEqual([
+    "decisions",
+    "prs",
+    "stalls",
+  ]);
+});
+
+it("resets categories saved before briefed asks, keeping the operator's own opt-ins and settings", async () => {
+  const old = {
+    enabled: false,
+    categories: {
+      people: true,
+      decisions: true,
+      stalls: true,
+      prs: true,
+      capcom: true,
+      awayDigest: true,
+      quota: true,
+      agentMessages: false,
+    },
+    quietHours: { start: "20:00", end: "07:00", timezone: "UTC", stallsBypass: true },
+    softChime: false,
+  };
+  store.setSetting("notification-preferences", JSON.stringify(old));
+  const p = await preferences();
+  expect(p).toMatchObject({
+    enabled: false,
+    softChime: false,
+    quietHours: { start: "20:00", end: "07:00", timezone: "UTC" },
+  });
+  expect(Object.entries(p.categories).filter(([, on]) => on)).toEqual([
+    ["asks", true],
+    ["flightDown", true],
+    ["awayDigest", true],
+    ["quota", true],
+  ]);
+});
+
+it("keeps an away-digest opt-out saved before briefed asks", async () => {
+  store.setSetting(
+    "notification-preferences",
+    JSON.stringify({
+      enabled: true,
+      categories: {
+        people: true,
+        decisions: true,
+        stalls: true,
+        prs: true,
+        capcom: true,
+        awayDigest: false,
+        quota: false,
+        agentMessages: false,
+      },
+      quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+      softChime: true,
+    }),
+  );
+  expect(Object.entries((await preferences()).categories).filter(([, on]) => on)).toEqual([
+    ["asks", true],
+    ["flightDown", true],
+  ]);
+});
+
+it("keeps saved choices across a category added or removed later", async () => {
+  store.setSetting(
+    "notification-preferences",
+    JSON.stringify({
+      enabled: true,
+      categories: { asks: false, people: true, awayDigest: false, retired: true },
+      quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+      softChime: true,
+    }),
+  );
+  const { categories } = await preferences();
+  expect(categories).toMatchObject({
+    asks: false,
+    people: true,
+    awayDigest: false,
+    flightDown: true,
+    stalls: false,
+  });
+  expect(categories).not.toHaveProperty("retired");
+});
+
+it("reads unparseable saved preferences as the defaults", async () => {
+  store.setSetting("notification-preferences", "{not json");
+  expect((await preferences()).categories.asks).toBe(true);
+  ask("demo");
+  expect(await events()).toMatchObject([{ category: "asks" }]);
+});
+
+it("notifies a new or changed ask on an item the operator already read", async () => {
+  await app.ready();
+  note("read");
+  await app.inject({ method: "POST", url: "/api/attention/ack", payload: { keys: ["note:read"] } });
+  vi.setSystemTime(new Date("2026-10-23T12:01:00Z"));
+  ask("read", "Ship it today?");
+  expect(await events()).toMatchObject([{ category: "asks", text: "Ship it today?" }]);
+  expect((await app.inject("/api/attention")).json()[0].acked).toBe(false);
+});
+
+it("notifies each FLIGHT outage, even after the last one was read", async () => {
+  await app.ready();
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: one");
+  expect(await events()).toHaveLength(1);
+  await app.inject({
+    method: "POST",
+    url: "/api/attention/ack",
+    payload: { keys: [`note:${FLIGHT_NOTE_KEY}`] },
+  });
+  store.clearNote(FLIGHT_NOTE_KEY, Date.now());
+  bus.emit("attention");
+  await events();
+  vi.setSystemTime(new Date("2026-10-23T13:00:00Z"));
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: two");
+  expect((await events()).map((e: { text: string }) => e.text)).toEqual([
+    "FLIGHT could not be kept running: one",
+    "FLIGHT could not be kept running: two",
+  ]);
+});
+
+it("counts FLIGHT down as FLIGHT down even with a brief on it", async () => {
+  await app.ready();
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked");
+  store.addBrief({
+    key: `note:${FLIGHT_DOWN_NOTE_KEY}`,
+    context: "c",
+    ask: "Unpark FLIGHT?",
+    recommendation: "r",
+    options: [],
+    basis: "b",
+    at: Date.now(),
+    for: "operator",
+  });
+  bus.emit("attention");
+  expect((await events()).map((e: { category: string }) => e.category)).toEqual(["flightDown"]);
+});
+
+it("adopts the new notification versions on Update without replaying open items", async () => {
+  await app.close();
+  ask("open");
+  store.setSetting(
+    "notification-events",
+    JSON.stringify({
+      seen: { "note:open": JSON.stringify(["question", "Choose the demo lane", Date.now()]) },
+      events: [],
+      away: false,
+    }),
+  );
+  app = buildApp({ config, store, bus });
+  expect(await events()).toEqual([]);
+  ask("open", "A changed ask?");
+  expect(await events()).toMatchObject([{ category: "asks", text: "A changed ask?" }]);
 });

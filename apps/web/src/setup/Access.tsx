@@ -7,6 +7,8 @@ import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
 
 const NOTIFY: [NotificationCategory, string][] = [
+  ["asks", "Asks FLIGHT has briefed for me"],
+  ["flightDown", "FLIGHT is down"],
   ["people", "People asking me something in Teams or GitHub"],
   ["decisions", "Decisions waiting for me"],
   ["stalls", "Stalls and stuck runs"],
@@ -14,7 +16,6 @@ const NOTIFY: [NotificationCategory, string][] = [
   ["capcom", "Anything tagged @CAPCOM"],
   ["awayDigest", "The away-mode digest when I come back"],
   ["quota", "Quota above 90%"],
-  ["agentMessages", "Every agent message"],
 ];
 
 const SAMPLES = [
@@ -149,7 +150,9 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             required
           />
         </label>
-        <span className="muted">{prefs.quietHours.timezone} · stalls still notify</span>
+        <span className="muted">
+          {prefs.quietHours.timezone} · FLIGHT down and stalls still notify
+        </span>
       </div>
       <label>
         <input
