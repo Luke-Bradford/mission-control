@@ -275,6 +275,8 @@ export interface TicketView {
   title: string;
   url: string;
   state: "open" | "closed";
+  /** When GitHub closed it (epoch ms, whole seconds); null while open or when unread. */
+  closedAt?: number | null;
   /** Plain text as written on GitHub, cut at 20 000 characters (`bodyTruncated`). */
   body: string;
   /** True when the collector cut `body`. */

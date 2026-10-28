@@ -635,8 +635,19 @@ export const FLIGHT_CLOSES_PER_HOUR = 5;
 export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call; if you were wrong, call it again with action "reopen" (only for a ticket you closed). Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
 export const closeComment = (replacement: number): string =>
   `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
-export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
-  `Closed as ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
+export const CLOSED_PREFIX = "Closed as";
+export const closedDecision = (
+  reason: "duplicate" | "not-planned",
+  url: string,
+  closedAt: number,
+): string =>
+  `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url} [closedAt ${closedAt}]`;
+/** The closedAt a "Closed as" decision recorded; null for any other decision. */
+export const closedAtOf = (decision: string): number | null =>
+  decision.startsWith(CLOSED_PREFIX)
+    ? Number(/\[closedAt (\d+)\]$/.exec(decision)?.[1] ?? "") || null
+    : null;
+export const CLOSE_UNCONFIRMED_DECISION = "Close failed; replacement comment may have posted";
 export const closeRefusedText = (why: string): string => `Not closed: ${why}.`;
 export const closedText = (ref: string, replacement: string): string =>
   `Closed ${ref}; linked its open replacement ${replacement}. Recorded in Decided without you.`;

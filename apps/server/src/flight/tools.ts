@@ -35,6 +35,8 @@ import {
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   CLOSE_DESCRIPTION,
+  CLOSE_UNCONFIRMED_DECISION,
+  CLOSED_PREFIX,
   COMMENTED_DECISION,
   CREATE_NO_REPO,
   CREW_LANES,
@@ -45,6 +47,7 @@ import {
   ciNotActionsText,
   ciNotFailedText,
   closeComment,
+  closedAtOf,
   closedDecision,
   closedText,
   closeFailedText,
@@ -1800,7 +1803,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const reopening = "action" in a;
     const refuse = (why: string) => fail(closeRefusedText(why));
     const at = now();
-    const closes = lastHour(["close"], at);
+    // Only closes (and attempts whose comment may have posted) spend the cap; reopens undo one.
+    const closes = reopening
+      ? 0
+      : store
+          .flightDecisions(at - FLIGHT_HOUR_MS, 1000)
+          .filter(
+            (d) =>
+              d.kind === "close" &&
+              (d.decision.startsWith(CLOSED_PREFIX) || d.decision === CLOSE_UNCONFIRMED_DECISION),
+          ).length;
     if (closes >= FLIGHT_CLOSES_PER_HOUR) return fail(capText("closed tickets", closes));
     const ref = `${repo.id}#${a.issue}`;
     const rules = await deps.rules(repo.id);
@@ -1822,22 +1834,33 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (problem !== null) return refuse(problem);
     const cwd = crewDir(deps.dbPath);
     const known = await readKnown(deps, "close_ticket");
-    const gh = async (args: string[], what: string): Promise<Result | null> => {
+    const read = async (n: number): Promise<TicketView | null> => {
+      try {
+        return await deps.fetchTicket(repo, n);
+      } catch {
+        return null;
+      }
+    };
+    /** Runs one gh write: a refusal Result when it did not run, else whether it exited 0. */
+    const gh = async (args: string[], what: string): Promise<Result | boolean> => {
       // fetches above took time: Away may have begun since superTool's check
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const r = await deps.gh(args, { cwd });
-      if (r.code === 0) return null;
-      deps.log?.(
-        redact(`mc close_ticket: gh ${what} failed (${String(r.code)}): ${r.stderr}`, known),
-      );
-      return fail(closeFailedText());
+      if (r.code !== 0)
+        deps.log?.(
+          redact(`mc close_ticket: gh ${what} failed (${String(r.code)}): ${r.stderr}`, known),
+        );
+      return r.code === 0;
     };
     if (reopening) {
-      // only FLIGHT's own latest close of this ticket can be undone here
+      // only FLIGHT's own latest close of this ticket can be undone, and only while that close stands
       const last = store.flightDecisions(0, 1000).find((d) => d.kind === "close" && d.ref === ref);
-      if (!last?.decision.startsWith("Closed as"))
-        return refuse("only a ticket you closed yourself can be reopened");
-      const refused = await gh(
+      const closedAt = last ? closedAtOf(last.decision) : null;
+      if (closedAt === null) return refuse("only a ticket you closed yourself can be reopened");
+      const live = await read(a.issue);
+      if (live?.state !== "closed" || live.closedAt !== closedAt)
+        return refuse("it was reopened or closed again since you closed it");
+      const done = await gh(
         [
           "issue",
           "reopen",
@@ -1847,12 +1870,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ],
         "issue reopen",
       );
-      if (refused) return refused;
+      if (typeof done !== "boolean") return done;
+      if (!done) return fail(closeFailedText());
       record(at, {
         kind: "close",
         ref,
         about: `${ref}: ${card.title}`,
-        decision: `Reopened: ${last.decision.slice(last.decision.indexOf(": ") + 2)}`,
+        decision: `Reopened: ${live.url}`,
         basis: a.basis,
       });
       return { text: `Reopened ${ref}. Recorded in Decided without you.` };
@@ -1882,6 +1906,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return refuse(
         `open tickets are blocked by it (${blocked.map((c) => `${repo.id}#${c.issueNumber}`).join(", ")}); closing it would unblock them`,
       );
+    if (card.subIssues && card.subIssues.done < card.subIssues.total)
+      return refuse("the ticket has open sub-issues");
+    // "Depends on #N" in a waiting ticket's body also holds it back; an unreadable body fails closed
+    const waiting = cards.filter(
+      (c) =>
+        !c.closed &&
+        c.issueNumber !== a.issue &&
+        (["Backlog", "Ready", "Refinement", "Blocked"] as string[]).includes(hudColumnOf(c)),
+    );
+    const bodies = await Promise.all(waiting.map((c) => read(c.issueNumber)));
+    const dependents: string[] = [];
+    for (const [i, t] of bodies.entries()) {
+      if (t === null || t.bodyTruncated) return refuse("a waiting ticket's body could not be read");
+      if (dependsOn(t.body).includes(a.issue))
+        dependents.push(`${repo.id}#${waiting[i]?.issueNumber}`);
+    }
+    if (dependents.length > 0)
+      return refuse(
+        `open tickets depend on it (${dependents.join(", ")}); closing it would unblock them`,
+      );
     let target: TicketView | null;
     let replacementTicket: TicketView | null;
     try {
@@ -1898,8 +1942,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (target.subIssues.some((sub) => sub.state === "open"))
       return refuse("the ticket has open sub-issues");
     if (replacementTicket?.state !== "open") return refuse("the replacement is not an open issue");
-    // One call: the comment and the close land together or not at all. The card's move to Done is #50.
-    const failed = await gh(
+    // gh posts the comment, then closes: the two are not atomic. The card's move to Done is #50.
+    const startedAt = now();
+    const done = await gh(
       [
         "issue",
         "close",
@@ -1912,15 +1957,31 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ],
       "issue close",
     );
-    if (failed) return failed;
+    if (typeof done !== "boolean") return done;
+    // Exit 0 is not proof: gh succeeds on an issue that was already closed. Trust only the live
+    // issue, closed at or after the call began (closedAt has whole-second resolution).
+    const after = await read(a.issue);
+    const closedAt = after?.state === "closed" ? (after.closedAt ?? null) : null;
+    if (closedAt !== null && closedAt >= startedAt - 1000) {
+      record(at, {
+        kind: "close",
+        ref,
+        about: `${ref}: ${card.title} (replaced by ${replacementRef})`,
+        decision: closedDecision(reason, target.url, closedAt),
+        basis: a.basis,
+      });
+      return { text: closedText(ref, replacementRef) };
+    }
+    // closed before the call (an operator got there first): not FLIGHT's close, nothing was posted
+    if (closedAt !== null) return refuse("it was already closed by someone else");
     record(at, {
       kind: "close",
       ref,
       about: `${ref}: ${card.title} (replaced by ${replacementRef})`,
-      decision: closedDecision(reason, target.url),
+      decision: CLOSE_UNCONFIRMED_DECISION,
       basis: a.basis,
     });
-    return { text: closedText(ref, replacementRef) };
+    return fail(closeFailedText());
   }
 
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3081,7 +3142,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       },
       modes: [],
       grantable: ["read-only"],
-      call: promote,
+      call: (ctx, args) => queued(ticketQueue, repoOf()?.id ?? "", () => promote(ctx, args)),
     },
     {
       name: MC_TOOL_NAMES.endRun,
