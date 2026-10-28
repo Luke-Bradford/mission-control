@@ -1087,20 +1087,24 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
           "\nrepos:",
           `\n  - id: codex-profile\n    vendor: codex\n    alert_at: 70\n    stop_at: 80\n    cli_profile: ${profile}\n\nrepos:`,
         );
-    const profileSeat = (model: string) =>
+    const profileSeat = (model: string, extra = "") =>
       withProfile(
         crewText({
-          seats: [seat("guido-1", "GUIDO", "", "codex-profile").replace("sonnet", model)],
+          seats: [seat("guido-1", "GUIDO", extra, "codex-profile").replace("sonnet", model)],
         }),
       );
 
-    const configured = load(profileSeat("gpt-profile-only")).crew?.sessions[0]?.seats[0];
+    const configured = load(profileSeat("gpt-profile-only", ", effort: high")).crew?.sessions[0]
+      ?.seats[0];
     if (!configured) throw new Error("missing profile seat");
     expect(seatUnavailable(configured)).toBeNull();
     expect(seatUnavailable({ ...configured, model: "gpt-6-astra" })).toContain(
       'model "gpt-6-astra" is not listed',
     );
     expect(fails(profileSeat("gpt-6-astra")).path).toBe("crew.sessions[0].seats[0].model");
+    expect(fails(profileSeat("gpt-profile-only", ", effort: ultra")).path).toBe(
+      "crew.sessions[0].seats[0].effort",
+    );
     expect(
       fails(
         withProfile(
