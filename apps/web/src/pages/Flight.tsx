@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import { AskedOfYou } from "../flight/AskedOfYou.tsx";
 import { BriefPanel, WatchList } from "../flight/Brief.tsx";
 import { ControlQueue } from "../flight/ControlQueue.tsx";
@@ -11,6 +11,7 @@ import { Summary } from "../flight/Summary.tsx";
 import { WorkInFlight } from "../flight/WorkInFlight.tsx";
 import { WorkingLog } from "../flight/WorkingLog.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { navigate, useHash } from "../router.ts";
 
 const FLIGHT_TABS = ["command", "queue", "notebook", "record"] as const;
 type FlightTab = (typeof FLIGHT_TABS)[number];
@@ -22,8 +23,27 @@ const TAB_LABEL: Record<FlightTab, string> = {
   record: "Record",
 };
 
-const initialTab = (): FlightTab =>
-  globalThis.location?.hash.startsWith("#flight-note-") ? "notebook" : "command";
+/** Panels a link may name, by the tab that holds them; a working-context or draft row by prefix. */
+const HASH_TAB: Readonly<Record<string, FlightTab>> = {
+  briefP: "notebook",
+  memoryP: "notebook",
+  ledgerP: "queue",
+  askP: "queue",
+  draftsP: "queue",
+  incP: "queue",
+  watchP: "queue",
+  outcomesP: "record",
+  decidedP: "record",
+  logP: "record",
+};
+
+/** The tab a `#fragment` link opens: the one holding it, else Command. */
+export function tabForHash(hash: string): FlightTab {
+  const id = hash.replace(/^#/, "");
+  if (id.startsWith("flight-note-")) return "notebook";
+  if (id.startsWith("draft-")) return "queue";
+  return HASH_TAB[id] ?? "command";
+}
 
 function moveTab(
   event: KeyboardEvent<HTMLButtonElement>,
@@ -47,9 +67,57 @@ function moveTab(
   document.getElementById(`flight-tab-${next}`)?.focus();
 }
 
+/**
+ * A tab's panel. It takes focus itself (WAI-ARIA tabs pattern) so a keyboard user reaches a panel
+ * that opens with no focusable content, and its `flight-<tab>` class carries the tab's layout.
+ */
+function TabPanel({
+  tab,
+  current,
+  children,
+}: {
+  tab: FlightTab;
+  current: FlightTab;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`flight-tab-body flight-${tab}`}
+      id={`flight-${tab}`}
+      role="tabpanel"
+      aria-labelledby={`flight-tab-${tab}`}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the APG tabs pattern makes a tabpanel a tab stop.
+      tabIndex={0}
+      hidden={tab !== current}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** FLIGHT's shared command surface: one canonical home for now, next, context and history. */
 export function Flight() {
-  const [tab, setTab] = useState<FlightTab>(initialTab);
+  const hash = useHash();
+  const [tab, setTab] = useState<FlightTab>(() => tabForHash(hash));
+  // A link to a section opens its tab, on load and when the fragment changes on this page.
+  useEffect(() => {
+    if (hash === "") return;
+    setTab(tabForHash(hash));
+    // The target was hidden while its tab was, so the browser could not scroll to it.
+    requestAnimationFrame(() =>
+      document.getElementById(hash.slice(1))?.scrollIntoView?.({
+        block: "nearest",
+      }),
+    );
+  }, [hash]);
+  // A tab chosen by hand drops a section link the page no longer shows, so following it again
+  // switches back.
+  const select = (next: FlightTab) => {
+    setTab(next);
+    if (window.location.hash !== "") {
+      navigate(window.location.pathname + window.location.search, { replace: true });
+    }
+  };
   return (
     <section id="page-flight">
       <div className="flight-tabs" role="tablist" aria-label="Flight views">
@@ -62,8 +130,8 @@ export function Flight() {
             aria-controls={`flight-${item}`}
             aria-selected={tab === item}
             tabIndex={tab === item ? 0 : -1}
-            onClick={() => setTab(item)}
-            onKeyDown={(event) => moveTab(event, item, setTab)}
+            onClick={() => select(item)}
+            onKeyDown={(event) => moveTab(event, item, select)}
           >
             <span className="flight-tab-index" aria-hidden="true">
               {String(FLIGHT_TABS.indexOf(item) + 1).padStart(2, "0")}
@@ -73,14 +141,8 @@ export function Flight() {
         ))}
       </div>
 
-      <div
-        className="flight-tab-body flight-command"
-        id="flight-command"
-        role="tabpanel"
-        aria-labelledby="flight-tab-command"
-        hidden={tab !== "command"}
-      >
-        <Situation onOpen={(target) => setTab(target)} />
+      <TabPanel tab="command" current={tab}>
+        <Situation />
         <div className="flight-command-grid">
           <Panel
             id="wifP"
@@ -97,19 +159,13 @@ export function Flight() {
             sub="what to clear, what follows, and what FLIGHT is watching"
           >
             <div className="flight-panel-scroll">
-              <ControlQueue onOpenQueue={() => setTab("queue")} />
+              <ControlQueue onOpenQueue={() => select("queue")} />
             </div>
           </Panel>
         </div>
-      </div>
+      </TabPanel>
 
-      <div
-        className="flight-tab-body flight-queue"
-        id="flight-queue"
-        role="tabpanel"
-        aria-labelledby="flight-tab-queue"
-        hidden={tab !== "queue"}
-      >
+      <TabPanel tab="queue" current={tab}>
         <Panel
           id="ledgerP"
           title="Planning board"
@@ -120,12 +176,8 @@ export function Flight() {
           </div>
         </Panel>
         <div className="flight-queue-lower">
-          <Panel
-            id="operatorDeskP"
-            title="Operator actions"
-            sub="decisions and replies only you can make"
-          >
-            <div className="flight-panel-scroll" id="askP">
+          <Panel id="askP" title="Operator actions" sub="decisions and replies only you can make">
+            <div className="flight-panel-scroll">
               <AskedOfYou />
             </div>
           </Panel>
@@ -155,26 +207,14 @@ export function Flight() {
             </Panel>
           </div>
         </div>
-      </div>
+      </TabPanel>
 
-      <div
-        className="flight-tab-body flight-notebook"
-        id="flight-notebook"
-        role="tabpanel"
-        aria-labelledby="flight-tab-notebook"
-        hidden={tab !== "notebook"}
-      >
+      <TabPanel tab="notebook" current={tab}>
         <BriefPanel expanded />
         <MemoryPanel expanded />
-      </div>
+      </TabPanel>
 
-      <div
-        className="flight-tab-body flight-record"
-        id="flight-record"
-        role="tabpanel"
-        aria-labelledby="flight-tab-record"
-        hidden={tab !== "record"}
-      >
+      <TabPanel tab="record" current={tab}>
         <Panel id="outcomesP" title="Outcomes" sub="recently completed work and the last 24 hours">
           <div className="flight-panel-scroll">
             <Summary mode="record" />
@@ -192,7 +232,7 @@ export function Flight() {
           </Panel>
           <WorkingLog />
         </div>
-      </div>
+      </TabPanel>
     </section>
   );
 }

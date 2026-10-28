@@ -2,6 +2,7 @@ import type {
   FlightLedgerEntry,
   FlightLedgerView,
   FlightSummaryItem,
+  FlightSummaryOutcome,
   FlightSummaryView,
 } from "@mc/core";
 import { MIN, NOW } from "./fixtures.ts";
@@ -32,6 +33,13 @@ export const summaryItem = (entry: FlightLedgerEntry): FlightSummaryItem => ({
   due: entry.due,
   priority: entry.priority,
   ageMin: 10,
+});
+export const summaryOutcome = (entry: FlightLedgerEntry): FlightSummaryOutcome => ({
+  ...summaryItem(entry),
+  outcome: entry.outcome,
+  refs: entry.refs,
+  basis: entry.basis,
+  closedAt: entry.updatedAt,
 });
 export const flightLedger = (entries: FlightLedgerEntry[] = []): FlightLedgerView => ({
   session: "s1",

@@ -181,6 +181,14 @@ export interface FlightSummaryItem {
   priority: string | null;
   ageMin: number;
 }
+/** A closed ledger outcome as Record shows it: its result, evidence and when it closed. */
+export interface FlightSummaryOutcome extends FlightSummaryItem {
+  outcome: string | null;
+  refs: string[];
+  basis: string;
+  /** The entry's `updatedAt`: when it was closed. */
+  closedAt: number;
+}
 /**
  * Daily and live hub metrics. A run's whole cost and tokens are attributed when it was
  * active in the window (still open or ended at or after `since`); the hub has no per-turn cost.
@@ -210,8 +218,8 @@ export interface FlightSummaryView {
   watching: { counts: Record<FlightLedgerStatus, number>; top: FlightSummaryItem[] };
   /** Items of kind plan resolve by id through GET /api/flight/schedule. */
   next: FlightSummaryItem[];
-  /** Most recently closed ledger outcomes, newest first. */
-  done: FlightSummaryItem[];
+  /** Most recently completed ledger outcomes, newest first; arrivals (`incoming`) are excluded. */
+  done: FlightSummaryOutcome[];
   incoming: number;
   metrics: FlightMetrics;
 }

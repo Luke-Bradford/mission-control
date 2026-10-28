@@ -4721,14 +4721,22 @@ div.opt {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
+  /* The tabs lay out by the page's own width: the dock takes a share of the window. */
+  container: flight / inline-size;
 }
+/* The tabs scroll sideways rather than wrap; the rule is an inset line so the scroller's
+   clipping keeps the selected tab's edge. */
 .flight-tabs {
   display: flex;
   gap: 2px;
-  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px var(--line);
+  scrollbar-width: thin;
 }
 .flight-tabs button {
   position: relative;
+  flex: none;
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
@@ -4749,7 +4757,7 @@ div.opt {
   content: "";
   position: absolute;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   left: 0;
   height: 2px;
   background: transparent;
@@ -4778,8 +4786,16 @@ div.opt {
 .flight-tabs button[aria-selected="true"] .flight-tab-index {
   color: var(--accent);
 }
+/* Each tab fits the window where it can; where its panels' minimum heights do not fit, the tab
+   body scrolls rather than cutting the lower panels off. */
 .flight-tab-body {
   min-height: 0;
+}
+.flight-command,
+.flight-queue,
+.flight-notebook,
+.flight-record {
+  overflow: auto;
 }
 .flight-tab-body[hidden] {
   display: none;
@@ -4876,9 +4892,8 @@ button.flight-link:hover {
 /* Command */
 .flight-command {
   display: grid;
-  grid-template-rows: auto minmax(180px, 1fr);
+  grid-template-rows: max-content minmax(min-content, 1fr);
   gap: 12px;
-  overflow: hidden;
 }
 /* The briefing keeps its full height; the panels below it give way and scroll inside. */
 .flight-command > #sitP {
@@ -4886,7 +4901,7 @@ button.flight-link:hover {
 }
 .flight-command-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
   gap: 12px;
   min-height: 0;
 }
@@ -5043,7 +5058,33 @@ button.flight-pulse:hover {
   white-space: nowrap;
 }
 
-/* Delivery board: a table; the delivery path is a step track on one line */
+/* FLIGHT's tables are real tables laid out as grids: each row is a grid, its cells the items. */
+.wif-table,
+.flight-plan-table,
+.flight-outcome-table,
+.wif-table > :is(thead, tbody),
+.flight-plan-table > :is(thead, tbody),
+.flight-outcome-table > :is(thead, tbody) {
+  display: block;
+}
+.wif-table > thead,
+.flight-plan-table > thead,
+.flight-outcome-table > thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* Undo the global th/td look; element-level specificity, so each column's class still wins. */
+:where(.wif-table, .flight-plan-table, .flight-outcome-table) :is(th, td) {
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  border: 0;
+}
+/* Delivery board: the delivery path is a step track on one line */
 .wif-table {
   min-width: 640px;
 }
@@ -5057,9 +5098,6 @@ button.flight-pulse:hover {
   align-items: start;
 }
 .wif-table-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   padding: 8px 14px;
   color: var(--muted);
   font: 600 10.5px / 1.2 var(--mono);
@@ -5070,10 +5108,6 @@ button.flight-pulse:hover {
 }
 .wif-table-head > :last-child {
   text-align: right;
-}
-#wifP ul.tlist {
-  gap: 0;
-  padding: 0;
 }
 #wifP .wif-row {
   padding: 11px 14px;
@@ -5115,6 +5149,11 @@ button.flight-pulse:hover {
 }
 .wif-doing {
   display: block;
+}
+.wif-branch {
+  display: block;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
 }
 .wif-stage {
   display: grid;
@@ -5342,14 +5381,12 @@ button.flight-pulse:hover {
   grid-template-rows: minmax(240px, 1.1fr) minmax(240px, 1fr);
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
 }
 .flight-queue-lower {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
 }
 .flight-queue-signals {
   display: grid;
@@ -5369,18 +5406,6 @@ button.flight-pulse:hover {
 .flight-summary > .note {
   margin: 0;
   padding: 10px 14px;
-}
-.flight-summary-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: start;
-}
-.flight-summary .sittext {
-  margin: 0;
-  font-family: var(--display);
-  font-size: 18px;
-  font-weight: 600;
 }
 .flight-plan-intro {
   display: flex;
@@ -5432,9 +5457,6 @@ button.flight-pulse:hover {
 }
 .flight-plan-head,
 .flight-outcome-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   padding: 8px 14px;
   color: var(--muted);
   font: 600 10.5px / 1.2 var(--mono);
@@ -5447,12 +5469,6 @@ button.flight-pulse:hover {
 .flight-outcome-head > :last-child {
   text-align: right;
 }
-.flight-plan-list,
-.flight-outcome-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
 .flight-plan-row,
 .flight-outcome-row {
   padding: 11px 14px;
@@ -5464,8 +5480,8 @@ button.flight-pulse:hover {
 .flight-outcome-row:hover {
   background: color-mix(in srgb, var(--surface-2) 70%, transparent);
 }
-.flight-plan-row > span,
-.flight-outcome-row > span {
+.flight-plan-row > td,
+.flight-outcome-row > td {
   min-width: 0;
 }
 .flight-plan-horizon {
@@ -5476,7 +5492,7 @@ button.flight-pulse:hover {
 }
 .flight-plan-work,
 .flight-plan-checkpoint,
-.flight-outcome-row > span:first-child {
+.flight-outcome-row > td:first-child {
   display: grid;
   gap: 4px;
 }
@@ -5559,10 +5575,9 @@ button.flight-pulse:hover {
 /* Notebook */
 .flight-notebook {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
 }
 .flight-notes .flight-knowledge-scroll > p.note:first-child {
   max-width: none;
@@ -5702,10 +5717,9 @@ button.flight-pulse:hover {
 /* Record */
 .flight-record {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
 }
 .flight-record-side {
   display: grid;
@@ -5735,7 +5749,7 @@ button.flight-pulse:hover {
   font-size: 22px;
 }
 #outcomesP .flight-tiles {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
   margin: 0;
   border-bottom: 1px solid var(--line);
@@ -5791,7 +5805,7 @@ button.flight-pulse:hover {
 @media (max-width: 1439px) {
   .flight-command-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1.4fr) minmax(200px, 1fr);
   }
   .flight-pulse {
     grid-template-areas:
@@ -5814,158 +5828,33 @@ button.flight-pulse:hover {
     grid-template-rows: none;
   }
 }
+/* A page narrower than three working columns (the dock open on a laptop): Plan's lower panels,
+   Notebook and Record stack, each panel keeping a usable height, and the tab body scrolls. */
+@container flight (width < 900px) {
+  .flight-queue {
+    grid-template-rows: minmax(240px, 1fr) auto;
+  }
+  .flight-queue-lower,
+  .flight-record-side {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(240px, auto);
+  }
+  /* Arrivals and revisit triggers share the last row side by side. */
+  .flight-queue-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .flight-notebook,
+  .flight-record {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(320px, auto);
+  }
+}
 .sittext {
   font-size: 15px;
   line-height: 1.55;
   max-width: 110ch;
-}
-.sitstats {
-  display: flex;
-  gap: 6px 16px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 10px;
-  font-size: var(--fs-s);
-  color: var(--fg-2);
-}
-.sitstats b {
-  font-family: var(--display);
-  font-size: 17px;
-  color: var(--fg);
-}
-.sitstats .warn b {
-  color: var(--warn);
-}
-.sitstats.compact {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.sitstats.compact > span {
-  min-width: 0;
-  padding: 6px 7px;
-  text-align: center;
-  background: var(--surface-2);
-  border-radius: var(--r-s);
-}
-.sitstats.compact b {
-  display: block;
-  font-size: 18px;
-  line-height: 1.1;
-}
-.sitstats.compact button {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-.flight-horizon {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.flight-section-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.flight-section-heading h3 {
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.flight-section-heading span {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-.flight-horizon .tl {
-  height: 62px;
-  margin-top: 6px;
-}
-.tl {
-  position: relative;
-  height: 78px;
-  margin: 16px 10px 2px;
-}
-.tlline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 36px;
-  height: 2px;
-  background: var(--line-2);
-  border-radius: 1px;
-}
-.tlnow {
-  position: absolute;
-  left: 0;
-  top: 26px;
-  width: 2px;
-  height: 22px;
-  background: var(--ok);
-}
-.tlnow span {
-  position: absolute;
-  top: -15px;
-  left: -4px;
-  font-size: 10px;
-  color: var(--ok);
-  font-weight: 600;
-}
-.tlev {
-  position: absolute;
-  top: 30px;
-  width: 14px;
-  margin-left: -7px;
-}
-.tlev i {
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--accent);
-}
-.tlev span {
-  position: absolute;
-  left: -10px;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tlev.up span {
-  bottom: 20px;
-}
-.tlev.dn span {
-  top: 20px;
-}
-.tlev.r span {
-  left: auto;
-  right: -10px;
-}
-.tllater,
-.tlnext {
-  margin-top: 4px;
-}
-.tlnext.narrow {
-  display: none;
-}
-.tlev.bare span {
-  display: none;
-}
-.fgrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.fgrid .scroll {
-  max-height: 470px;
 }
 
 /* away mode */
@@ -6368,7 +6257,6 @@ kbd {
   .flight-command,
   .flight-command-grid,
   .flight-queue,
-  .flight-queue-main,
   .flight-queue-lower,
   .flight-queue-signals,
   .flight-notebook,
@@ -6390,19 +6278,25 @@ kbd {
   .flight-pulse:nth-child(2n) {
     border-right: 0;
   }
-  .flight-command > #sitP,
-  .flight-knowledge-scroll,
-  .flight-panel-scroll {
+  .flight-command > #sitP {
     overflow: visible;
   }
-  .flight-summary.compact .flight-tiles {
+  /* Panels take their content's height here, so a body sized from zero would overlap the next. */
+  .flight-knowledge-scroll {
+    flex: none;
+    overflow: visible;
+  }
+  /* The page scrolls down; a table wider than its panel still scrolls sideways inside it. */
+  .flight-panel-scroll {
+    flex: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #outcomesP .flight-tiles {
     grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
   }
   .flight-notebook .briefgrid {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .sitstats.compact {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .comms-page,
   .comms-grid {
@@ -6446,7 +6340,6 @@ kbd {
   .agrid,
   .cgrid,
   .tgrid,
-  .fgrid,
   .awaygrid,
   .boardsplit,
   .boardsplit.withdetail {
@@ -6596,18 +6489,6 @@ kbd {
   }
   .gloss {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .tl {
-    height: 52px;
-  }
-  .tlev span {
-    display: none;
-  }
-  .tlnext.narrow {
-    display: block;
-  }
-  .tlnext.wide {
-    display: none;
   }
 }
 
@@ -6956,9 +6837,6 @@ button.nrow.thread.tagged {
   overflow: visible;
 }
 
-.flight-ledger > summary {
-  cursor: pointer;
-}
 .flight-notes > .disclosure > summary,
 .flight-memory > .disclosure > summary {
   padding: 12px 14px;
@@ -7331,8 +7209,7 @@ button.nrow.thread.tagged {
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .wif-work,
-  .wif-stage,
-  .wif-latest {
+  .wif-stage {
     grid-column: 1 / -1;
   }
   .wif-elapsed {

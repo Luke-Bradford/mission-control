@@ -560,6 +560,35 @@ describe("ledger storage and summaries", () => {
       "done-4",
     ]);
   });
+
+  it("drops closed arrivals before taking the outcomes and carries each outcome's evidence", () => {
+    for (let n = 0; n < 6; n++)
+      store.putFlightLedgerEntry(
+        "s1",
+        entry(`arrival-${n}`, { kind: "incoming", status: "done", updatedAt: NOW + n }),
+        0,
+      );
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("shipped", {
+        status: "done",
+        updatedAt: NOW - MIN,
+        outcome: "Merged PR #12",
+        refs: ["#5", "PR #12"],
+        basis: "PR #12 merged",
+      }),
+      0,
+    );
+    expect(flightSummary(config, store, NOW).done).toEqual([
+      expect.objectContaining({
+        key: "shipped",
+        outcome: "Merged PR #12",
+        refs: ["#5", "PR #12"],
+        basis: "PR #12 merged",
+        closedAt: NOW - MIN,
+      }),
+    ]);
+  });
 });
 
 describe("retrospective measures", () => {

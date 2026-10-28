@@ -2,6 +2,7 @@ import {
   type Crew,
   type CrewRow,
   FIX_STEP,
+  FLIGHT_LEDGER_OPEN,
   type FlightLedgerEntry,
   type FlightLedgerView,
   type RunLoopView,
@@ -23,7 +24,7 @@ import { dur } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 
@@ -80,23 +81,46 @@ function StepCells({ r }: { r: CrewRow }) {
   );
 }
 
-/** One row of Work in flight; its doing line is the Overview's, with the whole line as hover text. */
-function ticketNumber(ticket: string | null): string | null {
-  return ticket?.match(/#\d+$/)?.[0] ?? null;
+/**
+ * A ledger ref as a ticket: `#N` names an issue in the ledger's session repo (FLIGHT's refs carry
+ * no repo); a `repo#N` ref names its own repo. PR refs are not tickets.
+ */
+function refTicket(ref: string, sessionRepo: string): { repoId: string; number: number } | null {
+  if (ref.startsWith("PR ")) return null;
+  if (ref.startsWith("#")) {
+    const number = Number(ref.slice(1));
+    return Number.isInteger(number) && number > 0 ? { repoId: sessionRepo, number } : null;
+  }
+  return parseTicket(ref);
 }
 
-function ledgerWork(row: CrewRow, entries: readonly FlightLedgerEntry[]): FlightLedgerEntry | null {
-  const ticket = ticketNumber(row.ticket);
-  const work = entries.filter((entry) => entry.kind === "work");
-  return (
-    (ticket
-      ? work.find((entry) =>
-          entry.refs.some((ref) => !ref.startsWith("PR ") && ref.endsWith(ticket)),
-        )
-      : undefined) ??
-    work.find((entry) => entry.owner === row.id) ??
-    null
+/**
+ * The open ledger `work` entry for a row: the one whose ticket ref is the row's ticket (same repo
+ * and number). Only when none names it does the owner's entry stand in, and only if the owner has
+ * exactly one open work entry and that entry names no ticket; otherwise another ticket's next
+ * action or checkpoint would show against this one.
+ */
+export function ledgerWork(
+  row: Pick<CrewRow, "id" | "repoId" | "ticket">,
+  entries: readonly FlightLedgerEntry[],
+): FlightLedgerEntry | null {
+  const work = entries.filter(
+    (entry) => entry.kind === "work" && FLIGHT_LEDGER_OPEN.includes(entry.status),
   );
+  const tickets = (entry: FlightLedgerEntry) =>
+    entry.refs.flatMap((ref) => refTicket(ref, row.repoId) ?? []);
+  const ticket = row.ticket === null ? null : parseTicket(row.ticket);
+  const exact =
+    ticket === null
+      ? undefined
+      : work.find((entry) =>
+          tickets(entry).some((t) => t.repoId === ticket.repoId && t.number === ticket.number),
+        );
+  if (exact) return exact;
+  const owned = work.filter((entry) => entry.owner === row.id);
+  return owned.length === 1 && tickets(owned[0] as FlightLedgerEntry).length === 0
+    ? (owned[0] as FlightLedgerEntry)
+    : null;
 }
 
 /**
@@ -108,15 +132,15 @@ function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: numb
   const due = entry?.due ?? null;
   if (next === null && due === null) {
     return (
-      <span className="wif-next min0">
+      <td className="wif-next min0">
         <span className="flight-gap" title="FLIGHT has not recorded a next action or checkpoint">
           Not recorded
         </span>
-      </span>
+      </td>
     );
   }
   return (
-    <span className="wif-next min0" title={next ?? undefined}>
+    <td className="wif-next min0" title={next ?? undefined}>
       {next === null ? (
         <span className="flight-gap">No next action</span>
       ) : (
@@ -129,7 +153,7 @@ function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: numb
           {due <= now ? `Checkpoint overdue ${dur(now - due)}` : `Checkpoint in ${dur(due - now)}`}
         </span>
       )}
-    </span>
+    </td>
   );
 }
 
@@ -149,39 +173,42 @@ function WorkRow({
   const repoPrs = useReviewPrs(r);
   const doing = doingLine(r, now, tz, repoPrs);
   return (
-    <li>
-      <div className="row wif-row">
-        <div className="wif-seat">
-          <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
-            <AgentTag id={r.id} index={r.index} bare />
-          </a>
-          <span title={seatStatus(r).reason ?? seatStatus(r).label}>
-            <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+    <tr className="row wif-row">
+      <td className="wif-seat">
+        <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
+          <AgentTag id={r.id} index={r.index} bare />
+        </a>
+        <span title={seatStatus(r).reason ?? seatStatus(r).label}>
+          <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+        </span>
+      </td>
+      <td className="wif-work min0">
+        {r.ticketTitle && (
+          <b className="wif-title min0 ellip" title={r.ticketTitle}>
+            {r.ticketTitle}
+          </b>
+        )}
+        <span className="wif-meta min0">
+          {r.ticket && <TicketRef ticket={r.ticket} />}
+          <span className="wif-doing min0 ellip" title={doing}>
+            <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
           </span>
-        </div>
-        <div className="wif-work min0">
-          {r.ticketTitle && (
-            <b className="wif-title min0 ellip" title={r.ticketTitle}>
-              {r.ticketTitle}
-            </b>
-          )}
-          <span className="wif-meta min0">
-            {r.ticket && <TicketRef ticket={r.ticket} />}
-            <span className="wif-doing min0 ellip" title={doing}>
-              <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
-            </span>
+        </span>
+        {r.run?.branch && (
+          <span className="wif-branch min0 ellip" title={r.run.branch}>
+            {r.run.branch}
           </span>
-        </div>
-        <div className="wif-stage min0">
-          <StepCells r={r} />
-          {r.loop?.prNumber != null && (
-            <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
-          )}
-        </div>
-        <NextAction entry={entry} now={now} />
-        <span className="wif-elapsed num">{elapsed === null ? DASH : dur(elapsed)}</span>
-      </div>
-    </li>
+        )}
+      </td>
+      <td className="wif-stage min0">
+        <StepCells r={r} />
+        {r.loop?.prNumber != null && (
+          <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
+        )}
+      </td>
+      <NextAction entry={entry} now={now} />
+      <td className="wif-elapsed num">{elapsed === null ? DASH : dur(elapsed)}</td>
+    </tr>
   );
 }
 
@@ -212,15 +239,17 @@ export function WorkInFlight() {
   const active = activeCrewRows(crew, matchesSession);
   if (active.length === 0) return <p className="pb note">{crew ? NO_CREW_RUNS : DASH}</p>;
   return (
-    <div className="wif-table">
-      <div className="wif-table-head" aria-hidden="true">
-        <span>Owner</span>
-        <span>Workstream</span>
-        <span>Delivery path</span>
-        <span>Next / checkpoint</span>
-        <span>Age</span>
-      </div>
-      <ul className="pb tlist" aria-label="Crew runs">
+    <table className="wif-table" aria-label="Crew runs">
+      <thead>
+        <tr className="wif-table-head">
+          <th scope="col">Owner</th>
+          <th scope="col">Workstream</th>
+          <th scope="col">Delivery path</th>
+          <th scope="col">Next / checkpoint</th>
+          <th scope="col">Age</th>
+        </tr>
+      </thead>
+      <tbody>
         {active.map((r) => (
           <WorkRow
             key={r.id}
@@ -230,7 +259,7 @@ export function WorkInFlight() {
             entry={ledger?.session === r.sessionId ? ledgerWork(r, ledger.entries ?? []) : null}
           />
         ))}
-      </ul>
-    </div>
+      </tbody>
+    </table>
   );
 }
