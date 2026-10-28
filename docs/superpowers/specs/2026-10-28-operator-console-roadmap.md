@@ -67,7 +67,7 @@ Ordered so each phase makes the next one trustworthy; the tickets table lists ea
 ### Phase 4 — look and charts
 13. Visual system v2: a borderless stat bar instead of tiles; an 8-slot agent palette distinct from status colours; two type families and six sizes; one empty-state and skeleton component; themed native controls; no clipped panels at 1366–1920.
 14. Instrument charts v2: crew state timeline (truthful idle/parked), quota bullets with stop/alert lines, reset annotations and burn projection, cycle-time control chart (p50/p85, hours), cumulative flow, quality small multiples, cost per merged ticket; one shared time range and an event-annotation layer (crew paused, hub Update, quota resets); a missing value breaks a line, never draws zero.
-15. Speed: findings from the speed/accessibility review (bundle splitting for the 3D map, duplicate fetches, re-render cost on live events, small text).
+15. Speed and accessibility (from the speed review): the HUD works only when data changes — no whole-app re-render every second, no topic emitted or payload refetched unchanged, lean payloads, compressed responses (#779); the Board loads without layout shift and stays light with hundreds of done cards (#780); text ≥ 11 px, headings, skip link, target sizes, matching names and seat-colour contrast (#781). The 3D map's three.js chunk already loads only on demand.
 
 ### Phase 5 — Audit board
 16. Server captures: PR size, run account/effort/prompt hash, kept PR history and retrospectives, longer guard/chatter windows, an `/api/audit` aggregation.
@@ -99,7 +99,7 @@ Each ticket states its outcome, done-when, size and security note.
 | 12 | FLIGHT page v2 | #766 | #756, #759, #763, #765, #762 |
 | 13 | Visual system v2 | #767 | #751 |
 | 14 | Instrument charts v2 | #768 | #762 |
-| 15 | Speed and accessibility fixes | after the speed review | — |
+| 15 | Speed and accessibility fixes | #779 (live-update efficiency), #780 (Board load), #781 (legibility and structure) | #767 for seat-colour contrast |
 | 16 | Audit data on the server | #769 | — |
 | 17 | Audit board | #770 | #769, #768 |
 | 18 | QA data on the server | #771 | — |
