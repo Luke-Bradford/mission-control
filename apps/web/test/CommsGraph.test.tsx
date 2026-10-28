@@ -52,7 +52,8 @@ it.each([3, 6, 10])(
     );
     for (const node of document.querySelectorAll<HTMLElement>('.comms-node[role="button"]')) {
       const visibleLabel = node.querySelector(".comms-node-name")?.textContent;
-      if (visibleLabel === undefined || visibleLabel === null) throw new Error("Node label is missing");
+      if (visibleLabel === undefined || visibleLabel === null)
+        throw new Error("Node label is missing");
       expect(node.getAttribute("aria-label")).toContain(visibleLabel);
     }
   },
@@ -91,10 +92,18 @@ it("lays out every live seat, draws static link totals, and changes scope with t
   await waitFor(() => expect(screen.getByText("guido-1 ↔ retro-1 · 24h")).toBeTruthy());
   expect(document.querySelectorAll(".comms-edge:not(.dim)")).toHaveLength(1);
   expect(document.querySelector(".comms-edge:not(.dim) .comms-edge-count")?.textContent).toBe("5");
-  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /retro-1.*open retro-1/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).not.toContain("selected");
-  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).not.toContain("selected");
+  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /retro-1.*open retro-1/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).not.toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).not.toContain(
+    "selected",
+  );
 });
 
 it("lights an edge only when its message count increases after the initial load", async () => {
@@ -266,9 +275,15 @@ it("keeps selected seats lit without traffic and dims crew-paused seats", async 
   expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).toContain("dim");
 
   graph.rerender(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "flight" }} />);
-  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).toContain("selected");
-  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).not.toContain("selected");
+  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }).classList).toContain(
+    "selected",
+  );
+  expect(screen.getByRole("button", { name: /guido-1.*open guido-1/i }).classList).not.toContain(
+    "selected",
+  );
 
   graph.rerender(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   expect(document.querySelectorAll(".comms-node.selected")).toHaveLength(0);
@@ -557,7 +572,9 @@ it("hovers a node or link for its counts and newest message; clicks and keys ope
   const guido = await screen.findByRole("button", { name: /guido-1, open guido-1, 5 messages/i });
   // One tab stop for the whole graph: FLIGHT, at the centre.
   expect(guido.getAttribute("tabindex")).toBe("-1");
-  expect(screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).getAttribute("tabindex")).toBe("0");
+  expect(
+    screen.getByRole("button", { name: /FLIGHT.*open FLIGHT/i }).getAttribute("tabindex"),
+  ).toBe("0");
   fireEvent.mouseEnter(guido);
   expect(guido.getAttribute("aria-describedby")).toContain(
     screen.getByRole("tooltip").getAttribute("id"),
@@ -575,7 +592,9 @@ it("hovers a node or link for its counts and newest message; clicks and keys ope
   fireEvent.click(edge);
   expect(window.location.pathname).toBe("/comms/agents/guido-1/contacts/retro-1");
 
-  fireEvent.keyDown(screen.getByRole("button", { name: /retro-1.*open retro-1/i }), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("button", { name: /retro-1.*open retro-1/i }), {
+    key: "Enter",
+  });
   expect(window.location.pathname).toBe("/comms/agents/retro-1");
   fireEvent.focus(screen.getByRole("button", { name: /CAPCOM.*open CAPCOM/i }));
   expect(within(screen.getByRole("tooltip")).getByText("No messages in 24h")).toBeTruthy();

@@ -274,9 +274,9 @@ describe("columns", () => {
       "Ready for QA 1",
       "Done 0",
     ]);
-    expect([...container.querySelectorAll(".kcol h2")].map((heading) => heading.textContent)).toEqual(
-      heads,
-    );
+    expect(
+      [...container.querySelectorAll(".kcol h2")].map((heading) => heading.textContent),
+    ).toEqual(heads);
   });
 
   it("an empty column is collapsed with a tooltip", async () => {
