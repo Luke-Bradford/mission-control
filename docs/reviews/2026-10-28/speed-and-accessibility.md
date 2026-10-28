@@ -1,6 +1,6 @@
 # Mission Control web HUD: speed and readability audit
 
-Date: 2026-10-28. Code: `~/Dev/mc-wt/ui` at `10d5d19e` (a new commit, `ef9addb7`, landed in that worktree partway through the audit; its `dist` is within 20 bytes of the build measured here). Viewport 1600×1000, dark scheme.
+Date: 2026-10-28. Code: `a UI worktree of this repo` at `10d5d19e` (a new commit, `ef9addb7`, landed in that worktree partway through the audit; its `dist` is within 20 bytes of the build measured here). Viewport 1600×1000, dark scheme.
 
 ## How it was measured
 
@@ -8,7 +8,7 @@ Date: 2026-10-28. Code: `~/Dev/mc-wt/ui` at `10d5d19e` (a new commit, `ef9addb7`
 - **Dev build (:5199)**: used for the 60-second live counts. Before navigation, an init script wrapped `fetch` and `EventSource` and installed a React DevTools hook. That hook counted commits and the component fibers that rendered, and a long-task observer ran alongside it. StrictMode and the dev build make the render times about 3–5× worse than production. The counts of commits, fibers and requests are the same in both builds.
 - **Preview hub**: the loops are paused (until the 02:00 reset), so the data is mostly static. On the live hub, payloads change more often, so the refetch counts below are a floor.
 - **Lighthouse**: the MCP Lighthouse tool does not include the Performance category. Load metrics come from performance traces and PerformanceObserver instead.
-- **Artifacts**: the measurement scripts and raw captures were kept locally, not committed.
+- **Artifacts**: the measurement scripts and raw captures were kept locally, not committed, so the figures are a record rather than reproducible from the repo.
 
 ## 1. Bundle (production)
 
@@ -136,11 +136,11 @@ All of these are under the 200 ms INP threshold. The Board figure is the one to 
 
 I computed WCAG ratios for every visible text node, using a canvas to resolve the colours and composing backgrounds and opacity:
 - **Dark mode**: one real failure. Seat colour `--s6 #008300` on `#0c1117` is **3.83:1**, used for the agent name on Overview (14 px) and the timeline lane label (12 px).
-- **Hover-only actions**: Comms has 21 "Reply" and "React" buttons at `opacity: 0` until hover. They reveal on `:focus-within` (`hud.css:3447`), so keyboard users are fine. Mouse users see nothing until hover.
 - **Light mode**: 18 failures, all seat colours. `--s1 #2a78d6` and `--s2 #eb6834` fall as low as **2.17:1**; `.dock-unread` is 2.76:1.
 
 ### Names, roles, headings and focus
 
+- **Hover-only actions**: Comms has 21 "Reply" and "React" buttons at `opacity: 0` until hover. They reveal on `:focus-within` (`hud.css:3447`), so keyboard users are fine. Mouse users see nothing until hover.
 - **Missing names**: none. Every button, link, input and tab had an accessible name on all 7 pages.
 - **Label/name mismatch**:
   - Flight pulse buttons: the visible text is "14h 52m CYCLE TIME 24 H"; the aria-label is "Cycle time: 14h 52m median…".
