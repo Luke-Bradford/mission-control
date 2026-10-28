@@ -1,16 +1,14 @@
-import type { Crew, FileDiff, MapSnapshot } from "@mc/core";
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { Crew, MapSnapshot } from "@mc/core";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
-import { hub, RESOURCES, useResource } from "../data.ts";
-import { AgentCards } from "./AgentCards.tsx";
-import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
-import { type BadgeKind, isWorking, uncheckedNotes } from "./cards.ts";
-import { areaColor, mainAreas, repoLayout } from "./layout.ts";
+import { RESOURCES, useResource } from "../data.ts";
+import { isWorking } from "./cards.ts";
+import { mainAreas, repoLayout } from "./layout.ts";
 import { LiveMap } from "./live.ts";
-import { layoutTree, pinToken } from "./model.ts";
-import type { MessageArc, MotionEvent } from "./motion.ts";
+import { layoutTree } from "./model.ts";
+import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
 import "./map.css";
 
 const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
@@ -25,43 +23,42 @@ export interface MapStatus {
 export function LiveCrewMap({ repo }: { repo: string }) {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
-  const [skipped, setSkipped] = useState("");
   const [error, setError] = useState<Error | null>(null);
-  const [events, setEvents] = useState<MotionEvent[]>([]);
-  const [epoch, setEpoch] = useState(0);
   useEffect(() => {
     setSnapshot(null);
-    setSkipped("");
     setError(null);
-    setEvents([]);
-    setEpoch(0);
     const live = new LiveMap(
       repo,
       () => apiGet<MapSnapshot>(RESOURCES.repoMap(repo).path),
       setSnapshot,
       setError,
-      (calls, messages) =>
-        setSkipped(`While this tab was hidden: ${calls} calls, ${messages} messages`),
-      (event) =>
-        setEvents((previous) =>
-          [...previous.filter((e) => e.at > event.at - 6000), event].slice(-200),
-        ),
-      setEpoch,
     );
     live.start();
     return () => live.stop();
   }, [repo]);
+  const rows = crew?.rows;
   const indices = useMemo(
-    () => Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index])),
-    [crew?.rows],
+    () => Object.fromEntries((rows ?? []).map((r) => [r.id, r.index])),
+    [rows],
   );
   const names = useMemo(
-    () => Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, callSign(r)])),
-    [crew?.rows],
+    () => Object.fromEntries((rows ?? []).map((r) => [r.id, callSign(r)])),
+    [rows],
+  );
+  // each seat's open PR, as the Overview names it
+  const prs = useMemo(
+    () =>
+      Object.fromEntries(
+        (rows ?? []).flatMap((r) => {
+          const pr = r.review?.prNumber ?? r.prs[0]?.number;
+          return pr === undefined ? [] : [[r.id, pr]];
+        }),
+      ),
+    [rows],
   );
   const status: MapStatus = error
     ? { live: false, text: errorText(error) }
-    : { live: true, text: `Live · real time${skipped ? ` · ${skipped}` : ""}` };
+    : { live: true, text: "Live · real time" };
   if (snapshot?.repoId !== repo)
     return (
       <div className="map-wait">
@@ -72,10 +69,9 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     <CrewMapView
       key={repo}
       snapshot={snapshot}
-      events={events}
-      epoch={epoch}
       indices={indices}
       names={names}
+      prs={prs}
       status={status}
     />
   );
@@ -99,25 +95,26 @@ export function CrewMapView({
   snapshot,
   indices = {},
   names = {},
-  events = [],
-  epoch = 0,
+  prs = {},
   status,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
   /** Each seat's call sign (the crew's display name). */
   names?: Record<string, string>;
-  events?: MotionEvent[];
-  epoch?: number;
+  /** Each seat's open PR, where it has one. */
+  prs?: Record<string, number>;
   status?: MapStatus;
 }) {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
   const [overview, setOverview] = useState(0);
+  const [rotate, setRotate] = useState(false);
+  const [seatFocus, setSeatFocus] = useState<{ seat: string; request: number } | null>(null);
   const now = useNow();
-  // the stage draws working agents only; the rest are a folded line in the rail
+  // the stage and the selector show working seats only
   // (keyed on who is working, so the clock's tick doesn't redraw the scene)
   const working = snapshot.seats
     .filter((seat) => isWorking(seat, now))
@@ -127,31 +124,20 @@ export function CrewMapView({
     const ids = new Set(working.split("\n"));
     return { ...snapshot, seats: snapshot.seats.filter((seat) => ids.has(seat.seat)) };
   }, [snapshot, working]);
-  const [rotate, setRotate] = useState(false);
-  const [agent, setAgent] = useState<string | null>(null);
-  const [agentFocus, setAgentFocus] = useState<{ seat: string; request: number } | null>(null);
-  const [badge, setBadge] = useState<{
-    seat: string;
-    kind: BadgeKind;
-    conversation?: MessageArc;
-  } | null>(null);
-  const opener = useRef<HTMLButtonElement | null>(null);
-  const agentsHeading = useRef<HTMLHeadingElement>(null);
-  const drawerId = useId();
-  const badgeSeat = snapshot.seats.find((s) => s.seat === badge?.seat);
-  const closeBadge = useCallback(() => {
-    setBadge(null);
-    queueMicrotask(() => {
-      const target = opener.current?.isConnected ? opener.current : agentsHeading.current;
-      target?.focus();
-    });
-  }, []);
+  // a seat's colour is its place in config order; one the crew doesn't list takes its place here,
+  // the same on the stage and in the rail
+  const colours = useMemo(
+    () => ({
+      ...Object.fromEntries(snapshot.seats.map((seat, i) => [seat.seat, i])),
+      ...indices,
+    }),
+    [snapshot.seats, indices],
+  );
+  const selectedSeat =
+    selection?.kind === "seat" ? stage.seats.find((s) => s.seat === selection.seat) : undefined;
   useEffect(() => {
-    if (agent && !snapshot.seats.some((s) => s.seat === agent)) setAgent(null);
-  }, [agent, snapshot.seats]);
-  useEffect(() => {
-    if (badge && !badgeSeat && !badge.conversation) closeBadge();
-  }, [badge, badgeSeat, closeBadge]);
+    if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
+  }, [selection, selectedSeat]);
   // the layout is cached per repo and set of paths (layout.ts), so the same array comes back for
   // a refetch that changed no path, and the scene keeps its geometry
   const nodes = useMemo(
@@ -192,16 +178,21 @@ export function CrewMapView({
   const focusNode =
     displayNodes.find((n) => n.path === focus) ??
     displayNodes.find((n) => focus !== null && n.files.includes(focus));
-  const select = (path: string) => {
-    setBadge(null);
-    setSelected(path);
-  };
+  const selectedPath = selection?.kind === "node" ? selection.path : null;
+  const selectNode = (path: string) => setSelection({ kind: "node", path });
   const searchSelect = (path: string) => {
-    setBadge(null);
-    setSelected(path);
+    selectNode(path);
     setFocus(null);
     queueMicrotask(() => setFocus(path));
   };
+  const selectSeat = (seat: string | null, frame: boolean) => {
+    setSelection(seat === null ? null : { kind: "seat", seat });
+    if (seat === null || !frame) return;
+    setFocus(null);
+    setRotate(false);
+    setSeatFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
+  };
+  const named = { snapshot, indices: colours, names };
   return (
     <div className="map-body">
       <div className="map-main">
@@ -216,69 +207,28 @@ export function CrewMapView({
               home={home}
               overview={overview}
               rotate={rotate}
-              selected={selected}
-              indices={indices}
-              onSelect={select}
-              events={events}
-              epoch={epoch}
-              agent={agent && stage.seats.some((seat) => seat.seat === agent) ? agent : null}
+              selected={selectedPath}
+              indices={colours}
+              onSelect={selectNode}
+              seat={selectedSeat?.seat ?? null}
+              seatFocus={seatFocus}
               dockSeats={snapshot.seats.length}
-              agentFocus={agentFocus}
-              onAgentSelect={setAgent}
-              onArc={(conversation, button) => {
-                opener.current = button;
-                setSelected(null);
-                const seat = snapshot.seats.find(
-                  (s) =>
-                    s.seat !== "CAPCOM" &&
-                    s.seat !== "HUB" &&
-                    (s.seat === conversation.from || s.seat === conversation.to),
-                );
-                setBadge({ seat: seat?.seat ?? "", kind: "questions", conversation });
-              }}
+              onSeatSelect={(seat) => selectSeat(seat, false)}
             />
           </Suspense>
-          <MapLegend areas={areas} tree={snapshot.tree} />
-          <aside
-            id={drawerId}
-            className="map-drawer"
-            aria-label="Agent details"
-            hidden={!(badge && (badgeSeat || badge.conversation))}
-          >
-            {badge && (badgeSeat || badge.conversation) && (
-              <BadgeDrawer
-                key={`${badge.seat}-${badge.kind}-${badge.conversation?.to ?? ""}-${badge.conversation?.ticket ?? ""}`}
-                snapshot={snapshot}
-                seat={badgeSeat}
-                kind={badge.kind}
-                conversation={badge.conversation}
-                onClose={closeBadge}
-              />
-            )}
-          </aside>
+          <MapKey tree={snapshot.tree} />
         </div>
         <div className="map-rail">
-          <div className="map-card map-card-agents">
-            <AgentCards
-              snapshot={snapshot}
-              indices={indices}
-              names={names}
-              selected={agent}
-              onSelect={setAgent}
-              onZoom={(seat) => {
-                setFocus(null);
-                setRotate(false);
-                setAgentFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
-              }}
-              drawerId={drawerId}
-              headingRef={agentsHeading}
-              onBadge={(seat, kind, button) => {
-                opener.current = button;
-                setBadge({ seat, kind });
-              }}
+          <section className="map-card map-card-seats" aria-label="Seats">
+            <h3>Seats</h3>
+            <SeatSelector
+              {...named}
+              seats={stage.seats}
+              selected={selectedSeat?.seat ?? null}
+              onSelect={(seat) => selectSeat(seat, true)}
+              prs={prs}
             />
-            <ConflictLine snapshot={snapshot} onFile={searchSelect} />
-          </div>
+          </section>
           <section className="map-card map-card-selected" aria-label="Selected">
             <h3>Selected</h3>
             <input
@@ -303,37 +253,41 @@ export function CrewMapView({
                 {!matches.length && <p>No file or folder matches.</p>}
               </div>
             )}
-            <aside className="map-detail" aria-label="Selected file">
-              {selected ? (
+            <aside className="map-detail" aria-label="Selection detail">
+              {selectedSeat ? (
+                <SeatDetail {...named} seat={selectedSeat} now={now} pr={prs[selectedSeat.seat]} />
+              ) : selectedPath !== null ? (
                 <>
+                  <NodeDetail
+                    {...named}
+                    path={selectedPath}
+                    files={
+                      displayNodes.find((n) => n.path === selectedPath)?.files.length
+                        ? (displayNodes.find((n) => n.path === selectedPath)?.files ?? [])
+                        : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
+                            f.startsWith(`${selectedPath}/`),
+                          )
+                    }
+                  />
                   <div className="map-detail-actions">
                     <button
                       type="button"
                       onClick={() => {
                         setFocus(null);
-                        queueMicrotask(() => setFocus(selected));
+                        queueMicrotask(() => setFocus(selectedPath));
                       }}
                     >
-                      ⌖ Zoom to file
+                      Zoom to it
                     </button>
-                    <button type="button" onClick={() => setSelected(null)}>
+                    <button type="button" onClick={() => setSelection(null)}>
                       Close
                     </button>
                   </div>
-                  <FileDrawer
-                    snapshot={snapshot}
-                    path={selected}
-                    files={
-                      displayNodes.find((n) => n.path === selected)?.files.length
-                        ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
-                        : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                            f.startsWith(`${selected}/`),
-                          )
-                    }
-                  />
                 </>
               ) : (
-                <p className="map-note">Click a node, or find one, to see who read or wrote it.</p>
+                <p className="map-note">
+                  Pick a seat to follow it, or click a node to see who changed or read it.
+                </p>
               )}
             </aside>
           </section>
@@ -349,11 +303,11 @@ export function CrewMapView({
         <span className="map-deck-controls">
           <button
             type="button"
-            title="Frame where the agents are working (the whole repo when nobody is)"
+            title="Frame where the seats are working (the whole repo when nobody is)"
             onClick={() => {
               setHome(home + 1);
               setFocus(null);
-              setAgentFocus(null);
+              setSeatFocus(null);
             }}
           >
             Home view
@@ -363,7 +317,7 @@ export function CrewMapView({
             onClick={() => {
               setOverview(overview + 1);
               setFocus(null);
-              setAgentFocus(null);
+              setSeatFocus(null);
             }}
           >
             Whole repo
@@ -378,224 +332,24 @@ export function CrewMapView({
   );
 }
 
-/**
- * One muted line for merge conflicts and branches whose conflicts went unchecked; it opens to the
- * list, each conflicted file a button that selects it (the keyboard's way to every conflict).
- */
-function ConflictLine({
-  snapshot,
-  onFile,
-}: {
-  snapshot: MapSnapshot;
-  onFile: (path: string) => void;
-}) {
-  const files = new Map<string, string[]>();
-  for (const c of snapshot.conflicts)
-    files.set(c.file, [...(files.get(c.file) ?? []), c.branches.join(" / ")]);
-  const unchecked = snapshot.conflictsUnchecked;
-  if (!files.size && !unchecked.length) return null;
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** The stage's key: what a light, a path and a disc are. */
+function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
   return (
-    <details className="map-conflicts">
-      <summary>
-        {files.size > 0 && (
-          <>
-            <b className="map-conflict-glyph">◆</b>{" "}
-            {plural(files.size, "file in conflict", "files in conflict")}
-          </>
-        )}
-        {files.size > 0 && unchecked.length > 0 && " · "}
-        {unchecked.length > 0 && `${plural(unchecked.length, "branch", "branches")} not checked`}
-      </summary>
-      {files.size > 0 && (
-        <ul aria-label="Merge conflicts between open PRs">
-          {[...files].map(([file, pairs]) => (
-            <li key={file}>
-              <button type="button" onClick={() => onFile(file)}>
-                {file}
-              </button>
-              <span>{pairs.join("; ")}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {unchecked.length > 0 && (
-        <ul aria-label="Branches not checked for conflicts">
-          {unchecked.map((u) => (
-            <li key={u.branch}>
-              {u.branch}: {u.reason}
-            </li>
-          ))}
-        </ul>
-      )}
-    </details>
-  );
-}
-
-/** The stage's key: one line of area colours; the full key opens behind "?". */
-function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"] }) {
-  const [open, setOpen] = useState(false);
-  const keyId = useId();
-  return (
-    <div className="map-legend">
-      {[...areas, "other"].map((area) => (
-        <span key={area}>
-          <i style={{ background: areaColor(area, areas) }} />
-          {area}
-        </span>
-      ))}
-      <button
-        type="button"
-        className="map-key-toggle"
-        aria-expanded={open}
-        aria-controls={keyId}
-        aria-label="Map key"
-        title="Map key"
-        onClick={() => setOpen(!open)}
-      >
-        ?
-      </button>
-      {open && (
-        <div className="map-key" id={keyId} role="note">
-          <p>
-            Each file is a point, coloured by its area. An agent's colour lights the files its
-            unmerged branch changed (bright, bigger with more lines) and the files it read (dim).
-            Its orb sits over the files it is working on, with one line: call sign · ticket · files
-            changed · <b className="add">+added</b> <b className="rem">−removed</b>: the branch's
-            real diff from its merge base, or edit churn from its Edit and Write calls where it says
-            "(churn)" (a file not committed or added yet, or before the diff has been read). "2
-            branches" when its changes span a set-aside branch too; "waiting on you" when it has a
-            question or is parked for you.
-          </p>
-          <p>
-            ○ a file a call is using now · ◌ shared with another branch · ◎ written by two branches
-            (overlap, not conflict) ·{" "}
-            {(["Critical", "Important", "Minor"] as const).map((s) => (
-              <b key={s} style={{ color: `var(${pinToken(s)})` }} title={s}>
-                ▲
-              </b>
-            ))}{" "}
-            review findings · <b style={{ color: "var(--crit)" }}>◆</b> a merge conflict between
-            open PRs. Hover a file or a mark for detail; click to open it in Selected.
-          </p>
-          <p>
-            Particles: a read flows from the file into the agent, a write the other way, sized by
-            the tokens it carried; <b className="add">✦</b> lines added, <b className="rem">✦</b>{" "}
-            removed. Arcs are messages. Drag to orbit, scroll to zoom, arrow keys to pan.
-          </p>
-          <p>
-            Crew seats only, one repo at a time; history stays in each agent's own view.{" "}
-            {tree.length.toLocaleString()} files at origin/HEAD.
-            {tree.length > 2000 && " Files are collapsed into folders (more than 2,000 files)."}{" "}
-            Findings are the current review's; the hub keeps no fixed state for one. No recorded
-            playback: the hub keeps each seat's last 15 minutes of calls in memory only.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FileDrawer({
-  snapshot,
-  path,
-  files,
-}: {
-  snapshot: MapSnapshot;
-  path: string;
-  files: string[];
-}) {
-  const listed = files.length ? files : [path];
-  const imports = snapshot.imports.filter((i) => listed.includes(i.from) || listed.includes(i.to));
-  return (
-    <>
-      <h3>{path}</h3>
-      {files.length > 1 && <p>{files.length} files</p>}
-      {snapshot.seats.map((s) => {
-        const changes = s.scope.modified.filter((c) => listed.includes(c.file));
-        const read = s.scope.read.some((f) => listed.includes(f));
-        const unchecked = uncheckedNotes(s, snapshot);
-        return read || changes.length ? (
-          <div key={s.seat}>
-            <strong>{s.seat}</strong>
-            {read && <p>Read on the branch</p>}
-            {unchecked.map((note) => (
-              <p className="map-unchecked" key={note}>
-                {note}
-              </p>
-            ))}
-            {changes.map((c) => (
-              <div key={c.file}>
-                <p>
-                  {c.file} · +{c.add} −{c.rem} ·{" "}
-                  {c.source === "churn" ? "edit churn" : "branch diff"}
-                </p>
-                {c.source === "diff" && s.seat !== "FLIGHT" && (
-                  <BranchDiff seat={s.seat} path={c.file} snapshot={snapshot} />
-                )}
-              </div>
-            ))}
-          </div>
-        ) : null;
-      })}
-      {snapshot.findings
-        .filter((f) => listed.includes(f.file))
-        .map((f) => (
-          <Finding finding={f} key={`${f.seat}-${f.file}-${f.line}-${f.summary}`} />
-        ))}
-      {snapshot.conflicts
-        .filter((c) => listed.includes(c.file))
-        .map((c) => (
-          <p key={`${c.file}:${c.branches.join("|")}`}>Conflict: {c.branches.join(" / ")}</p>
-        ))}
-      <h4>Imports</h4>
-      {imports.length ? (
-        imports.map((i) => (
-          <p key={`${i.from}-${i.to}`}>
-            {i.from} → {i.to}
-          </p>
-        ))
-      ) : (
-        <p>No imports recorded.</p>
-      )}
-    </>
-  );
-}
-function BranchDiff({
-  seat,
-  path,
-  snapshot,
-}: {
-  seat: string;
-  path: string;
-  snapshot: MapSnapshot;
-}) {
-  const [open, setOpen] = useState(false);
-  const resource = RESOURCES.fileDiff(seat, path);
-  const diff = useResource<FileDiff>(open ? resource : null);
-  const previous = useRef(snapshot);
-  useEffect(() => {
-    if (open && previous.current !== snapshot) hub.refetch(resource.path);
-    previous.current = snapshot;
-  }, [open, snapshot, resource.path]);
-  return (
-    <>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Current checkout diff
-      </button>
-      {open &&
-        (diff.error ? (
-          <p>Diff unavailable.</p>
-        ) : !diff.data ? (
-          <p>Loading diff…</p>
-        ) : diff.data.binary ? (
-          <p>Binary file</p>
-        ) : (
-          <>
-            <pre>{diff.data.text}</pre>
-            {diff.data.truncated && <p>Diff truncated.</p>}
-          </>
-        ))}
-    </>
+    <p className="map-legend">
+      <span className="map-key-item">
+        <i className="key-light" aria-hidden="true" /> seat
+      </span>
+      <span className="map-key-item">
+        <i className="key-path" aria-hidden="true" /> its path
+      </span>
+      <span className="map-key-item">
+        <i className="key-touched" aria-hidden="true" /> a file seats touched (split when shared) —
+        click for who read or changed it
+      </span>
+      <span className="map-key-item">
+        {tree.length.toLocaleString()} files
+        {tree.length > 2000 && ", collapsed into folders"}
+      </span>
+    </p>
   );
 }

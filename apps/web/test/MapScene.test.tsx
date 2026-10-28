@@ -1,14 +1,13 @@
-import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
+import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import * as THREE from "three";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { orbPlacement } from "../src/map/agents.ts";
+import { lightPlacement } from "../src/map/agents.ts";
 import { renderer } from "./mapRendererMock.ts";
 
 const { MapScene, fileTip } = await import("../src/map/MapScene.tsx");
 
-import { applyDelta, layoutTree } from "../src/map/model.ts";
-import type { MotionEvent } from "../src/map/motion.ts";
+import { layoutTree } from "../src/map/model.ts";
 
 const nodes = layoutTree(mapSnapshotFixture.tree);
 const props = {
@@ -68,221 +67,20 @@ it("renders once when settled, pauses in hidden tabs, caps rotation and disposes
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("keeps rotation static for reduced motion and renders named severity pins", () => {
-  vi.stubGlobal("matchMedia", () => ({
-    matches: true,
-    addEventListener() {},
-    removeEventListener() {},
-  }));
-  const snapshot = {
-    ...mapSnapshotFixture,
-    findings: ["Critical", "Important", "Minor"].map((severity) => ({
-      ...mapSnapshotFixture.findings[0],
-      severity: severity as "Critical" | "Important" | "Minor",
-    })),
-  };
-  const { unmount } = render(<MapScene {...props} snapshot={snapshot} rotate />);
-  act(() => vi.advanceTimersByTime(1000));
-  expect(renderer.render).toHaveBeenCalledOnce();
-  // one small mark per file, its words in the tooltip; a click opens the file
-  const mark = screen.getByRole("button", { name: /^3 review findings on src\/main\.ts/ });
-  expect(mark.textContent).toBe("▲");
-  for (const severity of ["Critical", "Important", "Minor"])
-    expect(mark.getAttribute("title")).toContain(`${severity} · line 12 · Empty input throws`);
-  fireEvent.click(mark);
-  expect(props.onSelect).toHaveBeenCalledWith("src/main.ts");
-  // the agent's one fact line; its live state is the tooltip
-  const label = screen.getByRole("button", {
-    name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
-  });
-  // on the stage: facts only, churn as "~", waiting on you as an amber dot; the words are its
-  // accessible name and tooltip
-  expect(label.textContent).toBe("GUIDO-1 · #7 · 1 file · ~+12 −3");
-  expect(label.querySelector(".map-waits-dot")).not.toBeNull();
-  expect(label.getAttribute("title")).toContain("reading src/util.ts");
-  expect(label.getAttribute("title")).toContain("~ edit churn");
-  unmount();
-});
-
 it("provides a searchable-file fallback when WebGL is unavailable", () => {
   renderer.fail = true;
   render(<MapScene {...props} />);
   expect(screen.getByRole("status").textContent).toContain("Use file search");
 });
 
-it("animates fixture deltas at at most 30 fps, opens the arc pair, and stops after settling", () => {
-  const onArc = vi.fn();
-  const { rerender, unmount } = render(<MapScene {...props} onArc={onArc} />);
-  act(() => vi.advanceTimersByTime(100));
-  let snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
-  const events: MotionEvent[] = [];
-  for (const delta of mapDeltaFixture) {
-    const seat = "seat" in delta ? delta.seat : null;
-    events.push({
-      delta,
-      at: Date.now(),
-      calls: snapshot.seats.find((s) => s.seat === seat)?.calls,
-    });
-    snapshot = applyDelta(snapshot, delta, Date.now()) ?? { ...snapshot, seq: delta.seq };
-    rerender(<MapScene {...props} snapshot={snapshot} events={[...events]} onArc={onArc} />);
-  }
-  const before = renderer.render.mock.calls.length;
-  act(() => vi.advanceTimersByTime(1000));
-  expect(renderer.render.mock.calls.length - before).toBeGreaterThan(1);
-  expect(renderer.render.mock.calls.length - before).toBeLessThanOrEqual(30);
-  const label = screen.getByRole("button", { name: "review: GUIDO-1 → RETRO-1" });
-  fireEvent.click(label);
-  expect(onArc).toHaveBeenCalledWith(
-    expect.objectContaining({ from: "GUIDO-1", to: "RETRO-1", ticket: 7 }),
-    label,
-  );
-  act(() => vi.advanceTimersByTime(6000));
-  expect(screen.queryByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeNull();
-  const settled = renderer.render.mock.calls.length;
-  act(() => vi.advanceTimersByTime(60_000));
-  expect(renderer.render).toHaveBeenCalledTimes(settled);
-  unmount();
-  expect(vi.getTimerCount()).toBe(0);
-});
-
-it("selects an orb without moving the camera, zooms explicitly, and resets Home", () => {
-  const onAgentSelect = vi.fn();
-  const { rerender } = render(<MapScene {...props} onAgentSelect={onAgentSelect} />);
-  act(() => vi.advanceTimersByTime(100));
-  const camera = renderer.render.mock.lastCall?.[1] as import("three").Camera;
-  const home = camera.position.clone();
-  fireEvent.click(
-    screen.getByRole("button", {
-      name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
-    }),
-  );
-  expect(onAgentSelect).toHaveBeenCalledWith("GUIDO-1");
-  rerender(<MapScene {...props} agent="GUIDO-1" />);
-  act(() => vi.advanceTimersByTime(100));
-  expect(camera.position.equals(home)).toBe(true);
-  rerender(<MapScene {...props} agent="GUIDO-1" agentFocus={{ seat: "GUIDO-1", request: 1 }} />);
-  act(() => vi.advanceTimersByTime(100));
-  expect(camera.position.equals(home)).toBe(false);
-  rerender(<MapScene {...props} home={1} agent="GUIDO-1" agentFocus={null} />);
-  act(() => vi.advanceTimersByTime(100));
-  expect(camera.position.equals(home)).toBe(true);
-});
-
-it("keeps live motion static under reduced motion and clears the arc after four seconds", () => {
-  vi.stubGlobal("matchMedia", () => ({
-    matches: true,
-    addEventListener() {},
-    removeEventListener() {},
-  }));
-  const events = mapDeltaFixture.map((delta) => ({ delta, at: Date.now() }));
-  render(<MapScene {...props} events={events} />);
-  act(() => vi.advanceTimersByTime(1000));
-  expect(renderer.render).toHaveBeenCalledOnce();
-  expect(screen.getByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeTruthy();
-  act(() => vi.advanceTimersByTime(4000));
-  expect(renderer.render).toHaveBeenCalledTimes(2);
-  expect(screen.queryByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeNull();
-});
-
-it("drops in-progress effects on tab hide and catches up silently on return", () => {
-  const { rerender } = render(
-    <MapScene {...props} events={mapDeltaFixture.map((delta) => ({ delta, at: Date.now() }))} />,
-  );
-  act(() => vi.advanceTimersByTime(500));
-  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
-  act(() => document.dispatchEvent(new Event("visibilitychange")));
-  const before = renderer.render.mock.calls.length;
-  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
-  snapshot.seats[0].calls = [];
-  snapshot.seats[0].recent = [{ file: "src/main.ts", at: Date.now() }];
-  rerender(<MapScene {...props} snapshot={snapshot} />);
-  act(() => vi.advanceTimersByTime(1000));
-  expect(renderer.render).toHaveBeenCalledTimes(before);
-  hidden.mockReturnValue(false);
-  act(() => document.dispatchEvent(new Event("visibilitychange")));
-  act(() => vi.advanceTimersByTime(1000));
-  expect(renderer.render).toHaveBeenCalledTimes(before + 1);
-  act(() => vi.advanceTimersByTime(60_000));
-  expect(renderer.render).toHaveBeenCalledTimes(before + 1);
-});
-
-const submittedScene = () => renderer.render.mock.lastCall?.[0] as THREE.Scene;
-const activityObjects = () => {
-  const group = submittedScene().children.find(
-    (object) => object instanceof THREE.Group,
-  ) as THREE.Group;
-  return {
-    group,
-    orbs: group.children.find(
-      (object) =>
-        object instanceof THREE.InstancedMesh && object.geometry instanceof THREE.SphereGeometry,
-    ) as THREE.InstancedMesh,
-    particles: group.children.find((object) => object instanceof THREE.Points) as THREE.Points,
-  };
-};
-it("submits placed orb matrices and populated particle attributes to the renderer", () => {
-  const { rerender } = render(<MapScene {...props} />);
-  act(() => vi.advanceTimersByTime(40));
-  const { orbs, particles } = activityObjects();
-  const matrix = new THREE.Matrix4();
-  props.snapshot.seats.forEach((seat, i) => {
-    orbs.getMatrixAt(i, matrix);
-    const actual = new THREE.Vector3().setFromMatrixPosition(matrix);
-    const expected = orbPlacement(seat, nodes, i, Date.now()).position;
-    actual.toArray().forEach((value, axis) => {
-      expect(value).toBeCloseTo(expected[axis], 5);
-    });
-    expect(new THREE.Vector3().setFromMatrixScale(matrix).toArray()).toEqual([
-      expect.closeTo(1.6),
-      expect.closeTo(1.6),
-      expect.closeTo(1.6),
-    ]);
-  });
-  expect(particles.geometry.drawRange.count).toBe(0);
-  const at = Date.now();
-  let drawnAt = at;
-  renderer.render.mockImplementationOnce(() => {
-    drawnAt = Date.now();
-  });
-  rerender(
-    <MapScene
-      {...props}
-      events={[
-        {
-          delta: { type: "edit", seq: 1, seat: "GUIDO-1", file: "src/main.ts", add: 8, rem: 0 },
-          at,
-        },
-      ]}
-    />,
-  );
-  act(() => vi.advanceTimersByTime(40));
-  const geometry = particles.geometry;
-  expect(geometry.drawRange).toEqual({ start: 0, count: 1 });
-  const p = nodes.find((node) => node.path === "src/main.ts")?.position as number[];
-  const u = (drawnAt - at) / 800;
-  const outside = [p[0] + Math.cos(2.4) * 10, p[1] + Math.sin(2.4) * 10, p[2] + Math.cos(4.8) * 5];
-  const position = geometry.getAttribute("position");
-  [position.getX(0), position.getY(0), position.getZ(0)].forEach((value, axis) => {
-    expect(value).toBeCloseTo(outside[axis] + (p[axis] - outside[axis]) * u, 5);
-  });
-  expect(geometry.getAttribute("size").getX(0)).toBeCloseTo(3.6);
-  expect(Array.from(geometry.getAttribute("color").array).slice(0, 3)).toEqual(
-    new THREE.Color("#808999").toArray().map((v) => expect.closeTo(v, 5)),
-  );
-  expect((position as THREE.BufferAttribute).version).toBeGreaterThan(0);
-});
 it("releases labels, instance resources and geometries on seat removal and unmount", () => {
-  const { rerender, unmount } = render(<MapScene {...props} />);
+  const { rerender, unmount } = render(<MapScene {...props} areas={["src"]} />);
   act(() => vi.advanceTimersByTime(40));
   const watch = () => {
     const scene = submittedScene();
     const disposed: ReturnType<typeof vi.fn>[] = [];
     scene.traverse((object) => {
-      if (
-        object instanceof THREE.Mesh ||
-        object instanceof THREE.Line ||
-        object instanceof THREE.Points
-      ) {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
         const resource = vi.fn();
         object.geometry.addEventListener("dispose", resource);
         disposed.push(resource);
@@ -295,53 +93,25 @@ it("releases labels, instance resources and geometries on seat removal and unmou
     });
     return disposed;
   };
-  const oldLabel = screen.getByRole("button", {
-    name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
-  });
+  const oldLabel = screen.getByRole("button", { name: "GUIDO-1" });
   const oldResources = watch();
   rerender(
-    <MapScene {...props} snapshot={{ ...props.snapshot, seats: props.snapshot.seats.slice(1) }} />,
+    <MapScene
+      {...props}
+      areas={["src"]}
+      snapshot={{ ...props.snapshot, seats: props.snapshot.seats.slice(1) }}
+    />,
   );
   act(() => vi.advanceTimersByTime(40));
   expect(oldLabel.isConnected).toBe(false);
   for (const disposed of oldResources) expect(disposed).toHaveBeenCalledOnce();
-  const labels = [...document.querySelectorAll(".map-orb-label, .map-arc, .map-marker")];
+  const labels = [...document.querySelectorAll(".map-seat-label, .map-area")];
   expect(labels.length).toBeGreaterThan(0);
   const remaining = watch();
   unmount();
   for (const disposed of remaining) expect(disposed).toHaveBeenCalledOnce();
   for (const label of labels) expect(label.isConnected).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
-});
-it("updates only animated file instances and reuses colour and projection scratch objects", () => {
-  const { rerender } = render(<MapScene {...props} />);
-  act(() => vi.advanceTimersByTime(40));
-  const mesh = submittedScene().children.find(
-    (object) => object instanceof THREE.InstancedMesh,
-  ) as THREE.InstancedMesh;
-  rerender(
-    <MapScene
-      {...props}
-      events={[
-        {
-          delta: { type: "edit", seq: 1, seat: "GUIDO-1", file: "src/main.ts", add: 8, rem: 0 },
-          at: Date.now(),
-        },
-      ]}
-    />,
-  );
-  act(() => vi.advanceTimersByTime(40));
-  const writes = vi.spyOn(mesh, "setMatrixAt");
-  const colors = vi.spyOn(THREE.Color.prototype, "clone");
-  const vectors = vi.spyOn(THREE.Vector3.prototype, "clone");
-  act(() => vi.advanceTimersByTime(200));
-  const fileIndex = nodes
-    .filter((node) => node.count > 0)
-    .findIndex((node) => node.path === "src/main.ts");
-  expect(writes.mock.calls.length).toBeGreaterThan(0);
-  expect([...new Set(writes.mock.calls.map(([index]) => index))]).toEqual([fileIndex]);
-  expect(colors).not.toHaveBeenCalled();
-  expect(vectors).not.toHaveBeenCalled();
 });
 
 it("keeps one WebGL context per visit: new nodes rebuild the tree, unmount loses the context", () => {
@@ -357,7 +127,7 @@ it("keeps one WebGL context per visit: new nodes rebuild the tree, unmount loses
   const canvas = document.querySelector("canvas") as HTMLCanvasElement;
   expect(canvas.getAttribute("role")).toBe("application");
   expect(canvas.tabIndex).toBe(0);
-  for (const label of document.querySelectorAll<HTMLElement>(".map-orb-label"))
+  for (const label of document.querySelectorAll<HTMLElement>(".map-seat-label"))
     expect(label.tabIndex).toBe(-1);
   unmount();
   expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
@@ -371,10 +141,7 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   act(() => vi.advanceTimersByTime(40));
   const canvas = document.querySelector("canvas") as HTMLCanvasElement;
   const without = { ...props.snapshot, seats: props.snapshot.seats.slice(1) };
-  const label = () =>
-    screen.getByRole("button", {
-      name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
-    });
+  const label = () => screen.getByRole("button", { name: "GUIDO-1" });
   act(() => label().focus());
   rerender(<MapScene {...props} snapshot={without} />);
   await act(async () => {
@@ -397,30 +164,6 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   expect(document.activeElement).toBe(outside);
   outside.remove();
   unmount();
-});
-
-it("says in a file's tooltip what it is, who changed or read it, and its findings and conflicts", () => {
-  const node = nodes.find((n) => n.path === "src/main.ts");
-  if (!node) throw new Error("fixture node missing");
-  const snapshot: MapSnapshot = {
-    ...structuredClone(mapSnapshotFixture),
-    conflicts: [
-      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
-    ],
-  };
-  expect(fileTip(node, { snapshot, names: { "GUIDO-1": "GUIDO-1" } }).split("\n")).toEqual([
-    "src/main.ts",
-    "GUIDO-1 +12 −3 (edit churn)",
-    "▲ 1 review finding",
-    "◆ conflict: a / b",
-  ]);
-  const util = nodes.find((n) => n.path === "src/util.ts");
-  if (!util) throw new Error("fixture node missing");
-  expect(fileTip(util, { snapshot }).split("\n")).toEqual([
-    "src/util.ts",
-    "GUIDO-1 read it",
-    "GUIDO-1 is on it now",
-  ]);
 });
 
 it("opens on the changed files, follows them until an arrow key moves it, and frames the whole repo", () => {
@@ -477,4 +220,230 @@ it("opens on the changed files, follows them until an arrow key moves it, and fr
   act(() => vi.advanceTimersByTime(40));
   expect(camera().position.toArray()).toEqual(moved.toArray());
   unmount();
+});
+
+const submittedScene = () => renderer.render.mock.lastCall?.[0] as THREE.Scene;
+const layer = () => {
+  const group = submittedScene().children.find((o) => o instanceof THREE.Group) as THREE.Group;
+  const get = (name: string) => group.getObjectByName(name) as THREE.InstancedMesh;
+  return {
+    lights: get("lights"),
+    marks: (n: number) => get(`marks-${n}`),
+    paths: group.getObjectByName("paths") as THREE.LineSegments,
+  };
+};
+const at = (mesh: THREE.InstancedMesh, i: number) => {
+  const matrix = new THREE.Matrix4();
+  mesh.getMatrixAt(i, matrix);
+  return new THREE.Vector3().setFromMatrixPosition(matrix);
+};
+const node = (path: string) =>
+  new THREE.Vector3(...(nodes.find((n) => n.path === path)?.position ?? [NaN, NaN, NaN]));
+
+it("draws no warnings: no finding, conflict, question or failure marks, only the seat's name", () => {
+  const snapshot: MapSnapshot = {
+    ...structuredClone(mapSnapshotFixture),
+    conflicts: [
+      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
+    ],
+  };
+  // the fixture's seat has a question, a refusal and a review finding
+  expect(snapshot.seats[0]?.badges.questions.length).toBeGreaterThan(0);
+  const { container, unmount } = render(<MapScene {...props} snapshot={snapshot} />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(container.querySelector(".map-mark, .map-ring, .map-waits-dot, .map-arc")).toBeNull();
+  expect(container.textContent).not.toMatch(/[▲◆]/);
+  const label = screen.getByRole("button", { name: "GUIDO-1" });
+  expect(label.textContent).toBe("GUIDO-1");
+  expect(label.getAttribute("title")).toBeNull();
+  unmount();
+});
+
+it("puts each seat's light on its node, a path through its visits and a disc on each file it touched", () => {
+  render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const { lights, marks, paths } = layer();
+  // the fixture's seat read main.ts, then is reading util.ts: its light is on util.ts
+  expect(lights.count).toBe(1);
+  expect(at(lights, 0).distanceTo(node("src/util.ts"))).toBeCloseTo(0, 5);
+  expect(lightPlacement(props.snapshot.seats[0], nodes, 0, Date.now()).trail).toEqual([
+    "src/main.ts",
+    "src/util.ts",
+  ]);
+  // one segment, main.ts to the light
+  expect(paths.geometry.drawRange.count).toBe(2);
+  const line = paths.geometry.getAttribute("position");
+  expect(
+    new THREE.Vector3(line.getX(0), line.getY(0), line.getZ(0)).distanceTo(node("src/main.ts")),
+  ).toBeCloseTo(0, 5);
+  // one kind of mark: a whole disc on each file it touched, changed (main.ts) or read (util.ts)
+  const discs = marks(1);
+  expect(discs.count).toBe(2);
+  expect(discs.geometry).toBeInstanceOf(THREE.CircleGeometry);
+  for (const [i, path] of ["src/main.ts", "src/util.ts"].entries())
+    expect(at(discs, i).distanceTo(node(path))).toBeLessThan(0.5);
+  // the light is the brightest, largest circle; the disc is the seat's colour, a little dimmer
+  const size = (mesh: THREE.InstancedMesh) => {
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(0, matrix);
+    return new THREE.Vector3().setFromMatrixScale(matrix).x;
+  };
+  expect(size(lights)).toBeGreaterThan(size(discs));
+  const light = new THREE.Color(),
+    disc = new THREE.Color();
+  lights.getColorAt(0, light);
+  discs.getColorAt(0, disc);
+  expect(light.getHSL({ h: 0, s: 0, l: 0 }).l).toBeGreaterThan(disc.getHSL({ h: 0, s: 0, l: 0 }).l);
+});
+
+it("splits a shared file's disc into equal arcs, one per seat, in seat order", () => {
+  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  snapshot.seats.push(
+    {
+      ...structuredClone(snapshot.seats[0]),
+      seat: "GUIDO-2",
+      calls: [],
+      recent: [],
+      scope: { read: ["src/main.ts"], modified: [] },
+    },
+    {
+      ...structuredClone(snapshot.seats[0]),
+      seat: "RETRO-1",
+      calls: [],
+      recent: [],
+      scope: { read: ["src/main.ts"], modified: [] },
+    },
+  );
+  const root = document.documentElement.style;
+  for (const [token, colour] of [
+    ["--s1", "#ff0000"],
+    ["--s2", "#00ff00"],
+    ["--s3", "#0000ff"],
+  ])
+    root.setProperty(token, colour);
+  render(
+    <MapScene
+      {...props}
+      snapshot={snapshot}
+      indices={{ "GUIDO-1": 0, "GUIDO-2": 1, "RETRO-1": 2 }}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  const thirds = layer().marks(3);
+  // main.ts is shared by three seats: three arcs of a third each; util.ts is GUIDO-1's alone
+  expect(thirds.count).toBe(3);
+  expect((thirds.geometry as THREE.CircleGeometry).parameters.thetaLength).toBeCloseTo(
+    (Math.PI * 2) / 3,
+  );
+  expect(layer().marks(1).count).toBe(1);
+  // in seat order: GUIDO-1 red, GUIDO-2 green, RETRO-1 blue, each its own arc
+  const strongest = [0, 1, 2].map((i) => {
+    const c = new THREE.Color();
+    thirds.getColorAt(i, c);
+    const channels = [c.r, c.g, c.b];
+    return "rgb"[channels.indexOf(Math.max(...channels))];
+  });
+  expect(strongest).toEqual(["r", "g", "b"]);
+  for (const token of ["--s1", "--s2", "--s3"]) root.removeProperty(token);
+  const turns = [0, 1, 2].map((i) => {
+    const matrix = new THREE.Matrix4();
+    thirds.getMatrixAt(i, matrix);
+    return new THREE.Quaternion().setFromRotationMatrix(matrix.extractRotation(matrix));
+  });
+  expect(turns[0]?.angleTo(turns[1] as THREE.Quaternion)).toBeCloseTo((Math.PI * 2) / 3, 3);
+});
+
+it("glides a light to the next node at at most 30 fps, then settles; reduced motion jumps", () => {
+  const { rerender, unmount } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(100));
+  const moved: MapSnapshot = structuredClone(mapSnapshotFixture);
+  moved.seats[0].calls = [{ tool: "Edit", detail: "", files: ["src/main.ts"], since: Date.now() }];
+  moved.seats[0].recent = [{ file: "src/util.ts", at: 1 }];
+  const before = renderer.render.mock.calls.length;
+  rerender(<MapScene {...props} snapshot={moved} />);
+  act(() => vi.advanceTimersByTime(100));
+  // on its way: between the two nodes
+  const midway = at(layer().lights, 0);
+  expect(midway.distanceTo(node("src/main.ts"))).toBeGreaterThan(0.01);
+  expect(midway.distanceTo(node("src/util.ts"))).toBeGreaterThan(0.01);
+  act(() => vi.advanceTimersByTime(900));
+  expect(renderer.render.mock.calls.length - before).toBeGreaterThan(1);
+  expect(renderer.render.mock.calls.length - before).toBeLessThanOrEqual(31);
+  act(() => vi.advanceTimersByTime(10_000));
+  expect(at(layer().lights, 0).distanceTo(node("src/main.ts"))).toBeCloseTo(0, 5);
+  const settled = renderer.render.mock.calls.length;
+  act(() => vi.advanceTimersByTime(5000));
+  expect(renderer.render).toHaveBeenCalledTimes(settled);
+  unmount();
+  vi.stubGlobal("matchMedia", () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const again = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(100));
+  again.rerender(<MapScene {...props} snapshot={moved} />);
+  act(() => vi.advanceTimersByTime(40));
+  expect(at(layer().lights, 0).distanceTo(node("src/main.ts"))).toBeCloseTo(0, 5);
+  again.unmount();
+});
+
+it("selects a seat from its label, frames it on request and follows its light as it moves", () => {
+  const onSeatSelect = vi.fn();
+  const { rerender } = render(<MapScene {...props} onSeatSelect={onSeatSelect} />);
+  act(() => vi.advanceTimersByTime(100));
+  const camera = renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
+  const home = camera.position.clone();
+  fireEvent.click(screen.getByRole("button", { name: "GUIDO-1" }));
+  expect(onSeatSelect).toHaveBeenCalledWith("GUIDO-1");
+  // selecting from the stage doesn't move the camera
+  rerender(<MapScene {...props} seat="GUIDO-1" />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.toArray()).toEqual(home.toArray());
+  // the selector asks to frame it
+  rerender(<MapScene {...props} seat="GUIDO-1" seatFocus={{ seat: "GUIDO-1", request: 1 }} />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.equals(home)).toBe(false);
+  const framed = camera.position.clone();
+  // it moves to main.ts: the camera moves with it, by the same step
+  const moved: MapSnapshot = structuredClone(mapSnapshotFixture);
+  moved.seats[0].calls = [{ tool: "Edit", detail: "", files: ["src/main.ts"], since: Date.now() }];
+  moved.seats[0].recent = [{ file: "src/util.ts", at: 1 }];
+  rerender(
+    <MapScene
+      {...props}
+      snapshot={moved}
+      seat="GUIDO-1"
+      seatFocus={{ seat: "GUIDO-1", request: 1 }}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(10_000));
+  const step = node("src/main.ts").sub(node("src/util.ts"));
+  const travelled = camera.position.clone().sub(framed);
+  travelled.toArray().forEach((value, axis) => {
+    expect(value).toBeCloseTo(step.toArray()[axis] as number, 3);
+  });
+  // Home view lets it go
+  rerender(<MapScene {...props} snapshot={moved} home={1} seatFocus={null} />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.equals(framed.clone().add(step))).toBe(false);
+});
+
+it("says in a file's tooltip who changed it (+/−), read it or both, and nothing else", () => {
+  const main = nodes.find((n) => n.path === "src/main.ts");
+  const util = nodes.find((n) => n.path === "src/util.ts");
+  if (!main || !util) throw new Error("fixture node missing");
+  const snapshot: MapSnapshot = {
+    ...structuredClone(mapSnapshotFixture),
+    conflicts: [
+      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
+    ],
+  };
+  expect(fileTip(main, { snapshot, names: { "GUIDO-1": "GUIDO-1" } }).split("\n")).toEqual([
+    "src/main.ts",
+    "GUIDO-1 · changed +12 −3 (edit churn) · read",
+  ]);
+  expect(fileTip(util, { snapshot }).split("\n")).toEqual(["src/util.ts", "GUIDO-1 · read"]);
+  snapshot.seats = [];
+  expect(fileTip(util, { snapshot }).split("\n")).toEqual(["src/util.ts", "untouched"]);
 });

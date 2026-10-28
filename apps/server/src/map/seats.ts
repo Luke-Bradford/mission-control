@@ -1,7 +1,7 @@
 import type { CrewRow, MapSeat, MapSnapshot, Run, TestLockState } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import type { Store } from "../store.ts";
-import type { CallRing } from "./ring.ts";
+import { type CallRing, KEEP_MS } from "./ring.ts";
 
 const safe = (text: string) => cleanText(text.replace(/\/(?:Users|home)\/[^/\s]+\//g, "~/"));
 
@@ -136,9 +136,12 @@ export function mapSeats(
         read: live ? scope.read : [],
         modified: flight ? (live ? scope.modified : []) : [...modified.values()],
       },
-      recent: live
-        ? calls.flatMap((c) => c.files.map((file) => ({ file, at: c.end ?? c.since }))).slice(-12)
-        : [],
+      // the path stays after the run ends, for as long as the ring keeps its calls, so a seat at
+      // rest still shows where it has been
+      recent: calls
+        .filter((c) => c.end === null || c.end >= now - KEEP_MS)
+        .flatMap((c) => c.files.map((file) => ({ file, at: c.end ?? c.since })))
+        .slice(-12),
       context: null,
       badges: {
         questions: store

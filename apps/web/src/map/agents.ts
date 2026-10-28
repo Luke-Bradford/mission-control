@@ -1,9 +1,10 @@
-import type { MapSeat } from "@mc/core";
-import { duration } from "./cards.ts";
+import type { MapSeat, MapSnapshot } from "@mc/core";
+import { duration, touchedFiles } from "./cards.ts";
 import { isDocked, type MapNode } from "./model.ts";
 
 export type Position = [number, number, number];
-export function stateLabel(seat: MapSeat, now: number, lastCallEnd?: number): string {
+
+export function stateLabel(seat: MapSeat, now: number): string {
   if (seat.state === "stalled") return `stalled ${duration(now - seat.since)}`;
   const call = [...seat.calls].sort((a, b) => a.since - b.since)[0];
   if (call) {
@@ -21,10 +22,7 @@ export function stateLabel(seat: MapSeat, now: number, lastCallEnd?: number): st
     const detail = call.detail.replace(/^cd \S+ && /, "").slice(0, 80);
     return `${verb} ${detail} ${duration(now - call.since)}${seat.calls.length > 1 ? ` · +${seat.calls.length - 1} calls` : ""}`;
   }
-  if (seat.state === "running")
-    return lastCallEnd === undefined || lastCallEnd < seat.since
-      ? "thinking"
-      : `thinking ${duration(now - lastCallEnd)}`;
+  if (seat.state === "running") return "thinking";
   return `${seat.state} ${duration(now - seat.since)}`;
 }
 
@@ -41,41 +39,82 @@ export function dockPosition(nodes: MapNode[], index: number): Position {
   ];
 }
 
-export function orbPlacement(seat: MapSeat, nodes: MapNode[], index: number, now: number) {
-  const docked = isDocked(seat, now) || (seat.seat === "FLIGHT" && !seat.calls.length);
-  // a docked seat with an unmerged branch sits over the files it changed, so the stage shows where
-  // its work is; one with nothing changed goes to the dock
-  const files = docked
-    ? seat.scope.modified.map((c) => c.file)
-    : seat.calls.length
-      ? seat.calls.flatMap((c) => c.files)
-      : [...seat.recent]
-          .sort((a, b) => b.at - a.at)
-          .slice(0, 8)
-          .map((r) => r.file);
-  const paths = [
-    ...new Set(
-      files
-        .map((f) => nodes.find((n) => n.files.includes(f))?.path)
-        .filter((p): p is string => p !== undefined),
+/** Each file's node (a collapsed tree's folder), computed once per layout. */
+const indexes = new WeakMap<MapNode[], Map<string, MapNode>>();
+export function nodeOfFile(nodes: MapNode[]): Map<string, MapNode> {
+  let index = indexes.get(nodes);
+  if (!index) {
+    index = new Map();
+    for (const node of nodes) for (const file of node.files) index.set(file, node);
+    indexes.set(nodes, index);
+  }
+  return index;
+}
+
+/** How many nodes a seat's path runs through. */
+export const TRAIL_NODES = 12;
+
+/**
+ * The nodes a seat visited, oldest first: its recent accesses and the files its calls in flight
+ * are on, in time order, as the nodes that hold them (a file not on the map is skipped), with a
+ * node visited twice in a row listed once.
+ */
+export function seatTrail(seat: MapSeat, nodes: MapNode[]): string[] {
+  const index = nodeOfFile(nodes);
+  const visits = [
+    ...seat.recent.map((r, i) => ({ file: r.file, at: r.at, order: i })),
+    ...seat.calls.flatMap((c, i) =>
+      c.files.map((file, j) => ({ file, at: c.since, order: seat.recent.length + i * 1000 + j })),
     ),
-  ];
-  const positions = paths.map((p) => nodes.find((n) => n.path === p)?.position as Position);
-  const position: Position = positions.length
-    ? ([0, 1, 2].map(
-        (axis) => positions.reduce((sum, p) => sum + p[axis], 0) / positions.length,
-      ) as Position)
-    : dockPosition(nodes, index);
-  if (positions.length) position[1] += seat.state === "running" && !seat.calls.length ? 16 : 9;
+  ].sort((a, b) => a.at - b.at || a.order - b.order);
+  const trail: string[] = [];
+  for (const visit of visits) {
+    const path = index.get(visit.file)?.path;
+    if (path !== undefined && trail.at(-1) !== path) trail.push(path);
+  }
+  return trail.slice(-TRAIL_NODES);
+}
+
+/**
+ * Where a seat's light sits: on the last node it touched (a call in flight or its latest access);
+ * with no access on the map, on the file it changed most, so a resting branch still shows where its
+ * work is; else in the dock beside the tree.
+ */
+export function lightPlacement(
+  seat: MapSeat,
+  nodes: MapNode[],
+  index: number,
+  now: number,
+): { position: Position; node: string | null; trail: string[]; docked: boolean } {
+  const trail = seatTrail(seat, nodes);
+  const files = nodeOfFile(nodes);
+  const biggest = [...seat.scope.modified]
+    .filter((c) => files.has(c.file))
+    .sort((a, b) => b.add + b.rem - (a.add + a.rem))[0];
+  const path = trail.at(-1) ?? (biggest ? (files.get(biggest.file)?.path ?? null) : null);
+  const node = path === null ? undefined : nodes.find((n) => n.path === path);
   return {
-    position,
-    docked,
-    links: seat.calls.length ? paths.slice(0, 12) : [],
-    more: seat.calls.length ? Math.max(0, paths.length - 12) : 0,
+    position: node ? [...node.position] : dockPosition(nodes, index),
+    node: node ? node.path : null,
+    trail,
+    docked: isDocked(seat, now),
   };
 }
 
-export const haloSize = (seat: MapSeat): number | null =>
-  seat.context && seat.context.window !== null && seat.context.window > 0
-    ? 2.4 + Math.sqrt(Math.min(1, Math.max(0, seat.context.total / seat.context.window))) * 5
-    : null;
+/**
+ * Each node a seat touched, with the seats that touched it in seat order (the selector's order),
+ * so a shared node's colours keep their places from one frame to the next.
+ */
+export function touchedNodes(snapshot: MapSnapshot, nodes: MapNode[]): Map<string, string[]> {
+  const index = nodeOfFile(nodes);
+  const touched = new Map<string, string[]>();
+  for (const seat of snapshot.seats)
+    for (const path of new Set(
+      [...touchedFiles(seat)].flatMap((file) => index.get(file)?.path ?? []),
+    )) {
+      const seats = touched.get(path) ?? [];
+      seats.push(seat.seat);
+      touched.set(path, seats);
+    }
+  return touched;
+}

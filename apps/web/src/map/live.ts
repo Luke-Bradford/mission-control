@@ -1,6 +1,5 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
 import { applyDelta } from "./model.ts";
-import type { MotionEvent } from "./motion.ts";
 
 /** One repo subscription; snapshot requests coalesce while deltas keep their order. */
 export class LiveMap {
@@ -27,39 +26,20 @@ export class LiveMap {
   private get: () => Promise<MapSnapshot>;
   private receive: (s: MapSnapshot) => void;
   private error: (e: Error | null) => void;
-  private skipped: (calls: number, messages: number) => void;
-  private hiddenCalls = 0;
-  private hiddenMessages = 0;
-  private animate: (event: MotionEvent) => void;
-  private reconnect: (epoch: number) => void;
-  private visibility = () => {
-    if (!document.hidden && (this.hiddenCalls || this.hiddenMessages)) {
-      this.skipped(this.hiddenCalls, this.hiddenMessages);
-      this.hiddenCalls = 0;
-      this.hiddenMessages = 0;
-    }
-  };
 
   constructor(
     repo: string,
     get: () => Promise<MapSnapshot>,
     receive: (s: MapSnapshot) => void,
     error: (e: Error | null) => void,
-    skipped: (calls: number, messages: number) => void = () => {},
-    animate: (event: MotionEvent) => void = () => {},
-    reconnect: (epoch: number) => void = () => {},
   ) {
     this.repo = repo;
     this.get = get;
     this.receive = receive;
     this.error = error;
-    this.skipped = skipped;
-    this.animate = animate;
-    this.reconnect = reconnect;
   }
 
   start() {
-    document.addEventListener("visibilitychange", this.visibility);
     this.source = new EventSource(`/api/stream?map=${encodeURIComponent(this.repo)}`);
     this.source.addEventListener("open", () => {
       const first = !this.opened;
@@ -67,7 +47,7 @@ export class LiveMap {
       if (!first) {
         this.watermark = 0;
         this.pending = [];
-        this.reconnect(++this.epoch);
+        this.epoch++;
       }
       if (!first || !this.fetching) void this.refresh();
     });
@@ -90,19 +70,6 @@ export class LiveMap {
           throw new Error("Invalid map event");
         if (delta.seq <= this.watermark) return;
         this.watermark = delta.seq;
-        if (document.hidden) {
-          if (delta.type === "call.start") this.hiddenCalls++;
-          if (delta.type === "message") this.hiddenMessages++;
-        } else
-          this.animate({
-            delta,
-            at: Date.now(),
-            calls:
-              "seat" in delta
-                ? this.snapshot?.seats.find((s) => s.seat === delta.seat)?.calls
-                : undefined,
-            epoch: this.epoch,
-          });
         if (this.fetching || !this.snapshot) {
           this.pending.push(delta);
           return;
@@ -196,6 +163,5 @@ export class LiveMap {
     clearTimeout(this.retry);
     clearTimeout(this.held);
     this.source?.close();
-    document.removeEventListener("visibilitychange", this.visibility);
   }
 }

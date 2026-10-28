@@ -67,7 +67,10 @@ export interface MapSeat {
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };
-  /** Recent accesses position an orb; they never identify what a seat is thinking about. */
+  /**
+   * The seat's last accesses, oldest first: its path on the map, kept for the ring's fifteen
+   * minutes after its run ends. They never identify what a seat is thinking about.
+   */
   recent: { file: string; at: number }[];
   context: Pick<ContextUsage, "total" | "window"> | null;
   badges: MapBadges;

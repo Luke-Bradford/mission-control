@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { CrewRow, MapChange, Run } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { SeatDiff } from "../src/map/diff.ts";
-import type { CallRing } from "../src/map/ring.ts";
+import { type CallRing, KEEP_MS } from "../src/map/ring.ts";
 import { mapSeats, runChanges, runWork } from "../src/map/seats.ts";
 import { Store } from "../src/store.ts";
 
@@ -212,6 +212,49 @@ describe("mapSeats", () => {
     expect(seat?.scope.modified).toEqual([]);
     expect(seat?.branches).toEqual([]);
     expect(seat?.changedOn).toEqual([]);
+  });
+
+  it("keeps an ended run's recent path while the ring keeps its calls, and drops it after", () => {
+    const ended = run({ id: "r", status: "ok", endedAt: 5000 });
+    const call = (id: string, file: string, end: number) => ({
+      id,
+      runId: "r",
+      repoId: "mission-control",
+      tool: "Read",
+      detail: file,
+      files: [file],
+      since: end - 100,
+      end,
+      resultSize: 0,
+      resultTok: 0,
+      error: false,
+      refused: false,
+      why: null,
+      tests: null,
+      churn: [],
+    });
+    const ring = {
+      ...ringOf({ r: {} }),
+      calls: () => [call("1", "a.ts", 2000), call("2", "b.ts", 4000)],
+    };
+    const at = (now: number) =>
+      mapSeats(
+        [row({ run: { id: "r" } as CrewRow["run"] })],
+        storeOf([ended]),
+        ring as unknown as CallRing,
+        lock,
+        now,
+      ).seats[0];
+    // the run has ended (no live session): no calls in flight, but its path stays
+    const soon = at(10_000);
+    expect(soon?.calls).toEqual([]);
+    expect(soon?.recent).toEqual([
+      { file: "a.ts", at: 2000 },
+      { file: "b.ts", at: 4000 },
+    ]);
+    // fifteen minutes on, the first call has aged out of the window, then the second
+    expect(at(2000 + KEEP_MS + 1)?.recent).toEqual([{ file: "b.ts", at: 4000 }]);
+    expect(at(4000 + KEEP_MS + 1)?.recent).toEqual([]);
   });
 
   it("merges a current and a set-aside branch, dedupes a shared checkout, relabels mixed churn", () => {

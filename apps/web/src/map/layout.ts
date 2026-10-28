@@ -10,7 +10,7 @@ export const areaOf = (path: string, file = true): string =>
   ) ?? (path.includes("/") || !file ? (path.split("/")[0] as string) : ROOT_AREA);
 export const ROOT_AREA = "(root)";
 
-/** How many areas get their own direction and colour; the rest share "other". */
+/** How many areas get their own direction and a name on the stage; the rest share "other". */
 export const MAIN_AREAS = 4;
 
 /** The prototype's area directions: the biggest areas left, right, down and up, facing the camera. */
@@ -36,7 +36,7 @@ const cross = (a: Vec, b: Vec): Vec => [
   a[0] * b[1] - a[1] * b[0],
 ];
 
-/** The areas holding the most lines of code, biggest first: they get a direction and a colour. */
+/** The areas holding the most lines of code, biggest first: they get a direction and a name. */
 export function mainAreas(tree: MapSnapshot["tree"]): string[] {
   const weight = new Map<string, number>();
   for (const f of tree) {
@@ -240,12 +240,6 @@ export function forceLayout(
     count: node.lines >= 0 ? 1 : 0,
   }));
 }
-
-/** Muted area colours (the prototype's), so the agents' s1–s7 colours stand out against them. */
-export const AREA_COLORS = ["#4f6290", "#84566f", "#85754c", "#675f90"] as const;
-export const OTHER_AREA_COLOR = "#4d566b";
-export const areaColor = (area: string, main: string[]): string =>
-  AREA_COLORS[main.indexOf(area)] ?? OTHER_AREA_COLOR;
 
 /** Layouts kept per repo, newest first: navigating back, or a tree whose paths are unchanged, reuses one. */
 const layouts = new Map<string, { key: string; nodes: MapNode[] }[]>();

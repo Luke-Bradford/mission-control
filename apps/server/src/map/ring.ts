@@ -8,7 +8,8 @@ import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
 import { SeatDiff } from "./diff.ts";
 
-const KEEP_MS = 15 * 60_000;
+/** How long the ring keeps a finished call. */
+export const KEEP_MS = 15 * 60_000;
 type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
