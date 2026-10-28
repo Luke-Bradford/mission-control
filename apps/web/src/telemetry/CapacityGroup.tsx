@@ -73,6 +73,24 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     color,
     points: q.points.map((p) => ({ at: p.at, v: p.pct })),
   }));
+  // Usage is cumulative within a provider window. A lower subsequent reading is a reset, not a
+  // spent-usage value of zero; mark the discontinuity so operators do not read it as a burn drop.
+  const quotaResets = quota.flatMap(({ q }) =>
+    q.points.flatMap((point, index) => {
+      const previous = q.points[index - 1];
+      return previous && point.pct < previous.pct
+        ? [{ at: point.at, label: `${q.accountId} ${q.window} reset` }]
+        : [];
+    }),
+  );
+  const quotaLegend = quota.map(({ q, color }) => {
+    const latest = q.points.at(-1);
+    return {
+      key: `${q.accountId}:${q.window}`,
+      name: `${q.accountId} ${q.window} · ${latest ? `${Math.round(latest.pct)}%` : DASH}`,
+      color,
+    };
+  });
   const machine = t?.machine ?? [];
   const machineLines: LineSeries[] = [
     {
@@ -103,16 +121,11 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
               max={110}
               ticks={[0, 50, 100]}
               limit
+              annotations={quotaResets}
               label="Quota used"
               {...chart}
             />
-            <Legend
-              items={quota.map(({ q, color }) => ({
-                key: `${q.accountId}:${q.window}`,
-                name: `${q.accountId} ${q.window} · ${Math.round(q.points.at(-1)?.pct ?? 0)}%`,
-                color,
-              }))}
-            />
+            <Legend items={quotaLegend} />
           </div>
         )}
       </Panel>

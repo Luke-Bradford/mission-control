@@ -52,6 +52,9 @@ export function TimelinePanel() {
     const name = roster.find((row) => row.id === lane.agentId)?.name;
     const agent = crew?.rows.find((row) => row.id === lane.agentId);
     const spans = lane.spans.flatMap((span) => {
+      // An open activity record says its end is unknown. It is only safe to extend it while the
+      // seat is actually running; a parked seat must not be painted as turning for the whole view.
+      if (span.to === null && agent?.hudState === "parked") return [];
       const start = Math.max(from, span.from);
       const end = Math.min(now, span.to ?? openEnd);
       if (end <= start) return [];

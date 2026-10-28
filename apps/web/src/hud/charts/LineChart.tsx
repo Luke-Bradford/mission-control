@@ -8,6 +8,7 @@ import {
   pointerX,
   spread,
   Tip,
+  useChartCursor,
   useChartWidth,
   useGradientId,
   XAxis,
@@ -37,6 +38,7 @@ export function LineChart({
   max = 100,
   ticks,
   limit = false,
+  annotations = [],
   label,
   xLabels,
   at,
@@ -51,6 +53,8 @@ export function LineChart({
   /** Y values (in the same units as `max`) to grid and label; default 0, 50 and 100 % of `max`. */
   ticks?: number[];
   limit?: boolean;
+  /** Events known at a precise sample time, such as an observed quota reset. */
+  annotations?: { at: number; label: string; color?: string }[];
   label: string;
   xLabels: [string, string];
   /** The tooltip heading for a sample time. */
@@ -61,7 +65,13 @@ export function LineChart({
 }) {
   const [ref, w] = useChartWidth(560);
   const gid = useGradientId();
-  const [hover, setHover] = useState<number | null>(null);
+  const [localHover, setLocalHover] = useState<number | null>(null);
+  const cursor = useChartCursor();
+  const hover = cursor?.at ?? localHover;
+  const setHover = (at: number | null) => {
+    setLocalHover(at);
+    cursor?.setAt(at);
+  };
   const span = Math.max(1, to - from);
   const x0 = PAD.l;
   const x1 = w - PAD.r;
@@ -173,6 +183,27 @@ export function LineChart({
             strokeWidth={1}
           />
         )}
+        {annotations
+          .filter((annotation) => annotation.at >= from && annotation.at <= to)
+          .map((annotation) => {
+            const x = X(annotation.at);
+            return (
+              <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={yTop}
+                  y2={yBottom}
+                  stroke={annotation.color ?? "var(--warn)"}
+                  strokeDasharray="2 3"
+                  strokeWidth={1}
+                />
+                <text className="ct" x={x + 3} y={yTop + 12}>
+                  {annotation.label}
+                </text>
+              </g>
+            );
+          })}
         <defs>
           {series.map((s, i) => (
             <FadeGradient

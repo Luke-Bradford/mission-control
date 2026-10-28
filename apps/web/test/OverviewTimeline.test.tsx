@@ -34,7 +34,7 @@ it("clips spans and ticks to the last hour and extends open spans to now", async
     },
   ]);
   const { container } = render(<TimelinePanel />);
-  await screen.findByRole("link", { name: "dev-1" });
+  await screen.findByTitle("dev-1");
   const spans = [...container.querySelectorAll<HTMLElement>(".overview-span")];
   expect(spans.map((s) => [s.style.left, s.style.width])).toEqual([
     ["0%", "50%"],
@@ -78,6 +78,16 @@ it("keeps idle lanes and links the whole lane to its agent", async () => {
   expect(lane.getAttribute("href")).toBe("/agent/dev-1");
   fireEvent.click(lane);
   expect(window.location.pathname).toBe("/agent/dev-1");
+});
+
+it("does not fabricate a running span for a currently parked agent", async () => {
+  stub(
+    [{ agentId: "dev-1", spans: [{ kind: "turn", from: NOW - HOUR, to: null }], ticks: [] }],
+    [seatRow({ id: "dev-1", hudState: "parked" })],
+  );
+  const { container } = render(<TimelinePanel />);
+  await screen.findByTitle("dev-1");
+  expect(container.querySelector(".overview-span")).toBeNull();
 });
 
 it("slides every second between fetches", async () => {

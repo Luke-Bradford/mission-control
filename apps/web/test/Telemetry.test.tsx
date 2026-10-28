@@ -793,6 +793,24 @@ describe("Capacity and cost", () => {
     expect(tip.textContent).toContain("codex-main 7d—");
   });
 
+  it("labels an observed quota drop as a reset instead of fabricating zero usage", async () => {
+    await loaded(
+      tel({
+        quota: [
+          {
+            accountId: "claude-main",
+            window: "5h",
+            points: [
+              { at: NOW - HOUR, pct: 80 },
+              { at: NOW - MIN, pct: 12 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("claude-main 5h reset");
+  });
+
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
     const data = tel();
     await loaded(data);
@@ -978,6 +996,13 @@ describe("empty and failing telemetry", () => {
     );
     render(<Telemetry />);
     await within(panel("tTok")).findByText("No tokens in the last 60 minutes.");
+  });
+
+  it("does not invent v2 history from aggregate telemetry", async () => {
+    await loaded();
+    for (const id of ["tCrewState", "tFlow", "tCycleControl", "tQualityTrend", "tCostMerged"]) {
+      expect(panel(id).textContent).toContain("data is not available for the last 6h yet.");
+    }
   });
 
   it("a failed fetch says so", async () => {

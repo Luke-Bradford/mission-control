@@ -7,6 +7,7 @@ import {
 } from "@mc/core";
 import { useEffect, useId, useMemo, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
+import { ChartCursorProvider } from "../hud/charts/Hover.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { AgentsGroup } from "../telemetry/AgentsGroup.tsx";
@@ -14,6 +15,7 @@ import { CapacityGroup } from "../telemetry/CapacityGroup.tsx";
 import { CostGroup } from "../telemetry/CostGroup.tsx";
 import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { FlowOfWork } from "../telemetry/FlowOfWork.tsx";
+import { InstrumentCharts } from "../telemetry/InstrumentCharts.tsx";
 import { Kpis } from "../telemetry/Kpis.tsx";
 
 const RANGES = (Object.keys(TELEMETRY_RANGES) as TelemetryRange[]).map((r) => ({
@@ -88,60 +90,64 @@ export function Telemetry() {
   const turnAgent = agents.find((a) => a.id === selected)?.id ?? agents[0]?.id ?? null;
 
   return (
-    <section id="page-telemetry" className={refetching ? "refetching" : undefined}>
-      <div className="toolbar">
-        <h2>Telemetry</h2>
-        <Seg label="Range" options={RANGES} value={range} onChange={setRange} />
-        <label className="s fg2" htmlFor={agentSel}>
-          Agent
-        </label>
-        <select id={agentSel} value={agent} onChange={(e) => setAgent(e.target.value)}>
-          <option value="">All</option>
-          {all.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.id}
-            </option>
-          ))}
-        </select>
-        <label className="s fg2" htmlFor={accountSel}>
-          Account
-        </label>
-        <select id={accountSel} value={account} onChange={(e) => setAccount(e.target.value)}>
-          <option value="">All</option>
-          {(config?.accounts ?? []).map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.id}
-            </option>
-          ))}
-        </select>
-        <label className="s fg2" htmlFor={ticketSel}>
-          Ticket
-        </label>
-        <select id={ticketSel} value={ticket} onChange={(e) => setTicket(e.target.value)}>
-          <option value="">All</option>
-          {(tickets.length ? tickets : ticket ? [ticket] : []).map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
-        <span className="note">
-          Token counts come from each provider's usage events. Costs marked ~ are API-equivalent
-          estimates; a subscription isn't billed per token.
-        </span>
-      </div>
-      {res.error && !res.data && (
-        <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
-      )}
-      <Kpis t={t} live={scope.live} filtered={agent !== "" || account !== "" || ticket !== ""} />
-      <h3 className="grp">Flow of work</h3>
-      <FlowOfWork t={t} scope={scope} />
-      <h3 className="grp">Agents</h3>
-      <AgentsGroup t={t} scope={scope} turnAgent={turnAgent} />
-      <h3 className="grp">Capacity</h3>
-      <CapacityGroup t={t} scope={scope} />
-      <h3 className="grp">Cost</h3>
-      <CostGroup t={t} scope={scope} />
-    </section>
+    <ChartCursorProvider>
+      <section id="page-telemetry" className={refetching ? "refetching" : undefined}>
+        <div className="toolbar">
+          <h2>Telemetry</h2>
+          <Seg label="Range" options={RANGES} value={range} onChange={setRange} />
+          <label className="s fg2" htmlFor={agentSel}>
+            Agent
+          </label>
+          <select id={agentSel} value={agent} onChange={(e) => setAgent(e.target.value)}>
+            <option value="">All</option>
+            {all.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.id}
+              </option>
+            ))}
+          </select>
+          <label className="s fg2" htmlFor={accountSel}>
+            Account
+          </label>
+          <select id={accountSel} value={account} onChange={(e) => setAccount(e.target.value)}>
+            <option value="">All</option>
+            {(config?.accounts ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.id}
+              </option>
+            ))}
+          </select>
+          <label className="s fg2" htmlFor={ticketSel}>
+            Ticket
+          </label>
+          <select id={ticketSel} value={ticket} onChange={(e) => setTicket(e.target.value)}>
+            <option value="">All</option>
+            {(tickets.length ? tickets : ticket ? [ticket] : []).map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+          <span className="note">
+            Token counts come from each provider's usage events. Costs marked ~ are API-equivalent
+            estimates; a subscription isn't billed per token.
+          </span>
+        </div>
+        {res.error && !res.data && (
+          <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
+        )}
+        <Kpis t={t} live={scope.live} filtered={agent !== "" || account !== "" || ticket !== ""} />
+        <h3 className="grp">Flow of work</h3>
+        <FlowOfWork t={t} scope={scope} />
+        <h3 className="grp">Instrument charts</h3>
+        <InstrumentCharts scope={scope} />
+        <h3 className="grp">Agents</h3>
+        <AgentsGroup t={t} scope={scope} turnAgent={turnAgent} />
+        <h3 className="grp">Capacity</h3>
+        <CapacityGroup t={t} scope={scope} />
+        <h3 className="grp">Cost</h3>
+        <CostGroup t={t} scope={scope} />
+      </section>
+    </ChartCursorProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { HBar } from "../src/hud/charts/HBar.tsx";
+import { ChartCursorProvider } from "../src/hud/charts/Hover.tsx";
 import { LineChart } from "../src/hud/charts/LineChart.tsx";
 import { StackedArea } from "../src/hud/charts/StackedArea.tsx";
 import { VBars } from "../src/hud/charts/VBars.tsx";
@@ -169,6 +170,66 @@ describe("LineChart", () => {
       />,
     );
     expect(container.querySelector("line.limit")).toBeNull();
+  });
+
+  it("keeps a missing reading as a gap and exposes reset annotations to keyboard users", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "q",
+            name: "quota",
+            color: "var(--s1)",
+            points: [
+              { at: 0, v: 80 },
+              { at: 50, v: null },
+              { at: 100, v: 12 },
+            ],
+          },
+        ]}
+        from={0}
+        to={100}
+        label="Quota"
+        xLabels={["start", "now"]}
+        at={(ms) => `${ms}`}
+        annotations={[{ at: 100, label: "quota reset" }]}
+      />,
+    );
+    const line = container.querySelector("path.line")?.getAttribute("d") ?? "";
+    expect(line.match(/M/g)).toHaveLength(2);
+    expect(container.querySelector(".annotation")?.textContent).toBe("quota reset");
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    fireEvent.focus(svg);
+    expect(container.querySelector(".tip")?.textContent).toContain("quota12%");
+  });
+
+  it("shares a keyboard crosshair with the other time charts in its workspace", () => {
+    const props = {
+      series: [
+        {
+          id: "q",
+          name: "quota",
+          color: "var(--s1)",
+          points: [
+            { at: 0, v: 10 },
+            { at: 100, v: 20 },
+          ],
+        },
+      ],
+      from: 0,
+      to: 100,
+      xLabels: ["start", "now"] as [string, string],
+      at: (ms: number) => `${ms}`,
+    };
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart {...props} label="first" />
+        <LineChart {...props} label="second" />
+      </ChartCursorProvider>,
+    );
+    const [first, second] = container.querySelectorAll("svg");
+    fireEvent.focus(first as SVGSVGElement);
+    expect(second?.parentElement?.querySelector(".tip")?.textContent).toContain("quota20%");
   });
 });
 

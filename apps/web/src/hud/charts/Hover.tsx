@@ -5,14 +5,33 @@
  */
 import {
   type CSSProperties,
+  createContext,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject,
+  useContext,
   useEffect,
   useId,
   useRef,
   useState,
 } from "react";
+
+/** A timestamp shared by time charts inside one operator workspace. */
+const ChartCursor = createContext<{
+  at: number | null;
+  setAt: (at: number | null) => void;
+} | null>(null);
+
+/** Synchronises hover/focus crosshairs without making charts outside this workspace stateful. */
+export function ChartCursorProvider({ children }: { children: ReactNode }) {
+  const [at, setAt] = useState<number | null>(null);
+  return <ChartCursor.Provider value={{ at, setAt }}>{children}</ChartCursor.Provider>;
+}
+
+export function useChartCursor() {
+  return useContext(ChartCursor);
+}
 
 /** The plot's left edge (room for the y labels), right inset, top and bottom (x labels). */
 export const PAD = { l: 38, r: 4, t: 6, b: 18 } as const;
