@@ -6422,7 +6422,7 @@ describe("the first loop's engine", () => {
   });
 
   it.each(["review", "review-ruling"] as const)(
-    "queues rework for a set-aside %s park and sends it to the engine without a waiver",
+    "queues rework for a set-aside %s park and uses the non-waiving engine resume path",
     async (kind) => {
       store.upsertRun(
         run({
@@ -6440,7 +6440,7 @@ describe("the first loop's engine", () => {
         payload: { text: "Please address the findings." },
       });
       expect(r.statusCode).toBe(200);
-      expect(calls).toEqual([["aside", "CAPCOM", { kinds: [kind], action: "rework" }]]);
+      expect(calls).toEqual([["aside", "CAPCOM", { kinds: [kind] }]]);
       expect(store.comms(0)).toEqual([
         expect.objectContaining({
           from: "CAPCOM",

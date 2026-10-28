@@ -3154,10 +3154,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               reply,
             );
           }
-          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
-            kinds: [kind],
-            action: "rework",
-          });
+          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", { kinds: [kind] });
           if (!lifted)
             return reply
               .code(409)
