@@ -44,8 +44,10 @@ import {
   evidenceCanUnpark,
   evidenceTextText,
   evidenceUncommittedText,
+  FINDING_CATEGORIES,
   FINDING_FILE_MAX,
   FINDING_FIX_MAX,
+  FINDING_RESOLUTION_OUTCOMES,
   FINDING_SCENARIO_MAX,
   FINDING_SEVERITIES,
   FINDING_SUMMARY_MAX,
@@ -144,6 +146,8 @@ import {
   pushReferenceText,
   pushSecretText,
   REVERT_STRAYS,
+  REVIEW_CHECK_IDS,
+  REVIEW_CHECK_RESULTS,
   REVIEW_FINDINGS_MAX,
   REVIEW_SUMMARY_MAX,
   type Run,
@@ -283,7 +287,6 @@ const CommsReactArgs = z
     if (value.reaction !== "cant" && value.reason !== undefined)
       ctx.addIssue({ code: "custom", message: "reason is only allowed for cant" });
   });
-const EvidenceArgs = z.strictObject({ note: text(MC_EVIDENCE_MAX) });
 const PlanArgs = z
   .strictObject({
     plan: text(MC_PLAN_MAX),
@@ -302,11 +305,48 @@ const FindingArgs = z.strictObject({
   summary: text(FINDING_SUMMARY_MAX),
   scenario: text(FINDING_SCENARIO_MAX),
   fix: text(FINDING_FIX_MAX),
+  category: z.enum(FINDING_CATEGORIES).optional(),
+});
+const ReportedTestArgs = z.strictObject({
+  command: text(MC_TEXT_MAX),
+  file: text(FINDING_FILE_MAX).optional(),
+  passed: z.int().min(0),
+  failed: z.int().min(0),
+  skipped: z.int().min(0),
+  duration: z.int().min(0),
 });
 const FindingsArgs = z.strictObject({
   verdict: z.strictObject({ spec: z.enum(VERDICTS), quality: z.enum(VERDICTS) }),
   summary: text(REVIEW_SUMMARY_MAX),
   findings: z.array(FindingArgs).max(REVIEW_FINDINGS_MAX),
+  checked: z
+    .array(
+      z.strictObject({
+        check: z.enum(REVIEW_CHECK_IDS),
+        result: z.enum(REVIEW_CHECK_RESULTS),
+        note: text(MC_TEXT_MAX).optional(),
+      }),
+    )
+    .max(REVIEW_CHECK_IDS.length)
+    .optional(),
+  tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
+  resolutions: z
+    .array(
+      z.strictObject({
+        findingRef: z.strictObject({ reviewId: z.int().positive(), pos: z.int().min(0) }),
+        outcome: z.enum(FINDING_RESOLUTION_OUTCOMES),
+      }),
+    )
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
+});
+const EvidenceArgs = z.strictObject({
+  note: text(MC_EVIDENCE_MAX),
+  tests: z.array(ReportedTestArgs).max(REVIEW_FINDINGS_MAX).optional(),
+  testsAdded: z
+    .array(z.strictObject({ file: text(FINDING_FILE_MAX), failedOnBase: z.boolean() }))
+    .max(REVIEW_FINDINGS_MAX)
+    .optional(),
 });
 
 export function badArgs(e: z.ZodError): Result {
@@ -1805,7 +1845,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const note = parsed.data.note;
+    const { note, tests, testsAdded } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -1904,7 +1944,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
-      store.addEvidence(currentRun.id, note, now());
+      store.addEvidence(currentRun.id, note, now(), { tests, testsAdded });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
@@ -1928,7 +1968,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportFindings(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = FindingsArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { verdict, summary, findings } = parsed.data;
+    const { verdict, summary, findings, checked, tests, resolutions } = parsed.data;
     const live = liveRun(ctx);
     if (live === null) return ENDED;
     const { run } = live;
@@ -1938,6 +1978,31 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     }
     if (review.state === "reported") return { text: FINDINGS_ALREADY };
     if (review.state !== "running") return { text: FINDINGS_DROPPED, isError: true };
+    if (new Set((checked ?? []).map((check) => check.check)).size !== (checked ?? []).length) {
+      return { text: `${MC_BAD_ARGS}checked: each check may appear once`, isError: true };
+    }
+    if (resolutions !== undefined) {
+      if (review.round < 2)
+        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
+      const previous = store
+        .reviewsOfRun(review.authorRunId)
+        .find((r) => r.round === review.round - 1);
+      if (
+        previous === undefined ||
+        resolutions.some(
+          (resolution) =>
+            resolution.findingRef.reviewId !== previous.id ||
+            !store
+              .findingsOf(previous.id)
+              .some((finding) => finding.pos === resolution.findingRef.pos),
+        )
+      ) {
+        return {
+          text: `${MC_BAD_ARGS}resolutions: findings must be from the previous round`,
+          isError: true,
+        };
+      }
+    }
     const badFile = findings.findIndex((f) => !findingFileOk(f.file));
     if (badFile !== -1) return { text: findingFileText(badFile + 1), isError: true };
     const blocking = findings.filter((f) => BLOCKING_SEVERITIES.includes(f.severity)).length;
@@ -1948,7 +2013,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: FINDINGS_BLOCKING_NEEDS_FAIL, isError: true };
     }
     const at = now();
-    if (!store.recordFindings(review.id, run.id, { verdict, summary, findings, at })) {
+    if (
+      !store.recordFindings(review.id, run.id, {
+        verdict,
+        summary,
+        findings,
+        checked,
+        tests,
+        resolutions,
+        at,
+      })
+    ) {
       const again = store.review(review.id);
       return again?.state === "reported"
         ? { text: FINDINGS_ALREADY }
@@ -2222,7 +2297,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportEvidence,
       description:
-        "Report that the ticket's work is done and committed: a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
+        "Report that the ticket's work is done and committed: a short note, optional test runs and newly added tests with whether they failed on base. Mission Control pushes, opens the draft PR and runs CI, and messages you if CI fails. While responding to blocking review findings on the unchanged head, the note may explain why no change is appropriate without a commit. The note is posted to GitHub, so it may not @mention anyone or reference any issue but your ticket, inside backticks too.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2233,6 +2308,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
+          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
+          testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
         },
         required: ["note"],
         additionalProperties: false,
@@ -2256,7 +2333,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.reportFindings,
       description:
-        "Report your review, once, when you are done: every finding at every severity, each with file, line (0 for the whole file), a one-line summary, a failure scenario and the exact fix, plus your verdict on spec and quality. Mission Control decides what happens next: Critical and Important findings go back to the author to fix; Minor ones are logged in the PR body. An empty list with pass verdicts means nothing to fix.",
+        "Report your review, once, when you are done: every finding at every severity, each with category, file, line (0 for the whole file), a one-line summary, a failure scenario and the exact fix; optional checked standards, test runs and later-round resolutions; plus your verdict on spec and quality. Mission Control decides what happens next: Critical and Important findings go back to the author to fix; Minor ones are logged in the PR body. An empty list with pass verdicts means nothing to fix.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2325,11 +2402,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
                   maxLength: FINDING_FIX_MAX,
                   description: "A concrete suggested change: what to write, and where.",
                 },
+                category: { type: "string", enum: [...FINDING_CATEGORIES] },
               },
               required: ["severity", "file", "line", "summary", "scenario", "fix"],
               additionalProperties: false,
             },
           },
+          checked: { type: "array", maxItems: REVIEW_CHECK_IDS.length, items: { type: "object" } },
+          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
+          resolutions: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
         },
         required: ["verdict", "summary", "findings"],
         additionalProperties: false,

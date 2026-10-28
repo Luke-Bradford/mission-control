@@ -119,8 +119,48 @@ describe("evidence", () => {
     const b = store.addEvidence("r1", "second", 20);
     store.addEvidence("r2", "other run", 30);
     expect(b).toBeGreaterThan(a);
-    expect(store.latestEvidence("r1")).toEqual({ id: b, runId: "r1", note: "second", at: 20 });
+    expect(store.latestEvidence("r1")).toEqual({
+      id: b,
+      runId: "r1",
+      note: "second",
+      at: 20,
+      tests: [],
+      testsAdded: [],
+    });
     expect(store.evidenceCount("r1")).toBe(2);
+  });
+
+  it("keeps build-seat test evidence with the report", () => {
+    const id = store.addEvidence("r1", "tested", 10, {
+      tests: [
+        {
+          command: "pnpm -s vitest run a.test.ts",
+          file: "a.test.ts",
+          passed: 1,
+          failed: 0,
+          skipped: 0,
+          duration: 12,
+        },
+      ],
+      testsAdded: [{ file: "a.test.ts", failedOnBase: true }],
+    });
+    expect(store.latestEvidence("r1")).toEqual({
+      id,
+      runId: "r1",
+      note: "tested",
+      at: 10,
+      tests: [
+        {
+          command: "pnpm -s vitest run a.test.ts",
+          file: "a.test.ts",
+          passed: 1,
+          failed: 0,
+          skipped: 0,
+          duration: 12,
+        },
+      ],
+      testsAdded: [{ file: "a.test.ts", failedOnBase: true }],
+    });
   });
 });
 
