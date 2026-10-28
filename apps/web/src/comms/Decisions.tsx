@@ -1,10 +1,11 @@
 import type { AttentionHoldCondition, AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
-import { isOperatorItem } from "../attention.ts";
+import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { ACTIONS } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
+import { followLink, NEEDS_YOU_PATH } from "../router.ts";
 import { answerTarget, sendAnswer } from "./answer.ts";
 import { HoldForm } from "./NeedsList.tsx";
 
@@ -102,14 +103,19 @@ export function Decisions({
   flightSeat: FlightSeat | null;
   onDiscuss: (item: AttentionItem) => void;
 }) {
-  const decisions = (items ?? []).filter(
-    (item) => item.kind === "decision" && isOperatorItem(item),
-  );
+  // The decisions among the Needs-you set; the head counts the whole set and links to its home.
+  const needsYou = needsYouItems(items);
+  const decisions = needsYou.filter((item) => item.kind === "decision");
   return (
     <section className="comms-decisions" aria-label="Decisions">
       <div className="comms-section-head">
         <h2>Decisions</h2>
-        <span>{`${decisions.length} for you`}</span>
+        <span className="spacer" />
+        <a
+          className="comms-needs-link"
+          href={NEEDS_YOU_PATH}
+          onClick={(e) => followLink(e, NEEDS_YOU_PATH)}
+        >{`Needs you ${needsYou.length}`}</a>
       </div>
       <div className="comms-decision-list">
         {decisions.length === 0 ? (

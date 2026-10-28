@@ -41,6 +41,7 @@ import {
   itemWithoutOwner,
   limit5h,
   limit7d,
+  METRICS_VIEW,
   MIN,
   NOW,
   OVERVIEW,
@@ -92,6 +93,7 @@ function stub(d: Data = {}) {
   return stubFetch({
     ...d.extra,
     "/api/overview": OVERVIEW,
+    "/api/metrics": METRICS_VIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
@@ -161,10 +163,11 @@ describe("Overview panels", () => {
     expect(constructed).toHaveBeenCalledWith("/api/stream");
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     await act(async () => release());
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
@@ -183,10 +186,11 @@ describe("Overview panels", () => {
         <Overview />
       </StrictMode>,
     );
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(
       await within(container.querySelector("#timelineP") as HTMLElement).findByText(
@@ -209,6 +213,21 @@ describe("Overview panels", () => {
     }
     await screen.findByText("No events yet.");
     expect(container.querySelector("#nbanner")).toBeNull();
+  });
+
+  it("keeps the activity map on its own page: no map panel, a link from the Timeline", () => {
+    stub();
+    const { container } = render(<Overview />);
+    expect(container.querySelector("#mapP")).toBeNull();
+    expect(screen.queryByText(/Crew Activity Map/i)).toBeNull();
+    // the grid is the whole page: nothing is stacked below it
+    expect(
+      container.querySelector("#page-overview > .overview-grid")?.nextElementSibling,
+    ).toBeNull();
+    const link = within(container.querySelector("#timelineP") as HTMLElement).getByRole("link", {
+      name: "Activity map →",
+    });
+    expect(link.getAttribute("href")).toBe("/map");
   });
 });
 
@@ -362,7 +381,7 @@ describe("Agents panel", () => {
     expect(within(agentRows(container)[0] as HTMLElement).getByText("flight-1")).toBeTruthy();
   });
 
-  it("the FLIGHT row shows the live seat, once, and the subtitle leaves it out", async () => {
+  it("the FLIGHT row shows the live seat, once; the subtitle is the registry's working count", async () => {
     const seat = (over: Partial<CrewRow>) =>
       crewRow({ kind: "crew", role: "Developer", mode: "writer", loopKind: "crew", ...over });
     stub({
@@ -374,7 +393,10 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("1 working · 2 agents · FLIGHT not counted");
+    // agents working is the registry's figure: every agent in view, FLIGHT included
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 3 agents working"),
+    );
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     expect(within(flight).getByText("head agent")).toBeTruthy();
@@ -427,7 +449,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
+  it("subtitle reads the registry's agents working", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -435,8 +457,13 @@ describe("Agents panel", () => {
         crewRow({ id: "c", index: 2, hudState: "running" }),
       ],
     });
-    render(<Overview />);
-    await screen.findByText("2 working · 3 agents · FLIGHT not counted");
+    const { container } = render(<Overview />);
+    await waitFor(() =>
+      expect(container.querySelector(".crew-working")?.textContent).toBe("2 of 3 agents working"),
+    );
+    expect(container.querySelector('#agentsP [data-metric="agentsWorking"]')?.textContent).toBe(
+      "2",
+    );
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
@@ -1340,7 +1367,7 @@ describe("Agents panel", () => {
       "shop-app-ta",
     ]);
     expect(container.querySelector(".trow.flight")).toBeTruthy();
-    expect(screen.getByText("1 working · 1 agents · FLIGHT not counted")).toBeTruthy();
+    expect(container.querySelector(".crew-working")?.textContent).toBe("1 of 1 agents working");
   });
 });
 
@@ -1361,7 +1388,7 @@ describe("Needs banner", () => {
     expect(container.querySelector(".nbanner")).toBeNull();
   });
 
-  it("counts things by kind and goes to Comms", async () => {
+  it("counts things by kind and goes to Needs you's home on FLIGHT", async () => {
     stub({
       items: [
         item({ key: "1", kind: "decision" }),
@@ -1379,10 +1406,10 @@ describe("Needs banner", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen Comms →",
+      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen in FLIGHT →",
     );
     fireEvent.click(btn);
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
   });
 });
 
@@ -1399,7 +1426,7 @@ describe("Needs banner, acknowledged items", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "3things need you2 decisions1 stall· 1 not acknowledgedOpen Comms →",
+      "3things need you2 decisions1 stall· 1 not acknowledgedOpen in FLIGHT →",
     );
   });
 
@@ -1414,7 +1441,7 @@ describe("Needs banner, acknowledged items", () => {
     });
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
-    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen Comms →");
+    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen in FLIGHT →");
   });
 
   it("is all clear when every item is someone else's", async () => {
@@ -1911,6 +1938,37 @@ describe("Activity panel", () => {
     await screen.findByText("Updated decision");
     expect(list.querySelector(".arow")).toBe(node);
     expect(list.scrollTop).toBe(80);
+  });
+
+  it("Needs you lists the header's set: one row per item, whatever the session", async () => {
+    stub({
+      config: SESSION_CONFIG,
+      items: [
+        // an escalation and a PR on the same ticket are two things to do, so two rows
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({
+          key: "pr:site-builder#9:1",
+          kind: "pr",
+          repoId: "site-builder",
+          text: "PR #9 · You: review",
+          escalationId: null,
+          ticket: "site-builder#2",
+          agentId: null,
+        }),
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({ key: "flight", text: "FLIGHT's to settle", owner: "flight" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
+    await screen.findByText("Pick a layout");
+    // a session on another repo hides nothing waiting on the operator
+    act(() => setSession("shop-app-session"));
+    const rows = () => container.querySelectorAll("#actList .arow");
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByText("PR #9 · You: review")).toBeTruthy();
+    expect(screen.queryByText("FLIGHT's to settle")).toBeNull();
+    act(() => setSession(SESSION_ALL));
   });
 
   it("holds new rows while scrolled down and shows N new without moving the reader", async () => {

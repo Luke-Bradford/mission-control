@@ -1,9 +1,11 @@
-import type { GuardHitsView, Telemetry, TestLockHistory } from "@mc/core";
+import type { GuardHitsView, MetricId, Telemetry, TestLockHistory } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dur, kTokens, mss } from "../fmt.ts";
+import { MetricName } from "../hud/MetricName.tsx";
+import { metricText, metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { followLink } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE } from "./common.ts";
@@ -31,6 +33,12 @@ interface Tile {
   href?: string;
   /** The figure is not stored: the value reads "not tracked yet", small and muted. */
   nt?: boolean;
+  /** A registry figure (`METRICS` in @mc/core); its label carries the definition on hover. */
+  metric?: MetricId;
+  /** The label's hover text. */
+  hint?: string;
+  /** A registry figure's scope tag after its window ("s/mission-control"). */
+  tag?: string | null;
 }
 
 function Kpi({ tile: k }: { tile: Tile }) {
@@ -54,9 +62,12 @@ function Kpi({ tile: k }: { tile: Tile }) {
   }, [k.value, k.live, k.nt]);
   return (
     <div className={k.live ? "kpi live" : "kpi"}>
-      <span className="lbl">{k.label}</span>
+      <span className="lbl" title={k.hint}>
+        {k.metric ? <MetricName id={k.metric} tag={k.tag} /> : k.label}
+      </span>
       <span
         key={k.value}
+        data-metric={k.metric}
         className={`v${k.nt ? " nt" : ""}${changed ? " kpi-change" : ""}`}
         title={k.title}
         onAnimationEnd={() => setChanged(false)}
@@ -76,10 +87,22 @@ function Kpi({ tile: k }: { tile: Tile }) {
 
 /**
  * Today's KPI row (catalogue 2.6.2). `live` (default true): the telemetry is fresh, so the tiles
- * that move with the crew today carry the live marker.
+ * that move with the crew today carry the live marker. Working, cost and merged are the registry's
+ * figures; with an Agent, Account or Ticket filter set (`filtered`), working and cost show the
+ * filtered figure under a label that says so instead.
  */
-export function Kpis({ t, live = true }: { t: Telemetry | undefined; live?: boolean }) {
+export function Kpis({
+  t,
+  live = true,
+  filtered = false,
+}: {
+  t: Telemetry | undefined;
+  live?: boolean;
+  filtered?: boolean;
+}) {
   const nameOf = useSeatName();
+  const metrics = useMetrics();
+  const r = metrics.readings;
   const d = t?.today;
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
   const lock = useTestLock();
@@ -109,6 +132,21 @@ export function Kpis({ t, live = true }: { t: Telemetry | undefined; live?: bool
         : cpr === null
           ? "No finished crew runs in the last 14 days."
           : `${cpr.toFixed(1)} per run, last 14 days`;
+  // Telemetry's own figures ignore the header's session filter; a registry tile names the one it
+  // follows, on its label and in its hover.
+  const tag = sessionTag(metrics.session);
+  const registry = (id: MetricId, detail: string): Tile => ({
+    key: id,
+    metric: id,
+    label: metricText(id).label,
+    tag,
+    hint: `${metricTitle(metrics, id)}${tag ? `\nOn Telemetry this follows the header's session filter (${tag}); the page's own figures do not.` : ""}`,
+    value: r[id]?.value ?? DASH,
+    detail,
+    live,
+  });
+  const filteredHint =
+    "Only the agents, account or ticket picked above; the registry figure is shown unfiltered.";
   const tiles: Tile[] = [
     {
       key: "tokens",
@@ -117,13 +155,16 @@ export function Kpis({ t, live = true }: { t: Telemetry | undefined; live?: bool
       detail: `today, in + out · ${num((x) => kTokens(x.cacheRead))} cache read`,
       live,
     },
-    {
-      key: "cost",
-      label: "~Cost",
-      value: num((x) => cost(x.costUsd)),
-      detail: "today, API-equivalent",
-      live,
-    },
+    filtered
+      ? {
+          key: "cost",
+          label: "~Cost · today · filtered",
+          hint: filteredHint,
+          value: num((x) => cost(x.costUsd)),
+          detail: "API-equivalent",
+          live,
+        }
+      : registry("cost", "API-equivalent"),
     {
       key: "tools",
       label: "Tool calls",
@@ -138,18 +179,19 @@ export function Kpis({ t, live = true }: { t: Telemetry | undefined; live?: bool
       live,
       ...commits,
     },
+    filtered
+      ? {
+          key: "agentsWorking",
+          label: "Working · now · filtered",
+          hint: filteredHint,
+          value: num((x) => String(x.working)),
+          detail: `of ${num((x) => String(x.agents))} agents`,
+          live,
+        }
+      : registry("agentsWorking", r.agentsWorking?.detail ?? ""),
     {
-      key: "working",
-      label: "Working",
-      value: num((x) => String(x.working)),
-      detail: `now, of ${num((x) => String(x.agents))} agents`,
-      live,
-    },
-    {
-      key: "merged",
-      label: "Merged",
-      value: num((x) => String(x.merged7d)),
-      detail: "PRs, last 7 days",
+      ...registry("merged", r.merged?.detail ? `PRs · ${r.merged.detail}` : "PRs"),
+      live: false,
     },
     {
       key: "lock",

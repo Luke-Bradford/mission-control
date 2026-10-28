@@ -1665,23 +1665,6 @@ export class Store {
     };
   }
 
-  /** Recent state changes plus the state carried into the window, for each scoped seat. */
-  overviewAgentEvents(agentIds: readonly string[], since: number, until: number): AgentEvent[] {
-    const query = this.db.prepare(`SELECT * FROM agent_events
-      WHERE agent_id = ? AND at >= COALESCE(
-        (SELECT MAX(at) FROM agent_events WHERE agent_id = ? AND at < ?), ?)
-        AND at <= ? ORDER BY at`);
-    return agentIds.flatMap((id) =>
-      (query.all(id, id, since, since, until) as Row[]).map((r) => ({
-        agentId: id,
-        at: r.at as number,
-        from: r.from_state as HudState,
-        to: r.to_state as HudState,
-        text: r.text as string,
-      })),
-    );
-  }
-
   latestMachineSample(until: number): MachineSample | null {
     const row = this.db
       .prepare("SELECT sample FROM machine_samples WHERE at <= ? ORDER BY at DESC LIMIT 1")

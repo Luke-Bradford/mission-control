@@ -6,6 +6,7 @@ import {
   type AgentSeries,
   cacheHitPct,
   FLOW_DAYS,
+  percentile as interpolatedPercentile,
   LIVE_MINUTES,
   NO_SIZE,
   type ReviewRow,
@@ -33,7 +34,6 @@ import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts"
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
-const MERGED_DAYS = 7;
 
 type Interval = [number, number];
 
@@ -128,7 +128,8 @@ export interface TelemetryScope {
 
 /**
  * `scope` intersects ticket, agent and account for today, ticket bars, tools and totals;
- * `merged7d`, the flow of work, quota, machine and the per-agent series stay crew-wide.
+ * the flow of work, quota, machine and the per-agent series stay crew-wide. Unfiltered, the page
+ * shows the registry's working, merged and cost (`METRICS` in @mc/core) instead of `today`'s.
  */
 export function telemetry(
   config: CcConfig,
@@ -223,7 +224,6 @@ export function telemetry(
           inToday.some((run) => run.agentId === r.id && run.endedAt === null && matches(run))),
     ).length,
     agents: scoped.length,
-    merged7d: merged.filter((m) => m > now - MERGED_DAYS * DAY_MS && m <= now).length,
   };
 
   // ── flow of work ──
@@ -241,14 +241,15 @@ export function telemetry(
   const bySize = new Map<string, number[]>();
   let excluded = 0;
   for (const i of store.flowIssues(flowSince)) {
-    if (i.doneAt === null) continue;
+    // Like the registry's cycle time (metricsView): a Done stamped after now is not counted yet.
+    if (i.doneAt === null || i.doneAt > now) continue;
     if (i.startAt === null || i.startAt > i.doneAt) {
       excluded += 1;
       continue;
     }
     const size = i.size ?? NO_SIZE;
     const list = bySize.get(size) ?? [];
-    list.push((i.doneAt - i.startAt) / DAY_MS);
+    list.push(i.doneAt - i.startAt);
     bySize.set(size, list);
   }
   const standard: readonly string[] = TICKET_SIZES;
@@ -257,7 +258,12 @@ export function telemetry(
   const cycleTime: Telemetry["cycleTime"] = {
     rows: sizes.map((size) => {
       const list = bySize.get(size) ?? [];
-      return { size, medianDays: median(list), tickets: list.length };
+      return {
+        size,
+        p50Ms: interpolatedPercentile(list, 50),
+        p85Ms: interpolatedPercentile(list, 85),
+        tickets: list.length,
+      };
     }),
     excluded,
   };

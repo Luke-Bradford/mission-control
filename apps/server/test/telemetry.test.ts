@@ -197,7 +197,6 @@ describe("today, in the operator's timezone", () => {
       cacheRead: 2500,
       working: 0,
       agents: 2,
-      merged7d: 0,
       commits: 0,
     });
   });
@@ -241,16 +240,6 @@ describe("today, in the operator's timezone", () => {
       idle: 87.5,
       unknown: 0,
     });
-  });
-
-  it("merged7d counts PRs merged in the last 7 days only", () => {
-    store.replacePullRequests(
-      "shop-app",
-      [pr(1, NOW - 3 * DAY), pr(2, NOW - 8 * DAY), pr(3, null)],
-      0,
-    );
-    store.replacePullRequests("site-builder", [pr(4, NOW - HOUR, "site-builder")], 0);
-    expect(tel().today.merged7d).toBe(2);
   });
 });
 
@@ -346,7 +335,7 @@ describe("flow of work", () => {
     expect(th.filter((d) => d.merged === 0)).toHaveLength(11);
   });
 
-  it("cycle time: median days by size in XS S M L XL order then none, and the excluded count", () => {
+  it("cycle time: p50 and p85 by size in XS S M L XL order then none, and the excluded count", () => {
     const issue = (number: number, size: string | null, days: number | null): FlowIssue => ({
       repoId: "shop-app",
       number,
@@ -370,18 +359,18 @@ describe("flow of work", () => {
     );
     expect(tel().cycleTime).toEqual({
       rows: [
-        { size: "XS", medianDays: null, tickets: 0 },
-        { size: "S", medianDays: 1.5, tickets: 2 },
-        { size: "M", medianDays: 2, tickets: 3 },
-        { size: "L", medianDays: null, tickets: 0 },
-        { size: "XL", medianDays: null, tickets: 0 },
-        { size: "none", medianDays: 3, tickets: 1 },
+        { size: "XS", p50Ms: null, p85Ms: null, tickets: 0 },
+        { size: "S", p50Ms: 1.5 * DAY, p85Ms: 1.85 * DAY, tickets: 2 },
+        { size: "M", p50Ms: 2 * DAY, p85Ms: 3.4 * DAY, tickets: 3 },
+        { size: "L", p50Ms: null, p85Ms: null, tickets: 0 },
+        { size: "XL", p50Ms: null, p85Ms: null, tickets: 0 },
+        { size: "none", p50Ms: 3 * DAY, p85Ms: 3 * DAY, tickets: 1 },
       ],
       excluded: 2,
     });
   });
 
-  it("cycle time excludes missing Ready and Done before Ready from the median", () => {
+  it("cycle time excludes missing Ready and Done before Ready from the percentiles", () => {
     store.replaceFlow(
       "shop-app",
       [
@@ -393,7 +382,8 @@ describe("flow of work", () => {
     );
     expect(tel().cycleTime.rows.find((r) => r.size === "M")).toEqual({
       size: "M",
-      medianDays: 3,
+      p50Ms: 3 * DAY,
+      p85Ms: 3 * DAY,
       tickets: 1,
     });
     expect(tel().cycleTime.excluded).toBe(2);
@@ -829,7 +819,6 @@ describe("empty store", () => {
       turns: 0,
       working: 0,
       agents: 2,
-      merged7d: 0,
       commits: 0,
     });
     expect(t.throughput).toHaveLength(14);
@@ -837,7 +826,8 @@ describe("empty store", () => {
     expect(t.cycleTime).toEqual({
       rows: ["XS", "S", "M", "L", "XL", "none"].map((size) => ({
         size,
-        medianDays: null,
+        p50Ms: null,
+        p85Ms: null,
         tickets: 0,
       })),
       excluded: 0,
@@ -1571,7 +1561,6 @@ it.each([
   store.setDigest("r", digest({ attemptUsage }));
   const spend = overviewSummary(store, NOW, {
     repoIds: config.repos.map((r) => r.id),
-    seatIds: config.loops.map((l) => l.id),
     timezone: config.operator.timezone,
     attention: [],
   }).kpis.spendToday;

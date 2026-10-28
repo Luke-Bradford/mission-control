@@ -64,7 +64,11 @@ it("shows the axis and legend even for an empty window", async () => {
   ]) {
     expect(screen.getByText(label)).toBeTruthy();
   }
-  expect(screen.queryAllByRole("link")).toHaveLength(0);
+  // no lane links in an empty window; only the head's link to the activity map
+  const links = screen.queryAllByRole("link");
+  expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Activity map →", "/map"],
+  ]);
 });
 
 it("keeps idle lanes and links the whole lane to its agent", async () => {

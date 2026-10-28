@@ -1,24 +1,27 @@
-import type { AgentStream, Crew, FlightSummaryView, FlightView } from "@mc/core";
-import { useNeedsYou } from "../attention.ts";
+import {
+  type AgentStream,
+  type FlightSummaryView,
+  type FlightView,
+  METRICS,
+  type MetricId,
+} from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { runElapsed } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { navigate, PAGE_PATHS } from "../router.ts";
-import { useSessionScope } from "../shell/session.ts";
+import { metricTitle, useMetrics } from "../metrics.ts";
+import { NEEDS_YOU_PATH, navigate, PAGE_PATHS } from "../router.ts";
 import { chatRows, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
 import { SUMMARY_EMPTY } from "./Summary.tsx";
-import { activeCrewRows } from "./WorkInFlight.tsx";
 
 const DASH = "—";
 /** Where a pulse leads: the canonical detail behind that reading. */
 const PULSE_TARGET = {
-  /** Plan's Operator actions: the operator's asks and drafts live there. */
-  needs: `${PAGE_PATHS.flight}#askP`,
+  /** Needs you's home. */
+  needs: NEEDS_YOU_PATH,
   /** Telemetry's flow of work shows cycle time over time. */
   cycle: PAGE_PATHS.telemetry,
 } as const;
@@ -124,24 +127,18 @@ export function Situation() {
   const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const summary = summaryResource.data;
   const flight = useResource<FlightView>(RESOURCES.flight).data;
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const { inView } = useSessionScope();
   const now = useSecond();
-  const active = activeCrewRows(crew, inView);
-  const blocked = active.filter(
-    (row) =>
-      ["blocked", "stalled", "parked", "error"].includes(row.hudState) ||
-      row.loop?.phase === "parked",
-  ).length;
-  // The header's count, so the two never disagree.
-  const needsYou = useNeedsYou().length;
+  // The registry's figures (METRICS in @mc/core), so the rail agrees with every other page.
+  const metrics = useMetrics();
+  const { readings: r, view } = metrics;
+  const blocked = r.blocked?.n ?? 0;
+  const inProgress = r.inProgress?.n ?? 0;
+  const needsYou = r.needsYou?.n ?? 0;
   // Two counts, not a sum: a PR in review can also have CI pending, so adding them double-counts.
   const inReview = summary?.metrics.inReview ?? 0;
   const inCi = summary?.metrics.inCi ?? 0;
-  const oldestActive = active.reduce((oldest, row) => {
-    const age = row.run ? runElapsed(row.run, now) : null;
-    return age === null ? oldest : Math.max(oldest, age);
-  }, 0);
+  const oldestAt = view?.inProgress.oldestAt ?? null;
+  const oldest = oldestAt === null ? 0 : Math.max(0, now - oldestAt);
   const headlineStale = (summary?.headlineAgeMin ?? 0) >= 60;
   // Operational state only: a stale briefing is FLIGHT's data quality, shown on the age line.
   const status =
@@ -151,7 +148,7 @@ export function Situation() {
         ? { label: "Blocked work", tone: "crit" as const }
         : needsYou > 0
           ? { label: "Needs you", tone: "warn" as const }
-          : active.length > 0
+          : inProgress > 0
             ? { label: "Work moving", tone: "ok" as const }
             : { label: "Standing by", tone: "plain" as const };
   const seatId = flight === undefined ? undefined : (flight.seat?.id ?? null);
@@ -161,13 +158,14 @@ export function Situation() {
     value: number | string,
     detail: string,
     tone: PulseTone,
-    window: "now" | "24 h",
+    window: string,
     target?: PulseTarget,
+    metric?: MetricId,
   ) => {
     const idle = value === 0 || value === DASH;
     const content = (
       <>
-        <span className="flight-pulse-value">
+        <span className="flight-pulse-value" data-metric={metric}>
           <Reading value={value} />
         </span>
         <span className="flight-pulse-label">{label}</span>
@@ -179,19 +177,26 @@ export function Situation() {
     );
     // tone-* rather than bare crit/warn: a bare .warn on a button is the global warn button style.
     const cls = `flight-pulse tone-${tone}${idle ? " idle" : ""}`;
+    const title = metric ? metricTitle(metrics, metric) : undefined;
     return target ? (
       <button
         type="button"
         className={cls}
+        title={title}
         aria-label={`${label}: ${value} ${detail}, ${window}`}
         onClick={() => navigate(PULSE_TARGET[target])}
       >
         {content}
       </button>
     ) : (
-      <div className={cls}>{content}</div>
+      <div className={cls} title={title}>
+        {content}
+      </div>
     );
   };
+  /** A registry figure: its label, window, value and hover come from the registry. */
+  const figure = (id: MetricId, detail: string, tone: PulseTone = "plain", target?: PulseTarget) =>
+    pulse(METRICS[id].label, r[id]?.value ?? DASH, detail, tone, METRICS[id].window, target, id);
 
   return (
     <Panel
@@ -235,12 +240,12 @@ export function Situation() {
         <LatestContact seatId={seatId} />
       </div>
       <div className="flight-pulse-rail">
-        {pulse("WIP", active.length, "runs started, not finished", "plain", "now")}
-        {pulse("Blocked", blocked, "runs to clear", pulseTone(blocked, "crit"), "now")}
+        {figure("inProgress", "tickets started, not merged")}
+        {figure("blocked", "agents to clear", pulseTone(blocked, "crit"))}
         {pulse(
           "Oldest",
-          oldestActive === 0 ? DASH : dur(oldestActive),
-          "age of the oldest active run",
+          oldest === 0 ? DASH : dur(oldest),
+          "in-progress ticket, since work started",
           "plain",
           "now",
         )}
@@ -251,25 +256,9 @@ export function Situation() {
           "plain",
           "now",
         )}
-        {pulse("Throughput", summary?.metrics.merged ?? 0, "PRs merged", "plain", "24 h")}
-        {pulse(
-          "Cycle time",
-          summary?.metrics.readyToMergedMin == null
-            ? DASH
-            : dur(summary.metrics.readyToMergedMin * 60_000),
-          "median Ready → merged",
-          "plain",
-          "24 h",
-          "cycle",
-        )}
-        {pulse(
-          "Needs you",
-          needsYou,
-          "decisions or replies",
-          pulseTone(needsYou, "warn"),
-          "now",
-          "needs",
-        )}
+        {figure("merged", r.merged?.detail ? `PRs merged · ${r.merged.detail}` : "PRs merged")}
+        {figure("cycleTime", `Ready → Done · ${r.cycleTime?.detail ?? DASH}`, "plain", "cycle")}
+        {figure("needsYou", "decisions or replies", pulseTone(needsYou, "warn"), "needs")}
       </div>
     </Panel>
   );

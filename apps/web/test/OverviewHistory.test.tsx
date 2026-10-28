@@ -15,8 +15,9 @@ it("uses every KPI's minute series instead of hourly history", async () => {
   );
   stubFetch({ "/api/overview": { ...OVERVIEW, kpis } });
   render(<KpiStrip />);
-  await screen.findByText("$24.31");
-  expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(8);
+  await screen.findByText("41.2k");
+  // Registry figures without a minute history (working, merged, cycle time) draw no trace.
+  expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(5);
   for (const graph of screen.getAllByRole("img")) {
     // 0 at the baseline (y 23), the peak (4) on the top gridline (y 9), newest at the right edge
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
@@ -25,7 +26,7 @@ it("uses every KPI's minute series instead of hourly history", async () => {
     expect(graph.getAttribute("aria-label")).toMatch(/peak .+ · latest /);
     expect(graph.querySelectorAll("circle")).toHaveLength(0);
   }
-  expect(screen.getByText("+$3.00 · 30m")).toBeTruthy();
+  expect(screen.getByText("+~$3.00 · 30m")).toBeTruthy();
   expect(screen.getByText("+3 pp · 30m")).toBeTruthy();
 });
 
@@ -35,7 +36,7 @@ it("keeps empty minute series honest even when hourly figures exist", async () =
   );
   stubFetch({ "/api/overview": { ...OVERVIEW, kpis } });
   render(<KpiStrip />);
-  await screen.findByText("$24.31");
+  await screen.findByText("41.2k");
   expect(screen.queryAllByRole("img")).toHaveLength(0);
   for (const tile of screen.getAllByRole("link")) {
     expect(within(tile).getAllByText("—").length).toBeGreaterThan(0);

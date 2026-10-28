@@ -7,18 +7,19 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
-  "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
+  background: "Commands must stay attached to the seat's current tool call",
+  "codex-allowlist": "The Codex request is outside the seat’s area, protected files or sandbox",
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
-  "github-write":
-    "No GitHub comments, labels, board moves or Priority changes without your approval",
+  "gh-cli": "The GitHub CLI is not available to seats; GitHub goes through Mission Control",
   "merge-push":
     "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
   "flight-powers": "Only repos with flight_powers: superuser may use these tools",
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
+  unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;
 
@@ -239,7 +240,7 @@ const WRAPPERS: Readonly<Record<string, { valued: readonly string[]; operands: n
 };
 /** `env -S <string>`: the string is a command line of its own. */
 const ENV_SPLIT = /^(?:-S|--split-string)(?:=?)(.*)$/;
-const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "fish", "ksh", "mksh", "tcsh", "csh", "pwsh"]);
 const SHELL_KEYWORDS = new Set([
   "!",
   "if",
@@ -256,6 +257,162 @@ const SHELL_KEYWORDS = new Set([
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
+/**
+ * Programs that hand a command to something outside this tool call (a scheduler, launchd, another
+ * app): what they start outlives the call, so they are refused like a detached command.
+ */
+const BACKGROUND_LAUNCHERS = new Set([
+  "at",
+  "batch",
+  "crontab",
+  "launchctl",
+  "osascript",
+  "open",
+  // daemonises, or runs a command under a new agent
+  "ssh-agent",
+  "systemd-run",
+  "daemonize",
+]);
+/**
+ * Programs that start a daemon only with one option, which GnuPG also takes as any unambiguous
+ * prefix: `gpg-agent --daemon` (from `--dae`), `gpgconf --launch` (from `--la`).
+ */
+const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; shortest: number }>> = {
+  "gpg-agent": { option: "--daemon", shortest: "--dae".length },
+  gpgconf: { option: "--launch", shortest: "--la".length },
+};
+/** Whether `program` with `args` hands work to something that outlives this tool call. */
+function launches(program: string, args: readonly string[]): boolean {
+  if (BACKGROUND_LAUNCHERS.has(program)) return true;
+  const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
+    ? BACKGROUND_LAUNCH_OPTIONS[program]
+    : undefined;
+  if (spec === undefined) return false;
+  return args.some((a) => {
+    const name = a.split("=")[0] ?? "";
+    return name.length >= spec.shortest && spec.option.startsWith(name);
+  });
+}
+/** tmux's global options that take a value (`tmux -L sock ls`): the value is not the command. */
+const TMUX_VALUED = "cfLST";
+/** tmux commands that start nothing: they list, query, attach to, type into or end what exists. */
+const TMUX_SAFE = new Set([
+  "ls",
+  "lsb",
+  "lsc",
+  "lscm",
+  "lsk",
+  "lsp",
+  "lsw",
+  "has",
+  "has-session",
+  "a",
+  "attach",
+  "attach-session",
+  "show",
+  "showb",
+  "showenv",
+  "showmsgs",
+  "showw",
+  "killp",
+  "killw",
+  // typing into an existing session is allowed by decision (spec 2026-10-26)
+  "send",
+  "send-keys",
+]);
+/** Starts nothing only with `-p` (print to stdout, never to a buffer or the status line). */
+const TMUX_PRINT_ONLY = new Set(["display", "display-message", "capture-pane", "capturep"]);
+
+/** Whether a tmux invocation may start work: fail closed on any command it does not know is safe. */
+function tmuxStarts(rest: readonly string[]): boolean {
+  let at = 0;
+  for (; at < rest.length; at++) {
+    const word = rest[at] ?? "";
+    if (word === "--") {
+      at++;
+      break;
+    }
+    if (!word.startsWith("-") || word === "-") break;
+    // getopt: flags up to the first letter that takes a value, which is the rest or the next word
+    for (let k = 1; k < word.length; k++) {
+      const letter = word.charAt(k);
+      if (letter === "V") return false;
+      if (TMUX_VALUED.includes(letter)) {
+        if (k === word.length - 1) at++;
+        break;
+      }
+    }
+  }
+  // an expansion can become any option, command or `;` sequence. The words reach here unquoted,
+  // so a single-quoted `$` (which cannot expand) is refused too: fail closed.
+  if (rest.some((w) => EXPANDS.test(w))) return true;
+  const command = rest[at];
+  // no command is `new-session`
+  if (command === undefined) return true;
+  const args = rest.slice(at + 1);
+  // a command sequence (`ls \; new -d …`) or a format that runs a shell (`#(…)`) is not judged
+  if ([command, ...args].some((w) => w === ";" || w.endsWith(";") || w.includes("#("))) return true;
+  if (
+    TMUX_SAFE.has(command) ||
+    command.startsWith("list-") ||
+    command.startsWith("show-") ||
+    command.startsWith("kill-")
+  )
+    return false;
+  if (TMUX_PRINT_ONLY.has(command)) {
+    return !args.some((w) => /^-[A-Za-z]*p/.test(w));
+  }
+  return true;
+}
+
+/** screen's options that take a value; `-X` makes the rest a command for an existing session. */
+const SCREEN_VALUED = "ceEhpsStT";
+/** screen's single-word queries (no session starts). */
+const SCREEN_QUERIES = new Set(["-ls", "-list", "-wipe", "-v", "-version", "--version", "-help"]);
+/** Commands `screen -X` may send that start nothing (`stuff` types into the session by decision). */
+const SCREEN_X_SAFE = new Set(["stuff", "hardcopy", "quit", "kill", "detach", "info", "windows"]);
+
+/**
+ * Whether a screen invocation may start work. Reattaching (`-r`, `-x`, `-d -r`) and detaching
+ * start nothing; `-m`, `-R` (reattach or else start), a command or no command at all may.
+ */
+function screenStarts(rest: readonly string[]): boolean {
+  let reattach = false;
+  for (let at = 0; at < rest.length; at++) {
+    const word = rest[at] ?? "";
+    if (SCREEN_QUERIES.has(word)) return false;
+    if (word === "-Logfile") {
+      at++;
+      continue;
+    }
+    if (word === "-fn" || word === "-fa" || word === "-ln") continue;
+    if (word === "-X") {
+      const command = rest[at + 1];
+      return command === undefined || !SCREEN_X_SAFE.has(command);
+    }
+    if (word === "-Q") return false;
+    if (!word.startsWith("-") || word === "-" || word === "--") {
+      // a session name after a reattach or detach; otherwise a command to start
+      return !reattach;
+    }
+    for (let k = 1; k < word.length; k++) {
+      const letter = word.charAt(k);
+      if (letter === "m" || letter === "R") return true;
+      if ("rxdD".includes(letter)) reattach = true;
+      if (SCREEN_VALUED.includes(letter)) {
+        if (k === word.length - 1) at++;
+        break;
+      }
+    }
+  }
+  // no command: a new session with a shell
+  return !reattach;
+}
+
+/** Whether the multiplexer invocation itself may start work that outlives this tool call. */
+function startsDetachedMultiplexer(name: string, rest: readonly string[]): boolean {
+  return name === "tmux" ? tmuxStarts(rest) : screenStarts(rest);
+}
 /** Runners whose options are not modelled (`watch`, `flock -c`, `script -c`, `parallel`, `npx -c` take a command line as one word): judged like a multiplexer, in the foreground. */
 const RUNNERS = new Set([
   "watch",
@@ -276,14 +433,295 @@ const RUNNERS = new Set([
 const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn"]);
 const PACKAGE_RUN_VERBS = new Set(["exec", "dlx", "x"]);
 
-/** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
+/**
+ * pnpm's own commands. Any other first word runs a package.json script or, failing that, a binary
+ * (pnpm 11 ran `/usr/bin/open` for `pnpm open .`), so it is judged as `pnpm exec <word>`.
+ */
+const PNPM_COMMANDS = new Set([
+  "add",
+  "approve-builds",
+  "audit",
+  "bin",
+  "c",
+  "cache",
+  "cat-file",
+  "cat-index",
+  "config",
+  "create",
+  "dedupe",
+  "deploy",
+  "doctor",
+  "env",
+  "fetch",
+  "find-hash",
+  "get",
+  "help",
+  "i",
+  "ignored-builds",
+  "import",
+  "init",
+  "install",
+  "install-test",
+  "it",
+  "la",
+  "licenses",
+  "link",
+  "list",
+  "ll",
+  "ln",
+  "login",
+  "logout",
+  "ls",
+  "outdated",
+  "pack",
+  "patch",
+  "patch-commit",
+  "patch-remove",
+  "prune",
+  "publish",
+  "rb",
+  "rebuild",
+  "remove",
+  "rm",
+  "root",
+  "run",
+  "run-script",
+  "self-update",
+  "server",
+  "set",
+  "setup",
+  "start",
+  "store",
+  "t",
+  "test",
+  "tst",
+  "un",
+  "uninstall",
+  "unlink",
+  "up",
+  "update",
+  "upgrade",
+  "version",
+  "why",
+]);
+/**
+ * yarn's own commands. Any other first word, and the word after `yarn run`, may be a package
+ * binary; that is not established from yarn's docs here, so it is judged as a command (fail closed).
+ */
+const YARN_COMMANDS = new Set([
+  "add",
+  "autoclean",
+  "bin",
+  "cache",
+  "check",
+  "config",
+  "constraints",
+  "create",
+  "dedupe",
+  "explain",
+  "generate-lock-entry",
+  "global",
+  "help",
+  "import",
+  "info",
+  "init",
+  "install",
+  "licenses",
+  "link",
+  "list",
+  "login",
+  "logout",
+  "npm",
+  "outdated",
+  "owner",
+  "pack",
+  "patch",
+  "patch-commit",
+  "plugin",
+  "policies",
+  "publish",
+  "rebuild",
+  "remove",
+  "set",
+  "start",
+  "tag",
+  "team",
+  "test",
+  "unlink",
+  "unplug",
+  "up",
+  "upgrade",
+  "upgrade-interactive",
+  "version",
+  "versions",
+  "why",
+]);
+
+/**
+ * The package manager's own commands that take package names or other plain arguments: after
+ * one of these (even behind options whose values are unknown), the words are data.
+ */
+const PACKAGE_ARG_COMMANDS = new Set([
+  "add",
+  "audit",
+  "bin",
+  "c",
+  "cache",
+  "cat-file",
+  "cat-index",
+  "config",
+  "dedupe",
+  "deploy",
+  "doctor",
+  "explain",
+  "fetch",
+  "find-hash",
+  "get",
+  "help",
+  "i",
+  "import",
+  "info",
+  "init",
+  "install",
+  "la",
+  "licenses",
+  "link",
+  "list",
+  "ll",
+  "ln",
+  "login",
+  "logout",
+  "ls",
+  "outdated",
+  "pack",
+  "patch",
+  "patch-commit",
+  "patch-remove",
+  "prune",
+  "publish",
+  "rb",
+  "rebuild",
+  "remove",
+  "rm",
+  "root",
+  "set",
+  "setup",
+  "store",
+  "un",
+  "uninstall",
+  "unlink",
+  "unplug",
+  "up",
+  "update",
+  "upgrade",
+  "upgrade-interactive",
+  "version",
+  "versions",
+  "why",
+]);
+
+/**
+ * Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner.
+ * A package manager's `exec`/`x`/`dlx` counts only as its first plain word: a later one is an
+ * argument (`pnpm open . x`). With options first, whose values are unknown, a verb anywhere makes
+ * every word from the first plain one judged (`npm --prefix foo exec open .`).
+ */
 function runnerStart(name: string, rest: readonly string[]): number {
   if (RUNNERS.has(name)) return 0;
-  if (PACKAGE_MANAGERS.has(name)) {
-    const i = rest.findIndex((w) => PACKAGE_RUN_VERBS.has(w));
-    return i === -1 ? -1 : i + 1;
-  }
+  if (!PACKAGE_MANAGERS.has(name)) return -1;
+  const first = rest.findIndex((w) => !w.startsWith("-"));
+  if (first === -1) return -1;
+  if (PACKAGE_RUN_VERBS.has(rest[first] ?? "")) return first + 1;
+  if (first > 0 && rest.slice(first + 1).some((w) => PACKAGE_RUN_VERBS.has(w))) return first;
   return -1;
+}
+
+/** pnpm and yarn options known to take the next word as their value. */
+const PACKAGE_VALUED_OPTIONS = new Set([
+  "-C",
+  "--dir",
+  "-F",
+  "--filter",
+  "--filter-prod",
+  "--workspace-dir",
+  "--reporter",
+  "--loglevel",
+  "--cwd",
+]);
+
+/** pnpm and yarn options known to take no value: skipping them can't swallow a command word. */
+const PACKAGE_BOOLEAN_OPTIONS = new Set([
+  "-s",
+  "--silent",
+  "-w",
+  "--workspace-root",
+  "-r",
+  "--recursive",
+  "-g",
+  "--global",
+  "-D",
+  "--save-dev",
+  "-P",
+  "--save-prod",
+  "-O",
+  "--save-optional",
+  "-E",
+  "--save-exact",
+  "--frozen-lockfile",
+  "--no-frozen-lockfile",
+  "--prefer-offline",
+  "--offline",
+  "--ignore-scripts",
+  "--stream",
+  "--parallel",
+  "--if-present",
+  "--no-bail",
+  "--aggregate-output",
+  "--color",
+  "--no-color",
+  "--reverse",
+  "--json",
+  "--dev",
+  "--prod",
+  "--production",
+  "-y",
+  "--yes",
+]);
+
+/**
+ * Where `pnpm <word>` / `yarn <word>` may run a binary (pnpm 11 ran `/usr/bin/open` for
+ * `pnpm open .`), or -1. Every word from there is judged as a command. Yarn's behaviour is not
+ * established from its docs here, so its forms are judged the same way (fail closed): the word after
+ * `yarn run`, after `yarn workspace <name>` and after `yarn workspaces foreach`.
+ */
+function packageBinStart(name: string, rest: readonly string[]): number {
+  if (name !== "pnpm" && name !== "yarn") return -1;
+  // Leading options, and the value of one known to take a value (`--filter @mc/web add open`). An
+  // option known to neither set may have taken the next word as its value (`--store-dir add open .`
+  // runs `open`), so then every word from the first plain one is judged (fail closed).
+  let first = 0;
+  let unknown = false;
+  while (first < rest.length && (rest[first] ?? "").startsWith("-")) {
+    const option = rest[first] ?? "";
+    if (PACKAGE_VALUED_OPTIONS.has(option)) first++;
+    else if (!option.includes("=") && !PACKAGE_BOOLEAN_OPTIONS.has(option)) unknown = true;
+    first++;
+  }
+  if (first >= rest.length) return -1;
+  if (unknown) return first;
+  const word = rest[first] ?? "";
+  if (name === "yarn") {
+    if (word === "run") return first + 1;
+    // `yarn workspace <name> <command…>`: data after a package command (`add open`), else the
+    // name and what follows are judged (the name is harmless as a program)
+    if (word === "workspace")
+      return PACKAGE_ARG_COMMANDS.has(rest[first + 2] ?? "") ? -1 : first + 1;
+    if (word === "workspaces") return rest[first + 1] === "foreach" ? first + 2 : -1;
+  }
+  if (PACKAGE_ARG_COMMANDS.has(word)) return -1;
+  // with no option first, a built-in (a script runner: run, test, start…) runs no binary
+  if (first === 0 && (name === "pnpm" ? PNPM_COMMANDS : YARN_COMMANDS).has(word)) return -1;
+  return first;
 }
 
 /**
@@ -368,12 +806,16 @@ interface Cmd {
   braces?: boolean;
   /** The command receives a pipeline's output (preserved by the Codex walk). */
   piped?: boolean;
+  /** Judged from a later word of a multiplexer's arguments (`tmux send-keys -t x open`: `open`). */
+  suffix?: boolean;
 }
 
 /** One decision's walk over a command line. */
 interface Walk {
   /** A lone `&` somewhere in the line (or a script inside it). */
   lineBackground: boolean;
+  /** A wrapper or multiplexer explicitly starts work detached from this tool call. */
+  detachedCommand: boolean;
   /** Words still to examine; past it the line is too long to judge (fail closed). */
   budget: number;
   /** Codex must match exact argv: no expansion, hidden redirects or wrapper stripping. */
@@ -506,6 +948,9 @@ class Reader {
     let param = 0;
     // the closers still owed, innermost last: `)` (a subshell), `))` (`((`, `$((`), `]` (`$[`)
     const closers: string[] = [];
+    // beside each closer: a lone `&` inside it waits on how it closes (`$((5 & 3))` is arithmetic,
+    // `((sleep 9 &) )` two subshells), so it is not the line's background until then
+    const amps: boolean[] = [];
     let arith = 0;
     // heredocs opened on this line, in order; their bodies follow its newline
     let heredocs: Heredoc[] = [];
@@ -575,11 +1020,24 @@ class Reader {
     };
     const push = (closer: string) => {
       closers.push(closer);
+      amps.push(false);
       if (ARITH_CLOSERS.has(closer)) arith++;
     };
-    const pop = () => {
+    // A lone `&`: the line's background, unless an arithmetic closer is still open around it.
+    const amp = () => {
+      for (let k = closers.length - 1; k >= 0; k--) {
+        if (ARITH_CLOSERS.has(closers[k] ?? "")) {
+          amps[k] = true;
+          return;
+        }
+      }
+      this.walk.lineBackground = true;
+    };
+    // Returns whether a lone `&` waited on this closer: background if it closes as a subshell.
+    const pop = (): boolean => {
       const c = closers.pop();
       if (c !== undefined && ARITH_CLOSERS.has(c)) arith--;
+      return amps.pop() ?? false;
     };
     // After the line's newline (at `from`): each pending heredoc's body in turn, up to its
     // delimiter line (none: unreadable). Returns the index after them. Every line is looked at once.
@@ -726,22 +1184,24 @@ class Reader {
             // level only separates)
             if (cases === 0 && inSub) return finish(i);
           } else if (top === "$))") {
-            pop();
+            const waited = pop();
             if (next === ")") return finish(i + 1, true);
             // `$((cd x) …)`: that `)` closed the subshell; the `$(` is this line's own
+            if (waited) amp();
           } else if (top === "))") {
-            pop();
+            const waited = pop();
             // `((ls) )`: a lone `)` closes one of the two
             if (next === ")") i++;
-            else push(")");
+            else {
+              push(")");
+              if (waited) amp();
+            }
           } else if (top === ")") pop();
           else throw new Unreadable();
         }
         const prev = i > 0 ? s.charAt(i - 1) : "";
         // a lone `&` (not `&&`, not `|&`) puts what came before it in the background
-        if (c === "&" && next !== "&" && prev !== "&" && prev !== "|") {
-          this.walk.lineBackground = true;
-        }
+        if (c === "&" && next !== "&" && prev !== "&" && prev !== "|") amp();
         pipe = c === "|" && next !== "|" && prev !== "|";
         endSegment();
         if (c === "\n" && heredocs.length > 0) i = bodies(i + 1) - 1;
@@ -949,7 +1409,19 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       continue;
     }
     if (braces[at] === true) return [{ argv: [BRACE_WORD], background: bg }];
+    // zsh: `=git` runs the `git` on PATH (EQUALS expansion). Deliberately broader than zsh: the
+    // words reach here unquoted, so a quoted `'=git'` (a command named `=git`) is judged as `git` too.
+    if (head.length > 1 && head.startsWith("=")) {
+      words[at] = head.replace(/^=+/, "");
+      if (words[at] === "") return [{ argv: [UNREADABLE_LINE], background: bg }];
+      continue;
+    }
     const base = baseName(head);
+    // zsh: a lone `-` is a precommand modifier (`- git push` runs `git push`)
+    if (head === "-") {
+      at++;
+      continue;
+    }
     if (SHELL_KEYWORDS.has(head)) {
       at++;
     } else if (head === "function") {
@@ -961,7 +1433,10 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     } else if (Object.hasOwn(WRAPPERS, base)) {
       const spec = WRAPPERS[base];
       if (spec === undefined) break;
-      if (BACKGROUND_WRAPPERS.has(base)) bg = true;
+      if (BACKGROUND_WRAPPERS.has(base)) {
+        bg = true;
+        walk.detachedCommand = true;
+      }
       if (base === "xargs") viaXargs = true;
       if (base === "env") afterEnv = true;
       at++;
@@ -1035,6 +1510,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     ...extra,
   ];
   const multiplexer = MULTIPLEXERS.has(name);
+  if (multiplexer && startsDetachedMultiplexer(name, rest)) walk.detachedCommand = true;
   const from = multiplexer ? 0 : runnerStart(name, rest);
   if (multiplexer || from !== -1) {
     // `tmux new -d 'pnpm -s test'`, `screen -dmS s pnpm -s test`: which word starts the command is
@@ -1050,14 +1526,35 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     // a multiplexer among a runner's words returns early as a suffix: its command is background
     const runBg = multiplexer || bg || run.some((w) => MULTIPLEXERS.has(baseName(w)));
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
+    // A runner's later words are all judged as commands, launchers included: its options and
+    // their values are not modelled, so any word may be the one it runs. This refuses some
+    // ordinary lines (`npx vitest run -t open`, `npx cypress open`) on purpose (fail closed;
+    // refusal telemetry measures the cost). Accepted gap: a program that runs its own arguments
+    // (`npx cross-env A=1 open .`, `bun x open`) is beyond the guard, as it is without npx.
+    // Only a multiplexer's later words skip the launcher check: its own rules decide what it
+    // starts, and typing into a session (`tmux send-keys -t x open Enter`) is allowed.
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
-      out.push(...wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix")));
+      const judged = wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix"));
+      out.push(
+        ...(i > 0 && multiplexer ? judged.map((cmd) => ({ ...cmd, suffix: true })) : judged),
+      );
     }
     for (const w of run) {
       if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
     }
     return out;
+  }
+  // `pnpm open .` runs /usr/bin/open: each word from the binary on is judged as a command, in the
+  // foreground (no command-line splitting: that is a runner's, and these are scripts or binaries)
+  const bin = packageBinStart(name, rest);
+  if (bin !== -1) {
+    for (let i = bin; i < rest.length; i++) {
+      const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));
+      out.push(
+        ...wrappedGit(normalise(suffix, walk, depth + 1, bg, mux === "none" ? "suffix" : mux)),
+      );
+    }
   }
   if (name === "find") {
     for (let i = 0; i < rest.length; i++) {
@@ -1130,7 +1627,11 @@ export function splitCommands(cmd: string): string[][] {
     .map((c) => c.argv);
 }
 
-const newWalk = (): Walk => ({ lineBackground: false, budget: WORD_BUDGET });
+const newWalk = (): Walk => ({
+  lineBackground: false,
+  detachedCommand: false,
+  budget: WORD_BUDGET,
+});
 
 /**
  * The line's commands. One the budget or the depth cannot judge is the `TOO_LONG`
@@ -1218,407 +1719,6 @@ export function codexCommand(raw: string, parsed: readonly string[] | null): str
       return null;
   }
   return script;
-}
-
-type ReadOption = "value" | "path" | "pattern";
-interface ReadOptions {
-  flags: readonly string[];
-  values?: Readonly<Record<string, ReadOption>>;
-  pattern?: boolean;
-  maxOperands?: number;
-}
-
-/** Known read-only options only: unknown options may run a helper, follow links or write files. */
-export const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
-  pwd: { flags: ["-L", "-P"], maxOperands: 0 },
-  ls: {
-    flags: [
-      "-a",
-      "-A",
-      "-l",
-      "-h",
-      "-d",
-      "-R",
-      "-t",
-      "-r",
-      "-S",
-      "-1",
-      "-F",
-      "-p",
-      "-i",
-      "-s",
-      "-n",
-    ],
-  },
-  cat: { flags: ["-n", "-b", "-s", "-v", "-E", "-T", "-A", "-e", "-t", "-u"] },
-  head: {
-    flags: ["-q", "-v"],
-    values: { "-n": "value", "-c": "value", "--lines": "value", "--bytes": "value" },
-  },
-  tail: {
-    flags: ["-q", "-v"],
-    values: { "-n": "value", "-c": "value", "--lines": "value", "--bytes": "value" },
-  },
-  wc: { flags: ["-c", "-m", "-l", "-w", "-L"] },
-  sort: {
-    flags: [
-      "-b",
-      "-d",
-      "-f",
-      "-g",
-      "-h",
-      "-i",
-      "-M",
-      "-n",
-      "-r",
-      "-s",
-      "-u",
-      "-V",
-      "-c",
-      "-C",
-      "-m",
-      "-z",
-    ],
-    values: { "-k": "value", "--key": "value", "-t": "value", "--field-separator": "value" },
-  },
-  uniq: {
-    flags: ["-c", "-d", "-u", "-i", "-z"],
-    values: {
-      "-f": "value",
-      "--skip-fields": "value",
-      "-s": "value",
-      "--skip-chars": "value",
-      "-w": "value",
-      "--check-chars": "value",
-    },
-    // A second positional operand is an output file, even when it is inside the worktree.
-    maxOperands: 1,
-  },
-  cut: {
-    flags: ["-n", "-s", "-z", "--only-delimited", "--complement", "--zero-terminated"],
-    values: {
-      "-b": "value",
-      "--bytes": "value",
-      "-c": "value",
-      "--characters": "value",
-      "-f": "value",
-      "--fields": "value",
-      "-d": "value",
-      "--delimiter": "value",
-      "--output-delimiter": "value",
-    },
-  },
-  rg: {
-    flags: [
-      "-n",
-      "-i",
-      "-s",
-      "-v",
-      "-l",
-      "-c",
-      "-w",
-      "-x",
-      "-F",
-      "-q",
-      "-o",
-      "-U",
-      "-a",
-      "--hidden",
-      "--files",
-      "--no-ignore",
-      "--line-number",
-      "--files-with-matches",
-      "--count",
-      "--fixed-strings",
-    ],
-    values: {
-      "-e": "pattern",
-      "--regexp": "pattern",
-      "-f": "path",
-      "--file": "path",
-      "-g": "value",
-      "--glob": "value",
-      "-t": "value",
-      "--type": "value",
-      "-T": "value",
-      "--type-not": "value",
-      "-A": "value",
-      "-B": "value",
-      "-C": "value",
-      "-m": "value",
-      "--max-count": "value",
-      "--max-depth": "value",
-      "--color": "value",
-    },
-    pattern: true,
-  },
-  grep: {
-    flags: [
-      "-n",
-      "-i",
-      "-v",
-      "-l",
-      "-c",
-      "-w",
-      "-x",
-      "-F",
-      "-E",
-      "-q",
-      "-o",
-      "-h",
-      "-H",
-      "-s",
-      "-a",
-    ],
-    values: {
-      "-e": "pattern",
-      "--regexp": "pattern",
-      "-f": "path",
-      "--file": "path",
-      "-A": "value",
-      "-B": "value",
-      "-C": "value",
-      "-m": "value",
-    },
-    pattern: true,
-  },
-  sed: { flags: ["-n"] },
-  find: {
-    flags: [
-      "-P",
-      "-print",
-      "-print0",
-      "-empty",
-      "-depth",
-      "-xdev",
-      "-mount",
-      "-prune",
-      "-o",
-      "-a",
-      "-not",
-      "!",
-      "(",
-      ")",
-    ],
-    values: {
-      "-name": "value",
-      "-iname": "value",
-      "-path": "value",
-      "-ipath": "value",
-      "-type": "value",
-      "-maxdepth": "value",
-      "-mindepth": "value",
-      "-size": "value",
-      "-mtime": "value",
-      "-mmin": "value",
-      "-newer": "path",
-    },
-  },
-  diff: {
-    flags: ["-u", "-q", "-s", "-i", "-w", "-b", "-B", "--brief", "--unified"],
-    values: { "-U": "value" },
-  },
-  stat: {
-    flags: ["-x"],
-    // BSD's -f takes a format; GNU's is a flag, so its next word must also be a safe path.
-    values: { "-f": "path", "-c": "value", "--format": "value" },
-  },
-};
-
-/** A known valued option, with its inline value or a value still owed by the next word. */
-function codexReadOption(
-  word: string,
-  spec: ReadOptions,
-): { kind: ReadOption; value: string | undefined } | null {
-  if (!word.startsWith("-")) return null;
-  const exact = spec.values?.[word];
-  if (exact !== undefined) return { kind: exact, value: undefined };
-  if (word.startsWith("--")) {
-    const equal = word.indexOf("=");
-    const kind = spec.values?.[equal === -1 ? word : word.slice(0, equal)];
-    return kind === undefined
-      ? null
-      : { kind, value: equal === -1 ? undefined : word.slice(equal + 1) };
-  }
-  const cluster = clusterValue(word, Object.keys(spec.values ?? {}));
-  if (cluster === null) return null;
-  const at = word.indexOf(cluster.letter, 1);
-  if (![...word.slice(1, at)].every((c) => spec.flags.includes(`-${c}`))) return null;
-  const kind = spec.values?.[`-${cluster.letter}`];
-  return kind === undefined ? null : { kind, value: cluster.inline || undefined };
-}
-
-/** Explicit patterns apply to all positionals, even those before the option. */
-function codexPositionalPattern(argv: readonly string[], spec: ReadOptions): boolean {
-  if (!spec.pattern) return false;
-  for (let i = 1; i < argv.length; i++) {
-    const word = argv[i];
-    if (word === "--") break;
-    if (word === "--files") return false;
-    const option = codexReadOption(word, spec);
-    if (option === null) continue;
-    if (option.kind === "pattern" || option.kind === "path") return false;
-    if (option.value === undefined) i++;
-  }
-  return true;
-}
-
-/** Check read-command options and pass every file operand to the caller's path check. */
-export function codexReadCommand(
-  argv: readonly string[],
-  allowedPath: (path: string) => boolean,
-): boolean {
-  const program = argv[0];
-  const spec = CODEX_READ_COMMANDS[program];
-  if (spec === undefined) return false;
-  if (program === "find" && argv.some((w) => FIND_EXEC.has(w) || w === "-delete")) return false;
-  let pattern = codexPositionalPattern(argv, spec);
-  let options = true;
-  let operands = 0;
-  let sedScript = program === "sed";
-  if (sedScript && argv[1] !== "-n") return false;
-  for (let i = 1; i < argv.length; i++) {
-    const word = argv[i];
-    if (options && word === "--") {
-      // find's expressions still have meaning after its global option terminator.
-      options = program === "find";
-      continue;
-    }
-    if (
-      options &&
-      ((word.startsWith("-") && word !== "-") || (program === "find" && spec.flags.includes(word)))
-    ) {
-      const option = codexReadOption(word, spec);
-      if (option !== null) {
-        const value = option.value ?? argv[++i];
-        if (value === undefined || (option.kind === "path" && !allowedPath(value))) return false;
-      } else if (
-        word.includes("=") ||
-        (!spec.flags.includes(word) &&
-          !(
-            word.startsWith("-") &&
-            !word.startsWith("--") &&
-            [...word.slice(1)].every((c) => spec.flags.includes(`-${c}`))
-          ))
-      )
-        return false;
-    } else if (sedScript) {
-      // Printing numeric line ranges is read-only; sed's e/r/w commands are not.
-      if (!/^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(word)) return false;
-      sedScript = false;
-    } else if (pattern) pattern = false;
-    else {
-      operands++;
-      if (program === "uniq") options = false;
-      if (spec.maxOperands !== undefined && operands > spec.maxOperands) return false;
-      if (word !== "-" && !allowedPath(word)) return false;
-    }
-  }
-  return !pattern && !sedScript;
-}
-
-const CODEX_GIT_DIFF_READ_FLAGS = [
-  "--stat",
-  "--numstat",
-  "--shortstat",
-  "--name-only",
-  "--name-status",
-  "--raw",
-  "-p",
-  "--patch",
-  "-s",
-  "--no-patch",
-  "--no-ext-diff",
-  "--no-textconv",
-] as const;
-
-const CODEX_GIT_READ_OPTIONS: Readonly<Record<string, ReadOptions>> = {
-  status: {
-    flags: [
-      "-s",
-      "--short",
-      "-b",
-      "--branch",
-      "--porcelain",
-      "--porcelain=v1",
-      "--porcelain=v2",
-      "-z",
-    ],
-  },
-  diff: {
-    flags: [...CODEX_GIT_DIFF_READ_FLAGS, "--cached", "--staged", "--check", "-w", "-b"],
-    values: { "-U": "value", "--unified": "value" },
-  },
-  log: {
-    flags: [
-      ...CODEX_GIT_DIFF_READ_FLAGS,
-      "--oneline",
-      "--graph",
-      "--decorate",
-      "--no-decorate",
-      "--all",
-      "--reverse",
-      "--no-merges",
-      "--first-parent",
-    ],
-    values: { "-n": "value", "--max-count": "value" },
-  },
-  show: {
-    flags: [...CODEX_GIT_DIFF_READ_FLAGS, "--oneline"],
-    values: { "-U": "value", "--unified": "value" },
-  },
-};
-
-/** Branch/tag refs and ancestor suffixes; ranges contain two independently validated revisions. */
-function codexGitRevision(word: string, allowedPath: (path: string) => boolean): boolean {
-  const revisions = word.split(/\.{2,3}/);
-  return (
-    revisions.length <= 2 &&
-    revisions.every((revision) => {
-      const match = /^([A-Za-z0-9_][A-Za-z0-9_./-]*)(?:[~^]\d*)*$/.exec(revision);
-      if (match === null) return false;
-      const ref = match[1];
-      return (
-        !ref.endsWith(".") &&
-        !ref.includes("..") &&
-        ref
-          .split("/")
-          .every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock")) &&
-        allowedPath(ref)
-      );
-    })
-  );
-}
-
-/** A Git pipeline segment must have known read options and confined path operands. */
-export function codexGitReadCommand(
-  argv: readonly string[],
-  allowedPath: (path: string) => boolean,
-): boolean {
-  if (argv[0] !== "git" || !Object.hasOwn(CODEX_GIT_READ_OPTIONS, argv[1])) return false;
-  if (!allowedPath(".")) return false;
-  const spec = CODEX_GIT_READ_OPTIONS[argv[1]];
-  let paths = false;
-  const operands: { word: string; path: boolean }[] = [];
-  for (let i = 2; i < argv.length; i++) {
-    const word = argv[i];
-    if (!paths && word === "--") {
-      paths = true;
-    } else if (!paths && word.startsWith("-")) {
-      if (spec.flags.includes(word) || (argv[1] === "log" && /^-\d+$/.test(word))) {
-        continue;
-      }
-      const option = codexReadOption(word, spec);
-      if (option === null) return false;
-      const value = option.value ?? argv[++i];
-      if (value === undefined || !/^\d+$/.test(value)) return false;
-    } else operands.push({ word, path: paths || argv[1] === "status" });
-  }
-  return operands.every(({ word, path }) =>
-    path
-      ? word !== "" && !/[:*?[\]\\]/.test(word) && allowedPath(word)
-      : codexGitRevision(word, allowedPath),
-  );
 }
 
 function commands(cmd: string, walk: Walk, depth: number, background: boolean, mux: Mux): Cmd[] {
@@ -1770,7 +1870,6 @@ function gitReadOnly(sub: string, rest: readonly string[]): boolean {
 
 /** `gh` group verbs that only read. */
 const GH_READ_VERBS = new Set(["view", "list", "diff", "checks", "status", "show"]);
-const GH_API_WRITE_FLAGS = new Set(["-f", "-F", "--field", "--raw-field", "--input"]);
 
 /** `gh` groups and verbs that may appear in a guard-hit text; anything else is never echoed. */
 const GH_GROUPS = new Set([
@@ -1858,27 +1957,6 @@ function ghText(args: readonly string[]): string {
   return verb !== undefined && GH_VERBS.has(verb) ? `gh ${group} ${verb}` : `gh ${group}`;
 }
 
-function ghReadOnly(args: readonly string[]): boolean {
-  const [group, ...rest] = args;
-  if (group === undefined) return true;
-  if (group === "search") return true;
-  if (group === "api") {
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i] ?? "";
-      const flag = a.split("=")[0] ?? a;
-      if (GH_API_WRITE_FLAGS.has(flag) || /^-[fF]./.test(a)) return false;
-      if (flag === "-X" || flag === "--method") {
-        const m = a.includes("=") ? a.slice(a.indexOf("=") + 1) : (rest[i + 1] ?? "");
-        if (m.toUpperCase() !== "GET") return false;
-      }
-      if (/^-X./.test(a) && a.slice(2).toUpperCase() !== "GET") return false;
-    }
-    return !rest.some((a) => a === "graphql");
-  }
-  const verb = ghVerb(rest);
-  return verb !== undefined && GH_READ_VERBS.has(verb) && group !== "auth" && group !== "secret";
-}
-
 const deny = (rule: GuardRule, what: string): GuardVerdict => ({
   kind: "deny",
   rule,
@@ -1914,7 +1992,9 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
+  const backgroundCommand = e.input.run_in_background === true;
   let gitEnvDenied = false;
+  let githubDenied: string | null = null;
   const walk = newWalk();
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
@@ -1924,19 +2004,22 @@ export function guardDecision(
     background,
     braces,
     indirectGit,
+    suffix,
     directories: wrapperDirectories = [],
   } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
     if (program === TOO_LONG) {
-      return { kind: "deny", rule: "git-write", text: GUARD_TOO_LONG_TEXT };
+      return { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
     }
     if (program === UNREADABLE_LINE) {
-      return { kind: "deny", rule: "git-write", text: GUARD_UNREADABLE_TEXT };
+      return { kind: "deny", rule: "unreadable", text: GUARD_UNREADABLE_TEXT };
     }
-    if (program === UNREADABLE_SCRIPT) return deny("git-write", "shell -c");
-    if (program === STDIN_SCRIPT) return deny("git-write", "shell reading stdin");
-    if (program === BRACE_WORD) return deny("git-write", "brace expansion");
+    if (program === UNREADABLE_SCRIPT) return deny("unreadable", "shell -c");
+    if (program === STDIN_SCRIPT) return deny("unreadable", "shell reading stdin");
+    if (program === BRACE_WORD) return deny("unreadable", "brace expansion");
+    // not a multiplexer's later word: `tmux send-keys -t x open Enter` types `open` into a session
+    if (suffix !== true && launches(program, args)) return deny("background", program);
     if (
       program === GIT_ENV_OVERRIDE ||
       (["for", "select"].includes(program) && /^GIT_/.test(args[0] ?? "")) ||
@@ -2058,9 +2141,7 @@ export function guardDecision(
       )
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
-      if (!ghReadOnly(args)) {
-        return deny("github-write", ghText(args));
-      }
+      githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
       return deny("network", program);
     }
@@ -2068,20 +2149,19 @@ export function guardDecision(
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
     if (suite !== null) {
-      if (ctx.mode !== "writer") return deny("full-suite", suite);
-      if (e.input.run_in_background === true) {
-        return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
-      }
-      if (background) backgroundSuite = true;
+      if (backgroundCommand || background) backgroundSuite = true;
       lock ??= suite;
     }
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");
-  if (lock === null) return { kind: "allow" };
+  if (githubDenied !== null) return deny("gh-cli", githubDenied);
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
-  if (backgroundSuite || walk.lineBackground) {
+  if (lock !== null && (backgroundSuite || walk.lineBackground)) {
     return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   }
+  if (backgroundCommand || walk.lineBackground || walk.detachedCommand)
+    return deny("background", "detached or background command");
+  if (lock === null) return { kind: "allow" };
   return { kind: "lock", command: lock };
 }
 

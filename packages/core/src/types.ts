@@ -1213,24 +1213,21 @@ export interface OverviewTimeline {
 export interface OverviewSummary {
   at: number;
   kpis: {
-    working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
     /** Minute spend buckets, using the same attribution as perHour. */
     spendToday: { usd: number; perHour: number[]; series?: number[] };
-    /** Distinct tickets in building, checks, review or merging at each minute end. */
+    /**
+     * Distinct tickets in building, checks, review or merging at each minute end; `count` is the
+     * registry's In progress (`MetricsView.inProgress`). Merged and cycle time are registry figures
+     * served by `GET /api/metrics`.
+     */
     inFlight: { count: number; oldestAt: number | null; series?: number[] };
-    /** Merge counts per minute, including minutes before local midnight. */
-    mergedToday: { count: number; perHour: number[]; series?: number[] };
     /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
     ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
-    /** Local-day median at each minute end; null without completed cycles. */
-    cycleTime: {
-      medianMs: number | null;
-      n: number;
-      avg14dMs: number | null;
-      series?: (number | null)[];
-    };
-    /** Operator need episodes open at each minute end, including retained resolved episodes. */
+    /**
+     * The operator's whole inbox (one per key, never narrowed by the session filter), and its
+     * episodes open at each minute end, including retained resolved episodes.
+     */
     needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
