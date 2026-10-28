@@ -8,6 +8,7 @@ export const mapSnapshotFixture = {
     { path: "src/util.ts", lines: 20 },
   ],
   imports: [{ from: "src/main.ts", to: "src/util.ts" }],
+  hist: { since: 0, prCount: 0, fixCount: 0, files: {}, coupling: [] },
   seats: [
     {
       seat: "GUIDO-1",

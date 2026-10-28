@@ -3667,6 +3667,13 @@ describe("boards, escalations, health", () => {
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
+      hist: expect.objectContaining({
+        since: expect.any(Number),
+        prCount: 0,
+        fixCount: 0,
+        files: {},
+        coupling: [],
+      }),
       findings: [],
       seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
     });
@@ -3677,6 +3684,11 @@ describe("boards, escalations, health", () => {
       from: "packages/core/src/map.ts",
       to: "packages/core/src/types.ts",
     });
+    expect(response.json().imports).toContainEqual({
+      from: "apps/server/src/map/ring.ts",
+      to: "packages/core/src/types.ts",
+    });
+    expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
   });
 
