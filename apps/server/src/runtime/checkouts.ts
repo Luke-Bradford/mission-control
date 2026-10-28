@@ -26,6 +26,7 @@ import {
   type SessionCheckoutOutcome,
   scratchName,
 } from "@mc/core";
+import { parse as parseYaml } from "yaml";
 import { type CrewSessionConfig, managedSessionPath, realish, SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import {
@@ -521,11 +522,24 @@ async function inspectDisk(
   found: string[],
   rel = "",
   allowRootInstallDir = false,
+  allowNestedInstallDir?: (rel: string, read: ReadObject) => Promise<boolean>,
+  allowedInstallDirs = new Set<string>(),
+  read?: ReadObject,
 ): Promise<string | null> {
   const dir = join(root, rel);
   const prefix = rel ? `${rel}/` : "";
-  if (!(allowRootInstallDir && rel === "") && (await succeeds(lstat(join(dir, tool.installDir)))))
-    return `has ${prefix}${tool.installDir}`;
+  const installRel = `${prefix}${tool.installDir}`;
+  if (!(allowRootInstallDir && rel === "") && (await succeeds(lstat(join(dir, tool.installDir))))) {
+    const stat = await lstat(join(dir, tool.installDir));
+    if (
+      !stat.isDirectory() ||
+      read === undefined ||
+      !(await allowNestedInstallDir?.(installRel, read))
+    ) {
+      return `has ${installRel}`;
+    }
+    allowedInstallDirs.add(installRel);
+  }
   for (const name of tool.inputs) {
     if (await succeeds(lstat(join(dir, name)))) found.push(`${prefix}${name}`);
   }
@@ -533,9 +547,19 @@ async function inspectDisk(
     if (rel === "" && d.name === ".git" && d.isFile()) continue;
     // A reused pnpm worktree verifies its inputs before deleting this one directory.
     if (allowRootInstallDir && rel === "" && d.name === tool.installDir) continue;
+    if (allowedInstallDirs.has(`${prefix}${d.name}`)) continue;
     if (d.isSymbolicLink()) return `has a symlink at ${prefix}${d.name}`;
     if (d.isDirectory()) {
-      const unsafe = await inspectDisk(root, tool, found, `${prefix}${d.name}`);
+      const unsafe = await inspectDisk(
+        root,
+        tool,
+        found,
+        `${prefix}${d.name}`,
+        false,
+        allowNestedInstallDir,
+        allowedInstallDirs,
+        read,
+      );
       if (unsafe !== null) return unsafe;
     }
   }
@@ -616,6 +640,24 @@ async function baseBlob(read: ReadObject, baseSha: string, file: string): Promis
   if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return null;
   await read("blob", entry.id, file);
   return entry.id;
+}
+
+/** The exact package directories pnpm's verified lockfile records as workspace importers. */
+async function pnpmWorkspaceImporters(read: ReadObject, baseSha: string): Promise<Set<string>> {
+  const entry = await baseEntry(read, baseSha, PNPM_TOOL.lockfile);
+  if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return new Set();
+  try {
+    const lock = parseYaml((await read("blob", entry.id, PNPM_TOOL.lockfile)).toString("utf8"));
+    if (lock === null || typeof lock !== "object" || !Object.hasOwn(lock, "importers")) {
+      return new Set();
+    }
+    const importers = (lock as { importers: unknown }).importers;
+    return importers !== null && typeof importers === "object"
+      ? new Set(Object.keys(importers))
+      : new Set();
+  } catch {
+    return new Set();
+  }
 }
 
 /**
@@ -874,17 +916,28 @@ async function verifyInstall(
   s: InstallVerification,
   tool: InstallTool,
   allowRootInstallDir = false,
-): Promise<void> {
+  allowNestedInstallDir?: (rel: string, read: ReadObject) => Promise<boolean>,
+): Promise<string[]> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
   if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
-  const found: string[] = [];
-  const unsafe = await inspectDisk(s.path, tool, found, "", allowRootInstallDir);
-  if (unsafe !== null) throw refuse(s.subject, unsafe);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
   const read = verifiedObjects((args, maxBuffer) =>
     crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
   );
+  const found: string[] = [];
+  const allowedInstallDirs = new Set<string>();
+  const unsafe = await inspectDisk(
+    s.path,
+    tool,
+    found,
+    "",
+    allowRootInstallDir,
+    allowNestedInstallDir,
+    allowedInstallDirs,
+    read,
+  );
+  if (unsafe !== null) throw refuse(s.subject, unsafe);
   await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
   for (const file of tool.required) {
     if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
@@ -918,6 +971,7 @@ async function verifyInstall(
     }
     refuseUnsafeUvRegistries(await readFile(join(s.path, "uv.lock"), "utf8"), s.subject);
   }
+  return [...allowedInstallDirs];
 }
 
 async function installAll(
@@ -955,9 +1009,22 @@ async function installReusedPnpm(
       throw e;
     }
   }
-  await verifyInstall(s, PNPM_TOOL, true);
+  let importers: Promise<Set<string>> | undefined;
+  const nestedModules = await verifyInstall(s, PNPM_TOOL, true, async (rel, read) => {
+    if (importers === undefined) importers = pnpmWorkspaceImporters(read, s.base);
+    if (!(await importers).has(dirname(rel))) return false;
+    const packageJson = join(s.path, dirname(rel), "package.json");
+    const manifest = await lstat(packageJson).catch(() => null);
+    if (manifest === null || !manifest.isFile()) return false;
+    return crewGit(s.path, ["check-ignore", "--quiet", "--", rel], s.common).then(
+      () => true,
+      () => false,
+    );
+  });
   try {
     await rm(modules, { recursive: true, force: true });
+    for (const nested of nestedModules)
+      await rm(join(s.path, nested), { recursive: true, force: true });
   } catch (e) {
     throw new CheckoutError(
       "install",

@@ -888,6 +888,86 @@ describe("prepareCheckout", () => {
     expect(readFileSync(preserved, "utf8")).toBe("keep\n");
   });
 
+  describe("a reused pnpm workspace", () => {
+    const workspace = "packages:\n  - apps/*\n";
+    const workspaceLock = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n\n  apps/relay: {}\n";
+
+    beforeEach(() => {
+      commit(seed, {
+        "package.json": PKG,
+        "pnpm-lock.yaml": workspaceLock,
+        "pnpm-workspace.yaml": workspace,
+        "apps/relay/package.json": PKG,
+        "examples/standalone/package.json": PKG,
+      });
+      git(seed, "push", "-q", "origin", "main");
+    });
+
+    it("clears ignored package node_modules before reinstalling", async () => {
+      const first = await prepareCheckout(input());
+      const modules = join(first.path, "apps", "relay", "node_modules");
+      mkdirSync(modules);
+      writeFileSync(join(modules, "from-earlier-install"), "old\n");
+
+      expect(await prepareCheckout(input())).toMatchObject({ path: first.path, created: false });
+      expect(existsSync(join(modules, "from-earlier-install"))).toBe(false);
+    });
+
+    it("refuses a tracked package node_modules", async () => {
+      const first = await prepareCheckout(input());
+      const tracked = join(first.path, "apps", "relay", "node_modules", "dep", "index.js");
+      mkdirSync(dirname(tracked), { recursive: true });
+      writeFileSync(tracked, "x\n");
+      git(first.path, "add", "-f", "--", "apps/relay/node_modules/dep/index.js");
+      git(first.path, "commit", "-qm", "nm");
+
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} has apps/relay/node_modules/dep/index.js; Mission Control won't install from it`,
+      );
+    });
+
+    it("refuses and preserves node_modules from a project outside the workspace", async () => {
+      const first = await prepareCheckout(input());
+      const modules = join(first.path, "examples", "standalone", "node_modules");
+      mkdirSync(modules);
+      const preserved = join(modules, "separate-project-dependency");
+      writeFileSync(preserved, "keep\n");
+
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} has examples/standalone/node_modules; Mission Control won't install from it`,
+      );
+      expect(readFileSync(preserved, "utf8")).toBe("keep\n");
+    });
+
+    it("refuses a symlinked package node_modules", async () => {
+      const first = await prepareCheckout(input());
+      const outside = join(dir, "outside");
+      mkdirSync(outside);
+      symlinkSync(outside, join(first.path, "apps", "relay", "node_modules"));
+
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} has apps/relay/node_modules; Mission Control won't install from it`,
+      );
+    });
+
+    it("refuses a package node_modules file", async () => {
+      const first = await prepareCheckout(input());
+      writeFileSync(join(first.path, "apps", "relay", "node_modules"), "not a directory\n");
+
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} has apps/relay/node_modules; Mission Control won't install from it`,
+      );
+    });
+  });
+
   it("installs when a base lockfile is over the 4 MiB default read", async () => {
     commit(seed, {
       "package.json": PKG,
