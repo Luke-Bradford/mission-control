@@ -469,11 +469,15 @@ export function CommsSpider({
   const nodeKeys = (node: SpiderNode) => (event: KeyboardEvent) => {
     const i = order.findIndex((n) => n.id === node.id);
     const step = (d: number) => order[(i + d + order.length) % order.length];
+    // A node missing from the walk (a hidden hub) or an empty walk has nowhere to step to.
+    const toNode = (target: { id: string } | undefined) => {
+      if (target) goTo(`n:${target.id}`);
+    };
     if (event.key === "Enter" || event.key === " ") onOpenNode(node.id);
-    else if (event.key === "ArrowRight") goTo(`n:${step(1)?.id}`);
-    else if (event.key === "ArrowLeft") goTo(`n:${step(-1)?.id}`);
-    else if (event.key === "Home") goTo(`n:${order[0]?.id}`);
-    else if (event.key === "End") goTo(`n:${order.at(-1)?.id}`);
+    else if (event.key === "ArrowRight") toNode(i === -1 ? order[0] : step(1));
+    else if (event.key === "ArrowLeft") toNode(i === -1 ? order.at(-1) : step(-1));
+    else if (event.key === "Home") toNode(order[0]);
+    else if (event.key === "End") toNode(order.at(-1));
     else if (event.key === "ArrowDown") {
       const first = linksOf(node.id)[0];
       if (!first) return;
