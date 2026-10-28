@@ -53,6 +53,41 @@ const steps = (region: HTMLElement): (string | null)[] =>
     .map((li) => li.textContent);
 
 describe("Setup › Loops templates", () => {
+  it("shows the approved loop chain, selected-step inspector and a ticket run overlay", () => {
+    render(<Loops config={cfg} />);
+
+    const chain = screen.getByRole("region", { name: "Feature loop chain" });
+    expect(
+      within(chain)
+        .getAllByRole("button", { name: /gate:/ })
+        .map((button) => button.textContent),
+    ).toEqual([
+      "ImplementDeveloper seatgate: evidence reported",
+      "Draft PRMission Controlgate: PR opened",
+      "VerifyGitHub Actionsgate: all checks green",
+      "ReviewRETRO · fresh seatgate: approved",
+      "MergeHub enginegate: mergeable",
+    ]);
+    expect(within(chain).getByText("CI failure → Build · used 1/3")).toBeTruthy();
+    expect(within(chain).getByText("Review findings → Build · used 1/3")).toBeTruthy();
+    expect(within(chain).getByText("FLIGHT at cap")).toBeTruthy();
+
+    fireEvent.click(within(chain).getByRole("button", { name: /Review: gate: approved/ }));
+    const inspector = screen.getByRole("region", { name: "Step inspector" });
+    expect(inspector.textContent).toContain("Gate to move onapproved");
+    expect(inspector.textContent).toContain("If it failsBack to Build with findings");
+    expect(inspector.textContent).toContain("Cap3 rounds");
+    expect(inspector.textContent).toContain("At the capParked for FLIGHT");
+    expect(inspector.textContent).toContain("Model / commandretro-cx · gpt-5.6-sol · high");
+    expect(inspector.textContent).toContain("Review {diff} against {done_when}");
+
+    const overlay = screen.getByRole("region", { name: "Run overlay" });
+    expect(overlay.textContent).toContain("Ticket #681 · inco-cx");
+    expect(overlay.textContent).toContain("Now: Verify · try 2 of 3");
+    expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
+    expect(overlay.textContent).toContain("Review findings → Build · 1 of 3");
+  });
+
   it("template rows wrap within their width (hud.css)", () => {
     const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
     const rule = (selector: string) =>

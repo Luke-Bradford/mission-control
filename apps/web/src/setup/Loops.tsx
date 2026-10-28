@@ -215,6 +215,157 @@ const NO_OBSERVED_LOOPS = "No observed loops.";
 const TEMPLATES_NOTE =
   "Mission Control decides every move from its own checks; an agent saying it is done can only hold work back, never push it forward. cmd = Mission Control runs it · rule = read from the diff or the board · review = a fresh reviewer · gate = you or FLIGHT · agent = the agent's own evidence.";
 
+type ChainStep = {
+  name: string;
+  runner: string;
+  gate: string;
+  failure: string;
+  cap: string;
+  atCap: string;
+  command: string;
+  prompt: string | null;
+};
+
+// Temporary display source until the loop-config API supplies this same shape.
+const TODAY_CHAIN: readonly ChainStep[] = [
+  {
+    name: "Implement",
+    runner: "Developer seat",
+    gate: "evidence reported",
+    failure: "Stays in Build until evidence is reported",
+    cap: "turn and time limits",
+    atCap: "FLIGHT",
+    command: "gpt-5.6-terra · medium",
+    prompt: "Implement {plan} for {ticket}; test first, then report evidence.",
+  },
+  {
+    name: "Draft PR",
+    runner: "Mission Control",
+    gate: "PR opened",
+    failure: "Back to Build if the draft cannot be opened",
+    cap: "—",
+    atCap: "FLIGHT",
+    command: "mc report_evidence",
+    prompt: null,
+  },
+  {
+    name: "Verify",
+    runner: "GitHub Actions",
+    gate: "all checks green",
+    failure: "Back to Build: CI failed, fix it",
+    cap: "3 tries",
+    atCap: "Parked for FLIGHT",
+    command: "lint · typecheck · test · build",
+    prompt: null,
+  },
+  {
+    name: "Review",
+    runner: "RETRO · fresh seat",
+    gate: "approved",
+    failure: "Back to Build with findings",
+    cap: "3 rounds",
+    atCap: "Parked for FLIGHT",
+    command: "retro-cx · gpt-5.6-sol · high",
+    prompt: "Review {diff} against {done_when}; approve or give exact findings.",
+  },
+  {
+    name: "Merge",
+    runner: "Hub engine",
+    gate: "mergeable",
+    failure: "Parks for FLIGHT; sync then returns to Verify or Build",
+    cap: "—",
+    atCap: "FLIGHT",
+    command: "hard-rule clearance",
+    prompt: null,
+  },
+];
+
+function LoopChain() {
+  const [selected, setSelected] = useState(2);
+  const [withRun, setWithRun] = useState(true);
+  const step = TODAY_CHAIN[selected] ?? TODAY_CHAIN[0];
+  return (
+    <>
+      <Panel
+        title="Feature loop chain"
+        sub="fixed today; loop config API will replace this source"
+        actions={
+          <fieldset className="loop-show" aria-label="Loop display">
+            <button type="button" aria-pressed={!withRun} onClick={() => setWithRun(false)}>
+              Loop only
+            </button>
+            <button type="button" aria-pressed={withRun} onClick={() => setWithRun(true)}>
+              With run #681
+            </button>
+          </fieldset>
+        }
+      >
+        <div className="loop-chain-scroll">
+          <section className="loop-chain" aria-label="Approved loop chain">
+            {TODAY_CHAIN.map((item, index) => (
+              <button
+                key={item.name}
+                type="button"
+                className={`loop-chain-step${index === selected ? " selected" : ""}`}
+                onClick={() => setSelected(index)}
+                aria-pressed={index === selected}
+                aria-label={`${item.name}: gate: ${item.gate}`}
+              >
+                <b>{item.name}</b>
+                <span>{item.runner}</span>
+                <small>gate: {item.gate}</small>
+              </button>
+            ))}
+            <div className="loop-return return-ci">
+              CI failure → Build{withRun ? " · used 1/3" : " · ≤3"}
+            </div>
+            <div className="loop-return return-review">
+              Review findings → Build{withRun ? " · used 1/3" : " · ≤3"}
+            </div>
+            <div className="loop-flight">
+              <b>FLIGHT at cap</b>
+              <span>re-plan · reassign · split</span>
+              <small>sync → Verify or Build</small>
+            </div>
+          </section>
+        </div>
+      </Panel>
+      <div className="loop-details">
+        <Panel title="Step inspector" sub={`${step.name} step`}>
+          <dl className="loop-inspector">
+            <dt>Who runs it</dt>
+            <dd>{step.runner}</dd>
+            <dt>Gate to move on</dt>
+            <dd>{step.gate}</dd>
+            <dt>If it fails</dt>
+            <dd>{step.failure}</dd>
+            <dt>Cap</dt>
+            <dd>{step.cap}</dd>
+            <dt>At the cap</dt>
+            <dd>{step.atCap}</dd>
+            <dt>Model / command</dt>
+            <dd>
+              <code>{step.command}</code>
+            </dd>
+            <dt>Step prompt</dt>
+            <dd>{step.prompt ?? "No prompt: no agent runs this step."}</dd>
+          </dl>
+        </Panel>
+        {withRun && (
+          <Panel title="Run overlay" sub="chosen ticket">
+            <div className="loop-run">
+              <b>Ticket #681 · inco-cx</b>
+              <span>Now: Verify · try 2 of 3</span>
+              <span>CI failure → Build · 1 of 3</span>
+              <span>Review findings → Build · 1 of 3</span>
+            </div>
+          </Panel>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** Setup › Loops (catalogue 2.7.2), the observed loops, and the template profiles. */
 export function Loops({ config }: { config: ConfigView }) {
   const { inRepo } = useSessionScope(config);
@@ -253,6 +404,7 @@ export function Loops({ config }: { config: ConfigView }) {
           </div>
         )}
       </Panel>
+      <LoopChain />
       {config.profiles === undefined ? (
         <Panel title="Templates" sub="loops/*.yaml" actions={<NewTemplate />}>
           <div className="pb">
