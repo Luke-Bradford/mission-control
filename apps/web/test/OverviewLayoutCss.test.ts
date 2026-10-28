@@ -30,7 +30,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
     expect(rule(String.raw`\.overview-kpis`)).toContain("gap: 12px");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
-    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 26px");
+    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
     expect(rule(String.raw`\.pipeline-grid`)).toContain("repeat(5, minmax(0, 1fr))");
     expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
@@ -49,7 +49,8 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.timeline-body`)).toContain("flex-direction: column");
     expect(rule("#timelineP")).toContain("align-self: start");
     expect(rule(String.raw`\.overview-track`)).toContain("height: 100%");
-    expect(rule(String.raw`\.overview-span`)).toContain("bottom: 3px");
+    expect(rule(String.raw`\.overview-span`)).toContain("height: var(--sub)");
+    expect(rule(String.raw`\.overview-span\.k-turn`)).toContain("top: calc(50% - var(--sub) / 2)");
   });
 
   it("aligns Machine labels, fixed-height charts and values on shared columns", () => {
