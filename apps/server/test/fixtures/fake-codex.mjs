@@ -126,6 +126,7 @@ rl.on("line", (line) => {
   } else if (method === "config/read") {
     let configuredUrl = "http://hub/mcp";
     let workspaceAccess = "write";
+    let filesystem = { ":root": "read", "/operator": "deny" };
     try {
       const homeConfig = readFileSync(join(process.env.CODEX_HOME, "config.toml"), "utf8");
       configuredUrl = homeConfig.match(/^url = "([^"]+)"$/m)?.[1] ?? configuredUrl;
@@ -133,6 +134,16 @@ rl.on("line", (line) => {
         homeConfig.match(
           /\[permissions\.mc_seat\.filesystem\.":workspace_roots"\]\n"\."="(read|write)"/,
         )?.[1] ?? workspaceAccess;
+      const grants = homeConfig.match(
+        /\[permissions\.mc_seat\.filesystem\]\n([\s\S]*?)\[permissions\.mc_seat\.filesystem\.":workspace_roots"\]/,
+      )?.[1];
+      if (grants !== undefined)
+        filesystem = Object.fromEntries(
+          [...grants.matchAll(/^"([^"]+)"="(read|write|deny)"$/gm)].map(([, path, access]) => [
+            path,
+            access,
+          ]),
+        );
     } catch {
       // Unit-session fixtures do not need a private Codex home.
     }
@@ -143,8 +154,7 @@ rl.on("line", (line) => {
       permissions: {
         mc_seat: {
           filesystem: {
-            ":root": "read",
-            "/operator": "deny",
+            ...filesystem,
             ":workspace_roots": { ".": workspaceAccess, ".git": "read", ".codex": "read" },
           },
           network: { enabled: false },
