@@ -102,7 +102,12 @@ it("animates fixture deltas at at most 30 fps, opens the arc pair, and stops aft
   let snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
   const events: MotionEvent[] = [];
   for (const delta of mapDeltaFixture) {
-    events.push({ delta, at: Date.now(), snapshot });
+    const seat = "seat" in delta ? delta.seat : null;
+    events.push({
+      delta,
+      at: Date.now(),
+      calls: snapshot.seats.find((s) => s.seat === seat)?.calls,
+    });
     snapshot = applyDelta(snapshot, delta, Date.now()) ?? { ...snapshot, seq: delta.seq };
     rerender(<MapScene {...props} snapshot={snapshot} events={[...events]} onArc={onArc} />);
   }
@@ -316,4 +321,26 @@ it("updates only animated file instances and reuses colour and projection scratc
   expect([...new Set(writes.mock.calls.map(([index]) => index))]).toEqual([fileIndex]);
   expect(colors).not.toHaveBeenCalled();
   expect(vectors).not.toHaveBeenCalled();
+});
+
+it("keeps one WebGL context per visit: new nodes rebuild the tree, unmount loses the context", () => {
+  renderer.forceContextLoss.mockClear();
+  const created = renderer.created;
+  const { rerender, unmount } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const branchOnly = layoutTree([{ path: "branch/new.ts", lines: 1 }], nodes);
+  rerender(<MapScene {...props} nodes={branchOnly} />);
+  act(() => vi.advanceTimersByTime(40));
+  expect(renderer.created - created).toBe(1);
+  expect(renderer.dispose).not.toHaveBeenCalled();
+  const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+  expect(canvas.getAttribute("role")).toBe("img");
+  expect(canvas.tabIndex).toBe(0);
+  for (const label of document.querySelectorAll<HTMLElement>(".map-orb-label"))
+    expect(label.tabIndex).toBe(-1);
+  unmount();
+  expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
+  expect(renderer.forceContextLoss.mock.invocationCallOrder[0]).toBeLessThan(
+    renderer.dispose.mock.invocationCallOrder[0] as number,
+  );
 });

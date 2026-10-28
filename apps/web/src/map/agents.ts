@@ -73,12 +73,6 @@ export function orbPlacement(seat: MapSeat, nodes: MapNode[], index: number, now
   };
 }
 
-export function glide(from: Position, to: Position, seconds: number): Position {
-  if (Math.hypot(...from.map((v, i) => v - to[i])) < 0.02) return [...to];
-  const amount = 1 - 0.12 ** Math.max(0, seconds);
-  return from.map((v, i) => v + (to[i] - v) * amount) as Position;
-}
-
 export const haloSize = (seat: MapSeat): number | null =>
   seat.context && seat.context.window !== null && seat.context.window > 0
     ? 2.4 + Math.sqrt(Math.min(1, Math.max(0, seat.context.total / seat.context.window))) * 5

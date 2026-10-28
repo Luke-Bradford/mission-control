@@ -1980,7 +1980,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map panel)
+      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         async (req, reply): Promise<MapSnapshot | FastifyReply> => {
@@ -2021,6 +2021,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seat.context = context ? { total: context.total, window: context.window } : null;
             }
             const conflicts = await mapConflicts.check(checkout, store.pullRequests(repo.id));
+            for (const failure of conflicts.failures)
+              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
             return {
               repoId: repo.id,
               ...tree,
@@ -2030,13 +2032,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               // Slice 1b will publish sequenced deltas; none have been emitted yet.
               seq: 0,
             };
-          } catch {
+          } catch (e) {
+            reply.log.warn(
+              { reason: e instanceof Error ? e.message : String(e) },
+              "map snapshot unavailable",
+            );
             return reply.code(503).send({ error: "map snapshot unavailable" });
           }
         },
       );
 
-      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
         if (!config.repos.some((r) => r.id === req.params.repoId))
           return reply.code(404).send({ error: "unknown repo" });
@@ -2044,7 +2050,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { seats: deps.mapRing.scopes(req.params.repoId) };
       });
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
+      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/conflicts",
         async (req, reply) => {
@@ -2056,8 +2062,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            return { conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)) };
-          } catch {
+            const { conflicts, unchecked, failures } = await mapConflicts.check(
+              checkout,
+              store.pullRequests(repo.id),
+            );
+            for (const failure of failures)
+              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
+            return { conflicts, unchecked };
+          } catch (e) {
+            reply.log.warn(
+              { reason: e instanceof Error ? e.message : String(e) },
+              "map conflicts unavailable",
+            );
             return reply.code(503).send({ error: "map conflicts unavailable" });
           }
         },

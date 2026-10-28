@@ -1,6 +1,12 @@
 import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { agentCard, badgeModels, isStuck, recentFailures } from "../src/map/cards.ts";
+import {
+  agentCard,
+  badgeModels,
+  isStuck,
+  recentFailures,
+  STOPPED_PARK_REASON,
+} from "../src/map/cards.ts";
 import { applyDelta } from "../src/map/model.ts";
 
 const now = 2_000_000;
@@ -40,6 +46,13 @@ describe("map stuck rule", () => {
     expect(isStuck(s, now)).toBe(true);
     s.badges.failures = s.badges.failures.filter((f) => f.at <= now);
     expect(isStuck(s, now + 1)).toBe(false);
+  });
+  it("never calls a seat whose run was stopped stuck, however long it has been parked", () => {
+    const s = seat();
+    s.badges.waiting = { kind: "parked", since: now - 86_400_000, reason: STOPPED_PARK_REASON };
+    expect(isStuck(s, now)).toBe(false);
+    s.badges.waiting.reason = "run ended (error)";
+    expect(isStuck(s, now)).toBe(true);
   });
   it.each(["test-lock", "parked"] as const)(
     "requires a %s wait older than fifteen minutes",

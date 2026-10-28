@@ -24,7 +24,6 @@ const hash = (s: string) => {
   n = Math.imul(n ^ (n >>> 16), 0x45d9f3b);
   return (n ^ (n >>> 16)) >>> 0;
 };
-export const areaTone = (area: string): number => hash(area) / 0xffffffff;
 
 /**
  * The origin tree gets the prototype's force-directed layout (layout.ts), computed once per tree.

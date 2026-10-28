@@ -38,6 +38,10 @@ export function AgentCards({
             ? { total: seat.context.total, window }
             : null;
         const expanded = !card.docked || selected === seat.seat;
+        // shown even on a docked card: its unmerged branch is exactly what a conflict would touch
+        const unchecked = seat.branch
+          ? snapshot.conflictsUnchecked.find((u) => u.branch === seat.branch)
+          : undefined;
         return (
           <article
             key={seat.seat}
@@ -72,6 +76,9 @@ export function AgentCards({
             >
               ⌖
             </button>
+            {unchecked && (
+              <p className="map-unchecked">Conflicts not checked: {unchecked.reason}</p>
+            )}
             {expanded && (
               <>
                 {seat.title && <p className="map-agent-title">{seat.title}</p>}

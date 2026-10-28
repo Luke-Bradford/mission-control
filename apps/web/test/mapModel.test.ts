@@ -1,8 +1,8 @@
 import { mapSnapshotFixture as mapFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
+import { areaColor, OTHER_AREA_COLOR, repoLayout } from "../src/map/layout.ts";
 import {
   applyDelta,
-  areaTone,
   fileStyle,
   layoutTree,
   level,
@@ -13,7 +13,10 @@ import {
 
 describe("map rules", () => {
   it("uses distinct muted area tones and configured seat order", () => {
-    expect(areaTone("apps")).not.toEqual(areaTone("docs"));
+    expect(areaColor("apps/web", ["apps/server", "apps/web"])).not.toEqual(
+      areaColor("apps/server", ["apps/server", "apps/web"]),
+    );
+    expect(areaColor("docs", ["apps/server"])).toBe(OTHER_AREA_COLOR);
     const s: import("@mc/core").MapSnapshot = structuredClone(mapFixture);
     expect(fileStyle(s, ["src/main.ts"], "src", 3000, { "GUIDO-1": 4 }).token).toBe("--s5");
   });
@@ -65,6 +68,44 @@ describe("map rules", () => {
             Math.hypot(...a.position.map((v, i) => v - (b.position[i] as number))),
           );
     expect(closest).toBeGreaterThan(0.5);
+  });
+  it("keeps the layout across a merge: line counts move nothing, new files land by their folder", () => {
+    const tree = [
+      ...Array.from({ length: 30 }, (_, i) => ({ path: `apps/server/src/s${i}.ts`, lines: 40 })),
+      ...Array.from({ length: 20 }, (_, i) => ({ path: `apps/web/src/w${i}.tsx`, lines: 60 })),
+    ];
+    const first = repoLayout("stability", tree, []);
+    // a refetch whose line counts changed reuses the same layout
+    expect(
+      repoLayout(
+        "stability",
+        tree.map((f) => ({ ...f, lines: f.lines * 3 })),
+        [],
+      ),
+    ).toBe(first);
+    const merged = [
+      ...tree,
+      { path: "apps/web/src/w-new.tsx", lines: 30 },
+      { path: "apps/web/src/fresh/x.ts", lines: 5 },
+    ];
+    const next = repoLayout("stability", merged, [
+      { from: "apps/web/src/w-new.tsx", to: "apps/web/src/w0.tsx" },
+    ]);
+    const at = (nodes: typeof first, path: string) => nodes.find((n) => n.path === path)?.position;
+    let moved = 0;
+    for (const node of first)
+      moved = Math.max(
+        moved,
+        Math.hypot(
+          ...node.position.map((v, i) => v - ((at(next, node.path) ?? [])[i] ?? Infinity)),
+        ),
+      );
+    expect(moved).toBe(0);
+    const folder = at(next, "apps/web/src") as [number, number, number];
+    const added = at(next, "apps/web/src/w-new.tsx") as [number, number, number];
+    expect(Math.hypot(...added.map((v, i) => v - (folder[i] as number)))).toBeLessThan(30);
+    // navigating back to the old tree reuses its layout
+    expect(repoLayout("stability", tree, [])).toBe(first);
   });
   it("separates findings by shape and HUD severity token from all seven seat colours", () => {
     expect(pinToken("Critical")).toBe("--crit");

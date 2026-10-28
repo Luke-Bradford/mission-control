@@ -4003,6 +4003,7 @@ describe("boards, escalations, health", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       conflicts: [{ file: "file.txt", branches: ["right", "left"], shas: [right, left] }],
+      unchecked: [],
     });
     expect(git("count-objects", "-v")).toBe(before);
     expect(git("status", "--porcelain")).toBe("");
@@ -4012,7 +4013,19 @@ describe("boards, escalations, health", () => {
       prs.map((pr) => ({ ...pr, state: "closed" })),
       0,
     );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({ conflicts: [] });
+    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({
+      conflicts: [],
+      unchecked: [],
+    });
+    // a head the checkout hasn't fetched is named unchecked, never reported clean
+    store.upsertPullRequests(
+      "shop-app",
+      [prs[0], { ...prs[1], headSha: "f".repeat(40) }].map((pr) => ({ ...pr, state: "open" })),
+      0,
+    );
+    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toMatchObject({
+      unchecked: [{ reason: "head not fetched" }],
+    });
   });
 
   it("does not report a clean merge when the map checkout is unavailable", async () => {

@@ -26,12 +26,21 @@ export const recentFailures = (seat: MapSeat, now: number) =>
     .sort((a, b) => b.at - a.at);
 
 /** Cut-off calls are excluded by the server; only reported refusals and failures count. */
+/**
+ * The park reason core's loop gives a run that ended because it was stopped (packages/core/src/
+ * loop.ts, `run ended (${reason})`): the operator or the hub stopped it, so it isn't stuck.
+ */
+export const STOPPED_PARK_REASON = "run ended (stopped)";
+
 export function isStuck(seat: MapSeat, now: number): boolean {
+  const waiting = seat.badges.waiting;
   return (
     seat.state === "stalled" ||
     seat.calls.some((c) => now - c.since > 600_000) ||
     recentFailures(seat, now).length >= 3 ||
-    (seat.badges.waiting !== null && now - seat.badges.waiting.since > 900_000)
+    (waiting !== null &&
+      !(waiting.kind === "parked" && waiting.reason === STOPPED_PARK_REASON) &&
+      now - waiting.since > 900_000)
   );
 }
 

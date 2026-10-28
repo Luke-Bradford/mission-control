@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { MapSnapshot, PullRequestView } from "@mc/core";
+import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 
 const execFileP = promisify(execFile);
@@ -18,36 +18,62 @@ function queued<T>(run: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** A pair whose merge check failed although both heads are present (logged, never cached). */
+export interface PairFailure {
+  branches: [string, string];
+  reason: string;
+}
+
+/** How long a head found missing is taken as still missing before git is asked again. */
+export const MISSING_HEAD_TTL_MS = 30_000;
+
 /** Slice 6: the snapshot's conflicts, from Store.pullRequests(repoId), never local branch refs. */
 export class MapConflicts {
   private readonly cache = new Map<string, string[]>();
+  /** sha → when the checkout was last found not to hold it. */
+  private readonly missing = new Map<string, number>();
+
+  private readonly now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+  }
 
   /** The conflicts, or a rejection when any open pair could not be checked (never reported clean). */
   async read(worktree: string, prs: readonly Tip[]): Promise<MapSnapshot["conflicts"]> {
     const { conflicts, unchecked } = await this.check(worktree, prs);
     if (unchecked.length > 0)
-      throw new Error(`map conflicts unchecked for ${unchecked.join(", ")}`);
+      throw new Error(
+        `map conflicts unchecked for ${unchecked.map((u) => `${u.branch} (${u.reason})`).join(", ")}`,
+      );
     return conflicts;
   }
 
   /**
-   * The conflicts between every pair whose heads the checkout holds, and the branches whose head it
-   * does not (not fetched yet). An unchecked pair is neither cached nor reported clean.
+   * The conflicts between every pair the checkout can merge, and the branches with a pair it could
+   * not: a head it hasn't fetched yet, or a merge check that failed (unrelated histories, a
+   * timeout). An unchecked pair is neither cached nor reported clean, so it is checked again once
+   * possible. Only a broken checkout rejects.
    */
   async check(
     worktree: string,
     prs: readonly Tip[],
-  ): Promise<{ conflicts: MapSnapshot["conflicts"]; unchecked: string[] }> {
+  ): Promise<{
+    conflicts: MapSnapshot["conflicts"];
+    unchecked: MapUnchecked[];
+    failures: PairFailure[];
+  }> {
     return queued(async () => {
       const tips = prs.filter((p) => p.state === "open" && p.headSha && SHA.test(p.headSha));
       const conflicts: MapSnapshot["conflicts"] = [];
-      const unchecked = new Set<string>();
+      const unchecked = new Map<string, MapUnchecked["reason"]>();
+      const failures: PairFailure[] = [];
       // Checked only on a cache miss: a cached pair needs no object reads.
       const present = new Map<string, Promise<boolean>>();
       const holds = (sha: string) => {
         let known = present.get(sha);
         if (known === undefined) {
-          known = hasCommit(worktree, sha);
+          known = this.holds(worktree, sha);
           present.set(sha, known);
         }
         return known;
@@ -65,10 +91,18 @@ export class MapConflicts {
             const missing: Tip[] = [];
             for (const t of [a, b]) if (!(await holds(t.headSha))) missing.push(t);
             if (missing.length > 0) {
-              for (const t of missing) unchecked.add(t.branch);
+              for (const t of missing) unchecked.set(t.branch, "head not fetched");
               continue;
             }
-            files = await mergeFiles(worktree, shas[0] as string, shas[1] as string);
+            try {
+              files = await mergeFiles(worktree, shas[0] as string, shas[1] as string);
+            } catch (e) {
+              // both heads are here, so the checkout is sound: only this pair is unknown
+              failures.push({ branches: [a.branch, b.branch], reason: reasonOf(e) });
+              for (const t of [a, b])
+                if (!unchecked.has(t.branch)) unchecked.set(t.branch, "merge check failed");
+              continue;
+            }
             this.cache.set(key, files);
             if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value as string);
           }
@@ -77,9 +111,42 @@ export class MapConflicts {
           }
         }
       }
-      return { conflicts, unchecked: [...unchecked].sort() };
+      return {
+        conflicts,
+        unchecked: [...unchecked.entries()]
+          .map(([branch, reason]) => ({ branch, reason }))
+          .sort((x, y) => x.branch.localeCompare(y.branch)),
+        failures,
+      };
     });
   }
+
+  /** Whether the checkout holds `sha`; a head found missing stays missing for 30 s without git. */
+  private async holds(worktree: string, sha: string): Promise<boolean> {
+    const at = this.missing.get(sha);
+    if (at !== undefined && this.now() - at < MISSING_HEAD_TTL_MS) return false;
+    const held = await hasCommit(worktree, sha);
+    if (held) this.missing.delete(sha);
+    else {
+      this.missing.set(sha, this.now());
+      if (this.missing.size > 256) this.missing.delete(this.missing.keys().next().value as string);
+    }
+    return held;
+  }
+}
+
+/** A git failure's first line, for the log; never sent to the page. */
+function reasonOf(e: unknown): string {
+  const failure = e as { code?: unknown; signal?: unknown; killed?: boolean; message?: unknown };
+  const first = typeof failure.message === "string" ? (failure.message.split("\n")[0] ?? "") : "";
+  const how = failure.killed
+    ? "timed out"
+    : failure.signal
+      ? `signal ${String(failure.signal)}`
+      : failure.code !== undefined
+        ? `exit ${String(failure.code)}`
+        : "failed";
+  return `${how}: ${first}`.slice(0, 300);
 }
 
 /** Git's environment for map reads: no system or global config, no lazy fetch, no prompts. */

@@ -84,6 +84,7 @@ export function mapSeats(
       since: row.stateSince,
       ticket,
       title: !flight && row.ticketTitle ? safe(row.ticketTitle) : null,
+      branch: flight ? null : (run?.branch ?? null),
       calls: live
         ? calls
             .filter((c) => c.end === null)

@@ -5,7 +5,7 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { AgentCards } from "./AgentCards.tsx";
 import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
 import type { BadgeKind } from "./cards.ts";
-import { areaColor, mainAreas } from "./layout.ts";
+import { areaColor, mainAreas, repoLayout } from "./layout.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pinToken } from "./model.ts";
 import type { MessageArc, MotionEvent } from "./motion.ts";
@@ -54,14 +54,12 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     [crew?.rows],
   );
   const status: MapStatus = error
-    ? { live: false, text: `${error.message} Retrying.` }
+    ? { live: false, text: errorText(error) }
     : { live: true, text: `Live · real time${skipped ? ` · ${skipped}` : ""}` };
   if (snapshot?.repoId !== repo)
     return (
       <div className="map-wait">
-        <p role="status">
-          {error ? `Map unavailable: ${error.message} Retrying every 5 s.` : "Loading repo map…"}
-        </p>
+        <p role="status">{error ? errorText(error) : "Loading repo map…"}</p>
       </div>
     );
   return (
@@ -75,6 +73,20 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     />
   );
 }
+
+/** "Map snapshot unavailable. Retrying every 5 s.", or the feed's own reconnecting notice. */
+function errorText(error: Error): string {
+  const reason = error.message.trim().replace(/[.…\s]+$/, "");
+  const sentence = !reason
+    ? "Map unavailable"
+    : /^HTTP \d+$/.test(reason)
+      ? `Map unavailable (${reason})`
+      : reason.charAt(0).toUpperCase() + reason.slice(1);
+  return /reconnect|retry/i.test(sentence) ? `${sentence}…` : `${sentence}. Retrying every 5 s.`;
+}
+
+const collapsed = (tree: MapSnapshot["tree"]) =>
+  tree.length > 2000 ? layoutTree(tree, [], true) : null;
 
 export function CrewMapView({
   snapshot,
@@ -118,38 +130,43 @@ export function CrewMapView({
   useEffect(() => {
     if (badge && !badgeSeat && !badge.conversation) closeBadge();
   }, [badge, badgeSeat, closeBadge]);
-  const treeKey = JSON.stringify(snapshot.tree);
-  const importKey = JSON.stringify(snapshot.imports);
+  // the layout is cached per repo and set of paths (layout.ts), so the same array comes back for
+  // a refetch that changed no path, and the scene keeps its geometry
   const nodes = useMemo(
-    () => layoutTree(JSON.parse(treeKey), [], undefined, JSON.parse(importKey)),
-    [treeKey, importKey],
+    () => repoLayout(snapshot.repoId, snapshot.tree, snapshot.imports, collapsed),
+    [snapshot.repoId, snapshot.tree, snapshot.imports],
   );
-  const areas = useMemo(() => mainAreas(JSON.parse(treeKey)), [treeKey]);
-  const allFiles = [
+  const areas = useMemo(() => mainAreas(snapshot.tree), [snapshot.tree]);
+  const treePaths = useMemo(() => new Set(snapshot.tree.map((f) => f.path)), [snapshot.tree]);
+  // files a seat touched that origin/HEAD doesn't have yet (new on a branch)
+  const extraKey = [
     ...new Set(
       snapshot.seats.flatMap((s) => [...s.scope.read, ...s.scope.modified.map((c) => c.file)]),
     ),
-  ];
-  const extras = allFiles.filter((f) => !snapshot.tree.some((n) => n.path === f));
-  const extraKey = JSON.stringify(extras);
+  ]
+    .filter((f) => !treePaths.has(f))
+    .sort()
+    .join("\n");
+  const extras = useMemo(() => (extraKey ? extraKey.split("\n") : []), [extraKey]);
   const displayNodes = useMemo(
     () =>
-      JSON.parse(extraKey).length
+      extras.length
         ? layoutTree(
-            JSON.parse(extraKey).map((path: string) => ({ path, lines: 0 })),
+            extras.map((path) => ({ path, lines: 0 })),
             nodes,
-            JSON.parse(treeKey).length > 2000,
+            treePaths.size > 2000,
           )
         : nodes,
-    [treeKey, extraKey, nodes],
+    [extras, nodes, treePaths],
   );
-  const matches = [
-    ...new Set([
-      ...displayNodes.map((n) => n.path),
-      ...snapshot.tree.map((f) => f.path),
-      ...extras,
-    ]),
-  ].filter((path) => path !== "" && path.toLowerCase().includes(query.toLowerCase()));
+  const searchable = useMemo(
+    () => [...new Set([...displayNodes.map((n) => n.path), ...treePaths, ...extras])],
+    [displayNodes, treePaths, extras],
+  );
+  const needle = query.trim().toLowerCase();
+  const matches = needle
+    ? searchable.filter((path) => path !== "" && path.toLowerCase().includes(needle))
+    : [];
   const focusNode =
     displayNodes.find((n) => n.path === focus) ??
     displayNodes.find((n) => focus !== null && n.files.includes(focus));
@@ -342,8 +359,10 @@ export function CrewMapView({
           hub keeps each seat's last 15 minutes of calls in memory and serves no history.
           {snapshot.tree.length > 2000 &&
             " Files are collapsed into folders (more than 2,000 files)."}
-          {(snapshot.conflictsUnchecked?.length ?? 0) > 0 &&
-            ` Conflicts not checked for ${snapshot.conflictsUnchecked?.join(", ")}: the checkout hasn't fetched their heads yet.`}
+          {snapshot.conflictsUnchecked.length > 0 &&
+            ` Conflicts not checked for ${snapshot.conflictsUnchecked
+              .map((u) => `${u.branch} (${u.reason})`)
+              .join(", ")}.`}
         </p>
       </div>
     </div>
@@ -404,10 +423,16 @@ function FileDrawer({
       {snapshot.seats.map((s) => {
         const changes = s.scope.modified.filter((c) => listed.includes(c.file));
         const read = s.scope.read.some((f) => listed.includes(f));
+        const unchecked = s.branch
+          ? snapshot.conflictsUnchecked.find((u) => u.branch === s.branch)
+          : undefined;
         return read || changes.length ? (
           <div key={s.seat}>
             <strong>{s.seat}</strong>
             {read && <p>Read on the branch</p>}
+            {unchecked && (
+              <p className="map-unchecked">Conflicts not checked: {unchecked.reason}</p>
+            )}
             {changes.map((c) => (
               <div key={c.file}>
                 <p>
@@ -430,7 +455,7 @@ function FileDrawer({
       {snapshot.conflicts
         .filter((c) => listed.includes(c.file))
         .map((c) => (
-          <p key={c.file}>Conflict: {c.branches.join(" / ")}</p>
+          <p key={`${c.file}:${c.branches.join("|")}`}>Conflict: {c.branches.join(" / ")}</p>
         ))}
       <h4>Imports</h4>
       {imports.length ? (

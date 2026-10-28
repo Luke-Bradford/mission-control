@@ -205,7 +205,7 @@ it("keeps a waiting read's call metadata when the refetch has already removed th
       tests: null,
     },
     at: 3000,
-    snapshot: structuredClone(snapshot),
+    calls: structuredClone(snapshot.seats[0]?.calls),
   };
   let state = motionDelta(emptyMotion(), event, snapshot, nodes);
   snapshot.seats[0].calls = [];

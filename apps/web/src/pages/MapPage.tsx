@@ -15,24 +15,28 @@ import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
 export function MapPage({ repoId }: { repoId: string | null }) {
   const repos = useResource<RepoView[]>(RESOURCES.repos);
   const config = useResource<ConfigView>(RESOURCES.config);
-  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const crewRes = useResource<Crew>(RESOURCES.crew);
+  const crew = crewRes.data;
   const scope = useSessionScope();
   const options = useMemo(
     () => (repos.data ? mapRepoOptions(repos.data, config.data, crew) : []),
     [repos.data, config.data, crew],
   );
   const loaded = repos.data !== undefined && config.data !== undefined;
+  // the default repo ranks running crew seats, so wait for the crew (or its failure) first
+  const ready = loaded && (crew !== undefined || crewRes.error !== null);
   const target =
-    repoId === null && loaded
+    repoId === null && ready
       ? defaultMapRepo(options, crew, scope.repo ?? "", readKey(MAP_REPO_KEY) ?? "")
       : null;
   useEffect(() => {
     if (target) navigate(mapPath(target), { replace: true });
   }, [target]);
   const option = options.find((o) => o.id === repoId);
+  const remembered = option?.mapped ? option.id : null;
   useEffect(() => {
-    if (option?.mapped) writeKey(MAP_REPO_KEY, option.id);
-  }, [option]);
+    if (remembered) writeKey(MAP_REPO_KEY, remembered);
+  }, [remembered]);
   const failed = repos.error ?? config.error;
   return (
     <section id="page-map" className="map-page">
@@ -62,7 +66,7 @@ export function MapPage({ repoId }: { repoId: string | null }) {
         <div className="map-wait">
           <p role="alert">Repos unavailable: {failed.message}</p>
         </div>
-      ) : !loaded || target ? (
+      ) : !ready || target ? (
         <div className="map-wait">
           <p role="status">Loading repos…</p>
         </div>

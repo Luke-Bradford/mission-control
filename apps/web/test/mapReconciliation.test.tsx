@@ -55,7 +55,10 @@ function points() {
   });
   return result?.geometry as THREE.BufferGeometry;
 }
+const GAP = LiveMap.REFETCH_GAP_MS;
 beforeEach(() => {
+  // reconciliation, not the refetch throttle (CrewMap.test.tsx), is under test here
+  LiveMap.REFETCH_GAP_MS = 0;
   vi.useFakeTimers();
   fresh = { ...structuredClone(mapSnapshotFixture), seq: 0 };
   events.length = 0;
@@ -85,6 +88,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => {
+  LiveMap.REFETCH_GAP_MS = GAP;
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

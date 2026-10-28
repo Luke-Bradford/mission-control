@@ -225,8 +225,14 @@
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  opacity: 0.6;
-  text-shadow: 0 0 8px var(--void);
+  padding: 0 6px;
+  border-radius: 2px;
+  /* a soft backdrop keeps the name readable over the densest part of its area */
+  background: rgba(4, 6, 12, 0.62);
+  text-shadow:
+    0 0 6px var(--void),
+    0 0 2px var(--void);
+  opacity: 0.85;
 }
 .map-change {
   display: flex;
@@ -465,6 +471,13 @@
   border-top: 1px solid var(--line);
   padding-top: 8px;
   margin-top: 8px;
+}
+/* a caveat, not an ask: amber stays for what waits on the operator */
+.map-unchecked {
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-block: 2px;
 }
 .map-reason {
   white-space: pre-wrap;

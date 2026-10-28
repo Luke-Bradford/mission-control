@@ -169,6 +169,8 @@ export function activityLayer(
       const label = old?.label ?? document.createElement("button");
       label.type = "button";
       label.className = "map-orb-label";
+      // the agent cards carry the same selection in the tab order; an orb label is for the pointer
+      label.tabIndex = -1;
       label.textContent = `${seat.seat}${!placement.docked && seat.ticket !== null ? ` · #${seat.ticket}` : ""} · ${stateLabel(seat, Date.now(), memory.current.ended[seat.seat])}${placement.more ? ` · +${placement.more} more` : ""}`;
       label.title = seat.calls.length
         ? "Calls in flight"

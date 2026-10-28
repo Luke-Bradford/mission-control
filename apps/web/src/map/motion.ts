@@ -5,7 +5,8 @@ import { type MapNode, tokenBand } from "./model.ts";
 export interface MotionEvent {
   delta: MapDelta;
   at: number;
-  snapshot?: MapSnapshot;
+  /** The delta's seat's calls when it arrived (never the whole snapshot, which events outlive). */
+  calls?: MapCall[];
   epoch?: number;
 }
 export interface MessageArc {
@@ -33,7 +34,7 @@ interface Glow {
 export interface MotionState {
   seq: number;
   epoch: number;
-  pending: (MotionEvent & { calls?: MapCall[] })[];
+  pending: MotionEvent[];
   particles: Particle[];
   arcs: MessageArc[];
   glows: Glow[];
@@ -99,11 +100,6 @@ export function sampleMotion(state: MotionState, now: number) {
   return { particles, arcs, glows, active: !!(particles.length || arcs.length || glows.length) };
 }
 
-export function particlePosition(p: Particle, now: number): Position | null {
-  const u = (now - p.at) / p.life;
-  return u < 0 || u >= 1 ? null : (p.from.map((v, i) => v + (p.to[i] - v) * u) as Position);
-}
-
 /** Only live deltas create effects; snapshot scope and usage never synthesize particles. */
 export function motionDelta(
   state: MotionState,
@@ -119,7 +115,8 @@ export function motionDelta(
     const calls =
       "seat" in delta
         ? (state.calls[delta.seat] ??
-          (event.snapshot ?? snapshot).seats.find((seat) => seat.seat === delta.seat)?.calls)
+          event.calls ??
+          snapshot.seats.find((seat) => seat.seat === delta.seat)?.calls)
         : undefined;
     const pending = { ...event, calls: calls ?? (delta.type === "call.start" ? [] : undefined) };
     return {
@@ -225,11 +222,7 @@ function applyMotion(
     next.arcs = [...next.arcs.filter((a) => a !== same), arc].slice(-10);
   } else if (seat && "seat" in delta) {
     const here = endpoint(seat.seat, snapshot, nodes, at);
-    const calls =
-      observedCalls ??
-      next.calls[seat.seat] ??
-      event.snapshot?.seats.find((s) => s.seat === seat.seat)?.calls ??
-      seat.calls;
+    const calls = observedCalls ?? next.calls[seat.seat] ?? event.calls ?? seat.calls;
     if (delta.type === "call.start") {
       next.calls[seat.seat] = [
         ...calls.filter((c) => at - c.since < 900_000),

@@ -161,20 +161,24 @@ describe("Map page", () => {
     expect(screen.getByText(/2 files at origin\/HEAD, each its own node/)).toBeTruthy();
   });
 
-  it("names the branches whose conflicts went unchecked", async () => {
+  it("names the branches whose conflicts went unchecked, on the seat's card too", async () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
       "/api/crew": { rows: [] },
-      "/api/repos/sample/map": { ...idle, conflictsUnchecked: ["feature/9-unfetched"] },
+      "/api/repos/sample/map": {
+        ...idle,
+        conflictsUnchecked: [{ branch: "feature/7-empty-input", reason: "head not fetched" }],
+      },
     });
     at("/map/sample");
     await screen.findByText("3D scene");
     expect(
-      screen.getByText(
-        /Conflicts not checked for feature\/9-unfetched: the checkout hasn't fetched/,
-      ),
+      screen.getByText(/Conflicts not checked for feature\/7-empty-input \(head not fetched\)\./),
     ).toBeTruthy();
+    expect(screen.getByRole("article", { name: "GUIDO-1" }).textContent).toContain(
+      "Conflicts not checked: head not fetched",
+    );
   });
 
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {
@@ -188,6 +192,6 @@ describe("Map page", () => {
       }),
     });
     at("/map/sample");
-    expect((await screen.findByText(/Map unavailable/)).textContent).toContain("Retrying");
+    expect(await screen.findByText("Map snapshot unavailable. Retrying every 5 s.")).toBeTruthy();
   });
 });

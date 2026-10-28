@@ -123,7 +123,7 @@ it("skips a pair whose head the checkout has not fetched, keeping the rest of th
     pr("right", right),
     pr("unfetched", missing),
   ]);
-  expect(result.unchecked).toEqual(["unfetched"]);
+  expect(result.unchecked).toEqual([{ branch: "unfetched", reason: "head not fetched" }]);
   expect(result.conflicts).toEqual([
     { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
   ]);
@@ -134,4 +134,80 @@ it("fails rather than reporting unchecked when the checkout itself is broken", a
   await expect(
     new MapConflicts().check(gone, [pr("left", left), pr("right", right)]),
   ).rejects.toThrow();
+});
+
+it("still rejects from read() when any pair went unchecked", async () => {
+  await expect(
+    new MapConflicts().read(dir, [pr("left", left), pr("unfetched", "e".repeat(40))]),
+  ).rejects.toThrow(/unfetched \(head not fetched\)/);
+});
+
+it("reports a pair with unrelated histories unchecked, uncached, and keeps the other pairs", async () => {
+  git("checkout", "-q", "--orphan", "orphan");
+  writeFileSync(join(dir, "file.txt"), "orphan\n");
+  git("add", ".");
+  git("commit", "-qm", "orphan");
+  const orphan = git("rev-parse", "HEAD");
+  const collector = new MapConflicts();
+  const prs = [pr("left", left), pr("right", right), pr("orphan", orphan)];
+  const first = await collector.check(dir, prs);
+  expect(first.conflicts).toEqual([
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+  ]);
+  expect(first.unchecked).toEqual([
+    { branch: "left", reason: "merge check failed" },
+    { branch: "orphan", reason: "merge check failed" },
+    { branch: "right", reason: "merge check failed" },
+  ]);
+  expect(first.failures.map((f) => f.branches)).toEqual([
+    ["left", "orphan"],
+    ["right", "orphan"],
+  ]);
+  expect(first.failures[0]?.reason).toMatch(/^exit 128: /);
+  // never cached as clean: the failing pairs are tried again
+  expect((await collector.check(dir, prs)).failures).toHaveLength(2);
+});
+
+it("checks a pair once its head is fetched, after the 30 s missing-head hold", async () => {
+  const other = mkdtempSync(join(tmpdir(), "mc-map-conflicts-other-"));
+  try {
+    execFileSync("git", ["clone", "-q", dir, other]);
+    const run = (...args: string[]) =>
+      execFileSync("git", ["-C", other, ...args], { encoding: "utf8" }).trim();
+    run("config", "user.name", "Fixture");
+    run("config", "user.email", "fixture@example.invalid");
+    run("checkout", "-qb", "late", base);
+    writeFileSync(join(other, "file.txt"), "late\n");
+    run("commit", "-qam", "late");
+    const late = run("rev-parse", "HEAD");
+    let now = 1_000_000;
+    const collector = new MapConflicts(() => now);
+    const prs = [pr("left", left), pr("late", late)];
+    expect((await collector.check(dir, prs)).unchecked).toEqual([
+      { branch: "late", reason: "head not fetched" },
+    ]);
+    git("fetch", "-q", other, "late");
+    now += 1_000;
+    // still within the hold: git is not asked again
+    expect((await collector.check(dir, prs)).unchecked).toHaveLength(1);
+    now += 30_000;
+    const fetched = await collector.check(dir, prs);
+    expect(fetched.unchecked).toEqual([]);
+    expect(fetched.conflicts).toEqual([
+      { file: "file.txt", branches: ["left", "late"], shas: [left, late] },
+    ]);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+it("fails when the checkout is an existing directory that is not a repo", async () => {
+  const plain = mkdtempSync(join(tmpdir(), "mc-map-conflicts-plain-"));
+  try {
+    await expect(
+      new MapConflicts().check(plain, [pr("left", left), pr("right", right)]),
+    ).rejects.toThrow();
+  } finally {
+    rmSync(plain, { recursive: true, force: true });
+  }
 });

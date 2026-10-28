@@ -1,6 +1,6 @@
 import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CrewMapView, LiveCrewMap } from "../src/map/CrewMap.tsx";
 import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -8,7 +8,15 @@ import { stubFetch } from "./fetchStub.ts";
 vi.mock("../src/map/MapScene.tsx", () => ({
   MapScene: ({ focus }: { focus: string | null }) => <div data-focus={focus}>3D scene</div>,
 }));
-afterEach(() => vi.unstubAllGlobals());
+const GAP = LiveMap.REFETCH_GAP_MS;
+// these exercise ordering and resync; the throttle has its own test below
+beforeEach(() => {
+  LiveMap.REFETCH_GAP_MS = 0;
+});
+afterEach(() => {
+  LiveMap.REFETCH_GAP_MS = GAP;
+  vi.unstubAllGlobals();
+});
 it("renders the fixture, searches and opens the file drawer with honest changes and findings", async () => {
   render(<CrewMapView snapshot={mapSnapshotFixture} />);
   fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
@@ -300,4 +308,71 @@ it("delivers each live animation once, including events that require a snapshot 
   expect(animate).toHaveBeenCalledTimes(mapDeltaFixture.length);
   live.stop();
   hidden.mockRestore();
+});
+
+it("throttles delta-driven refetches to one per 2 s, never holding the first load", async () => {
+  LiveMap.REFETCH_GAP_MS = GAP;
+  vi.useFakeTimers();
+  try {
+    const listeners: Record<string, (e: MessageEvent) => void> = {};
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener(k: string, cb: (e: MessageEvent) => void) {
+          listeners[k] = cb;
+        }
+        close() {}
+      },
+    );
+    const get = vi.fn(async () => structuredClone({ ...mapSnapshotFixture, seq: 0 }));
+    const live = new LiveMap("sample", get, vi.fn(), vi.fn());
+    live.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get).toHaveBeenCalledTimes(1);
+    // a burst of edits and pings, each of which invalidates a seq-0 snapshot
+    for (let seq = 1; seq <= 5; seq++) {
+      listeners.map(
+        new MessageEvent("map", {
+          data: JSON.stringify({
+            type: "edit",
+            seq,
+            seat: "GUIDO-1",
+            file: "src/main.ts",
+            add: 1,
+            rem: 0,
+          }),
+        }),
+      );
+      listeners.changed(new MessageEvent("changed", { data: JSON.stringify({ topic: "agents" }) }));
+    }
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(get).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(get).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(get).toHaveBeenCalledTimes(2);
+    live.stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("says in the file drawer when a seat's branch went unchecked for conflicts, and lists each pair", () => {
+  const snapshot: MapSnapshot = {
+    ...structuredClone(mapSnapshotFixture),
+    conflictsUnchecked: [{ branch: "feature/7-empty-input", reason: "merge check failed" }],
+    conflicts: [
+      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
+      { file: "src/main.ts", branches: ["a", "c"], shas: ["1".repeat(40), "3".repeat(40)] },
+    ],
+  };
+  render(<CrewMapView snapshot={snapshot} />);
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
+    target: { value: "main" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));
+  const drawer = screen.getByRole("complementary", { name: "Selected file" });
+  expect(drawer.textContent).toContain("Conflicts not checked: merge check failed");
+  expect(drawer.textContent).toContain("Conflict: a / b");
+  expect(drawer.textContent).toContain("Conflict: a / c");
 });

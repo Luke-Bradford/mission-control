@@ -60,6 +60,8 @@ export function forceLayout(
   tree: MapSnapshot["tree"],
   imports: MapSnapshot["imports"] = [],
   steps = STEPS,
+  /** A warm start: these nodes keep their positions; only nodes new to the tree are placed. */
+  previous?: ReadonlyMap<string, readonly [number, number, number]>,
 ): MapNode[] {
   const main = mainAreas(tree);
   const list: { path: string; parent: number; area: string; kids: number[]; lines: number }[] = [
@@ -139,6 +141,26 @@ export function forceLayout(
     });
   };
   place(0, [0, 0, 1], Math.PI);
+  // Warm start: a node the last layout had stays exactly there; a new one keeps its offset from
+  // its folder, so it lands beside wherever that folder now is. Only new nodes relax.
+  const pinned = new Uint8Array(n);
+  pinned[0] = 1;
+  if (previous?.size) {
+    const initial = Float64Array.from(pos);
+    for (let i = 1; i < n; i++) {
+      const node = list[i];
+      if (!node) continue;
+      const known = previous.get(node.path);
+      if (known) {
+        pinned[i] = 1;
+        for (let a = 0; a < 3; a++) pos[i * 3 + a] = known[a] as number;
+      } else
+        for (let a = 0; a < 3; a++)
+          pos[i * 3 + a] =
+            pos[node.parent * 3 + a] + initial[i * 3 + a] - initial[node.parent * 3 + a];
+    }
+  }
+  const moving = pinned.some((p) => p === 0);
   const rest = new Float64Array(n);
   const dist = (a: number, b: number) =>
     Math.hypot(
@@ -169,7 +191,7 @@ export function forceLayout(
   const cell = (v: number) => Math.floor(v / REACH);
   // cells within ±512 of the root, packed into one number (the layout spans a few dozen cells)
   const key = (x: number, y: number, z: number) => (x + 512) * 1048576 + (y + 512) * 1024 + z + 512;
-  for (let step = 0; step < steps; step++) {
+  for (let step = 0; moving && step < steps; step++) {
     force.fill(0);
     const grid = new Map<number, number[]>();
     for (let i = 0; i < n; i++) {
@@ -203,8 +225,9 @@ export function forceLayout(
     }
     for (let i = 1; i < n; i++) spring(i, list[i]?.parent ?? 0, rest[i], 0.3);
     for (const [a, b] of links) spring(a, b, 12, 0.006);
-    // the root stays put; every other node moves at most 1.5 units a step
-    for (let i = 3; i < n * 3; i++) pos[i] += Math.max(-1.5, Math.min(1.5, force[i] * 0.5));
+    // the root and warm-started nodes stay put; every other node moves at most 1.5 units a step
+    for (let i = 3; i < n * 3; i++)
+      if (!pinned[Math.floor(i / 3)]) pos[i] += Math.max(-1.5, Math.min(1.5, force[i] * 0.5));
   }
   return list.map((node, i) => ({
     path: node.path,
@@ -221,3 +244,37 @@ export const AREA_COLORS = ["#4f6290", "#84566f", "#85754c", "#675f90"] as const
 export const OTHER_AREA_COLOR = "#4d566b";
 export const areaColor = (area: string, main: string[]): string =>
   AREA_COLORS[main.indexOf(area)] ?? OTHER_AREA_COLOR;
+
+/** Layouts kept per repo, newest first: navigating back, or a tree whose paths are unchanged, reuses one. */
+const layouts = new Map<string, { key: string; nodes: MapNode[] }[]>();
+
+/**
+ * The repo's layout, computed once per set of paths and imports (line counts don't move nodes) and
+ * kept across page visits. A changed tree warm-starts from the repo's last layout, so a merge moves
+ * only the files it added.
+ */
+export function repoLayout(
+  repoId: string,
+  tree: MapSnapshot["tree"],
+  imports: MapSnapshot["imports"],
+  collapse: (tree: MapSnapshot["tree"]) => MapNode[] | null = () => null,
+): MapNode[] {
+  const key = `${tree
+    .map((f) => f.path)
+    .sort()
+    .join("\n")}\0${imports.map((i) => `${i.from}>${i.to}`).join("\n")}`;
+  const kept = layouts.get(repoId) ?? [];
+  const hit = kept.find((k) => k.key === key);
+  const nodes =
+    hit?.nodes ??
+    collapse(tree) ??
+    forceLayout(
+      tree,
+      imports,
+      STEPS,
+      kept[0] && new Map(kept[0].nodes.map((node) => [node.path, node.position])),
+    );
+  layouts.set(repoId, [{ key, nodes }, ...kept.filter((k) => k.key !== key)].slice(0, 3));
+  if (layouts.size > 8) layouts.delete(layouts.keys().next().value as string);
+  return nodes;
+}
