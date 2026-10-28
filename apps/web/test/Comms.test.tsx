@@ -2105,16 +2105,21 @@ describe("Needs you: row actions", () => {
       return { status, body };
     },
   });
-  const stubNeeds = (items: AttentionItem[], flight: unknown = { seat: live, decisions: [] }) => {
+  const stubNeeds = (
+    items: AttentionItem[],
+    flight: unknown = { seat: live, decisions: [] },
+    extra: Record<string, unknown> = {},
+    rows: CrewRow[] = [
+      seatRow({ id: "guido-1", hudState: "stalled" }),
+      seatRow({ id: "guido-2", index: 1, hudState: "stalled" }),
+      seatRow({ id: "flight-1", index: 2 }),
+    ],
+  ) => {
     posts.length = 0;
     return stubFetch({
       "/api/attention": items,
       "/api/crew": {
-        rows: [
-          seatRow({ id: "guido-1", hudState: "stalled" }),
-          seatRow({ id: "guido-2", index: 1, hudState: "stalled" }),
-          seatRow({ id: "flight-1", index: 2 }),
-        ],
+        rows,
         firstRunToday: null,
       },
       "/api/config": CONFIG,
@@ -2123,6 +2128,7 @@ describe("Needs you: row actions", () => {
       ...route("/api/seats/guido-1/interrupt"),
       ...route("/api/seats/guido-2/interrupt"),
       ...route("/api/seats/flight-1/message"),
+      ...extra,
     });
   };
   const rowOf = async (text: string | RegExp) =>
@@ -2235,6 +2241,70 @@ describe("Needs you: row actions", () => {
     const b = within(row).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
     await waitFor(() => expect(b.title).toBe("FLIGHT is stopped."));
     expect(b.disabled).toBe(true);
+  });
+
+  it("shows the confirmed waiver and disabled set-aside rework action for a review park", async () => {
+    const row = seatRow({
+      id: "guido-1",
+      ticket: "shop-app#1",
+      run: { ...seatRow().run, id: "r-b" },
+      asideRuns: [
+        {
+          runId: "r-a",
+          ticket: "shop-app#2",
+          ticketTitle: "Parked work",
+          loop: {
+            phase: "parked",
+            text: "Blocked: RETRO finding",
+            prNumber: 2,
+            parked: "RETRO finding",
+          },
+        },
+      ],
+    });
+    stubNeeds(
+      [
+        item({
+          key: "park:a",
+          kind: "parked",
+          agentId: "guido-1",
+          escalationId: null,
+          ticket: "shop-app#2",
+          url: null,
+          text: "RETRO finding",
+        }),
+      ],
+      undefined,
+      {
+        "/api/runs/r-a/loop": {
+          loop: {
+            parked: { kind: "review", reason: "RETRO finding", ended: false },
+            pushFor: "abc1234def",
+          },
+        },
+        ...route("/api/runs/r-a/resume"),
+      },
+      [row, seatRow({ id: "flight-1", index: 2 })],
+    );
+    render(<Comms item={null} />);
+    const need = await rowOf("RETRO finding");
+    const waive = await within(need).findByRole("button", {
+      name: "Waive findings on abc1234 and resume",
+    });
+    const rework = within(need).getByRole("button", {
+      name: "Rework message (needs #832)",
+    }) as HTMLButtonElement;
+    expect(rework.disabled).toBe(true);
+    expect(rework.title).toBe("Rework for a set-aside run needs #832.");
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    fireEvent.click(waive);
+    expect(posts).not.toContainEqual({ path: "/api/runs/r-a/resume", body: {} });
+    fireEvent.click(waive);
+    await waitFor(() => expect(posts).toContainEqual({ path: "/api/runs/r-a/resume", body: {} }));
+    confirm.mockRestore();
   });
 });
 
