@@ -98,7 +98,9 @@ type Particle = {
   edge: string;
   from: string;
   to: string;
-  start: number;
+  /** Set on the first frame that paints it, on the frame clock (`delay` after that frame). */
+  start: number | null;
+  delay: number;
   el: SVGGElement | null;
 };
 
@@ -254,6 +256,9 @@ export function CommsSpider({
       const layer = particleLayer.current;
       particles.current = particles.current.filter((p) => {
         const c = geometry.get(p.edge);
+        // Start on the clock that paints it: a frame's timestamp needn't share performance.now()'s
+        // origin (jsdom's doesn't), which would expire a particle on its first frame.
+        p.start ??= now + p.delay;
         const t = (now - p.start) / PARTICLE_MS;
         if (!c || t >= 1) {
           p.el?.remove();
@@ -382,7 +387,6 @@ export function CommsSpider({
     if (flows.generation === flown.current) return;
     flown.current = flows.generation;
     if (reduced || document.hidden || flows.list.length === 0) return;
-    const now = performance.now();
     for (const flow of flows.list) {
       const [a, b] = flow.from < flow.to ? [flow.from, flow.to] : [flow.to, flow.from];
       for (let i = 0; i < Math.min(flow.n, MAX_PARTICLES_PER_FLOW); i++)
@@ -390,7 +394,8 @@ export function CommsSpider({
           edge: `${a}\0${b}`,
           from: flow.from,
           to: flow.to,
-          start: now + i * PARTICLE_GAP_MS,
+          start: null,
+          delay: i * PARTICLE_GAP_MS,
           el: null,
         });
     }
