@@ -1141,7 +1141,7 @@ describe("a seat keeps running through a restart", () => {
     expect(seen).toEqual([{ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" }]);
     expect(starts()).toHaveLength(1);
     // nothing of the run is left: no token, no files, no keeper folder, no cursor
-    expect(existsSync(keeperDir)).toBe(false);
+    await untilGone(keeperDir);
     expect(store.keeperCursor(runId)).toBeNull();
     expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
   });
@@ -1280,7 +1280,7 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "operator" });
     expect(seatState("guido-1")).toBe("idle");
     await until(() => expect(pidAlive(cliPid)).toBe(false));
-    expect(existsSync(keeperDir)).toBe(false);
+    await untilGone(keeperDir);
     expect(store.keeperCursor(runId)).toBeNull();
   });
 
@@ -1479,7 +1479,7 @@ describe("a seat keeps running through a restart", () => {
     },
   );
 
-  it("removes persisted Codex temp roots after restart when the seat row is gone", () => {
+  it("removes persisted Codex temp roots after restart when the seat row is gone", async () => {
     const runId = "ended-codex-restart";
     const worktree = join(dir, "codex-restart-worktree");
     const tmp = join(worktree, MC_TMP_DIR_NAME, "0123456789ab");
@@ -1508,7 +1508,7 @@ describe("a seat keeps running through a restart", () => {
     if (row) store.setSeatSession({ ...row, runId: null, state: "idle", reason: null });
     const { sup } = make();
     sup.start();
-    expect(existsSync(tmp)).toBe(false);
+    await untilGone(tmp);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
   });
 
@@ -1532,7 +1532,7 @@ describe("a seat keeps running through a restart", () => {
     const next = codexSupervisor();
     next.sup.start();
     await next.sup.endAsideRun(runId);
-    expect(existsSync(tmp)).toBe(false);
+    await untilGone(tmp);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
   });
 

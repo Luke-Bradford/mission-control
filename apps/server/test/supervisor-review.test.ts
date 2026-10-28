@@ -63,6 +63,7 @@ import {
   store,
   TICKET,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -898,7 +899,7 @@ describe("startReview", () => {
   it("a review run's worktree goes when the engine ends it", async () => {
     const { sup, reviewId, runId } = await started();
     await sup.endRunByEngine(runId);
-    expect(existsSync(scratch(reviewId))).toBe(false);
+    await untilGone(scratch(reviewId));
   });
 
   it("a review run resumes in its scratch worktree", async () => {
@@ -1350,7 +1351,7 @@ describe("a run set aside in review", () => {
     expect(ended(seen).filter((e) => e.runId === runId)).toEqual([
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "engine" },
     ]);
-    expect(existsSync(wt())).toBe(false);
+    await untilGone(wt());
     expect(store.seatSession("guido-1")).toEqual(row);
     expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
     expect(sup.seatFacts("guido-1")).not.toBeNull();
