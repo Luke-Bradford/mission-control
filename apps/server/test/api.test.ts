@@ -3730,11 +3730,11 @@ describe("boards, escalations, health", () => {
     expect(response.json().seats[0].scope.read).toEqual([]);
     // the set-aside branch still names the seat in conflicts and their unchecked notes
     expect(response.json().seats[0].branches).toContain("aside-branch");
-    // the only branch with changes is the set-aside one: its run owns the seat's ticket and title
+    // the set-aside branch keeps its own ticket; the seat's line shows its current run's (none)
     expect(response.json().seats[0]).toMatchObject({
-      ticket: 41,
-      title: "Set-aside work",
+      ticket: null,
       tickets: { "aside-branch": 41 },
+      changedOn: ["aside-branch"],
     });
     store.upsertPullRequests(
       "shop-app",

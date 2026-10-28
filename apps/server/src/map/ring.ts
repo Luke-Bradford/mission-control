@@ -63,8 +63,10 @@ interface RunScope {
   read: string[];
   /** Edit churn from the run's Edit and Write calls: never the branch's real change. */
   modified: MapChange[];
-  /** file → when a call last edited it, so churn can be limited to edits since the last commit. */
+  /** file → when a call last edited it. */
   touched: Record<string, number>;
+  /** Each edit's churn and time, so churn can be counted since a commit rather than for the run. */
+  edits: { file: string; add: number; rem: number; at: number }[];
   editedAt: number;
   tests: { tests: MapTests; at: number } | null;
 }
@@ -79,6 +81,7 @@ export class CallRing {
         read: [],
         modified: [],
         touched: {},
+        edits: [],
         editedAt: 0,
         tests: null,
       },
@@ -151,6 +154,11 @@ export class CallRing {
   /** The branch that diff was read on: the worktree's checkout, which may be a later run's. */
   diffBranch(runId: string): string | null {
     return this.diffs.get(runId)?.diff.branch() ?? null;
+  }
+
+  /** The worktree's untracked, unignored files, read with that diff; null while unknown. */
+  untracked(runId: string): string[] | null {
+    return this.diffs.get(runId)?.diff.untracked() ?? null;
   }
 
   calls(seat: string): RingCall[] {
@@ -439,6 +447,7 @@ export class CallRing {
       read: [],
       modified: [],
       touched: {},
+      edits: [],
       editedAt: 0,
       tests: null,
     };
@@ -452,6 +461,8 @@ export class CallRing {
           previous.rem += change.rem;
         } else scope.modified.push({ ...change });
         scope.touched[change.file] = Math.max(scope.touched[change.file] ?? 0, call.since);
+        scope.edits.push({ ...change, at: call.since });
+        if (scope.edits.length > 2000) scope.edits.shift();
         scope.editedAt = Math.max(scope.editedAt, call.since);
       }
     }

@@ -4,6 +4,7 @@ import {
   agentCard,
   badgeModels,
   branchList,
+  changedElsewhere,
   changeTotals,
   factLine,
   isStuck,
@@ -57,11 +58,19 @@ describe("who the stage shows, and its one line", () => {
     s.scope.modified.push({ file: "new.ts", add: 4, rem: 0, source: "churn" });
     expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #7 · 3 files · +19 −2 (churn)");
     s.ticket = null;
+    s.branches = ["feature/1"];
+    s.changedOn = ["feature/1"];
+    s.tickets = {};
     s.scope.modified = [{ file: "a.ts", add: 1, rem: 1, source: "diff" }];
     expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1");
     s.branches = ["feature/1", "feature/0-set-aside"];
+    s.changedOn = ["feature/1"];
+    // an unmerged branch with nothing changed isn't counted on the line
+    expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1");
+    s.changedOn = ["feature/1", "feature/0-set-aside"];
     expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1 · 2 branches");
     s.branches = ["feature/1"];
+    s.changedOn = [];
     s.scope.modified = [];
     expect(factLine(s)).toBe("GUIDO-1 · no changes yet");
     expect(factLine({ ...s, seat: "FLIGHT" }, "FLIGHT")).toBe("FLIGHT");
@@ -76,13 +85,32 @@ describe("who the stage shows, and its one line", () => {
     ];
     s.ticket = 717;
     s.branches = ["feature/717-audit", "feature/708-pill"];
+    s.changedOn = ["feature/717-audit", "feature/708-pill"];
     s.tickets = { "feature/717-audit": 717, "feature/708-pill": 708 };
     expect(stageLine(s, "INCO-CX")).toBe("INCO-CX · #717 · 2 files · ~+113 −63 · 2br");
     expect(branchList(s)).toBe("feature/717-audit (#717), feature/708-pill (#708)");
     s.scope.modified = [{ file: "a.ts", add: 175, rem: 29, source: "diff" }];
     s.branches = ["feature/747-models"];
+    s.changedOn = ["feature/747-models"];
+    s.tickets = { "feature/747-models": 747 };
     s.ticket = 747;
     expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #747 · 1 file · +175 −29");
+  });
+  it("says which ticket the changes are on when it isn't the line's", () => {
+    const s = seat();
+    s.badges.questions = [];
+    // the seat's current run is #698; its unmerged changes are all on a set-aside #747 branch
+    s.ticket = 698;
+    s.branches = ["feature/698-guard", "feature/747-models"];
+    s.changedOn = ["feature/747-models"];
+    s.tickets = { "feature/698-guard": 698, "feature/747-models": 747 };
+    s.scope.modified = [{ file: "a.ts", add: 175, rem: 29, source: "diff" }];
+    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 on #747");
+    expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 on #747");
+    expect(changedElsewhere(s)).toBe("#747");
+    // changes on the line's own ticket and another: counted as two branches
+    s.changedOn = ["feature/698-guard", "feature/747-models"];
+    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #698 · 1 file · +175 −29 · 2br");
   });
   it("never folds a seat waiting on the operator; a stopped run or the test lock isn't that", () => {
     const s = seat();

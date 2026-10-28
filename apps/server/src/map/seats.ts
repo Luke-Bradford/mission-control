@@ -19,22 +19,27 @@ export function mapSeats(
     const flight = row.role === "FLIGHT";
     // Each unmerged branch the seat's work is on: its run's, then set-aside runs'. A worktree can
     // have moved on to a later run's branch, so each counts as the branch its diff was read on,
-    // owned (ticket, title, commits) by the newest run on that branch.
+    // owned (ticket, title, commits) by the newest run on that branch. A review run edits nothing.
     const modified = new Map<string, MapSeat["scope"]["modified"][number]>();
-    const work: { branch: string; owner: Run }[] = [];
+    const work: { branch: string; owner: Run | null; changed: boolean }[] = [];
+    let currentWork: Work | null = null;
     for (const candidate of flight
       ? []
       : [
           ...(run ? [run] : []),
           ...store.mapAsideRuns(row.id).filter((r) => r.id !== run?.id && r.repoId === row.repoId),
         ]) {
-      const { branch, owner, changes } = runWork(candidate, ring, store);
+      const done = runWork(candidate, ring, store);
+      if (candidate === run) currentWork = done;
+      const { branch, owner, changes } = done;
       if (
-        (branch && work.some((w) => w.branch === branch)) ||
-        store.pullRequests(row.repoId).some((p) => p.branch === branch && p.state === "merged")
+        branch &&
+        (work.some((w) => w.branch === branch) ||
+          store.pullRequests(row.repoId).some((p) => p.branch === branch && p.state === "merged"))
       )
         continue;
-      if (changes.length && branch) work.push({ branch, owner });
+      // a run with no branch yet still shows its edit churn; it just names no branch
+      if (branch) work.push({ branch, owner, changed: changes.length > 0 });
       for (const change of changes) {
         const previous = modified.get(change.file);
         if (previous) {
@@ -45,14 +50,20 @@ export function mapSeats(
         } else modified.set(change.file, { ...change });
       }
     }
-    // the ticket on the seat's line is its current work's: the first branch with changes, else the
-    // crew row's
-    const ticketRef = flight ? null : (work[0]?.owner.ticket ?? row.ticket ?? null);
+    // The seat's ticket, title, PR and CI are its current run's work (even before it has changes);
+    // only a seat with no current run falls back to its first branch with changes. A worktree on a
+    // branch no run owns (main, a hand checkout) borrows no ticket: the crew row's stands.
+    const lead = run
+      ? currentWork
+      : (work.find((w) => w.changed && w.owner) ?? work.find((w) => w.owner) ?? null);
+    const owner = lead?.owner ?? null;
+    const ticketRef = flight ? null : (owner?.ticket ?? row.ticket ?? null);
     const ticket = ticketNumber(ticketRef);
     const ticketTitle =
-      work[0] && work[0].owner.ticket !== row.ticket
-        ? (work[0].owner.ticketTitle ?? null)
+      owner && owner.ticket !== row.ticket
+        ? (owner.ticketTitle ?? null)
         : (row.ticketTitle ?? null);
+    const leadBranch = lead?.branch ?? run?.branch ?? null;
     const scopeId = flight ? `${run?.id}:${row.repoId}` : (run?.id ?? "");
     const calls = ring
       .calls(row.id)
@@ -66,7 +77,7 @@ export function mapSeats(
     const waiting = lock.waiting.find((w) => w.seatId === row.id);
     const pr = store
       .pullRequests(row.repoId)
-      .find((p) => run?.branch != null && p.branch === run.branch);
+      .find((p) => leadBranch !== null && p.branch === leadBranch);
     const reviews =
       ticket === null
         ? []
@@ -98,9 +109,10 @@ export function mapSeats(
       ticket,
       title: !flight && ticketTitle ? safe(ticketTitle) : null,
       branches: work.map((w) => w.branch),
+      changedOn: work.filter((w) => w.changed).map((w) => w.branch),
       tickets: Object.fromEntries(
         work.flatMap((w) => {
-          const n = ticketNumber(w.owner.ticket);
+          const n = ticketNumber(w.owner?.ticket);
           return n === null ? [] : [[w.branch, n]];
         }),
       ),
@@ -121,7 +133,14 @@ export function mapSeats(
         questions: store
           .openQuestions()
           .filter((q) => q.agentId === row.id && q.runId === run?.id)
-          .map((q) => ({ id: q.id, from: row.id, to: "CAPCOM", ticket, since: q.at })),
+          // a question carries its own run's ticket, not the one the seat's line shows
+          .map((q) => ({
+            id: q.id,
+            from: row.id,
+            to: "CAPCOM",
+            ticket: ticketNumber(run?.ticket) ?? ticket,
+            since: q.at,
+          })),
         failures: [
           ...completed
             .filter((c) => (c.error || c.refused) && (c.end as number) >= now - 600_000)
@@ -181,12 +200,14 @@ export function mapSeats(
 
 /**
  * A run's change: the branch's real diff from its merge base, read from its worktree, plus edit
- * churn for files it touched since its last commit that the diff doesn't show yet (a new file not
- * yet added). Before the diff has been read, or where it can't be, the churn alone, labelled churn.
+ * churn for the worktree's untracked, unignored files the diff can't see yet (a new file not yet
+ * added), counted from the edits since the run's last commit (all of them when it has none: an
+ * untracked file was never committed). A reverted edit or an ignored file adds nothing. Before
+ * the diff has been read, or where it can't be, the run's churn alone, labelled churn.
  */
 export function runChanges(
   runId: string,
-  ring: Pick<CallRing, "diff" | "scope">,
+  ring: Pick<CallRing, "diff" | "scope" | "untracked">,
   store: Pick<Store, "newestRunCommit">,
   /** The run whose edits and commits belong to the diff's branch, when that is another run. */
   ownerId = runId,
@@ -194,36 +215,53 @@ export function runChanges(
   const scope = ring.scope(ownerId);
   const real = ring.diff(runId);
   if (real === null) return scope.modified;
+  const untracked = new Set(ring.untracked(runId) ?? []);
+  if (!untracked.size) return real;
   const since = store.newestRunCommit(ownerId)?.at ?? Number.NEGATIVE_INFINITY;
   const inDiff = new Set(real.map((c) => c.file));
+  const churn = new Map<string, { add: number; rem: number }>();
+  for (const edit of scope.edits) {
+    if (!untracked.has(edit.file) || inDiff.has(edit.file) || edit.at <= since) continue;
+    const total = churn.get(edit.file) ?? { add: 0, rem: 0 };
+    total.add += edit.add;
+    total.rem += edit.rem;
+    churn.set(edit.file, total);
+  }
   return [
     ...real,
-    ...scope.modified
-      .filter((c) => !inDiff.has(c.file) && (scope.touched[c.file] ?? 0) > since)
-      .map((c) => ({ ...c, source: "churn" as const })),
+    ...[...churn].map(([file, { add, rem }]) => ({ file, add, rem, source: "churn" as const })),
   ];
 }
 
 const ticketNumber = (ref: string | null | undefined): number | null =>
   ref ? Number(ref.split("#").at(-1)) || null : null;
 
+type Work = { branch: string | null; owner: Run | null; changes: MapSeat["scope"]["modified"] };
+
 /**
  * A run's work: the branch its worktree's diff was read on (the run's own until read), the newest
- * run on that branch, which owns its ticket and commits, and the change (runChanges).
+ * run on that branch, which owns its ticket and commits (this seat's own run first), and the change
+ * (runChanges). A review run's scratch checkout holds the developer's PR, so it contributes no
+ * change and no branch. A worktree on a branch no run owns, or detached, is credited nothing.
  */
 export function runWork(
   candidate: Run,
-  ring: Pick<CallRing, "diff" | "diffBranch" | "scope">,
+  ring: Pick<CallRing, "diff" | "diffBranch" | "scope" | "untracked">,
   store: Pick<Store, "newestRunCommit" | "latestRunOnBranch">,
-): { branch: string | null; owner: Run; changes: MapSeat["scope"]["modified"] } {
+): Work {
+  if (candidate.reviewId != null) return { branch: null, owner: candidate, changes: [] };
   const read = ring.diffBranch(candidate.id);
-  const owner =
-    read && read !== candidate.branch
-      ? (store.latestRunOnBranch(candidate.repoId, read) ?? candidate)
-      : candidate;
+  if (read === null && ring.diff(candidate.id) !== null)
+    return { branch: candidate.branch, owner: candidate, changes: [] }; // detached: not this branch
+  if (read && read !== candidate.branch) {
+    const owner = store.latestRunOnBranch(candidate.repoId, read, candidate.agentId);
+    return owner
+      ? { branch: read, owner, changes: runChanges(candidate.id, ring, store, owner.id) }
+      : { branch: read, owner: null, changes: [] };
+  }
   return {
     branch: read ?? candidate.branch,
-    owner,
-    changes: runChanges(candidate.id, ring, store, owner.id),
+    owner: candidate,
+    changes: runChanges(candidate.id, ring, store),
   };
 }

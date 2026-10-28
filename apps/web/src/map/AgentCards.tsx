@@ -7,6 +7,7 @@ import {
   type BadgeKind,
   badgeModels,
   branchList,
+  changedElsewhere,
   changeTotals,
   isActing,
   isWorking,
@@ -138,7 +139,9 @@ function AgentRow({
                 {totals.files} file{totals.files === 1 ? "" : "s"} ·{" "}
                 <b className="add">+{totals.add}</b> <b className="rem">−{totals.rem}</b>
                 {totals.churn && " (churn)"}
-                {seat.branches.length > 1 && ` · ${seat.branches.length} branches`}
+                {changedElsewhere(seat)
+                  ? ` on ${changedElsewhere(seat)}`
+                  : seat.changedOn.length > 1 && ` · ${seat.changedOn.length} branches`}
               </>
             ) : seat.seat === "FLIGHT" ? null : (
               "no changes yet"
