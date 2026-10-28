@@ -161,11 +161,17 @@ it("sends a particle per new message along its link, and again when the link ris
   await new Promise((resolve) => setTimeout(resolve, 60));
   expect(document.querySelector(".comms-particle")).toBeNull();
   count = 3;
+  // Count particles as they are created: on a slow runner the first can land before the second
+  // (which starts a beat later) appears, so never both on screen at once.
+  const created = new Set<Element>();
+  const seen = new MutationObserver(() => {
+    for (const el of document.querySelectorAll(".comms-particle")) created.add(el);
+  });
+  seen.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => seen.disconnect());
   act(() => hub.refetchTopic("agents"));
   // Two new messages: two particles, the second a beat behind the first.
-  await waitFor(() => expect(document.querySelectorAll(".comms-particle")).toHaveLength(2), {
-    timeout: 1_000,
-  });
+  await waitFor(() => expect(created.size).toBe(2), { timeout: 3_000 });
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
   await waitFor(() => expect(document.querySelector(".comms-particle")).toBeNull(), {
     timeout: 3_000,
