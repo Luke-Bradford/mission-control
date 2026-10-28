@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -1433,6 +1433,36 @@ describe("the FLIGHT watcher", () => {
       await watch.check();
       expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
       facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
+
+    it("uses the last turn line rather than a transcript touch while FLIGHT is in a turn", async () => {
+      const transcriptPath = join(dir, "flight.jsonl");
+      const first = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(T0).toISOString(),
+        message: { content: [{ type: "text", text: "working" }] },
+      });
+      writeFileSync(transcriptPath, `${first}\n`);
+      live("flight-1", "r-flight");
+      store.upsertRun(run("r-flight", "flight-1", { transcriptPath }));
+      store.setDigest("r-flight", foldTranscript(null, [first], T0).digest);
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      // HUD context reads refresh mtime without adding an agent turn.
+      utimesSync(transcriptPath, nowMs / 1000, nowMs / 1000);
+      await watch.check();
+      expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
+
+      const next = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(nowMs).toISOString(),
+        message: { content: [{ type: "text", text: "back" }] },
+      });
+      writeFileSync(transcriptPath, `${first}\n${next}\n`);
+      store.setDigest("r-flight", foldTranscript(null, [first, next], nowMs).digest);
       await watch.check();
       expect(down()).toEqual([]);
     });
