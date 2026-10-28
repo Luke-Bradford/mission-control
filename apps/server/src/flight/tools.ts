@@ -345,10 +345,10 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
+import { hudRenderRequest } from "./hud-render.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
-import { hudRenderRequest } from "./hud-render.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   flightArrivalSource,
@@ -863,7 +863,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const screenshotHud = async (ctx: McToolContext, args: unknown): Promise<Result> => {
     const c = flightCall(deps, ctx, ScreenshotHudArgs, args);
     if (!c.ok) return c.result;
-    if (!deps.screenshotHud || !deps.hubOrigin) return fail("HUD screenshots are unavailable on this hub.");
+    if (!deps.screenshotHud || !deps.hubOrigin)
+      return fail("HUD screenshots are unavailable on this hub.");
     try {
       const guard = hudRenderRequest(deps.hubOrigin);
       const reference = await deps.screenshotHud(guard.page(c.args.page), guard);
@@ -3132,7 +3133,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.screenshotHud,
-      description: "Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. Compare the image with the mockup and direction, then file or fold the gap.",
+      description:
+        "Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. Compare the image with the mockup and direction, then file or fold the gap.",
       inputSchema: z.toJSONSchema(ScreenshotHudArgs),
       modes: [],
       grantable: ["read-only"],

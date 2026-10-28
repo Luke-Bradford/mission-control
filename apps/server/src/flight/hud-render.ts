@@ -1,7 +1,8 @@
 /** URL confinement shared by the HUD renderer and its tests. */
 import { existsSync } from "node:fs";
 
-const HUD_PATH = /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
+const HUD_PATH =
+  /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
 
 export interface HudRenderGuard {
   (method: string, url: string): boolean;
@@ -21,7 +22,8 @@ export function hudRenderRequest(hubOrigin: string): HudRenderGuard {
     } catch {
       throw new Error("HUD page required.");
     }
-    if (target.origin !== origin || !HUD_PATH.test(target.pathname)) throw new Error("HUD page required.");
+    if (target.origin !== origin || !HUD_PATH.test(target.pathname))
+      throw new Error("HUD page required.");
     return target.toString();
   };
   const guard = ((method: string, url: string): boolean => {
@@ -41,15 +43,24 @@ interface BrowserRoute {
   abort(): Promise<void>;
 }
 interface HudBrowser {
-  newPage(options: { viewport: { width: number; height: number } }): Promise<{ route(pattern: string, handler: (route: BrowserRoute) => Promise<void>): Promise<void>; goto(url: string, options: { waitUntil: "networkidle" }): Promise<void>; screenshot(options: { type: "png" }): Promise<Buffer> }>;
+  newPage(options: { viewport: { width: number; height: number } }): Promise<{
+    route(pattern: string, handler: (route: BrowserRoute) => Promise<void>): Promise<void>;
+    goto(url: string, options: { waitUntil: "networkidle" }): Promise<void>;
+    screenshot(options: { type: "png" }): Promise<Buffer>;
+  }>;
   close(): Promise<void>;
 }
-interface PlaywrightCore { chromium: { launch(options: { headless: true; executablePath?: string }): Promise<HudBrowser> } }
+interface PlaywrightCore {
+  chromium: { launch(options: { headless: true; executablePath?: string }): Promise<HudBrowser> };
+}
 
 /** Route interception is installed before navigation, blocking every non-GET and off-origin request. */
 export async function renderHudWithPlaywright(url: string, guard: HudRenderGuard): Promise<string> {
-  const executablePath = process.env.MC_BROWSER_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (!existsSync(executablePath)) throw new Error("HUD screenshot unavailable: no system Chrome or Chromium executable found.");
+  const executablePath =
+    process.env.MC_BROWSER_EXECUTABLE ||
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (!existsSync(executablePath))
+    throw new Error("HUD screenshot unavailable: no system Chrome or Chromium executable found.");
   let chromium: PlaywrightCore["chromium"];
   try {
     const load = Function("return import('playwright-core')") as () => Promise<PlaywrightCore>;
