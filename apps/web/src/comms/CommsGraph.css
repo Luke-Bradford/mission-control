@@ -564,7 +564,7 @@
   opacity: 0.7;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .comms-chart-now {
+  .comms-chart-now.live {
     animation: comms-live 2.4s ease-in-out infinite;
   }
 }

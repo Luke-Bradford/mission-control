@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
+import { TrafficChart } from "../src/comms/TrafficChart.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { crewRow, seatRow } from "./fixtures.ts";
@@ -11,7 +12,10 @@ const rows = [
   seatRow({ id: "retro-1", index: 2 }),
 ];
 
-afterEach(() => hub.clear());
+afterEach(() => {
+  vi.useRealTimers();
+  hub.clear();
+});
 
 it.each([3, 6, 10])(
   "keeps FLIGHT centred, racks quiet seats and leaves observed loops off the graph for %i seats",
@@ -97,6 +101,96 @@ it("lights an edge only when its message count increases after the initial load"
   count = 2;
   act(() => hub.refetchTopic("agents"));
   await waitFor(() => expect(document.querySelector(".comms-edge.live")).not.toBeNull());
+});
+
+/** Links whose guido-1 → retro-1 count is read from `count()` on every fetch. */
+function stubRisingLinks(count: () => number) {
+  return stubFetch({
+    "/api/comms/links": () => ({
+      status: 200,
+      body: { links: [{ from: "guido-1", to: "retro-1", count: count() }] },
+    }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+}
+
+it("clears a lit edge after 1.8s even when the crew rows change identity meanwhile", async () => {
+  let count = 1;
+  stubRisingLinks(() => count);
+  const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  count = 2;
+  act(() => hub.refetchTopic("agents"));
+  await vi.waitFor(() => expect(document.querySelector(".comms-edge.live")).not.toBeNull(), {
+    interval: 1,
+  });
+  await act(async () => {}); // run the effects that start the light's timer
+  // A crew refetch hands over a new rows array (same seats) before the light times out.
+  act(() => vi.advanceTimersByTime(1_000));
+  graph.rerender(
+    <CommsGraph
+      rows={rows.map((row) => ({ ...row }))}
+      flightId="flight-1"
+      view={{ kind: "crew" }}
+    />,
+  );
+  expect(document.querySelector(".comms-edge.live")).not.toBeNull();
+  act(() => vi.advanceTimersByTime(800));
+  expect(document.querySelector(".comms-edge.live")).toBeNull();
+  expect(document.querySelector(".comms-edge-pulse")).toBeNull();
+});
+
+it("replays the pulse and restarts the light when the same edge rises again", async () => {
+  let count = 1;
+  stubRisingLinks(() => count);
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  count = 2;
+  act(() => hub.refetchTopic("agents"));
+  await vi.waitFor(() => expect(document.querySelector(".comms-edge-pulse")).not.toBeNull(), {
+    interval: 1,
+  });
+  await act(async () => {}); // run the effects that start the light's timer
+  const first = document.querySelector(".comms-edge-pulse");
+  act(() => vi.advanceTimersByTime(1_000));
+  count = 3;
+  act(() => hub.refetchTopic("agents"));
+  await vi.waitFor(
+    () => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("3"),
+    {
+      interval: 1,
+    },
+  );
+  await act(async () => {});
+  // A new pulse element, so its one-shot animation plays again.
+  const second = document.querySelector(".comms-edge-pulse");
+  expect(second).not.toBeNull();
+  expect(second).not.toBe(first);
+  // The light now runs 1.8s from the second rise, not the first.
+  act(() => vi.advanceTimersByTime(1_000));
+  expect(document.querySelector(".comms-edge.live")).not.toBeNull();
+  act(() => vi.advanceTimersByTime(800));
+  expect(document.querySelector(".comms-edge.live")).toBeNull();
+});
+
+it("claims LIVE only while the links are loaded and their last read succeeded", async () => {
+  let ok = true;
+  stubFetch({
+    "/api/comms/links": () =>
+      ok ? { status: 200, body: { links: [] } } : { status: 503, body: { error: "down" } },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(document.querySelector(".comms-graph-readout .live")).toBeNull();
+  await waitFor(() => expect(document.querySelector(".comms-graph-readout .live")).not.toBeNull());
+  await waitFor(() => expect(document.querySelector(".comms-chart-now.live")).not.toBeNull());
+  ok = false;
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(document.querySelector(".comms-graph-readout .live")).toBeNull());
 });
 
 it("keeps selected seats lit without traffic and dims crew-paused seats", async () => {
@@ -237,4 +331,34 @@ it("resolves the configured FLIGHT seat and MC hub traffic in the open conversat
   expect(traffic.querySelector(".comms-hour:last-of-type title")?.textContent).toMatch(
     /· 5 messages · 5 with capcom$/,
   );
+});
+
+it("labels traffic buckets by their start in the operator's timezone", async () => {
+  stubFetch({ "/api/config": { operator: { timezone: "Asia/Kolkata" } } });
+  // UTC-hour buckets start at :30 in a half-hour zone.
+  const start = Date.UTC(2026, 9, 28, 0);
+  const hours = Array.from({ length: 24 }, (_, index) => ({
+    hour: start + index * 60 * 60 * 1000,
+    total: index === 3 ? 4 : 0,
+    part: 0,
+  }));
+  render(
+    <TrafficChart
+      hours={hours}
+      label="Traffic"
+      totalLabel="All messages"
+      partLabel="With CAPCOM"
+      emptyText="None"
+      live
+    />,
+  );
+  await waitFor(() =>
+    expect([...document.querySelectorAll(".comms-chart-tick")].map((el) => el.textContent)).toEqual(
+      ["05:30", "17:30", "now"],
+    ),
+  );
+  expect(document.querySelectorAll(".comms-hour title")[3]?.textContent).toBe(
+    "08:30 · 4 messages · 0 with capcom",
+  );
+  expect(document.querySelector(".comms-chart-now.live")).not.toBeNull();
 });

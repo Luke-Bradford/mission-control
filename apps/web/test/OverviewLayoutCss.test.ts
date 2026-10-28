@@ -39,9 +39,9 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#machP \.resrow \.spark`)).toContain("width: 100%");
   });
 
-  it("shares available Timeline height equally between lanes within 14–28px", () => {
+  it("shares available Timeline height equally between lanes within 19–28px", () => {
     const lanes = rule(String.raw`\.overview-lanes`);
-    expect(lanes).toContain("--lane-min: 14px");
+    expect(lanes).toContain("--lane-min: 19px");
     expect(lanes).toContain("--lane-max: 28px");
     expect(lanes).toContain("repeat(var(--lane-count), minmax(var(--lane-min), 1fr))");
     expect(lanes).toContain("min-height: calc(var(--lane-count) * var(--lane-min))");
@@ -51,6 +51,33 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-track`)).toContain("height: 100%");
     expect(rule(String.raw`\.overview-span`)).toContain("height: var(--sub)");
     expect(rule(String.raw`\.overview-span\.k-turn`)).toContain("top: calc(50% - var(--sub) / 2)");
+  });
+
+  it("keeps all four sub-tracks inside the track at the shortest lane", () => {
+    const px = (block: string, name: string) =>
+      Number(block.match(new RegExp(`${name}: ([\\d.]+)px`))?.[1]);
+    const laneMin = px(rule(String.raw`\.overview-lanes`), "--lane-min");
+    const track = rule(String.raw`\.overview-track`);
+    const sub = px(track, "--sub");
+    const gap = px(track, "--sub-gap");
+    const top = (kind: string) =>
+      rule(String.raw`\.overview-span\.k-${kind}`).match(/top: calc\((.*)\);/)?.[1] ?? "";
+    // The offsets as hud.css writes them, evaluated at the shortest lane (50% = half of it).
+    expect(top("turn")).toBe("50% - var(--sub) / 2");
+    expect(top("checks")).toBe("50% - 1.5 * var(--sub) - var(--sub-gap)");
+    expect(top("review")).toBe("50% - 2.5 * var(--sub) - 2 * var(--sub-gap)");
+    expect(top("lock")).toBe("50% + var(--sub) / 2 + var(--sub-gap)");
+    const half = laneMin / 2;
+    const tops = {
+      turn: half - sub / 2,
+      checks: half - 1.5 * sub - gap,
+      review: half - 2.5 * sub - 2 * gap,
+      lock: half + sub / 2 + gap,
+    };
+    for (const [kind, at] of Object.entries(tops)) {
+      expect(at, kind).toBeGreaterThanOrEqual(0);
+      expect(at + sub, kind).toBeLessThanOrEqual(laneMin);
+    }
   });
 
   it("aligns Machine labels, fixed-height charts and values on shared columns", () => {

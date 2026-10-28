@@ -247,10 +247,14 @@ button {
   cursor: pointer;
   line-height: 1.3;
   white-space: nowrap;
-  transition:
-    border-color 150ms ease,
-    color 150ms ease,
-    background-color 150ms ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition:
+      border-color 150ms ease,
+      color 150ms ease,
+      background-color 150ms ease;
+  }
 }
 button:hover {
   border-color: color-mix(in srgb, var(--accent) 70%, var(--line-2));
@@ -880,9 +884,13 @@ textarea {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-  transition:
-    color 150ms ease,
-    box-shadow 150ms ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tabs a {
+    transition:
+      color 150ms ease,
+      box-shadow 150ms ease;
+  }
 }
 .tabs a:hover {
   color: var(--fg);
@@ -1342,7 +1350,8 @@ th {
   flex: none;
 }
 .overview-lanes {
-  --lane-min: 14px;
+  /* the shortest lane that still holds all four sub-tracks: review sits 9.5px above the centre */
+  --lane-min: 19px;
   --lane-max: 28px;
   position: relative;
   display: grid;
@@ -2108,7 +2117,7 @@ th {
   opacity: 0.8;
 }
 @media (prefers-reduced-motion: no-preference) {
-  #machP .machine-now {
+  #machP .machine-now.live {
     animation: now-pulse 2.4s ease-in-out infinite;
   }
 }
@@ -3105,9 +3114,13 @@ pre.diff .h {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* Full-opacity --muted clears 4.5:1 on --surface in both themes (5.4 dark, 5.1 light); on a
+   selected row's accent tint it would not (4.1 / 4.4), so a zero there reads in --fg-2. */
 .comms-nav-counts > small.zero {
   color: var(--muted);
-  opacity: 0.6;
+}
+.comms-nav button.on .comms-nav-counts > small.zero {
+  color: var(--fg-2);
 }
 /* Unread and mention counts: compact filled chips, mono numerals. */
 .comms-nav .comms-unread-count,
@@ -3295,8 +3308,10 @@ pre.diff .h {
   display: flex;
   flex-direction: column;
   width: min(380px, calc(100vw - 34px));
-  max-height: 440px;
+  /* --mentions-room: the room below the bell inside #chatP, measured when the list opens */
+  max-height: min(440px, var(--mentions-room, 440px));
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
@@ -3323,6 +3338,8 @@ pre.diff .h {
   gap: 2px 7px;
   padding: 9px 12px;
   text-align: left;
+  /* buttons do not wrap by default; the mention's text clamps to two lines instead */
+  white-space: normal;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);

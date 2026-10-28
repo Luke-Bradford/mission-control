@@ -56,19 +56,23 @@ function AgentNavRow({
   );
 }
 
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
 function CountBadges({ unread = 0, mentions = 0 }: { unread?: number; mentions?: number }) {
+  const unreadLabel = counted(unread, "unread message", "unread messages");
+  const mentionsLabel = counted(mentions, "new mention", "new mentions");
   return (
     <>
       {unread > 0 && (
-        <span className="comms-unread-count" title={`${unread} unread`}>
+        <span className="comms-unread-count" title={unreadLabel}>
           <span aria-hidden="true">{unread}</span>
-          <span className="sr-only">{`${unread} unread`}</span>
+          <span className="sr-only">{unreadLabel}</span>
         </span>
       )}
       {mentions > 0 && (
-        <span className="comms-mention-count" title={`${mentions} new mentions`}>
+        <span className="comms-mention-count" title={mentionsLabel}>
           <span aria-hidden="true">@{mentions}</span>
-          <span className="sr-only">{`${mentions} new mentions`}</span>
+          <span className="sr-only">{mentionsLabel}</span>
         </span>
       )}
     </>
