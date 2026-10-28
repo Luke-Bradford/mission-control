@@ -6180,11 +6180,44 @@ kbd {
 .loop-chain {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(5, 170px);
-  grid-template-rows: 96px 36px 36px;
-  gap: 0 34px;
-  min-width: 980px;
-  padding: 18px 0 0;
+  grid-template-columns: repeat(6, 170px);
+  gap: 34px;
+  min-width: 1200px;
+  padding: 18px 0 210px;
+}
+.loop-routes {
+  position: absolute;
+  inset: 0;
+  width: 1280px;
+  height: 320px;
+  overflow: visible;
+  pointer-events: none;
+}
+.loop-route {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  marker-end: url(#loop-arrow);
+}
+.loop-route path,
+.loop-route marker {
+  fill: var(--warn);
+}
+.loop-route.review-return {
+  stroke-dasharray: 5 4;
+}
+.loop-route.conflict-route {
+  stroke: var(--crit);
+  stroke-dasharray: 5 4;
+}
+.loop-route.flight-return {
+  stroke: var(--think);
+  stroke-dasharray: 5 4;
+}
+.loop-route.active {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--warn));
 }
 .loop-chain-step {
   position: relative;
@@ -6210,6 +6243,9 @@ kbd {
 .loop-chain-step.selected {
   border: 2px solid var(--accent);
 }
+.loop-chain-step.now {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
 .loop-chain-step span {
   color: var(--fg-2);
   font-size: var(--fs-s);
@@ -6220,27 +6256,11 @@ kbd {
   font-family: var(--mono);
   font-size: var(--fs-xs);
 }
-.loop-return {
-  grid-column: 2 / span 3;
-  align-self: center;
-  justify-self: stretch;
-  padding: 5px 10px;
-  border-left: 2px solid var(--warn);
-  color: var(--fg-2);
-  font-size: var(--fs-s);
-}
-.return-ci {
-  grid-row: 2;
-  margin-left: 32px;
-}
-.return-review {
-  grid-row: 3;
-  margin-left: 4px;
-  border-left-style: dashed;
-}
 .loop-flight {
-  grid-column: 5;
-  grid-row: 2 / span 2;
+  position: absolute;
+  top: 220px;
+  left: 1060px;
+  width: 190px;
   display: grid;
   align-content: center;
   gap: 4px;

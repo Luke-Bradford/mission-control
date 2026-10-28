@@ -62,17 +62,27 @@ describe("Setup › Loops templates", () => {
         .getAllByRole("button", { name: /gate:/ })
         .map((button) => button.textContent),
     ).toEqual([
-      "ImplementDeveloper seatgate: evidence reported",
-      "Draft PRMission Controlgate: PR opened",
-      "VerifyGitHub Actionsgate: all checks green",
+      "PlanPlanner seatgate: has a ## Plan",
+      "BuildDeveloper seatgate: evidence reported",
+      "CI checksGitHub Actionsgate: all checks green",
       "ReviewRETRO · fresh seatgate: approved",
       "MergeHub enginegate: mergeable",
+      "DoneBoard → Donegate: merged",
     ]);
-    expect(within(chain).getByText("CI failure → Build · used 1/3")).toBeTruthy();
-    expect(within(chain).getByText("Review findings → Build · used 1/3")).toBeTruthy();
+    expect(
+      within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
+    ).toContain("active");
+    expect(within(chain).getByLabelText("Review returns to Build").getAttribute("class")).toContain(
+      "active",
+    );
+    expect(within(chain).getByLabelText("Merge conflict parks for FLIGHT")).toBeTruthy();
+    expect(within(chain).getByLabelText("FLIGHT sync returns to CI checks or Build")).toBeTruthy();
     expect(within(chain).getByText("FLIGHT at cap")).toBeTruthy();
 
     fireEvent.click(within(chain).getByRole("button", { name: /Review: gate: approved/ }));
+    expect(
+      within(chain).getByRole("button", { name: /CI checks: gate: all checks green/ }).className,
+    ).toContain("now");
     const inspector = screen.getByRole("region", { name: "Step inspector" });
     expect(inspector.textContent).toContain("Gate to move onapproved");
     expect(inspector.textContent).toContain("If it failsBack to Build with findings");
@@ -83,9 +93,26 @@ describe("Setup › Loops templates", () => {
 
     const overlay = screen.getByRole("region", { name: "Run overlay" });
     expect(overlay.textContent).toContain("Ticket #681 · inco-cx");
-    expect(overlay.textContent).toContain("Now: Verify · try 2 of 3");
+    expect(overlay.textContent).toContain("Now: CI checks · try 2 of 3");
     expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
     expect(overlay.textContent).toContain("Review findings → Build · 1 of 3");
+
+    fireEvent.click(within(chain).getByRole("button", { name: "Loop only" }));
+    expect(within(chain).getByRole("button", { name: /CI checks: gate/ }).className).not.toContain(
+      "now",
+    );
+    expect(
+      within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
+    ).not.toContain("active");
+  });
+
+  it("keeps phone-width horizontal scrolling inside the chain drawing (hud.css)", () => {
+    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const rule = (selector: string) =>
+      css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(String.raw`\.loop-chain-scroll`)).toContain("overflow-x: auto;");
+    expect(rule(String.raw`\.loop-chain`)).toContain("min-width: 1200px;");
+    expect(rule(String.raw`\.loop-chain`)).not.toContain("overflow-x:");
   });
 
   it("template rows wrap within their width (hud.css)", () => {

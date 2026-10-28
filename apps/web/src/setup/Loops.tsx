@@ -229,7 +229,17 @@ type ChainStep = {
 // Temporary display source until the loop-config API supplies this same shape.
 const TODAY_CHAIN: readonly ChainStep[] = [
   {
-    name: "Implement",
+    name: "Plan",
+    runner: "Planner seat",
+    gate: "has a ## Plan",
+    failure: "Plan again; a missing decision asks CAPCOM with a default",
+    cap: "Size M+ unless planRequired is false",
+    atCap: "FLIGHT",
+    command: "gpt-5.6-sol · high",
+    prompt: "Turn {ticket} into a plan a developer can build from the ticket alone.",
+  },
+  {
+    name: "Build",
     runner: "Developer seat",
     gate: "evidence reported",
     failure: "Stays in Build until evidence is reported",
@@ -239,17 +249,7 @@ const TODAY_CHAIN: readonly ChainStep[] = [
     prompt: "Implement {plan} for {ticket}; test first, then report evidence.",
   },
   {
-    name: "Draft PR",
-    runner: "Mission Control",
-    gate: "PR opened",
-    failure: "Back to Build if the draft cannot be opened",
-    cap: "—",
-    atCap: "FLIGHT",
-    command: "mc report_evidence",
-    prompt: null,
-  },
-  {
-    name: "Verify",
+    name: "CI checks",
     runner: "GitHub Actions",
     gate: "all checks green",
     failure: "Back to Build: CI failed, fix it",
@@ -278,6 +278,16 @@ const TODAY_CHAIN: readonly ChainStep[] = [
     command: "hard-rule clearance",
     prompt: null,
   },
+  {
+    name: "Done",
+    runner: "Board → Done",
+    gate: "merged",
+    failure: "—",
+    cap: "—",
+    atCap: "—",
+    command: "ticket closed",
+    prompt: null,
+  },
 ];
 
 function LoopChain() {
@@ -302,11 +312,50 @@ function LoopChain() {
       >
         <div className="loop-chain-scroll">
           <section className="loop-chain" aria-label="Approved loop chain">
+            <svg className="loop-routes" viewBox="0 0 1280 320" aria-label="Return routes">
+              <defs>
+                <marker
+                  id="loop-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
+                >
+                  <path d="M0,0L8,4L0,8Z" />
+                </marker>
+              </defs>
+              <path
+                className={`loop-route ci-return${withRun ? " active" : ""}`}
+                aria-label="CI checks returns to Build"
+                d="M 510 108 V 150 H 300 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className={`loop-route review-return${withRun ? " active" : ""}`}
+                aria-label="Review returns to Build"
+                d="M 714 108 V 198 H 300 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route conflict-route"
+                aria-label="Merge conflict parks for FLIGHT"
+                d="M 918 108 V 248 H 1110"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route flight-return"
+                aria-label="FLIGHT sync returns to CI checks or Build"
+                d="M 1110 248 H 1040 V 276 H 510 M 300 276 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+            </svg>
             {TODAY_CHAIN.map((item, index) => (
               <button
                 key={item.name}
                 type="button"
-                className={`loop-chain-step${index === selected ? " selected" : ""}`}
+                className={`loop-chain-step${index === selected ? " selected" : ""}${withRun && index === 2 ? " now" : ""}`}
                 onClick={() => setSelected(index)}
                 aria-pressed={index === selected}
                 aria-label={`${item.name}: gate: ${item.gate}`}
@@ -316,12 +365,6 @@ function LoopChain() {
                 <small>gate: {item.gate}</small>
               </button>
             ))}
-            <div className="loop-return return-ci">
-              CI failure → Build{withRun ? " · used 1/3" : " · ≤3"}
-            </div>
-            <div className="loop-return return-review">
-              Review findings → Build{withRun ? " · used 1/3" : " · ≤3"}
-            </div>
             <div className="loop-flight">
               <b>FLIGHT at cap</b>
               <span>re-plan · reassign · split</span>
@@ -355,7 +398,7 @@ function LoopChain() {
           <Panel title="Run overlay" sub="chosen ticket">
             <div className="loop-run">
               <b>Ticket #681 · inco-cx</b>
-              <span>Now: Verify · try 2 of 3</span>
+              <span>Now: CI checks · try 2 of 3</span>
               <span>CI failure → Build · 1 of 3</span>
               <span>Review findings → Build · 1 of 3</span>
             </div>
