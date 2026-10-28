@@ -125,11 +125,14 @@ rl.on("line", (line) => {
     say({ id, result });
   } else if (method === "config/read") {
     let configuredUrl = "http://hub/mcp";
+    let workspaceAccess = "write";
     try {
-      configuredUrl =
-        readFileSync(join(process.env.CODEX_HOME, "config.toml"), "utf8").match(
-          /^url = "([^"]+)"$/m,
-        )?.[1] ?? configuredUrl;
+      const homeConfig = readFileSync(join(process.env.CODEX_HOME, "config.toml"), "utf8");
+      configuredUrl = homeConfig.match(/^url = "([^"]+)"$/m)?.[1] ?? configuredUrl;
+      workspaceAccess =
+        homeConfig.match(
+          /\[permissions\.mc_seat\.filesystem\.":workspace_roots"\]\n"\."="(read|write)"/,
+        )?.[1] ?? workspaceAccess;
     } catch {
       // Unit-session fixtures do not need a private Codex home.
     }
@@ -139,7 +142,7 @@ rl.on("line", (line) => {
       mcp_servers: { mc: { url: configuredUrl, bearer_token_env_var: "MC_SEAT_TOKEN" } },
       permissions: {
         mc_seat: {
-          filesystem: { ":workspace_roots": { ".": "write" } },
+          filesystem: { ":workspace_roots": { ".": workspaceAccess } },
           network: { enabled: false },
         },
       },
