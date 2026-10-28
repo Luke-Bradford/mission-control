@@ -196,14 +196,7 @@ body,
 }
 body {
   margin: 0;
-  /* Flight deck (docs/design/flight-deck.md): a faint 24px plotting grid under the panels. */
-  background:
-    var(--glow),
-    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0 0 /
-    24px 24px,
-    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0
-    0 / 24px 24px,
-    var(--bg);
+  background: var(--glow), var(--bg);
   color: var(--fg);
   font: 400 var(--fs) / 1.45 var(--sans);
   font-variant-numeric: tabular-nums;
