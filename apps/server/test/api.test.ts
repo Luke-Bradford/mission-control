@@ -67,7 +67,13 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_OPEN_NOTE } from "../src/api.ts";
+import {
+  buildApp,
+  CHECK_FAILED,
+  CONFIG_WRITES_UNAVAILABLE,
+  LOOP_WRITES_DISABLED,
+  NO_OPEN_NOTE,
+} from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import {
@@ -1113,6 +1119,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
+  ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -6232,7 +6239,11 @@ describe("the first loop's engine", () => {
     touches: null,
     cardFor: null,
   } as const;
-  const engineApp = (seatRunId: string | null, knownSecrets?: () => Promise<readonly string[]>) => {
+  const engineApp = (
+    seatRunId: string | null,
+    knownSecrets?: () => Promise<readonly string[]>,
+    lifts = false,
+  ) => {
     const told: string[] = [];
     const calls: Parameters<
       NonNullable<Parameters<typeof buildApp>[0]["engine"]>["onOperatorMessage"]
@@ -6261,7 +6272,7 @@ describe("the first loop's engine", () => {
           const [runId] = args;
           told.push(runId);
           calls.push(args);
-          return false;
+          return lifts;
         },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
       },
@@ -6408,6 +6419,110 @@ describe("the first loop's engine", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ ok: true });
     await a.close();
+  });
+
+  it.each(["review", "review-ruling"] as const)(
+    "queues rework for a set-aside %s park and sends it to the engine without a waiver",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          ticket: "shop-app#9",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null, undefined, true);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/message",
+        headers: json,
+        payload: { text: "Please address the findings." },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(calls).toEqual([["aside", "CAPCOM", { kinds: [kind], action: "rework" }]]);
+      expect(store.comms(0)).toEqual([
+        expect.objectContaining({
+          from: "CAPCOM",
+          to: "guido-1",
+          ticket: "shop-app#9",
+          text: "Please address the findings.",
+        }),
+      ]);
+      await a.close();
+    },
+  );
+
+  it.each(["blocked", "ci", "ruling"] as const)(
+    "refuses rework for a %s park without queuing a message",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/message",
+        headers: json,
+        payload: { text: "Please address the findings." },
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toEqual({ error: "rework is only available for review parks" });
+      expect(calls).toEqual([]);
+      expect(store.comms(0)).toEqual([]);
+      await a.close();
+    },
+  );
+
+  it("enforces rework text bounds and refuses loop writes in a preview", async () => {
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        loop: {
+          ...loop,
+          phase: "parked",
+          parked: { kind: "review", reason: "held", ended: false },
+        },
+      }),
+    );
+    const bounded = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const invalid = await bounded.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: " " },
+    });
+    expect(invalid.statusCode).toBe(400);
+    await bounded.close();
+
+    const preview = buildApp({
+      config,
+      store,
+      bus,
+      noLoopWrites: true,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const refused = await preview.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: "Please address the findings." },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: LOOP_WRITES_DISABLED });
+    await preview.close();
   });
 
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
@@ -6928,6 +7043,7 @@ describe("operator token", () => {
     expect(bare.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
     expect(existsSync(join(stateDir, "PAUSE"))).toBe(false);
     expect((await guardedPost(pause, { [OPERATOR_HEADER]: "wrong" })).statusCode).toBe(401);
+    expect((await guardedPost("/api/runs/nope/message", {})).statusCode).toBe(401);
     const away = await guardedPost("/api/settings/away", {}, { ...DEFAULT_AWAY, on: true });
     expect(away.statusCode).toBe(401);
     const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });

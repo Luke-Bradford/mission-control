@@ -3118,6 +3118,53 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
+      // Rework reaches a set-aside run through Comms, rather than interrupting whichever newer run
+      // now occupies its seat. The engine wakes the set-aside run after the message is stored.
+      // Reader: docs/runbook.md#rework-a-parked-run
+      api.post<{ Params: { id: string } }>(
+        "/runs/:id/message",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const run = store.run(req.params.id);
+          if (run === null) return reply.code(404).send({ error: "unknown run" });
+          if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = MessageBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (deps.engine?.status().on !== true)
+            return reply.code(409).send({ error: "the loop engine is off" });
+          const kind = run.loop.parked?.kind;
+          if (kind !== "review" && kind !== "review-ruling")
+            return reply.code(409).send({ error: "rework is only available for review parks" });
+          try {
+            await sendComms(
+              {
+                store,
+                crew: commsCrew,
+                knownSecrets: deps.knownSecrets ?? (async () => []),
+                now,
+              },
+              COMMS_CAPCOM,
+              { to: run.agentId, text: body.data.text, ref: run.ticket ?? undefined },
+            );
+          } catch (e) {
+            return crewFail(
+              new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+              reply,
+            );
+          }
+          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
+            kinds: [kind],
+            action: "rework",
+          });
+          if (!lifted)
+            return reply
+              .code(409)
+              .send({ error: "the review park could not be resumed for rework" });
+          return { ok: true };
+        },
+      );
       // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
       api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
         const run = store.run(req.params.id);
