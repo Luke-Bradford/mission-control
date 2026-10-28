@@ -39,6 +39,7 @@ export function LineChart({
   ticks,
   limit = false,
   annotations = [],
+  guides = [],
   label,
   xLabels,
   at,
@@ -55,6 +56,8 @@ export function LineChart({
   limit?: boolean;
   /** Events known at a precise sample time, such as an observed quota reset. */
   annotations?: { at: number; label: string; color?: string }[];
+  /** Horizontal threshold lines in the chart's value units. */
+  guides?: { value: number; label: string; color?: string }[];
   label: string;
   xLabels: [string, string];
   /** The tooltip heading for a sample time. */
@@ -124,6 +127,9 @@ export function LineChart({
       });
   };
 
+  const visibleAnnotations = annotations.filter(
+    (annotation) => annotation.at >= from && annotation.at <= to,
+  );
   const aria = `${label}: ${series
     .map((s) => {
       const vs = valued(s);
@@ -132,7 +138,11 @@ export function LineChart({
         ? `${s.name} latest ${pct(last.v)}, peak ${pct(Math.max(...vs.map((p) => p.v)))}`
         : `${s.name} no readings`;
     })
-    .join("; ")}`;
+    .join("; ")}${
+    visibleAnnotations.length
+      ? `; events ${visibleAnnotations.map((annotation) => `${at(annotation.at)} ${annotation.label}`).join(", ")}`
+      : ""
+  }`;
 
   return (
     <div className="chart" ref={ref}>
@@ -183,27 +193,41 @@ export function LineChart({
             strokeWidth={1}
           />
         )}
-        {annotations
-          .filter((annotation) => annotation.at >= from && annotation.at <= to)
-          .map((annotation) => {
-            const x = X(annotation.at);
-            return (
-              <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={yTop}
-                  y2={yBottom}
-                  stroke={annotation.color ?? "var(--warn)"}
-                  strokeDasharray="2 3"
-                  strokeWidth={1}
-                />
-                <text className="ct" x={x + 3} y={yTop + 12}>
-                  {annotation.label}
-                </text>
-              </g>
-            );
-          })}
+        {guides.map((guide) => (
+          <g key={`${guide.value}:${guide.label}`} className="guide">
+            <line
+              x1={x0}
+              x2={x1}
+              y1={Y(guide.value)}
+              y2={Y(guide.value)}
+              stroke={guide.color ?? "var(--warn)"}
+              strokeDasharray="4 3"
+              strokeWidth={1}
+            />
+            <text className="ct" x={x1 - 3} y={Y(guide.value) - 3} textAnchor="end">
+              {guide.label}
+            </text>
+          </g>
+        ))}
+        {visibleAnnotations.map((annotation) => {
+          const x = X(annotation.at);
+          return (
+            <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
+              <line
+                x1={x}
+                x2={x}
+                y1={yTop}
+                y2={yBottom}
+                stroke={annotation.color ?? "var(--warn)"}
+                strokeDasharray="2 3"
+                strokeWidth={1}
+              />
+              <text className="ct" x={x + 3} y={yTop + 12}>
+                {annotation.label}
+              </text>
+            </g>
+          );
+        })}
         <defs>
           {series.map((s, i) => (
             <FadeGradient
@@ -274,16 +298,27 @@ export function LineChart({
           x={X(hover)}
           width={w}
           title={at(hover)}
-          rows={series.map((s) => {
-            // A shared crosshair must not invent a value from another sample time.
-            const value = s.points.find((point) => point.at === hover)?.v;
-            return {
-              key: s.id,
-              name: s.name,
-              color: s.color,
-              value: value === null || value === undefined ? "—" : pct(value),
-            };
-          })}
+          rows={series
+            .map((s) => {
+              // A shared crosshair must not invent a value from another sample time.
+              const value = s.points.find((point) => point.at === hover)?.v;
+              return {
+                key: s.id,
+                name: s.name,
+                color: s.color,
+                value: value === null || value === undefined ? "—" : pct(value),
+              };
+            })
+            .concat(
+              visibleAnnotations
+                .filter((annotation) => annotation.at === hover)
+                .map((annotation) => ({
+                  key: `event:${annotation.label}`,
+                  name: "Event",
+                  color: "var(--warn)",
+                  value: annotation.label,
+                })),
+            )}
         />
       )}
     </div>

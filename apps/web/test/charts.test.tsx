@@ -199,8 +199,9 @@ describe("LineChart", () => {
     expect(line.match(/M/g)).toHaveLength(2);
     expect(container.querySelector(".annotation")?.textContent).toBe("quota reset");
     const svg = container.querySelector("svg") as SVGSVGElement;
+    expect(svg.getAttribute("aria-label")).toContain("events 100 quota reset");
     fireEvent.focus(svg);
-    expect(container.querySelector(".tip")?.textContent).toContain("quota12%");
+    expect(container.querySelector(".tip")?.textContent).toContain("Eventquota reset");
   });
 
   it("shares a keyboard crosshair with the other time charts in its workspace", () => {
@@ -230,6 +231,42 @@ describe("LineChart", () => {
     const [first, second] = container.querySelectorAll("svg");
     fireEvent.focus(first as SVGSVGElement);
     expect(second?.parentElement?.querySelector(".tip")?.textContent).toContain("quota20%");
+  });
+
+  it("publishes a line-chart keyboard cursor to a stacked-area time chart", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart
+          series={[
+            {
+              id: "q",
+              name: "quota",
+              color: "var(--s1)",
+              points: [
+                { at: 0, v: 10 },
+                { at: 100, v: 20 },
+              ],
+            },
+          ]}
+          from={0}
+          to={100}
+          label="quota"
+          xLabels={["start", "now"]}
+          at={String}
+        />
+        <StackedArea
+          series={[{ id: "a", name: "tokens", color: "var(--s2)", values: [1, 2] }]}
+          label="tokens"
+          xLabels={["start", "now"]}
+          at={String}
+          format={k}
+          times={[0, 100]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [line] = container.querySelectorAll("svg");
+    fireEvent.focus(line as SVGSVGElement);
+    expect(container.querySelectorAll(".tip")[1]?.textContent).toContain("tokens2");
   });
 });
 

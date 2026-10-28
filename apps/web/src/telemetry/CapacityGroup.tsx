@@ -1,5 +1,6 @@
 import {
   type CrewRow,
+  type LimitRow,
   LOCK_OUTCOME_TEXT,
   lockWaitingLine,
   startOfLocalDay,
@@ -29,6 +30,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
   const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
   const lock = useTestLock();
   const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
+  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const waits = new Map<string, number>();
   const holds = [...(history?.runs ?? [])];
   const h = lock?.holder;
@@ -71,7 +73,17 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     id: `${q.accountId}:${q.window}`,
     name: `${q.accountId} ${q.window}`,
     color,
-    points: q.points.map((p) => ({ at: p.at, v: p.pct })),
+    points: q.points.flatMap((point, index) => {
+      const previous = q.points[index - 1];
+      // A fall starts a new provider window; make the discontinuity visible rather than plotting
+      // a fictitious burn reversal.
+      return previous && point.pct < previous.pct
+        ? [
+            { at: point.at, v: null },
+            { at: point.at, v: point.pct },
+          ]
+        : [{ at: point.at, v: point.pct }];
+    }),
   }));
   // Usage is cumulative within a provider window. A lower subsequent reading is a reset, not a
   // spent-usage value of zero; mark the discontinuity so operators do not read it as a burn drop.
@@ -91,6 +103,30 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
       color,
     };
   });
+  const quotaGuides = quota.flatMap(({ q }) => {
+    const row = limits.find(
+      (limit) => limit.accountId === q.accountId && limit.window === q.window,
+    );
+    return row
+      ? [
+          {
+            value: row.alertAt,
+            label: `${q.accountId} alert ${row.alertAt}%`,
+            color: "var(--warn)",
+          },
+          { value: row.stopAt, label: `${q.accountId} stop ${row.stopAt}%`, color: "var(--crit)" },
+        ]
+      : [];
+  });
+  const quotaResetEvents = [
+    ...quotaResets,
+    ...quota.flatMap(({ q }) => {
+      const row = limits.find(
+        (limit) => limit.accountId === q.accountId && limit.window === q.window,
+      );
+      return row ? [{ at: row.resetAt, label: `${q.accountId} ${q.window} reset` }] : [];
+    }),
+  ];
   const machine = t?.machine ?? [];
   const machineLines: LineSeries[] = [
     {
@@ -121,7 +157,8 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
               max={110}
               ticks={[0, 50, 100]}
               limit
-              annotations={quotaResets}
+              annotations={quotaResetEvents}
+              guides={quotaGuides}
               label="Quota used"
               {...chart}
             />

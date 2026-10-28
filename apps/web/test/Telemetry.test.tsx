@@ -17,7 +17,7 @@ import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, HOUR, METRICS_VIEW, MIN, NOW, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, HOUR, limit5h, METRICS_VIEW, MIN, NOW, seatRow } from "./fixtures.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -809,6 +809,33 @@ describe("Capacity and cost", () => {
       }),
     );
     expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("claude-main 5h reset");
+  });
+
+  it("breaks a reset and labels the configured alert and stop thresholds", async () => {
+    const data = tel({
+      quota: [
+        {
+          accountId: "claude-main",
+          window: "5h",
+          points: [
+            { at: NOW - HOUR, pct: 80 },
+            { at: NOW - MIN, pct: 12 },
+          ],
+        },
+      ],
+    });
+    stubFetch({
+      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.metrics().path]: METRICS_VIEW,
+      [RESOURCES.limits.path]: [limit5h({ alertAt: 85, stopAt: 95 })],
+    });
+    render(<Telemetry />);
+    await screen.findByText("61.2k");
+    const quota = panel("tQuota");
+    expect(quota.querySelector("path.line")?.getAttribute("d")?.match(/M/g)).toHaveLength(2);
+    expect(quota.textContent).toContain("claude-main alert 85%");
+    expect(quota.textContent).toContain("claude-main stop 95%");
   });
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
