@@ -1390,6 +1390,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         },
       );
     }
+    store.setRunPromptVersion(
+      run.id,
+      createHash("sha256").update(readFileSync(promptPath, "utf8")).digest("hex"),
+      def.prompt,
+      now(),
+    );
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
@@ -2910,6 +2916,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: planner || readOnly ? null : checkout.branch,
         ticket:
@@ -3322,6 +3330,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: null,
         ticket: author.ticket,

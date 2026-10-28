@@ -127,6 +127,19 @@ CREATE TABLE IF NOT EXISTS pull_requests (
   review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, merged_at INTEGER,
   PRIMARY KEY (repo_id, number)
 );
+-- A merged PR outlives the bounded live PR cache used by the board.
+CREATE TABLE IF NOT EXISTS pr_history (
+  repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, record TEXT NOT NULL,
+  PRIMARY KEY (repo_id, number)
+);
+CREATE INDEX IF NOT EXISTS pr_history_merged ON pr_history(repo_id, merged_at);
+CREATE TABLE IF NOT EXISTS retrospectives (
+  repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
+  PRIMARY KEY (repo_id, day)
+);
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  hash TEXT PRIMARY KEY, path TEXT NOT NULL, first_seen INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER NOT NULL, PRIMARY KEY (repo_id, number)
@@ -745,6 +758,9 @@ const toRun = (r: Row): Run => ({
   ...(r.cli_version === null || r.cli_version === undefined
     ? {}
     : { cliVersion: r.cli_version as string }),
+  ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
+  ...(r.effort == null ? {} : { effort: r.effort as string }),
+  ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
     ? {}
@@ -1038,6 +1054,9 @@ export class Store {
       ["profile_hash", "TEXT"],
       // The plan at run creation; later transcript folds never rewrite it.
       ["plan", "TEXT"],
+      ["account_id", "TEXT"],
+      ["effort", "TEXT"],
+      ["prompt_hash", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1078,6 +1097,9 @@ export class Store {
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
     // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
     this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("pull_requests", "additions", "INTEGER");
+    this.addColumn("pull_requests", "deletions", "INTEGER");
+    this.addColumn("pull_requests", "changed_files", "INTEGER");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1246,8 +1268,9 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
+           account_id, effort, prompt_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1257,7 +1280,10 @@ export class Store {
            summary = excluded.summary, folded = MAX(folded, excluded.folded),
            ticket_title = COALESCE(excluded.ticket_title, ticket_title),
            cli_version = COALESCE(excluded.cli_version, cli_version),
-           latest_plan = COALESCE(excluded.latest_plan, latest_plan)`,
+           latest_plan = COALESCE(excluded.latest_plan, latest_plan),
+           account_id = COALESCE(account_id, excluded.account_id),
+           effort = COALESCE(effort, excluded.effort),
+           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash)`,
       )
       .run(
         r.id,
@@ -1286,7 +1312,20 @@ export class Store {
         r.plan === undefined ? null : JSON.stringify(r.plan),
         r.vendor ?? "claude",
         r.latestPlan ?? null,
+        r.accountId ?? null,
+        r.effort ?? null,
+        r.promptHash ?? null,
       );
+  }
+
+  /** Completes immutable launch metadata once the generated prompt file exists. */
+  setRunPromptVersion(runId: string, hash: string, path: string, at: number): void {
+    this.db
+      .prepare("UPDATE runs SET prompt_hash = COALESCE(prompt_hash, ?) WHERE id = ?")
+      .run(hash, runId);
+    this.db
+      .prepare("INSERT OR IGNORE INTO prompt_versions (hash, path, first_seen) VALUES (?, ?, ?)")
+      .run(hash, path, at);
   }
 
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
@@ -2042,8 +2081,8 @@ export class Store {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks, closing_issues, merge_commit_sha)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2051,7 +2090,9 @@ export class Store {
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
          assignees = excluded.assignees, checks = excluded.checks,
-         closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha, stale = 0`,
+         closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
+         additions = excluded.additions, deletions = excluded.deletions,
+         changed_files = excluded.changed_files, stale = 0`,
     );
     for (const p of prs) {
       const runs = this.db
@@ -2093,8 +2134,102 @@ export class Store {
         JSON.stringify(p.checks ?? []),
         JSON.stringify(p.closingIssues ?? []),
         p.mergeCommitSha ?? null,
+        p.additions ?? null,
+        p.deletions ?? null,
+        p.changedFiles ?? null,
       );
+      if (p.mergedAt !== null)
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
+          )
+          .run(repoId, p.number, p.mergedAt, JSON.stringify(p));
     }
+  }
+
+  /** Merged PR snapshots are immutable, unlike the 30-day live PR cache. */
+  prHistory(repoId: RepoId, since = 0, until = Number.MAX_SAFE_INTEGER): PullRequestView[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT record FROM pr_history WHERE repo_id = ? AND merged_at >= ? AND merged_at <= ? ORDER BY merged_at DESC",
+        )
+        .all(repoId, since, until) as { record: string }[]
+    ).map((r) => JSON.parse(r.record) as PullRequestView);
+  }
+
+  recordRetrospective(repoId: RepoId, day: string, at: number, report: unknown): void {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO retrospectives (repo_id, day, at, report) VALUES (?, ?, ?, ?)",
+      )
+      .run(repoId, day, at, JSON.stringify(report));
+  }
+
+  retrospectives(repoId: RepoId, since = 0, until = Number.MAX_SAFE_INTEGER): unknown[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT report FROM retrospectives WHERE repo_id = ? AND at >= ? AND at <= ? ORDER BY at DESC",
+        )
+        .all(repoId, since, until) as { report: string }[]
+    ).map((r) => JSON.parse(r.report));
+  }
+
+  /** Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP. */
+  audit(since: number, until: number): Record<string, unknown> {
+    const rows = (sql: string, ...args: SQLInputValue[]) =>
+      this.db.prepare(sql).all(...args) as Row[];
+    return {
+      range: { since, until },
+      longRunners: rows(
+        `SELECT id AS runId, agent_id AS agentId, ticket, started_at AS startedAt,
+          COALESCE(ended_at, ?) - started_at AS durationMs FROM runs
+         WHERE started_at <= ? AND COALESCE(ended_at, ?) >= ? ORDER BY durationMs DESC LIMIT 100`,
+        until,
+        until,
+        until,
+        since,
+      ),
+      deathLoops: rows(
+        `SELECT run_id AS runId, COUNT(*) AS parks FROM run_attempts
+         WHERE kind = 'loop' AND at >= ? AND at <= ?
+           AND json_extract(data, '$.parked') IS NOT NULL GROUP BY run_id ORDER BY parks DESC`,
+        since,
+        until,
+      ),
+      reworkRounds: rows(
+        `SELECT author_run_id AS runId, COUNT(*) AS rounds, MAX(round) AS maxRound FROM reviews
+         WHERE created_at >= ? AND created_at <= ? GROUP BY author_run_id ORDER BY rounds DESC`,
+        since,
+        until,
+      ),
+      refusalsByRule: rows(
+        `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
+        since,
+        until,
+      ),
+      questions: rows(
+        `SELECT COUNT(*) AS asked, SUM(answered_at IS NOT NULL) AS answered,
+          AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
+         FROM seat_questions WHERE at >= ? AND at <= ?`,
+        since,
+        until,
+      )[0] ?? { asked: 0, answered: 0, answerMs: null },
+      costPerMergedTicket: rows(
+        `SELECT json_extract(h.record, '$.ticket') AS ticket, SUM(r.cost_usd) AS costUsd FROM pr_history h
+         LEFT JOIN runs r ON r.repo_id = h.repo_id AND r.ticket = json_extract(h.record, '$.ticket')
+         WHERE h.merged_at >= ? AND h.merged_at <= ? GROUP BY h.repo_id, json_extract(h.record, '$.ticket') ORDER BY h.merged_at DESC`,
+        since,
+        until,
+      ),
+      modelPromptTimeline: rows(
+        `SELECT started_at AS at, model, account_id AS accountId, effort, prompt_hash AS promptHash
+         FROM runs WHERE started_at >= ? AND started_at <= ? ORDER BY started_at`,
+        since,
+        until,
+      ),
+    };
   }
 
   pullRequests(repoId: RepoId): PullRequestView[] {
@@ -2145,6 +2280,9 @@ export class Store {
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
       closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      additions: (r.additions as number | null) ?? null,
+      deletions: (r.deletions as number | null) ?? null,
+      changedFiles: (r.changed_files as number | null) ?? null,
     }));
   }
 
