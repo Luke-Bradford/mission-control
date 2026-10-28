@@ -30,7 +30,9 @@ export type Frame = { w: number; h: number; cx: number; cy: number; rx: number; 
 export const DEFAULT_SIZE = { w: 340, h: 360 };
 
 /** The strip under the plot that holds the legend. */
-const LEGEND_PX = 20;
+export const LEGEND_PX = 20;
+/** How far a tall panel may stretch the web vertically, as a multiple of its width. */
+const MAX_STRETCH = 1.5;
 
 export function frameFor(size: { w: number; h: number }): Frame {
   const w = Math.max(240, size.w);
@@ -38,8 +40,8 @@ export function frameFor(size: { w: number; h: number }): Frame {
   const plot = h - LEGEND_PX;
   // Room outside the web for the spokes' labels.
   const rx = Math.min(w / 2 - 46, plot / 2 - 26);
-  // A tall panel stretches the web a little, never so far that the spokes read as skewed.
-  const ry = Math.min(plot / 2 - 26, rx * 1.12);
+  // A tall panel stretches the web to fill it; spokesFor widens the spread to match.
+  const ry = Math.min(plot / 2 - 26, rx * MAX_STRETCH);
   return { w, h, cx: w / 2, cy: plot / 2, rx, ry };
 }
 
@@ -53,10 +55,14 @@ function spokeOrder(keys: string[]): string[] {
   return [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
-/** Angles (degrees, y down) for `k` spokes on one side, centred on the horizontal. */
-function sideAngles(k: number): number[] {
+/**
+ * Angles (degrees, y down) for `k` spokes on one side, centred on the horizontal. A web stretched
+ * tall (`stretch` = ry / rx above 1) spreads them wider, up to a third more, so they reach into it.
+ */
+function sideAngles(k: number, stretch: number): number[] {
   if (k <= 1) return [0];
-  const span = Math.min(100, 36 * (k - 1));
+  const tall = Math.min(1, Math.max(0, (stretch - 1) / (MAX_STRETCH - 1)));
+  const span = Math.min(100, 36 * (k - 1)) * (1 + tall / 3);
   return Array.from({ length: k }, (_, i) => -span / 2 + (span * i) / (k - 1));
 }
 
@@ -64,7 +70,7 @@ function sideAngles(k: number): number[] {
  * One spoke per role (and one for the loops), alternating right and left of FLIGHT so the top and
  * bottom stay clear for CAPCOM and #crew. Seats on a spoke keep config order.
  */
-export function spokesFor(rows: readonly CrewRow[], flight: string): Spoke[] {
+export function spokesFor(rows: readonly CrewRow[], flight: string, stretch = 1): Spoke[] {
   const groups = new Map<string, CrewRow[]>();
   for (const row of rows) {
     if (row.id === flight) continue;
@@ -74,8 +80,8 @@ export function spokesFor(rows: readonly CrewRow[], flight: string): Spoke[] {
   const keys = spokeOrder([...groups.keys()]);
   const right = keys.filter((_, i) => i % 2 === 0);
   const left = keys.filter((_, i) => i % 2 === 1);
-  const rightAngles = sideAngles(right.length);
-  const leftAngles = sideAngles(left.length).map((a) => 180 - a);
+  const rightAngles = sideAngles(right.length, stretch);
+  const leftAngles = sideAngles(left.length, stretch).map((a) => 180 - a);
   return keys.map((key, i) => ({
     key,
     angle: (i % 2 === 0 ? rightAngles[i / 2] : leftAngles[(i - 1) / 2]) ?? 0,
@@ -123,7 +129,7 @@ export function spokeAnchors(
 
 /** Which side of its node a name sits on. */
 export type LabelSide = "below" | "above" | "right" | "left";
-type Box = { x0: number; y0: number; x1: number; y1: number };
+export type Box = { x0: number; y0: number; x1: number; y1: number };
 
 /** A 9px mono upper-case name is about this wide per character. */
 const CHAR_PX = 5.9;
@@ -145,23 +151,46 @@ const overlap = (a: Box, b: Box) =>
   Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) *
   Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 
+/** What a name must keep clear of besides other names and nodes: lines and shown count chips. */
+export type LabelObstacles = { segments?: readonly [Point, Point][]; boxes?: readonly Box[] };
+
+/** How much of a segment runs through a box, by sampling (cheap and good enough for a few lines). */
+function crossing(box: Box, [a, b]: [Point, Point]): number {
+  let hits = 0;
+  for (let i = 1; i < 16; i++) {
+    const x = a.x + ((b.x - a.x) * i) / 16;
+    const y = a.y + ((b.y - a.y) * i) / 16;
+    if (x > box.x0 && x < box.x1 && y > box.y0 && y < box.y1) hits++;
+  }
+  return hits;
+}
+
 /**
- * Places every full name: each on its preferred side unless that hits another name, a node or
- * the edge of the plot, then the first clear side, else the least crowded. Done on the anchors,
- * not per frame, so names never flicker as the web drifts.
+ * Places every full name: on the side it had before if that is still clear (so traffic changes do
+ * not flip names), else its preferred side, else the first clear side, else the least crowded.
+ * Clear means off other names, nodes, the given lines and chips, the plot's edges and the legend
+ * strip. Done on the anchors, not per frame, so names never flicker as the web drifts.
  */
 export function placeLabels(
   nodes: readonly { id: string; at: Point; r: number; text: string; prefer: LabelSide }[],
   f: Frame,
+  previous: ReadonlyMap<string, LabelSide> = new Map(),
+  obstacles: LabelObstacles = {},
 ): Map<string, LabelSide> {
   const placed: Box[] = [];
   const sides = new Map<string, LabelSide>();
+  const floor = f.h - LEGEND_PX;
   const discs = nodes.map((n) => ({
     id: n.id,
     box: { x0: n.at.x - n.r, y0: n.at.y - n.r, x1: n.at.x + n.r, y1: n.at.y + n.r },
   }));
   for (const n of nodes) {
-    const order: LabelSide[] = [n.prefer, ...(["below", "above", "right", "left"] as const)];
+    const before = previous.get(n.id);
+    const order: LabelSide[] = [
+      ...(before ? [before] : []),
+      n.prefer,
+      ...(["below", "above", "right", "left"] as const),
+    ];
     let best: { side: LabelSide; box: Box; cost: number } | null = null;
     for (const side of order) {
       const box = labelBox(n.at, n.r, n.text, side);
@@ -169,10 +198,12 @@ export function placeLabels(
         Math.max(0, -box.x0) +
         Math.max(0, box.x1 - f.w) +
         Math.max(0, -box.y0) +
-        Math.max(0, box.y1 - f.h);
+        Math.max(0, box.y1 - floor);
       const cost =
         placed.reduce((sum, b) => sum + overlap(box, b), 0) +
         discs.reduce((sum, d) => sum + (d.id === n.id ? 0 : overlap(box, d.box)), 0) +
+        (obstacles.boxes ?? []).reduce((sum, b) => sum + overlap(box, b), 0) +
+        (obstacles.segments ?? []).reduce((sum, seg) => sum + crossing(box, seg) * 4, 0) +
         outside * LABEL_H;
       if (best === null || cost < best.cost) best = { side, box, cost };
       if (cost === 0) break;
@@ -219,10 +250,19 @@ export function curve(a: Point, b: Point, straight: boolean, centre: Point) {
 /** What the simulation is asked to hold: a node's anchor, its radius, and whether it is fixed. */
 export type SimTarget = { id: string; x: number; y: number; r: number; pinned: boolean };
 
-type SimNode = SimTarget & { px: number; py: number; vx: number; vy: number; phase: number };
+type SimNode = SimTarget & {
+  px: number;
+  py: number;
+  vx: number;
+  vy: number;
+  phase: number;
+  /** Where the node was after the previous step (where it started, before one), to measure movement. */
+  lx: number;
+  ly: number;
+};
 
 /** A stable per-id phase so each seat drifts on its own path, the same every visit. */
-function phaseOf(id: string): number {
+export function phaseOf(id: string): number {
   let h = 2166136261;
   for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
   return ((h >>> 0) / 2 ** 32) * Math.PI * 2;
@@ -231,8 +271,6 @@ function phaseOf(id: string): number {
 /** Spring stiffness (1/s²) and damping (1/s): a little under critical, so a move settles softly. */
 const STIFFNESS = 14;
 const DAMPING = 6;
-/** Drift: a few pixels round the anchor, a lap every ten to fifteen seconds. */
-const DRIFT_PX = 3;
 /** The clear gap kept between two nodes' edges. */
 const GAP = 9;
 /** Where a node that appears after the first layout starts: this far out along its spoke. */
@@ -258,21 +296,20 @@ export class SpiderSim {
         continue;
       }
       const fresh = !this.started || instant || t.pinned;
-      this.nodes.set(t.id, {
-        ...t,
-        px: fresh ? t.x : centre.x + (t.x - centre.x) * ENTRY_FRACTION,
-        py: fresh ? t.y : centre.y + (t.y - centre.y) * ENTRY_FRACTION,
-        vx: 0,
-        vy: 0,
-        phase: phaseOf(t.id),
-      });
+      const px = fresh ? t.x : centre.x + (t.x - centre.x) * ENTRY_FRACTION;
+      const py = fresh ? t.y : centre.y + (t.y - centre.y) * ENTRY_FRACTION;
+      this.nodes.set(t.id, { ...t, px, py, vx: 0, vy: 0, phase: phaseOf(t.id), lx: px, ly: py });
     }
     this.started = true;
     if (instant) this.settle();
   }
 
-  /** Advances `dt` seconds (capped, so a backgrounded tab does not jump) at clock `t` seconds. */
-  step(dt: number, t: number, drift: boolean): void {
+  /**
+   * Advances `dt` seconds (capped, so a backgrounded tab does not jump) and returns how far the
+   * nodes moved in all: once that stays near zero the picture has settled and the loop can rest.
+   * (The resting drift is a CSS animation on each node, not physics, so it costs no frames.)
+   */
+  step(dt: number): number {
     const h = Math.min(Math.max(dt, 0), 1 / 20);
     for (const n of this.nodes.values()) {
       if (n.pinned) {
@@ -282,14 +319,19 @@ export class SpiderSim {
         n.vy = 0;
         continue;
       }
-      const tx = n.x + (drift ? DRIFT_PX * Math.sin(t * (0.42 + n.phase / 30) + n.phase) : 0);
-      const ty = n.y + (drift ? DRIFT_PX * Math.cos(t * (0.55 - n.phase / 40) + n.phase * 1.7) : 0);
-      n.vx += (STIFFNESS * (tx - n.px) - DAMPING * n.vx) * h;
-      n.vy += (STIFFNESS * (ty - n.py) - DAMPING * n.vy) * h;
+      n.vx += (STIFFNESS * (n.x - n.px) - DAMPING * n.vx) * h;
+      n.vy += (STIFFNESS * (n.y - n.py) - DAMPING * n.vy) * h;
       n.px += n.vx * h;
       n.py += n.vy * h;
     }
     this.separate();
+    let moved = 0;
+    for (const n of this.nodes.values()) {
+      moved += Math.hypot(n.px - n.lx, n.py - n.ly);
+      n.lx = n.px;
+      n.ly = n.py;
+    }
+    return moved;
   }
 
   /** Puts every node on its anchor at rest, then clears any overlap. */
@@ -301,6 +343,10 @@ export class SpiderSim {
       n.vy = 0;
     }
     for (let i = 0; i < 12; i++) this.separate();
+    for (const n of this.nodes.values()) {
+      n.lx = n.px;
+      n.ly = n.py;
+    }
   }
 
   private separate(): void {

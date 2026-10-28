@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -17,6 +18,7 @@ import {
   onSpoke,
   type Point,
   type Presence,
+  phaseOf,
   SpiderSim,
   type Spoke,
 } from "./spider.ts";
@@ -26,9 +28,9 @@ export type LastMessage = { from: string; to: string; text: string; at: number }
 
 export type SpiderNode = {
   id: string;
-  /** What the graph prints under the node (a seat's suffix on its role's spoke). */
+  /** The call sign the graph prints by the node. */
   label: string;
-  /** The full name: tooltips and the accessible name. */
+  /** The call sign for cards and accessible names (the same as `label`). */
   name: string;
   hub: boolean;
   /** Which side of the node its name sits on (placed clear of other names and nodes). */
@@ -82,8 +84,14 @@ const PARTICLE_GAP_MS = 200;
 const MAX_PARTICLES_PER_FLOW = 4;
 /** A node that leaves fades for this long before it is removed. */
 const LEAVE_MS = 650;
-/** The physics loop runs at most this often (ms between steps); about 30 fps. */
+/** The physics loop steps at most this often (ms); about 30 fps while anything moves. */
 const STEP_MS = 30;
+/** The loop rests once the nodes have moved less than this (px, all told) for QUIET_STEPS steps. */
+const QUIET_PX = 0.05;
+const QUIET_STEPS = 8;
+const PING_MS = 900;
+const TIP_W = 228;
+const TIP_GAP = 16;
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 type Particle = {
@@ -97,6 +105,9 @@ type Particle = {
 type Ghost = { node: SpiderNode; at: Point };
 
 type Hover = { kind: "node"; id: string } | { kind: "edge"; key: string } | null;
+
+/** A link's drawn parts, held so the loop writes to them without searching the DOM. */
+type EdgeParts = { hit?: SVGPathElement; line?: SVGPathElement; chip?: SVGGElement };
 
 /** Where a node's name sits, relative to the node, for its placed side. */
 function nameAt(node: { r: number; labelSide: LabelSide }) {
@@ -119,8 +130,7 @@ const reducedMotionQuery = () =>
 
 /** True while the operator asks for reduced motion; follows the setting live. */
 export function useReducedMotion(): boolean {
-  const query = reducedMotionQuery;
-  const [reduced, setReduced] = useState(() => query()?.matches ?? false);
+  const [reduced, setReduced] = useState(() => reducedMotionQuery()?.matches ?? false);
   useEffect(() => {
     const media = reducedMotionQuery();
     if (!media) return;
@@ -132,10 +142,21 @@ export function useReducedMotion(): boolean {
   return reduced;
 }
 
+/** Clockwise from straight up, the centre first: the order the arrow keys walk the nodes in. */
+function walkOrder(nodes: readonly SpiderNode[], centre: Point): SpiderNode[] {
+  const angle = (n: SpiderNode) => {
+    const a = Math.atan2(n.anchor.y - centre.y, n.anchor.x - centre.x) + Math.PI / 2;
+    return a < 0 ? a + 2 * Math.PI : a;
+  };
+  const middle = (n: SpiderNode) => Math.hypot(n.anchor.x - centre.x, n.anchor.y - centre.y) < 1;
+  return [...nodes].sort((a, b) => Number(middle(b)) - Number(middle(a)) || angle(a) - angle(b));
+}
+
 /**
- * The Comms graph as a live spider: React draws the structure; a physics loop moves it. The loop
- * writes node transforms, link paths and particles straight to the DOM, so a refetch re-renders
- * nothing that moved and the picture never jumps.
+ * The Comms graph as a live spider. React draws the structure; a physics loop moves it only while
+ * something is moving (a node arriving or re-anchored, a particle in flight), then rests. The
+ * resting drift is a CSS animation on each node's body, so a still graph costs no frames, and
+ * everything pauses while the panel is scrolled out of view.
  */
 export function CommsSpider({
   frame: f,
@@ -162,20 +183,48 @@ export function CommsSpider({
   onOpenNode: (id: string) => void;
   onOpenEdge: (a: string, b: string) => void;
 }) {
+  const uid = useId();
+  const tipId = `${uid}-tip`;
+  const hintId = `${uid}-hint`;
+  const awayId = `${uid}-away`;
   const simRef = useRef<SpiderSim | null>(null);
   if (simRef.current === null) simRef.current = new SpiderSim();
   const sim = simRef.current;
+  const figure = useRef<HTMLElement>(null);
   const nodeEls = useRef(new Map<string, SVGGElement>());
   const edgeEls = useRef(new Map<string, SVGGElement>());
+  const edgeParts = useRef(new Map<string, EdgeParts>());
+  const partRefs = useRef(new Map<string, (el: SVGElement | null) => void>());
   const particleLayer = useRef<SVGGElement>(null);
   const particles = useRef<Particle[]>([]);
-  const latest = useRef({ nodes, edges, f });
-  latest.current = { nodes, edges, f };
+  const pingTimers = useRef(new Set<number>());
+  const ghostTimers = useRef(new Set<number>());
+  const latest = useRef({ edges, f });
+  latest.current = { edges, f };
   const [ghosts, setGhosts] = useState<Map<string, Ghost>>(() => new Map());
   const [hover, setHover] = useState<Hover>(null);
-  const [awayOpen, setAwayOpen] = useState(false);
+  const [awayHover, setAwayHover] = useState(false);
+  const [awayPinned, setAwayPinned] = useState(false);
   const centre = hubPoint(f, "centre");
   const at = (node: SpiderNode): Point => sim.position(node.id) ?? node.anchor;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const call = (id: string) => byId.get(id)?.name ?? id;
+
+  /** A stable callback ref per link part, so React does not detach and reattach it every render. */
+  const partRef = (key: string, part: keyof EdgeParts) => {
+    const id = `${key}\u0001${part}`;
+    let ref = partRefs.current.get(id);
+    if (!ref) {
+      ref = (el: SVGElement | null) => {
+        const parts = edgeParts.current.get(key) ?? {};
+        if (el) (parts as Record<string, SVGElement>)[part] = el;
+        else delete parts[part];
+        edgeParts.current.set(key, parts);
+      };
+      partRefs.current.set(id, ref);
+    }
+    return ref;
+  };
 
   /** Writes every node, link and particle at the simulation's current positions. */
   const paint = useCallback(
@@ -190,13 +239,14 @@ export function CommsSpider({
       for (const edge of liveEdges) {
         const a = sim.position(edge.a);
         const b = sim.position(edge.b);
-        const el = edgeEls.current.get(edge.key);
-        if (!a || !b || !el) continue;
+        if (!a || !b) continue;
         const c = curve(a, b, edge.straight, middle);
         geometry.set(edge.key, c);
-        for (const path of el.querySelectorAll("path")) path.setAttribute("d", c.d);
+        const parts = edgeParts.current.get(edge.key);
+        parts?.hit?.setAttribute("d", c.d);
+        parts?.line?.setAttribute("d", c.d);
         const mid = c.at(0.5);
-        el.querySelector(".comms-edge-count")?.setAttribute(
+        parts?.chip?.setAttribute(
           "transform",
           `translate(${mid.x.toFixed(1)} ${mid.y.toFixed(1)})`,
         );
@@ -207,7 +257,7 @@ export function CommsSpider({
         const t = (now - p.start) / PARTICLE_MS;
         if (!c || t >= 1) {
           p.el?.remove();
-          if (c) ping(nodeEls.current.get(p.to));
+          if (c) ping(nodeEls.current.get(p.to), pingTimers.current);
           return false;
         }
         if (t < 0) return true;
@@ -228,13 +278,13 @@ export function CommsSpider({
         }
         const [a, b] = p.edge.split("\0");
         const forward = p.from === a && p.to === b;
-        const dots = p.el?.querySelectorAll("circle") ?? [];
+        const dots = p.el?.childNodes ?? [];
         dots.forEach((dot, i) => {
           const lag = (dots.length - 1 - i) * 0.045;
           const e = easeInOut(Math.max(0, t - lag));
           const q = c.at(forward ? e : 1 - e);
-          dot.setAttribute("cx", q.x.toFixed(1));
-          dot.setAttribute("cy", q.y.toFixed(1));
+          (dot as SVGCircleElement).setAttribute("cx", q.x.toFixed(1));
+          (dot as SVGCircleElement).setAttribute("cy", q.y.toFixed(1));
         });
         return true;
       });
@@ -242,122 +292,233 @@ export function CommsSpider({
     [sim],
   );
 
-  // Hold the current nodes in the simulation; only a new or moved anchor sets anything in motion.
-  const targets = nodes.map(
-    (n) => `${n.id}:${n.anchor.x.toFixed(1)},${n.anchor.y.toFixed(1)}:${n.r}`,
-  );
-  const signature = `${targets.join("|")}#${reduced}`;
-  useLayoutEffect(() => {
-    void signature;
-    const { nodes: current, f: frame } = latest.current;
-    sim.sync(
-      current.map((n) => ({ id: n.id, x: n.anchor.x, y: n.anchor.y, r: n.r, pinned: n.pinned })),
-      hubPoint(frame, "centre"),
-      reduced,
-    );
-    paint(performance.now());
-  }, [signature, reduced, sim, paint]);
-
-  // A seat that leaves fades out where it was; under reduced motion it simply goes.
-  const shown = useRef(new Map<string, Ghost>());
-  const ghostTimers = useRef(new Set<number>());
-  useEffect(() => {
-    const timers = ghostTimers.current;
-    return () => {
-      for (const timer of timers) window.clearTimeout(timer);
+  // The loop: steps the springs and particles while anything moves, then stops asking for frames.
+  // It wakes on a sync, a new particle or the panel scrolling back into view.
+  const raf = useRef(0);
+  const visible = useRef(true);
+  const wake = useCallback(() => {
+    if (reduced || raf.current !== 0 || !visible.current) return;
+    if (typeof window.requestAnimationFrame !== "function") return;
+    let last = performance.now() - STEP_MS;
+    let quiet = 0;
+    const tick = (now: number) => {
+      raf.current = 0;
+      if (now - last >= STEP_MS) {
+        const moved = sim.step((now - last) / 1000);
+        last = now;
+        paint(now);
+        quiet = moved < QUIET_PX ? quiet + 1 : 0;
+      }
+      if (!visible.current) return;
+      if (quiet >= QUIET_STEPS && particles.current.length === 0) return;
+      raf.current = window.requestAnimationFrame(tick);
     };
+    raf.current = window.requestAnimationFrame(tick);
+  }, [reduced, sim, paint]);
+  const rest = useCallback(() => {
+    if (raf.current !== 0) window.cancelAnimationFrame(raf.current);
+    raf.current = 0;
   }, []);
+
+  // A seat that leaves fades out where it was last drawn: its position is read before the sync
+  // below drops it from the simulation. Under reduced motion it simply goes.
+  const shownIds = useRef<string[]>([]);
+  const lastNodes = useRef(new Map<string, SpiderNode>());
   useLayoutEffect(() => {
     const ids = new Set(nodes.map((n) => n.id));
-    const gone = [...shown.current.values()].filter((g) => !ids.has(g.node.id));
-    shown.current = new Map(
-      nodes.map((n) => [n.id, { node: n, at: sim.position(n.id) ?? n.anchor }]),
-    );
-    if (reduced || gone.length === 0) return;
-    setGhosts((last) => {
-      const next = new Map(last);
-      for (const g of gone) next.set(g.node.id, g);
+    const gone = shownIds.current.filter((id) => !ids.has(id));
+    const leaving = gone.flatMap((id) => {
+      const node = lastNodes.current.get(id);
+      return node ? [{ node, at: sim.position(id) ?? node.anchor }] : [];
+    });
+    shownIds.current = [...ids];
+    lastNodes.current = new Map(nodes.map((n) => [n.id, n]));
+    if (reduced || leaving.length === 0) return;
+    setGhosts((prev) => {
+      const next = new Map(prev);
+      for (const g of leaving) next.set(g.node.id, g);
       return next;
     });
     const timer = window.setTimeout(() => {
       ghostTimers.current.delete(timer);
-      setGhosts((last) => {
-        const next = new Map(last);
-        for (const g of gone) if (next.get(g.node.id) === g) next.delete(g.node.id);
+      setGhosts((prev) => {
+        const next = new Map(prev);
+        for (const g of leaving) if (next.get(g.node.id) === g) next.delete(g.node.id);
         return next;
       });
     }, LEAVE_MS);
     ghostTimers.current.add(timer);
   }, [nodes, reduced, sim]);
   // A ghost whose seat came back is dropped at once.
-  const visibleGhosts = [...ghosts.values()].filter((g) => !nodes.some((n) => n.id === g.node.id));
+  const visibleGhosts = [...ghosts.values()].filter((g) => !byId.has(g.node.id));
 
-  // New messages become particles, once per read (a crew refetch hands over the same read again);
-  // reduced motion shows the lit link alone.
+  // Hold the current nodes in the simulation; only a new or moved anchor sets anything in motion.
+  const signature = `${nodes
+    .map((n) => `${n.id}:${n.anchor.x.toFixed(1)},${n.anchor.y.toFixed(1)}:${n.r}:${n.pinned}`)
+    .join("|")}#${reduced}`;
+  const targets = useRef(nodes);
+  targets.current = nodes;
+  useLayoutEffect(() => {
+    void signature;
+    sim.sync(
+      targets.current.map((n) => ({
+        id: n.id,
+        x: n.anchor.x,
+        y: n.anchor.y,
+        r: n.r,
+        pinned: n.pinned,
+      })),
+      hubPoint(latest.current.f, "centre"),
+      reduced,
+    );
+    paint(performance.now());
+    wake();
+  }, [signature, reduced, sim, paint, wake]);
+
+  // New messages become particles, once per read (a crew refetch hands over the same read again).
+  // None while the tab is hidden or motion is reduced; the lit link says it alone.
   const flown = useRef(flows.generation);
   useEffect(() => {
     if (flows.generation === flown.current) return;
     flown.current = flows.generation;
-    if (reduced || flows.list.length === 0) return;
+    if (reduced || document.hidden || flows.list.length === 0) return;
     const now = performance.now();
-    const queued: Particle[] = [];
     for (const flow of flows.list) {
       const [a, b] = flow.from < flow.to ? [flow.from, flow.to] : [flow.to, flow.from];
-      const edge = `${a}\0${b}`;
       for (let i = 0; i < Math.min(flow.n, MAX_PARTICLES_PER_FLOW); i++)
-        queued.push({
-          edge,
+        particles.current.push({
+          edge: `${a}\0${b}`,
           from: flow.from,
           to: flow.to,
           start: now + i * PARTICLE_GAP_MS,
           el: null,
         });
     }
-    particles.current.push(...queued);
-  }, [flows, reduced]);
+    wake();
+  }, [flows, reduced, wake]);
 
-  // The physics loop: drift, springs and particles, about 30 frames a second; none when reduced.
+  // Reduced motion stops the loop and drops anything in flight.
   useEffect(() => {
-    if (reduced || typeof window.requestAnimationFrame !== "function") return;
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      raf = window.requestAnimationFrame(tick);
-      if (now - last < STEP_MS) return;
-      sim.step((now - last) / 1000, now / 1000, true);
-      last = now;
-      paint(now);
-    };
-    raf = window.requestAnimationFrame(tick);
+    if (!reduced) return;
+    rest();
+    for (const p of particles.current) p.el?.remove();
+    particles.current = [];
+  }, [reduced, rest]);
+
+  // Out of view: no frames and no drift; back in view, catch up.
+  useEffect(() => {
+    const el = figure.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      visible.current = entry?.isIntersecting ?? true;
+      el.classList.toggle("offscreen", !visible.current);
+      if (visible.current) wake();
+      else rest();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [wake, rest]);
+
+  // Unmount: no frame, timer, particle or ping outlives the graph.
+  useEffect(() => {
+    const pings = pingTimers.current;
+    const leaves = ghostTimers.current;
     return () => {
-      window.cancelAnimationFrame(raf);
+      rest();
       for (const p of particles.current) p.el?.remove();
       particles.current = [];
+      for (const timer of pings) window.clearTimeout(timer);
+      for (const timer of leaves) window.clearTimeout(timer);
     };
-  }, [reduced, sim, paint]);
+  }, [rest]);
 
-  const nodeKey = (open: () => void) => (event: KeyboardEvent) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    open();
+  // Keyboard: the graph is one tab stop. Left/right walk the nodes clockwise from FLIGHT, down
+  // walks the focused node's links, up (or Escape) goes back to the node.
+  const order = walkOrder(nodes, centre);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [walkFrom, setWalkFrom] = useState<string | null>(null);
+  const moveFocus = useRef(false);
+  const linksOf = (id: string) =>
+    edges
+      .filter((e) => e.a === id || e.b === id)
+      .map((e) => ({ e, other: byId.get(e.a === id ? e.b : e.a) }))
+      .filter((x): x is { e: SpiderEdge; other: SpiderNode } => x.other !== undefined)
+      .map((x) => x.e);
+  const current =
+    focusKey !== null &&
+    (focusKey.startsWith("n:")
+      ? byId.has(focusKey.slice(2))
+      : edges.some((e) => `e:${e.key}` === focusKey))
+      ? focusKey
+      : order[0]
+        ? `n:${order[0].id}`
+        : null;
+  const goTo = (key: string, from?: string) => {
+    moveFocus.current = true;
+    setFocusKey(key);
+    if (from !== undefined) setWalkFrom(from);
   };
+  useEffect(() => {
+    if (!moveFocus.current || current === null) return;
+    moveFocus.current = false;
+    const el = current.startsWith("n:")
+      ? nodeEls.current.get(current.slice(2))
+      : edgeEls.current.get(current.slice(2));
+    el?.focus();
+  }, [current]);
+  const nodeKeys = (node: SpiderNode) => (event: KeyboardEvent) => {
+    const i = order.findIndex((n) => n.id === node.id);
+    const step = (d: number) => order[(i + d + order.length) % order.length];
+    if (event.key === "Enter" || event.key === " ") onOpenNode(node.id);
+    else if (event.key === "ArrowRight") goTo(`n:${step(1)?.id}`);
+    else if (event.key === "ArrowLeft") goTo(`n:${step(-1)?.id}`);
+    else if (event.key === "Home") goTo(`n:${order[0]?.id}`);
+    else if (event.key === "End") goTo(`n:${order.at(-1)?.id}`);
+    else if (event.key === "ArrowDown") {
+      const first = linksOf(node.id)[0];
+      if (!first) return;
+      goTo(`e:${first.key}`, node.id);
+    } else return;
+    event.preventDefault();
+  };
+  const edgeKeys = (edge: SpiderEdge) => (event: KeyboardEvent) => {
+    const from =
+      walkFrom !== null && (edge.a === walkFrom || edge.b === walkFrom) ? walkFrom : edge.a;
+    const list = linksOf(from);
+    const i = list.findIndex((e) => e.key === edge.key);
+    if (event.key === "Enter" || event.key === " ") onOpenEdge(edge.a, edge.b);
+    else if (event.key === "ArrowDown" || event.key === "ArrowRight")
+      goTo(`e:${list[(i + 1) % list.length]?.key}`, from);
+    else if (event.key === "ArrowLeft")
+      goTo(`e:${list[(i - 1 + list.length) % list.length]?.key}`, from);
+    else if (event.key === "ArrowUp" || event.key === "Escape") goTo(`n:${from}`);
+    else return;
+    event.preventDefault();
+  };
+
   const hovered =
     hover?.kind === "node"
       ? nodes.find((n) => n.id === hover.id)
       : hover?.kind === "edge"
         ? edges.find((e) => e.key === hover.key)
         : undefined;
-  const byId = new Map(nodes.map((n) => [n.id, n]));
   const seats = nodes.filter((n) => !n.hub || n.state !== null);
   const counts = {
     running: seats.filter((n) => n.presence === "running").length,
     idle: seats.filter((n) => n.presence === "idle").length,
     stopped: seats.filter((n) => n.presence === "stopped").length,
   };
+  const awayOpen = away.length > 0 && (awayHover || awayPinned);
+  const describedBy = (kind: "node" | "edge", id: string) => {
+    const on =
+      hover?.kind === "node"
+        ? kind === "node" && hover.id === id
+        : hover?.kind === "edge" && kind === "edge" && hover.key === id;
+    return on ? `${tipId} ${hintId}` : hintId;
+  };
 
   const renderNode = (node: SpiderNode, index: number, ghost?: Ghost) => {
     const p = ghost?.at ?? at(node);
-    const open = () => onOpenNode(node.id);
     const className = [
       "comms-node",
       `presence-${node.presence}`,
@@ -371,6 +532,12 @@ export function CommsSpider({
     ]
       .filter(Boolean)
       .join(" ");
+    // Each node drifts on its own slow lap (9–15s), started part-way round so none move together.
+    const lap = phaseOf(node.id) / (2 * Math.PI);
+    const drift = {
+      "--drift-s": `${(9 + lap * 6).toFixed(2)}s`,
+      "--drift-at": `${(-lap * 15).toFixed(2)}s`,
+    } as CSSProperties;
     return (
       <g
         key={ghost ? `ghost-${node.id}` : node.id}
@@ -386,28 +553,37 @@ export function CommsSpider({
           ? { "aria-hidden": true }
           : {
               role: "button",
-              tabIndex: 0,
+              tabIndex: current === `n:${node.id}` ? 0 : -1,
               "aria-label": `Open ${node.name}, ${node.count} messages in 24h${node.state ? `, ${node.state}` : ""}`,
-              onClick: open,
-              onKeyDown: nodeKey(open),
+              "aria-describedby": describedBy("node", node.id),
+              onClick: () => onOpenNode(node.id),
+              onKeyDown: nodeKeys(node),
               onMouseEnter: () => setHover({ kind: "node", id: node.id }),
               onMouseLeave: () => setHover(null),
-              onFocus: () => setHover({ kind: "node", id: node.id }),
+              onFocus: () => {
+                setFocusKey(`n:${node.id}`);
+                setHover({ kind: "node", id: node.id });
+              },
               onBlur: () => setHover(null),
             })}
       >
-        <g
-          className="comms-node-body"
-          style={{ animationDelay: `${Math.min(index, 16) * 35}ms` } as CSSProperties}
-        >
-          <circle className="comms-node-hit" r={node.r + 9} />
-          <circle className="comms-node-halo" r={node.r + 6} />
-          <circle className="comms-node-core" r={node.r} />
-          {node.hub && <circle className="comms-node-inner" r={Math.max(2, node.r - 4.5)} />}
-          <circle className="comms-node-ring" r={node.r + 3.5} />
-          <text className="comms-node-name" {...nameAt(node)}>
-            {node.label}
-          </text>
+        <g className="comms-node-drift" style={node.pinned ? undefined : drift}>
+          <g
+            className="comms-node-body"
+            style={{ animationDelay: `${Math.min(index, 16) * 35}ms` } as CSSProperties}
+          >
+            <circle className="comms-node-hit" r={node.r + 9} />
+            <g className="comms-node-halo">
+              <circle r={node.r + 7} />
+              <circle r={node.r + 3.5} />
+            </g>
+            <circle className="comms-node-core" r={node.r} />
+            {node.hub && <circle className="comms-node-inner" r={Math.max(2, node.r - 4.5)} />}
+            <circle className="comms-node-ring" r={node.r + 3.5} />
+            <text className="comms-node-name" {...nameAt(node)}>
+              {node.label}
+            </text>
+          </g>
         </g>
       </g>
     );
@@ -415,15 +591,22 @@ export function CommsSpider({
 
   const tipAt = (() => {
     if (!hovered) return null;
-    if ("anchor" in hovered) return at(hovered);
+    if ("anchor" in hovered) return { p: at(hovered), r: hovered.r };
     const a = byId.get(hovered.a);
     const b = byId.get(hovered.b);
     if (!a || !b) return null;
-    return curve(at(a), at(b), hovered.straight, centre).at(0.5);
+    return { p: curve(at(a), at(b), hovered.straight, centre).at(0.5), r: 4 };
   })();
 
   return (
-    <figure className={`comms-spider${metric === "tokens" ? " tokens" : ""}`} aria-label={label}>
+    <figure
+      ref={figure}
+      className={`comms-spider${metric === "tokens" ? " tokens" : ""}`}
+      aria-label={label}
+    >
+      <p id={hintId} className="sr-only">
+        Left and right arrows move between agents; down walks an agent's links, up goes back.
+      </p>
       <svg className="comms-spider-svg" viewBox={`0 0 ${f.w} ${f.h}`}>
         <title>Crew by role: FLIGHT at the centre, one spoke per role</title>
         <g className="comms-spider-scale">
@@ -441,18 +624,22 @@ export function CommsSpider({
             const out = onSpoke(f, spoke.angle, 1 + 8 / Math.max(1, f.rx));
             const cos = Math.cos((spoke.angle * Math.PI) / 180);
             const sin = Math.sin((spoke.angle * Math.PI) / 180);
-            // Clear of the seat labels, which hang under their nodes: lower spokes' names drop.
+            // Clear of the seat names, which hang under their nodes: lower spokes' names drop.
             const drop = sin > 0.2 ? 9 : sin < -0.2 ? -3 : 0;
+            // Every seat on this spoke is away: the spoke stays, dimmed and marked.
+            const empty = spoke.ids.every((id) => !byId.has(id));
             return (
-              <g key={spoke.key} className="comms-spoke">
-                <line x1={f.cx} y1={f.cy} x2={tip.x} y2={tip.y} />
+              <g key={spoke.key} className={`comms-spoke${empty ? " away" : ""}`}>
+                <line className="comms-spoke-line" x1={f.cx} y1={f.cy} x2={tip.x} y2={tip.y} />
                 <text
+                  className="comms-spoke-name"
                   x={out.x}
                   y={out.y + drop}
                   dy="0.34em"
                   textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
                 >
                   {spoke.key}
+                  {empty && <tspan className="away-mark"> · away</tspan>}
                 </text>
               </g>
             );
@@ -486,24 +673,30 @@ export function CommsSpider({
                 className={className}
                 style={{ "--w": edge.weight.toFixed(3) } as CSSProperties}
                 role="button"
-                tabIndex={0}
-                aria-label={`Conversation ${byId.get(edge.a)?.name ?? edge.a} ↔ ${byId.get(edge.b)?.name ?? edge.b}, ${count} messages in 24h`}
+                tabIndex={current === `e:${edge.key}` ? 0 : -1}
+                aria-label={`Conversation ${a.name} ↔ ${b.name}, ${count} messages in 24h`}
+                aria-describedby={describedBy("edge", edge.key)}
                 onClick={() => onOpenEdge(edge.a, edge.b)}
-                onKeyDown={nodeKey(() => onOpenEdge(edge.a, edge.b))}
+                onKeyDown={edgeKeys(edge)}
                 onMouseEnter={() => setHover({ kind: "edge", key: edge.key })}
                 onMouseLeave={() => setHover(null)}
-                onFocus={() => setHover({ kind: "edge", key: edge.key })}
+                onFocus={() => {
+                  setFocusKey(`e:${edge.key}`);
+                  setHover({ kind: "edge", key: edge.key });
+                }}
                 onBlur={() => setHover(null)}
               >
-                <path className="comms-edge-hit" d={c.d} />
+                <path className="comms-edge-hit" ref={partRef(edge.key, "hit")} d={c.d} />
                 <path
                   className="comms-edge-line"
+                  ref={partRef(edge.key, "line")}
                   d={c.d}
                   strokeWidth={metric === "tokens" ? 1 : 1 + 2.6 * edge.weight}
                 />
                 {metric === "messages" && (
                   <g
                     className="comms-edge-count"
+                    ref={partRef(edge.key, "chip")}
                     transform={`translate(${mid.x.toFixed(1)} ${mid.y.toFixed(1)})`}
                   >
                     <rect
@@ -530,7 +723,7 @@ export function CommsSpider({
         </g>
       </svg>
       {hovered && tipAt && (
-        <SpiderTip at={tipAt} frame={f} subject={hovered} name={(id) => byId.get(id)?.name ?? id} />
+        <SpiderTip id={tipId} at={tipAt.p} r={tipAt.r} frame={f} subject={hovered} name={call} />
       )}
       <div className="comms-spider-legend">
         <span className="running" aria-hidden="true">
@@ -548,27 +741,31 @@ export function CommsSpider({
           </span>
         )}
         {away.length > 0 && (
-          <button
-            type="button"
-            className="away"
-            aria-expanded={awayOpen}
-            aria-label={`${away.length} away: ${away.map((seat) => `${seat.name}, ${seat.state}`).join("; ")}`}
-            onMouseEnter={() => setAwayOpen(true)}
-            onMouseLeave={() => setAwayOpen(false)}
-            onFocus={() => setAwayOpen(true)}
-            onBlur={() => setAwayOpen(false)}
-          >
-            <b>{away.length}</b> away
-            {awayOpen && (
-              <span className="comms-spider-away" role="tooltip">
-                {away.map((seat) => (
-                  <span key={seat.id} className="away-seat">
-                    <b>{seat.name}</b> {seat.state}
-                  </span>
-                ))}
-              </span>
-            )}
-          </button>
+          <span className="away-wrap">
+            <button
+              type="button"
+              className="away"
+              aria-expanded={awayOpen}
+              aria-controls={awayId}
+              onClick={() => setAwayPinned((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                setAwayPinned(false);
+                setAwayHover(false);
+              }}
+              onMouseEnter={() => setAwayHover(true)}
+              onMouseLeave={() => setAwayHover(false)}
+            >
+              <b>{away.length}</b> away
+            </button>
+            <ul id={awayId} className="comms-spider-away" hidden={!awayOpen}>
+              {away.map((seat) => (
+                <li key={seat.id} className="away-seat">
+                  <b className="away-name">{seat.name}</b> {seat.state}
+                </li>
+              ))}
+            </ul>
+          </span>
         )}
         <span className="link" aria-hidden="true">
           <i className="key" />
@@ -585,8 +782,8 @@ export function CommsSpider({
   );
 }
 
-/** One expanding ring on the node a message reached. */
-function ping(el: SVGGElement | undefined) {
+/** One expanding ring on the node a message reached; its timer is tracked so unmount clears it. */
+function ping(el: SVGGElement | undefined, timers: Set<number>) {
   const body = el?.querySelector(".comms-node-body");
   const core = el?.querySelector(".comms-node-core");
   if (!body || !core) return;
@@ -594,32 +791,59 @@ function ping(el: SVGGElement | undefined) {
   ring.setAttribute("class", "comms-node-ping");
   ring.setAttribute("r", core.getAttribute("r") ?? "6");
   body.append(ring);
-  window.setTimeout(() => ring.remove(), 900);
+  const timer = window.setTimeout(() => {
+    timers.delete(timer);
+    ring.remove();
+  }, PING_MS);
+  timers.add(timer);
+}
+
+/**
+ * Where the hover card goes: beside the subject on whichever side it fits, else under (or over)
+ * it, clamped inside the stage, so a hub's card never runs off the panel.
+ */
+export function tipPlacement(at: Point, r: number, f: Frame): CSSProperties {
+  const pct = (v: number, of: number) => `${((v / of) * 100).toFixed(2)}%`;
+  const gap = TIP_GAP + r;
+  if (at.x + gap + TIP_W <= f.w)
+    return { left: pct(at.x + gap, f.w), top: pct(at.y, f.h), transform: "translateY(-50%)" };
+  if (at.x - gap - TIP_W >= 0)
+    return {
+      left: pct(at.x - gap - TIP_W, f.w),
+      top: pct(at.y, f.h),
+      transform: "translateY(-50%)",
+    };
+  const left = Math.min(Math.max(0, at.x - TIP_W / 2), Math.max(0, f.w - TIP_W));
+  const below = at.y < f.h * 0.55;
+  return {
+    left: pct(left, f.w),
+    top: pct(below ? at.y + gap : at.y - gap, f.h),
+    transform: below ? "none" : "translateY(-100%)",
+  };
 }
 
 /** The hover card: who, state, counts both ways and the newest message. */
 function SpiderTip({
+  id,
   at,
+  r,
   frame: f,
   subject,
   name,
 }: {
+  id: string;
   at: Point;
+  r: number;
   frame: Frame;
   subject: SpiderNode | SpiderEdge;
   name: (id: string) => string;
 }) {
   const now = useNow();
   const tz = useTz();
-  const flip = at.x > f.w * 0.55;
-  const style = {
-    left: `${((at.x / f.w) * 100).toFixed(2)}%`,
-    top: `${((at.y / f.h) * 100).toFixed(2)}%`,
-  } as CSSProperties;
   const last = subject.last;
   const total = "anchor" in subject ? subject.count : subject.aToB + subject.bToA;
   return (
-    <div className={`comms-spider-tip${flip ? " flip" : ""}`} style={style} role="tooltip">
+    <div id={id} className="comms-spider-tip" style={tipPlacement(at, r, f)} role="tooltip">
       {"anchor" in subject ? (
         <>
           <p className="tip-head">

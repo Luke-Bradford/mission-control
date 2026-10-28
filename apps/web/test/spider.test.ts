@@ -65,7 +65,7 @@ it("keeps every position when the same nodes are synced again", () => {
   const sim = new SpiderSim();
   const nodes = targets(["guido-1", "inco-1", "retro-1"]);
   sim.sync(nodes, centre, false);
-  for (let i = 0; i < 40; i++) sim.step(1 / 30, i / 30, true);
+  for (let i = 0; i < 40; i++) sim.step(1 / 30);
   const before = nodes.map((n) => sim.position(n.id));
   sim.sync(
     nodes.map((n) => ({ ...n })),
@@ -88,25 +88,36 @@ it("starts the first layout on the anchors and springs a later arrival out along
   expect(Math.hypot(start.x - centre.x, start.y - centre.y)).toBeLessThan(
     Math.hypot(retro.x - centre.x, retro.y - centre.y),
   );
-  for (let i = 0; i < 300; i++) sim.step(1 / 30, i / 30, false);
+  for (let i = 0; i < 300; i++) sim.step(1 / 30);
   const settled = sim.position("retro-1") as { x: number; y: number };
   expect(Math.hypot(settled.x - retro.x, settled.y - retro.y)).toBeLessThan(0.5);
   expect(sim.energy()).toBeLessThan(0.5);
 });
 
-it("drifts a few pixels round each anchor and never leaves it", () => {
+it("reports how far nodes moved, so the loop can rest once the picture settles", () => {
   const sim = new SpiderSim();
-  const nodes = targets(["guido-1"]);
-  sim.sync(nodes, centre, false);
-  const anchor = nodes[0] as (typeof nodes)[number];
-  let furthest = 0;
-  for (let i = 0; i < 600; i++) {
-    sim.step(1 / 30, i / 30, true);
-    const p = sim.position("guido-1") as { x: number; y: number };
-    furthest = Math.max(furthest, Math.hypot(p.x - anchor.x, p.y - anchor.y));
-  }
-  expect(furthest).toBeGreaterThan(0.5);
-  expect(furthest).toBeLessThan(6);
+  sim.sync(targets(["guido-1"]), centre, false);
+  // Already on its anchor: nothing moves, from the first step on.
+  expect(sim.step(1 / 30)).toBe(0);
+  sim.sync(targets(["guido-1", "inco-1"]), centre, false);
+  // The arrival springs out along its spoke, then comes to rest.
+  expect(sim.step(1 / 30)).toBeGreaterThan(0.1);
+  let steps = 0;
+  while (sim.step(1 / 30) >= 0.05 && steps < 1_000) steps++;
+  expect(steps).toBeLessThan(200);
+});
+
+it("spreads the spokes wider when the web is stretched tall", () => {
+  const rows = ["guido-1", "inco-1", "retro-1", "fao-1"].map((id, index) =>
+    seatRow({ id, index, role: id.split("-")[0]?.toUpperCase() }),
+  );
+  const flat = spokesFor(rows, "flight-1", 1);
+  const tall = spokesFor(rows, "flight-1", 1.5);
+  const spread = (spokes: typeof flat) =>
+    Math.abs((spokes[0]?.angle ?? 0) - (spokes[2]?.angle ?? 0));
+  expect(spread(tall)).toBeGreaterThan(spread(flat));
+  const f2 = frameFor({ w: 360, h: 700 });
+  expect(f2.ry / f2.rx).toBeCloseTo(1.5, 1);
 });
 
 it("puts every node straight on its anchor when motion is reduced", () => {

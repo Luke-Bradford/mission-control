@@ -24,7 +24,9 @@ import {
   DEFAULT_SIZE,
   frameFor,
   hubPoint,
+  type LabelSide,
   LOOPS_SPOKE,
+  type Point,
   placeLabels,
   presenceOf,
   spokeAnchors,
@@ -134,6 +136,8 @@ export function CommsGraph({
   );
   const previousLinks = useRef<Map<string, { count: number; lastId?: string }> | null>(null);
   const stage = useRef<HTMLDivElement>(null);
+  // Each name's side, kept between renders so names only move when their side stops being clear.
+  const labelSides = useRef<ReadonlyMap<string, LabelSide>>(new Map());
   const [size, setSize] = useState(DEFAULT_SIZE);
   useLayoutEffect(() => {
     const el = stage.current;
@@ -268,7 +272,7 @@ export function CommsGraph({
   const isAway = (row: CrewRow) =>
     presenceOf(row) === "stopped" && countOf(row.id) === 0 && !selected.has(row.id);
   const f = frameFor(size);
-  const spokes = spokesFor(rows, flight);
+  const spokes = spokesFor(rows, flight, f.ry / f.rx);
   const flightRow = crewRows.find((row) => row.id === flight);
   const allSeats = rows.filter((row) => row.id !== flight);
   const awayRows = allSeats.filter(isAway);
@@ -325,7 +329,7 @@ export function CommsGraph({
       return {
         id: row.id,
         label: callSign(row),
-        name: row.kind === "loop" ? callSign(row) : row.id,
+        name: callSign(row),
         hub: false,
         role:
           row.kind === "loop"
@@ -344,6 +348,21 @@ export function CommsGraph({
     }),
   ];
   // Full names, each nudged to a clear side of its node.
+  // Full names, each kept on its side while that stays clear, else nudged to a clear one: off
+  // other names and nodes, the links, the count chips shown at rest, and the legend strip.
+  const anchorOf = new Map(placed.map((n) => [n.id, n.anchor]));
+  const segments = edges.flatMap((edge): [Point, Point][] => {
+    const a = anchorOf.get(edge.a);
+    const b = anchorOf.get(edge.b);
+    return a && b ? [[a, b]] : [];
+  });
+  const chips = scoped.flatMap((edge) => {
+    const a = anchorOf.get(edge.a);
+    const b = anchorOf.get(edge.b);
+    if (!focusedView || !a || !b) return [];
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return [{ x0: m.x - 10, y0: m.y - 7, x1: m.x + 10, y1: m.y + 7 }];
+  });
   const sides = placeLabels(
     placed.map((n) => ({
       id: n.id,
@@ -353,7 +372,10 @@ export function CommsGraph({
       prefer: n.id === CAPCOM ? ("above" as const) : ("below" as const),
     })),
     f,
+    labelSides.current,
+    { segments, boxes: chips },
   );
+  labelSides.current = sides;
   const nodes: SpiderNode[] = placed.map((n) => ({ ...n, labelSide: sides.get(n.id) ?? "below" }));
   const away = awayRows.map((row) => ({ id: row.id, name: callSign(row), state: stateLabel(row) }));
   const hasData = links !== undefined;

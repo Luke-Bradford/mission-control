@@ -635,6 +635,14 @@ describe("Comms API", () => {
     });
   });
 
+  it("keeps a link's count but not its words when an end is no Comms agent", async () => {
+    commsRow("alpha", "gone-seat", "private words");
+    await withCommsApp(async (comms) => {
+      const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
+      expect(links).toEqual([{ from: "alpha", to: "gone-seat", count: 1 }]);
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
