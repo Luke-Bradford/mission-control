@@ -105,7 +105,13 @@ export function mapSeats(
         questions: store
           .openQuestions()
           .filter((q) => q.agentId === row.id && q.runId === run?.id)
-          .map((q) => ({ id: q.id, from: row.id, to: "CAPCOM", ticket, since: q.at })),
+          .map((q) => ({
+            id: q.id,
+            from: row.id,
+            to: rows.find((r) => r.role === "FLIGHT")?.id ?? "CAPCOM",
+            ticket,
+            since: q.at,
+          })),
         failures: [
           ...completed
             .filter((c) => (c.error || c.refused) && (c.end as number) >= now - 600_000)

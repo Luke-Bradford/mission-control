@@ -133,7 +133,9 @@ const categoryOf = (item: AttentionItem): NotificationCategory | null => {
 function versionOf(category: NotificationCategory, item: AttentionItem): string {
   // Once per episode: its count, reason and time move while FLIGHT stays out, and `seen` keeps only
   // items still present, so it notifies again only after it has cleared and come back.
-  if (item.key === FLIGHT_NOT_TRIAGING_KEY) return JSON.stringify([category, item.key]);
+  // A new cause in the same episode (stopped, then failing to start) is news, so it is in the version.
+  if (item.key === FLIGHT_NOT_TRIAGING_KEY)
+    return JSON.stringify([category, item.key, item.notTriaging?.cause ?? null]);
   if (category === "asks")
     return JSON.stringify([category, item.kind, item.brief?.ask ?? item.text]);
   if (category === "stalls") return JSON.stringify([item.kind, item.at]);
@@ -270,6 +272,12 @@ export class LocalNotifications {
       }
       if (previous === version || item.acked) {
         seen[item.key] = version;
+        continue;
+      }
+      // The operator's own Stop with nothing waiting tells them nothing: it notifies only once
+      // something waits on FLIGHT, or the cause changes.
+      if (item.notTriaging?.cause === "stopped" && item.notTriaging.keys.length === 0) {
+        if (previous !== undefined) seen[item.key] = previous;
         continue;
       }
       // An ask held back by quiet hours stays unseen, so it notifies once they end.

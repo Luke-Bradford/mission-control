@@ -22,6 +22,7 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
@@ -1049,6 +1050,31 @@ describe("ask_flight", () => {
     });
     expect(store.openQuestions()).toEqual([]);
     expect(store.comms(0)).toEqual([]);
+  });
+
+  it("refuses a seat's question to CAPCOM over comms_send, pointing at ask_flight (#758)", async () => {
+    tools = make({ config: withFlight() });
+    const send = (ctx: McToolContext, args: unknown) => tool("comms_send").call(ctx, args);
+    expect(await send(CTX, { to: "CAPCOM", text: "Which lane?", label: "question" })).toEqual({
+      text: COMMS_QUESTION_TO_FLIGHT,
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+    // a plain line, or a question to FLIGHT, still goes
+    expect((await send(CTX, { to: "CAPCOM", text: "Done with #42." })).isError).toBeUndefined();
+    expect(
+      (await send(CTX, { to: "flight-1", text: "Which lane?", label: "question" })).isError,
+    ).toBeUndefined();
+    // FLIGHT's own question to CAPCOM is its channel to the operator
+    liveSeat("flight-1", "flight-1:1");
+    expect(
+      (
+        await send(
+          { seatId: "flight-1", runId: "flight-1:1" },
+          { to: "CAPCOM", text: "Merge #551?", label: "question" },
+        )
+      ).isError,
+    ).toBeUndefined();
   });
 
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {

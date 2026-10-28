@@ -462,6 +462,17 @@ export const FLIGHT_TRIAGE_LABEL = {
   down: "Waiting on FLIGHT — not triaging",
 } as const;
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
+/**
+ * Kinds that are always the operator's call: FLIGHT may brief them for the operator but never keep
+ * them, and once past FLIGHT's triage window (or while FLIGHT is not triaging) they reach the
+ * operator as themselves, never folded into the "FLIGHT is not triaging" item (#758).
+ */
+export const OPERATOR_CALL_KINDS: readonly AttentionKind[] = [
+  "approval",
+  "decision",
+  "flag",
+  "ratelimit",
+];
 export const OWNER_CONTROLLER = "controller" satisfies AttentionOwner;
 export const OWNER_LOOP = "loop" satisfies AttentionOwner;
 export const laneOwner = (login: string): AttentionOwner => `lane:${login}`;

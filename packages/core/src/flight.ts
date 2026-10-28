@@ -422,8 +422,7 @@ export const PASSED_DECISION = "Passed to the operator";
  */
 export const passNeedsBriefText = (id: number): string =>
   `Not passed: a seat's question reaches the operator only with your brief. Call mc brief_item { key: "ask:${id}", for: "operator", ask, assessment, recommendation, options?, basis }.`;
-export const answerMessageText = (answer: string): string =>
-  `FLIGHT, answering for the operator: ${answer}`;
+export const answerMessageText = (answer: string): string => `FLIGHT answers: ${answer}`;
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
@@ -999,7 +998,9 @@ export function flightNotTriagingText(
   const why =
     detail ??
     (cause === "stopped"
-      ? "Start it to have them triaged."
+      ? n === 0
+        ? null
+        : "Start it to have them triaged."
       : cause === "off"
         ? "FLIGHT is not running."
         : cause === "late"

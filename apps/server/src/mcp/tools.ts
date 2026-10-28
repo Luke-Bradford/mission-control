@@ -18,6 +18,7 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_LABELS,
+  COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
   carriedFrom,
@@ -1181,6 +1182,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const parsed = CommsSendArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
+    if (
+      parsed.data.to === COMMS_CAPCOM &&
+      parsed.data.label === "question" &&
+      !isFlight(ctx.seatId)
+    )
+      return { text: COMMS_QUESTION_TO_FLIGHT, isError: true };
     try {
       const sent = await sendComms(
         {
@@ -2123,7 +2130,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.commsSend,
-      description: "Send a message to a local seat, CAPCOM, or the crew channel.",
+      description:
+        "Send a message to a local seat, CAPCOM, or the crew channel. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
       inputSchema: {
         type: "object",
         properties: {

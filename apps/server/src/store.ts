@@ -4064,6 +4064,19 @@ export class Store {
   }
 
   /**
+   * Hands a passed, still open question back to FLIGHT (#758): FLIGHT kept it, or it was passed
+   * without a brief before #758. True only when it was passed.
+   */
+  unpassQuestion(id: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET passed_at = NULL WHERE id = ? AND answered_at IS NULL AND passed_at IS NOT NULL",
+      )
+      .run(id);
+    return Number(r.changes) > 0;
+  }
+
+  /**
    * Marks every open question of the seat answered at `at`; with `unpassedOnly`, leaves the ones
    * passed to the operator open.
    */

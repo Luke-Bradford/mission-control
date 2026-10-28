@@ -27,7 +27,14 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { operatorItems } from "../src/flight/state.ts";
-import { agentViews, attentionItems, crew, flightNotTriagingDueAt, NO_LOCK } from "../src/hud.ts";
+import {
+  agentViews,
+  attentionItems,
+  crew,
+  flightNotTriagingDueAt,
+  markHubStarted,
+  NO_LOCK,
+} from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
@@ -1932,10 +1939,14 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         owner: "flight",
         flightTriage: "waiting",
       });
-      // missed: FLIGHT's still, under the one not-triaging item, not a raw operator item (#758)
-      expect(
-        attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find((i) => i.key === key),
-      ).toMatchObject({ owner: "flight", flightTriage: "missed" });
+      // a decision and a flag are the operator's calls: missed, they reach the operator as
+      // themselves, never folded into the not-triaging item (#758)
+      const late = attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS);
+      expect(late.find((i) => i.key === key)).toMatchObject({
+        owner: "operator",
+        flightTriage: "missed",
+      });
+      expect(late.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)).toBeUndefined();
     }
     flightRow({ state: "parked" });
     expect(attentionItems(c, store, NOW).find((i) => i.key === "note:triage")?.owner).toBe(
@@ -2556,9 +2567,10 @@ describe("messages are not Needs you", () => {
       ["flight", "missed"],
       ["flight", "missed"],
     ]);
-    // FLIGHT down: nobody triages, it says so, and still nothing reaches Needs you
+    // FLIGHT down past its restart grace: nobody triages, it says so, and still nothing reaches
+    // Needs you
     store.upsertRun(run({ id: "r-flight-1", agentId: "flight-1", endedAt: NOW, status: "ok" }));
-    expect(chatter().map((i) => [i.owner, i.flightTriage])).toEqual([
+    expect(chatter(c, NOW + FLIGHT_OFF_GRACE_MS).map((i) => [i.owner, i.flightTriage])).toEqual([
       ["flight", "down"],
       ["flight", "down"],
     ]);
@@ -2648,14 +2660,14 @@ describe("messages are not Needs you", () => {
     expect(chatter(noFlight)).toEqual([]);
   });
 
-  it("raises a seat question once, not again for the Comms line ask_operator mirrors it to", () => {
+  it("raises a seat question once, not again for the Comms line ask_flight mirrors it to", () => {
     up("flight-1");
     up("guido-1");
     say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "Carry on with #42.");
-    // ask_operator records the question and writes the same text to CAPCOM at the same instant
+    // ask_flight records the question and writes the same text to FLIGHT at the same instant
     const text = "@CAPCOM which lane should #42 go in? Please confirm.";
     const id = store.addQuestion({ agentId: "guido-1", runId: "r-guido-1", text, at: NOW - MIN });
-    say(NOW - MIN, "guido-1", COMMS_CAPCOM, text);
+    say(NOW - MIN, "guido-1", "flight-1", text);
     const mine = () =>
       attentionItems(c, store, NOW, NO_LOCK, []).filter((i) => i.agentId === "guido-1");
     expect(mine().map((i) => [i.kind, i.key])).toEqual([["question", `ask:${id}`]]);
@@ -2778,7 +2790,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
   it("says FLIGHT is stopped (never down) after the operator's Stop, even with nothing waiting", () => {
     flight({ runId: null, state: "stopped", updatedAt: NOW - 2 * HOUR });
     expect(aggregate()).toMatchObject({
-      text: "FLIGHT is stopped: nothing waiting yet. Start it to have them triaged.",
+      text: "FLIGHT is stopped: nothing waiting yet.",
       at: NOW - 2 * HOUR,
       notTriaging: { cause: "stopped", keys: [], since: null },
     });
@@ -2867,6 +2879,87 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(operatorItems(c, store, NOW, null).map((i) => i.key)).not.toContain(
       FLIGHT_NOT_TRIAGING_KEY,
     );
+  });
+
+  it("never folds an operator's call: a missed decision or flag reaches the operator as itself", () => {
+    flight();
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
+    const id = ask(NOW - 30 * MIN);
+    const items = all();
+    expect(items.find((i) => i.key === "esc:shop-app#9")).toMatchObject({
+      owner: "operator",
+      flightTriage: "missed",
+    });
+    expect(aggregate()?.notTriaging?.keys).toEqual([`ask:${id}`]);
+    // reported down while live: nobody triages, so the decision goes to the operator at once
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - MIN })]);
+    expect(all().find((i) => i.key === "esc:shop-app#9")?.owner).toBe("flight");
+    watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
+    const down = all().find((i) => i.key === "esc:shop-app#9");
+    expect(down?.owner).toBe("operator");
+    expect(down?.flightTriage).toBeUndefined();
+    expect(aggregate()?.notTriaging?.keys).not.toContain("esc:shop-app#9");
+  });
+
+  it("does not reset windows in a crash loop: only a real outage gives a fresh window", () => {
+    // three FLIGHT runs, each ending a minute before the next starts: one stretch of being up
+    const runAt = (id: string, start: number, end: number | null) =>
+      store.upsertRun(
+        run({
+          id,
+          agentId: "flight-1",
+          startedAt: start,
+          endedAt: end,
+          status: end ? "failed" : "running",
+        }),
+      );
+    runAt("f-a", NOW - 60 * MIN, NOW - 41 * MIN);
+    runAt("f-b", NOW - 40 * MIN, NOW - 21 * MIN);
+    flight({}, { startedAt: NOW - 20 * MIN });
+    const id = ask(NOW - 50 * MIN);
+    expect(all().find((i) => i.key === `ask:${id}`)).toMatchObject({
+      owner: "flight",
+      flightTriage: "missed",
+      triageDueAt: NOW - 30 * MIN,
+    });
+    expect(aggregate()?.notTriaging).toMatchObject({ cause: "late", keys: [`ask:${id}`] });
+    // a real outage (more than the grace between runs) does give a fresh window
+    flight({}, { startedAt: NOW - 10 * MIN });
+    expect(all().find((i) => i.key === `ask:${id}`)).toMatchObject({
+      flightTriage: "waiting",
+      triageDueAt: NOW + 10 * MIN,
+    });
+  });
+
+  it("carries a late item through a rotation's restart grace instead of dropping it", () => {
+    flight({}, { startedAt: NOW - HOUR });
+    const id = ask(NOW - 30 * MIN);
+    expect(aggregate()?.notTriaging?.cause).toBe("late");
+    // the run ends for a fresh session; the watch starts the next within the grace
+    store.upsertRun(run({ id: "r-flight", agentId: "flight-1", endedAt: NOW, status: "ok" }));
+    flight({ runId: null, updatedAt: NOW }, { id: "r-gone", endedAt: NOW });
+    expect(aggregate()?.notTriaging).toMatchObject({ cause: "late", keys: [`ask:${id}`] });
+    expect(all().find((i) => i.key === `ask:${id}`)?.flightTriage).toBe("missed");
+    // the next run, a minute later: still the same late item, not a fresh window
+    flight({}, { id: "r-flight-2", startedAt: NOW + MIN });
+    expect(aggregate(NOW + 2 * MIN)?.notTriaging).toMatchObject({ cause: "late" });
+  });
+
+  it("counts a FLIGHT seat that never ran as down since the hub started, never at 0", () => {
+    markHubStarted(NOW - MIN);
+    try {
+      expect(aggregate()).toBeUndefined();
+      expect(flightNotTriagingDueAt(c, store, NOW)).toBe(NOW - MIN + FLIGHT_OFF_GRACE_MS);
+      const later = NOW - MIN + FLIGHT_OFF_GRACE_MS;
+      expect(aggregate(later)).toMatchObject({
+        at: NOW - MIN,
+        notTriaging: { cause: "off", keys: [] },
+      });
+    } finally {
+      markHubStarted(null);
+    }
+    // a tool or test that never marks the start: within the grace from now, so never shown
+    expect(aggregate(NOW + DAY)).toBeUndefined();
   });
 
   it("does not exist without a FLIGHT seat, where a seat's question stays the operator's", () => {

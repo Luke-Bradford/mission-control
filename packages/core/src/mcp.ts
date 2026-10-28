@@ -234,6 +234,9 @@ export const MC_COMMIT_TOO_BIG =
 
 export const ASKED_FLIGHT =
   "Asked FLIGHT. It answers, or takes the question to the operator with its brief; the answer arrives as a message. Carry on with what you can meanwhile.";
+/** A seat's comms_send to CAPCOM labelled `question`: a seat's questions go to FLIGHT (#758). */
+export const COMMS_QUESTION_TO_FLIGHT =
+  "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";
 /** ask_flight from FLIGHT itself: it takes decisions to the operator with a brief, never a bare question. */
 export const ASK_FLIGHT_SELF =
   'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item, or an @CAPCOM question in your reply.';

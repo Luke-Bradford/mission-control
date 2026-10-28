@@ -199,6 +199,7 @@ import {
   notRunOfSeatText,
   notSentText,
   notStartableSeatText,
+  OPERATOR_CALL_KINDS,
   OWN_SEAT_TEXT,
   OWNER_OPERATOR,
   PASSED_DECISION,
@@ -986,7 +987,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!c.ok) return c.result;
     const { question_id: id, answer, basis } = c.args;
     const q = store.question(id);
-    if (q === null || q.answeredAt !== null || q.passedAt !== null) {
+    // Passed with FLIGHT's brief for the operator, it is theirs; passed without one (before #758),
+    // it is still FLIGHT's to answer.
+    const briefed = store.briefs().get(`ask:${id}`);
+    const operators = q?.passedAt != null && briefed !== undefined && briefed.for !== "flight";
+    if (q === null || q.answeredAt !== null || operators) {
       return fail(noOpenQuestionText(id));
     }
     if (seatCfg(q.agentId) === undefined) return fail(noOpenQuestionText(id));
@@ -997,6 +1002,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const about = `${call}: ${q.text}`;
     const capped = messageCap(at, call, q.agentId);
     if (capped !== null) return fail(capped);
+    // the message answers unpassed questions only: a question passed without a brief rejoins them
+    if (q.passedAt !== null) store.unpassQuestion(id);
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
@@ -1838,7 +1845,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const note = store.notes().find((n) => `note:${n.key}` === key);
       const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
       if (
-        ["approval", "decision", "flag", "ratelimit"].includes(item.kind) ||
+        OPERATOR_CALL_KINDS.includes(item.kind) ||
         key === "note:hub-update-held" ||
         (item.kind === "blocked" && (park === "budget" || park === "account"))
       )
@@ -1866,6 +1873,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // engine holds its run for the operator's answer, and the pass is in Decided without you.
     const ask = /^ask:(\d+)$/.exec(key);
     const question = ask === null ? null : store.question(Number(ask[1]));
+    // Kept for FLIGHT, a passed question is FLIGHT's again: answer_question can close it, and the
+    // engine no longer holds its run for the operator.
+    if (structured.for === "flight" && question !== null && question.passedAt !== null)
+      store.unpassQuestion(question.id);
     if (
       structured.for === "operator" &&
       question !== null &&

@@ -774,11 +774,7 @@ describe("answer_question", () => {
     const id = ask();
     expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
     expect(messageCalls).toEqual([
-      [
-        "guido-1",
-        "FLIGHT, answering for the operator: Lane 2",
-        { interrupt: false, questions: "unpassed" },
-      ],
+      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "unpassed" }],
     ]);
     expect(decisions()).toEqual([
       {
@@ -887,6 +883,37 @@ describe("answer_question", () => {
     expect((await call("answer_question", A(id))).text).toBe(
       `Not answered: there is no open question ${id}.`,
     );
+  });
+
+  it("hands a passed question back to FLIGHT when it keeps it, so it can answer it (#758)", async () => {
+    const id = ask();
+    await passUp(id);
+    expect(store.question(id)?.passedAt).toBe(NOW);
+    // the operator's while briefed for them
+    expect((await call("answer_question", A(id))).text).toBe(
+      `Not answered: there is no open question ${id}.`,
+    );
+    const keep = await call("brief_item", {
+      key: `ask:${id}`,
+      for: "flight",
+      assessment: "I can settle this from the ticket.",
+      recommendation: "Lane 2.",
+      basis: "the ticket",
+    });
+    expect(keep.isError).toBeUndefined();
+    // FLIGHT's again: no longer passed, so the engine does not hold the run for the operator
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(messageCalls).toHaveLength(1);
+  });
+
+  it("answers a question passed without a brief before #758, handing it back first", async () => {
+    const id = ask();
+    store.passQuestion(id, NOW);
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(store.question(id)?.passedAt).toBeNull();
+    // the answer's message closes unpassed questions, which now includes this one
+    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
   });
 
   it("refuses an answer with a pass, or neither", async () => {

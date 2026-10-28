@@ -50,6 +50,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
   OWNER_LOOP,
@@ -592,6 +593,7 @@ interface FlightTriage {
   flightId: string;
   repoId: string;
   triaging: boolean;
+  /** Routes items as a live FLIGHT: live, or within the restart grace. */
   live: boolean;
   cause: Exclude<FlightNotTriagingCause, "late"> | null;
   /** The watch note's text, when one says why. */
@@ -600,6 +602,32 @@ interface FlightTriage {
   liveSince: number;
   /** An "off" FLIGHT within FLIGHT_OFF_GRACE_MS: when the item will show, else null. */
   showsAt: number | null;
+}
+
+/** When this hub process started (main.ts); null in a test or tool that never sets it. */
+let hubStartedAt: number | null = null;
+/** main.ts: a FLIGHT seat with no seat row yet counts as stopped since the hub started. */
+export function markHubStarted(at: number | null): void {
+  hubStartedAt = at;
+}
+
+/** Runs of FLIGHT walked back for `liveSince`: hours of a crash loop at FLIGHT_STARTS_MAX an hour. */
+const LIVE_SINCE_RUNS = 30;
+
+/**
+ * When FLIGHT's current stretch of being up began: its live run's start, moved back over each
+ * earlier run that ended within FLIGHT_OFF_GRACE_MS of the next one's start (a rotation, a quick
+ * restart, a crash the watch recovered), so only a real outage gives items a fresh window and a
+ * crash loop cannot keep resetting them.
+ */
+function flightLiveSince(store: Store, flightId: string, run: Run): number {
+  let start = run.startedAt;
+  for (const prev of store.runs(flightId, LIVE_SINCE_RUNS)) {
+    if (prev.id === run.id || prev.startedAt >= start) continue;
+    if (prev.endedAt === null || start - prev.endedAt > FLIGHT_OFF_GRACE_MS) break;
+    start = prev.startedAt;
+  }
+  return start;
 }
 
 function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage | null {
@@ -621,7 +649,7 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
       cause: note.key === FLIGHT_NOTE_KEY ? "start-failed" : "down",
       detail: note.text,
       since: note.at,
-      liveSince: live ? (run?.startedAt ?? 0) : 0,
+      liveSince: live && run !== null ? flightLiveSince(store, flightId, run) : 0,
     };
   }
   if (live) {
@@ -631,22 +659,36 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
       cause: null,
       detail: null,
       since: null,
-      liveSince: run?.startedAt ?? 0,
+      liveSince: run === null ? 0 : flightLiveSince(store, flightId, run),
     };
   }
-  const since = Math.max(row?.updatedAt ?? 0, run?.endedAt ?? 0);
+  // never run: down since this hub started (a test without a start time: just now, so in grace)
+  const since = row === null ? (hubStartedAt ?? now) : Math.max(row.updatedAt, run?.endedAt ?? 0);
   if (row?.state === "stopped") {
     return { ...base, triaging: false, cause: "stopped", detail: null, since };
   }
+  // parked is an outage, not a restart: no grace (the watch's note, when raised, says more)
+  if (row?.state === "parked") {
+    return { ...base, triaging: false, cause: "down", detail: "FLIGHT is parked.", since };
+  }
   const showsAt = since + FLIGHT_OFF_GRACE_MS;
-  return {
-    ...base,
-    triaging: false,
-    cause: now < showsAt ? null : "off",
-    detail: null,
-    since,
-    showsAt: now < showsAt ? showsAt : null,
-  };
+  if (now < showsAt) {
+    // Within the restart grace (a rotation, a crash the watch recovers, a hub restart) FLIGHT
+    // still counts as triaging, so items keep their windows and a "late" item carries through
+    // rather than vanishing and notifying again when FLIGHT is back.
+    const last = run ?? store.runs(flightId, 1)[0] ?? null;
+    return {
+      ...base,
+      live: true,
+      triaging: true,
+      cause: null,
+      detail: null,
+      since,
+      liveSince: last === null ? 0 : flightLiveSince(store, flightId, last),
+      showsAt,
+    };
+  }
+  return { ...base, triaging: false, cause: "off", detail: null, since };
 }
 
 /** When a not-running FLIGHT's grace ends and its "not triaging" item shows; null if not pending. */
@@ -880,10 +922,13 @@ export function attentionItems(
       .filter((q) => q.agentId === flightId)
       .map((q) => `ask:${q.id}`),
   );
-  /** Missed or late: with a FLIGHT seat it stays FLIGHT's, counted by the one not-triaging item. */
+  /**
+   * Missed or late: with a FLIGHT seat it stays FLIGHT's, counted by the one not-triaging item,
+   * except an operator's call, which reaches the operator as itself.
+   */
   const missed = (item: AttentionItem, triageDueAt?: number): AttentionItem => ({
     ...item,
-    ...(triage === null ? {} : { owner: OWNER_FLIGHT }),
+    ...(triage === null || OPERATOR_CALL_KINDS.includes(item.kind) ? {} : { owner: OWNER_FLIGHT }),
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
@@ -917,7 +962,8 @@ export function attentionItems(
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
-    if (!live) return item;
+    // nobody is triaging: an operator's call goes straight to the operator
+    if (!live || (!triaging && OPERATOR_CALL_KINDS.includes(i.kind))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     // A PR only becomes an attention item after its existing quiet wait.
     const raisedAt =
