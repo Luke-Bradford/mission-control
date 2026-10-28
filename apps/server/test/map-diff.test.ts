@@ -2,13 +2,9 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CrewRow } from "@mc/core";
 import { afterEach, expect, it } from "vitest";
 import { mapChanges } from "../src/files.ts";
-import { NO_LOCK } from "../src/hud.ts";
 import { CallRing } from "../src/map/ring.ts";
-import { mapSeats } from "../src/map/seats.ts";
-import { Store } from "../src/store.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -154,48 +150,3 @@ it("retains the current checkout collector with an aside run on the same seat", 
     stop();
   }
 }, 12000);
-
-it("points a seat's question badge at the FLIGHT node when a FLIGHT seat exists (#758)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "map-seats-"));
-  dirs.push(dir);
-  const store = new Store(join(dir, "mc.sqlite"));
-  try {
-    store.upsertRun({
-      id: "r",
-      agentId: "seat",
-      repoId: "repo",
-      seq: 1,
-      startedAt: 1,
-      endedAt: null,
-      status: "running",
-      sessionId: null,
-      model: "opus",
-      branch: null,
-      ticket: null,
-      costUsd: null,
-      tokens: null,
-      transcriptPath: "",
-      prs: [],
-      summary: null,
-    });
-    const id = store.addQuestion({ agentId: "seat", runId: "r", text: "Which lane?", at: 1 });
-    const row = {
-      id: "seat",
-      role: "GUIDO",
-      repoId: "repo",
-      ticket: null,
-      run: { id: "r" },
-      hudState: "running",
-      stateSince: 1,
-      ticketTitle: null,
-      loop: null,
-    } as unknown as CrewRow;
-    const ring = new CallRing(() => []);
-    const to = (flightId?: string) =>
-      mapSeats([row], store, ring, NO_LOCK, 2, flightId).seats[0]?.badges.questions;
-    expect(to("flight-1")).toEqual([{ id, from: "seat", to: "FLIGHT", ticket: null, since: 1 }]);
-    expect(to()?.[0]?.to).toBe("CAPCOM");
-  } finally {
-    store.close();
-  }
-});

@@ -2902,7 +2902,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate()?.notTriaging?.keys).not.toContain("esc:shop-app#9");
   });
 
-  it("leaves a missed stuck run, budget park and held Update raw, so they notify as before", () => {
+  it("leaves a missed stuck run, error, budget park and held Update raw, so they notify as before", () => {
     flight();
     store.upsertRun(
       run({
@@ -2937,6 +2937,15 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
+    // an error a seat is stuck on stays raw too, so it still pings
+    store.addCrewError({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "commit failed",
+      at: NOW - 30 * MIN,
+    });
+    const error = all().find((i) => i.kind === "error");
+    expect(error).toMatchObject({ owner: "operator", flightTriage: "missed" });
     // an ordinary missed item is still folded in
     expect(aggregate()?.notTriaging?.keys).toEqual(["note:plain"]);
     // reported down while live: a stuck run goes to the operator at once, not into the count

@@ -246,7 +246,8 @@ export function FlightChat({
             return (
               <div className="dask" key={i.key} data-testid="waiting-ask">
                 <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
-                  {ATTENTION_LABEL[i.kind]}
+                  {/* the not-triaging item is about FLIGHT, not a blocked seat */}
+                  {i.notTriaging ? "FLIGHT" : ATTENTION_LABEL[i.kind]}
                 </Pill>
                 <span className="min0 ellip" title={i.text}>
                   {i.text}

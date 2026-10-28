@@ -621,9 +621,16 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
 
 /**
  * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
- * themselves so they notify as they always did: a stuck run is not news to fold into a count.
+ * themselves so they notify as they always did: a stuck run, or an error a seat is stuck on, is
+ * not news to fold into a count.
  */
-const STUCK_KINDS: readonly AttentionItem["kind"][] = ["stalled", "blocked", "parked", "lock"];
+const STUCK_KINDS: readonly AttentionItem["kind"][] = [
+  "stalled",
+  "blocked",
+  "parked",
+  "lock",
+  "error",
+];
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
 const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
