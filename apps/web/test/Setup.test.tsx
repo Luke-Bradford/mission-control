@@ -128,7 +128,7 @@ beforeEach(() => vi.useFakeTimers({ toFake: ["Date"], now: NOW }));
 afterEach(() => vi.useRealTimers());
 
 describe("Setup tabs", () => {
-  it("the dependency-order sidebar routes its five sections", async () => {
+  it("the dependency-order sidebar routes its six sections", async () => {
     load();
     render(<Setup tab="sessions" />);
     const tabs = screen.getByRole("navigation", { name: "Setup sections" });
@@ -137,6 +137,8 @@ describe("Setup tabs", () => {
     expect(window.location.pathname).toBe("/setup/accounts");
     fireEvent.click(within(tabs).getByRole("button", { name: "Roles" }));
     expect(window.location.pathname).toBe("/setup/roles");
+    fireEvent.click(within(tabs).getByRole("button", { name: "Sources" }));
+    expect(window.location.pathname).toBe("/setup/sources");
     fireEvent.click(within(tabs).getByRole("button", { name: "Safety" }));
     expect(window.location.pathname).toBe("/setup/access");
   });
@@ -218,6 +220,8 @@ describe("Setup tabs", () => {
     expect(t.textContent).toContain(
       "Mission Control decides every move from its own checks; an agent saying it is done can only hold work back, never push it forward. cmd = Mission Control runs it · rule = read from the diff or the board · review = a fresh reviewer · gate = you or FLIGHT · agent = the agent's own evidence.",
     );
+    expect(screen.queryByRole("region", { name: "GitHub" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Microsoft Teams" })).toBeNull();
   });
 
   const SESSIONS_CFG: ConfigView = { ...CREW_CONFIG, loops: CFG.loops };

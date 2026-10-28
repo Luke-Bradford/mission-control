@@ -63,10 +63,6 @@ export const answersToday = (
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>
   rows.filter((r) => r.kind === "you" || r.kind === "flight");
 
-/** The Feed tab's rows: Mission Control's wake lines and FLIGHT's decisions. */
-export const feedRows = (rows: readonly DockRow[]): DockRow[] =>
-  rows.filter((r) => r.kind === "hub" || r.kind === "decision");
-
 /**
  * Messages sent but not yet in FLIGHT's stream, as `you` rows marked pending. One is settled once
  * the stream holds a copy of that text that was not there when it was sent (`seen`: the ids of the

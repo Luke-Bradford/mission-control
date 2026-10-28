@@ -1,15 +1,21 @@
 export const MACHINE_CHART_HEIGHT = 24;
 const MACHINE_CHART_WIDTH = 100;
 const MACHINE_CHART_INSET = 2;
+/** The scale's span in viewBox units, from the baseline up to the top of the scale. */
+const MACHINE_CHART_SPAN = MACHINE_CHART_HEIGHT - 5;
+const MACHINE_CHART_BASELINE = MACHINE_CHART_HEIGHT - MACHINE_CHART_INSET;
+/** The y of the scale's top (the chart's max): where its dashed gridline and gradient start. */
+export const MACHINE_CHART_TOP = MACHINE_CHART_BASELINE - MACHINE_CHART_SPAN;
 
 export function machineAreaGeometry(values: (number | null)[], max: number) {
   const height = MACHINE_CHART_HEIGHT;
-  const baseline = height - MACHINE_CHART_INSET;
-  if (values.length < 2) return { height, baseline, line: null, areas: [] };
+  const baseline = MACHINE_CHART_BASELINE;
+  const top = MACHINE_CHART_TOP;
+  if (values.length < 2) return { height, baseline, top, line: null, areas: [] };
   const safeMax = Math.max(1, max);
   const point = (value: number, index: number) => {
     const x = (index / (values.length - 1)) * MACHINE_CHART_WIDTH;
-    const y = baseline - (Math.max(0, Math.min(safeMax, value)) / safeMax) * (height - 5);
+    const y = baseline - (Math.max(0, Math.min(safeMax, value)) / safeMax) * MACHINE_CHART_SPAN;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   };
   const segments = values.reduce<string[][]>(
@@ -33,6 +39,7 @@ export function machineAreaGeometry(values: (number | null)[], max: number) {
   return {
     height,
     baseline,
+    top,
     line: line || null,
     areas: nonEmpty
       .filter((segment) => segment.length > 1)

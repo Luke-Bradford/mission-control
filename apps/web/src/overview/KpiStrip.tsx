@@ -1,7 +1,7 @@
 import type { OverviewSummary } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
-import { Sparkline } from "../hud/Sparkline.tsx";
+import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { followLink, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
@@ -16,6 +16,54 @@ const change = (series: (number | null)[] | undefined, format = kTokens): string
   const delta = (series.at(-1) ?? 0) - (series[0] ?? 0);
   return `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${format(Math.abs(delta))} · 30m`;
 };
+
+/**
+ * A KPI's last 30 minutes on its own scale: the trace, its real peak labelled on the dashed top
+ * gridline (the scale itself never drops under 1, so a peak under 1 sits below it), and a -30m … now
+ * axis. An all-zero series is the bare baseline and says so.
+ */
+function KpiTrace({
+  values,
+  color,
+  label,
+  format,
+  live,
+}: {
+  values: (number | null)[];
+  color: string;
+  label: string;
+  format: (n: number) => string;
+  /** The summary is loaded and its last read succeeded: the now-cursor pulses. */
+  live: boolean;
+}) {
+  const quiet = quietSeries(values);
+  const readings = values.filter((v): v is number => v !== null);
+  // zeros are no activity; no readings at all (e.g. no completed cycles) is no data
+  const empty = readings.length === 0 ? "no data" : "no activity";
+  const peak = Math.max(0, ...readings);
+  const latest = values.at(-1);
+  const aria = quiet
+    ? `${label} · ${empty}`
+    : `${label} · peak ${format(peak)}${latest == null ? "" : ` · latest ${format(latest)}`}`;
+  return (
+    <span className="kpi-trace">
+      <Sparkline values={values} color={color} label={aria} live={live} top={9} />
+      {quiet ? (
+        <span className="kpi-quiet" aria-hidden="true">
+          {empty}
+        </span>
+      ) : (
+        <span className="kpi-peak num" aria-hidden="true" title="Peak in the last 30 minutes">
+          {format(peak)}
+        </span>
+      )}
+      <span className="kpi-axis num" aria-hidden="true">
+        <span>-30m</span>
+        <span>now</span>
+      </span>
+    </span>
+  );
+}
 
 /** Live Overview KPIs, scoped by the header's session filter. */
 export function KpiStrip() {
@@ -35,7 +83,8 @@ export function KpiStrip() {
             ? `of ${k.working.of} agents`
             : "—",
       series: k?.working?.series,
-      color: "var(--ok)",
+      fmt: String,
+      color: "var(--accent)",
       history: "last 30 minutes",
     },
     {
@@ -44,6 +93,7 @@ export function KpiStrip() {
       value: k?.tokensPerMin?.now != null ? kTokens(k.tokensPerMin.now) : "—",
       delta: change(k?.tokensPerMin?.series),
       series: k?.tokensPerMin?.series,
+      fmt: kTokens,
       color: "var(--accent)",
       history: "last 30 minutes",
     },
@@ -53,7 +103,8 @@ export function KpiStrip() {
       value: k?.spendToday?.usd != null ? `$${k.spendToday.usd.toFixed(2)}` : "—",
       delta: change(k?.spendToday?.series, (n) => `$${n.toFixed(2)}`),
       series: k?.spendToday?.series,
-      color: "var(--think)",
+      fmt: (n: number) => `$${n.toFixed(2)}`,
+      color: "var(--accent)",
       history: "last 30 minutes",
     },
     {
@@ -67,6 +118,7 @@ export function KpiStrip() {
             ? "—"
             : `${duration((summary?.at ?? Date.now()) - k.inFlight.oldestAt)} oldest`,
       series: k?.inFlight?.series,
+      fmt: String,
       history: "last 30 minutes",
       color: "var(--accent)",
     },
@@ -76,7 +128,8 @@ export function KpiStrip() {
       value: value(k?.mergedToday?.count),
       delta: change(k?.mergedToday?.series),
       series: k?.mergedToday?.series,
-      color: "var(--ok)",
+      fmt: String,
+      color: "var(--accent)",
       history: "last 30 minutes",
     },
     {
@@ -90,8 +143,9 @@ export function KpiStrip() {
             ? `${k.ciPassRate24h.runs} runs · ${k.ciPassRate24h.redNow} red now`
             : "—",
       series: k?.ciPassRate24h?.series,
+      fmt: (n: number) => `${Math.round(n)}%`,
       history: "last 30 minutes",
-      color: "var(--crit)",
+      color: "var(--accent)",
     },
     {
       label: "Cycle time",
@@ -104,8 +158,9 @@ export function KpiStrip() {
             ? "—"
             : `n=${k.cycleTime.n} · ${duration(k.cycleTime.avg14dMs)} avg (14d)`,
       series: k?.cycleTime?.series,
+      fmt: duration,
       history: "last 30 minutes",
-      color: "var(--think)",
+      color: "var(--accent)",
     },
     {
       label: "Needs you",
@@ -118,8 +173,10 @@ export function KpiStrip() {
             ? `${k.needsYou.overHour} over 1 h`
             : "—",
       series: k?.needsYou?.series,
+      fmt: String,
       history: "last 30 minutes",
-      color: "var(--warn)",
+      // amber only while something waits on the operator
+      color: k?.needsYou?.count ? "var(--warn-mark)" : "var(--accent)",
     },
   ] as const;
   return (
@@ -157,10 +214,12 @@ export function KpiStrip() {
                 </span>
               )}
               {series && series.length >= 2 ? (
-                <Sparkline
+                <KpiTrace
                   values={series}
                   color={tile.color}
                   label={`${tile.label} · ${tile.history}`}
+                  format={tile.fmt}
+                  live={summary !== undefined && error === null}
                 />
               ) : (
                 <span className="kpi-secondary num" title="History unavailable">

@@ -181,10 +181,22 @@ describe("Needs-you owners", () => {
   });
 
   it("a hard-rule flag is the operator's, or the controller's where the rules say it merges", () => {
-    note("flag:r1:hard-rules:abc", "flag");
-    expect(owners()["note:flag:r1:hard-rules:abc"]).toBe("operator");
+    note("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag");
+    expect(owners()["note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"]).toBe(
+      "operator",
+    );
     store.setSetting(hardRulesBySettingKey("shop-app"), "controller");
-    expect(owners()["note:flag:r1:hard-rules:abc"]).toBe("controller");
+    expect(owners()["note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"]).toBe(
+      "controller",
+    );
+  });
+
+  it("routes a hard-rule flag whose run id contains a colon, as crew run ids do", () => {
+    const key = "flag:guido-1:20261021T165337Z:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
+    note(key, "flag");
+    expect(owners()[`note:${key}`]).toBe("operator");
+    store.setSetting(hardRulesBySettingKey("shop-app"), "controller");
+    expect(owners()[`note:${key}`]).toBe("controller");
   });
 
   it("a cleanup note is the controller's, and a review note the operator's", () => {

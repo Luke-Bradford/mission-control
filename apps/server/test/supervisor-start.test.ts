@@ -120,6 +120,7 @@ import {
   sups,
   TICKET,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -2780,7 +2781,7 @@ import(${JSON.stringify(fixture)});
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm the seat floor"));
     // Keeper cleanup can finish after the refusal is recorded on a loaded runner.
-    await vi.waitFor(() => expect(existsSync(crewKeeperDir(dbPath, runId))).toBe(false));
+    await untilGone(crewKeeperDir(dbPath, runId));
   });
 
   it.each(["codex-cli 0.153.9", "unreadable"])(

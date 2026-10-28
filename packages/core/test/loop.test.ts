@@ -8,6 +8,8 @@ import {
   CI_TRIES,
   ciVerdict,
   fillLoopText,
+  hardRulesFlagKey,
+  isHardRulesFlagKey,
   LOOP_TEXT_CI,
   LOOP_TEXT_CI_REF,
   LOOP_TEXT_DONE,
@@ -2871,5 +2873,24 @@ describe("ciVerdict", () => {
   it("a name listed twice takes its worst state", () => {
     const v = ciVerdict([chk("check", "passing"), chk("check", "failing")], []);
     expect(v).toMatchObject({ ci: "failing", failing: ["check"] });
+  });
+});
+
+describe("isHardRulesFlagKey", () => {
+  const sha = "00c296383f2b261b436d5a1d7951db07f82174af";
+  it("matches the keys hardRulesFlagKey builds, including run ids that contain a colon", () => {
+    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1:20261021T165337Z", sha))).toBe(true);
+    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1", sha))).toBe(true);
+    expect(isHardRulesFlagKey(hardRulesFlagKey("run-1", "a".repeat(64)))).toBe(true);
+  });
+  it("matches nothing else", () => {
+    expect(isHardRulesFlagKey(`flag:guido-1:20261021T165337Z:other:${sha}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flake:guido-1:hard-rules:${sha}`)).toBe(false);
+    expect(isHardRulesFlagKey("flag:guido-1:hard-rules:not-a-sha")).toBe(false);
+    expect(isHardRulesFlagKey(`flag:hard-rules:${sha}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.toUpperCase()}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.slice(1)}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}0`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}:x`)).toBe(false);
   });
 });

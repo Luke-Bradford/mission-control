@@ -1,5 +1,5 @@
 import type { AttentionItem, AwaySettings } from "@mc/core";
-import { operatorItems } from "../attention.ts";
+import { needsYouItems } from "../attention.ts";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { untilLabel } from "../fmt.ts";
@@ -22,7 +22,8 @@ const BITS: { label: string; kinds: AttentionItem["kind"][]; plural: boolean }[]
 /** The Overview's banner (catalogue 2.1.1): the away strip when on, then All clear or the count. */
 export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
   const all = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const items = all && operatorItems(all);
+  // The header's Needs you set: the whole inbox, one per key (attention.ts).
+  const items = all && needsYouItems(all);
   const away = useResource<AwaySettings>(RESOURCES.away).data;
   const lamp = items
     ? needsLamp(

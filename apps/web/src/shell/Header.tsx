@@ -9,7 +9,7 @@ import {
   type MachineSample,
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
-import { operatorItems } from "../attention.ts";
+import { useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
@@ -27,13 +27,13 @@ import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts
 import { toast } from "./Toast.tsx";
 
 const TABS: readonly {
-  page?: Page;
+  page: Page;
   label: string;
   to: string;
-  map?: true;
   needs?: (i: AttentionItem) => boolean;
 }[] = [
   { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
+  { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
   {
     page: "board",
     label: "Board",
@@ -43,24 +43,17 @@ const TABS: readonly {
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms, needs: () => true },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
-  { label: "Map", to: "/#mapP", map: true },
-  { page: "setup", label: "Setup", to: PAGE_PATHS.setup },
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const attention = operatorItems(useResource<AttentionItem[]>(RESOURCES.attention).data ?? []);
+  const attention = useNeedsYou();
   return (
     <header className="top">
       <span className="brand">MISSION CONTROL</span>
       <nav className="tabs" aria-label="Pages">
         {TABS.map((t) => (
-          <Tab
-            key={t.label}
-            to={t.to}
-            on={t.map ? page === "overview" && window.location.hash === "#mapP" : page === t.page}
-            native={t.map}
-          >
+          <Tab key={t.label} to={t.to} on={page === t.page}>
             {t.label}
             {t.needs && <NeedsLamp items={attention.filter(t.needs)} />}
           </Tab>
@@ -75,6 +68,7 @@ export function Header({ page }: { page: Page }) {
         <NeedsButton items={attention} />
         <AwayButton />
         <ThemeButton />
+        <SetupButton on={page === "setup"} />
         <DockButton page={page} />
       </div>
       <span className="sr-only">
@@ -85,26 +79,42 @@ export function Header({ page }: { page: Page }) {
   );
 }
 
-function Tab({
-  to,
-  on,
-  native = false,
-  children,
-}: {
-  to: string;
-  on: boolean;
-  native?: boolean;
-  children: ReactNode;
-}) {
+function Tab({ to, on, children }: { to: string; on: boolean; children: ReactNode }) {
   return (
     <a
       href={to}
       className={on ? "on" : undefined}
       aria-current={on ? "page" : undefined}
-      onClick={native ? undefined : (e) => followLink(e, to)}
+      onClick={(e) => followLink(e, to)}
     >
       {children}
     </a>
+  );
+}
+
+/** Configuration stays out of the operational page tabs. */
+function SetupButton({ on }: { on: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`ghost iconbtn${on ? " on" : ""}`}
+      title="Setup: sessions, loops, accounts, guard, access and notifications"
+      aria-label="Setup"
+      aria-pressed={on}
+      onClick={() => navigate(PAGE_PATHS.setup)}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M2 4h12M2 8h12M2 12h12"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <circle className="knob" cx="5" cy="4" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+        <circle className="knob" cx="11" cy="8" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+        <circle className="knob" cx="7" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    </button>
   );
 }
 

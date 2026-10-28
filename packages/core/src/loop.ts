@@ -187,7 +187,9 @@ export const isCleanupNoteKey = (key: string): boolean =>
 /** The flag note while a run's PR touches hard-rule files, per pushed sha. */
 export const hardRulesFlagKey = (runId: string, sha: string): string =>
   `flag:${runId}:hard-rules:${sha}`;
-export const isHardRulesFlagKey = (key: string): boolean => /^flag:[^:]+:hard-rules:/.test(key);
+/** A run id may itself contain colons (`guido-1:20261021T165337Z`), so only the sha is anchored. */
+export const isHardRulesFlagKey = (key: string): boolean =>
+  /^flag:.+:hard-rules:[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(key);
 /** The flag note for a CI failure that passed on its one re-run, per sha. */
 export const flakeNoteKey = (runId: string, sha: string): string => `flake:${runId}:${sha}`;
 /** A flake record is the controller's to follow up. */

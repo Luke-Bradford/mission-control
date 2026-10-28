@@ -197,8 +197,19 @@ export function Conversation({
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
-const time = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/** The mentions list keeps this much clear of the conversation panel's bottom edge. */
+const MENTIONS_GAP_PX = 8;
+/** However short the window, the mentions list keeps room for about two entries. */
+const MENTIONS_MIN_PX = 120;
+
+/** A message's time; one from an earlier day carries its date, so old traffic never reads as today's. */
+const time = (at: number) => {
+  const date = new Date(at);
+  const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toDateString() === new Date().toDateString()
+    ? clock
+    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${clock}`;
+};
 
 function scopeFor(view: CommsView): string | null {
   if (view.kind === "crew") return "crew";
@@ -345,6 +356,7 @@ function MessagePane({
   onOpenMessage,
   onReply,
   flightId,
+  sent = 0,
 }: {
   messages: CommsMessage[];
   lookupMessages?: CommsMessage[];
@@ -353,24 +365,42 @@ function MessagePane({
   onOpenMessage: OpenMessage;
   onReply: (message: CommsMessage) => void;
   flightId: string | undefined;
+  /** Counts CAPCOM's sends: each one brings the pane back to the latest, wherever the reader was. */
+  sent?: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const followsLatest = useRef(true);
+  useLayoutEffect(() => {
+    if (sent === 0) return;
+    // Follow the latest again, so the sent message is in view when the refetch brings it.
+    followsLatest.current = true;
+    if (box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [sent]);
+  const onJumpedRef = useRef(onJumped);
+  onJumpedRef.current = onJumped;
   const [highlightId, setHighlightId] = useState(jumpId);
   const latestId = messages.at(-1)?.id;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow the newest rendered message.
   useLayoutEffect(() => {
     if (jumpId) {
       const target = document.getElementById(`comms-message-${jumpId}`);
       if (target) {
         setHighlightId(jumpId);
         target.scrollIntoView?.({ block: "center" });
-        onJumped();
+        followsLatest.current = jumpId === latestId;
+        onJumpedRef.current();
       }
-    } else if (box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [jumpId, latestId, onJumped]);
+    } else if (box.current && followsLatest.current) {
+      box.current.scrollTop = box.current.scrollHeight;
+    }
+  }, [jumpId, latestId]);
+  const rememberScrollPosition = () => {
+    const el = box.current;
+    if (!el) return;
+    followsLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+  };
   const byId = new Map(lookupMessages.map((message) => [message.id, message]));
   return (
-    <div className="comms-messages scroll" id="convo" ref={box}>
+    <div className="comms-messages scroll" id="convo" ref={box} onScroll={rememberScrollPosition}>
       <div className="comms-message-stack">
         {messages.length === 0 ? <p className="pb note">No messages yet.</p> : null}
         {messages.map((message) => {
@@ -384,7 +414,6 @@ function MessagePane({
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
                 <CommsEnd id={message.from} />
-                {message.from === COMMS_CAPCOM && <Pill tone="warn">operator</Pill>}
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
                     {message.label}
@@ -526,6 +555,21 @@ function MentionsBell({
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
   const [markError, setMarkError] = useState<string[] | null>(null);
+  const panel = useRef<HTMLElement>(null);
+  // The conversation panel clips what overflows it: fit the list into the room below the bell.
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !el) return;
+    const fit = () => {
+      const top = el.getBoundingClientRect().top;
+      const host = el.closest("#chatP")?.getBoundingClientRect().bottom ?? window.innerHeight;
+      const room = Math.min(host, window.innerHeight) - top - MENTIONS_GAP_PX;
+      el.style.setProperty("--mentions-room", `${Math.max(MENTIONS_MIN_PX, Math.floor(room))}px`);
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [open]);
   const mentions = resource.data?.mentions ?? [];
   const unseen = mentions.filter((mention) => !mention.seen && !seen.has(mention.message.id));
   const mark = (ids: string[]) => {
@@ -559,7 +603,7 @@ function MentionsBell({
         {unseen.length > 0 && <b>{unseen.length}</b>}
       </button>
       {open && (
-        <section className="comms-mentions-panel" aria-label="Mentions">
+        <section className="comms-mentions-panel" aria-label="Mentions" ref={panel}>
           <header>
             Mentions <span>{unseen.length} new</span>
             <button
@@ -717,6 +761,7 @@ function ModernConversation({
               : (agent.data?.messages ?? []);
   const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
   const [reply, setReply] = useState<CommsMessage | null>(null);
+  const [sent, setSent] = useState(0);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
   const read = useRef(new Set<string>());
   const pendingRead = useRef(new Set<string>());
@@ -765,9 +810,9 @@ function ModernConversation({
           <span className="comms-chat-hint" title={conversationHint(view)}>
             {conversationHint(view)}
           </span>
-          <MentionsBell onOpenMessage={onOpenMessage} flightId={flightSeat?.id} />
         </div>
       }
+      actions={<MentionsBell onOpenMessage={onOpenMessage} flightId={flightSeat?.id} />}
     >
       {readError && (
         <p className="pb crit-t s">
@@ -806,6 +851,7 @@ function ModernConversation({
         onOpenMessage={onOpenMessage}
         onReply={setReply}
         flightId={flightSeat?.id}
+        sent={sent}
       />
       {to ? (
         <Composer
@@ -827,6 +873,7 @@ function ModernConversation({
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
           onSent={() => {
+            setSent((count) => count + 1);
             if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)
               navigate(commsContactPath(view.agentId, COMMS_CAPCOM));
           }}

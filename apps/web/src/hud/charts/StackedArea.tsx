@@ -1,5 +1,18 @@
 import { useState } from "react";
-import { Grid, keyStep, nearestIndex, PAD, pointerX, Tip, useChartWidth } from "./Hover.tsx";
+import {
+  FadeGradient,
+  Grid,
+  keyStep,
+  NowCursor,
+  nearestIndex,
+  PAD,
+  pointerX,
+  spread,
+  Tip,
+  useChartWidth,
+  useGradientId,
+  XAxis,
+} from "./Hover.tsx";
 
 export interface AreaSeries {
   id: string;
@@ -11,8 +24,9 @@ export interface AreaSeries {
 }
 
 /**
- * Series stacked bottom-up in the order given (the mockup's `stackedArea`): a wash and a 2 px top
- * line per series, a dot on the newest total, grid at 0/50/100 % of the peak total, and a crosshair
+ * Series stacked bottom-up in the order given (the mockup's `stackedArea`): per series a 1.5 px top
+ * line over a fill fading to transparent, dashed grid at 0/50/100 % of the peak total, an x axis
+ * ruled in quarters, a "now" cursor at the newest point (pulsing while `live`), and a crosshair
  * whose tooltip lists every series at that point, top of the stack first. An empty host for no series.
  */
 export function StackedArea({
@@ -22,6 +36,7 @@ export function StackedArea({
   at,
   format,
   height = 170,
+  live = false,
 }: {
   series: AreaSeries[];
   /** What is plotted; the aria-label adds each series' latest and peak. */
@@ -32,8 +47,11 @@ export function StackedArea({
   at: (i: number, n: number) => string;
   format: (v: number) => string;
   height?: number;
+  /** The newest point is now and still moving: the cursor pulses. */
+  live?: boolean;
 }) {
   const [ref, w] = useChartWidth(1100);
+  const gid = useGradientId();
   const [hover, setHover] = useState<number | null>(null);
   const n = Math.max(0, ...series.map((s) => s.values.length));
   // The host stays mounted so its width is followed once series arrive.
@@ -80,33 +98,32 @@ export function StackedArea({
         aria-label={aria}
         {...keyStep(n, hover, setHover)}
       >
+        <defs>
+          {series.map((s, i) => (
+            <FadeGradient key={s.id} id={`${gid}-${i}`} color={s.color} opacity={0.32} />
+          ))}
+        </defs>
         <Grid max={peak} y={Y} x0={x0} x1={x1} label={format} />
-        {layers.map(({ s, area, line }) => (
+        {layers.map(({ s, area, line }, i) => (
           <g key={s.id}>
-            <path className="area" d={area} fill={s.color} fillOpacity={0.26} />
+            <path className="area" d={area} fill={`url(#${gid}-${i})`} />
             <path
               className="line"
               d={line}
               fill="none"
               stroke={s.color}
-              strokeWidth={2}
+              strokeWidth={1.5}
               strokeLinejoin="round"
               strokeLinecap="round"
             />
           </g>
         ))}
-        <circle
-          cx={X(n - 1)}
-          cy={Y(totals[n - 1] ?? 0)}
-          r={4}
-          fill="var(--fg)"
-          stroke="var(--surface)"
-          strokeWidth={2}
-        />
-        <text className="ct" x={X(0)} y={height - 4} textAnchor="start">
+        <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />
+        <NowCursor x={X(n - 1)} y1={yTop} y2={yBottom} live={live} />
+        <text className="ct" x={X(0)} y={height - 3} textAnchor="start">
           {xLabels[0]}
         </text>
-        <text className="ct" x={X(n - 1)} y={height - 4} textAnchor="end">
+        <text className="ct now" x={X(n - 1)} y={height - 3} textAnchor="end">
           {xLabels[1]}
         </text>
         {hover !== null && (
@@ -118,6 +135,7 @@ export function StackedArea({
             y2={yBottom}
             stroke="var(--fg-2)"
             strokeWidth={1}
+            strokeDasharray="3 3"
           />
         )}
         <rect

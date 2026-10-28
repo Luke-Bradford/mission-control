@@ -1,5 +1,17 @@
 import { useState } from "react";
-import { Grid, keyStep, PAD, pointerX, Tip, useChartWidth } from "./Hover.tsx";
+import {
+  FadeGradient,
+  Grid,
+  keyStep,
+  NowCursor,
+  PAD,
+  pointerX,
+  spread,
+  Tip,
+  useChartWidth,
+  useGradientId,
+  XAxis,
+} from "./Hover.tsx";
 
 export interface LineSeries {
   id: string;
@@ -13,8 +25,9 @@ const pct = (v: number): string => `${Math.round(v)}%`;
 
 /**
  * Percent lines over time (the mockup's `lineChart`): x from `from` to `to` (epoch ms), y from 0 to
- * `max`, grid at 0/50/100 % of `max`, an optional dashed limit at 100 %, a dot on each line's newest
- * point, and a crosshair that snaps to the nearest sample and lists every series there.
+ * `max`, dashed grid at 0/50/100 % of `max`, an optional dashed limit at 100 %, 1.5 px lines over a
+ * fill fading to transparent, a "now" cursor at `to` (pulsing while `live`), and a crosshair that
+ * snaps to the nearest sample and lists every series there.
  */
 export function LineChart({
   series,
@@ -28,6 +41,7 @@ export function LineChart({
   xLabels,
   at,
   height = 170,
+  live = false,
 }: {
   series: LineSeries[];
   bands?: { from: number; to: number; label: string }[];
@@ -42,8 +56,11 @@ export function LineChart({
   /** The tooltip heading for a sample time. */
   at: (ms: number) => string;
   height?: number;
+  /** `to` is now and moving: the cursor pulses. */
+  live?: boolean;
 }) {
   const [ref, w] = useChartWidth(560);
+  const gid = useGradientId();
   const [hover, setHover] = useState<number | null>(null);
   const span = Math.max(1, to - from);
   const x0 = PAD.l;
@@ -76,6 +93,25 @@ export function LineChart({
       pen = true;
     }
     return d;
+  };
+
+  // One area per unbroken run of readings, down to the baseline.
+  const areas = (s: LineSeries): string[] => {
+    const runs: { at: number; v: number }[][] = [[]];
+    for (const p of s.points) {
+      if (p.v === null) runs.push([]);
+      else runs.at(-1)?.push({ at: p.at, v: p.v });
+    }
+    return runs
+      .filter((r) => r.length > 1)
+      .map((r) => {
+        const top = r
+          .map((p, i) => `${i ? "L" : "M"}${X(p.at).toFixed(1)},${Y(p.v).toFixed(1)}`)
+          .join("");
+        const first = r[0]?.at ?? from;
+        const last = r.at(-1)?.at ?? from;
+        return `${top}L${X(last).toFixed(1)},${yBottom}L${X(first).toFixed(1)},${yBottom}Z`;
+      });
   };
 
   const aria = `${label}: ${series
@@ -137,36 +173,39 @@ export function LineChart({
             strokeWidth={1}
           />
         )}
-        {series.map((s) => {
-          const last = valued(s).at(-1);
-          return (
-            <g key={s.id}>
-              <path
-                className="line"
-                d={path(s)}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {last && (
-                <circle
-                  cx={X(last.at)}
-                  cy={Y(last.v)}
-                  r={4}
-                  fill={s.color}
-                  stroke="var(--surface)"
-                  strokeWidth={2}
-                />
-              )}
-            </g>
-          );
-        })}
-        <text className="ct" x={x0} y={height - 4} textAnchor="start">
+        <defs>
+          {series.map((s, i) => (
+            <FadeGradient
+              key={s.id}
+              id={`${gid}-${i}`}
+              color={s.color}
+              opacity={0.14}
+              box={{ y1: yTop, y2: yBottom }}
+            />
+          ))}
+        </defs>
+        {series.map((s, i) => (
+          <g key={s.id}>
+            {areas(s).map((d) => (
+              <path key={d} className="area" d={d} fill={`url(#${gid}-${i})`} />
+            ))}
+            <path
+              className="line"
+              d={path(s)}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={1.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          </g>
+        ))}
+        <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />
+        <NowCursor x={x1} y1={yTop} y2={yBottom} live={live} />
+        <text className="ct" x={x0} y={height - 3} textAnchor="start">
           {xLabels[0]}
         </text>
-        <text className="ct" x={x1} y={height - 4} textAnchor="end">
+        <text className="ct now" x={x1} y={height - 3} textAnchor="end">
           {xLabels[1]}
         </text>
         {hover !== null && (
@@ -178,6 +217,7 @@ export function LineChart({
             y2={yBottom}
             stroke="var(--fg-2)"
             strokeWidth={1}
+            strokeDasharray="3 3"
           />
         )}
         <rect

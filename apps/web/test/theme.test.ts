@@ -125,7 +125,7 @@ describe("theme tokens", () => {
 
   it("keeps the mockup's values where they pass", () => {
     expect(THEME_TOKENS.dark).toMatchObject({
-      "--bg": "#0e1116",
+      "--bg": "#070a0e",
       "--fg": "#e7eaef",
       "--s1": "#3987e5",
     });

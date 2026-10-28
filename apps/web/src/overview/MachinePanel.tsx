@@ -1,4 +1,5 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
+import { useId } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
@@ -43,17 +44,23 @@ function MachineAreaChart({
   values,
   max,
   color,
+  live,
 }: {
   label: string;
   values: (number | null)[];
   max?: number;
   color: string;
+  /** The history is loaded and its last read succeeded: the now-cursor pulses. */
+  live: boolean;
 }) {
+  const gradient = `machine-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const geometry = machineAreaGeometry(
     values,
     max ?? Math.max(1, ...values.filter((value) => value !== null)),
   );
   if (geometry.line === null) return null;
+  // The scale's top: `max` (100 %), or the series' own peak.
+  const { top } = geometry;
   return (
     <svg
       className="machine-chart"
@@ -63,16 +70,39 @@ function MachineAreaChart({
       aria-label={label}
       data-max={max ?? Math.max(1, ...values.filter((value) => value !== null))}
     >
+      <title>{`${label} · last 30 minutes, a point a minute`}</title>
+      <defs>
+        <linearGradient
+          id={gradient}
+          gradientUnits="userSpaceOnUse"
+          x1={0}
+          y1={top}
+          x2={0}
+          y2={geometry.baseline}
+        >
+          <stop offset="0" stopColor={color} stopOpacity={0.24} />
+          <stop offset="1" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <line className="machine-grid" x1={0} x2={100} y1={top} y2={top} />
       <path className="machine-gridline" d={`M0,${geometry.baseline}H100`} />
       {geometry.areas.map((area) => (
-        <path key={area} d={area} fill={color} fillOpacity={0.18} />
+        <path key={area} d={area} fill={`url(#${gradient})`} />
       ))}
       <path
         d={geometry.line}
         fill="none"
         stroke={color}
         strokeWidth={1.5}
+        strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
+      />
+      <line
+        className={`machine-now${live ? " live" : ""}`}
+        x1={100}
+        x2={100}
+        y1={0}
+        y2={MACHINE_CHART_HEIGHT}
       />
     </svg>
   );
@@ -130,7 +160,9 @@ function AgentSlots({ view }: { view: MachineView }) {
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
   const view = useResource<MachineView>(RESOURCES.machine).data;
-  const summary = useResource<OverviewSummary>(RESOURCES.overview()).data;
+  const overview = useResource<OverviewSummary>(RESOURCES.overview());
+  const summary = overview.data;
+  const live = summary !== undefined && overview.error === null;
   const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
@@ -150,6 +182,7 @@ export function MachinePanel() {
                 values={summary.machine.cpu}
                 max={100}
                 color="var(--accent)"
+                live={live}
               />
             ) : (
               <Bar
@@ -190,6 +223,7 @@ export function MachinePanel() {
                 values={summary.machine.mem}
                 max={100}
                 color="var(--think)"
+                live={live}
               />
             ) : (
               <Bar
@@ -222,6 +256,7 @@ export function MachinePanel() {
                 label="Disk history · GB free"
                 values={summary.machine.disk}
                 color="var(--fg-2)"
+                live={live}
               />
             ) : (
               <Bar
