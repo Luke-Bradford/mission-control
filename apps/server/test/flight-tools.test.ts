@@ -6425,17 +6425,30 @@ describe("close_ticket", () => {
     engineOn = true;
   });
 
-  it("comments with the replacement, closes the issue, and records the decision", async () => {
-    const result = await call("close_ticket", args);
-    expect(result.isError).not.toBe(true);
-    expect(ghCalls).toEqual([
-      ["issue", "comment", "7", "--repo=o/mc", "--body=Superseded by #8."],
-      ["issue", "close", "7", "--repo=o/mc", "--reason=duplicate"],
-    ]);
-    expect(decisions()).toContainEqual(
-      expect.objectContaining({ kind: "close", ref: "mc#7", basis: "#8 replaces it" }),
-    );
-  });
+  it.each(["duplicate", "not-planned"] as const)(
+    "comments with the replacement and closes %s with a GitHub-supported reason",
+    async (reason) => {
+      ghImpl = async (command) => ({
+        code:
+          command[0] === "issue" &&
+          command[1] === "close" &&
+          command.at(-1) !== "--reason=not planned"
+            ? 1
+            : 0,
+        stdout: "",
+        stderr: "unsupported close reason",
+      });
+      const result = await call("close_ticket", { ...args, reason });
+      expect(result.isError).not.toBe(true);
+      expect(ghCalls).toEqual([
+        ["issue", "comment", "7", "--repo=o/mc", "--body=Superseded by #8."],
+        ["issue", "close", "7", "--repo=o/mc", "--reason=not planned"],
+      ]);
+      expect(decisions()).toContainEqual(
+        expect.objectContaining({ kind: "close", ref: "mc#7", basis: "#8 replaces it" }),
+      );
+    },
+  );
 
   it.each([
     ["itself", () => ({ ...args, replacement: 7 })],

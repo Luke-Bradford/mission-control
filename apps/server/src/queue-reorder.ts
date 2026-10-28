@@ -226,7 +226,7 @@ function approvalItem(
   };
 }
 
-export async function proposeQueueReorder(
+async function prepareQueueReorder(
   deps: QueueReorderDeps,
   seatId: string,
   moveRef: string,
@@ -253,6 +253,16 @@ export async function proposeQueueReorder(
     seatSnapshot: seatInput(seat),
     state: "pending",
   };
+  return { key, p };
+}
+
+export async function proposeQueueReorder(
+  deps: QueueReorderDeps,
+  seatId: string,
+  moveRef: string,
+  aboveRef: string,
+) {
+  const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
   const item = approvalItem(key, p, deps.now());
   deps.store.addBrief({ key: item.key, ...item.brief });
   deps.store.saveQueueReorder(key, JSON.stringify(p), item.at, {
@@ -274,8 +284,10 @@ export async function reorderQueue(
   moveRef: string,
   aboveRef: string,
 ) {
-  const { item } = await proposeQueueReorder(deps, seatId, moveRef, aboveRef);
-  return resolveQueueReorder(deps, item.key, "approve");
+  const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
+  // The pending proposal is an internal recovery record, not an operator approval.
+  deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now());
+  return resolveQueueReorder(deps, key, "approve");
 }
 
 const approvals = new WeakMap<Store, Promise<unknown>>();

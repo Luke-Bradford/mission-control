@@ -1809,7 +1809,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (posted.code !== 0)
       return fail("Not closed: GitHub refused the replacement comment; see the server log.");
     const closed = await deps.gh(
-      ["issue", "close", String(issue), `--repo=${repo.github}`, `--reason=${reason}`],
+      ["issue", "close", String(issue), `--repo=${repo.github}`, "--reason=not planned"],
       { cwd },
     );
     if (closed.code !== 0) return fail("Not closed: GitHub refused the close; see the server log.");

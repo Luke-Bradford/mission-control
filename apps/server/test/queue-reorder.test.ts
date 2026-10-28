@@ -169,6 +169,32 @@ it("applies FLIGHT's reorder directly without leaving an approval item", async (
   expect(deps.edit).toHaveBeenCalledTimes(2);
   expect(store.notes().filter((item) => item.key.startsWith("queue-reorder:"))).toEqual([]);
 });
+
+it("never exposes an operator approval while a direct reorder waits for the writer", async () => {
+  const { item } = await propose();
+  let release: () => void = () => {};
+  let entered: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const writing = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  vi.mocked(deps.edit).mockImplementationOnce(async (_repo, issue, fields) => {
+    entered();
+    await blocked;
+    board = board.map((c) => (c.issueNumber === issue ? { ...c, priority: fields.priority } : c));
+    return { ok: true, changed: true };
+  });
+  const first = resolveQueueReorder(deps, item.key, "approve");
+  await writing;
+  const direct = reorderQueue(deps, "guido-1", "demo#2", "demo#1");
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(store.notes().filter((note) => note.key.startsWith("queue-reorder:"))).toHaveLength(1);
+  release();
+  await first;
+  await expect(direct).rejects.toThrow(/stale|changed/i);
+});
 it("deny and replay never write, including after reopening the store", async () => {
   const { item } = await propose();
   expect((await resolveQueueReorder(deps, item.key, "deny")).text).toBe("Left the order as it is.");
