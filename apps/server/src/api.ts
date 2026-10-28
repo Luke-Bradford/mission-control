@@ -2777,7 +2777,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/Dock.tsx#Dock
-      api.get("/flight", async () => flightView(config, store, Date.now()));
+      // `live` is judged from FLIGHT's session, not only its run row (#798)
+      api.get("/flight", async () =>
+        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
+      );
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),

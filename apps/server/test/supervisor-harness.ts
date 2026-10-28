@@ -75,6 +75,8 @@ const prep = vi.hoisted(() => ({
   /** Set: every attachSession (a restart's take-back) waits for it. */
   attachGate: null as Promise<void> | null,
   attaches: [] as string[],
+  /** Set: every attach hears the hello of a keeper from before #798 (awaiting, no parsedResults). */
+  oldKeeperHello: false,
   closeGate: null as Promise<void> | null,
   closing: 0,
   /** The `peers` each prepare call was given, in order. */
@@ -139,7 +141,16 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
     attachSession: async (...a: Parameters<typeof real.attachSession>) => {
       prep.attaches.push(a[0].dir);
       if (prep.attachGate) await prep.attachGate;
-      const found = await real.attachSession(...a);
+      const [i] = a;
+      const asked = i.awaiting;
+      const found = await real.attachSession(
+        prep.oldKeeperHello && asked !== undefined
+          ? {
+              ...i,
+              awaiting: (h) => asked({ ...h, awaiting: true, parsedResults: undefined }),
+            }
+          : i,
+      );
       if (found.kind === "attached") {
         const close = found.session.close.bind(found.session);
         found.session.close = async () => {
@@ -429,6 +440,7 @@ beforeEach(() => {
   prep.resumeGate = null;
   prep.attachGate = null;
   prep.attaches = [];
+  prep.oldKeeperHello = false;
   prep.closeGate = null;
   prep.closing = 0;
   prep.failWrite = false;

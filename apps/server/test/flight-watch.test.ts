@@ -59,7 +59,7 @@ import {
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
-import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
+import { createFlightWatch, FLIGHT_GHOST_MS, type FlightWatch } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -114,6 +114,11 @@ let statusCalls: number;
 let startFails: string | null;
 let sendFails = false;
 let facts: SeatFacts | null;
+/** What the supervisor's `sessionAlive` answers for FLIGHT. */
+let alive: boolean | null;
+let resumeCalls: string[];
+/** What a take-back does, when a test says. */
+let onResume: ((runId: string) => void | Promise<void>) | null;
 let enabled: boolean;
 let started = 0;
 let listener: ((e: SupervisorEvent) => void) | null = null;
@@ -191,6 +196,7 @@ const makeWatch = () => {
         store.upsertRun(run(runId, seatId));
         store.setSeatSession(row(seatId, runId));
         facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+        if (alive === false) alive = true;
         return { runId };
       },
       send: async (runId, key, text): Promise<SendResult> => {
@@ -209,6 +215,11 @@ const makeWatch = () => {
         endCalls.push(runId);
         store.upsertRun(run(runId, "flight-1", { endedAt: nowMs, status: "ok" }));
         store.setSeatSession(row("flight-1", null));
+      },
+      sessionAlive: () => alive,
+      resumeRun: async (runId) => {
+        resumeCalls.push(runId);
+        await onResume?.(runId);
       },
     },
   });
@@ -235,6 +246,9 @@ beforeEach(() => {
   startFails = null;
   sendFails = false;
   facts = null;
+  alive = null;
+  resumeCalls = [];
+  onResume = null;
   enabled = true;
   started = 0;
   listener = null;
@@ -1069,6 +1083,7 @@ describe("the FLIGHT watcher", () => {
         },
         send: async () => "sent",
         endRunByEngine: async () => {},
+        resumeRun: async () => {},
       },
     });
     await w.check();
@@ -1110,6 +1125,111 @@ describe("the FLIGHT watcher", () => {
     for (let i = 0; i < 3; i++) await watch.check();
     expect(startCalls).toHaveLength(6);
     expect(notesOpen()).toEqual([]);
+  });
+
+  describe("a FLIGHT run with no live session (#798)", () => {
+    const ghostRun = () => {
+      live("flight-1", "r-ghost");
+      alive = false;
+      facts = null;
+    };
+
+    it("takes it back once, then ends it (engine, reason recorded) and starts FLIGHT", async () => {
+      ghostRun();
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      expect(startCalls).toEqual([]);
+      nowMs += FLIGHT_GHOST_MS - 1;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      nowMs += 1;
+      await watch.check();
+      expect(endCalls).toEqual(["r-ghost"]);
+      expect(startCalls).toHaveLength(1);
+      expect(store.seatSession("flight-1")?.runId).toBe("r-flight-1");
+      expect(store.agentEvents(0).map((e) => [e.agentId, e.from, e.to, e.text])).toEqual([
+        [
+          "flight-1",
+          "idle",
+          "idle",
+          "FLIGHT: its CLI session was gone; run #1 ended so FLIGHT starts afresh",
+        ],
+      ]);
+      expect(notesOpen()).toEqual([]);
+    });
+
+    it("leaves a run its take-back brought back alone", async () => {
+      ghostRun();
+      onResume = () => {
+        alive = true;
+        facts = { inTurn: false, resumedAt: nowMs, rateLimitedUntil: null };
+      };
+      await watch.check();
+      nowMs += FLIGHT_GHOST_MS;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      expect(startCalls).toEqual([]);
+      expect(store.seatSession("flight-1")?.runId).toBe("r-ghost");
+    });
+
+    it("waits while the hub cannot tell (a restart's take-back), and while the seat is held", async () => {
+      live("flight-1", "r-ghost");
+      alive = null;
+      nowMs += 10 * FLIGHT_GHOST_MS;
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+      watch.stop();
+      let held = true;
+      watch = createFlightWatch({
+        config,
+        store,
+        bus,
+        enabled: true,
+        blocked: () => held,
+        now: () => nowMs,
+        supervisor: {
+          status: () => ({ enabled: true, note: null }),
+          on: () => () => {},
+          busy: () => [],
+          seatFacts: () => null,
+          sessionAlive: () => false,
+          startWatch: async () => ({ runId: "x" }),
+          send: async () => "sent",
+          endRunByEngine: async (runId) => void endCalls.push(runId),
+          resumeRun: async (runId) => void resumeCalls.push(runId),
+        },
+      });
+      for (let i = 0; i < 2; i++) {
+        await watch.check();
+        nowMs += FLIGHT_GHOST_MS;
+      }
+      expect([resumeCalls, endCalls]).toEqual([[], []]);
+      held = false;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+    });
+
+    it("says the process is gone when FLIGHT will not start again", async () => {
+      ghostRun();
+      await watch.check();
+      nowMs += FLIGHT_GHOST_MS;
+      startFails = "FLIGHT-1 already has a run";
+      for (let i = 0; i < 4; i++) await watch.check();
+      expect(endCalls).toEqual(["r-ghost"]);
+      expect(startCalls).toHaveLength(3);
+      expect(notesOpen()).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          text: flightStartFailedText(
+            "its process is gone, and a restart failed: FLIGHT-1 already has a run",
+          ),
+        },
+      ]);
+    });
   });
 
   it("does not start FLIGHT at the account's stop", async () => {
@@ -1610,6 +1730,7 @@ describe("the FLIGHT watcher", () => {
         },
         send: async () => "sent",
         endRunByEngine: async () => {},
+        resumeRun: async () => {},
       },
     });
     await off.check();

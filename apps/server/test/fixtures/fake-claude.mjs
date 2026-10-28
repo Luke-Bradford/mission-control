@@ -83,16 +83,13 @@ const assistant = (content, stopReason) =>
     parent_tool_use_id: null,
     session_id: sessionId,
   });
-/** A `result` with the fields the fold reads, as the real CLI writes them. */
+/**
+ * A `result` with the fields the fold reads, as the real CLI writes them: in its key order, which
+ * does not put `type` first (#798).
+ */
 const result = (text, stopReason, interrupted = false, failed = false) =>
   out({
-    type: "result",
-    subtype: interrupted ? "error_during_execution" : failed ? "error_max_turns" : "success",
-    is_error: interrupted || failed,
-    duration_ms: 900,
     duration_api_ms: 800,
-    num_turns: 1,
-    result: interrupted ? null : text,
     stop_reason: stopReason,
     session_id: sessionId,
     total_cost_usd: 0.0013,
@@ -115,6 +112,12 @@ const result = (text, stopReason, interrupted = false, failed = false) =>
     },
     permission_denials: [],
     terminal_reason: interrupted ? "aborted_tools" : "completed",
+    is_error: interrupted || failed,
+    num_turns: 1,
+    subtype: interrupted ? "error_during_execution" : failed ? "error_max_turns" : "success",
+    result: interrupted ? null : text,
+    type: "result",
+    duration_ms: 900,
   });
 const user = (content) =>
   out({

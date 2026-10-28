@@ -8,7 +8,15 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import {
@@ -26,6 +34,7 @@ import { sleep, str } from "../util.ts";
 import {
   CLI_PID_FILE,
   endKeeper,
+  isResultLine,
   KEEPER_LOG_FILE,
   KEEPER_PID_FILE,
   KEEPER_PROTOCOL_VERSION,
@@ -188,6 +197,7 @@ function parseHello(line: string): KeeperHello | { version: number | null } {
           cliPid: typeof v.cliPid === "number" ? v.cliPid : null,
           lines: n(v.lines),
           awaiting: v.awaiting === true,
+          parsedResults: v.parsedResults === true,
         };
       }
       return { version };
@@ -646,13 +656,74 @@ export type Attached =
   /** No keeper to attach to (null), or one that speaks another version (its number). */
   | { kind: "gone"; version: number | null };
 
+/** How far back `endsAtResult` reads a transcript for its last turn line. */
+const TURN_TAIL_MAX_BYTES = 64 * 1024 * 1024;
+const TURN_TAIL_CHUNK = 1024 * 1024;
+
+/**
+ * Whether a Claude transcript's last turn line is a `result`: the CLI is between turns, unless a
+ * line was written that it has not answered yet. Control responses (a context-usage read between
+ * turns) are not turn lines. False for a transcript that cannot be read, one whose last line is cut
+ * off or not JSON, and one with no turn line in its last 64 MiB.
+ */
+export function endsAtResult(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    let pos = size;
+    // the start of a line whose beginning is further back
+    let rest = Buffer.alloc(0);
+    while (pos > 0 && size - pos < TURN_TAIL_MAX_BYTES) {
+      const len = Math.min(TURN_TAIL_CHUNK, pos);
+      pos -= len;
+      const chunk = Buffer.alloc(len);
+      readSync(fd, chunk, 0, len, pos);
+      const buf = Buffer.concat([chunk, rest]);
+      let end = buf.length;
+      for (;;) {
+        const nl = end === 0 ? -1 : buf.lastIndexOf(10, end - 1);
+        if (nl < 0 && pos > 0) break;
+        const text = buf
+          .subarray(nl + 1, end)
+          .toString("utf8")
+          .trim();
+        end = Math.max(nl, 0);
+        if (text !== "") {
+          let type: unknown;
+          try {
+            const m: unknown = JSON.parse(text);
+            type = isObj(m) ? m.type : undefined;
+          } catch {
+            return false;
+          }
+          if (type !== "control_response") return isResultLine(text);
+        }
+        if (nl < 0) return false;
+      }
+      rest = buf.subarray(0, end);
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /**
  * Attaches to the keeper of a run folder that an earlier hub started. `from` says which keeper line
- * to replay from, given the keeper's hello. Never throws.
+ * to replay from, given the keeper's hello; `awaiting`, when given, is what the hub takes the
+ * hello's `awaiting` to be (the hello returned and the `attached` event carry it). Never throws.
  */
 export async function attachSession(i: {
   dir: string;
   from: (h: KeeperHello) => number;
+  awaiting?: (h: KeeperHello) => boolean;
   raw?: boolean;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
@@ -705,11 +776,12 @@ export async function attachSession(i: {
         resolve(line);
       });
     });
-    const h = first === null ? { version: null } : parseHello(first);
-    if (!isHello(h)) {
+    const said = first === null ? { version: null } : parseHello(first);
+    if (!isHello(said)) {
       s.destroy();
-      return { kind: "gone", version: h.version };
+      return { kind: "gone", version: said.version };
     }
+    const h = i.awaiting === undefined ? said : { ...said, awaiting: i.awaiting(said) };
     const driver = createDriver({
       dir: i.dir,
       controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,

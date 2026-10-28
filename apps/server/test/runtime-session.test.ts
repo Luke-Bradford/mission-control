@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { endKeeper } from "../src/runtime/keeper.ts";
-import { type CrewSession, startSession } from "../src/runtime/session.ts";
+import { type CrewSession, endsAtResult, startSession } from "../src/runtime/session.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
@@ -539,5 +539,43 @@ describe("startSession against the fake CLI", () => {
         { kind: "stderr", text: "b".repeat(10) },
       ]);
     });
+  });
+});
+
+describe("endsAtResult (#798)", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "mc-ends-"));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+  const file = (text: string) => {
+    const path = join(tmp, "t.jsonl");
+    writeFileSync(path, text);
+    return path;
+  };
+  const RESULT = JSON.stringify({ duration_api_ms: 5, type: "result", stop_reason: "end_turn" });
+  const CONTROL = (n: number) =>
+    JSON.stringify({ type: "control_response", response: { pad: "x".repeat(n) } });
+  const line = (o: object) => `${JSON.stringify(o)}\n`;
+
+  it("is true when the last turn line is a result, past control responses", () => {
+    expect(endsAtResult(file(`${line({ type: "assistant" })}${RESULT}\n`))).toBe(true);
+    expect(endsAtResult(file(`${RESULT}\n${CONTROL(10)}\n${CONTROL(10)}\n\n`))).toBe(true);
+  });
+
+  it("finds the result behind control responses over several read chunks", () => {
+    const controls = Array.from({ length: 6 }, () => `${CONTROL(400_000)}\n`).join("");
+    expect(endsAtResult(file(`${line({ type: "system" })}${RESULT}\n${controls}`))).toBe(true);
+    expect(endsAtResult(file(`${RESULT}\n${line({ type: "system" })}${controls}`))).toBe(false);
+  });
+
+  it("is false mid-turn, on a cut-off last line, on no turn line, and on a missing file", () => {
+    expect(endsAtResult(file(`${RESULT}\n${line({ type: "system", subtype: "init" })}`))).toBe(
+      false,
+    );
+    expect(endsAtResult(file(`${RESULT}\n{"type":"assis`))).toBe(false);
+    expect(endsAtResult(file(`${CONTROL(5)}\n`))).toBe(false);
+    expect(endsAtResult(file(""))).toBe(false);
+    expect(endsAtResult(join(tmp, "none.jsonl"))).toBe(false);
   });
 });

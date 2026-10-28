@@ -198,6 +198,7 @@ import { recordNoReport } from "./no-report.ts";
 import {
   attachSession,
   type CrewSession,
+  endsAtResult,
   type KeeperSession,
   SessionControlError,
   type SessionEvent,
@@ -492,6 +493,12 @@ export interface Supervisor {
   resumeDeferredRuns?(): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
+  /**
+   * Whether the seat's CLI session is attached and alive: the process the hub holds, not the run
+   * row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
+   * or a start, resume or account move for the seat is under way. Never throws.
+   */
+  sessionAlive?(seatId: string): boolean | null;
   /**
    * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
    * process, removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
@@ -2179,6 +2186,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
       // Codex needs earlier item paths and unresolved requests even before the saved cursor.
       from: (h) => (row.vendor === "codex" ? 0 : cursor?.spawn === h.spawn ? cursor.line : 0),
+      // A Claude keeper from before #798 never saw a `result` (the CLI does not print `type`
+      // first), so it says a turn is open after every turn, and the seat would wait on it forever
+      // (FLIGHT never woken). The transcript says whether the CLI is between turns.
+      awaiting: (h) =>
+        h.awaiting &&
+        (row.vendor === "codex" ||
+          h.parsedResults === true ||
+          run === null ||
+          !endsAtResult(run.transcriptPath)),
       raw: row.vendor === "codex",
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
@@ -4002,6 +4018,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    sessionAlive(seatId) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
+      return live.get(seatId)?.session.alive === true;
     },
 
     async contextUsage(seatId) {

@@ -83,8 +83,8 @@ export const HUB_ABSENT_TEXT = "the keeper ended the CLI: no hub was attached fo
 /** The exit's reason when the spec's secret is not the 64 hex characters the hub writes. */
 export const NO_SECRET_TEXT = "could not start the CLI: the keeper's spec has no secret";
 const SECRET_FORMAT = /^[0-9a-f]{64}$/;
-/** A turn ends with this line (the CLI prints `type` first). */
-const RESULT_PREFIX = '{"type":"result"';
+/** Every Claude `result` line holds this; the CLI does not print `type` first (2.1.302 does not). */
+const RESULT_TYPE = '"type":"result"';
 const DROPPED_TEXT = "a CLI output line over 64 MiB was dropped";
 
 /** What the hub writes to `spec.json`: the CLI to run, as the hub would have run it. */
@@ -133,6 +133,22 @@ export interface KeeperHello {
   lines: number;
   /** A user line was written and the turn's `result` has not come. */
   awaiting: boolean;
+  /**
+   * This keeper finds a Claude turn's `result` by its parsed `type`. A keeper without it (from
+   * before #798) never saw one end, so its `awaiting` stays true after the first turn.
+   */
+  parsedResults?: boolean;
+}
+
+/** Whether a Claude stdout line is a turn's `result`, wherever the CLI put its `type` key. */
+export function isResultLine(line: string): boolean {
+  if (!line.includes(RESULT_TYPE)) return false;
+  try {
+    const m: unknown = JSON.parse(line);
+    return typeof m === "object" && m !== null && (m as { type?: unknown }).type === "result";
+  } catch {
+    return false;
+  }
 }
 
 export const pidAlive = (pid: number): boolean => {
@@ -594,7 +610,7 @@ export function runKeeper(
       } catch {
         // Non-JSON stdout does not end a turn.
       }
-    } else if (line.startsWith(RESULT_PREFIX)) awaiting = false;
+    } else if (isResultLine(line)) awaiting = false;
     if (client) pump(client);
   };
 
@@ -817,6 +833,7 @@ export function runKeeper(
       cliPid,
       lines: lineCount,
       awaiting,
+      parsedResults: true,
     };
     send(c, hello as unknown as Json);
   });
