@@ -7149,7 +7149,7 @@ button.nrow.thread.tagged {
 .overview-kpis {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 0;
+  gap: 12px;
   border-block: 1px solid var(--line);
 }
 .overview-kpi {
