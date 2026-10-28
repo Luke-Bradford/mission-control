@@ -14,6 +14,9 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("select")).toContain("min-height: 24px");
     expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: -2.5px");
+    expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {

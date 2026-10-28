@@ -569,7 +569,7 @@ export function CommsSpider({
           : {
               role: "button",
               tabIndex: current === `n:${node.id}` ? 0 : -1,
-              "aria-label": `Open ${node.name}, ${node.count} messages in 24h${node.state ? `, ${node.state}` : ""}`,
+              "aria-label": `${node.label}, open ${node.name}, ${node.count} messages in 24h${node.state ? `, ${node.state}` : ""}`,
               "aria-describedby": describedBy("node", node.id),
               onClick: () => onOpenNode(node.id),
               onKeyDown: nodeKeys(node),

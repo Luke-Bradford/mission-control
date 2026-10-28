@@ -1196,6 +1196,11 @@ th {
   align-items: center;
   flex-wrap: wrap;
 }
+.toolbar-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
 
 /* overview */
 #page-overview {
@@ -1390,8 +1395,10 @@ th {
   gap: 8px;
   align-items: center;
   height: 100%;
-  min-height: var(--lane-min);
+  /* Keep the 19px visual lane while extending its pointer target to 24px. */
+  min-height: 24px;
   max-height: var(--lane-max);
+  margin-block: -2.5px;
   color: var(--fg-2);
   text-decoration: none;
   font-size: 12px;
@@ -1522,7 +1529,9 @@ th {
   background: var(--ok);
 }
 .trow .rowlink {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
   max-width: 100%;
   color: inherit;
   text-decoration: none;
@@ -2303,6 +2312,8 @@ th {
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
+  margin: 0;
+  font-size: inherit;
   font-weight: 600;
 }
 .kcol .kh .n {
@@ -6523,7 +6534,7 @@ kbd {
     align-self: stretch;
     padding: 9px 12px;
   }
-  .kcol button.kh {
+  .kcol .kh > button {
     width: 100%;
     border: 0;
     background: none;
