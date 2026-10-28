@@ -3992,9 +3992,9 @@ export class Store {
   addStrays(strays: Omit<Stray, "key">[]): void {
     this.transaction(() => {
       const ins = this.db.prepare(
+        // `at` stays first-seen: a retry of the same stray is not a new one (its ack holds)
         `INSERT INTO strays (key, session_id, path, agent_id, kind, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind,
-           at = excluded.at`,
+         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind`,
       );
       for (const x of strays) {
         ins.run(strayKey(x.sessionId, x.path), x.sessionId, x.path, x.agentId, x.kind, x.at);
@@ -4727,6 +4727,15 @@ export class Store {
           })),
         };
       }
+      // A rebrief with the same ask (for the same reader) keeps when that ask began; a new or
+      // changed ask begins at its own `at`, so it carries no askAt.
+      delete structured.askAt;
+      const last = this.db
+        .prepare("SELECT at, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+        .get(key) as { at: number; structured: string | null } | undefined;
+      const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
+      if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
+        structured.askAt = prior?.askAt ?? last.at;
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

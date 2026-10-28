@@ -3801,7 +3801,7 @@ describe("brief_item", () => {
   });
 
   it.each(["operator", "flight"])(
-    "retains only an operator brief when a %s-briefed stray moves its time",
+    "keeps a %s brief when the same stray is recorded again (its time stays first-seen)",
     async (forWhom) => {
       const stray = {
         sessionId: "s1",
@@ -3819,12 +3819,16 @@ describe("brief_item", () => {
       if (forWhom === "operator") {
         expect(item).toMatchObject({
           owner: "operator",
-          at: nowMs,
+          at: NOW,
           brief: { for: "operator", at: NOW },
         });
       } else {
-        expect(item).toMatchObject({ owner: "flight", flightTriage: "waiting", at: nowMs });
-        expect(item).not.toHaveProperty("brief");
+        expect(item).toMatchObject({
+          owner: "flight",
+          flightTriage: "handling",
+          at: NOW,
+          brief: { for: "flight" },
+        });
       }
     },
   );

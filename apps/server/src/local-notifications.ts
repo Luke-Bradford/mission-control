@@ -1,17 +1,15 @@
 import { randomUUID } from "node:crypto";
-import {
-  type AttentionItem,
-  FLIGHT_DOWN_NOTE_KEY,
-  FLIGHT_NOTE_KEY,
-  type NotificationCategory,
-  type NotificationEvent,
-  type NotificationPreferences,
+import type {
+  AttentionItem,
+  NotificationCategory,
+  NotificationEvent,
+  NotificationPreferences,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { CcConfig } from "./config.ts";
-import { NOTE_KEY } from "./hud.ts";
+import { FLIGHT_DOWN_ITEMS } from "./hud.ts";
 import type { Store } from "./store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -69,32 +67,30 @@ const defaultNotificationPreferences = (timezone: string): NotificationPreferenc
   softChime: true,
 });
 
-/** Categories that were off by default before briefed asks: a saved true was the operator's choice. */
-const OPT_IN_BEFORE_ASKS: readonly NotificationCategory[] = ["quota"];
+/**
+ * Categories whose default did not change when briefed asks came in: a saved choice for one of
+ * them (an away-digest opt-out, a quota opt-in) was the operator's own.
+ */
+const KEPT_FROM_BEFORE_ASKS: readonly NotificationCategory[] = ["awayDigest", "quota"];
 
 /**
- * The categories to use from saved ones. Saved before briefed asks (no `asks` key), they were the
- * old notify-everything defaults: today's defaults apply, keeping only a category the operator had
- * turned on that was off by default then. Otherwise each known saved choice is kept and a category
- * added since takes its default.
+ * The categories to use from saved ones. Saved before briefed asks (no `asks` key), the rest were
+ * the old notify-everything defaults: today's defaults apply to them. Otherwise each known saved
+ * choice is kept and a category added since takes its default.
  */
 function storedCategories(
   saved: Record<string, boolean>,
   defaults: NotificationPreferences["categories"],
 ): NotificationPreferences["categories"] {
   const categories = { ...defaults };
-  const legacy = !("asks" in saved);
-  for (const c of legacy ? OPT_IN_BEFORE_ASKS : (Object.keys(defaults) as NotificationCategory[])) {
+  const kept =
+    "asks" in saved ? (Object.keys(defaults) as NotificationCategory[]) : KEPT_FROM_BEFORE_ASKS;
+  for (const c of kept) {
     const on = saved[c];
-    if (typeof on === "boolean" && (!legacy || on)) categories[c] = on;
+    if (typeof on === "boolean") categories[c] = on;
   }
   return categories;
 }
-
-/** Notes that say FLIGHT is down: it could not be kept running, or is held or stuck. */
-const FLIGHT_DOWN_KEYS: ReadonlySet<string> = new Set(
-  [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
-);
 
 /** Categories that notify through quiet hours. */
 const BYPASS_QUIET: ReadonlySet<NotificationCategory> = new Set(["stalls", "flightDown"]);
@@ -104,7 +100,7 @@ const briefedAsk = (item: AttentionItem): boolean =>
   item.brief !== undefined && item.brief.for !== "flight";
 
 const categoryOf = (item: AttentionItem): NotificationCategory | null => {
-  if (FLIGHT_DOWN_KEYS.has(item.key)) return "flightDown";
+  if (FLIGHT_DOWN_ITEMS.has(item.key)) return "flightDown";
   if (briefedAsk(item)) return "asks";
   switch (item.kind) {
     case "tag":

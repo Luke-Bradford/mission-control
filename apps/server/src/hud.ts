@@ -26,9 +26,8 @@ import {
   driverStopKey,
   type Escalation,
   escalationKind,
-  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
-  FLIGHT_NOTE_KEY,
   FLIGHT_TRIAGE_WAIT_MS,
   fixesSent,
   flightFloorBlocked,
@@ -571,9 +570,9 @@ export function crew(
 
 const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k);
 
-/** FLIGHT being down is the operator's at once: FLIGHT cannot triage its own outage. */
-const FLIGHT_SELF_NOTES: ReadonlySet<string> = new Set(
-  [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
+/** The items that say FLIGHT is down: the operator's at once, as FLIGHT can't triage its own outage. */
+export const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
+  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
 );
 
 /** An attention item before its ack is read; the server always knows its owner. */
@@ -795,7 +794,7 @@ export function attentionItems(
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
-    const askAt = brief !== undefined && brief.for !== "flight" ? brief.at : 0;
+    const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
@@ -805,7 +804,7 @@ export function attentionItems(
       i.owner !== OWNER_OPERATOR ||
       passed.has(i.key) ||
       ownReply(i, flightId) ||
-      FLIGHT_SELF_NOTES.has(i.key)
+      FLIGHT_DOWN_ITEMS.has(i.key)
     )
       return item;
     if (brief !== undefined && brief.for !== "flight") return item;

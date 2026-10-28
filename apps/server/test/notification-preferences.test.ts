@@ -543,6 +543,31 @@ it("resets categories saved before briefed asks, keeping the operator's own opt-
   ]);
 });
 
+it("keeps an away-digest opt-out saved before briefed asks", async () => {
+  store.setSetting(
+    "notification-preferences",
+    JSON.stringify({
+      enabled: true,
+      categories: {
+        people: true,
+        decisions: true,
+        stalls: true,
+        prs: true,
+        capcom: true,
+        awayDigest: false,
+        quota: false,
+        agentMessages: false,
+      },
+      quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+      softChime: true,
+    }),
+  );
+  expect(Object.entries((await preferences()).categories).filter(([, on]) => on)).toEqual([
+    ["asks", true],
+    ["flightDown", true],
+  ]);
+});
+
 it("keeps saved choices across a category added or removed later", async () => {
   store.setSetting(
     "notification-preferences",

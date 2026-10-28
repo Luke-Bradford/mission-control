@@ -947,6 +947,8 @@ export const FLIGHT_NOTE_KEY = "flight:start-failed";
  */
 export const FLIGHT_DOWN_NOTE_KEY = "flight:down";
 export const FLIGHT_DOWN_STALL_MS = 30 * 60_000;
+/** The notes that say FLIGHT is down: the operator's at once, and notified through quiet hours. */
+export const FLIGHT_DOWN_NOTES: readonly string[] = [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY];
 export const flightDownText = (reason: string): string =>
   `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
 export const flightStartFailedText = (reason: string): string =>

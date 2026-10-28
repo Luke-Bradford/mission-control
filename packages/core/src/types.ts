@@ -1009,6 +1009,8 @@ export interface AttentionBrief {
   assessment?: string;
   did?: { action: string; refs: string[] }[];
   ask?: string;
+  /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
+  askAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  BACKGROUND_STALL_MS,
   type BoardItem,
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
@@ -1162,6 +1163,95 @@ describe("the FLIGHT watcher", () => {
     it("says nothing when the operator stopped FLIGHT", async () => {
       store.upsertRun(run("r-stopped", "flight-1", { endedAt: T0, status: "ok" }));
       store.setSeatSession(row("flight-1", "r-stopped", "stopped"));
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
+
+    const atStop = (resetAt: number) =>
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: nowMs - 1000,
+        pct: 95,
+        resetAt,
+        source: "test",
+      });
+    const failedStart = () => store.notes().filter((n) => n.key === FLIGHT_NOTE_KEY);
+
+    it("hands over from the stop line to failed starts, never both open", async () => {
+      atStop(T0 + 10 * MIN);
+      await watch.check();
+      expect(down()).toHaveLength(1);
+      // past the reset FLIGHT is restarting, not down; then its starts fail
+      nowMs = T0 + 11 * MIN;
+      atStop(nowMs - 1);
+      startFails = "boom";
+      for (let i = 0; i < 4; i++) {
+        await watch.check();
+        expect(down().length + failedStart().length).toBeLessThanOrEqual(1);
+      }
+      expect(down()).toEqual([]);
+      expect(failedStart()).toHaveLength(1);
+    });
+
+    it("hands over from a silent turn to failed starts when FLIGHT dies", async () => {
+      live("flight-1", "r-flight");
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      await watch.check();
+      expect(down()).toHaveLength(1);
+      noFlight();
+      startFails = "boom";
+      for (let i = 0; i < 4; i++) {
+        await watch.check();
+        expect(down().length + failedStart().length).toBeLessThanOrEqual(1);
+      }
+      expect(failedStart()).toHaveLength(1);
+    });
+
+    it("leaves the note alone while FLIGHT's facts are unknown after a hub restart", async () => {
+      live("flight-1", "r-flight");
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      await watch.check();
+      expect(down()).toHaveLength(1);
+      facts = null;
+      await watch.check();
+      expect(down()).toHaveLength(1);
+    });
+
+    it("gives FLIGHT the background-task allowance a loop gets", async () => {
+      live("flight-1", "r-flight");
+      store.setDigest("r-flight", {
+        toolCalls: 1,
+        turns: 1,
+        lastEventAt: T0,
+        model: "opus",
+        contextTokens: 100,
+        contextWindow: null,
+        liveTool: null,
+        tools: {},
+        subagents: [],
+        minuteTokens: [],
+        turnUsage: [],
+        background: [{ taskId: "b1", description: "full suite", type: "bash" }],
+        compactions: 0,
+      });
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      await watch.check();
+      expect(down()).toEqual([]);
+      nowMs = T0 + BACKGROUND_STALL_MS + MIN;
+      await watch.check();
+      expect(down()).toHaveLength(1);
+    });
+
+    it("clears the note when the watch is off", async () => {
+      store.upsertRun(run("r-parked", "flight-1"));
+      store.setSeatSession(row("flight-1", "r-parked", "parked"));
+      await watch.check();
+      expect(down()).toHaveLength(1);
+      enabled = false;
       await watch.check();
       expect(down()).toEqual([]);
     });
