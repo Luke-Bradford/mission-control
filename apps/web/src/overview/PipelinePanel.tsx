@@ -3,7 +3,9 @@ import type { CSSProperties } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { followLink } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
@@ -48,6 +50,9 @@ export function PipelinePanel() {
     <Panel id="pipelineP" title="Pipeline">
       {error && <p className="pb crit-t">{error.message}</p>}
 
+      {!data && !error ? null : data?.pipeline?.every((stage) => stage.count === 0) ? (
+        <EmptyState>No pipeline work in this view.</EmptyState>
+      ) : null}
       <div className="pipeline-grid pb scroll" aria-busy={!data && !error}>
         {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
           const lane = key as PipelineLane;
@@ -77,7 +82,7 @@ export function PipelinePanel() {
                 Array.from({ length: VISIBLE_CARDS }, (_, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: identical loading placeholders
                   <div className="pipeline-chip pipeline-skeleton" key={i} aria-hidden="true">
-                    <span className="kpi-skeleton" />
+                    <Skeleton className="kpi-skeleton" />
                   </div>
                 ))}
               {cards.map((card) => {

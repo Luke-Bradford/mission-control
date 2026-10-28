@@ -4,9 +4,9 @@ import { usePhone } from "../board/phone.ts";
 import { namedSeat, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 
-/** An agent's colour by its config index (`--s1…--s7`, wrapping); FLIGHT is grey. */
+/** An agent's colour by its config index (`--s1…--s8`, wrapping); FLIGHT is grey. */
 export function agentColor(index: number | "flight"): string {
-  return index === "flight" ? "var(--fg-2)" : `var(--s${(index % 7) + 1})`;
+  return index === "flight" ? "var(--fg-2)" : `var(--s${(index % 8) + 1})`;
 }
 
 /**

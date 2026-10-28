@@ -25,6 +25,18 @@ export const REPO_TOKEN_NAMES = [
   "--r8",
 ] as const;
 
+/** Crew identity colours: eight slots, deliberately separate from semantic state colours. */
+export const AGENT_TOKEN_NAMES = [
+  "--s1",
+  "--s2",
+  "--s3",
+  "--s4",
+  "--s5",
+  "--s6",
+  "--s7",
+  "--s8",
+] as const;
+
 export const TOKEN_NAMES = [
   "--bg",
   "--surface",
@@ -48,13 +60,7 @@ export const TOKEN_NAMES = [
   "--accent-soft",
   "--shadow",
   "--glow",
-  "--s1",
-  "--s2",
-  "--s3",
-  "--s4",
-  "--s5",
-  "--s6",
-  "--s7",
+  ...AGENT_TOKEN_NAMES,
   ...REPO_TOKEN_NAMES,
 ] as const;
 export type TokenName = (typeof TOKEN_NAMES)[number];
@@ -91,6 +97,7 @@ export const THEME_TOKENS: Record<"dark" | "light", Record<TokenName, string>> =
     "--s5": "#d55181",
     "--s6": "#008300",
     "--s7": "#9085e9",
+    "--s8": "#6d9ac8",
     "--r1": "#3fd0e8",
     "--r2": "#e6dc6e",
     "--r3": "#f5b5d0",
@@ -131,6 +138,7 @@ export const THEME_TOKENS: Record<"dark" | "light", Record<TokenName, string>> =
     "--s5": "#e87ba4",
     "--s6": "#008300",
     "--s7": "#6250d6",
+    "--s8": "#376b9a",
     "--r1": "#0e6a8a",
     "--r2": "#586018",
     "--r3": "#a2308f",

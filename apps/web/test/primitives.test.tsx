@@ -107,10 +107,11 @@ describe("Seg", () => {
 });
 
 describe("AgentTag", () => {
-  it("colours agents by config index, wrapping after seven, and FLIGHT grey", () => {
+  it("colours agents by config index, wrapping after eight, and FLIGHT grey", () => {
     expect(agentColor(0)).toBe("var(--s1)");
     expect(agentColor(6)).toBe("var(--s7)");
-    expect(agentColor(7)).toBe("var(--s1)");
+    expect(agentColor(7)).toBe("var(--s8)");
+    expect(agentColor(8)).toBe("var(--s1)");
     expect(agentColor("flight")).toBe("var(--fg-2)");
   });
 

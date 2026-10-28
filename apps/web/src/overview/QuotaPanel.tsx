@@ -2,6 +2,7 @@ import type { ConfigView, LimitRow } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { quotaWarnings, resetWhen, timeToFull } from "../quota.ts";
@@ -55,6 +56,7 @@ export function QuotaPanel() {
       }
     >
       <div className="pb">
+        {accounts.length === 0 && <EmptyState>No quota accounts configured.</EmptyState>}
         {accounts.map((a) => {
           const mine = rows.filter((r) => r.accountId === a);
           const read =

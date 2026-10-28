@@ -2,6 +2,7 @@ import { type MetricId, type OverviewSummary, usd } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
@@ -216,7 +217,7 @@ export function KpiStrip() {
                 data-metric={tile.metric}
                 title={tile.metric ? tile.title : undefined}
               >
-                {tile.pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
+                {tile.pending ? <Skeleton className="kpi-skeleton" /> : tile.value}
               </span>
               {!contextOnly && (
                 <span className="d num" title={tile.pending ? undefined : tile.delta}>
