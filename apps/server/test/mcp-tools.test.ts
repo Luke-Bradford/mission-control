@@ -3563,6 +3563,8 @@ describe("report_evidence", () => {
       runId: RUN,
       note: "Fixed the race.\n\nDeploy: restart the hub.",
       at: clock,
+      tests: [],
+      testsAdded: [],
     });
     expect(told).toEqual([["guido-1", RUN]]);
     expect(emitted).toContain("agents");
