@@ -270,7 +270,23 @@ const BACKGROUND_LAUNCHERS = new Set([
   "open",
   // daemonises, or runs a command under a new agent
   "ssh-agent",
+  "systemd-run",
+  "daemonize",
 ]);
+/** Programs that start a daemon only with one option: `gpg-agent --daemon`, `gpgconf --launch`. */
+const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, string>> = {
+  "gpg-agent": "--daemon",
+  gpgconf: "--launch",
+};
+/** Whether `program` with `args` hands work to something that outlives this tool call. */
+const launches = (program: string, args: readonly string[]): boolean =>
+  BACKGROUND_LAUNCHERS.has(program) ||
+  (Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program) &&
+    args.some(
+      (a) =>
+        a === BACKGROUND_LAUNCH_OPTIONS[program] ||
+        a.startsWith(`${BACKGROUND_LAUNCH_OPTIONS[program]}=`),
+    ));
 /** tmux's global options that take a value (`tmux -L sock ls`): the value is not the command. */
 const TMUX_VALUED = "cfLST";
 /** tmux commands that start nothing: they list, query, attach to, type into or end what exists. */
@@ -321,7 +337,8 @@ function tmuxStarts(rest: readonly string[]): boolean {
       }
     }
   }
-  // an expansion can become any option, command or `;` sequence
+  // an expansion can become any option, command or `;` sequence. The words reach here unquoted,
+  // so a single-quoted `$` (which cannot expand) is refused too: fail closed.
   if (rest.some((w) => EXPANDS.test(w))) return true;
   const command = rest[at];
   // no command is `new-session`
@@ -406,8 +423,12 @@ const RUNNERS = new Set([
   "bunx",
   "uvx",
 ]);
+/** Runners whose first word, when it is not an option, is the command they run. */
+const COMMAND_FIRST_RUNNERS = new Set(["npx", "bunx", "uvx"]);
 /** `pnpm exec`, `npm x`, `yarn dlx`: a package manager running a command (the verb may follow options: `pnpm -s exec`). */
 const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn"]);
+/** A first word that runs some other command line: no later word of it is known to be data. */
+const RUNNER_HEADS = new Set([...RUNNERS, ...PACKAGE_MANAGERS, ...MULTIPLEXERS, ...SHELLS, "eval"]);
 const PACKAGE_RUN_VERBS = new Set(["exec", "dlx", "x"]);
 
 /** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
@@ -1108,7 +1129,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       continue;
     }
     if (braces[at] === true) return [{ argv: [BRACE_WORD], background: bg }];
-    // zsh: `=git` runs the `git` on PATH (EQUALS expansion)
+    // zsh: `=git` runs the `git` on PATH (EQUALS expansion). Deliberately broader than zsh: the
+    // words reach here unquoted, so a quoted `'=git'` (a command named `=git`) is judged as `git` too.
     if (head.length > 1 && head.startsWith("=")) {
       words[at] = head.replace(/^=+/, "");
       if (words[at] === "") return [{ argv: [UNREADABLE_LINE], background: bg }];
@@ -1224,10 +1246,21 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     // a multiplexer among a runner's words returns early as a suffix: its command is background
     const runBg = multiplexer || bg || run.some((w) => MULTIPLEXERS.has(baseName(w)));
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
+    // Later words are data only where the runner's first word is certainly the command: a
+    // multiplexer (its own rules judge it), or a command-first runner whose first word is a plain
+    // program. An option, `--` or another runner first means the command may be any later word.
+    const head = run[0];
+    const exempt =
+      multiplexer ||
+      ((COMMAND_FIRST_RUNNERS.has(name) || PACKAGE_MANAGERS.has(name)) &&
+        head !== undefined &&
+        !head.startsWith("-") &&
+        !RUNNER_HEADS.has(baseName(head)) &&
+        !Object.hasOwn(WRAPPERS, baseName(head)));
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
       const judged = wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix"));
-      out.push(...(i === 0 ? judged : judged.map((cmd) => ({ ...cmd, suffix: true }))));
+      out.push(...(i === 0 || !exempt ? judged : judged.map((cmd) => ({ ...cmd, suffix: true }))));
     }
     for (const w of run) {
       if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
@@ -1697,7 +1730,7 @@ export function guardDecision(
     if (program === STDIN_SCRIPT) return deny("unreadable", "shell reading stdin");
     if (program === BRACE_WORD) return deny("unreadable", "brace expansion");
     // only a real command word: `npx cypress open` and `vitest -t batch` pass `open`/`batch` as data
-    if (BACKGROUND_LAUNCHERS.has(program) && suffix !== true) return deny("background", program);
+    if (suffix !== true && launches(program, args)) return deny("background", program);
     if (
       program === GIT_ENV_OVERRIDE ||
       (["for", "select"].includes(program) && /^GIT_/.test(args[0] ?? "")) ||

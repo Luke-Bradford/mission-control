@@ -2425,8 +2425,10 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
   ])("judges %s by the command it runs (%s)", (c, rule) => {
     expect(ruleOf(bash(c))).toBe(rule);
   });
-  it("still allows an ordinary =word argument", () => {
+  it("still allows an ordinary =word argument, and gpg tools that start nothing", () => {
     expect(ruleOf(bash("echo =x"))).toBe("allow");
+    expect(ruleOf(bash("gpgconf --list-dirs"))).toBe("allow");
+    expect(ruleOf(bash("gpg-agent --version"))).toBe("allow");
   });
 
   it.each([
@@ -2435,6 +2437,7 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "npx tsx scripts/run.ts batch",
     "npx cypress open",
     "pnpm -s exec vitest run -t at",
+    "pnpm -s exec tsx x.ts open",
     "tmux send-keys -t x open Enter",
   ])("allows a launcher name that is only an argument: %s", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
@@ -2447,8 +2450,56 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "pnpm exec open .",
     "npx open .",
     "ssh-agent sh",
+    "ssh-agent -k",
     'eval "$(ssh-agent -s)"',
     "/usr/bin/ssh-agent -s",
+    "gpg-agent --daemon",
+    "gpgconf --launch gpg-agent",
+    "systemd-run sleep 9",
+    "daemonize /bin/sleep 9",
+    // a runner's options, `--` or another runner first: the command may be any later word
+    "npx -y open .",
+    "npx --yes open .",
+    "npx -y -- open .",
+    "npx -p foo open .",
+    "npx --package=foo open .",
+    "npx -c open",
+    "npx -y bash -c open",
+    "bunx --bun open .",
+    "pnpm dlx -y open .",
+    "npm exec -- open .",
+    "npm exec --yes -- open .",
+    "npm x -y open .",
+    "pnpm exec -- open .",
+    "pnpm exec -- launchctl load x.plist",
+    "uvx --from x open",
+    "npx -y osascript -e 'tell app \"Terminal\" to activate'",
+    "npx -y crontab f",
+    "npx -y at now",
+    "npx -y env open .",
+    "watch -n 1 open .",
+    "watch -n1 open .",
+    "watch -n 9 crontab f",
+    "caffeinate -i open .",
+    "caffeinate -t 5 open .",
+    "flock f open .",
+    "flock /tmp/l launchctl submit -l x -- /bin/sh -c x",
+    "script -q /dev/null open .",
+    "taskset 0x1 open .",
+    "ionice -c3 open .",
+    "doas -u root open .",
+    "npx npx open .",
+    "pnpm exec npx open .",
+    "npx watch open .",
+    "watch npx open .",
+    "unbuffer npx open .",
+    "timeout 5 npx -y open .",
+    "=npx -y open .",
+    "npx -y ssh-agent sh",
+    "npx -y =open .",
+    // accepted: an option before a command-first runner's command cancels the exemption
+    "npx -y vitest run -t open",
+    "npm exec -- vitest run -t batch",
   ])("still refuses a launcher that is the command: %s", (c) => {
     expect(ruleOf(bash(c))).toBe("background");
   });
