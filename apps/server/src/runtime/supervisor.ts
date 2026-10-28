@@ -182,7 +182,7 @@ import {
   writeReviewInputs,
 } from "./checkouts.ts";
 import { createCodexApprover } from "./codex-approval.ts";
-import { codexSeatConfig } from "./codex-floor.ts";
+import { codexSeatConfig, codexSeatFilesystemGrants } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
 import { assertSeatGitConfig, assertSeatGitVersion, SeatGitError } from "./git.ts";
@@ -1574,7 +1574,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           resumeThreadId: resume ? cliSessionId : null,
           outboxPath: join(runDir, CODEX_OUTBOX_FILE),
           approve: codexApprover(info, run, cwd),
-          effectiveConfig: codexSeatEffectiveConfig(`${hub}${MCP_PATH}`, def.mode),
+          effectiveConfig: codexSeatEffectiveConfig(`${hub}${MCP_PATH}`, def.mode, {
+            ...codexSeatFilesystemGrants(sandbox, tmp),
+            [claudeTmpParent]: "deny",
+          }),
           log,
           controlTimeoutMs: deps.controlTimeoutMs,
           stopGraceMs: deps.stopGraceMs,

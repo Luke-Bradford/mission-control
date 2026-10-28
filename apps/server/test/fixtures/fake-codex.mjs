@@ -142,7 +142,11 @@ rl.on("line", (line) => {
       mcp_servers: { mc: { url: configuredUrl, bearer_token_env_var: "MC_SEAT_TOKEN" } },
       permissions: {
         mc_seat: {
-          filesystem: { ":workspace_roots": { ".": workspaceAccess } },
+          filesystem: {
+            ":root": "read",
+            "/operator": "deny",
+            ":workspace_roots": { ".": workspaceAccess, ".git": "read", ".codex": "read" },
+          },
           network: { enabled: false },
         },
       },
@@ -157,6 +161,8 @@ rl.on("line", (line) => {
     if (bad === "sandboxConfig") config.permissions.mc_seat.network.enabled = true;
     if (bad === "writableRoot")
       config.permissions.mc_seat.filesystem[":workspace_roots"]["."] = "read";
+    if (bad === "absoluteWrite") config.permissions.mc_seat.filesystem["/operator"] = "write";
+    if (bad === "missingDeny") delete config.permissions.mc_seat.filesystem["/operator"];
     if (bad === "execPolicy") config.rules = { allow: ["*"] };
     if (bad === "shell") config.shell_environment_policy = { exclude: [] };
     if (bad === "shellExtra") config.shell_environment_policy.inherit = "all";

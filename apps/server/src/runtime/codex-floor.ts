@@ -26,6 +26,24 @@ export function requireCodexProfileDeny(denied: readonly string[]): void {
     throw new Error("codex seat config: profile requires at least one deny entry");
 }
 
+/** The absolute filesystem grants in the hub-owned Codex profile. */
+export function codexSeatFilesystemGrants(
+  i: CrewSandboxInput,
+  tmpDir: string,
+  profileDenies = sandboxReadDenies(i),
+): Readonly<Record<string, string>> {
+  const pnpmStore = join(dirname(i.cwd), ".mc-pnpm-store", basename(i.cwd));
+  return Object.freeze({
+    ":root": "read",
+    ...Object.fromEntries(profileDenies.map((path) => [path, "deny"])),
+    [tmpDir]: "write",
+    [pnpmStore]: "read",
+    ...Object.fromEntries(
+      [...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => [path, "read"]),
+    ),
+  });
+}
+
 /** The hub-written config in one run's isolated CODEX_HOME. */
 export function codexSeatConfig(
   i: CrewSandboxInput,
@@ -57,7 +75,7 @@ export function codexSeatConfig(
   if ([i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(tmpDir, path)))
     throw new Error("codex seat config: tmpDir contains a seat or operator path");
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
-  const pnpmStore = join(dirname(i.cwd), ".mc-pnpm-store", basename(i.cwd));
+  const filesystem = codexSeatFilesystemGrants(i, tmpDir, denied);
   return [
     `approvals_reviewer = ${tomlString("user")}`,
     `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
@@ -75,11 +93,7 @@ export function codexSeatConfig(
     `url = ${tomlString(mcpUrl)}`,
     `bearer_token_env_var = ${tomlString(CODEX_SEAT_TOKEN_ENV)}`,
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem]`,
-    grant(":root", "read"),
-    ...denied.map((path) => grant(path, "deny")),
-    grant(tmpDir, "write"),
-    grant(pnpmStore, "read"),
-    ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
+    ...Object.entries(filesystem).map(([path, access]) => grant(path, access)),
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
     grant(".", mode === "read-only" ? "read" : "write"),
     grant(".git", "read"),

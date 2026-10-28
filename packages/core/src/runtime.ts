@@ -854,6 +854,7 @@ export interface CodexSeatEffectiveConfig {
   mcpServers: Readonly<Record<string, Readonly<Record<string, string>>>>;
   approval: Readonly<Record<string, string>>;
   sandbox: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
+  filesystem: Readonly<Record<string, string>>;
   writableRoots: Readonly<Record<string, string>>;
   execPolicy: Readonly<Record<string, never>>;
   shellEnvironment: Readonly<Record<string, readonly string[]>>;
@@ -863,6 +864,7 @@ export interface CodexSeatEffectiveConfig {
 export function codexSeatEffectiveConfig(
   mcpUrl: string,
   mode: CrewMode = "writer",
+  filesystem: Readonly<Record<string, string>> = {},
 ): CodexSeatEffectiveConfig {
   return Object.freeze({
     mcpServers: Object.freeze({
@@ -873,7 +875,12 @@ export function codexSeatEffectiveConfig(
       approvals_reviewer: "user",
     }),
     sandbox: Object.freeze({ network: Object.freeze({ enabled: false }) }),
-    writableRoots: Object.freeze({ ".": mode === "read-only" ? "read" : "write" }),
+    filesystem,
+    writableRoots: Object.freeze({
+      ".": mode === "read-only" ? "read" : "write",
+      ".git": "read",
+      ".codex": "read",
+    }),
     execPolicy: Object.freeze({}),
     shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
   });

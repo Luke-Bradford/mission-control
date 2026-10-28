@@ -71,7 +71,10 @@ function start(scenario: Record<string, unknown> = {}, over: Partial<CodexSessio
     approve,
     stopGraceMs: 100,
     controlTimeoutMs: 1000,
-    effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
+    effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp", "writer", {
+      ":root": "read",
+      "/operator": "deny",
+    }),
     ...over,
   });
   sessions.push(session);
@@ -192,6 +195,8 @@ describe("Codex session", () => {
     "approvalConfig",
     "sandboxConfig",
     "writableRoot",
+    "absoluteWrite",
+    "missingDeny",
     "execPolicy",
     "shell",
     "shellExtra",

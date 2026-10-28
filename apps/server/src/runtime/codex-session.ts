@@ -160,12 +160,29 @@ function sameConfig(actual: unknown, expected: unknown): boolean {
 }
 
 const CODEX_MCP_METADATA_FIELDS = new Set(["environment_id", "enabled", "tool_timeout_sec"]);
+const CODEX_FILESYSTEM_METADATA_FIELDS = new Set(["environment_id"]);
 
 function matchesMcpServer(actual: unknown, expected: Readonly<Record<string, string>>): boolean {
   if (!isObj(actual)) return false;
   return (
     Object.keys(actual).every((key) => key in expected || CODEX_MCP_METADATA_FIELDS.has(key)) &&
     hasConfigFloor(actual, expected)
+  );
+}
+
+function matchesFilesystem(actual: unknown, expected: CodexSeatEffectiveConfig): boolean {
+  if (!isObj(actual)) return false;
+  if (Object.keys(expected.filesystem).length === 0)
+    return sameConfig(actual[":workspace_roots"], expected.writableRoots);
+  return (
+    Object.keys(actual).every(
+      (key) =>
+        key in expected.filesystem ||
+        key === ":workspace_roots" ||
+        CODEX_FILESYSTEM_METADATA_FIELDS.has(key),
+    ) &&
+    hasConfigFloor(actual, expected.filesystem) &&
+    sameConfig(actual[":workspace_roots"], expected.writableRoots)
   );
 }
 
@@ -189,10 +206,7 @@ function seatConfigMatches(value: unknown, expected: CodexSeatEffectiveConfig): 
       },
     }) &&
     isObj(workspaceRoots) &&
-    Object.entries(workspaceRoots).every(
-      ([path, access]) => access !== "write" || expected.writableRoots[path] === "write",
-    ) &&
-    hasConfigFloor(workspaceRoots, expected.writableRoots) &&
+    matchesFilesystem(roots, expected) &&
     sameConfig(value.rules, expected.execPolicy) &&
     sameConfig(value.shell_environment_policy, expected.shellEnvironment)
   );

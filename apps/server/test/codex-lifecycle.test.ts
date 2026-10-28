@@ -101,7 +101,9 @@ function attached(approve = vi.fn<CodexSessionInput["approve"]>(async () => "acc
                 },
                 permissions: {
                   mc_seat: {
-                    filesystem: { ":workspace_roots": { ".": "write" } },
+                    filesystem: {
+                      ":workspace_roots": { ".": "write", ".git": "read", ".codex": "read" },
+                    },
                     network: { enabled: false },
                   },
                 },
