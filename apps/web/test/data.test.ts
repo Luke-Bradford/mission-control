@@ -86,6 +86,45 @@ describe("hub", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     off();
   });
+
+  it("keeps the previous snapshot and does not notify for an identical refetch", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ crew: ["INCO"] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const path = RESOURCES.crew.path;
+    const notified = vi.fn();
+    const off = hub.subscribe(path, "agents", notified);
+    await vi.waitFor(() => expect(hub.snapshot(path, "agents").data).toBeDefined());
+    const initial = hub.snapshot(path, "agents");
+    notified.mockClear();
+
+    hub.refetch(path);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(hub.snapshot(path, "agents").loading).toBe(false));
+
+    expect(hub.snapshot(path, "agents")).toBe(initial);
+    expect(notified).not.toHaveBeenCalled();
+    off();
+  });
+
+  it("shares one request when the same resource is subscribed concurrently", async () => {
+    let resolve: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((done) => {
+          resolve = done;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const path = RESOURCES.crew.path;
+    const first = hub.subscribe(path, "agents", () => {});
+    const second = hub.subscribe(path, "agents", () => {});
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    resolve(Response.json([]));
+    await vi.waitFor(() => expect(hub.snapshot(path, "agents").loading).toBe(false));
+    first();
+    second();
+  });
 });
 
 describe("hub.clear", () => {
@@ -244,6 +283,30 @@ describe("startStream", () => {
     await settle();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(notified).not.toHaveBeenCalled();
+  });
+
+  it("does not refetch while hidden, then refreshes once when shown", async () => {
+    let visibility: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    sub("/api/limits", "limits", () => {});
+    await settle();
+    fetchMock.mockClear();
+    start();
+
+    visibility = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"limits"}' });
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    visibility = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 
   it("a first open refetches nothing; a reopen refetches everything on screen", async () => {

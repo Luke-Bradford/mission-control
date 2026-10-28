@@ -1,6 +1,6 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
 import { useEffect, useRef } from "react";
-import { RESOURCES, useResource } from "./data.ts";
+import { hub, RESOURCES, useResource } from "./data.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";
 
@@ -111,7 +111,9 @@ export function BrowserNotifications() {
       prefs.loading ||
       events.loading ||
       prefs.error ||
-      events.error
+      events.error ||
+      hub.isFetching(RESOURCES.notificationPreferences.path) ||
+      hub.isFetching(RESOURCES.notificationEvents.path)
     )
       return;
     for (const event of events.data) deliverNotification(event, prefs.data);

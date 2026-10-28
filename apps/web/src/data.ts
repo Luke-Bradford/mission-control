@@ -43,6 +43,15 @@ const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attent
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
+type PageDocument = {
+  visibilityState: "hidden" | "visible" | string;
+  addEventListener(type: "visibilitychange", listener: () => void): void;
+  removeEventListener(type: "visibilitychange", listener: () => void): void;
+};
+
+const pageDocument = (): PageDocument | undefined =>
+  (globalThis as { document?: PageDocument }).document;
+
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
   teams: { path: "/api/sources/teams", topic: "attention" },
@@ -342,12 +351,18 @@ class Hub {
   }
 
   private set(e: Entry, snap: Resource<unknown>): void {
+    if (e.snap === snap) return;
     e.snap = snap;
     for (const fn of [...e.listeners]) fn();
   }
 
   snapshot(path: string, topic: Topic | readonly Topic[] | null): Resource<unknown> {
     return this.entry(path, topic).snap;
+  }
+
+  /** Read-only coordination for consumers that must wait for two related snapshots to settle. */
+  isFetching(path: string): boolean {
+    return this.entries.get(path)?.inflight ?? false;
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -368,6 +383,9 @@ class Hub {
 
   /** One request per path at a time; a change during a fetch queues exactly one more. */
   private async fetch(e: Entry, full = false): Promise<void> {
+    // Timers and stream events can still fire in a background tab. Keep their data cache quiet
+    // until the tab is visible again, when startStream refreshes every mounted resource once.
+    if (pageDocument()?.visibilityState === "hidden") return;
     if (e.inflight) {
       e.again = true;
       e.fullAgain ||= full;
@@ -375,7 +393,9 @@ class Hub {
     }
     const gen = this.generation;
     e.inflight = true;
-    this.set(e, { ...e.snap, loading: true });
+    // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
+    // this lets identical responses retain their complete snapshot identity.
+    if (e.snap.data === undefined && !e.snap.loading) this.set(e, { ...e.snap, loading: true });
     let next: Resource<unknown>;
     try {
       const activity = e.path === RESOURCES.activity.path;
@@ -448,7 +468,10 @@ class Hub {
           );
         }
       }
-      next = { data, error: null, loading: false };
+      next =
+        sameJson(data, e.snap.data) && e.snap.error === null
+          ? e.snap
+          : { data, error: null, loading: false };
     } catch (err) {
       // Keep the last good data on screen; show the error beside it.
       const error = err instanceof Error ? err : new Error(String(err));
@@ -536,6 +559,16 @@ class Hub {
       this.set(e, IDLE);
     }
     this.refetchAll();
+  }
+}
+
+/** API data is JSON. Equality is deliberately structural so a repeated decoded response keeps its cache identity. */
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
   }
 }
 
@@ -637,6 +670,11 @@ export function startStream(): () => void {
     if (!connectedBefore) streamStatus.set({ ...streamStatus.get(), reconnecting: true });
   }, STREAM_OPEN_TIMEOUT_MS);
   const received = () => streamStatus.set({ ...streamStatus.get(), lastMessageAt: Date.now() });
+  const doc = pageDocument();
+  const onVisibility = () => {
+    if (doc?.visibilityState === "visible") hub.refetchAll();
+  };
+  doc?.addEventListener("visibilitychange", onVisibility);
 
   const connect = () => {
     if (stopped) return;
@@ -678,5 +716,6 @@ export function startStream(): () => void {
     clearTimeout(opening);
     clearTimeout(retry);
     es?.close();
+    doc?.removeEventListener("visibilitychange", onVisibility);
   };
 }

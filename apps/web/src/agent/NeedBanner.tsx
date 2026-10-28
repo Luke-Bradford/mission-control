@@ -1,6 +1,7 @@
 import type { AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { ackKeys } from "../ack.ts";
+import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
@@ -10,15 +11,8 @@ import { needLine, seatItems } from "../crew.ts";
  * When the agent has needs (catalogue 2.4.2): `{id} needs you.`, the Overview's need line, and Ack
  * for its unacknowledged items (shown only while there are any).
  */
-export function NeedBanner({
-  row,
-  items,
-  now,
-}: {
-  row: CrewRow;
-  items: AttentionItem[];
-  now: number;
-}) {
+export function NeedBanner({ row, items }: { row: CrewRow; items: AttentionItem[] }) {
+  const now = useSecond();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parts = needLine(row, items, now, useTestLock());

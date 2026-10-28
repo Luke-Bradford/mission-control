@@ -1,6 +1,5 @@
 import type { AttentionItem, ConfigView, Crew } from "@mc/core";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { useSecond } from "./clock.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 
@@ -192,7 +191,6 @@ function PageView({ route: r }: { route: Route }) {
 
 /** The global shortcuts, reading the latest crew, attention and page when a key is pressed. */
 function useShellKeys(current: Route, popout: boolean) {
-  const now = useSecond();
   const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const flight = useResource<FlightView>(RESOURCES.flight).data;
@@ -202,8 +200,8 @@ function useShellKeys(current: Route, popout: boolean) {
     config?.crew?.sessions.flatMap((s) => s.seats).find((s) => !s.retiring && s.loop === "watch")
       ?.id;
   const { repo } = useSessionScope();
-  const latest = useRef({ current, rows, items, popout, repo, flightId, now });
-  latest.current = { current, rows, items, popout, repo, flightId, now };
+  const latest = useRef({ current, rows, items, popout, repo, flightId });
+  latest.current = { current, rows, items, popout, repo, flightId };
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
@@ -215,7 +213,7 @@ function useShellKeys(current: Route, popout: boolean) {
         dir,
         latest.current.repo,
         latest.current.flightId,
-        latest.current.now,
+        Date.now(),
       );
       if (id === null) return;
       setSelectedAgent(id);

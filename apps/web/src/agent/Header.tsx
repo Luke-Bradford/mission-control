@@ -1,7 +1,14 @@
-import type { CliAccountStatus, ConfigView, CrewChanges, CrewRow, LimitRow } from "@mc/core";
+import type {
+  CliAccountStatus,
+  ConfigView,
+  CrewChanges,
+  CrewRow,
+  LimitRow,
+  PullRequestView,
+} from "@mc/core";
 import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useSecond, useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -446,7 +453,17 @@ function SeatSettings({ row }: { row: CrewRow }) {
  * The agent's header (catalogue 2.4.3): id with its colour, state, chips, Pause/Resume for a TA
  * loop only (the loop is observed, so there are no other loop controls) and Pop out. Then the tiles.
  */
-export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; now: number }) {
+export function Header({
+  row,
+  limits,
+  // Kept optional for callers that provide a fixed render timestamp in tests. The time-sensitive
+  // children own their subscriptions so the header and its controls stay stable between ticks.
+  now: _now,
+}: {
+  row: CrewRow;
+  limits: LimitRow[];
+  now?: number;
+}) {
   const branch = row.run?.branch ?? null;
   const tz = useTz();
   const repoPrs = useReviewPrs(row);
@@ -512,12 +529,25 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
         </span>
       </div>
       <p className="s fg2 doing">
-        <DoingLine row={row} now={now} tz={tz} repoPrs={repoPrs} />
+        <CurrentDoingLine row={row} tz={tz} repoPrs={repoPrs} />
       </p>
       {row.kind === "loop" && (
         <p className="s muted">Observed loop: Mission Control reads it and never drives it.</p>
       )}
-      <Tiles row={row} limits={limits} now={now} />
+      <Tiles row={row} limits={limits} />
     </section>
   );
+}
+
+function CurrentDoingLine({
+  row,
+  tz,
+  repoPrs,
+}: {
+  row: CrewRow;
+  tz: string | null;
+  repoPrs?: readonly PullRequestView[];
+}) {
+  const now = useSecond();
+  return <DoingLine row={row} now={now} tz={tz} repoPrs={repoPrs} />;
 }

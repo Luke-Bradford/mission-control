@@ -7,6 +7,7 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
+import { useSecond } from "../clock.ts";
 import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { BUILD_LOOP_TEMPLATE, isLoopInFlight, runElapsed, runPrs } from "../crew.ts";
@@ -97,7 +98,8 @@ const runDur = (r: RunView, now: number): string => {
  * The mockup's Loop panel: where a looped run is (Steps) and the loop's recent runs. It opens on
  * Steps while the loop is in flight; a choice the viewer makes holds until that changes.
  */
-export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
+  const now = useSecond();
   const inFlight = isLoopInFlight(row);
   const runId = row.run?.id ?? null;
   // A pick lasts for the loop it was made on: a new run or a change in flight forgets it.

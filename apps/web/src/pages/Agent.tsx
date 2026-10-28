@@ -7,7 +7,7 @@ import { RunsPanel } from "../agent/RunsPanel.tsx";
 import { SideTabs } from "../agent/SideTabs.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
-import { useSecond, useTz } from "../clock.ts";
+import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
@@ -24,7 +24,6 @@ export function Agent({ id }: { id: string | null }) {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const tz = useTz();
-  const now = useSecond();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
 
@@ -72,12 +71,12 @@ export function Agent({ id }: { id: string | null }) {
       <Picker rows={inView} items={items} current={shownId} />
       {row ? (
         <>
-          <NeedBanner row={row} items={items} now={now} />
-          <Header row={row} limits={limits} now={now} />
+          <NeedBanner row={row} items={items} />
+          <Header row={row} limits={limits} />
           <div className="agrid">
-            <StreamPanel key={`s:${row.id}`} row={row} now={now} tz={tz} />
+            <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
             <div className="side">
-              <RunsPanel key={`r:${row.id}`} row={row} now={now} tz={tz} />
+              <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
               <SideTabs key={`t:${row.id}`} row={row} />
             </div>
           </div>
