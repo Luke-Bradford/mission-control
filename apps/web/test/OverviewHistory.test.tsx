@@ -18,9 +18,12 @@ it("uses every KPI's minute series instead of hourly history", async () => {
   await screen.findByText("$24.31");
   expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(8);
   for (const graph of screen.getAllByRole("img")) {
+    // 0 at the baseline (y 23), the peak (4) on the top gridline (y 9), newest at the right edge
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
-      "M0.0,12.8L26.0,9.5L52.0,3.0",
+      "M0.0,19.5L50.0,16.0L100.0,9.0",
     );
+    expect(graph.getAttribute("aria-label")).toMatch(/peak .+ · latest /);
+    expect(graph.querySelectorAll("circle")).toHaveLength(0);
   }
   expect(screen.getByText("+$3.00 · 30m")).toBeTruthy();
   expect(screen.getByText("+3 pp · 30m")).toBeTruthy();

@@ -59,6 +59,8 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     to: now,
     xLabels: [`-${scope.range}`, "now"] as [string, string],
     at: (ms: number) => minutesAgo((now - ms) / MINUTE_MS),
+    // the window ends now and slides every second
+    live: true,
   };
 
   // A window keeps its colour whichever account is picked: its place among all the windows.

@@ -36,6 +36,10 @@ describe("StackedArea", () => {
     expect(texts).toContain("now");
     // the top of the stack is the total: 14 at the last point is the y max (× 1.08 headroom)
     expect(texts).toContain("14");
+    // no end-point dots; "now" is a cursor line, and the fills fade by gradient
+    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    expect(container.querySelectorAll("line.nowc")).toHaveLength(1);
+    expect(container.querySelectorAll("linearGradient")).toHaveLength(2);
   });
 
   it("hover snaps a crosshair to the nearest point and lists every series there", () => {
@@ -113,6 +117,9 @@ describe("LineChart", () => {
     expect(container.querySelector("svg")?.getAttribute("aria-label")).toBe(
       "Machine load: CPU latest 40%, peak 40%; Memory latest 25%, peak 25%",
     );
+    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    // one fill per unbroken run: CPU's lone first reading has none
+    expect(container.querySelectorAll("path.area")).toHaveLength(2);
   });
 
   it("hover lists each series at the nearest sample", () => {
