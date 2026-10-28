@@ -1,7 +1,7 @@
 import { COMMS_TICKET } from "@mc/core";
 import { type MouseEvent, useSyncExternalStore } from "react";
 
-/** A tiny History-API router: seven pages and a few ids do not justify a library. */
+/** A tiny History-API router: eight pages and a few ids do not justify a library. */
 const NAV_EVENT = "mc:navigate";
 
 export function navigate(to: string, opts: { replace?: boolean } = {}): void {
@@ -57,7 +57,15 @@ export const SETUP_TABS = [
 ] as const;
 export type SetupTab = (typeof SETUP_TABS)[number];
 
-export type Page = "overview" | "flight" | "board" | "agent" | "comms" | "telemetry" | "setup";
+export type Page =
+  | "overview"
+  | "flight"
+  | "board"
+  | "agent"
+  | "map"
+  | "comms"
+  | "telemetry"
+  | "setup";
 
 export type CommsView =
   | { kind: "flight" }
@@ -72,9 +80,14 @@ export type Route =
   | { page: "flight" }
   | { page: "board"; repoId: string | null; ticket: number | null }
   | { page: "agent"; id: string | null }
+  /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
+  | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
   | { page: "setup"; tab: SetupTab };
+
+/** Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. */
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
 export const PAGE_PATHS: Record<Page, string> = {
@@ -82,6 +95,7 @@ export const PAGE_PATHS: Record<Page, string> = {
   flight: "/flight",
   board: "/board",
   agent: "/agent",
+  map: "/map",
   comms: "/comms",
   telemetry: "/telemetry",
   setup: "/setup",
@@ -90,6 +104,7 @@ export const PAGE_PATHS: Record<Page, string> = {
 const enc = encodeURIComponent;
 export const agentPath = (id: string): string => `/agent/${enc(id)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
+export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
 export const ticketPath = (repoId: string, issueNumber: number): string =>
   `${boardPath(repoId)}/${issueNumber}`;
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
@@ -186,6 +201,8 @@ export function route(path: string, search = ""): Route | null {
   if (ticket) return { page: "board", ...ticket };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
+  const map = withId(path, "map");
+  if (map) return { page: "map", repoId: map.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
   const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
