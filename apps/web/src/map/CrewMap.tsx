@@ -342,6 +342,8 @@ export function CrewMapView({
           hub keeps each seat's last 15 minutes of calls in memory and serves no history.
           {snapshot.tree.length > 2000 &&
             " Files are collapsed into folders (more than 2,000 files)."}
+          {(snapshot.conflictsUnchecked?.length ?? 0) > 0 &&
+            ` Conflicts not checked for ${snapshot.conflictsUnchecked?.join(", ")}: the checkout hasn't fetched their heads yet.`}
         </p>
       </div>
     </div>

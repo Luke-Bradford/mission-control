@@ -115,3 +115,16 @@ it("reads linked worktree objects without changing either checkout", async () =>
   ]);
   expect(contents(dir)).toEqual(before);
 });
+
+it("skips a pair whose head the checkout has not fetched, keeping the rest of the snapshot", async () => {
+  const missing = "f".repeat(40);
+  const result = await new MapConflicts().check(dir, [
+    pr("left", left),
+    pr("right", right),
+    pr("unfetched", missing),
+  ]);
+  expect(result.unchecked).toEqual(["unfetched"]);
+  expect(result.conflicts).toEqual([
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+  ]);
+});

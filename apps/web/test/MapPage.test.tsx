@@ -161,6 +161,22 @@ describe("Map page", () => {
     expect(screen.getByText(/2 files at origin\/HEAD, each its own node/)).toBeTruthy();
   });
 
+  it("names the branches whose conflicts went unchecked", async () => {
+    stubFetch({
+      "/api/repos": repos,
+      "/api/config": config,
+      "/api/crew": { rows: [] },
+      "/api/repos/sample/map": { ...idle, conflictsUnchecked: ["feature/9-unfetched"] },
+    });
+    at("/map/sample");
+    await screen.findByText("3D scene");
+    expect(
+      screen.getByText(
+        /Conflicts not checked for feature\/9-unfetched: the checkout hasn't fetched/,
+      ),
+    ).toBeTruthy();
+  });
+
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {
     stubFetch({
       "/api/repos": repos,

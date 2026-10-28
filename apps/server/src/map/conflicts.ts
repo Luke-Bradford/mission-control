@@ -22,10 +22,31 @@ function queued<T>(run: () => Promise<T>): Promise<T> {
 export class MapConflicts {
   private readonly cache = new Map<string, string[]>();
 
+  /** The conflicts, or a rejection when any open pair could not be checked (never reported clean). */
   async read(worktree: string, prs: readonly Tip[]): Promise<MapSnapshot["conflicts"]> {
+    const { conflicts, unchecked } = await this.check(worktree, prs);
+    if (unchecked.length > 0)
+      throw new Error(`map conflicts unchecked for ${unchecked.join(", ")}`);
+    return conflicts;
+  }
+
+  /**
+   * The conflicts between every pair whose heads the checkout holds, and the branches whose head it
+   * does not (not fetched yet). An unchecked pair is neither cached nor reported clean.
+   */
+  async check(
+    worktree: string,
+    prs: readonly Tip[],
+  ): Promise<{ conflicts: MapSnapshot["conflicts"]; unchecked: string[] }> {
     return queued(async () => {
       const tips = prs.filter((p) => p.state === "open" && p.headSha && SHA.test(p.headSha));
       const conflicts: MapSnapshot["conflicts"] = [];
+      const unchecked = new Set<string>();
+      const present = new Map<string, boolean>();
+      for (const t of tips) {
+        const sha = t.headSha as string;
+        if (!present.has(sha)) present.set(sha, await hasCommit(worktree, sha));
+      }
       for (let i = 0; i < tips.length; i++) {
         const a = tips[i] as Tip & { headSha: string };
         for (const b of tips.slice(i + 1) as (Tip & { headSha: string })[]) {
@@ -34,6 +55,13 @@ export class MapConflicts {
           const key = shas.join(":");
           let files = this.cache.get(key);
           if (files === undefined) {
+            // A PR head the checkout hasn't fetched yet has no objects to merge: record it as
+            // unchecked (uncached, so it is checked once fetched) rather than fail the snapshot.
+            const missing = [a, b].filter((t) => !present.get(t.headSha));
+            if (missing.length > 0) {
+              for (const t of missing) unchecked.add(t.branch);
+              continue;
+            }
             files = await mergeFiles(worktree, shas[0] as string, shas[1] as string);
             this.cache.set(key, files);
             if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value as string);
@@ -43,8 +71,36 @@ export class MapConflicts {
           }
         }
       }
-      return conflicts;
+      return { conflicts, unchecked: [...unchecked].sort() };
     });
+  }
+}
+
+/** Whether the checkout holds `sha` as a commit; any other git failure still throws. */
+async function hasCommit(worktree: string, sha: string): Promise<boolean> {
+  try {
+    await execFileP(
+      "git",
+      [
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        worktree,
+        "cat-file",
+        "-e",
+        `${sha}^{commit}`,
+      ],
+      {
+        env: { ...gitEnv(process.env), GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" },
+        timeout: GIT_TIMEOUT_MS,
+      },
+    );
+    return true;
+  } catch (e) {
+    const failure = e as { code?: number; killed?: boolean; signal?: string };
+    if (failure.code === 128 || failure.code === 1) return false;
+    throw e;
   }
 }
 

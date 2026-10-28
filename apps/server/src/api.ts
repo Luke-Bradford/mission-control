@@ -2020,11 +2020,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 : null;
               seat.context = context ? { total: context.total, window: context.window } : null;
             }
+            const conflicts = await mapConflicts.check(checkout, store.pullRequests(repo.id));
             return {
               repoId: repo.id,
               ...tree,
               ...data,
-              conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)),
+              conflicts: conflicts.conflicts,
+              conflictsUnchecked: conflicts.unchecked,
               // Slice 1b will publish sequenced deltas; none have been emitted yet.
               seq: 0,
             };
