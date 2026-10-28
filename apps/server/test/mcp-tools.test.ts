@@ -3845,6 +3845,32 @@ describe("report_findings", () => {
     ).toBe(true);
   });
 
+  it("rejects duplicate prior-round resolution references before storage", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const resolution = { findingRef: { reviewId, pos: 0 }, outcome: "fixed" } as const;
+    const result = await report(
+      args({ verdict: passing, findings: [], resolutions: [resolution, resolution] }),
+      roundTwo,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Invalid arguments: resolutions:/);
+    expect(store.review(second)?.state).toBe("running");
+    expect(store.reviewResolutions(second)).toEqual([]);
+  });
+
   it("answers bad arguments", async () => {
     const r = await report(args({ findings: [finding({ line: -1 })] }));
     expect(r.isError).toBe(true);

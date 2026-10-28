@@ -2032,6 +2032,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: `${MC_BAD_ARGS}checked: each check may appear once`, isError: true };
     }
     if (resolutions !== undefined) {
+      if (
+        new Set(
+          resolutions.map((resolution) =>
+            [resolution.findingRef.reviewId, resolution.findingRef.pos].join(":"),
+          ),
+        ).size !== resolutions.length
+      ) {
+        return {
+          text: `${MC_BAD_ARGS}resolutions: each prior finding may appear once`,
+          isError: true,
+        };
+      }
       if (review.round < 2)
         return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
       const previous = store
