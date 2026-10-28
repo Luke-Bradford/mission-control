@@ -1,31 +1,29 @@
 import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
 import type { CSSProperties } from "react";
-import { agentColor } from "../hud/AgentTag.tsx";
 import { stateLabel } from "./agents.ts";
-import { type ChangeCount, changeTotals, nodeWork, readCount, workLine } from "./cards.ts";
+import {
+  type ChangeCount,
+  changeTotals,
+  nodeWork,
+  readCount,
+  type SeatWork,
+  seatToken,
+  workLine,
+} from "./cards.ts";
 
 /** What the rail is showing: a node (a file, or a collapsed folder), or a seat. */
 export type Selection = { kind: "node"; path: string } | { kind: "seat"; seat: string } | null;
 
 interface SeatNames {
   snapshot: MapSnapshot;
+  /** Every seat's colour place (CrewMapView fills in the ones the crew doesn't list). */
   indices: Record<string, number>;
   names: Record<string, string>;
 }
 
 /** A seat's light colour, the one its light and path have on the stage. */
-const lightStyle = (seat: string, { snapshot, indices }: SeatNames): CSSProperties =>
-  ({
-    "--light": agentColor(
-      seat === "FLIGHT"
-        ? "flight"
-        : (indices[seat] ??
-            Math.max(
-              0,
-              snapshot.seats.findIndex((s) => s.seat === seat),
-            )),
-    ),
-  }) as CSSProperties;
+const lightStyle = (seat: string, { indices }: SeatNames): CSSProperties =>
+  ({ "--light": `var(${seatToken(seat, indices[seat] ?? 0)})` }) as CSSProperties;
 const callSign = (seat: string, names: Record<string, string>) => names[seat] ?? seatCallSign(seat);
 
 function Light({ seat, ...props }: SeatNames & { seat: string }) {
@@ -40,13 +38,14 @@ export function SeatSelector({
   seats,
   selected,
   onSelect,
-  prs,
+  work,
   ...props
 }: SeatNames & {
   seats: MapSeat[];
   selected: string | null;
   onSelect: (seat: string | null) => void;
-  prs: Record<string, number>;
+  /** What each seat is on: ticket, title and PR from one source. */
+  work: (seat: MapSeat) => SeatWork;
 }) {
   if (!seats.length)
     return (
@@ -59,20 +58,22 @@ export function SeatSelector({
   return (
     <ul className="map-seats" aria-label="Seats working in this repo">
       {seats.map((seat) => {
-        const on = workLine(seat, prs[seat.seat]);
+        const on = workLine(work(seat));
         const pressed = selected === seat.seat;
+        const name = callSign(seat.seat, props.names);
         return (
           <li key={seat.seat}>
             <button
               type="button"
               className="map-seat"
               aria-pressed={pressed}
+              aria-label={`${name}: ${on ?? "no ticket"}`}
               title={on ?? undefined}
               onClick={() => onSelect(pressed ? null : seat.seat)}
             >
               <Light seat={seat.seat} {...props} />
               <span className="map-seat-name" style={lightStyle(seat.seat, props)}>
-                {callSign(seat.seat, props.names)}
+                {name}
               </span>
               <span className={on ? "map-seat-on" : "map-seat-on none"}>{on ?? "no ticket"}</span>
             </button>
@@ -97,9 +98,9 @@ function Lines({ count, files }: { count: ChangeCount; files?: number }) {
 export function SeatDetail({
   seat,
   now,
-  pr,
+  work,
   ...props
-}: SeatNames & { seat: MapSeat; now: number; pr: number | undefined }) {
+}: SeatNames & { seat: MapSeat; now: number; work: SeatWork }) {
   const totals = changeTotals(seat);
   const read = readCount(seat);
   return (
@@ -108,7 +109,7 @@ export function SeatDetail({
         <Light seat={seat.seat} {...props} />
         {callSign(seat.seat, props.names)}
       </h3>
-      <p className="map-detail-on">{workLine(seat, pr) ?? "No ticket"}</p>
+      <p className="map-detail-on">{workLine(work) ?? "No ticket"}</p>
       <dl className="map-facts">
         <dt>Now</dt>
         <dd>{stateLabel(seat, now)}</dd>

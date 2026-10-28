@@ -65,9 +65,59 @@ export function MapScene(props: Props) {
   useEffect(() => {
     shell.current?.rebuild(nodes, seatCount, areasKey ? areasKey.split("\n") : []);
   }, [nodes, seatCount, areasKey]);
+  // keyed on each prop, not the props object, so a parent's re-render that changed nothing (the
+  // clock's tick) doesn't rebuild the paths and labels
+  const {
+    snapshot,
+    names,
+    indices,
+    seat,
+    onSeatSelect,
+    areas,
+    focus,
+    home,
+    rotate,
+    dockSeats,
+    overview,
+    selected,
+    onSelect,
+    seatFocus,
+  } = props;
   useEffect(() => {
-    shell.current?.update(props);
-  }, [props]);
+    shell.current?.update({
+      nodes,
+      snapshot,
+      names,
+      indices,
+      seat,
+      onSeatSelect,
+      areas,
+      focus,
+      home,
+      rotate,
+      dockSeats,
+      overview,
+      selected,
+      onSelect,
+      seatFocus,
+    });
+  }, [
+    nodes,
+    snapshot,
+    names,
+    indices,
+    seat,
+    onSeatSelect,
+    areas,
+    focus,
+    home,
+    rotate,
+    dockSeats,
+    overview,
+    selected,
+    onSelect,
+    seatFocus,
+  ]);
   return (
     <div className="map-stage" ref={host}>
       {unavailable && (
@@ -114,7 +164,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     let value = tokens.get(token);
     if (value === undefined) {
       value =
-        getComputedStyle(document.documentElement).getPropertyValue(token).trim() || "#808999";
+        // the stage's own tokens (the seats' palette) are defined on the map page, not the root
+        getComputedStyle(el).getPropertyValue(token).trim() || "#808999";
       tokens.set(token, value);
     }
     return value;

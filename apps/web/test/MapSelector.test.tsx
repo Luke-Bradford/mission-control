@@ -1,20 +1,22 @@
-import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 
+const scenes = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: ({
-    seat,
-    seatFocus,
-  }: {
-    seat: string | null;
-    seatFocus: { seat: string; request: number } | null;
-  }) => (
-    <div data-testid="scene" data-seat={seat ?? ""} data-seat-focus={seatFocus?.seat ?? ""}>
-      3D scene
-    </div>
-  ),
+  MapScene: (props: { seat: string | null; seatFocus: { seat: string } | null }) => {
+    scenes.push(props);
+    return (
+      <div
+        data-testid="scene"
+        data-seat={props.seat ?? ""}
+        data-seat-focus={props.seatFocus?.seat ?? ""}
+      >
+        3D scene
+      </div>
+    );
+  },
 }));
 
 const quiet = (seat: string, over: Partial<MapSeat> = {}): MapSeat => ({
@@ -57,7 +59,7 @@ it("lists one row per working seat: its light, call sign and what it is on, and 
       snapshot={crew()}
       indices={{ "GUIDO-1": 2 }}
       names={{ "GUIDO-1": "GUIDO-1" }}
-      prs={{ "GUIDO-1": 31 }}
+      work={{ "GUIDO-1": { ticket: 7, title: "Handle empty input", pr: 31 } }}
     />,
   );
   const list = screen.getByRole("list", { name: "Seats working in this repo" });
@@ -69,15 +71,20 @@ it("lists one row per working seat: its light, call sign and what it is on, and 
   // the light is the seat's colour, the same one the stage gives it
   const light = (row: HTMLElement | undefined) =>
     row?.querySelector<HTMLElement>(".map-light")?.style.getPropertyValue("--light");
-  expect(light(rows[0])).toBe("var(--s3)");
-  expect(light(rows[1])).toBe("var(--fg-2)");
+  expect(light(rows[0])).toBe("var(--seat-3)");
+  expect(light(rows[1])).toBe("var(--seat-flight)");
   // nothing else on a row: no state, counts, badges or notes
   expect(rows[0]?.children).toHaveLength(3);
   expect(await screen.findByTestId("scene")).toBeTruthy();
 });
 
 it("selects and follows a seat from its row, shows its card, and lets go on a second click", () => {
-  render(<CrewMapView snapshot={crew()} prs={{ "GUIDO-1": 31 }} />);
+  render(
+    <CrewMapView
+      snapshot={crew()}
+      work={{ "GUIDO-1": { ticket: 7, title: "Handle empty input", pr: 31 } }}
+    />,
+  );
   const row = screen.getByRole("button", { name: /^GUIDO-1/ });
   fireEvent.click(row);
   expect(row.getAttribute("aria-pressed")).toBe("true");
@@ -141,4 +148,65 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
     ])
       expect(text).not.toMatch(warning);
   expect(container.querySelector(".map-badge, .map-drawer, .map-waits, .map-conflicts")).toBeNull();
+});
+
+it("names each row for a screen reader, and takes its ticket and PR from the crew row together", () => {
+  render(
+    <CrewMapView
+      snapshot={crew()}
+      // the crew row's run is on #9 with its PR; the map's changes are on #7
+      work={{ "GUIDO-1": { ticket: 9, title: "Other work", pr: 31 } }}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "GUIDO-1: #9 · PR #31 · Other work" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "FLIGHT: no ticket" })).toBeTruthy();
+  // without a crew row, the map's own ticket and title, and no PR
+  const { unmount } = render(<CrewMapView snapshot={crew()} />);
+  expect(screen.getByRole("button", { name: "GUIDO-1: #7 · Handle empty input" })).toBeTruthy();
+  unmount();
+  expect(
+    screen
+      .getAllByRole("complementary", { name: "Selection detail" })[0]
+      ?.getAttribute("aria-live"),
+  ).toBe("polite");
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+it("lets a resting seat's path age out on an open page as the clock ticks", () => {
+  vi.useFakeTimers();
+  const start = Date.now();
+  const snapshot = crew();
+  // GUIDO-2's run ended a minute ago: no changes, only the path the hub still keeps
+  snapshot.seats[1] = quiet("GUIDO-2", {
+    state: "idle",
+    since: start - 60_000,
+    recent: [{ file: "src/main.ts", at: start - 60_000 }],
+    scope: { read: [], modified: [] },
+  });
+  render(<CrewMapView snapshot={snapshot} />);
+  expect(screen.getByRole("button", { name: /^GUIDO-2/ })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(MAP_RECENT_MS - 60_000 + 6000));
+  expect(screen.queryByRole("button", { name: /^GUIDO-2/ })).toBeNull();
+});
+
+it("hands the scene the same props on a clock tick that changed nothing, so it rebuilds nothing", async () => {
+  vi.useFakeTimers();
+  render(<CrewMapView snapshot={crew()} names={{}} />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const before = scenes.at(-1) as Record<string, unknown>;
+  const count = scenes.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(scenes.length).toBeGreaterThan(count);
+  const after = scenes.at(-1) as Record<string, unknown>;
+  for (const key of Object.keys(before)) expect([key, after[key]]).toEqual([key, before[key]]);
+  for (const key of Object.keys(before))
+    if (typeof before[key] === "object" || typeof before[key] === "function")
+      expect(Object.is(after[key], before[key]), key).toBe(true);
 });

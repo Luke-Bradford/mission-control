@@ -1,4 +1,4 @@
-import type { MapDelta, MapSeat, MapSnapshot } from "@mc/core";
+import { MAP_RECENT_CAP, type MapDelta, type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
 import { areaOf, forceLayout } from "./layout.ts";
 
 export const isDocked = (seat: MapSeat, now: number): boolean =>
@@ -91,19 +91,20 @@ export function pickRepo(
   return ranked[0]?.rows.length ? ranked[0].id : ids.includes(last) ? last : (ids[0] ?? "");
 }
 
-/** How many accesses a seat's `recent` keeps: the server's own cap (map/seats.ts). */
-export const RECENT_CAP = 12;
-
 /**
  * A seat's recent accesses after a call touched `files`: each is moved to the end with this time, as
- * the server lists them (its calls' files in order, each at its call's end or start), capped.
+ * the hub lists them (its calls' files in order, a run of one file once at its latest), capped.
+ * The hub serves map snapshots at seq 0 today, so LiveMap refetches them instead: this keeps a
+ * delta-applied snapshot consistent for when it doesn't.
  */
 function trail(recent: MapSeat["recent"], files: string[], now: number): MapSeat["recent"] {
   const touched = new Set(files);
   // a file the call already put at the end (its start) moves, it isn't listed twice
   let keep = recent.length;
   while (keep > 0 && touched.has(recent[keep - 1]?.file as string)) keep--;
-  return [...recent.slice(0, keep), ...files.map((file) => ({ file, at: now }))].slice(-RECENT_CAP);
+  return [...recent.slice(0, keep), ...files.map((file) => ({ file, at: now }))].slice(
+    -MAP_RECENT_CAP,
+  );
 }
 
 /** null asks the feed to reload authoritative state, never inventing a missing seat. */
@@ -123,6 +124,8 @@ export function applyDelta(
   switch (delta.type) {
     case "call.start":
       seat.calls.push({ tool: delta.tool, detail: delta.detail, files: delta.files, since: now });
+      // a name-only listing (Glob) opened none of its files: not read, not on the path
+      if (namesOnly(delta.tool)) break;
       for (const file of delta.files)
         if (!seat.scope.read.includes(file)) seat.scope.read.push(file);
       seat.recent = trail(seat.recent, delta.files, now);
@@ -134,8 +137,9 @@ export function applyDelta(
         (c) =>
           c.files.length === delta.files.length && c.files.every((f) => delta.files.includes(f)),
       );
+      const listed = i >= 0 && namesOnly(seat.calls[i]?.tool ?? "");
       if (i >= 0) seat.calls.splice(i, 1);
-      seat.recent = trail(seat.recent, delta.files, now);
+      if (!listed) seat.recent = trail(seat.recent, delta.files, now);
       break;
     }
     case "state":

@@ -1,7 +1,7 @@
 import { type MapSnapshot, seatCallSign } from "@mc/core";
 import * as THREE from "three";
-import { agentColor } from "../hud/AgentTag.tsx";
 import { lightPlacement, type Position, touchedNodes } from "./agents.ts";
+import { seatToken } from "./cards.ts";
 import type { MapNode } from "./model.ts";
 
 export interface LightProps {
@@ -26,10 +26,6 @@ const INK = new THREE.Color("#dbe4f5");
 const MARK_SIZE = 0.85;
 /** A disc sits this far in front of its node, towards the camera, so the node never pokes through. */
 const MARK_LIFT = 0.45;
-
-/** A seat's colour token: its place in config order, FLIGHT its own (AgentTag's agentColor). */
-export const seatToken = (seat: string, indices: Record<string, number>, order: number): string =>
-  agentColor(seat === "FLIGHT" ? "flight" : (indices[seat] ?? Math.max(0, order))).slice(4, -1);
 
 /**
  * The seats on the stage: one small solid light each, on the node it last touched, a thin path of
@@ -136,7 +132,7 @@ export function lightLayer(
         placement.position[1],
         placement.position[2],
       ];
-      const base = new THREE.Color(css(seatToken(seat.seat, props.indices, order)));
+      const base = new THREE.Color(css(seatToken(seat.seat, props.indices[seat.seat] ?? order)));
       const color = shade(seat.seat, base);
       if (placement.docked) color.lerp(VOID, 0.35);
       const old = previous.get(seat.seat);

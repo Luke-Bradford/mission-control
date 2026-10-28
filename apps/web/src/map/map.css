@@ -15,6 +15,15 @@
   --void-panel: rgba(10, 15, 29, 0.96);
   --add: #4fdc8a;
   --rem: #ff6b6b;
+  /* the seats' colours on the void, in both themes: the dark theme's s1–s7 and its FLIGHT tone */
+  --seat-1: #3987e5;
+  --seat-2: #d95926;
+  --seat-3: #199e70;
+  --seat-4: #c98500;
+  --seat-5: #d55181;
+  --seat-6: #008300;
+  --seat-7: #9085e9;
+  --seat-flight: #aab2bf;
   display: flex;
   flex-direction: column;
   gap: 10px;

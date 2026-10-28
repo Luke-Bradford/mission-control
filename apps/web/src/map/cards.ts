@@ -1,4 +1,4 @@
-import type { MapSeat, MapSnapshot } from "@mc/core";
+import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
 import { isDocked } from "./model.ts";
 
 export function duration(ms: number): string {
@@ -22,14 +22,21 @@ const waitsOnYou = (seat: MapSeat): boolean =>
   seat.badges.questions.length > 0 ||
   (seat.badges.waiting?.kind === "parked" && !seat.badges.waiting.stopped);
 
+/** A seat's recent accesses the hub still keeps: those within MAP_RECENT_MS of now. */
+export const freshRecent = (seat: MapSeat, now: number): MapSeat["recent"] =>
+  seat.recent.filter((r) => r.at >= now - MAP_RECENT_MS);
+
 /**
  * A seat the map shows: live now (a call in flight, a running turn, or less than a minute since
- * one), with a recent path (the hub keeps it fifteen minutes after a run ends), carrying an
- * unmerged branch with changes, or waiting on the operator.
+ * one), with a recent path (kept MAP_RECENT_MS after its calls end), carrying an unmerged branch
+ * with changes, or waiting on the operator.
  */
 export function isWorking(seat: MapSeat, now: number): boolean {
   return (
-    !isDocked(seat, now) || seat.recent.length > 0 || counted(seat).length > 0 || waitsOnYou(seat)
+    !isDocked(seat, now) ||
+    freshRecent(seat, now).length > 0 ||
+    counted(seat).length > 0 ||
+    waitsOnYou(seat)
   );
 }
 
@@ -51,17 +58,27 @@ export function changeTotals(seat: MapSeat): ChangeCount & { files: number } {
   };
 }
 
-/** The distinct files a seat has read on its current run. */
-export const readCount = (seat: MapSeat): number => new Set(seat.scope.read).size;
-
-/** The files a seat has touched on its current run: changed, read, or accessed by a call. */
+/**
+ * The files a seat has touched on its current run: changed, read, or accessed by a call (a
+ * name-only listing such as Glob opened nothing, so it touches nothing).
+ */
 export function touchedFiles(seat: MapSeat): Set<string> {
   return new Set([
     ...counted(seat).map((c) => c.file),
     ...seat.scope.read,
     ...seat.recent.map((r) => r.file),
-    ...seat.calls.flatMap((c) => c.files),
+    ...seat.calls.filter((c) => !namesOnly(c.tool)).flatMap((c) => c.files),
   ]);
+}
+
+/**
+ * The files a seat read, by nodeWork's rule: read on its run, or touched without being changed,
+ * so the seat's card and the discs on the map agree once a run's reads are gone.
+ */
+export function readCount(seat: MapSeat): number {
+  const read = new Set(seat.scope.read);
+  const changed = new Set(counted(seat).map((c) => c.file));
+  return [...touchedFiles(seat)].filter((f) => read.has(f) || !changed.has(f)).length;
 }
 
 /** One seat's work on a node: its lines changed there (null when none), and whether it read it. */
@@ -94,15 +111,29 @@ export function nodeWork(snapshot: MapSnapshot, files: string[]): NodeSeatWork[]
   });
 }
 
+/** What a seat is on, from one source: the crew row's ticket, title and PR, else the map's. */
+export interface SeatWork {
+  ticket: number | null;
+  title: string | null;
+  pr: number | null;
+}
+
 /**
  * What a seat is on, as the Overview says it: `#808 · PR #812 · Map: plain seat lights`, the
  * ticket and its PR when known, else null.
  */
-export function workLine(seat: MapSeat, pr: number | undefined): string | null {
+export function workLine(work: SeatWork): string | null {
   const refs = [
-    ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
-    ...(pr !== undefined ? [`PR #${pr}`] : []),
+    ...(work.ticket !== null ? [`#${work.ticket}`] : []),
+    ...(work.pr !== null ? [`PR #${work.pr}`] : []),
   ];
   if (!refs.length) return null;
-  return [...refs, ...(seat.title ? [seat.title] : [])].join(" · ");
+  return [...refs, ...(work.title ? [work.title] : [])].join(" · ");
 }
+
+/**
+ * A seat's colour token on the map, its place in config order (FLIGHT its own), defined on the
+ * map page in one palette for both themes, so the void stage and the rail show the same colour.
+ */
+export const seatToken = (seat: string, order: number): string =>
+  seat === "FLIGHT" ? "--seat-flight" : `--seat-${(Math.max(0, order) % 7) + 1}`;

@@ -1,7 +1,14 @@
-import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { touchedNodes } from "../src/map/agents.ts";
-import { changeTotals, isWorking, nodeWork, readCount, workLine } from "../src/map/cards.ts";
+import {
+  changeTotals,
+  isWorking,
+  nodeWork,
+  readCount,
+  seatToken,
+  workLine,
+} from "../src/map/cards.ts";
 import { layoutTree } from "../src/map/model.ts";
 
 const now = 1_000_000;
@@ -25,6 +32,8 @@ describe("who the map shows", () => {
     // a run that ended keeps its path on the map while the hub keeps it
     s.recent = [{ file: "src/main.ts", at: now - 300_000 }];
     expect(isWorking(s, now)).toBe(true);
+    // until the hub would have let it go
+    expect(isWorking(s, now - 300_000 + MAP_RECENT_MS + 1)).toBe(false);
     s.recent = [];
     s.scope.modified = [{ file: "src/main.ts", add: 1, rem: 0, source: "diff" }];
     expect(isWorking(s, now)).toBe(true);
@@ -53,16 +62,22 @@ describe("who the map shows", () => {
 
 describe("what a seat is on", () => {
   it("says the ticket, its PR and title as the Overview does, or nothing without either", () => {
-    const s = seat();
-    expect(workLine(s, undefined)).toBe("#7 · Handle empty input");
-    expect(workLine(s, 12)).toBe("#7 · PR #12 · Handle empty input");
-    s.ticket = null;
-    expect(workLine(s, 12)).toBe("PR #12 · Handle empty input");
-    expect(workLine(s, undefined)).toBeNull();
+    const on = { ticket: 7, title: "Handle empty input", pr: null };
+    expect(workLine(on)).toBe("#7 · Handle empty input");
+    expect(workLine({ ...on, pr: 12 })).toBe("#7 · PR #12 · Handle empty input");
+    expect(workLine({ ...on, ticket: null, pr: 12 })).toBe("PR #12 · Handle empty input");
+    expect(workLine({ ...on, ticket: null })).toBeNull();
+  });
+
+  it("gives each seat one map colour token by its place, FLIGHT its own", () => {
+    expect(seatToken("GUIDO-1", 0)).toBe("--seat-1");
+    expect(seatToken("GUIDO-1", 9)).toBe("--seat-3");
+    expect(seatToken("FLIGHT", 2)).toBe("--seat-flight");
   });
 
   it("counts its changed files and lines, marking churn, and its distinct reads", () => {
     const s = seat();
+    s.recent = [];
     s.scope = {
       read: ["a.ts", "b.ts", "a.ts"],
       modified: [
@@ -73,7 +88,16 @@ describe("what a seat is on", () => {
       ],
     };
     expect(changeTotals(s)).toEqual({ files: 2, add: 13, rem: 2, churn: true });
+    // a.ts and b.ts were read (a.ts changed too)
     expect(readCount(s)).toBe(2);
+    // once a run's reads are gone, a file on its path it didn't change still counts, as its disc does
+    s.scope.read = [];
+    s.recent = [
+      { file: "b.ts", at: 1 },
+      { file: "a.ts", at: 2 },
+    ];
+    s.calls = [{ tool: "Glob", detail: "**", files: ["e.ts", "f.ts"], since: 3 }];
+    expect(readCount(s)).toBe(1);
   });
 });
 

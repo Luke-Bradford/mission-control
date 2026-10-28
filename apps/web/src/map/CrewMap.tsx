@@ -1,10 +1,10 @@
-import type { Crew, MapSnapshot } from "@mc/core";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import type { Crew, MapSeat, MapSnapshot } from "@mc/core";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { isWorking } from "./cards.ts";
+import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
 import { mainAreas, repoLayout } from "./layout.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree } from "./model.ts";
@@ -45,13 +45,20 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     () => Object.fromEntries((rows ?? []).map((r) => [r.id, callSign(r)])),
     [rows],
   );
-  // each seat's open PR, as the Overview names it
-  const prs = useMemo(
+  // what each seat is on, from its crew row alone, as the Overview names it: ticket, title, PR
+  const work = useMemo(
     () =>
       Object.fromEntries(
-        (rows ?? []).flatMap((r) => {
-          const pr = r.review?.prNumber ?? r.prs[0]?.number;
-          return pr === undefined ? [] : [[r.id, pr]];
+        (rows ?? []).map((r): [string, SeatWork] => {
+          const ticket = Number(r.ticket?.replace(/^.*#/, ""));
+          return [
+            r.id,
+            {
+              ticket: r.ticket && Number.isInteger(ticket) ? ticket : null,
+              title: r.ticketTitle ?? null,
+              pr: r.review?.prNumber ?? r.prs[0]?.number ?? null,
+            },
+          ];
         }),
       ),
     [rows],
@@ -71,7 +78,7 @@ export function LiveCrewMap({ repo }: { repo: string }) {
       snapshot={snapshot}
       indices={indices}
       names={names}
-      prs={prs}
+      work={work}
       status={status}
     />
   );
@@ -88,22 +95,26 @@ function errorText(error: Error): string {
   return /reconnect|retry/i.test(sentence) ? `${sentence}…` : `${sentence}. Retrying every 5 s.`;
 }
 
+const noNames: Record<string, string> = {};
+const noWork: Record<string, SeatWork> = {};
+const noIndices: Record<string, number> = {};
+
 const collapsed = (tree: MapSnapshot["tree"]) =>
   tree.length > 2000 ? layoutTree(tree, [], true) : null;
 
 export function CrewMapView({
   snapshot,
-  indices = {},
-  names = {},
-  prs = {},
+  indices = noIndices,
+  names = noNames,
+  work = noWork,
   status,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
   /** Each seat's call sign (the crew's display name). */
   names?: Record<string, string>;
-  /** Each seat's open PR, where it has one. */
-  prs?: Record<string, number>;
+  /** What each crew seat is on (its crew row's ticket, title and PR); the map's own otherwise. */
+  work?: Record<string, SeatWork>;
   status?: MapStatus;
 }) {
   const [query, setQuery] = useState("");
@@ -114,16 +125,36 @@ export function CrewMapView({
   const [rotate, setRotate] = useState(false);
   const [seatFocus, setSeatFocus] = useState<{ seat: string; request: number } | null>(null);
   const now = useNow();
-  // the stage and the selector show working seats only
-  // (keyed on who is working, so the clock's tick doesn't redraw the scene)
+  // The stage and the selector show working seats only, each with the part of its path the hub
+  // still keeps: the clock's tick ages a path out on an open page. Keyed on who is working and how
+  // much of each path is fresh, so a tick that changes neither doesn't redraw the scene.
   const working = snapshot.seats
     .filter((seat) => isWorking(seat, now))
-    .map((seat) => seat.seat)
+    .map((seat) => `${seat.seat}\t${freshRecent(seat, now).length}`)
     .join("\n");
   const stage = useMemo(() => {
-    const ids = new Set(working.split("\n"));
-    return { ...snapshot, seats: snapshot.seats.filter((seat) => ids.has(seat.seat)) };
+    const fresh = new Map(
+      working
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split("\t") as [string, string]),
+    );
+    return {
+      ...snapshot,
+      seats: snapshot.seats.flatMap((seat) => {
+        const kept = fresh.get(seat.seat);
+        // recent is oldest first, so what is still fresh is its tail
+        return kept === undefined
+          ? []
+          : [{ ...seat, recent: seat.recent.slice(seat.recent.length - Number(kept)) }];
+      }),
+    };
   }, [snapshot, working]);
+  const seatWork = useCallback(
+    (seat: MapSeat): SeatWork =>
+      work[seat.seat] ?? { ticket: seat.ticket, title: seat.title, pr: null },
+    [work],
+  );
   // a seat's colour is its place in config order; one the crew doesn't list takes its place here,
   // the same on the stage and in the rail
   const colours = useMemo(
@@ -179,20 +210,26 @@ export function CrewMapView({
     displayNodes.find((n) => n.path === focus) ??
     displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const selectedPath = selection?.kind === "node" ? selection.path : null;
-  const selectNode = (path: string) => setSelection({ kind: "node", path });
+  const selectedFiles = displayNodes.find((n) => n.path === selectedPath)?.files ?? [];
+  // stable callbacks, so the scene's props change only when what it shows does
+  const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
   const searchSelect = (path: string) => {
     selectNode(path);
     setFocus(null);
     queueMicrotask(() => setFocus(path));
   };
-  const selectSeat = (seat: string | null, frame: boolean) => {
+  const selectSeat = useCallback((seat: string | null, frame: boolean) => {
     setSelection(seat === null ? null : { kind: "seat", seat });
     if (seat === null || !frame) return;
     setFocus(null);
     setRotate(false);
     setSeatFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
-  };
-  const named = { snapshot, indices: colours, names };
+  }, []);
+  const followFromStage = useCallback(
+    (seat: string | null) => selectSeat(seat, false),
+    [selectSeat],
+  );
+  const named = { snapshot: stage, indices: colours, names };
   return (
     <div className="map-body">
       <div className="map-main">
@@ -213,7 +250,7 @@ export function CrewMapView({
               seat={selectedSeat?.seat ?? null}
               seatFocus={seatFocus}
               dockSeats={snapshot.seats.length}
-              onSeatSelect={(seat) => selectSeat(seat, false)}
+              onSeatSelect={followFromStage}
             />
           </Suspense>
           <MapKey tree={snapshot.tree} />
@@ -223,10 +260,11 @@ export function CrewMapView({
             <h3>Seats</h3>
             <SeatSelector
               {...named}
+              snapshot={snapshot}
               seats={stage.seats}
               selected={selectedSeat?.seat ?? null}
               onSelect={(seat) => selectSeat(seat, true)}
-              prs={prs}
+              work={seatWork}
             />
           </section>
           <section className="map-card map-card-selected" aria-label="Selected">
@@ -253,17 +291,22 @@ export function CrewMapView({
                 {!matches.length && <p>No file or folder matches.</p>}
               </div>
             )}
-            <aside className="map-detail" aria-label="Selection detail">
+            <aside className="map-detail" aria-label="Selection detail" aria-live="polite">
               {selectedSeat ? (
-                <SeatDetail {...named} seat={selectedSeat} now={now} pr={prs[selectedSeat.seat]} />
+                <SeatDetail
+                  {...named}
+                  seat={selectedSeat}
+                  now={now}
+                  work={seatWork(selectedSeat)}
+                />
               ) : selectedPath !== null ? (
                 <>
                   <NodeDetail
                     {...named}
                     path={selectedPath}
                     files={
-                      displayNodes.find((n) => n.path === selectedPath)?.files.length
-                        ? (displayNodes.find((n) => n.path === selectedPath)?.files ?? [])
+                      selectedFiles.length
+                        ? selectedFiles
                         : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
                             f.startsWith(`${selectedPath}/`),
                           )

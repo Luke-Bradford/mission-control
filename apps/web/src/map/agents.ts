@@ -1,5 +1,5 @@
-import type { MapSeat, MapSnapshot } from "@mc/core";
-import { duration, touchedFiles } from "./cards.ts";
+import { type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
+import { duration, freshRecent, touchedFiles } from "./cards.ts";
 import { isDocked, type MapNode } from "./model.ts";
 
 export type Position = [number, number, number];
@@ -41,7 +41,7 @@ export function dockPosition(nodes: MapNode[], index: number): Position {
 
 /** Each file's node (a collapsed tree's folder), computed once per layout. */
 const indexes = new WeakMap<MapNode[], Map<string, MapNode>>();
-export function nodeOfFile(nodes: MapNode[]): Map<string, MapNode> {
+function nodeOfFile(nodes: MapNode[]): Map<string, MapNode> {
   let index = indexes.get(nodes);
   if (!index) {
     index = new Map();
@@ -52,20 +52,23 @@ export function nodeOfFile(nodes: MapNode[]): Map<string, MapNode> {
 }
 
 /** How many nodes a seat's path runs through. */
-export const TRAIL_NODES = 12;
+const TRAIL_NODES = 12;
 
 /**
- * The nodes a seat visited, oldest first: its recent accesses and the files its calls in flight
- * are on, in time order, as the nodes that hold them (a file not on the map is skipped), with a
- * node visited twice in a row listed once.
+ * The nodes a seat visited, oldest first: its recent accesses the hub still keeps and the files
+ * its calls in flight are on (a name-only listing such as Glob opened none), in time order, as the
+ * nodes that hold them (a file not on the map is skipped), a node visited twice in a row once.
  */
-export function seatTrail(seat: MapSeat, nodes: MapNode[]): string[] {
+export function seatTrail(seat: MapSeat, nodes: MapNode[], now: number): string[] {
   const index = nodeOfFile(nodes);
+  const recent = freshRecent(seat, now);
   const visits = [
-    ...seat.recent.map((r, i) => ({ file: r.file, at: r.at, order: i })),
-    ...seat.calls.flatMap((c, i) =>
-      c.files.map((file, j) => ({ file, at: c.since, order: seat.recent.length + i * 1000 + j })),
-    ),
+    ...recent.map((r, i) => ({ file: r.file, at: r.at, order: i })),
+    ...seat.calls
+      .filter((c) => !namesOnly(c.tool))
+      .flatMap((c, i) =>
+        c.files.map((file, j) => ({ file, at: c.since, order: recent.length + i * 1000 + j })),
+      ),
   ].sort((a, b) => a.at - b.at || a.order - b.order);
   const trail: string[] = [];
   for (const visit of visits) {
@@ -86,7 +89,7 @@ export function lightPlacement(
   index: number,
   now: number,
 ): { position: Position; node: string | null; trail: string[]; docked: boolean } {
-  const trail = seatTrail(seat, nodes);
+  const trail = seatTrail(seat, nodes, now);
   const files = nodeOfFile(nodes);
   const biggest = [...seat.scope.modified]
     .filter((c) => files.has(c.file))

@@ -10,9 +10,13 @@ const { MapScene, fileTip } = await import("../src/map/MapScene.tsx");
 import { layoutTree } from "../src/map/model.ts";
 
 const nodes = layoutTree(mapSnapshotFixture.tree);
+// the fixture's seat read main.ts just now (a path the hub still keeps), and is reading util.ts
+const fresh: MapSnapshot = structuredClone(mapSnapshotFixture);
+fresh.seats[0].recent = [{ file: "src/main.ts", at: Date.now() - 1000 }];
+fresh.seats[0].calls[0].since = Date.now();
 const props = {
   nodes,
-  snapshot: mapSnapshotFixture,
+  snapshot: fresh,
   focus: null,
   selected: null,
   home: 0,
@@ -316,9 +320,9 @@ it("splits a shared file's disc into equal arcs, one per seat, in seat order", (
   );
   const root = document.documentElement.style;
   for (const [token, colour] of [
-    ["--s1", "#ff0000"],
-    ["--s2", "#00ff00"],
-    ["--s3", "#0000ff"],
+    ["--seat-1", "#ff0000"],
+    ["--seat-2", "#00ff00"],
+    ["--seat-3", "#0000ff"],
   ])
     root.setProperty(token, colour);
   render(
@@ -344,7 +348,7 @@ it("splits a shared file's disc into equal arcs, one per seat, in seat order", (
     return "rgb"[channels.indexOf(Math.max(...channels))];
   });
   expect(strongest).toEqual(["r", "g", "b"]);
-  for (const token of ["--s1", "--s2", "--s3"]) root.removeProperty(token);
+  for (const token of ["--seat-1", "--seat-2", "--seat-3"]) root.removeProperty(token);
   const turns = [0, 1, 2].map((i) => {
     const matrix = new THREE.Matrix4();
     thirds.getMatrixAt(i, matrix);
