@@ -39,7 +39,8 @@ export interface MapBadges {
   review: { ticket: number; round: number; counts: MapReviewCounts; at: number } | null;
   tests: (MapTests & { at: number; editedSince: boolean }) | null;
   ci: { sha: string; checks: PrCheck[]; at: number } | null;
-  waiting: { kind: "test-lock" | "parked"; since: number; reason: string } | null;
+  /** `stopped`: parked because the operator stopped the run; waiting on nobody, so never stuck. */
+  waiting: { kind: "test-lock" | "parked"; since: number; reason: string; stopped: boolean } | null;
 }
 
 export interface MapSeat {
@@ -49,6 +50,11 @@ export interface MapSeat {
   since: number;
   ticket: number | null;
   title: string | null;
+  /**
+   * Every branch whose unmerged changes are in `scope.modified` (the current run's first, then
+   * runs set aside), which name the seat in conflicts and conflictsUnchecked.
+   */
+  branches: string[];
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };
@@ -56,6 +62,13 @@ export interface MapSeat {
   recent: { file: string; at: number }[];
   context: Pick<ContextUsage, "total" | "window"> | null;
   badges: MapBadges;
+}
+
+/** Why a branch's conflicts went unchecked: its head isn't in the checkout, or the check failed. */
+export const MAP_UNCHECKED_REASONS = ["head not fetched", "merge check failed"] as const;
+export interface MapUnchecked {
+  branch: string;
+  reason: (typeof MAP_UNCHECKED_REASONS)[number];
 }
 
 /** GET /api/repos/:repoId/map, including every delta up to seq. */
@@ -67,6 +80,8 @@ export interface MapSnapshot {
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */
   conflicts: { file: string; branches: [string, string]; shas: [string, string] }[];
+  /** Open PR branches with a pair that went unchecked: unknown, never reported clean. */
+  conflictsUnchecked: MapUnchecked[];
   seq: number;
 }
 

@@ -66,7 +66,7 @@ it("shows three labels and the hidden count with the complete list", () => {
       outcome="Closed"
       when=""
       statusOutOfDate={null}
-      youWait={null}
+      you={null}
     />,
   );
   expect(screen.getByText("+2").title).toBe(labels.join(", "));

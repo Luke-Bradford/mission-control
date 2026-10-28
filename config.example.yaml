@@ -31,7 +31,9 @@ repos:
     #   hard_rules: ["policy/**"]
     #   hard_rules_by: operator
     #   always_ask: []
-    # Commands and protected files are user-config keys alongside rules.
+    # Commands and protected files are user-config keys alongside rules. commands are the repo's
+    # validation commands, named in each seat's brief; they are not an allowlist (seats run ordinary
+    # local commands inside their sandbox).
     # commands:
     #   writer: ["uv run pytest"]
     #   review: ["uv run pytest"]
@@ -66,8 +68,9 @@ repos:
     # list. The existing repo block remains an optional override that tightens rules until separately removed.
     # See docs/runbook.md, Per-repo board rules. This example does not edit your home config.
     project: 5
-    # Commands that run the whole suite: the guard lets one seat at a time run them. Each must be a
-    # command crew seats may run (see WRITER_TOOLS in packages/core/src/runtime.ts).
+    # Commands that run the whole suite: each takes the shared test lock, so one seat at a time runs
+    # one. Each must be one of the repo's writer validation commands (commands.writer, or the
+    # defaults) or extend one; it is not an allowlist of what seats may run.
     full_suite:
       - pnpm -s test
       - pnpm -s vitest run

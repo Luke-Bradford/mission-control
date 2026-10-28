@@ -2,11 +2,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_SEAT_COMMANDS } from "@mc/core";
 import { expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { crewGuardDecision } from "../src/guard/decision.ts";
-import { codexCommandAllowed } from "../src/runtime/codex-floor.ts";
 
 it("confines each Claude git segment to the seat worktree in every mode", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-git-paths-")));
@@ -132,7 +130,6 @@ it.each([
   const root = realpathSync(mkdtempSync(join(tmpdir(), "mc-git-context-")));
   try {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
-      expect(codexCommandAllowed(command, mode, DEFAULT_SEAT_COMMANDS, root, root)).toBe(false);
       expect(
         crewGuardDecision(
           { repos: [] } as unknown as CcConfig,

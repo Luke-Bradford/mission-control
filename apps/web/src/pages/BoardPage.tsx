@@ -14,6 +14,7 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
+import { needsYouItems } from "../attention.ts";
 import { BriefModal } from "../board/BriefModal.tsx";
 import { standup, weekly } from "../board/brief.ts";
 import {
@@ -140,7 +141,9 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
           ),
         ].map((id) => RESOURCES.runLoop(id)),
   ).flatMap((view) => (view.data ? [view.data] : []));
-  const items = attention ?? [];
+  // The canonical Needs-you set: the inbox is never narrowed by the session filter; the Board's
+  // session view narrows the cards (`inLane`), so Needs me narrows the Board, not the inbox.
+  const needsYou = useMemo(() => needsYouItems(attention), [attention]);
 
   // Once per render, not once per card (#26 A1).
   const todayStart = tz === null ? null : startOfLocalDay(now, tz);
@@ -156,13 +159,13 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         isInPipelineLane(stage, pipelineStage(i, rows, prs, now, todayStart, loopViews))) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
-      (!mineOnly || needsMe(i, items, rows)),
+      (!mineOnly || needsMe(i, needsYou, rows)),
   );
   const priorities = [
     ...new Set(inLane.map((i) => i.priority).filter((p): p is string => p !== null)),
   ].sort((a, b) => priorityRank(a) - priorityRank(b) || a.localeCompare(b));
 
-  const ctx = { laneName: lane.name, prs, crew: rows, attention: items };
+  const ctx = { laneName: lane.name, prs, crew: rows, needsYou };
   const briefText = (mode: "standup" | "weekly"): string => {
     if (tz === null) return "Loading…";
     return mode === "standup"
@@ -181,8 +184,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const kanbanProps = {
     prs,
     crew: rows,
-    attention: items,
-    unackedAttention: items.filter((i) => !i.acked),
+    needsYou,
     now,
     tz,
     todayStart,

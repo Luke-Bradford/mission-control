@@ -107,13 +107,15 @@ export function canReadComms(
   store: Store,
   actor: string,
   message: NonNullable<ReturnType<Store["commsMessage"]>>,
+  /** The pinned message ids, when the caller checks many messages and read them once. */
+  pins?: ReadonlySet<string>,
 ): boolean {
   return (
     message.to === COMMS_CREW ||
     message.from === actor ||
     message.to === actor ||
     message.mentions.includes(actor) ||
-    store.commsPins().some((pin) => pin.id === message.id) ||
+    (pins?.has(message.id) ?? store.commsPins().some((pin) => pin.id === message.id)) ||
     (message.replyTo !== null && store.commsMessage(message.replyTo)?.from === actor)
   );
 }

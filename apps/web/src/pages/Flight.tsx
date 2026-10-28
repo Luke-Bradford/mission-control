@@ -11,7 +11,7 @@ import { Summary } from "../flight/Summary.tsx";
 import { WorkInFlight } from "../flight/WorkInFlight.tsx";
 import { WorkingLog } from "../flight/WorkingLog.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { navigate, useHash } from "../router.ts";
+import { NEEDS_YOU_PANEL, navigate, useHash } from "../router.ts";
 
 const FLIGHT_TABS = ["command", "queue", "notebook", "record"] as const;
 type FlightTab = (typeof FLIGHT_TABS)[number];
@@ -28,7 +28,7 @@ const HASH_TAB: Readonly<Record<string, FlightTab>> = {
   briefP: "notebook",
   memoryP: "notebook",
   ledgerP: "queue",
-  askP: "queue",
+  [NEEDS_YOU_PANEL]: "queue",
   draftsP: "queue",
   incP: "queue",
   watchP: "queue",
@@ -176,7 +176,11 @@ export function Flight() {
           </div>
         </Panel>
         <div className="flight-queue-lower">
-          <Panel id="askP" title="Operator actions" sub="decisions and replies only you can make">
+          <Panel
+            id={NEEDS_YOU_PANEL}
+            title="Operator actions"
+            sub="decisions and replies only you can make"
+          >
             <div className="flight-panel-scroll">
               <AskedOfYou />
             </div>
