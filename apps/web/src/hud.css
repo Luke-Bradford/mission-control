@@ -4050,12 +4050,6 @@ button.nrow.thread.tagged {
 .audit-status-dismissed {
   color: var(--fg2);
 }
-@media (max-width: 760px) {
-  .audit-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 /* telemetry */
 #page-telemetry {
   display: flex;
@@ -6540,6 +6534,9 @@ kbd {
   }
 }
 @media (max-width: 760px) {
+  .audit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .top {
     padding: 10px 14px;
     gap: 8px 12px;
