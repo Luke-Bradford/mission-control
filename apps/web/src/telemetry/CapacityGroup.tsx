@@ -157,6 +157,10 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
           ]
         : [];
     }),
+    ...(t?.series?.annotations ?? []).map((event) => ({
+      at: event.at,
+      label: event.cause,
+    })),
   ];
   const quotaTo = Math.max(now, ...limits.map((row) => row.resetAt));
   const quotaChart = {

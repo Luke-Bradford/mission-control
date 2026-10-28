@@ -457,6 +457,7 @@ describe("startWatch", () => {
       "mcp__mc__sync_main",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
+      "mcp__mc__close_ticket",
       "mcp__mc__brief_item",
       "mcp__mc__read_pr",
       "mcp__mc__read_ci_log",

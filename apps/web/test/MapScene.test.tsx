@@ -77,6 +77,314 @@ it("provides a searchable-file fallback when WebGL is unavailable", () => {
   expect(screen.getByRole("status").textContent).toContain("Use file search");
 });
 
+it("uses point LOD for a 5,000-file 1440×900 overview without aggregating file nodes", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
+  const tree = Array.from({ length: 5_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
+  const nodes = layoutTree(tree);
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(<MapScene {...props} nodes={nodes} snapshot={snapshot} overview={1} />);
+  act(() => vi.advanceTimersByTime(100));
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  expect(nodes.filter((node) => node.count > 0)).toHaveLength(5_000);
+  expect(nodes.filter((node) => node.count > 1)).toHaveLength(0);
+  expect(points.geometry.getAttribute("position").count).toBe(5_000);
+  expect(points.visible).toBe(true);
+  expect(spheres.visible).toBe(false);
+});
+
+it("selects and describes a file point in the large-repo overview", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
+  const tree = Array.from({ length: 5_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
+  const nodes = layoutTree(tree);
+  const fileNodes = nodes.filter((node) => node.count > 0);
+  const indexedFile = fileNodes[123];
+  if (!indexedFile) throw new Error("test tree is missing point 123");
+  const onSelect = vi.fn();
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(
+    <MapScene {...props} nodes={nodes} snapshot={snapshot} overview={1} onSelect={onSelect} />,
+  );
+  act(() => vi.advanceTimersByTime(100));
+
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const camera = renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const target = new THREE.Vector3().fromBufferAttribute(
+    points.geometry.getAttribute("position") as THREE.BufferAttribute,
+    0,
+  );
+  const projected = target.project(camera);
+  const clientX = ((projected.x + 1) / 2) * 1440;
+  const clientY = ((1 - projected.y) / 2) * 900;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  const realPointHits: THREE.Intersection[] = [];
+  const realRay = new THREE.Raycaster();
+  realRay.params.Points.threshold = 0.4;
+  realRay.setFromCamera(
+    new THREE.Vector2((clientX / 1440) * 2 - 1, (-clientY / 900) * 2 + 1),
+    camera,
+  );
+  points.raycast(realRay, realPointHits);
+  expect(realPointHits).not.toHaveLength(0);
+  const pointRaycast = vi.spyOn(points, "raycast").mockImplementation((_, hits) => {
+    hits.push({
+      distance: 0,
+      distanceToRay: 0,
+      index: 123,
+      object: points,
+      point: new THREE.Vector3(),
+    });
+  });
+  const meshRaycast = vi.spyOn(spheres, "raycast");
+  const canvas = screen.getByRole("application");
+  Object.assign(canvas, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    bottom: 900,
+    height: 900,
+    left: 0,
+    right: 1440,
+    toJSON() {},
+    top: 0,
+    width: 1440,
+    x: 0,
+    y: 0,
+  });
+
+  fireEvent.pointerDown(canvas, { clientX, clientY });
+  fireEvent.pointerUp(canvas, { clientX, clientY });
+  expect(pointRaycast).toHaveBeenCalled();
+  expect(meshRaycast).not.toHaveBeenCalled();
+  expect(onSelect).toHaveBeenCalledWith(indexedFile.path);
+  fireEvent.pointerMove(canvas, { clientX, clientY });
+  act(() => vi.advanceTimersByTime(40));
+  expect(screen.getByRole("tooltip").textContent).toContain(indexedFile.path);
+});
+
+it("selects and describes a file mesh when point LOD is inactive", () => {
+  const onSelect = vi.fn();
+  const tree = [
+    { path: "src/one.ts", lines: 1 },
+    { path: "src/two.ts", lines: 1 },
+  ];
+  const smallNodes = layoutTree(tree);
+  const smallFileNodes = smallNodes.filter((node) => node.count > 0);
+  const indexedFile = smallFileNodes[1];
+  if (!indexedFile) throw new Error("test tree is missing mesh instance 1");
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(<MapScene {...props} nodes={smallNodes} snapshot={snapshot} onSelect={onSelect} />);
+  act(() => vi.advanceTimersByTime(100));
+
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  expect(points.visible).toBe(false);
+  expect(spheres.visible).toBe(true);
+  const pointRaycast = vi.spyOn(points, "raycast");
+  const meshRaycast = vi.spyOn(spheres, "raycast").mockImplementation((_, hits) => {
+    hits.push({
+      distance: 0,
+      instanceId: 1,
+      object: spheres,
+      point: new THREE.Vector3(),
+    });
+  });
+  const canvas = screen.getByRole("application");
+  Object.assign(canvas, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    bottom: 900,
+    height: 900,
+    left: 0,
+    right: 1440,
+    toJSON() {},
+    top: 0,
+    width: 1440,
+    x: 0,
+    y: 0,
+  });
+
+  fireEvent.pointerDown(canvas, { clientX: 720, clientY: 450 });
+  fireEvent.pointerUp(canvas, { clientX: 720, clientY: 450 });
+  expect(meshRaycast).toHaveBeenCalled();
+  expect(pointRaycast).not.toHaveBeenCalled();
+  expect(onSelect).toHaveBeenCalledWith(indexedFile.path);
+  fireEvent.pointerMove(canvas, { clientX: 720, clientY: 450 });
+  act(() => vi.advanceTimersByTime(40));
+  expect(screen.getByRole("tooltip").textContent).toContain(indexedFile.path);
+});
+
+/* Superseded by the seat-light architecture merged from main.
+it("animates fixture deltas at at most 30 fps, opens the arc pair, and stops after settling", () => {
+  const onArc = vi.fn();
+  const { rerender, unmount } = render(<MapScene {...props} onArc={onArc} />);
+  act(() => vi.advanceTimersByTime(100));
+  let snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  const events: MotionEvent[] = [];
+  for (const delta of mapDeltaFixture) {
+    const seat = "seat" in delta ? delta.seat : null;
+    events.push({
+      delta,
+      at: Date.now(),
+      calls: snapshot.seats.find((s) => s.seat === seat)?.calls,
+    });
+    snapshot = applyDelta(snapshot, delta, Date.now()) ?? { ...snapshot, seq: delta.seq };
+    rerender(<MapScene {...props} snapshot={snapshot} events={[...events]} onArc={onArc} />);
+  }
+  const before = renderer.render.mock.calls.length;
+  act(() => vi.advanceTimersByTime(1000));
+  expect(renderer.render.mock.calls.length - before).toBeGreaterThan(1);
+  expect(renderer.render.mock.calls.length - before).toBeLessThanOrEqual(30);
+  const label = screen.getByRole("button", { name: "review: GUIDO-1 → RETRO-1" });
+  fireEvent.click(label);
+  expect(onArc).toHaveBeenCalledWith(
+    expect.objectContaining({ from: "GUIDO-1", to: "RETRO-1", ticket: 7 }),
+    label,
+  );
+  act(() => vi.advanceTimersByTime(6000));
+  expect(screen.queryByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeNull();
+  const settled = renderer.render.mock.calls.length;
+  act(() => vi.advanceTimersByTime(60_000));
+  expect(renderer.render).toHaveBeenCalledTimes(settled);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("selects an orb without moving the camera, zooms explicitly, and resets Home", () => {
+  const onAgentSelect = vi.fn();
+  const { rerender } = render(<MapScene {...props} onAgentSelect={onAgentSelect} />);
+  act(() => vi.advanceTimersByTime(100));
+  const camera = renderer.render.mock.lastCall?.[1] as import("three").Camera;
+  const home = camera.position.clone();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
+    }),
+  );
+  expect(onAgentSelect).toHaveBeenCalledWith("GUIDO-1");
+  rerender(<MapScene {...props} agent="GUIDO-1" />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.equals(home)).toBe(true);
+  rerender(<MapScene {...props} agent="GUIDO-1" agentFocus={{ seat: "GUIDO-1", request: 1 }} />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.equals(home)).toBe(false);
+  rerender(<MapScene {...props} home={1} agent="GUIDO-1" agentFocus={null} />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(camera.position.equals(home)).toBe(true);
+});
+
+it("keeps live motion static under reduced motion and clears the arc after four seconds", () => {
+  vi.stubGlobal("matchMedia", () => ({
+    matches: true,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+  const events = mapDeltaFixture.map((delta) => ({ delta, at: Date.now() }));
+  render(<MapScene {...props} events={events} />);
+  act(() => vi.advanceTimersByTime(1000));
+  expect(renderer.render).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(4000));
+  expect(renderer.render).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole("button", { name: "review: GUIDO-1 → RETRO-1" })).toBeNull();
+});
+
+it("drops in-progress effects on tab hide and catches up silently on return", () => {
+  const { rerender } = render(
+    <MapScene {...props} events={mapDeltaFixture.map((delta) => ({ delta, at: Date.now() }))} />,
+  );
+  act(() => vi.advanceTimersByTime(500));
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  act(() => document.dispatchEvent(new Event("visibilitychange")));
+  const before = renderer.render.mock.calls.length;
+  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  snapshot.seats[0].calls = [];
+  snapshot.seats[0].recent = [{ file: "src/main.ts", at: Date.now() }];
+  rerender(<MapScene {...props} snapshot={snapshot} />);
+  act(() => vi.advanceTimersByTime(1000));
+  expect(renderer.render).toHaveBeenCalledTimes(before);
+  hidden.mockReturnValue(false);
+  act(() => document.dispatchEvent(new Event("visibilitychange")));
+  act(() => vi.advanceTimersByTime(1000));
+  expect(renderer.render).toHaveBeenCalledTimes(before + 1);
+  act(() => vi.advanceTimersByTime(60_000));
+  expect(renderer.render).toHaveBeenCalledTimes(before + 1);
+});
+
+const submittedScene = () => renderer.render.mock.lastCall?.[0] as THREE.Scene;
+const activityObjects = () => {
+  const group = submittedScene().children.find(
+    (object) => object instanceof THREE.Group,
+  ) as THREE.Group;
+  return {
+    group,
+    orbs: group.children.find(
+      (object) =>
+        object instanceof THREE.InstancedMesh && object.geometry instanceof THREE.SphereGeometry,
+    ) as THREE.InstancedMesh,
+    particles: group.children.find((object) => object instanceof THREE.Points) as THREE.Points,
+  };
+};
+it("submits placed orb matrices and populated particle attributes to the renderer", () => {
+  const { rerender } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const { orbs, particles } = activityObjects();
+  const matrix = new THREE.Matrix4();
+  props.snapshot.seats.forEach((seat, i) => {
+    orbs.getMatrixAt(i, matrix);
+    const actual = new THREE.Vector3().setFromMatrixPosition(matrix);
+    const expected = orbPlacement(seat, nodes, i, Date.now()).position;
+    actual.toArray().forEach((value, axis) => {
+      expect(value).toBeCloseTo(expected[axis], 5);
+    });
+    expect(new THREE.Vector3().setFromMatrixScale(matrix).toArray()).toEqual([
+      expect.closeTo(1.6),
+      expect.closeTo(1.6),
+      expect.closeTo(1.6),
+    ]);
+  });
+  expect(particles.geometry.drawRange.count).toBe(0);
+  const at = Date.now();
+  let drawnAt = at;
+  renderer.render.mockImplementationOnce(() => {
+    drawnAt = Date.now();
+  });
+  rerender(
+    <MapScene
+      {...props}
+      events={[
+        {
+          delta: { type: "edit", seq: 1, seat: "GUIDO-1", file: "src/main.ts", add: 8, rem: 0 },
+          at,
+        },
+      ]}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  const geometry = particles.geometry;
+  expect(geometry.drawRange).toEqual({ start: 0, count: 1 });
+  const p = nodes.find((node) => node.path === "src/main.ts")?.position as number[];
+  const u = (drawnAt - at) / 800;
+  const outside = [p[0] + Math.cos(2.4) * 10, p[1] + Math.sin(2.4) * 10, p[2] + Math.cos(4.8) * 5];
+  const position = geometry.getAttribute("position");
+  [position.getX(0), position.getY(0), position.getZ(0)].forEach((value, axis) => {
+    expect(value).toBeCloseTo(outside[axis] + (p[axis] - outside[axis]) * u, 5);
+  });
+  expect(geometry.getAttribute("size").getX(0)).toBeCloseTo(3.6);
+  expect(Array.from(geometry.getAttribute("color").array).slice(0, 3)).toEqual(
+    new THREE.Color("#808999").toArray().map((v) => expect.closeTo(v, 5)),
+  );
+  expect((position as THREE.BufferAttribute).version).toBeGreaterThan(0);
+});
+*/
 it("releases labels, instance resources and geometries on seat removal and unmount", () => {
   const { rerender, unmount } = render(<MapScene {...props} areas={["src"]} />);
   act(() => vi.advanceTimersByTime(40));

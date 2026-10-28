@@ -92,7 +92,7 @@ it("selects and follows a seat from its row, shows its card, and lets go on a se
   expect(scene.dataset.seat).toBe("GUIDO-1");
   expect(scene.dataset.seatFocus).toBe("GUIDO-1");
   const card = screen.getByRole("complementary", { name: "Selection detail" });
-  expect(within(card).getByRole("heading", { name: "GUIDO-1" })).toBeTruthy();
+  expect(within(card).getByRole("heading", { level: 3, name: "GUIDO-1" })).toBeTruthy();
   expect(card.textContent).toContain("#7 · PR #31 · Handle empty input");
   const facts = Object.fromEntries(
     [...card.querySelectorAll("dt")].map((dt) => [

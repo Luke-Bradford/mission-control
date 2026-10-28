@@ -5,6 +5,7 @@ import { ChartCursorProvider } from "../src/hud/charts/Hover.tsx";
 import { LineChart } from "../src/hud/charts/LineChart.tsx";
 import { StackedArea } from "../src/hud/charts/StackedArea.tsx";
 import { VBars } from "../src/hud/charts/VBars.tsx";
+import { InstrumentCharts } from "../src/telemetry/InstrumentCharts.tsx";
 
 const k = (v: number): string => `${Math.round(v)}`;
 
@@ -69,6 +70,77 @@ describe("StackedArea", () => {
       <StackedArea series={[]} label="x" xLabels={["a", "b"]} at={() => ""} format={k} />,
     );
     expect(container.querySelector("svg")).toBeNull();
+  });
+});
+
+describe("VBars time workspace", () => {
+  it("publishes its keyboard cursor and annotations to the shared chart workspace", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <VBars
+          label="Throughput"
+          bars={[
+            { key: "a", label: "Mon", tip: "Monday", segments: [{ name: "merged", value: 1 }] },
+            { key: "b", label: "Tue", tip: "Tuesday", segments: [{ name: "merged", value: 3 }] },
+          ]}
+          times={[100, 200]}
+          annotations={[{ at: 200, label: "hub Update" }]}
+        />
+        <LineChart
+          label="Other chart"
+          from={0}
+          to={200}
+          xLabels={["start", "now"]}
+          at={String}
+          series={[
+            {
+              id: "x",
+              name: "x",
+              color: "red",
+              points: [
+                { at: 100, v: 1 },
+                { at: 200, v: 2 },
+              ],
+            },
+          ]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [throughput, other] = container.querySelectorAll("svg");
+    fireEvent.focus(throughput as SVGSVGElement);
+    expect(other?.parentElement?.querySelector(".tip")?.textContent).toContain("x2%");
+    expect(throughput?.querySelector(".annotation")?.textContent).toBe("hub Update");
+  });
+});
+
+describe("Instrument charts", () => {
+  it("renders only the supplied server observations, retaining their timestamps", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <InstrumentCharts
+          scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+          series={{
+            stateSpans: [
+              { agentId: "crew", state: "parked", startedAt: 10, endedAt: 20 },
+              { agentId: "crew", state: "running", startedAt: 30, endedAt: 40 },
+            ],
+            quota: [],
+            tickets: [
+              { ticket: "repo#1", readyAt: 10, startedAt: 12, mergedAt: 30, doneAt: 40 },
+              { ticket: "repo#2", readyAt: 20, startedAt: 24, mergedAt: null, doneAt: 50 },
+            ],
+            annotations: [{ at: 30, kind: "hub-update", cause: "Updated Mission Control" }],
+          }}
+          from={0}
+          to={60}
+        />
+      </ChartCursorProvider>,
+    );
+    expect(container.querySelectorAll(".crew-state-span")).toHaveLength(2);
+    expect(container.querySelector(".crew-state-span")?.getAttribute("data-ended-at")).toBe("20");
+    expect(container.querySelectorAll(".annotation")).toHaveLength(3);
+    expect(container.querySelectorAll("#tFlow path.line").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
   });
 });
 

@@ -199,13 +199,19 @@ export interface Engine {
   reconcileRepo(repoId: RepoId): Promise<void>;
   /**
    * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
+   * A message after review findings sends the author back to working; only an explicit `accept` waives them.
    * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
    * never lifts a budget park. Resolves true only when it un-parked the run.
    */
   onOperatorMessage(
     runId: string,
     by?: "CAPCOM" | "FLIGHT",
-    opts?: { kinds?: readonly string[]; action?: "lift" | "rereview" | "accept" | "rework" },
+    opts?: {
+      kinds?: readonly string[];
+      action?: "lift" | "rereview" | "accept" | "rework";
+      /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
+      note?: string;
+    },
   ): Promise<boolean>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -2155,7 +2161,11 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (by === "FLIGHT" && flightHeld(run)) return;
         if (opts?.action !== undefined) {
-          if (by !== "FLIGHT" || flightPowersOf(config, run.repoId) !== "superuser") return;
+          if (
+            (by === "CAPCOM" && opts.action !== "accept") ||
+            (by === "FLIGHT" && flightPowersOf(config, run.repoId) !== "superuser")
+          )
+            return;
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (
@@ -2174,6 +2184,7 @@ export function createEngine(deps: EngineDeps): Engine {
           )
             return;
           if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2) return;
+          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1) return;
           if (opts.action === "accept") {
             if (pr?.state !== "open" || pr.headSha !== pushed.sha) return;
             const review = store
@@ -2208,8 +2219,11 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
         if (kind === "review" || kind === "review-ruling") {
-          next.phase = "review";
-          next.reviewWaivedSha = store.runPush(run.id)?.sha ?? null;
+          next.phase = opts?.action === "accept" ? "review" : "working";
+          if (opts?.action !== "accept") {
+            next.reviewWaivedSha = null;
+            next.flightClearedSha = null;
+          }
         } else if (kind === "ruling" || kind === "review-failed") {
           next.phase = "review";
         } else if (head !== null && pushed?.sha === head && (pr === null || pr.state === "open")) {
@@ -2235,6 +2249,11 @@ export function createEngine(deps: EngineDeps): Engine {
               [pushed.sha]: (loop.flightRereviews?.[pushed.sha] ?? 0) + 1,
             };
           if (opts.action === "rework") {
+            if (pushed)
+              next.flightReworks = {
+                ...loop.flightReworks,
+                [pushed.sha]: (loop.flightReworks?.[pushed.sha] ?? 0) + 1,
+              };
             if (next.aside) {
               try {
                 await supervisor.wakeRun(run.id);
@@ -2247,13 +2266,15 @@ export function createEngine(deps: EngineDeps): Engine {
               .reviewsOfRun(run.id)
               .filter((r) => r.state === "reported")
               .at(-1);
-            const message = review
+            const findings = review
               ? fixText({
                   retro: seatCallSign(review.seatId),
                   sha: review.sha,
                   findings: store.findingsOf(review.id),
                 })
               : `FLIGHT requests rework: ${loop.parked.reason}`;
+            const message =
+              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
             const sent = await supervisor.send(
               run.id,
               `${run.id}:flight-rework:${next.epoch}`,

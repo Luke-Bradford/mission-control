@@ -304,4 +304,5 @@ export async function prepareRetrospective(
     setting(repoId),
     JSON.stringify({ day, told: false, report } satisfies RetrospectiveRecord),
   );
+  store.recordRetrospective(repoId, day, now, report);
 }

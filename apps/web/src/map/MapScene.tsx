@@ -182,6 +182,20 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       new THREE.MeshBasicMaterial(),
       spheres.length,
     );
+    // At overview distance files become GPU points; zooming restores their individual spheres.
+    const pointGeometry = new THREE.BufferGeometry();
+    pointGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        spheres.flatMap((node) => node.position),
+        3,
+      ),
+    );
+    pointGeometry.setAttribute("color", new THREE.Float32BufferAttribute(spheres.length * 3, 3));
+    const points = new THREE.Points(
+      pointGeometry,
+      new THREE.PointsMaterial({ size: 2.5, sizeAttenuation: false, vertexColors: true }),
+    );
     const positions = new Map(nodes.map((n) => [n.path, new THREE.Vector3(...n.position)]));
     const linked = nodes.filter((n) => n.parent !== null);
     const edges = linked.flatMap((n) => [
@@ -195,7 +209,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       ),
       new THREE.LineBasicMaterial({ color: BRANCH, depthWrite: false }),
     );
-    scene.add(mesh, branches);
+    scene.add(mesh, points, branches);
     // each main area's name at the middle of its files
     const areaCentres = areas.flatMap((name) => {
       const files = nodes.filter((n) => n.count > 0 && n.area === name);
@@ -216,6 +230,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       nodes,
       spheres,
       mesh,
+      points,
+      branches,
       positions,
       filePositions,
       areaCentres,
@@ -223,10 +239,12 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       extent: box.getSize(new THREE.Vector3()),
       lights: lightLayer(scene, seatLabels, nodes, css),
       dispose: () => {
-        scene.remove(mesh, branches);
+        scene.remove(mesh, points, branches);
         mesh.dispose();
         mesh.geometry.dispose();
         mesh.material.dispose();
+        points.geometry.dispose();
+        (points.material as THREE.Material).dispose();
         branches.geometry.dispose();
         branches.material.dispose();
       },
@@ -367,6 +385,15 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     if (document.hidden || !g) return;
     lastDraw = performance.now();
     if (current?.rotate && !reduced.matches) controls.update();
+    const distance = camera.position.distanceTo(controls.target);
+    // A large tree becomes visually denser long before it reaches the former fixed 90-unit
+    // threshold. At the normal overview framing, use points for >2,000 individual files; zooming
+    // inside 20 units restores the individually pickable sphere instances.
+    const distant =
+      (g.spheres.length > 2000 && distance > 20) ||
+      distance > Math.max(90, g.extent.length() * 0.9);
+    g.mesh.visible = !distant;
+    g.points.visible = distant;
     const now = Date.now();
     const w = el.clientWidth,
       h = el.clientHeight;
@@ -426,7 +453,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   const update = (next: Props) => {
     current = next;
     if (!g) return;
-    const { lights, mesh, spheres, positions } = g;
+    const { lights, mesh, points, spheres, positions } = g;
     tokens.clear();
     lights.update(next, reduced.matches, Date.now());
     controls.autoRotate = next.rotate && !reduced.matches;
@@ -484,11 +511,24 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     const picked = new THREE.Color(SIGNAL);
     spheres.forEach((node, i) => {
       const chosen = node.path === next.selected;
-      // a collapsed folder is a little larger with more files, never a blob
+      // every file is an individual node; selection is the only reason to enlarge one
       const size = (node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4) * (chosen ? 1.8 : 1);
       matrix.makeScale(size, size, size).setPosition(...node.position);
       mesh.setMatrixAt(i, matrix);
       mesh.setColorAt(i, chosen ? picked : plain);
+      const color = chosen ? picked : plain;
+      (points.geometry.getAttribute("color") as THREE.BufferAttribute).setXYZ(
+        i,
+        color.r,
+        color.g,
+        color.b,
+      );
+      if (chosen)
+        addLabel(
+          node.path,
+          new THREE.Vector3(...node.position).add(new THREE.Vector3(0, size + 2, 0)),
+          "map-orb-label",
+        );
       // the selected node's +/− shows on the stage; the card says whose they are
       if (chosen) {
         const changed = nodeWork(next.snapshot, node.files).flatMap((w) => w.changed ?? []);
@@ -513,6 +553,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     for (const area of g.areaCentres) addLabel(area.name, area.position, "map-area");
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    (points.geometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
     schedule();
   };
 
@@ -559,14 +600,23 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     );
     return ray;
   };
+  const fileHit = (ray: THREE.Raycaster) => {
+    if (!g) return undefined;
+    if (g.points.visible) {
+      // Points are screen-sized, so match their hit target to the file node radius.
+      ray.params.Points.threshold = 0.4;
+      return ray.intersectObject(g.points)[0];
+    }
+    return ray.intersectObject(g.mesh)[0];
+  };
   const pick = (e: PointerEvent) => {
     if (!g || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
     const ray = rayAt(e.clientX, e.clientY);
     const seat = g.lights.pick(ray);
-    const hit = ray.intersectObject(g.mesh)[0];
+    const hit = fileHit(ray);
     if (seat) current?.onSeatSelect?.(current.seat === seat ? null : seat);
-    else if (hit?.instanceId !== undefined) {
-      const node = g.spheres[hit.instanceId];
+    else if (hit) {
+      const node = g.spheres[hit.instanceId ?? hit.index ?? -1];
       if (node) current?.onSelect(node.path);
     }
   };
@@ -589,8 +639,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     hoverTimer = setTimeout(() => {
       if (!g || !current) return;
       const rect = canvas.getBoundingClientRect();
-      const hit = rayAt(clientX, clientY).intersectObject(g.mesh)[0];
-      const node = hit?.instanceId === undefined ? undefined : g.spheres[hit.instanceId];
+      const hit = fileHit(rayAt(clientX, clientY));
+      const node = hit ? g.spheres[hit.instanceId ?? hit.index ?? -1] : undefined;
       if (!node) {
         tip.hidden = true;
         return;

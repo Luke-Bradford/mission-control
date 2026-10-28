@@ -65,7 +65,7 @@ import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
-import { proposeQueueReorder, type QueueReorderDeps } from "./queue-reorder.ts";
+import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -334,7 +334,7 @@ export async function main(): Promise<void> {
         throw new Error("Focus writes unavailable.");
       return setSeatFocus(config, configPath, crewReloader, seatId, focus, Date.now());
     },
-    queueReorder: (seatId, move, above) => proposeQueueReorder(queueReorder, seatId, move, above),
+    queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     config,
     store,

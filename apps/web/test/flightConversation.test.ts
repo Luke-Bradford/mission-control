@@ -1,8 +1,8 @@
 import type { AgentStream, StreamEvent } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
-  answersToday,
   type DockRow,
+  decidedToday,
   dockRows,
   kindLabel,
   overturnText,
@@ -144,7 +144,7 @@ describe("withPending", () => {
   });
 });
 
-describe("answersToday", () => {
+describe("decidedToday", () => {
   const noon = Date.UTC(2026, 9, 23, 12);
   const day = 24 * 3600 * 1000;
 
@@ -155,6 +155,15 @@ describe("answersToday", () => {
       decision("d3", noon - 2000, { kind: "brief" }),
       decision("d4", noon - 500),
     ];
-    expect(answersToday(ds, noon, "UTC").map((d) => d.id)).toEqual([1, 4]);
+    expect(decidedToday(ds, noon, "UTC").map((d) => d.id)).toEqual([1, 4]);
+  });
+
+  it("keeps closed and reordered tickets too", () => {
+    const ds = [
+      decision("d1", noon - 1000, { kind: "close" }),
+      decision("d2", noon - 2000, { kind: "reorder" }),
+      decision("d3", noon - 3000, { kind: "promote" }),
+    ];
+    expect(decidedToday(ds, noon, "UTC").map((d) => d.id)).toEqual([1, 2]);
   });
 });

@@ -98,5 +98,6 @@ export function writeCrewPause(
 ): void {
   for (const row of reviews) reviewPausedMs(store, row, at);
   store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
+  store.addHubEvent(pause === null ? "Crew resumed" : `Crew paused: ${pause.reason}`, at);
   for (const row of reviews) reviewPausedMs(store, row, at);
 }

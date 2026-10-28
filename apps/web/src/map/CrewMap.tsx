@@ -1,11 +1,12 @@
 import type { Crew, MapSeat, MapSnapshot } from "@mc/core";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
-import { mainAreas, repoLayout } from "./layout.ts";
+import { mainAreas } from "./layout.ts";
+import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree } from "./model.ts";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
@@ -98,10 +99,6 @@ function errorText(error: Error): string {
 const noNames: Record<string, string> = {};
 const noWork: Record<string, SeatWork> = {};
 const noIndices: Record<string, number> = {};
-
-const collapsed = (tree: MapSnapshot["tree"]) =>
-  tree.length > 2000 ? layoutTree(tree, [], true) : null;
-
 export function CrewMapView({
   snapshot,
   indices = noIndices,
@@ -122,6 +119,10 @@ export function CrewMapView({
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
   const [overview, setOverview] = useState(0);
+  const [nodes, setNodes] = useState<ReturnType<typeof layoutTree>>([]);
+  const previousLayout = useRef<{ repo: string; nodes: ReturnType<typeof layoutTree> } | null>(
+    null,
+  );
   const [rotate, setRotate] = useState(false);
   const [seatFocus, setSeatFocus] = useState<{ seat: string; request: number } | null>(null);
   const now = useNow();
@@ -169,12 +170,20 @@ export function CrewMapView({
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
-  // the layout is cached per repo and set of paths (layout.ts), so the same array comes back for
-  // a refetch that changed no path, and the scene keeps its geometry
-  const nodes = useMemo(
-    () => repoLayout(snapshot.repoId, snapshot.tree, snapshot.imports, collapsed),
-    [snapshot.repoId, snapshot.tree, snapshot.imports],
-  );
+  // Layout stays out of React's render path, so a large tree cannot block orbiting or the live feed.
+  useEffect(() => {
+    let current = true;
+    const previous =
+      previousLayout.current?.repo === snapshot.repoId ? previousLayout.current.nodes : undefined;
+    void mapLayoutWorker.layout(snapshot.tree, snapshot.imports, previous).then((next) => {
+      if (!current) return;
+      previousLayout.current = { repo: snapshot.repoId, nodes: next };
+      setNodes(next);
+    });
+    return () => {
+      current = false;
+    };
+  }, [snapshot.repoId, snapshot.tree, snapshot.imports]);
   const areas = useMemo(() => mainAreas(snapshot.tree), [snapshot.tree]);
   const treePaths = useMemo(() => new Set(snapshot.tree.map((f) => f.path)), [snapshot.tree]);
   // files a seat touched that origin/HEAD doesn't have yet (new on a branch)
@@ -193,10 +202,10 @@ export function CrewMapView({
         ? layoutTree(
             extras.map((path) => ({ path, lines: 0 })),
             nodes,
-            treePaths.size > 2000,
+            false,
           )
         : nodes,
-    [extras, nodes, treePaths],
+    [extras, nodes],
   );
   const searchable = useMemo(
     () => [...new Set([...displayNodes.map((n) => n.path), ...treePaths, ...extras])],
@@ -257,7 +266,7 @@ export function CrewMapView({
         </div>
         <div className="map-rail">
           <section className="map-card map-card-seats" aria-label="Seats">
-            <h3>Seats</h3>
+            <h2>Seats</h2>
             <SeatSelector
               {...named}
               snapshot={snapshot}
@@ -268,7 +277,7 @@ export function CrewMapView({
             />
           </section>
           <section className="map-card map-card-selected" aria-label="Selected">
-            <h3>Selected</h3>
+            <h2>Selected</h2>
             <input
               type="search"
               className="map-find"
@@ -399,7 +408,7 @@ function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
       </span>
       <span className="map-key-item">
         {tree.length.toLocaleString()} files
-        {tree.length > 2000 && ", collapsed into folders"}
+        {tree.length > 2000 && ", every file shown as an individual point"}
       </span>
     </p>
   );

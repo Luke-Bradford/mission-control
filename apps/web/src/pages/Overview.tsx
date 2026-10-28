@@ -14,6 +14,7 @@ import { TimelinePanel } from "../overview/TimelinePanel.tsx";
 export function Overview() {
   return (
     <section id="page-overview">
+      <h1 className="sr-only">Overview</h1>
       <NeedsBanner awayOnly />
       <div className="overview-grid">
         <div className="overview-metrics">

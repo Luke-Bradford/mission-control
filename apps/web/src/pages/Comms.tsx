@@ -62,6 +62,7 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
       : null;
     return (
       <section id="page-comms" className="comms-page">
+        <h1 className="sr-only">Comms</h1>
         <div className="comms-grid">
           <div className="comms-left">
             <Decisions
@@ -110,6 +111,7 @@ export function Comms({ item, view }: { item: string | null; view?: CommsView })
   }
   return (
     <section id="page-comms">
+      <h1 className="sr-only">Comms</h1>
       <div className="cgrid">
         <div className="col">
           <NeedsList

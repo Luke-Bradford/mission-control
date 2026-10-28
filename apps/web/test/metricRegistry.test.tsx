@@ -44,7 +44,7 @@ const LEGACY = {
     },
   },
   "/api/flight/summary": flightSummary({
-    metrics: { ...flightSummary().metrics, merged: 9, readyToMergedMin: 999, inReview: 9 },
+    metrics: { ...flightSummary().metrics, inReview: 9 },
   }),
   "/api/telemetry?range=6h": {
     today: { tokens: 0, cacheRead: 0, costUsd: 99, toolCalls: 0, turns: 0, working: 9, agents: 9 },

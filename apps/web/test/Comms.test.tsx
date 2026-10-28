@@ -542,7 +542,7 @@ describe("Comms routes", () => {
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledge shop-app-ta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ack shop-app-ta" }));
     await waitFor(() => {
       const hit = fetch.mock.calls.find(([path]) => path === "/api/comms/comms%3A9/reactions");
       expect(JSON.parse(String(hit?.[1]?.body))).toEqual({ reaction: "seen" });

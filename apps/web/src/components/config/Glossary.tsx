@@ -1,4 +1,4 @@
-import { BACKGROUND_STALL_MS, HUD_STATE_LABEL, HUD_STATES, STALL_MS } from "@mc/core";
+import { BACKGROUND_STALL_MS, HUD_STATE_LABEL, HUD_STATES, METRICS, STALL_MS } from "@mc/core";
 import { Panel } from "../../hud/Panel.tsx";
 
 /** Anchor for `/setup/sources#glossary` (where the old `/config` and `/settings#glossary` land). */
@@ -47,8 +47,8 @@ export function Glossary() {
           <dd>
             Each project's Status options map to{" "}
             <code>planned · in progress · review · blocked · done</code> via <code>status_map</code>
-            . <b>done</b> on the board = done and updated in the last 7 days. <b>WIP</b> = in
-            progress + review.
+            . <b>done</b> on the board = done and updated in the last 7 days. <b>WIP</b> ={" "}
+            {METRICS.inProgress.definition}
           </dd>
           <dt>agent states</dt>
           <dd>

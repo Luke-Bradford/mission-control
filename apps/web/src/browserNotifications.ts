@@ -1,6 +1,6 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
 import { useEffect, useRef } from "react";
-import { RESOURCES, useResource } from "./data.ts";
+import { hub, RESOURCES, useResource, useResourceSettled } from "./data.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";
 
@@ -97,8 +97,15 @@ export const deliverNotification = createDelivery();
 export function BrowserNotifications() {
   const prefs = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   const events = useResource<NotificationEvent[]>(RESOURCES.notificationEvents);
+  // A matching response keeps its data snapshot, but completion still wakes this coordination
+  // effect after a paired event response arrived first.
+  const prefsSettled = useResourceSettled(RESOURCES.notificationPreferences);
+  const eventsSettled = useResourceSettled(RESOURCES.notificationEvents);
   const initialized = useRef(false);
   useEffect(() => {
+    // Completion revisions are otherwise intentionally independent from resource data identity.
+    void prefsSettled;
+    void eventsSettled;
     // Seed history as soon as the first feed arrives, even if preferences are still loading.
     if (!initialized.current && events.data && !events.loading && !events.error) {
       deliverNotification.remember(events.data);
@@ -111,10 +118,21 @@ export function BrowserNotifications() {
       prefs.loading ||
       events.loading ||
       prefs.error ||
-      events.error
+      events.error ||
+      hub.isFetching(RESOURCES.notificationPreferences.path) ||
+      hub.isFetching(RESOURCES.notificationEvents.path)
     )
       return;
     for (const event of events.data) deliverNotification(event, prefs.data);
-  }, [prefs.data, prefs.loading, prefs.error, events.data, events.loading, events.error]);
+  }, [
+    prefs.data,
+    prefs.loading,
+    prefs.error,
+    events.data,
+    events.loading,
+    events.error,
+    prefsSettled,
+    eventsSettled,
+  ]);
   return null;
 }

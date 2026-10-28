@@ -47,6 +47,7 @@ export function LineChart({
   at,
   height = 170,
   live = false,
+  format = pct,
 }: {
   series: LineSeries[];
   bands?: { from: number; to: number; label: string }[];
@@ -67,6 +68,8 @@ export function LineChart({
   height?: number;
   /** `to` is now and moving: the cursor pulses. */
   live?: boolean;
+  /** Value formatter for axes, readouts and the accessible summary. */
+  format?: (value: number) => string;
 }) {
   const [ref, w] = useChartWidth(560);
   const gid = useGradientId();
@@ -137,7 +140,7 @@ export function LineChart({
       const vs = valued(s);
       const last = vs.at(-1);
       return last
-        ? `${s.name} latest ${pct(last.v)}, peak ${pct(Math.max(...vs.map((p) => p.v)))}`
+        ? `${s.name} latest ${format(last.v)}, peak ${format(Math.max(...vs.map((p) => p.v)))}`
         : `${s.name} no readings`;
     })
     .join(
@@ -184,7 +187,7 @@ export function LineChart({
               </g>
             );
           })}
-        <Grid max={max} ticks={ticks} y={Y} x0={x0} x1={x1} label={pct} />
+        <Grid max={max} ticks={ticks} y={Y} x0={x0} x1={x1} label={format} />
         {limit && (
           <line
             className="limit"
@@ -311,7 +314,7 @@ export function LineChart({
                 key: s.id,
                 name: s.name,
                 color: s.color,
-                value: value === null || value === undefined ? "—" : pct(value),
+                value: value === null || value === undefined ? "—" : format(value),
               };
             })
             .concat(

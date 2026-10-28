@@ -28,6 +28,11 @@ import {
 import { usePhone } from "./phone.ts";
 
 const NO_PRS: PullRequestView[] = [];
+export interface KanbanColumnMetric {
+  label: string;
+  count: string;
+  title: string;
+}
 /** Keep the Board's historical Done column light until the operator asks for its full history. */
 export const DONE_CARD_WINDOW = 10;
 
@@ -90,6 +95,7 @@ export function Kanban({
   todayStart,
   columns = HUD_COLUMNS,
   notIn,
+  metrics = {},
   id = "kanban",
 }: {
   items: BoardItem[];
@@ -105,6 +111,8 @@ export function Kanban({
   columns?: readonly HudColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
   notIn?: ReadonlyMap<HudColumn, string[]>;
+  /** Registry figures shown in place of a Status-column's local card count. */
+  metrics?: Partial<Record<HudColumn, KanbanColumnMetric>>;
   id?: string;
 }) {
   const prsByTicket = useMemo(() => {
@@ -142,11 +150,15 @@ export function Kanban({
   return (
     <div className="kanban" id={id}>
       {columns.map((col) => {
+        const metric = metrics[col];
         const lacking = notIn?.get(col);
         const note = lacking?.length ? (
           <div className="xs muted knot">not in {lacking.join(", ")}</div>
         ) : null;
         const list = lists.get(col) ?? [];
+        const label = metric?.label ?? col;
+        const count = metric?.count ?? String(list.length);
+        const title = metric?.title;
         const cards = col === "Done" && !doneExpanded ? list.slice(0, DONE_CARD_WINDOW) : list;
         const hiddenDone = col === "Done" ? list.length - cards.length : 0;
         const moreDone =
@@ -159,15 +171,18 @@ export function Kanban({
           const on = col === openCol;
           return (
             <div key={col} className="kcol">
-              <button
-                type="button"
-                className="kh"
-                aria-expanded={on}
-                aria-controls={panelId(col)}
-                onClick={() => setPicked(col)}
-              >
-                {col} <span className="n">{list.length}</span>
-              </button>
+              <h2 className="kh">
+                <button
+                  type="button"
+                  aria-expanded={on}
+                  aria-controls={panelId(col)}
+                  onClick={() => setPicked(col)}
+                >
+                  <span title={title}>
+                    {label} <span className="n">{count}</span>
+                  </span>
+                </button>
+              </h2>
               {note}
               {on && (
                 <div className="kb" id={panelId(col)}>
@@ -182,19 +197,23 @@ export function Kanban({
         }
         if (list.length === 0) {
           return (
-            <div key={col} className="kcol empty" title={`${col}: nothing here`}>
-              <div className="kh">
-                {col} <span className="n">0</span>
-              </div>
+            <div key={col} className="kcol empty" title={title ?? `${col}: nothing here`}>
+              <h2 className="kh">
+                <span title={title}>
+                  {label} <span className="n">{count}</span>
+                </span>
+              </h2>
               {note}
             </div>
           );
         }
         return (
           <div key={col} className="kcol">
-            <div className="kh">
-              {col} <span className="n">{list.length}</span>
-            </div>
+            <h2 className="kh">
+              <span title={title}>
+                {label} <span className="n">{count}</span>
+              </span>
+            </h2>
             {note}
             <div className="kb">
               {cards.map((i) => (

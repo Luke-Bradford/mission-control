@@ -91,6 +91,11 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
               label="PRs merged per day"
               every={2}
               accentLast
+              times={t.throughput.map((d) => Date.parse(`${d.day}T12:00:00Z`))}
+              annotations={(t.series?.annotations ?? []).map((event) => ({
+                at: event.at,
+                label: event.kind.replace("-", " "),
+              }))}
               bars={t.throughput.map((d) => ({
                 key: d.day,
                 label: narrowDay(d.day),

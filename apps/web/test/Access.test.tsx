@@ -376,7 +376,7 @@ it.each(["events"])("waits for both refreshes when %s finishes first", async (fi
     },
   );
   stubFetch({
-    "/api/notification-preferences": { ...PREFS, enabled: false },
+    "/api/notification-preferences": PREFS,
     "/api/notifications/events": [],
   });
   render(<BrowserNotifications />);
