@@ -108,6 +108,7 @@ rl.on("line", (line) => {
     if (bad === "approvalsReviewer") result.approvalsReviewer = "guardian_subagent";
     if (bad === "activePermissionProfile") result.activePermissionProfile.id = "other";
     if (bad === "networkAccess") result.sandbox.networkAccess = true;
+    if (bad === "sandboxType") result.sandbox.type = "dangerFullAccess";
     if (bad === "instructionSources") result.instructionSources = ["AGENTS.md"];
     const badField =
       handshakes > 1 ? (configured.badReattachField ?? configured.badField) : configured.badField;
@@ -122,6 +123,71 @@ rl.on("line", (line) => {
     }
     notify("thread/started", { thread: result.thread });
     say({ id, result });
+  } else if (method === "config/read") {
+    let configuredUrl = "http://hub/mcp";
+    let workspaceAccess = "write";
+    let filesystem = { ":root": "read", "/operator": "deny" };
+    try {
+      const homeConfig = readFileSync(join(process.env.CODEX_HOME, "config.toml"), "utf8");
+      configuredUrl = homeConfig.match(/^url = "([^"]+)"$/m)?.[1] ?? configuredUrl;
+      workspaceAccess =
+        homeConfig.match(
+          /\[permissions\.mc_seat\.filesystem\.":workspace_roots"\]\n"\."="(read|write)"/,
+        )?.[1] ?? workspaceAccess;
+      const grants = homeConfig.match(
+        /\[permissions\.mc_seat\.filesystem\]\n([\s\S]*?)\[permissions\.mc_seat\.filesystem\.":workspace_roots"\]/,
+      )?.[1];
+      if (grants !== undefined)
+        filesystem = Object.fromEntries(
+          [...grants.matchAll(/^"([^"]+)"="(read|write|deny)"$/gm)].map(([, path, access]) => [
+            path,
+            access,
+          ]),
+        );
+    } catch {
+      // Unit-session fixtures do not need a private Codex home.
+    }
+    const config = {
+      default_permissions: "mc_seat",
+      approvals_reviewer: "user",
+      mcp_servers: { mc: { url: configuredUrl, bearer_token_env_var: "MC_SEAT_TOKEN" } },
+      permissions: {
+        mc_seat: {
+          filesystem: {
+            ...filesystem,
+            ":workspace_roots": { ".": workspaceAccess, ".git": "read", ".codex": "read" },
+          },
+          network: { enabled: false },
+        },
+      },
+      rules: {},
+      shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
+    };
+    const bad = configured.badConfig;
+    if (bad === "mcp") config.mcp_servers.evil = {};
+    if (bad === "sameNameMcp") config.mcp_servers.mc.url = "http://evil.invalid/mcp";
+    if (bad === "sameNameMcpCommand") config.mcp_servers.mc.command = "hostile-mcp";
+    if (bad === "approvalConfig") config.default_permissions = "evil";
+    if (bad === "sandboxConfig") config.permissions.mc_seat.network.enabled = true;
+    if (bad === "writableRoot")
+      config.permissions.mc_seat.filesystem[":workspace_roots"]["."] = "read";
+    if (bad === "absoluteWrite") config.permissions.mc_seat.filesystem["/operator"] = "write";
+    if (bad === "missingDeny") delete config.permissions.mc_seat.filesystem["/operator"];
+    if (bad === "execPolicy") config.rules = { allow: ["*"] };
+    if (bad === "shell") config.shell_environment_policy = { exclude: [] };
+    if (bad === "shellExtra") config.shell_environment_policy.inherit = "all";
+    if (configured.realConfigShape) {
+      config.mcp_servers.mc.environment_id = "local";
+      config.mcp_servers.mc.enabled = true;
+      config.mcp_servers.mc.tool_timeout_sec = 600;
+      config.permissions.mc_seat.filesystem.environment_id = "local";
+    }
+    say({ id, result: { config } });
+  } else if (method === "hooks/list") {
+    say({
+      id,
+      result: { hooks: configured.badConfig === "effectiveHooks" ? [{ name: "evil" }] : [] },
+    });
   } else if (method === "turn/start" || method === "turn/steer") {
     let scenario = configured;
     try {

@@ -10,7 +10,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type CrewMode, MC_TOOL_NAMES, MCP_PATH, seatDef } from "@mc/core";
+import {
+  type CrewMode,
+  codexSeatEffectiveConfig,
+  MC_TOOL_NAMES,
+  MCP_PATH,
+  seatDef,
+} from "@mc/core";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type CcConfig, crewSeatGrants, crewSeatMode } from "../src/config.ts";
@@ -110,6 +116,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
     outboxPath: join(dir, `k-${id}`, CODEX_OUTBOX_FILE),
     approve,
     stopGraceMs: 100,
+    effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
   });
   sessions.push(session);
   session.on((e) => {

@@ -8,6 +8,7 @@ import {
   CODEX_PROJECT_DOC_CONFIG,
   CODEX_SEAT_PROFILE,
   CONTROL_TIMEOUT_MS,
+  type CodexSeatEffectiveConfig,
   isObj,
   type SessionEvent,
 } from "@mc/core";
@@ -55,6 +56,7 @@ export interface CodexSessionInput {
   log?: (line: string) => void;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
+  effectiveConfig: CodexSeatEffectiveConfig;
 }
 
 export const CODEX_OUTBOX_FILE = "outbox.json";
@@ -128,6 +130,88 @@ const rpcId = (value: unknown): value is RpcId =>
 const tokens = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
+class CodexSeatFloorError extends Error {}
+
+/** Matches only the hub-owned floor keys: Codex adds harmless descriptive fields to config/read. */
+function hasConfigFloor(actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (Array.isArray(actual) && Array.isArray(expected))
+    return (
+      actual.length === expected.length &&
+      actual.every((item, n) => hasConfigFloor(item, expected[n]))
+    );
+  if (!isObj(actual) || !isObj(expected)) return false;
+  return Object.keys(expected).every((key) => hasConfigFloor(actual[key], expected[key]));
+}
+
+function sameConfig(actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (Array.isArray(actual) && Array.isArray(expected))
+    return (
+      actual.length === expected.length && actual.every((item, n) => sameConfig(item, expected[n]))
+    );
+  if (!isObj(actual) || !isObj(expected)) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, n) => key === expectedKeys[n] && sameConfig(actual[key], expected[key]))
+  );
+}
+
+const CODEX_MCP_METADATA_FIELDS = new Set(["environment_id", "enabled", "tool_timeout_sec"]);
+const CODEX_FILESYSTEM_METADATA_FIELDS = new Set(["environment_id"]);
+
+function matchesMcpServer(actual: unknown, expected: Readonly<Record<string, string>>): boolean {
+  if (!isObj(actual)) return false;
+  return (
+    Object.keys(actual).every((key) => key in expected || CODEX_MCP_METADATA_FIELDS.has(key)) &&
+    hasConfigFloor(actual, expected)
+  );
+}
+
+function matchesFilesystem(actual: unknown, expected: CodexSeatEffectiveConfig): boolean {
+  if (!isObj(actual)) return false;
+  if (Object.keys(expected.filesystem).length === 0)
+    return sameConfig(actual[":workspace_roots"], expected.writableRoots);
+  return (
+    Object.keys(actual).every(
+      (key) =>
+        key in expected.filesystem ||
+        key === ":workspace_roots" ||
+        CODEX_FILESYSTEM_METADATA_FIELDS.has(key),
+    ) &&
+    hasConfigFloor(actual, expected.filesystem) &&
+    sameConfig(actual[":workspace_roots"], expected.writableRoots)
+  );
+}
+
+function seatConfigMatches(value: unknown, expected: CodexSeatEffectiveConfig): boolean {
+  if (!isObj(value)) return false;
+  const servers = value.mcp_servers;
+  const expectedServers = Object.keys(expected.mcpServers);
+  const roots =
+    isObj(value.permissions) && isObj(value.permissions[CODEX_SEAT_PROFILE])
+      ? value.permissions[CODEX_SEAT_PROFILE].filesystem
+      : undefined;
+  const workspaceRoots = isObj(roots) ? roots[":workspace_roots"] : undefined;
+  return (
+    isObj(servers) &&
+    Object.keys(servers).length === expectedServers.length &&
+    expectedServers.every((name) => matchesMcpServer(servers[name], expected.mcpServers[name])) &&
+    hasConfigFloor(value, expected.approval) &&
+    hasConfigFloor(value.permissions, {
+      [CODEX_SEAT_PROFILE]: {
+        network: expected.sandbox.network,
+      },
+    }) &&
+    isObj(workspaceRoots) &&
+    matchesFilesystem(roots, expected) &&
+    sameConfig(value.rules, expected.execPolicy) &&
+    sameConfig(value.shell_environment_policy, expected.shellEnvironment)
+  );
+}
+
 export function startCodexSession(i: CodexSessionInput): CrewSession {
   const outbox = readOutbox(i.outboxPath, i.resumeThreadId === null ? undefined : i.transcriptPath);
   const transport = startKeeperSession({
@@ -151,6 +235,7 @@ export interface CodexAttachInput {
   approve: CodexSessionInput["approve"];
   controlTimeoutMs?: number;
   log?: (line: string) => void;
+  effectiveConfig: CodexSeatEffectiveConfig;
 }
 
 export function attachCodexSession(i: CodexAttachInput, transport: KeeperSession): CrewSession {
@@ -167,6 +252,9 @@ function codexSession(
   let checked = false;
   const report = () => !replaying || ("from" in i && transport.lines > i.from);
   const listeners = new Set<(e: SessionEvent) => void>();
+  // The handshake can fail before supervisor.track subscribes. Keep this security event available
+  // for later listeners; the exit carries it too for the normal supervisor exit path.
+  const pendingGuardRefusals: { rule: "codex-seat-floor"; text: string }[] = [];
   const pending = new Map<RpcId, Pending>();
   const seenRequests = new Set<RpcId>();
   const approvals = new Map<RpcId, OpenApproval>();
@@ -182,6 +270,7 @@ function codexSession(
   let started: ReturnType<typeof waitForEvent> | null = null;
   const completions = new Map<string, Set<ReturnType<typeof waitForEvent>>>();
   let failed = false;
+  let guardRefusal: { rule: "codex-seat-floor"; text: string } | undefined;
   let totalTokens: number | null = null;
   let maxTokens: number | null = null;
   let resolveReady: () => void = () => {};
@@ -397,9 +486,17 @@ function codexSession(
 
   transport.on((e) => {
     if (e.kind === "exit") {
-      if (!closing && !checked) failed = true;
+      if (!closing && !checked) {
+        failed = true;
+        guardRefusal ??= {
+          rule: "codex-seat-floor",
+          text: "effective Codex seat settings differ",
+        };
+        pendingGuardRefusals.push(guardRefusal);
+        emit({ kind: "guard-refusal", ...guardRefusal });
+      }
       finish();
-      emit(failed ? { ...e, reason: CANNOT_START } : e);
+      emit(failed ? { ...e, reason: CANNOT_START, ...(guardRefusal ? { guardRefusal } : {}) } : e);
     } else if (e.kind === "attached") {
       if (closing) return;
       replaying = false;
@@ -610,6 +707,17 @@ function codexSession(
     failed = true;
     const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
     i.log?.(why);
+    // Before `checked` no session is permitted to run: an RPC error or early close cannot
+    // distinguish a malformed floor from a failed read-back, so record it as a floor refusal.
+    if (e instanceof CodexSeatFloorError || !checked)
+      guardRefusal = {
+        rule: "codex-seat-floor",
+        text: "effective Codex seat settings differ",
+      };
+    if (guardRefusal) {
+      pendingGuardRefusals.push(guardRefusal);
+      emit({ kind: "guard-refusal", ...guardRefusal });
+    }
     emit({ kind: "stderr", text: why });
     finish();
     void transport.close();
@@ -634,6 +742,7 @@ function codexSession(
       !isObj(result.activePermissionProfile) ||
       result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
       !isObj(result.sandbox) ||
+      result.sandbox.type !== "workspaceWrite" ||
       result.sandbox.networkAccess !== false ||
       !Array.isArray(result.instructionSources) ||
       result.instructionSources.length !== 0 ||
@@ -642,7 +751,13 @@ function codexSession(
       result.thread.id === "" ||
       (resumeId !== null && result.thread.id !== resumeId)
     )
-      throw new Error("Codex thread did not confirm the seat floor");
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
+    const effective = await request("config/read", { cwd: i.cwd, includeLayers: true });
+    if (!isObj(effective) || !seatConfigMatches(effective.config, i.effectiveConfig))
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
+    const hooks = await request("hooks/list", { cwd: i.cwd });
+    if (!isObj(hooks) || !Array.isArray(hooks.hooks) || hooks.hooks.length !== 0)
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
     init(result.thread.id);
   };
 
@@ -717,6 +832,7 @@ function codexSession(
     },
     on(listener) {
       listeners.add(listener);
+      for (const refusal of pendingGuardRefusals) listener({ kind: "guard-refusal", ...refusal });
       return () => {
         listeners.delete(listener);
       };
@@ -733,6 +849,9 @@ function codexSession(
     },
     get closeSent() {
       return transport.closeSent;
+    },
+    get floorRefusal() {
+      return guardRefusal;
     },
   };
 }

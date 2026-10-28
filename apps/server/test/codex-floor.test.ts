@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   type CrewSandboxInput,
   codexLineCommands,
@@ -45,6 +46,7 @@ const installedCodex = (() => {
     return null;
   }
 })();
+const DOC_PROBE = fileURLToPath(new URL("./live/codex-doc-probe.ts", import.meta.url));
 
 describe.skipIf(installedCodex === null)("Codex seat profile under the real codex sandbox", () => {
   let root: string;
@@ -104,6 +106,25 @@ describe.skipIf(installedCodex === null)("Codex seat profile under the real code
   );
 });
 
+describe.skipIf(installedCodex === null)("Codex project configuration isolation", () => {
+  it("ignores a trusted-project full-access profile and extra MCP server", () => {
+    const output = execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", DOC_PROBE, "project-untrusted"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, MC_CODEX_COMMAND: installedCodex as string },
+        timeout: 30_000,
+      },
+    );
+    expect(output).toContain('"activePermissionProfile":{"id":"mc_seat"');
+    expect(output).toContain('"networkAccess":false');
+    expect(output).toContain('"mcp_servers":{"mc"');
+    expect(output).not.toContain('"evil"');
+    expect(output).not.toContain('"id":"evil"');
+  }, 45_000);
+});
+
 describe("codexSeatConfig", () => {
   const url = "http://127.0.0.1:7420/mcp";
   const tmp = "/tmp/claude-501/seat-1";
@@ -134,6 +155,18 @@ describe("codexSeatConfig", () => {
     );
     expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
+  });
+
+  it("refuses to generate a seat profile without a filesystem deny", () => {
+    expect(() => codexSeatConfig(sandboxInput, "writer", url, tmp, [])).toThrow(
+      "requires at least one deny entry",
+    );
+    expect(() => codexSeatConfig(sandboxInput, "writer", url, tmp, [""])).toThrow(
+      "requires at least one deny entry",
+    );
+    expect(codexSeatConfig(sandboxInput, "writer", url, tmp, ["/operator"])).toContain(
+      '"/operator"="deny"',
+    );
   });
 
   it.each(["writer", "read-only"] as const)(

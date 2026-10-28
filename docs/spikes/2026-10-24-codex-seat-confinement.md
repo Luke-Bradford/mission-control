@@ -192,5 +192,13 @@ with `default_permissions = "evil"` (a full-write, network-on profile) and
   thread cwd's path. The seat profile now also says `".codex"="read"` explicitly, and
   `codex-floor.test.ts` runs the real `codex sandbox` against the generated profile when Codex is
   installed.
-- Not changed here: a `.codex/config.toml` committed to the repo's default branch would load at a
-  Codex seat's first `thread/start`.
+- **Closed in the seat launch:** `codex app-server -c
+  'projects."<absolute worktree>".trust_level="untrusted"'` is a session-flags override, which
+  has higher precedence than file-backed layers. It keeps the worktree project layer disabled even
+  when `thread/start` records the cwd as trusted in the private `CODEX_HOME`. The hub passes that
+  flag for every start and resume, alongside the run marker. The regression uses a repository
+  `.codex/config.toml` that selects a full-access profile and adds an MCP server; the effective
+  profile remains `mc_seat` and only the hub MCP configuration is available.
+- This is deliberately a launch flag rather than a mutable value in the per-run config: Codex's
+  thread start writes its trust decision back into that config file. Session flags remain above
+  that write for the app-server lifetime.

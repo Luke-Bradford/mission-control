@@ -764,6 +764,7 @@ describe("POST /api/guard/check", () => {
       background: 0,
       "git-write": 2,
       "codex-allowlist": 0,
+      "codex-seat-floor": 0,
       "git-env": 0,
       "gh-cli": 0,
       "merge-push": 0,

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   CANNOT_START,
   codexCommand,
+  codexSeatEffectiveConfig,
   MC_MCP_SERVER,
   MC_TOOL_NAMES,
   type SessionEvent,
@@ -70,6 +71,10 @@ function start(scenario: Record<string, unknown> = {}, over: Partial<CodexSessio
     approve,
     stopGraceMs: 100,
     controlTimeoutMs: 1000,
+    effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp", "writer", {
+      ":root": "read",
+      "/operator": "deny",
+    }),
     ...over,
   });
   sessions.push(session);
@@ -96,6 +101,7 @@ async function reattach(over: Partial<CodexAttachInput> = {}) {
       approve: async () => "decline",
       outboxPath: join(dir, CODEX_OUTBOX_FILE),
       controlTimeoutMs: 1000,
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
       ...over,
     },
     found.session,
@@ -127,6 +133,8 @@ describe("Codex session", () => {
       "initialize",
       "initialized",
       "thread/start",
+      "config/read",
+      "hooks/list",
       "turn/start",
     ]);
     expect(messages[2].params).toEqual({
@@ -144,7 +152,7 @@ describe("Codex session", () => {
       .map((line) => JSON.parse(line))
       .find((m) => m.method === "thread/tokenUsage/updated");
     expect(Number.isFinite(Date.parse(usage.timestamp))).toBe(true);
-    expect(messages[3].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
+    expect(messages[5].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
     expect(events.filter((e) => ["init", "turn-start", "result"].includes(e.kind))).toEqual([
       { kind: "init", sessionId: "codex-thread-1", model: "gpt-5.4" },
       { kind: "turn-start" },
@@ -163,6 +171,7 @@ describe("Codex session", () => {
     "approvalPolicy",
     "approvalsReviewer",
     "activePermissionProfile",
+    "sandboxType",
     "networkAccess",
     "instructionSources",
   ])("closes before the first turn when %s does not confirm the floor", async (bad) => {
@@ -177,6 +186,51 @@ describe("Codex session", () => {
     expect(session.alive).toBe(false);
     expect(events.some((e) => e.kind === "init")).toBe(false);
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
+  });
+
+  it.each([
+    "mcp",
+    "sameNameMcp",
+    "sameNameMcpCommand",
+    "approvalConfig",
+    "sandboxConfig",
+    "writableRoot",
+    "absoluteWrite",
+    "missingDeny",
+    "execPolicy",
+    "shell",
+    "shellExtra",
+    "effectiveHooks",
+  ])(
+    "closes before the first turn when effective %s settings differ on start and resume",
+    async (badConfig) => {
+      for (const resumeThreadId of [null, "codex-thread-1"]) {
+        const { session, events } = start({ badConfig }, { resumeThreadId });
+        session.send("must never run");
+        await session.ready;
+        await until(() =>
+          expect(events).toContainEqual(
+            expect.objectContaining({ kind: "guard-refusal", rule: "codex-seat-floor" }),
+          ),
+        );
+        expect(
+          recorded().some(
+            (m) => m.method === (resumeThreadId === null ? "thread/start" : "thread/resume"),
+          ),
+        ).toBe(true);
+        expect(recorded().some((m) => m.method === "config/read")).toBe(true);
+        expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
+        await session.close();
+      }
+    },
+  );
+
+  it("accepts the extra fields Codex 0.154 emits beside the effective MCP floor", async () => {
+    const { session, events } = start({ realConfigShape: true });
+    session.send("checked config shape");
+    await session.ready;
+    await until(() => expect(events.some((e) => e.kind === "result")).toBe(true));
+    expect(recorded().some((m) => m.method === "turn/start")).toBe(true);
   });
 
   it("does not treat the old fixture's permissionProfile as confirmation", async () => {
@@ -597,6 +651,7 @@ it("reattaches to the running Codex turn and steers without a second handshake",
       model: "gpt-5.4",
       effort: "high",
       approve: async () => "decline",
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     },
     found.session,
   );
@@ -639,6 +694,7 @@ it.each([
       effort: "high",
       approve: async () => "decline",
       controlTimeoutMs: 1000,
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     },
     found.session,
   );
