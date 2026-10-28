@@ -124,8 +124,6 @@ export interface CrewSession {
    * detached without sending one: a hub that is exiting waits on it, so a Stop is not lost.
    */
   readonly closeSent: Promise<void>;
-  /** A Codex handshake refusal retained until the supervisor has attached its event listener. */
-  readonly floorRefusal?: { rule: "codex-seat-floor"; text: string };
 }
 
 type Json = Record<string, unknown>;

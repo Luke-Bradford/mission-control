@@ -12,7 +12,6 @@ import { writeCodexHostileFiles } from "../fixtures/codex-hostile.ts";
 interface Candidate {
   name: string;
   config?: string;
-  projectUntrusted?: boolean;
   params?: Record<string, unknown>;
   experimental?: boolean;
   emptyCwd?: boolean;
@@ -23,10 +22,6 @@ interface Candidate {
 // These are hypotheses, not supported settings, until the returned sources establish otherwise.
 const candidates: Candidate[] = [
   { name: "baseline" },
-  {
-    name: "project-untrusted",
-    projectUntrusted: true,
-  },
   { name: "max-zero", config: "project_doc_max_bytes = 0" },
   { name: "fallback-empty", config: "project_doc_fallback_filenames = []" },
   {
@@ -111,8 +106,6 @@ async function probe(candidate: Candidate): Promise<void> {
     "enabled = false",
     "[features]",
     "shell_snapshot = false",
-    "[mcp_servers.mc]",
-    'url = "http://127.0.0.1:1/mcp"',
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem]`,
     '":root" = "read"',
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.":workspace_roots"]`,
@@ -130,13 +123,7 @@ async function probe(candidate: Candidate): Promise<void> {
     );
   const child = spawn(
     command,
-    [
-      ...(candidate.profileFile ? ["--profile", "no_docs"] : []),
-      "app-server",
-      ...(candidate.projectUntrusted
-        ? ["-c", `projects.${JSON.stringify(repo)}.trust_level="untrusted"`]
-        : []),
-    ],
+    [...(candidate.profileFile ? ["--profile", "no_docs"] : []), "app-server"],
     {
       cwd: candidate.emptyProcessCwd ? empty : repo,
       env: {
@@ -207,10 +194,6 @@ async function probe(candidate: Candidate): Promise<void> {
       });
     } else if (m.id === 2) {
       result = m.result;
-      if (m.error) error = JSON.stringify(m.error);
-      else send({ id: 3, method: "config/read", params: { cwd: repo } });
-    } else if (m.id === 3) {
-      if (isObj(result) && isObj(m.result)) result.config = m.result.config;
       if (m.error) error = JSON.stringify(m.error);
       close();
     } else if (typeof m.method === "string" && m.id !== undefined) {
