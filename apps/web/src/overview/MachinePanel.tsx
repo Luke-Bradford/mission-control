@@ -169,6 +169,9 @@ export function MachinePanel() {
   const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
+  const hasHistory = Object.values(summary?.machine ?? {}).some(
+    (series) => Array.isArray(series) && series.length > 0,
+  );
 
   if (view === undefined && !machine.error) {
     return (
@@ -179,7 +182,7 @@ export function MachinePanel() {
       </Panel>
     );
   }
-  if (m === null && !machine.error && !summary?.machine?.cpu?.length) {
+  if (m === null && !machine.error && !hasHistory) {
     return (
       <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
         <div className="pb">

@@ -1602,16 +1602,13 @@ describe("Machine panel", () => {
     expect(mach2.textContent).not.toContain("Room for");
   });
 
-  it("shows dashes and empty bars before the first sample", async () => {
+  it("shows an honest empty state before the first sample", async () => {
     stub({ machine: null });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(3));
-    expect(mach.querySelectorAll(".stack i").length).toBe(0);
-    for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
-    expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
-      "Claude/Codex processes (—)",
-    );
+    expect(await within(mach).findByText("No machine sample yet.")).toBeTruthy();
+    expect(mach.querySelector(".res")).toBeNull();
+    expect(mach.querySelectorAll(".resrow")).toHaveLength(0);
   });
 
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
