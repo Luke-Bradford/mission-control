@@ -21,6 +21,8 @@ type Props = LightProps & {
   /** The main areas, biggest first (layout.ts): their names label the stage. */
   areas?: string[];
   focus: string | null;
+  /** Direct import relationships around the focused file, highlighted on the map. */
+  focusLinks?: { from: string; to: string }[];
   home: number;
   rotate: boolean;
   /** Every seat on the repo, on stage or not, for the dock's size; the stage's count if absent. */
@@ -75,6 +77,7 @@ export function MapScene(props: Props) {
     onSeatSelect,
     areas,
     focus,
+    focusLinks,
     home,
     rotate,
     dockSeats,
@@ -93,6 +96,7 @@ export function MapScene(props: Props) {
       onSeatSelect,
       areas,
       focus,
+      focusLinks,
       home,
       rotate,
       dockSeats,
@@ -110,6 +114,7 @@ export function MapScene(props: Props) {
     onSeatSelect,
     areas,
     focus,
+    focusLinks,
     home,
     rotate,
     dockSeats,
@@ -322,6 +327,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   let overviewSeen = false; // the first update records the counter; later bumps frame the tree
   let workKey = "";
   let previousFocus: string | null = null;
+  let focusLinkKey = "";
+  let focusLines: THREE.LineSegments | null = null;
   let previousSeatFocus: Props["seatFocus"];
   /** The followed light's position at the last frame: the camera moves with it from there. */
   let followed: { seat: string; at: THREE.Vector3 } | null = null;
@@ -453,7 +460,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   const update = (next: Props) => {
     current = next;
     if (!g) return;
-    const { lights, mesh, points, spheres, positions } = g;
+    const { lights, mesh, points, spheres, positions, filePositions } = g;
     tokens.clear();
     lights.update(next, reduced.matches, Date.now());
     controls.autoRotate = next.rotate && !reduced.matches;
@@ -485,6 +492,38 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       const p = next.focus ? positions.get(next.focus) : undefined;
       if (p) frame3d(p, 0.38);
       previousFocus = next.focus;
+    }
+    const nextLinkKey = (next.focusLinks ?? [])
+      .map((edge) => `${edge.from}\t${edge.to}`)
+      .join("\n");
+    if (nextLinkKey !== focusLinkKey) {
+      if (focusLines) {
+        scene.remove(focusLines);
+        focusLines.geometry.dispose();
+        (focusLines.material as THREE.Material).dispose();
+        focusLines = null;
+      }
+      const vertices = (next.focusLinks ?? []).flatMap(({ from, to }) => {
+        const start = filePositions.get(from);
+        const end = filePositions.get(to);
+        return start && end ? [...start.toArray(), ...end.toArray()] : [];
+      });
+      if (vertices.length) {
+        focusLines = new THREE.LineSegments(
+          new THREE.BufferGeometry().setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(vertices, 3),
+          ),
+          new THREE.LineBasicMaterial({
+            color: SIGNAL,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+          }),
+        );
+        scene.add(focusLines);
+      }
+      focusLinkKey = nextLinkKey;
     }
     if (next.seatFocus !== previousSeatFocus) {
       const p = next.seatFocus ? lights.goal(next.seatFocus.seat) : undefined;
@@ -558,6 +597,13 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   };
 
   const rebuild = (nodes: MapNode[], seatCount: number, areas: string[]) => {
+    if (focusLines) {
+      scene.remove(focusLines);
+      focusLines.geometry.dispose();
+      (focusLines.material as THREE.Material).dispose();
+      focusLines = null;
+      focusLinkKey = "";
+    }
     if (g) {
       g.lights.dispose();
       g.dispose();
@@ -699,6 +745,11 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
         g.lights.dispose();
         g.dispose();
         g = null;
+      }
+      if (focusLines) {
+        scene.remove(focusLines);
+        focusLines.geometry.dispose();
+        (focusLines.material as THREE.Material).dispose();
       }
       el.removeEventListener("focusin", focusIn);
       el.removeEventListener("focusout", focusOut);

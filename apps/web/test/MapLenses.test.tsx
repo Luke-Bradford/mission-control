@@ -1,0 +1,111 @@
+import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { CrewMapView } from "../src/map/CrewMap.tsx";
+
+const scenes = vi.hoisted(() => [] as { focusLinks?: { from: string; to: string }[] }[]);
+vi.mock("../src/map/MapScene.tsx", () => ({
+  MapScene: (props: { focusLinks?: { from: string; to: string }[] }) => {
+    scenes.push(props);
+    return <div>3D scene</div>;
+  },
+}));
+
+function snapshot(): MapSnapshot {
+  const value: MapSnapshot = structuredClone(mapSnapshotFixture);
+  value.tree = [
+    { path: "src/contract.ts", lines: 12 },
+    { path: "src/consumer.ts", lines: 12 },
+    { path: "src/cycle.ts", lines: 12 },
+    { path: "src/untested.ts", lines: 12 },
+    { path: "test/consumer.test.ts", lines: 12 },
+  ];
+  value.imports = [
+    { from: "src/consumer.ts", to: "src/contract.ts" },
+    { from: "src/contract.ts", to: "src/cycle.ts" },
+    { from: "src/cycle.ts", to: "src/contract.ts" },
+    { from: "test/consumer.test.ts", to: "src/consumer.ts" },
+  ];
+  value.seats = [structuredClone(value.seats[0]), structuredClone(value.seats[0])];
+  value.seats[0] = {
+    ...value.seats[0],
+    seat: "GUIDO-1",
+    scope: {
+      read: [],
+      modified: [
+        { file: "src/contract.ts", add: 3, rem: 1, source: "diff" },
+        { file: "src/untested.ts", add: 2, rem: 0, source: "diff" },
+      ],
+    },
+  };
+  value.seats[1] = {
+    ...value.seats[1],
+    seat: "INCO-1",
+    scope: {
+      read: [],
+      modified: [{ file: "src/consumer.ts", add: 4, rem: 0, source: "diff" }],
+    },
+  };
+  value.hist = {
+    since: Date.UTC(2026, 9, 22),
+    prCount: 59,
+    fixCount: 22,
+    files: {
+      "0": [59, 22, Date.UTC(2026, 9, 28), [837, 836]],
+      "1": [12, 2, Date.UTC(2026, 9, 27), [835]],
+      "3": [8, 1, Date.UTC(2026, 9, 26), [834]],
+    },
+    coupling: [[0, 3, 8, 0.67]],
+  };
+  return value;
+}
+
+it("shows Impact tallies, dependency overlap, untested changes, cycles, and a focused import trace", async () => {
+  render(<CrewMapView snapshot={snapshot()} github="Luke-Bradford/mission-control" />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+
+  const lens = screen.getByRole("region", { name: "Impact lens" });
+  expect(lens.textContent).toContain("2 files changed");
+  expect(lens.textContent).toContain("1 import them");
+  expect(lens.textContent).toContain("Changes overlap through imports");
+  expect(lens.textContent).toContain("Changed, and no test imports them");
+  expect(lens.textContent).toContain("Import cycles");
+  expect(lens.textContent).toContain("src/untested.ts");
+
+  const impactContract = within(lens).getAllByRole("button", { name: "src/contract.ts" })[0];
+  if (impactContract === undefined) throw new Error("expected the changed contract file");
+  fireEvent.click(impactContract);
+  expect(lens.textContent).toContain("Imported by");
+  expect(lens.textContent).toContain("Tests that reach it");
+  expect(lens.textContent).toContain("It imports");
+  await waitFor(() =>
+    expect(
+      scenes.some((scene) =>
+        scene.focusLinks?.some(
+          (edge) => edge.from === "src/contract.ts" && edge.to === "src/cycle.ts",
+        ),
+      ),
+    ).toBe(true),
+  );
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(lens.textContent).toContain("Changes overlap through imports");
+});
+
+it("shows History hotspots, frequent fixes, unlinked change partners, and linked recent PRs on focus", () => {
+  render(<CrewMapView snapshot={snapshot()} github="Luke-Bradford/mission-control" />);
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+  const lens = screen.getByRole("region", { name: "History lens" });
+  expect(lens.textContent).toContain("Hotspots the seats are changing");
+  expect(lens.textContent).toContain("Fixed most often");
+  expect(lens.textContent).toContain("Change together, no import between them");
+  expect(lens.textContent).toContain("22 of 59");
+  const historyContract = within(lens).getAllByRole("button", { name: "src/contract.ts" })[0];
+  if (historyContract === undefined) throw new Error("expected the changed contract file");
+  fireEvent.click(historyContract);
+  expect(lens.textContent).toContain("Latest PRs");
+  expect(within(lens).getByRole("link", { name: "#837" }).getAttribute("href")).toBe(
+    "https://github.com/Luke-Bradford/mission-control/pull/837",
+  );
+  expect(lens.textContent).toContain("Changes together with");
+});
