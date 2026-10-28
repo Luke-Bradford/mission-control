@@ -555,33 +555,128 @@ const YARN_COMMANDS = new Set([
   "version",
   "versions",
   "why",
-  "workspace",
-  "workspaces",
 ]);
 
-/** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
+/**
+ * The package manager's own commands that take package names or other plain arguments: after
+ * one of these (even behind options whose values are unknown), the words are data.
+ */
+const PACKAGE_ARG_COMMANDS = new Set([
+  "add",
+  "audit",
+  "bin",
+  "c",
+  "cache",
+  "cat-file",
+  "cat-index",
+  "config",
+  "dedupe",
+  "deploy",
+  "doctor",
+  "explain",
+  "fetch",
+  "find-hash",
+  "get",
+  "help",
+  "i",
+  "import",
+  "info",
+  "init",
+  "install",
+  "la",
+  "licenses",
+  "link",
+  "list",
+  "ll",
+  "ln",
+  "login",
+  "logout",
+  "ls",
+  "outdated",
+  "pack",
+  "patch",
+  "patch-commit",
+  "patch-remove",
+  "prune",
+  "publish",
+  "rb",
+  "rebuild",
+  "remove",
+  "rm",
+  "root",
+  "set",
+  "setup",
+  "store",
+  "un",
+  "uninstall",
+  "unlink",
+  "unplug",
+  "up",
+  "update",
+  "upgrade",
+  "upgrade-interactive",
+  "version",
+  "versions",
+  "why",
+]);
+
+/**
+ * Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner.
+ * A package manager's `exec`/`x`/`dlx` counts only as its first plain word: a later one is an
+ * argument (`pnpm open . x`). With options first, whose values are unknown, a verb anywhere makes
+ * every word from the first plain one judged (`npm --prefix foo exec open .`).
+ */
 function runnerStart(name: string, rest: readonly string[]): number {
   if (RUNNERS.has(name)) return 0;
-  if (PACKAGE_MANAGERS.has(name)) {
-    const i = rest.findIndex((w) => PACKAGE_RUN_VERBS.has(w));
-    return i === -1 ? -1 : i + 1;
-  }
+  if (!PACKAGE_MANAGERS.has(name)) return -1;
+  const first = rest.findIndex((w) => !w.startsWith("-"));
+  if (first === -1) return -1;
+  if (PACKAGE_RUN_VERBS.has(rest[first] ?? "")) return first + 1;
+  if (first > 0 && rest.slice(first + 1).some((w) => PACKAGE_RUN_VERBS.has(w))) return first;
   return -1;
 }
 
+/** pnpm and yarn options known to take the next word as their value. */
+const PACKAGE_VALUED_OPTIONS = new Set([
+  "-C",
+  "--dir",
+  "-F",
+  "--filter",
+  "--filter-prod",
+  "--workspace-dir",
+  "--reporter",
+  "--loglevel",
+  "--cwd",
+]);
+
 /**
- * Where `pnpm <word>` / `yarn <word>` / `yarn run <word>` may run a binary (no run verb), or -1.
- * Every word from there is judged as a command. An option first may take the next word as its
- * value (`pnpm -C add open .`), so then the first plain word is judged even if it is a built-in.
+ * Where `pnpm <word>` / `yarn <word>` may run a binary (pnpm 11 ran `/usr/bin/open` for
+ * `pnpm open .`), or -1. Every word from there is judged as a command. Yarn's behaviour is not
+ * established from its docs here, so its forms are judged the same way (fail closed): the word after
+ * `yarn run`, after `yarn workspace <name>` and after `yarn workspaces foreach`.
  */
 function packageBinStart(name: string, rest: readonly string[]): number {
   if (name !== "pnpm" && name !== "yarn") return -1;
-  const first = rest.findIndex((w) => !w.startsWith("-"));
-  if (first === -1) return -1;
+  // leading options, and the value of one known to take a value (`--filter @mc/web add open`)
+  let first = 0;
+  while (first < rest.length && (rest[first] ?? "").startsWith("-")) {
+    if (PACKAGE_VALUED_OPTIONS.has(rest[first] ?? "")) first++;
+    first++;
+  }
+  if (first >= rest.length) return -1;
   const word = rest[first] ?? "";
-  if (name === "yarn" && word === "run") return first + 1;
-  if (first > 0) return first;
-  return (name === "pnpm" ? PNPM_COMMANDS : YARN_COMMANDS).has(word) ? -1 : first;
+  if (name === "yarn") {
+    if (word === "run") return first + 1;
+    // `yarn workspace <name> <command…>`: data after a package command (`add open`), else the
+    // name and what follows are judged (the name is harmless as a program)
+    if (word === "workspace")
+      return PACKAGE_ARG_COMMANDS.has(rest[first + 2] ?? "") ? -1 : first + 1;
+    if (word === "workspaces") return rest[first + 1] === "foreach" ? first + 2 : -1;
+  }
+  if (PACKAGE_ARG_COMMANDS.has(word)) return -1;
+  // with no option first, a built-in (a script runner: run, test, start…) runs no binary
+  if (first === 0 && (name === "pnpm" ? PNPM_COMMANDS : YARN_COMMANDS).has(word)) return -1;
+  return first;
 }
 
 /**
@@ -1407,7 +1502,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   }
   // `pnpm open .` runs /usr/bin/open: each word from the binary on is judged as a command, in the
   // foreground (no command-line splitting: that is a runner's, and these are scripts or binaries)
-  const bin = runnerStart(name, rest) === -1 ? packageBinStart(name, rest) : -1;
+  const bin = packageBinStart(name, rest);
   if (bin !== -1) {
     for (let i = bin; i < rest.length; i++) {
       const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));

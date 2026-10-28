@@ -2444,6 +2444,13 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
       "pnpm run build",
       "yarn install",
       "yarn test",
+      // a package command's words are package names, even behind a valued option
+      "pnpm add open",
+      "pnpm --filter @mc/web add open",
+      "pnpm -F web add -D open",
+      "yarn workspace web add open",
+      "pnpm -s lint --fix",
+      "pnpm --filter @mc/server exec vitest run test/at.test.ts",
     ])
       expect(ruleOf(bash(c)), c).toBe("allow");
   });
@@ -2544,6 +2551,23 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "pnpm -s open .",
     "yarn open .",
     "yarn run open .",
+    // a verb-looking later word is an argument, not the verb: the binary is still judged
+    "pnpm open . x",
+    "pnpm open -a Calculator --args x",
+    "pnpm open -a Calculator --args exec",
+    "pnpm osascript -e 'display dialog \"hi\"' x",
+    "pnpm crontab x",
+    "pnpm launchctl load x",
+    "pnpm at now dlx",
+    "pnpm gpgconf --launch gpg-agent x",
+    "pnpm Open . x",
+    "yarn open . x",
+    "yarn run open . exec",
+    "npm --prefix foo exec open .",
+    // yarn workspace forms run a command too
+    "yarn workspace foo open .",
+    "yarn workspaces foreach -A open",
+    "yarn workspaces foreach -A run open",
     // more shells read -c scripts
     "fish -c open",
     "ksh -c open",
