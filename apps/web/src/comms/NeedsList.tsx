@@ -1,5 +1,4 @@
 import {
-  ATTENTION_KINDS,
   ATTENTION_LABEL,
   type AttentionHoldCondition,
   type AttentionItem,
@@ -19,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
-import { isOperatorItem, itemOwner, needsYouItems, ownerLabel } from "../attention.ts";
+import { isOperatorItem, itemOwner, needsYouItems, ownerLabel, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -108,12 +107,6 @@ function NeedText({
       />
     </span>
   );
-}
-
-/** Kind order (`ATTENTION_KINDS`), then as the server sent them. */
-export function sortNeeds(items: AttentionItem[]): AttentionItem[] {
-  const rank = (i: AttentionItem) => ATTENTION_KINDS.indexOf(i.kind);
-  return [...items].sort((a, b) => rank(a) - rank(b));
 }
 
 /** The kinds the row's Answer button opens, when no escalation on GitHub carries the question. */

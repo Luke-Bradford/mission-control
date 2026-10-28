@@ -64,17 +64,19 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("badges the asks FLIGHT has put to you and names the count", async () => {
+  it("badges the Needs-you count, briefed or not, and names it", async () => {
     routes({
       attention: [
         item({ key: "esc:a#1", brief: brief() }),
         item({ key: "esc:a#2", brief: brief() }),
         item({ key: "esc:a#3" }),
+        item({ key: "esc:a#4", owner: "flight", brief: brief() }),
       ],
     });
     render(<Header page="board" />);
-    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 waiting on you" });
-    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 3 waiting on you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("3");
+    expect(screen.getByRole("button", { name: /^Needs you 3:/ })).toBeTruthy();
   });
 
   it("shows no badge for unread replies alone", async () => {
@@ -142,12 +144,12 @@ describe("Header", () => {
     const comms = await within(tab(/^Comms/)).findByRole("img");
     expect(comms.className).toBe("lamp crit"); // tab lamps never pulse (cat 1.1)
     expect(comms.getAttribute("aria-label")).toBe("Error, Decision");
-    const board = within(tab(/^Board/)).getByRole("img");
-    expect(board.getAttribute("aria-label")).toBe("Decision");
+    // Needs you is the one lamp: the Board has none, whatever waits on its cards.
+    expect(within(tab(/^Board/)).queryByRole("img")).toBeNull();
     expect(within(tab(/^Overview/)).queryByRole("img")).toBeNull();
   });
 
-  it("Comms and Board show their attention lamps; acked items hold still", async () => {
+  it("Comms shows its attention lamp, the Board none; acked items hold still", async () => {
     routes({
       attention: [
         item({ key: "stall:a:r", kind: "stalled", escalationId: null, acked: true }),
@@ -158,24 +160,23 @@ describe("Header", () => {
     const comms = await within(tab(/^Comms/)).findByRole("img");
     expect(comms.className).toBe("lamp warn");
     expect(comms.getAttribute("aria-label")).toBe("Stalled, Question");
-    expect(
-      within(tab(/^Board/))
-        .getByRole("img")
-        .getAttribute("aria-label"),
-    ).toBe("Question");
+    expect(within(tab(/^Board/)).queryByRole("img")).toBeNull();
   });
 
   it("counts what needs you and says whether any is unacknowledged", async () => {
     routes({ attention: [item({ key: "a" }), item({ key: "b", acked: true })] });
     render(<Header page="overview" />);
     const btn = await screen.findByRole("button", {
-      name: "Needs you 2: 2 things, some not yet acknowledged. Opens Comms.",
+      name: "Needs you 2: 2 things, some not yet acknowledged. Opens FLIGHT's Operator actions.",
     });
     expect(btn.textContent).toBe("Needs you 2");
     expect(btn.className).toBe("needs-btn has");
-    expect(btn.title).toBe("Everything waiting on you (on Comms) · 1 not acknowledged");
+    expect(btn.title).toBe(
+      "Everything waiting on you (FLIGHT › Plan › Operator actions) · 1 not acknowledged",
+    );
     fireEvent.click(btn);
-    expect(window.location.pathname).toBe("/comms");
+    // FLIGHT › Needs you until #766 builds it: Plan › Operator actions.
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
   });
 
   it("counts only the operator's items; one with no owner counts", async () => {
@@ -209,12 +210,16 @@ describe("Header", () => {
   it("all acknowledged, and nothing at all", async () => {
     routes({ attention: [item({ acked: true })] });
     const { unmount } = render(<Header page="overview" />);
-    const acked = await screen.findByRole("button", { name: "Needs you 1: 1 thing. Opens Comms." });
-    expect(acked.title).toBe("Everything waiting on you (on Comms)"); // none to explain
+    const acked = await screen.findByRole("button", {
+      name: "Needs you 1: 1 thing. Opens FLIGHT's Operator actions.",
+    });
+    expect(acked.title).toBe("Everything waiting on you (FLIGHT › Plan › Operator actions)"); // none to explain
     unmount();
     routes({ attention: [] });
     render(<Header page="overview" />);
-    const zero = await screen.findByRole("button", { name: "Needs you 0: nothing. Opens Comms." });
+    const zero = await screen.findByRole("button", {
+      name: "Needs you 0: nothing. Opens FLIGHT's Operator actions.",
+    });
     expect(zero.className).toBe("needs-btn");
     expect(within(zero).getByRole("img").className).toBe("lamp off");
   });

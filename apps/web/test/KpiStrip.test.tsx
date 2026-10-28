@@ -4,7 +4,7 @@ import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { OVERVIEW } from "./fixtures.ts";
+import { HOUR, item, NOW, OVERVIEW } from "./fixtures.ts";
 
 const kpis = OVERVIEW.kpis;
 
@@ -65,6 +65,13 @@ describe("KpiStrip", () => {
           inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 },
         },
       },
+      // the tile counts the header's Needs-you set: one per key, the operator's, never by session
+      "/api/attention": [
+        item({ key: "a", at: NOW - 2 * HOUR }),
+        item({ key: "a", at: NOW - 2 * HOUR }),
+        item({ key: "b", at: NOW - 60_000 }),
+        item({ key: "c", owner: "flight" }),
+      ],
     });
     render(<KpiStrip />);
     await screen.findByText("41.2k");
@@ -86,8 +93,14 @@ describe("KpiStrip", () => {
       "/board",
       "/board",
       "/board",
-      "/comms",
+      // Needs you's home (FLIGHT › Plan › Operator actions until #766)
+      "/flight#askP",
     ];
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Needs you/ }).querySelector(".v")?.textContent).toBe(
+        "2",
+      ),
+    );
     labels.forEach((label, i) => {
       expect(screen.getByRole("link", { name: new RegExp(label) }).getAttribute("href")).toBe(
         paths[i],

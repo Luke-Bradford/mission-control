@@ -13,14 +13,14 @@ import { Card, type CardProps } from "./Card.tsx";
 import {
   cardAgent,
   cardColumn,
+  cardNeeds,
   cardPr,
   cardQueue,
   cardReviewer,
   cardStep,
-  cardYouWait,
+  cardYou,
   daysAgo,
   doneOutcome,
-  needsMe,
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
@@ -35,8 +35,8 @@ interface CardCtx {
   /** The PRs per ticket ref, grouped once per PR fetch. */
   prsByTicket: Map<string, PullRequestView[]>;
   crew: CrewRow[];
-  attention: AttentionItem[];
-  unackedAttention: AttentionItem[];
+  /** The Needs-you set (`needsYouItems`): a card waits on you only for one of these. */
+  needsYou: AttentionItem[];
   now: number;
   tz: string | null;
   todayStart: number | null;
@@ -55,6 +55,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
   }
   const agent = cardAgent(item, ctx.crew);
   const pr = cardPr(item, prs);
+  const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
   return {
     item,
     showRepo: ctx.showRepo,
@@ -63,12 +64,12 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     queued: agent ? null : cardQueue(item, ctx.crew),
     reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
     pr,
-    mine: needsMe(item, ctx.attention, ctx.crew),
-    unacked: needsMe(item, ctx.unackedAttention, ctx.crew),
+    mine: needs.length > 0,
+    unacked: needs.some((a) => !a.acked),
     outcome: doneOutcome(item, prs),
     when,
     statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
-    youWait: cardYouWait(item, prs, ctx.crew, ctx.now),
+    you: cardYou(needs, ctx.now),
   };
 }
 
@@ -81,8 +82,7 @@ export function Kanban({
   showRepo,
   prs,
   crew,
-  attention,
-  unackedAttention,
+  needsYou,
   now,
   tz,
   todayStart,
@@ -94,8 +94,8 @@ export function Kanban({
   showRepo: boolean;
   prs: PullRequestView[];
   crew: CrewRow[];
-  attention: AttentionItem[];
-  unackedAttention: AttentionItem[];
+  /** The Needs-you set (`needsYouItems`). */
+  needsYou: AttentionItem[];
   now: number;
   tz: string | null;
   todayStart: number | null;
@@ -119,8 +119,7 @@ export function Kanban({
     showRepo,
     prsByTicket,
     crew,
-    attention,
-    unackedAttention,
+    needsYou,
     now,
     tz,
     todayStart,

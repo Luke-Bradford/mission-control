@@ -14,8 +14,10 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath } from "../router.ts";
+import { openItem } from "../shell/overlays.ts";
 import {
   type CardSeat,
+  type CardYou,
   cardColumn,
   checksText,
   firstBlocker,
@@ -72,8 +74,8 @@ export interface CardProps {
   when: string;
   /** The issue's open/closed state and the board's Status disagree; null when they agree. */
   statusOutOfDate: string | null;
-  /** What you must do to the card's PR and how long it has waited; null when nothing waits on you. */
-  youWait: { action: string; waiting: string } | null;
+  /** The card's "You:" chip, from its Needs-you items; null when none. */
+  you: CardYou | null;
 }
 
 /**
@@ -103,7 +105,7 @@ export const Card = memo(function Card({
   outcome,
   when,
   statusOutOfDate,
-  youWait,
+  you,
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
@@ -184,10 +186,21 @@ export const Card = memo(function Card({
         </span>
       </span>
     ),
-    youWait && (
-      <Pill key="you" tone="warn">
-        You: {youWait.action} · waiting {youWait.waiting}
-      </Pill>
+    you && (
+      <button
+        key="you"
+        type="button"
+        className="kyou pill warn"
+        title={`${you.title} · open its brief`}
+        onClick={(e) => {
+          // the card's own click would open the ticket instead
+          e.stopPropagation();
+          openItem(you.key);
+        }}
+      >
+        {you.text}
+        {you.more > 0 && <span className="kyou-more">{` +${you.more}`}</span>}
+      </button>
     ),
     statusOutOfDate && (
       <span key="stale" className="xs warn-t" title={statusOutOfDate}>

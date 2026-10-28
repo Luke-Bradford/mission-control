@@ -1,5 +1,4 @@
-import { type AgentStream, type AttentionItem, startOfLocalDay } from "@mc/core";
-import { isOperatorItem } from "../attention.ts";
+import { type AgentStream, startOfLocalDay } from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
@@ -30,24 +29,6 @@ export const overturnText = (
   call: string | null,
 ): string =>
   `I am overturning your decision ${d.id} (${d.about}: ${d.decision}).${call === null ? "" : ` Tell ${call} to hold that point.`} Then ask me what I prefer.`;
-
-/**
- * The operator's items that FLIGHT has put to them: ones it briefed, and ones it passed on
- * (`ask:{questionId}` of a `pass` decision), oldest first. Acked items stay.
- */
-export function waitingAsks(
-  items: readonly AttentionItem[],
-  decisions: readonly FlightDecision[],
-): AttentionItem[] {
-  const passed = new Set(
-    decisions.flatMap((d) =>
-      d.kind === "pass" && d.questionId !== null ? [`ask:${d.questionId}`] : [],
-    ),
-  );
-  return items
-    .filter((i) => isOperatorItem(i) && (i.brief !== undefined || passed.has(i.key)))
-    .sort((a, b) => a.at - b.at);
-}
 
 /** FLIGHT's `answer` decisions since the start of the local day. */
 export const answersToday = (

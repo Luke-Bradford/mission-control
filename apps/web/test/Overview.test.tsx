@@ -161,10 +161,11 @@ describe("Overview panels", () => {
     expect(constructed).toHaveBeenCalledWith("/api/stream");
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     await act(async () => release());
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
     );
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
@@ -183,10 +184,11 @@ describe("Overview panels", () => {
         <Overview />
       </StrictMode>,
     );
+    // Needs you is the header's count from the attention list (empty here), not the KPI's.
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "0"]),
     );
     expect(
       await within(container.querySelector("#timelineP") as HTMLElement).findByText(
@@ -1361,7 +1363,7 @@ describe("Needs banner", () => {
     expect(container.querySelector(".nbanner")).toBeNull();
   });
 
-  it("counts things by kind and goes to Comms", async () => {
+  it("counts things by kind and goes to Needs you's home on FLIGHT", async () => {
     stub({
       items: [
         item({ key: "1", kind: "decision" }),
@@ -1379,10 +1381,10 @@ describe("Needs banner", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen Comms →",
+      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen in FLIGHT →",
     );
     fireEvent.click(btn);
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
   });
 });
 
@@ -1399,7 +1401,7 @@ describe("Needs banner, acknowledged items", () => {
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
     expect(btn.textContent).toBe(
-      "3things need you2 decisions1 stall· 1 not acknowledgedOpen Comms →",
+      "3things need you2 decisions1 stall· 1 not acknowledgedOpen in FLIGHT →",
     );
   });
 
@@ -1414,7 +1416,7 @@ describe("Needs banner, acknowledged items", () => {
     });
     render(<NeedsBanner />);
     const btn = await screen.findByRole("button", { name: /things need you/ });
-    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen Comms →");
+    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen in FLIGHT →");
   });
 
   it("is all clear when every item is someone else's", async () => {

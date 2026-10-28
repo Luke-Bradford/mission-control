@@ -1,4 +1,5 @@
-import type { OverviewSummary } from "@mc/core";
+import type { AttentionItem, OverviewSummary } from "@mc/core";
+import { NEEDS_YOU_PATH, needsYouItems } from "../attention.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
@@ -10,6 +11,7 @@ const duration = (ms: number | null | undefined): string => {
   const minutes = Math.round(ms / 60_000);
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 };
+const HOUR_MS = 3_600_000;
 const value = (n: number | undefined): string => (n === undefined ? "—" : String(n));
 const change = (series: (number | null)[] | undefined, format = kTokens): string => {
   if (!series || series.length < 2 || series[0] == null || series.at(-1) == null) return "—";
@@ -71,6 +73,11 @@ export function KpiStrip() {
   const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const pending = !summary && !error;
   const k = summary?.kpis;
+  // Needs you is the header's count, not a session-scoped one: the inbox is never filtered.
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const needsYou = attention === undefined ? undefined : needsYouItems(attention);
+  const at = summary?.at ?? Date.now();
+  const needsOverHour = needsYou?.filter((i) => at - i.at > HOUR_MS).length;
   const tiles = [
     {
       label: "Agents working",
@@ -164,19 +171,20 @@ export function KpiStrip() {
     },
     {
       label: "Needs you",
-      page: "comms",
-      value: value(k?.needsYou?.count),
+      page: "flight",
+      to: NEEDS_YOU_PATH,
+      value: value(needsYou?.length),
       delta:
         k?.needsYou?.series !== undefined
           ? change(k.needsYou.series)
-          : k?.needsYou?.overHour != null
-            ? `${k.needsYou.overHour} over 1 h`
+          : needsOverHour !== undefined
+            ? `${needsOverHour} over 1 h`
             : "—",
       series: k?.needsYou?.series,
       fmt: String,
       history: "last 30 minutes",
       // amber only while something waits on the operator
-      color: k?.needsYou?.count ? "var(--warn-mark)" : "var(--accent)",
+      color: needsYou?.length ? "var(--warn-mark)" : "var(--accent)",
     },
   ] as const;
   return (
@@ -190,7 +198,7 @@ export function KpiStrip() {
       )}
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
         {tiles.map((tile) => {
-          const path = PAGE_PATHS[tile.page];
+          const path = "to" in tile ? tile.to : PAGE_PATHS[tile.page];
           const series = tile.series;
           const contextOnly =
             series === undefined &&

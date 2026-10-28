@@ -468,23 +468,20 @@ describe("Waiting on you", () => {
   const ask = (over: Parameters<typeof item>[0] = {}) =>
     item({ kind: "decision", text: "Which?", brief: brief(), ...over });
 
-  it("shows Waiting on you with Open on each ask FLIGHT has put to you", async () => {
+  it("shows the whole Needs-you set, most urgent first, with Open on each", async () => {
     function Probe() {
       return <span data-testid="item">{useItem() ?? "none"}</span>;
     }
     stubFlight(
-      {
-        seat: flightSeat(),
-        decisions: [
-          { ...DECISION, id: 2, kind: "pass", questionId: 7 } as FlightView["decisions"][number],
-        ],
-      },
+      { seat: flightSeat(), decisions: [] },
       {
         "/api/attention": [
           ask({ key: "b", at: NOW - HOUR }),
           ask({ key: "ask:7", brief: undefined, kind: "question", at: NOW - 2 * HOUR }),
-          ask({ key: "c", brief: undefined }),
+          // unbriefed, and not passed on by FLIGHT: still the operator's, so it waits on them
+          ask({ key: "c", brief: undefined, kind: "stalled", text: "No output" }),
           ask({ key: "d", owner: "flight" }),
+          ask({ key: "b", at: NOW - HOUR }),
         ],
       },
     );
@@ -495,11 +492,19 @@ describe("Waiting on you", () => {
       </>,
     );
     const rows = await screen.findAllByTestId("waiting-ask");
-    expect(container.querySelector("#dockWaiting .dwh")?.textContent).toBe("Waiting on you · 2");
-    expect(rows).toHaveLength(2);
-    fireEvent.click(rows[0]?.querySelector("button") as HTMLElement);
+    expect(container.querySelector("#dockWaiting .dwh")?.textContent).toBe("Waiting on you · 3");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain("No output");
+    fireEvent.click(rows[2]?.querySelector("button") as HTMLElement);
     expect(screen.getByTestId("item").textContent).toBe("ask:7");
     expect(rows[1]?.textContent).toContain("Which?");
+  });
+
+  it("shows what waits on you even with no FLIGHT seat", async () => {
+    stubFlight({ seat: null, decisions: [] }, { "/api/attention": [ask({ key: "b" })] });
+    const { container } = render(<Dock />);
+    await screen.findAllByTestId("waiting-ask");
+    expect(container.querySelector("#dockWaiting .dwh")?.textContent).toBe("Waiting on you · 1");
   });
 
   it("repins on ask mount and growth, while preserving a reader's scroll position", async () => {

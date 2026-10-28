@@ -1,5 +1,5 @@
 import type { AgentStream, Crew, FlightSummaryView, FlightView } from "@mc/core";
-import { useNeedsYou } from "../attention.ts";
+import { NEEDS_YOU_PATH, useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { runElapsed } from "../crew.ts";
@@ -17,8 +17,8 @@ import { activeCrewRows } from "./WorkInFlight.tsx";
 const DASH = "—";
 /** Where a pulse leads: the canonical detail behind that reading. */
 const PULSE_TARGET = {
-  /** Plan's Operator actions: the operator's asks and drafts live there. */
-  needs: `${PAGE_PATHS.flight}#askP`,
+  /** Needs you's home. */
+  needs: NEEDS_YOU_PATH,
   /** Telemetry's flow of work shows cycle time over time. */
   cycle: PAGE_PATHS.telemetry,
 } as const;

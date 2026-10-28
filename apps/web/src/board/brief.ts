@@ -5,12 +5,13 @@ import {
   type PullRequestView,
   startOfLocalDay,
 } from "@mc/core";
+import { prAction } from "../attention.ts";
 import { loopStepLabel } from "../crew.ts";
 import {
   cardAgent,
   cardColumn,
+  cardNeeds,
   cardPr,
-  cardYouWait,
   daysAgo,
   doneOutcome,
   firstBlocker,
@@ -23,8 +24,18 @@ export type BriefCtx = {
   laneName: string;
   prs: PullRequestView[];
   crew: CrewRow[];
-  attention: AttentionItem[];
+  /** The Needs-you set (`needsYouItems`): what waits on me comes only from it. */
+  needsYou: AttentionItem[];
 };
+
+/** What a card's PR waits on me to do, from its Needs-you item; null when none asks. */
+function prWait(i: BoardItem, ctx: BriefCtx): string | null {
+  for (const a of cardNeeds(i, ctx.needsYou, ctx.crew)) {
+    const action = prAction(a);
+    if (action !== null) return action;
+  }
+  return null;
+}
 
 /** `Saturday 17 October`, built from parts so ICU's comma never appears. */
 function longDate(ms: number, tz: string): string {
@@ -72,7 +83,7 @@ const join = (parts: string[]): string => parts.filter(Boolean).join("\n\n");
 
 /** Plain text for Teams or email: no agent ids anywhere. */
 export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: string): string {
-  const mine = (i: BoardItem) => needsMe(i, ctx.attention, ctx.crew);
+  const mine = (i: BoardItem) => needsMe(i, ctx.needsYou, ctx.crew);
   const today = startOfLocalDay(now, tz);
   const done = column(items, "Done").filter((i) => daysAgo(i.updatedAt, now, tz, today) <= 1);
   const held = new Set(["stalled", "blocked", "parked"]);
@@ -97,8 +108,8 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
     ),
     section("Blocked or waiting on me", [...blocked, ...waiting], ctx, (i) => {
       if (cardColumn(i) === "Blocked") return blockedBy(i);
-      const you = cardYouWait(i, ctx.prs, ctx.crew, now);
-      return you ? `I need to ${you.action}` : "waiting on me";
+      const action = prWait(i, ctx);
+      return action ? `I need to ${action}` : "waiting on me";
     }),
     section(
       "In review",
@@ -127,8 +138,8 @@ export function weekly(
     ),
     section("Ready for QA", column(items, "Ready for QA"), ctx),
     section("In review", column(items, "In review"), ctx, (i) => {
-      const you = cardYouWait(i, ctx.prs, ctx.crew, now);
-      return you ? `waiting for me to ${you.action}` : "PR open";
+      const action = prWait(i, ctx);
+      return action ? `waiting for me to ${action}` : "PR open";
     }),
     section("In progress", column(items, "In progress"), ctx),
     section("Blocked", column(items, "Blocked"), ctx, blockedBy),

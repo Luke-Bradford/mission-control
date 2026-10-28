@@ -4,16 +4,15 @@ import {
   type CrewRow,
   type HudColumn,
   hudColumnOf,
-  OWNER_OPERATOR,
   type PipelineStage,
   type PrCheck,
   type PullRequestView,
   priorityRank,
-  prYouAction,
   REVIEW_STATUS_CONTEXT,
   type RunLoopView,
   startOfLocalDay,
 } from "@mc/core";
+import { sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
 
 const DAY = 86_400_000;
@@ -81,14 +80,30 @@ export function cardAgent(item: BoardItem, crew: CrewRow[]): CrewRow | null {
   return crew.find((r) => r.run?.status === "running" && r.ticket === ref) ?? null;
 }
 
-/** An escalation or a waiting PR names this card, or the agent working it has something waiting on you. */
-export function needsMe(item: BoardItem, items: AttentionItem[], crew: CrewRow[]): boolean {
+/**
+ * The Needs-you items on this card, most urgent first. `needsYou` is the canonical set
+ * (`needsYouItems`), so a card never waits on you unless Needs you says so: an item about the
+ * card's ticket, or, on an In progress card, an item from the agent running it.
+ */
+export function cardNeeds(
+  item: BoardItem,
+  needsYou: readonly AttentionItem[],
+  crew: CrewRow[],
+): AttentionItem[] {
   const ref = ticketRef(item);
-  const mine = items.filter((a) => a.owner === OWNER_OPERATOR);
-  if (mine.some((a) => a.ticket === ref)) return true;
-  if (cardColumn(item) !== "In progress") return false;
-  const agent = cardAgent(item, crew);
-  return agent !== null && mine.some((a) => a.agentId === agent.id);
+  const agent = cardColumn(item) === "In progress" ? cardAgent(item, crew) : null;
+  return sortNeeds(
+    needsYou.filter((a) => a.ticket === ref || (agent !== null && a.agentId === agent.id)),
+  );
+}
+
+/** The card carries a Needs-you item (the Board's Needs-me filter). */
+export function needsMe(
+  item: BoardItem,
+  needsYou: readonly AttentionItem[],
+  crew: CrewRow[],
+): boolean {
+  return cardNeeds(item, needsYou, crew).length > 0;
 }
 
 /** Merged when any PR on the ticket is merged (not only the one the card shows), else Closed. */
@@ -112,25 +127,39 @@ export function cardColumn(item: BoardItem): HudColumn {
 }
 
 const HOUR = 3_600_000;
+const MINUTE = 60_000;
 
-/** `1 hour`, `5 hours`, `1 day`, `9 days`: how long a PR has waited. */
+/** `5 minutes`, `1 hour`, `5 hours`, `1 day`, `9 days`: how long something has waited. */
 export function waitingText(ms: number): string {
   const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? "" : "s"}`;
-  return ms >= DAY ? n(Math.floor(ms / DAY), "day") : n(Math.floor(ms / HOUR), "hour");
+  if (ms >= DAY) return n(Math.floor(ms / DAY), "day");
+  return ms >= HOUR ? n(Math.floor(ms / HOUR), "hour") : n(Math.floor(ms / MINUTE), "minute");
 }
 
-/** What you must do to the PR the card shows (`prYouAction`), with how long it has waited. */
-export function cardYouWait(
-  item: BoardItem,
-  prs: PullRequestView[],
-  crew: CrewRow[],
-  now: number,
-): { action: string; waiting: string } | null {
-  const pr = cardPr(item, prs);
-  // Done is done: nothing on the card waits on you.
-  if (!pr || cardColumn(item) === "Done") return null;
-  const action = prYouAction(pr, cardAgent(item, crew) !== null, now);
-  return action === null ? null : { action, waiting: waitingText(now - pr.updatedAt) };
+/** A card's "You:" chip: its first Needs-you item, what it asks and how long it has waited. */
+export interface CardYou {
+  /** The item's key: the chip opens its brief. */
+  key: string;
+  /** `You: decide on the draft · waiting 9 days`. */
+  text: string;
+  /** The item's own words. */
+  title: string;
+  /** How many more Needs-you items the card carries. */
+  more: number;
+}
+
+/** The chip for a card's Needs-you items (`cardNeeds`); null when it carries none. */
+export function cardYou(needs: readonly AttentionItem[], now: number): CardYou | null {
+  const [first, ...rest] = needs;
+  if (!first) return null;
+  // An undated item (`at` 0, an undated Comms item) says nothing of how long it has waited.
+  const waiting = first.at > 0 ? ` · waiting ${waitingText(Math.max(0, now - first.at))}` : "";
+  return {
+    key: first.key,
+    text: `You: ${youAction(first)}${waiting}`,
+    title: first.text,
+    more: rest.length,
+  };
 }
 
 /**

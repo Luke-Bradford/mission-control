@@ -8,14 +8,12 @@ import {
   lockHeaderText,
   type MachineSample,
 } from "@mc/core";
-import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
-import { useNeedsYou } from "../attention.ts";
+import { type ReactNode, useEffect, useSyncExternalStore } from "react";
+import { NEEDS_YOU_PATH, useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { waitingAsks } from "../flight/conversation.ts";
-import type { FlightView } from "../flight/flightTypes.ts";
 import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
@@ -34,12 +32,8 @@ const TABS: readonly {
 }[] = [
   { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
-  {
-    page: "board",
-    label: "Board",
-    to: PAGE_PATHS.board,
-    needs: (i) => i.kind === "pr" || i.escalationId !== null,
-  },
+  // No lamp on Board: Needs you is the one lamp, and its home is FLIGHT (roadmap item 2).
+  { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms, needs: () => true },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
@@ -69,7 +63,7 @@ export function Header({ page }: { page: Page }) {
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page} />
+        <DockButton page={page} waiting={attention.length} />
       </div>
       <span className="sr-only">
         <LiveIndicator />
@@ -264,6 +258,9 @@ function MachineButton() {
   );
 }
 
+/** Where the Needs-you button leads, in its accessible name. */
+const NEEDS_YOU_OPENS = "Opens FLIGHT's Operator actions";
+
 function NeedsButton({ items }: { items: AttentionItem[] }) {
   const notAcked = items.filter((i) => !i.acked).length;
   const unacked = notAcked > 0;
@@ -271,14 +268,14 @@ function NeedsButton({ items }: { items: AttentionItem[] }) {
   // The accessible name starts with the visible "Needs you {n}" (WCAG 2.5.3), then says more.
   const n = items.length;
   const what = n === 0 ? "nothing" : `${n} ${n === 1 ? "thing" : "things"}`;
-  const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. Opens Comms.`;
+  const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. ${NEEDS_YOU_OPENS}.`;
   return (
     <button
       type="button"
       className={`needs-btn${items.length ? " has" : ""}`}
-      title={`Everything waiting on you (on Comms)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
+      title={`Everything waiting on you (FLIGHT › Plan › Operator actions)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
       aria-label={label}
-      onClick={() => navigate(PAGE_PATHS.comms)}
+      onClick={() => navigate(NEEDS_YOU_PATH)}
     >
       {lamp ? (
         <Lamp {...lamp} title={false} />
@@ -376,15 +373,12 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. */
-function DockButton({ page }: { page: Page }) {
+/**
+ * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge is the
+ * Needs-you count, which the chat's "Waiting on you" lists.
+ */
+function DockButton({ page, waiting }: { page: Page; waiting: number }) {
   const dock = useDock();
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const decisions = useResource<FlightView>(RESOURCES.flight).data?.decisions;
-  const waiting = useMemo(
-    () => waitingAsks(attention ?? [], decisions ?? []).length,
-    [attention, decisions],
-  );
   const inComms = page === "comms";
   const inSetup = page === "setup";
   const title = inComms
