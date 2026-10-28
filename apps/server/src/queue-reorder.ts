@@ -6,6 +6,7 @@ import {
   type BoardItem,
   DEFAULT_PROFILES,
   eligibleToStart,
+  globMatches,
   hudColumnOf,
   type Profile,
   priorityRank,
@@ -98,6 +99,9 @@ async function validate(
     refuse("Queue changed; propose again from the current queue.");
   for (const card of cards) {
     const ref = `${repo.id}#${card.issueNumber}`;
+    // FLIGHT applies the swap itself now, so no one approves it: those tickets are the operator's.
+    if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
+      refuse("Card is always_ask; the operator orders it.");
     if (
       card.repoId !== repo.id ||
       !card.itemId ||
@@ -285,9 +289,17 @@ export async function reorderQueue(
   aboveRef: string,
 ) {
   const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
-  // The pending proposal is an internal recovery record, not an operator approval.
+  // The pending proposal is an internal recovery record, not an operator approval: no brief, no note.
   deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now());
-  return resolveQueueReorder(deps, key, "approve");
+  try {
+    return await resolveQueueReorder(deps, key, "approve");
+  } catch (e) {
+    // Refused before any write: drop the record, so it can never be approved later.
+    const raw = deps.store.getSetting(key);
+    if (raw !== null && (JSON.parse(raw) as Proposal).state === "pending")
+      deps.store.deleteSetting(key);
+    throw e;
+  }
 }
 
 const approvals = new WeakMap<Store, Promise<unknown>>();
@@ -360,7 +372,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   gate(deps, seatOf(deps, p.seat).seat, p.repoId);
   // Persist before the first external write. A crash or uncertain response must never replay it.
   const recoveryKey = `${key}:recovery`;
-  const recoveryText = `Priority swap incomplete or unconfirmed for ${p.repoId}#${cards[0].issueNumber} and ${p.repoId}#${cards[1].issueNumber}. Refresh the board and check both Priority values. Before approval: ${p.repoId}#${cards[0].issueNumber} ${cards[0].priority}; ${p.repoId}#${cards[1].issueNumber} ${cards[1].priority}. Restore these on the board if needed, then propose again. This approval will not write again.`;
+  const recoveryText = `Priority swap incomplete or unconfirmed for ${p.repoId}#${cards[0].issueNumber} and ${p.repoId}#${cards[1].issueNumber}. Refresh the board and check both Priority values. Before approval: ${p.repoId}#${cards[0].issueNumber} ${cards[0].priority}; ${p.repoId}#${cards[1].issueNumber} ${cards[1].priority}. Restore these on the board if needed, then queue the move again. This record will not write again.`;
   p.state = "writing";
   deps.store.saveQueueReorder(
     key,

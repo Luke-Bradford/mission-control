@@ -40,6 +40,7 @@ export const FLIGHT_DECISION_KINDS = [
   "ticket",
   "comment",
   "close",
+  "reorder",
   "rerun",
   "ruling",
   "sync",
@@ -628,6 +629,19 @@ export const commentTextText = (what: string): string =>
   `Not commented: ${what}. The comment is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
 export const commentFailedText = (issue: number): string =>
   `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
+
+/** Superseded tickets FLIGHT may close in an hour; a close is reversible by reopening. */
+export const FLIGHT_CLOSES_PER_HOUR = 5;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call; reopen it with a plain GitHub reopen if you were wrong. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
+export const closeComment = (replacement: number): string =>
+  `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
+export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
+  `Closed as ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
+export const closeRefusedText = (why: string): string => `Not closed: ${why}.`;
+export const closedText = (ref: string, replacement: string): string =>
+  `Closed ${ref}; linked its open replacement ${replacement}. Recorded in Decided without you.`;
+export const closeFailedText = (): string =>
+  "Not closed: GitHub refused the comment and close; see the server log.";
 
 /** GitHub reads (read_pr, read_ci_log, list_tickets): the calls FLIGHT may make in an hour, together. */
 export const FLIGHT_GH_READS_PER_HOUR = 60;

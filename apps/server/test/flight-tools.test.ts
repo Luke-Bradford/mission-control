@@ -34,6 +34,7 @@ import {
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
+  FLIGHT_CLOSES_PER_HOUR,
   FLIGHT_DECISION_MAX,
   FLIGHT_GH_API_READS_PER_HOUR,
   FLIGHT_GH_READ_MAX,
@@ -59,6 +60,7 @@ import {
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
+  FLIGHT_PROMOTES_PER_HOUR,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
@@ -230,6 +232,7 @@ let moveImpl: () => Promise<MoveResult>;
 let ghCalls: string[][];
 let ghInputs: (string | undefined)[];
 let ghImpl: (args: string[]) => Promise<GhResult>;
+let reorderImpl: () => Promise<{ ok: boolean; text: string }>;
 let secrets: string[];
 let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
@@ -297,6 +300,7 @@ beforeEach(() => {
   engineOn = false;
   lifts = true;
   rulesNow = DEFAULT_REPO_RULES;
+  reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
   // what the supervisor's endRun leaves behind: the run ended, the seat stopped
@@ -328,7 +332,7 @@ beforeEach(() => {
       if (!seat) throw new Error("Missing seat");
       seat.focus = focus;
     },
-    queueReorder: async () => ({ ok: true, text: "Changed Priority on the board." }),
+    queueReorder: async () => reorderImpl(),
     seen: stateSeen,
     config: cfg,
     store,
@@ -6399,7 +6403,7 @@ it("FLIGHT reads and changes focus through message_seat without sending a seat m
   expect(JSON.parse(read.text).focus).toBe("label:catalog");
   expect(messageCalls).toEqual([]);
 });
-it("FLIGHT applies a queue reorder and records its basis", async () => {
+it("FLIGHT applies a queue reorder, records it as a reorder, and cannot approve legacy items", async () => {
   live("flight-1", "r-flight");
   const result = await call("promote", {
     action: "queue-reorder",
@@ -6411,72 +6415,269 @@ it("FLIGHT applies a queue reorder and records its basis", async () => {
   expect(result.isError).not.toBe(true);
   expect(JSON.parse(result.text)).toMatchObject({ ok: true });
   expect(decisions()).toContainEqual(
-    expect.objectContaining({ kind: "promote", basis: "Operator asked" }),
+    expect.objectContaining({
+      kind: "reorder",
+      ref: "mc#2",
+      about: "mc#2 above mc#1",
+      basis: "Operator asked",
+    }),
   );
+  expect(decisions().some((d) => d.kind === "promote")).toBe(false);
+  expect(
+    (await call("promote", { action: "approve", key: "note:queue-reorder:old", basis: "Try" }))
+      .isError,
+  ).toBe(true);
+  expect(editCalls).toEqual([]);
   expect(ghCalls).toEqual([]);
+});
+
+describe("queue-reorder cap and failures", () => {
+  const reorder = () =>
+    call("promote", {
+      action: "queue-reorder",
+      seat: "guido-1",
+      move: "mc#2",
+      above: "mc#1",
+      basis: "b",
+    });
+
+  it("shares the hourly move cap with promotes", async () => {
+    for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR; i++)
+      addDecision({ kind: i % 2 ? "promote" : "reorder", at: NOW - 1000 });
+    expect(await reorder()).toEqual(refused(capText("moved tickets", FLIGHT_PROMOTES_PER_HOUR)));
+  });
+
+  it("records an unconfirmed swap and answers with an error", async () => {
+    reorderImpl = async () => ({ ok: false, text: "Priority swap incomplete." });
+    const result = await reorder();
+    expect(result).toEqual(refused("Priority swap incomplete."));
+    expect(decisions()).toContainEqual(
+      expect.objectContaining({
+        kind: "reorder",
+        decision: expect.stringContaining("unconfirmed"),
+      }),
+    );
+  });
 });
 
 describe("close_ticket", () => {
   const args = { issue: 7, replacement: 8, reason: "duplicate", basis: "#8 replaces it" };
+  const closeCall = (over: Record<string, unknown> = {}) =>
+    call("close_ticket", { ...args, ...over });
+  const refusedNothingWritten = async (result: ReturnType<typeof call>, text: RegExp | string) => {
+    const r = await result;
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(text);
+    expect(ghCalls).toEqual([]);
+    expect(decisions().filter((d) => d.kind === "close")).toEqual([]);
+  };
 
   beforeEach(() => {
+    need(cfg.repos[0]).flightPowers = "superuser";
     board(card(7), card(8));
-    fetchImpl = async (n) => ticket(n);
+    fetchImpl = async (n) => ticket(n, { url: `https://github.com/o/mc/issues/${n}` });
     engineOn = true;
   });
 
-  it.each(["duplicate", "not-planned"] as const)(
-    "comments with the replacement and closes %s with a GitHub-supported reason",
-    async (reason) => {
-      ghImpl = async (command) => ({
-        code:
-          command[0] === "issue" &&
-          command[1] === "close" &&
-          command.at(-1) !== "--reason=not planned"
-            ? 1
-            : 0,
-        stdout: "",
-        stderr: "unsupported close reason",
-      });
-      const result = await call("close_ticket", { ...args, reason });
-      expect(result.isError).not.toBe(true);
-      expect(ghCalls).toEqual([
-        ["issue", "comment", "7", "--repo=o/mc", "--body=Superseded by #8."],
-        ["issue", "close", "7", "--repo=o/mc", "--reason=not planned"],
-      ]);
-      expect(decisions()).toContainEqual(
-        expect.objectContaining({ kind: "close", ref: "mc#7", basis: "#8 replaces it" }),
-      );
-    },
-  );
+  it("closes as a duplicate in one gh call that comments and names the replacement", async () => {
+    const result = await closeCall();
+    expect(result.isError).not.toBe(true);
+    expect(ghCalls).toEqual([
+      [
+        "issue",
+        "close",
+        "7",
+        "--repo=o/mc",
+        "--reason=duplicate",
+        "--duplicate-of=8",
+        "--comment=Superseded by #8. (FLIGHT, Mission Control; reopen if wrong)",
+      ],
+    ]);
+    expect(decisions().filter((d) => d.kind === "close")).toEqual([
+      expect.objectContaining({
+        ref: "mc#7",
+        about: "mc#7: Ticket 7 (replaced by mc#8)",
+        decision: "Closed as duplicate: https://github.com/o/mc/issues/7",
+        basis: "#8 replaces it",
+      }),
+    ]);
+    expect(seen).toContain("flight");
+  });
 
-  it.each([
-    ["itself", () => ({ ...args, replacement: 7 })],
-    ["closed replacement", () => ({ ...args })],
-  ])("refuses %s without writing", async (label, make) => {
-    if (label === "closed replacement")
-      fetchImpl = async (n) => ticket(n, { state: n === 8 ? "closed" : "open" });
-    expect((await call("close_ticket", make())).isError).toBe(true);
+  it("closes as not planned with gh's own reason spelling", async () => {
+    expect((await closeCall({ reason: "not-planned" })).isError).not.toBe(true);
+    expect(ghCalls).toEqual([
+      [
+        "issue",
+        "close",
+        "7",
+        "--repo=o/mc",
+        "--reason=not planned",
+        "--comment=Superseded by #8. (FLIGHT, Mission Control; reopen if wrong)",
+      ],
+    ]);
+    expect(decisions()).toContainEqual(
+      expect.objectContaining({ kind: "close", decision: expect.stringContaining("not planned") }),
+    );
+  });
+
+  it("refuses a standard repo, and the engine off", async () => {
+    need(cfg.repos[0]).flightPowers = "standard";
+    await refusedNothingWritten(closeCall(), /superuser/i);
+    need(cfg.repos[0]).flightPowers = "superuser";
+    engineOn = false;
+    expect(await closeCall()).toEqual(refused(GITHUB_WRITES_OFF));
     expect(ghCalls).toEqual([]);
   });
 
-  it("refuses live work and always_ask tickets without writing", async () => {
-    live("guido-1", "r-guido", { ticket: "mc#7" });
-    expect((await call("close_ticket", args)).isError).toBe(true);
+  it("refuses while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await closeCall()).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses the same issue as its own replacement", async () => {
+    await refusedNothingWritten(closeCall({ replacement: 7 }), /different ticket/);
+  });
+
+  it("refuses a closed replacement, on the board or on GitHub", async () => {
+    board(card(7), card(8, { closed: true }));
+    await refusedNothingWritten(closeCall(), /replacement must be an open ticket/);
+    board(card(7), card(8));
+    fetchImpl = async (n) => ticket(n, { state: n === 8 ? "closed" : "open" });
+    await refusedNothingWritten(closeCall(), /replacement is not an open issue/);
+  });
+
+  it("refuses an off-board replacement, and one in another lane", async () => {
+    board(card(7));
+    await refusedNothingWritten(
+      closeCall(),
+      /replacement must be an open ticket on this repo's board/,
+    );
+    need(cfg.crew).lane = "home";
+    board(card(7, { labels: ["lane:home"] }), card(8, { labels: ["lane:work"] }));
+    await refusedNothingWritten(closeCall(), /replacement: .*another lane/);
+  });
+
+  it("refuses an issue that is not on the board, and one in another lane", async () => {
+    board(card(8));
+    await refusedNothingWritten(closeCall(), /not on this repo's board/);
+    need(cfg.crew).lane = "home";
+    board(card(7, { labels: ["lane:work"] }), card(8, { labels: ["lane:home"] }));
+    await refusedNothingWritten(closeCall(), /another lane/);
+  });
+
+  it("refuses an always_ask ticket", async () => {
     rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
     board(card(7, { labels: ["approval:operator"] }), card(8));
-    expect((await call("close_ticket", args)).isError).toBe(true);
-    expect(ghCalls).toEqual([]);
+    await refusedNothingWritten(closeCall(), /always_ask/);
   });
 
-  it("refuses an issue with an open PR without writing", async () => {
+  it("refuses an always_ask replacement", async () => {
+    rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+    board(card(7), card(8, { labels: ["approval:operator"] }));
+    await refusedNothingWritten(closeCall(), /replacement: .*always_ask/);
+  });
+
+  it("refuses an issue with a live run", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    await refusedNothingWritten(closeCall(), /live run/);
+  });
+
+  it("refuses an issue that is already closed", async () => {
+    fetchImpl = async (n) => ticket(n, { state: n === 7 ? "closed" : "open" });
+    await refusedNothingWritten(closeCall(), /not open/);
+  });
+
+  it("refuses an issue with an open PR, from GitHub or from the stored PRs", async () => {
     fetchImpl = async (n) =>
       ticket(n, {
         pullRequests:
           n === 7 ? [{ number: 9, title: "PR", url: "u", state: "open", repoId: "mc" }] : [],
       });
-    expect((await call("close_ticket", args)).isError).toBe(true);
+    await refusedNothingWritten(closeCall(), /open PR/);
+    fetchImpl = async (n) => ticket(n);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    await refusedNothingWritten(closeCall(), /open PR/);
+  });
+
+  it("refuses an issue that open tickets are blocked by", async () => {
+    board(card(7), card(8), card(9, { blockedBy: [{ ref: "mc#7", closed: false }] }));
+    await refusedNothingWritten(closeCall(), /blocked by it \(mc#9\)/);
+  });
+
+  it("refuses an issue with open sub-issues", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        subIssues: n === 7 ? [{ number: 10, title: "s", state: "open", repoId: "mc" }] : [],
+      });
+    await refusedNothingWritten(closeCall(), /open sub-issues/);
+  });
+
+  it("refuses when GitHub cannot be read", async () => {
+    fetchImpl = async () => {
+      throw new Error("down");
+    };
+    await refusedNothingWritten(closeCall(), /unreachable/);
+  });
+
+  it("stops at the hourly cap", async () => {
+    for (let i = 0; i < FLIGHT_CLOSES_PER_HOUR; i++) addDecision({ kind: "close", at: NOW - 1000 });
+    const r = await closeCall();
+    expect(r).toEqual(refused(capText("closed tickets", FLIGHT_CLOSES_PER_HOUR)));
     expect(ghCalls).toEqual([]);
+  });
+
+  it("records nothing and logs the redacted error when GitHub refuses", async () => {
+    secretSource = async () => ["s3cret-token"];
+    ghImpl = async () => ({ code: 1, stdout: "", stderr: "bad s3cret-token" });
+    const r = await closeCall();
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/GitHub refused/);
+    expect(logs.join("\n")).toContain("gh issue close failed");
+    expect(logs.join("\n")).not.toContain("s3cret-token");
+    expect(decisions().filter((d) => d.kind === "close")).toEqual([]);
+  });
+
+  describe("reopen", () => {
+    const reopen = () => call("close_ticket", { action: "reopen", issue: 7, basis: "wrong call" });
+
+    it("reopens only a ticket FLIGHT closed itself, and records it", async () => {
+      await refusedNothingWritten(reopen(), /only a ticket you closed/);
+      await closeCall();
+      ghCalls.length = 0;
+      board(card(7, { closed: true }), card(8));
+      expect((await reopen()).isError).not.toBe(true);
+      expect(ghCalls[0]?.slice(0, 4)).toEqual(["issue", "reopen", "7", "--repo=o/mc"]);
+      expect(decisions()[0]).toMatchObject({ kind: "close", ref: "mc#7" });
+      expect(decisions()[0]?.decision).toMatch(/^Reopened: /);
+      // the latest close decision is now a reopen, so a second reopen is refused
+      ghCalls.length = 0;
+      expect((await reopen()).isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+    });
   });
 });
 describe("attention hold tools", () => {

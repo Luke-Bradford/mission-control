@@ -170,6 +170,30 @@ it("applies FLIGHT's reorder directly without leaving an approval item", async (
   expect(store.notes().filter((item) => item.key.startsWith("queue-reorder:"))).toEqual([]);
 });
 
+it("leaves no approval note or pending record when the direct reorder is refused after saving", async () => {
+  let fetches = 0;
+  deps.fetchTicket = async (repo, n) => {
+    if (++fetches > 2) throw new Error("GitHub down");
+    return ticket(repo, n);
+  };
+  await expect(reorderQueue(deps, "guido-1", "demo#2", "demo#1")).rejects.toThrow("GitHub down");
+  expect(deps.edit).not.toHaveBeenCalled();
+  expect(store.notes().filter((item) => item.key.includes("queue-reorder:"))).toEqual([]);
+  const rows = (store as unknown as { db: { prepare: (q: string) => { all: () => unknown[] } } }).db
+    .prepare("SELECT key FROM settings WHERE key LIKE 'queue-reorder:%'")
+    .all();
+  expect(rows).toEqual([]);
+});
+
+it.each(["reorder", "propose"] as const)("refuses an always_ask card (%s)", async (how) => {
+  deps.rules = async () => ({ ...rules, alwaysAsk: ["approval:*"] });
+  board = [card(1, "P1"), { ...card(2, "P2"), labels: ["area:server", "lane:work", "approval:x"] }];
+  store.replaceBoard("demo", board);
+  const act = how === "reorder" ? reorderQueue : proposeQueueReorder;
+  await expect(act(deps, "guido-1", "demo#2", "demo#1")).rejects.toThrow(/always_ask/);
+  expect(deps.edit).not.toHaveBeenCalled();
+});
+
 it("never exposes an operator approval while a direct reorder waits for the writer", async () => {
   const { item } = await propose();
   let release: () => void = () => {};
