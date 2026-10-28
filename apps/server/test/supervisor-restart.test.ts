@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import {
   CANNOT_START,
   DEFAULT_REPO_RULES,
+  FLIGHT_GHOST_MS,
   freezeRules,
   MC_TMP_DIR_NAME,
   NEW_LOOP,
@@ -24,6 +25,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import { createFlightWatch } from "../src/flight/watch.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { rolePrompt } from "../src/runtime/brief.ts";
@@ -880,11 +882,12 @@ describe("a seat keeps running through a restart", () => {
   const RESUMED = "resumed after a restart; send a message to continue";
   const starts = () => recorded().filter((l) => Array.isArray(l.argv));
 
-  function watchMake() {
+  function watchMake(over: Parameters<typeof make>[0] = {}) {
     const rolesDir = join(dir, "roles");
     mkdirSync(rolesDir, { recursive: true });
     writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
     return make({
+      ...over,
       rolesDir,
       extraSeat: {
         id: "flight-1",
@@ -1632,6 +1635,228 @@ describe("a seat keeps running through a restart", () => {
     expect(store.seatSession("flight-1")).toMatchObject({ runId, cliSessionId });
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+  });
+
+  it("an old keeper's open turn is checked against the transcript: FLIGHT between turns is idle after a restart (#798)", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    // a context read between turns: its control_response is not a turn line
+    await first.sup.contextUsage("flight-1");
+    await first.sup.stopAll();
+    prep.oldKeeperHello = true;
+    const { sup } = watchMake();
+    sup.start();
+    await until(() => expect(sup.sessionAlive?.("flight-1")).toBe(true));
+    await until(() =>
+      expect(sup.seatFacts("flight-1")).toEqual({
+        inTurn: false,
+        resumedAt: null,
+        rateLimitedUntil: null,
+      }),
+    );
+    // the watch's wake goes through, where a stuck turn answered "busy" for days
+    expect(await sup.send(runId, `flight:wake:${runId}:1`, "wake")).toBe("sent");
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("an old keeper's open turn stands while the transcript shows one", async () => {
+    const first = make();
+    first.sup.start();
+    await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await first.sup.stopAll();
+    prep.oldKeeperHello = true;
+    const { sup } = make();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    await until(() => expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true }));
+    await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(1));
+    expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: false });
+  });
+
+  it("an old keeper's open turn: a line the CLI has not answered yet is seen through once it does", async () => {
+    // the race the transcript check accepts: the line is written, the CLI prints nothing yet, and
+    // the transcript still ends at the last result
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    const transcript = store.run(runId)?.transcriptPath ?? "";
+    await first.sup.message("flight-1", "QUIET", { interrupt: false });
+    await until(() => expect(userLines()).toContain("QUIET"));
+    await first.sup.stopAll();
+    prep.oldKeeperHello = true;
+    const { sup } = watchMake();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    await until(() => expect(sup.sessionAlive?.("flight-1")).toBe(true));
+    await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(1));
+    // taken as between turns while the CLI says nothing
+    expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
+    expect(readFileSync(transcript, "utf8")).not.toContain("QUIETED");
+    // the CLI starts its turn: the turn and its own end are seen
+    writeFileSync(`${recordFile}.go`, "");
+    await until(() => expect(readFileSync(transcript, "utf8")).toContain("echo: QUIETED"));
+    await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(2));
+    expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(starts()).toHaveLength(1);
+  });
+
+  /** FLIGHT's run left by a restart with no session: its old keeper lives and will not end. */
+  async function ghostFlight(failures: number) {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await first.sup.stopAll();
+    const dir0 = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(dir0, KEEPER_PID_FILE) as number;
+    const cliPid = readPidFile(dir0, CLI_PID_FILE) as number;
+    // A take-back that returns with the run left as it was: a new CLI profile must be denied to
+    // the run, and its old keeper will not end, `failures` times.
+    const real = keeper.endKeeper;
+    let left = failures;
+    const end = vi
+      .spyOn(keeper, "endKeeper")
+      .mockImplementation(async (d, ...rest) =>
+        d === dir0 && left-- > 0 ? false : real(d, ...rest),
+      );
+    const hub = watchMake();
+    const profile = join(dir, "alt-codex");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(
+      join(profile, "auth.json"),
+      JSON.stringify({ tokens: { account_id: "acct-alt" } }),
+      { mode: 0o600 },
+    );
+    hub.cfg.accounts.push({
+      id: "codex-alt",
+      vendor: "codex",
+      cliProfile: profile,
+      alertAt: 80,
+      stopAt: 95,
+    });
+    hub.sup.start();
+    await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(pidAlive(keeperPid)).toBe(true);
+    return { runId, dir0, keeperPid, cliPid, end, real, hub };
+  }
+
+  it("the watch ends a run a take-back left with no session, and its keeper, then starts FLIGHT (#798)", async () => {
+    // fails at the start's take-back and at the watch's
+    const { runId, dir0, keeperPid, cliPid, end, hub } = await ghostFlight(2);
+    try {
+      let clock = Date.now();
+      const watch = createFlightWatch({
+        config: hub.cfg,
+        store,
+        bus,
+        enabled: true,
+        now: () => clock,
+        supervisor: hub.sup,
+      });
+      try {
+        await watch.check(); // the take-back: still no session
+        expect(store.run(runId)).toMatchObject({ endedAt: null });
+        clock += FLIGHT_GHOST_MS;
+        await watch.check();
+        expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+        const fresh = store.seatSession("flight-1")?.runId;
+        expect(fresh).not.toBeNull();
+        expect(fresh).not.toBe(runId);
+        await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(true));
+        // the old keeper and its CLI are gone, and so is the old run's token
+        await until(() => expect([pidAlive(keeperPid), pidAlive(cliPid)]).toEqual([false, false]));
+        expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+        expect(existsSync(dir0)).toBe(false);
+        expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toEqual([]);
+        // one start before the restart, one fresh one: nothing resumed beside it
+        await until(() => expect(starts()).toHaveLength(2));
+        expect(starts()[1]?.argv).not.toContain("--resume");
+        expect(
+          store
+            .agentEvents(0)
+            .filter((e) => e.agentId === "flight-1" && e.text.includes("CLI session was gone")),
+        ).toHaveLength(1);
+      } finally {
+        watch.stop();
+      }
+    } finally {
+      end.mockRestore();
+    }
+  });
+
+  it("an engine end whose old keeper will not stop says so in a blocked note", async () => {
+    const { runId, dir0, keeperPid, end, real, hub } = await ghostFlight(Number.POSITIVE_INFINITY);
+    try {
+      await hub.sup.endRunByEngine(runId);
+      expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+      expect(store.notes().filter((n) => n.key === `cleanup:${runId}`)).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          runId,
+          text: expect.stringContaining("its CLI could not be stopped and may still be running"),
+        },
+      ]);
+      expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+      expect(existsSync(dir0)).toBe(true);
+      expect(pidAlive(keeperPid)).toBe(true);
+    } finally {
+      end.mockRestore();
+      await real(dir0, 5000);
+    }
+  });
+
+  it("says whether a seat's session is alive from its process, not its run row", async () => {
+    const first = watchMake();
+    first.sup.start();
+    // once the start's take-back is done: no run, no session
+    await until(() => expect(first.sup.sessionAlive?.("flight-1")).toBe(false));
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    expect(first.sup.sessionAlive?.("flight-1")).toBe(true);
+    await first.sup.stopAll();
+    // a stopping hub cannot tell
+    expect(first.sup.sessionAlive?.("flight-1")).toBeNull();
+    // a hub restart with no resume (a CLI hold): the row still runs, the session is gone
+    await noKeepers();
+    const hold = new CliHold();
+    hold.hold("held");
+    let open = () => {};
+    prep.attachGate = new Promise<void>((r) => {
+      open = r;
+    });
+    const { sup, log } = watchMake({ cliHold: hold });
+    sup.start();
+    // the take-back is under way: not known yet
+    expect(sup.sessionAlive?.("flight-1")).toBeNull();
+    open();
+    await until(() => expect(log).toHaveBeenCalledWith("flight-1: resume held: held"));
+    await until(() => expect(sup.sessionAlive?.("flight-1")).toBe(false));
+    expect(store.seatSession("flight-1")).toMatchObject({ runId, state: "idle" });
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+  });
+
+  it("a killed CLI under an attached hub ends its run: no session, and no run left running", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    const cliPid = readPidFile(crewKeeperDir(dbPath, runId), CLI_PID_FILE) as number;
+    process.kill(cliPid, "SIGKILL");
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    expect(first.sup.sessionAlive?.("flight-1")).toBe(false);
+    expect(store.seatSession("flight-1")).toMatchObject({ state: "error" });
+    expect(first.sup.seatBusy("flight-1")).toBe(false);
   });
 
   it("fails a watch resume when its worktree is missing", async () => {
