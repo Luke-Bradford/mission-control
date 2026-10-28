@@ -2046,6 +2046,36 @@ describe("fileMinorFindings", () => {
       issueNumber: 81,
     });
   });
+  it("appends findings to the rolling issue discovered by title", async () => {
+    const r = setup();
+    let file = "";
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      (args) => {
+        expect(args.slice(0, 2)).toEqual(["issue", "list"]);
+        return {
+          code: 0,
+          stdout: JSON.stringify([{ number: 656, title: "Tech debt: the rolling list" }]),
+        };
+      },
+      (args) => {
+        expect(args).toContain("656");
+        return { code: 0, stdout: JSON.stringify({ state: "OPEN", comments: [] }) };
+      },
+      (args) => {
+        expect(args.slice(0, 3)).toEqual(["issue", "comment", "656"]);
+        file = args.find((a) => a.startsWith("--body-file="))?.slice(12) ?? "";
+        expect(readFileSync(file, "utf8")).toBe("Minor findings from #12.\n\n- Finding\n");
+        return { code: 0, stdout: "" };
+      },
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12)).toEqual({ ok: true });
+    expect(ghCalls.some((args) => args[1] === "create")).toBe(false);
+    expect(existsSync(file)).toBe(false);
+  });
   it("does not append duplicate findings when the merge event repeats", async () => {
     const r = setup();
     ghAnswers.push(
@@ -2072,6 +2102,22 @@ describe("fileMinorFindings", () => {
         stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
       }),
       () => ({ code: 0, stdout: JSON.stringify({ state: "CLOSED", comments: [] }) }),
+      () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
+      () => ({ code: 0, stdout: "" }),
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toMatchObject({
+      ok: true,
+      issueNumber: 81,
+    });
+  });
+  it("falls back when the configured rolling tech-debt issue no longer exists", async () => {
+    const r = setup();
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      () => ({ code: 1, stdout: "", stderr: "HTTP 404: Not Found" }),
       () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
       () => ({ code: 0, stdout: "" }),
     );

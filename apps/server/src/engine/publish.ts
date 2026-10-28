@@ -375,6 +375,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return transient(why === "" ? `gh ${what} failed` : `gh ${what} failed: ${why}`);
   };
 
+  /** `gh issue view` identifies a deleted or mistyped issue with GitHub's HTTP 404 response. */
+  const ghNotFound = (stderr: string): boolean => /\bHTTP 404: Not Found\b/i.test(cleanLog(stderr));
+
   /** gh's answer as a JSON object, or a transient refusal naming the call. */
   async function ghJson(args: string[], what: string): Promise<Record<string, unknown> | Refusal> {
     const r = await deps.gh(args, { cwd: cwd() });
@@ -1357,7 +1360,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return { ok: true };
         }
         const appendRolling = async (issueNumber: number): Promise<PublishResult | null> => {
-          const issue = await ghJson(
+          const viewed = await deps.gh(
             [
               "issue",
               "view",
@@ -1365,9 +1368,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               `--repo=${repo.github}`,
               "--json=state,comments",
             ],
-            "rolling tech-debt issue view",
+            { cwd: cwd() },
           );
-          if (isRefusal(issue)) return issue;
+          if (viewed.code !== 0)
+            return ghNotFound(viewed.stderr)
+              ? null
+              : ghFailed("rolling tech-debt issue view", viewed.stderr);
+          let issue: Record<string, unknown>;
+          try {
+            const parsed: unknown = JSON.parse(viewed.stdout);
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+              return transient("gh rolling tech-debt issue view gave no JSON");
+            issue = parsed as Record<string, unknown>;
+          } catch {
+            return transient("gh rolling tech-debt issue view gave no JSON");
+          }
           if (issue.state !== "OPEN") return null;
           const intro = `Minor findings from #${prNumber}.`;
           if (
