@@ -187,7 +187,7 @@ it("updates the open card as live changes arrive", async () => {
   ).toBe("GUIDO-1changed +55 −2 · read");
 });
 
-it("finds individual files in a collapsed tree and focuses their folder", async () => {
+it("finds and focuses individual files in a large tree", async () => {
   const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
   snapshot.tree = Array.from({ length: 2001 }, (_, i) => ({ path: `src/file-${i}.ts`, lines: 1 }));
   snapshot.tree.push({ path: "settings.ts", lines: 1 });
@@ -196,12 +196,14 @@ it("finds individual files in a collapsed tree and focuses their folder", async 
   fireEvent.change(search, { target: { value: "file-2000" } });
   fireEvent.click(screen.getByRole("button", { name: "src/file-2000.ts" }));
   expect(screen.getByRole("heading", { name: "src/file-2000.ts" })).toBeTruthy();
-  await waitFor(() => expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("src"));
+  await waitFor(() =>
+    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("src/file-2000.ts"),
+  );
   fireEvent.change(search, { target: { value: "settings.ts" } });
   fireEvent.keyDown(search, { key: "Enter" });
   expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
   await waitFor(() =>
-    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("(root files)"),
+    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("settings.ts"),
   );
 });
 

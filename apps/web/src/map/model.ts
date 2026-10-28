@@ -21,15 +21,15 @@ const hash = (s: string) => {
 /**
  * The origin tree gets the prototype's force-directed layout (layout.ts), computed once per tree.
  * Files new on a branch (`base` given) are placed under their folder by path, so the rest never
- * moves; a tree too large to draw file by file collapses into folders, placed the same way.
+ * moves. Files are always individual nodes; the renderer decides how much detail is visible.
  */
 export function layoutTree(
   tree: MapSnapshot["tree"],
   base: MapNode[] = [],
-  collapse = tree.length > 2000,
+  _collapse = false,
   imports: MapSnapshot["imports"] = [],
 ): MapNode[] {
-  if (!base.length && !collapse) return forceLayout(tree, imports);
+  if (!base.length) return forceLayout(tree, imports);
   const nodes = new Map<string, MapNode>(base.map((n) => [n.path, { ...n, files: [...n.files] }]));
   nodes.set("", { path: "", parent: null, area: "", position: [0, 0, 0], files: [], count: 0 });
   const ensure = (path: string, lines?: number): MapNode => {
@@ -61,18 +61,9 @@ export function layoutTree(
     return node;
   };
   for (const file of [...tree].sort((a, b) => a.path.localeCompare(b.path))) {
-    if (collapse) {
-      const folder = file.path.includes("/")
-        ? file.path.slice(0, file.path.lastIndexOf("/"))
-        : "(root files)";
-      const n = ensure(folder);
-      n.files.push(file.path);
-      n.count++;
-    } else {
-      const n = ensure(file.path, file.lines);
-      n.files = [file.path];
-      n.count = 1;
-    }
+    const n = ensure(file.path, file.lines);
+    n.files = [file.path];
+    n.count = 1;
   }
   return [...nodes.values()];
 }
