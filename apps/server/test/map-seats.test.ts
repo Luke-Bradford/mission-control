@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CrewRow, MapChange, Run } from "@mc/core";
+import { type CrewRow, MAP_RECENT_MS as KEEP_MS, type MapChange, type Run } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { SeatDiff } from "../src/map/diff.ts";
 import type { CallRing } from "../src/map/ring.ts";
@@ -212,6 +212,79 @@ describe("mapSeats", () => {
     expect(seat?.scope.modified).toEqual([]);
     expect(seat?.branches).toEqual([]);
     expect(seat?.changedOn).toEqual([]);
+  });
+
+  describe("a seat's recent path", () => {
+    const call = (id: string, file: string, end: number | null, tool = "Read", since?: number) => ({
+      id,
+      runId: "r",
+      repoId: "mission-control",
+      tool,
+      detail: file,
+      files: [file],
+      since: since ?? (end ?? 0) - 100,
+      end,
+      resultSize: 0,
+      resultTok: 0,
+      error: false,
+      refused: false,
+      why: null,
+      tests: null,
+      churn: [],
+    });
+    const pathAt = (calls: ReturnType<typeof call>[], now: number, live = false) =>
+      mapSeats(
+        [row({ run: { id: "r" } as CrewRow["run"] })],
+        {
+          ...storeOf([run({ id: "r", status: live ? "running" : "ok", endedAt: 5000 })]),
+          seatSession: () => (live ? { state: "running" } : null),
+        } as unknown as Store,
+        { ...ringOf({ r: {} }), calls: () => calls } as unknown as CallRing,
+        lock,
+        now,
+      ).seats[0]?.recent;
+
+    it("keeps an ended run's path while the ring keeps its calls, and drops it after", () => {
+      const calls = [call("1", "a.ts", 2000), call("2", "b.ts", 4000)];
+      expect(pathAt(calls, 10_000)).toEqual([
+        { file: "a.ts", at: 2000 },
+        { file: "b.ts", at: 4000 },
+      ]);
+      // fifteen minutes on, the first call has aged out, then the second
+      expect(pathAt(calls, 2000 + KEEP_MS + 1)).toEqual([{ file: "b.ts", at: 4000 }]);
+      expect(pathAt(calls, 4000 + KEEP_MS + 1)).toEqual([]);
+    });
+
+    it("ages out a call the ended run cut off from its start; a live one's stays", () => {
+      const calls = [call("1", "a.ts", null, "Read", 3000)];
+      expect(pathAt(calls, 10_000)).toEqual([{ file: "a.ts", at: 3000 }]);
+      expect(pathAt(calls, 3000 + KEEP_MS + 1)).toEqual([]);
+      expect(pathAt(calls, 3000 + KEEP_MS + 1, true)).toEqual([{ file: "a.ts", at: 3000 }]);
+    });
+
+    it("lists a run of accesses to one file once, at its latest, and leaves out name-only listings", () => {
+      const calls = [
+        call("1", "a.ts", 1000),
+        call("2", "a.ts", 1100),
+        call("3", "b.ts", 1200),
+        call("4", "c.ts", 1300, "Glob"),
+        call("5", "a.ts", 1400),
+      ];
+      expect(pathAt(calls, 2000)).toEqual([
+        { file: "a.ts", at: 1100 },
+        { file: "b.ts", at: 1200 },
+        { file: "a.ts", at: 1400 },
+      ]);
+    });
+
+    it("keeps up to 48 accesses, so the map's twelve-node path is never cut short by the hub", () => {
+      const calls = Array.from({ length: 60 }, (_, i) =>
+        call(`${i}`, `f${i % 2 ? i : 0}.ts`, 1000 + i),
+      );
+      const path = pathAt(calls, 2000) ?? [];
+      expect(path).toHaveLength(48);
+      expect(path.at(-1)).toEqual({ file: "f59.ts", at: 1059 });
+    });
   });
 
   it("merges a current and a set-aside branch, dedupes a shared checkout, relabels mixed churn", () => {

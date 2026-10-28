@@ -67,11 +67,26 @@ export interface MapSeat {
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };
-  /** Recent accesses position an orb; they never identify what a seat is thinking about. */
+  /**
+   * The seat's last accesses, oldest first, a run of accesses to one file listed once at its
+   * latest: its path on the map, kept for MAP_RECENT_MS after each call ends (its run's end, for a
+   * call cut off). Name-only listings are left out. They never identify what a seat is thinking.
+   */
   recent: { file: string; at: number }[];
   context: Pick<ContextUsage, "total" | "window"> | null;
   badges: MapBadges;
 }
+
+/** How long the hub keeps a seat's finished calls, and so its path, after they end. */
+export const MAP_RECENT_MS = 15 * 60_000;
+/** The most accesses a seat's `recent` lists (a run of accesses to one file counts once). */
+export const MAP_RECENT_CAP = 48;
+/**
+ * Tools that only match names (Glob, LS): the files they list were never opened, so the map counts
+ * them neither as read nor on a seat's path.
+ */
+export const MAP_NAME_ONLY_TOOLS: readonly string[] = ["Glob", "LS"];
+export const namesOnly = (tool: string): boolean => MAP_NAME_ONLY_TOOLS.includes(tool);
 
 /** Why a branch's conflicts went unchecked: its head isn't in the checkout, or the check failed. */
 export const MAP_UNCHECKED_REASONS = ["head not fetched", "merge check failed"] as const;

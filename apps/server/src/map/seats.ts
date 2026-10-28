@@ -1,7 +1,16 @@
-import type { CrewRow, MapSeat, MapSnapshot, Run, TestLockState } from "@mc/core";
+import {
+  type CrewRow,
+  MAP_RECENT_CAP,
+  MAP_RECENT_MS,
+  type MapSeat,
+  type MapSnapshot,
+  namesOnly,
+  type Run,
+  type TestLockState,
+} from "@mc/core";
 import { cleanText } from "../clean.ts";
 import type { Store } from "../store.ts";
-import type { CallRing } from "./ring.ts";
+import type { CallRing, RingCall } from "./ring.ts";
 
 const safe = (text: string) => cleanText(text.replace(/\/(?:Users|home)\/[^/\s]+\//g, "~/"));
 
@@ -138,9 +147,7 @@ export function mapSeats(
         read: live ? scope.read : [],
         modified: flight ? (live ? scope.modified : []) : [...modified.values()],
       },
-      recent: live
-        ? calls.flatMap((c) => c.files.map((file) => ({ file, at: c.end ?? c.since }))).slice(-12)
-        : [],
+      recent: recentPath(calls, live, now),
       context: null,
       badges: {
         questions: store
@@ -244,6 +251,25 @@ export function runChanges(
     ...real,
     ...[...churn].map(([file, { add, rem }]) => ({ file, add, rem, source: "churn" as const })),
   ];
+}
+
+/**
+ * A seat's path: its calls' files in order, each at its call's end (now, for a call still running),
+ * a run of accesses to one file listed once at its latest. It stays after the run ends while each
+ * call is within MAP_RECENT_MS of its end; a call cut off by the run ending ends at its start, so
+ * it ages out too. Name-only listings (Glob) are left out: they opened nothing.
+ */
+function recentPath(calls: RingCall[], live: boolean, now: number): MapSeat["recent"] {
+  const path: MapSeat["recent"] = [];
+  for (const call of calls) {
+    const at = call.end ?? (live ? now : call.since);
+    if (namesOnly(call.tool) || at < now - MAP_RECENT_MS) continue;
+    for (const file of call.files) {
+      if (path.at(-1)?.file === file) path.pop();
+      path.push({ file, at: call.end ?? call.since });
+    }
+  }
+  return path.slice(-MAP_RECENT_CAP);
 }
 
 const ticketNumber = (ref: string | null | undefined): number | null =>

@@ -48,13 +48,11 @@ describe("declutter", () => {
     });
   });
 
-  it("knows each overlay label kind and leaves the rings on their nodes", () => {
-    expect(labelKind("map-orb-label")).toEqual({ rank: 0, nudge: true });
-    expect(labelKind("map-change map-edited")).toEqual({ rank: 4, nudge: true });
+  it("knows each overlay label kind, and nothing else is one", () => {
+    expect(labelKind("map-seat-label")).toEqual({ rank: 0, nudge: true });
+    expect(labelKind("map-change lifted")).toEqual({ rank: 4, nudge: true });
     expect(labelKind("map-area")).toEqual({ rank: 2, nudge: false });
-    expect(labelKind("map-ring faint")).toBeNull();
-    // finding and conflict marks are never hidden by a label
-    expect(labelKind("map-mark")).toBeNull();
+    expect(labelKind("map-tip")).toBeNull();
   });
 });
 
