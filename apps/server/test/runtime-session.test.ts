@@ -565,8 +565,35 @@ describe("endsAtResult (#798)", () => {
 
   it("finds the result behind control responses over several read chunks", () => {
     const controls = Array.from({ length: 6 }, () => `${CONTROL(400_000)}\n`).join("");
-    expect(endsAtResult(file(`${line({ type: "system" })}${RESULT}\n${controls}`))).toBe(true);
-    expect(endsAtResult(file(`${RESULT}\n${line({ type: "system" })}${controls}`))).toBe(false);
+    const init = line({ type: "system", subtype: "init" });
+    expect(endsAtResult(file(`${init}${RESULT}\n${controls}`))).toBe(true);
+    expect(endsAtResult(file(`${RESULT}\n${init}${controls}`))).toBe(false);
+    // a last line longer than a read chunk
+    const long = JSON.stringify({ type: "assistant", text: "y".repeat(3_000_000) });
+    expect(endsAtResult(file(`${RESULT}\n${long}\n`))).toBe(false);
+    expect(endsAtResult(file(`${long}\n${RESULT}\n${controls}`))).toBe(true);
+    expect(endsAtResult(file(`${RESULT}`))).toBe(true);
+  });
+
+  it("skips what may come between turns: keep-alives, task notices, heartbeats, hooks, non-JSON", () => {
+    const between = [
+      line({ type: "keep_alive" }),
+      line({ type: "system", subtype: "task_notification", task_id: "b1" }),
+      line({ type: "system", subtype: "status", status: "idle" }),
+      line({ type: "system", subtype: "hook_response" }),
+      line({ type: "tool_progress", heartbeat: true }),
+      "Warning: something the CLI said\n",
+      `${CONTROL(10)}\n`,
+    ].join("");
+    expect(endsAtResult(file(`${line({ type: "assistant" })}${RESULT}\n${between}`))).toBe(true);
+    // a turn's own lines are not skipped
+    for (const turn of [
+      { type: "assistant" },
+      { type: "user" },
+      { type: "stream_event" },
+      { type: "tool_progress" },
+    ])
+      expect(endsAtResult(file(`${RESULT}\n${between}${line(turn)}${between}`))).toBe(false);
   });
 
   it("is false mid-turn, on a cut-off last line, on no turn line, and on a missing file", () => {

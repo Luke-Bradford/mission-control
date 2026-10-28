@@ -9,6 +9,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_GHOST_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
@@ -19,6 +20,7 @@ import {
   type FlightState,
   flightDownText,
   flightStartFailedText,
+  HUD_STATE_LABEL,
   type HudState,
   type SeatSessionRow,
   type TestLockState,
@@ -87,12 +89,6 @@ export interface FlightWatch {
   /** The full state just returned to this run by flight_state. */
   seen(runId: string, state: FlightState): void;
 }
-
-/**
- * How long FLIGHT's run may stay with no live session after its take-back, before the watch ends
- * it and starts FLIGHT afresh (#798).
- */
-export const FLIGHT_GHOST_MS = 2 * 60_000;
 
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
@@ -219,11 +215,16 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       return true;
     }
     ghost = null;
-    const reason = `its CLI session was gone; run #${run.seq} ended so FLIGHT starts afresh`;
-    log(`flight watch: ${reason}`);
+    log(`flight watch: run #${run.seq}'s CLI session is gone; ending it to start FLIGHT afresh`);
     const from: HudState = row.state === "starting" ? "running" : row.state;
     try {
-      store.addAgentEvent({ agentId: id, at: t, from, to: "idle", text: `FLIGHT: ${reason}` });
+      store.addAgentEvent({
+        agentId: id,
+        at: t,
+        from,
+        to: "idle",
+        text: `${HUD_STATE_LABEL[from]} → ${HUD_STATE_LABEL.idle}: its CLI session was gone (run #${run.seq} ended to start FLIGHT afresh)`,
+      });
     } catch (e) {
       log(`flight watch: could not record the end: ${e instanceof Error ? e.message : e}`);
     }
@@ -277,12 +278,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     if (added) bus.emit("attention");
 
-    let row = store.seatSession(id);
+    const row = store.seatSession(id);
     // judged from FLIGHT's session, not only its run row: a run with no session is not live
     const alive = supervisor.sessionAlive?.(id) ?? null;
     if (!flightLive(config, store, () => alive)) {
-      if (await settleGhost(id, row, alive, t)) return;
-      row = store.seatSession(id);
       const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
       const atStop = accountAtStop(config, store, accountId, t);
       // Parked or held at a stop line is an outage; the operator's own Stop is not, and a failed
@@ -292,9 +291,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       else if (atStop && row?.state !== "stopped" && !noteOpen())
         raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
       else clearDown(t);
-      if (row?.state === "stopped" || row?.state === "parked" || noteOpen() || atStop) {
-        return;
-      }
+      if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
+      // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
+      // before any start, which it would refuse
+      if (await settleGhost(id, row, alive, t)) return;
+      if (noteOpen()) return;
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
         clearDown(t);
@@ -307,6 +308,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
           at: t,
         });
+        processGone = false; // said once, in this note
         bus.emit("attention");
         return;
       }
@@ -483,7 +485,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       offSupervisor = supervisor.on((e) => {
         if (e.seatId === flightSeat(config)?.seat.id) {
           if (e.kind === "idle") lastTurnEndAt = now();
-          if (!flightLive(config, store)) bus.emit("attention");
+          if (!flightLive(config, store, (seatId) => supervisor.sessionAlive?.(seatId) ?? null))
+            bus.emit("attention");
           void check();
         } else schedule();
       });
@@ -496,6 +499,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     },
     stop() {
       stopped = true;
+      ghost = null;
+      processGone = false;
       offSupervisor?.();
       offBus?.();
       offSupervisor = null;

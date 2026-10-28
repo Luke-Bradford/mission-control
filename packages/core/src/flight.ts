@@ -947,6 +947,11 @@ export const FLIGHT_NOTE_KEY = "flight:start-failed";
  */
 export const FLIGHT_DOWN_NOTE_KEY = "flight:down";
 export const FLIGHT_DOWN_STALL_MS = 30 * 60_000;
+/**
+ * How long FLIGHT's run may stay with no live session after the watch's take-back, before the
+ * watch ends it and starts FLIGHT afresh (#798).
+ */
+export const FLIGHT_GHOST_MS = 2 * 60_000;
 /** The notes that say FLIGHT is down: the operator's at once, and notified through quiet hours. */
 export const FLIGHT_DOWN_NOTES: readonly string[] = [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY];
 export const flightDownText = (reason: string): string =>

@@ -494,14 +494,14 @@ export interface Supervisor {
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
-   * Whether the seat's CLI session is attached and alive: the process the hub holds, not the run
-   * row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
+   * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
+   * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
    * or a start, resume or account move for the seat is under way. Never throws.
    */
   sessionAlive?(seatId: string): boolean | null;
   /**
    * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
-   * process, removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
+   * process (with none attached, ends any keeper it left and revokes its token), removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
    * seat idle. An ended or unknown run is left alone, with no event. A run Stop is already ending
    * stays Stop's (endedBy operator, seat stopped, worktree kept). Does nothing on a server that
    * does not run crew (disabled, or without the crew lock).
@@ -2188,7 +2188,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       from: (h) => (row.vendor === "codex" ? 0 : cursor?.spawn === h.spawn ? cursor.line : 0),
       // A Claude keeper from before #798 never saw a `result` (the CLI does not print `type`
       // first), so it says a turn is open after every turn, and the seat would wait on it forever
-      // (FLIGHT never woken). The transcript says whether the CLI is between turns.
+      // (FLIGHT never woken). The transcript says whether the CLI is between turns. One gap: a
+      // keeper whose transcript write failed holds later lines in memory only, so the file can end
+      // at an older result while a turn runs. The seat then looks idle until the turn's next line
+      // starts a turn again (a replayed one does at once).
       awaiting: (h) =>
         h.awaiting &&
         (row.vendor === "codex" ||
@@ -3518,6 +3521,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l.endedBy = "engine";
       l.run = { ...l.run, endedAt: at, status: "ok" };
       closing = l.ending ??= closeLive(l);
+    } else {
+      // No process here (a take-back that left the run with no session, #798): a keeper that
+      // lives on is ended and the run's token revoked before the seat is freed, so no CLI keeps
+      // running beside the seat's next run, in a worktree about to go.
+      dropGrant(seatId, runId);
+      await endAndRemoveKeeper(seatId, runId);
+      removeRunFiles(runId);
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -4029,7 +4039,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         transfers.has(seatId)
       )
         return null;
-      return live.get(seatId)?.session.alive === true;
+      const l = live.get(seatId);
+      // a process for another run than the row's (one being ended) is not this run's session
+      return l?.session.alive === true && l.run.id === store.seatSession(seatId)?.runId;
     },
 
     async contextUsage(seatId) {

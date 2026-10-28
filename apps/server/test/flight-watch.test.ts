@@ -8,6 +8,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_GHOST_MS,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
@@ -59,7 +60,7 @@ import {
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
-import { createFlightWatch, FLIGHT_GHOST_MS, type FlightWatch } from "../src/flight/watch.ts";
+import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -1154,7 +1155,7 @@ describe("the FLIGHT watcher", () => {
           "flight-1",
           "idle",
           "idle",
-          "FLIGHT: its CLI session was gone; run #1 ended so FLIGHT starts afresh",
+          "Idle → Idle: its CLI session was gone (run #1 ended to start FLIGHT afresh)",
         ],
       ]);
       expect(notesOpen()).toEqual([]);
@@ -1212,11 +1213,11 @@ describe("the FLIGHT watcher", () => {
       expect(resumeCalls).toEqual(["r-ghost"]);
     });
 
-    it("says the process is gone when FLIGHT will not start again", async () => {
+    it("says the process is gone when FLIGHT will not start again, once", async () => {
       ghostRun();
       await watch.check();
       nowMs += FLIGHT_GHOST_MS;
-      startFails = "FLIGHT-1 already has a run";
+      startFails = "could not start the CLI";
       for (let i = 0; i < 4; i++) await watch.check();
       expect(endCalls).toEqual(["r-ghost"]);
       expect(startCalls).toHaveLength(3);
@@ -1225,10 +1226,56 @@ describe("the FLIGHT watcher", () => {
           kind: "blocked",
           seatId: "flight-1",
           text: flightStartFailedText(
-            "its process is gone, and a restart failed: FLIGHT-1 already has a run",
+            "its process is gone, and a restart failed: could not start the CLI",
           ),
         },
       ]);
+      // said in that note: a later failure is just the failure
+      live("flight-1", "r-hand");
+      alive = true;
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(notesOpen()).toEqual([]);
+      noFlight();
+      alive = null;
+      for (let i = 0; i < 4; i++) await watch.check();
+      expect(notesOpen()).toMatchObject([
+        { text: flightStartFailedText("could not start the CLI") },
+      ]);
+    });
+
+    it("leaves a parked FLIGHT, or one at its account's stop line, to that first", async () => {
+      live("flight-1", "r-ghost");
+      store.setSeatSession(row("flight-1", "r-ghost", "parked"));
+      alive = false;
+      await watch.check();
+      nowMs += 10 * FLIGHT_GHOST_MS;
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+      store.setSeatSession(row("flight-1", "r-ghost"));
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: nowMs - 1000,
+        pct: 95,
+        resetAt: nowMs + 60 * MIN,
+        source: "test",
+      });
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+    });
+
+    it("forgets a run it was waiting on when the watch stops", async () => {
+      ghostRun();
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      watch.stop();
+      makeWatch();
+      nowMs += FLIGHT_GHOST_MS;
+      await watch.check();
+      // a new wait, with a new take-back: nothing ended on the old one's clock
+      expect(resumeCalls).toEqual(["r-ghost", "r-ghost"]);
+      expect(endCalls).toEqual([]);
     });
   });
 

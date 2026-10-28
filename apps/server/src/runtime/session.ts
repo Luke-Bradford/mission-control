@@ -34,7 +34,6 @@ import { sleep, str } from "../util.ts";
 import {
   CLI_PID_FILE,
   endKeeper,
-  isResultLine,
   KEEPER_LOG_FILE,
   KEEPER_PID_FILE,
   KEEPER_PROTOCOL_VERSION,
@@ -661,10 +660,35 @@ const TURN_TAIL_MAX_BYTES = 64 * 1024 * 1024;
 const TURN_TAIL_CHUNK = 1024 * 1024;
 
 /**
+ * What a Claude stdout line says about the turn: "end" for a `result`, "turn" for a line only a
+ * running turn prints (`assistant`, `user`, `stream_event`, `system/init`, a `tool_progress` that is
+ * not a heartbeat), null for any other line (a control response, a keep-alive, a task notification,
+ * a hook or status line) that may come between turns.
+ */
+function turnLine(m: unknown): "end" | "turn" | null {
+  if (!isObj(m)) return null;
+  switch (m.type) {
+    case "result":
+      return "end";
+    case "assistant":
+    case "user":
+    case "stream_event":
+      return "turn";
+    case "system":
+      return m.subtype === "init" ? "turn" : null;
+    case "tool_progress":
+      return m.heartbeat === true ? null : "turn";
+    default:
+      return null;
+  }
+}
+
+/**
  * Whether a Claude transcript's last turn line is a `result`: the CLI is between turns, unless a
- * line was written that it has not answered yet. Control responses (a context-usage read between
- * turns) are not turn lines. False for a transcript that cannot be read, one whose last line is cut
- * off or not JSON, and one with no turn line in its last 64 MiB.
+ * line was written that it has not answered yet (it prints `system/init` at once when it gets one).
+ * Lines that may come between turns are skipped (see `turnLine`), and so is a complete line that is
+ * not JSON. False for a transcript that cannot be read, one whose last line is cut off (no newline
+ * yet, and not JSON), and one with no turn line in its last 64 MiB.
  */
 export function endsAtResult(path: string): boolean {
   let fd: number;
@@ -676,37 +700,43 @@ export function endsAtResult(path: string): boolean {
   try {
     const size = fstatSync(fd).size;
     let pos = size;
-    // the start of a line whose beginning is further back
-    let rest = Buffer.alloc(0);
+    // the bytes after the last newline found, in order: a line whose start is further back
+    let pieces: Buffer[] = [];
+    // the next segment taken is the file's last, which has no newline after it
+    let last = true;
+    /** The answer, or undefined to read on. */
+    const judge = (segment: Buffer): boolean | undefined => {
+      const final = last;
+      last = false;
+      const text = segment.toString("utf8").trim();
+      if (text === "") return undefined;
+      let m: unknown;
+      try {
+        m = JSON.parse(text);
+      } catch {
+        return final ? false : undefined;
+      }
+      const said = turnLine(m);
+      return said === null ? undefined : said === "end";
+    };
     while (pos > 0 && size - pos < TURN_TAIL_MAX_BYTES) {
       const len = Math.min(TURN_TAIL_CHUNK, pos);
       pos -= len;
       const chunk = Buffer.alloc(len);
       readSync(fd, chunk, 0, len, pos);
-      const buf = Buffer.concat([chunk, rest]);
-      let end = buf.length;
-      for (;;) {
-        const nl = end === 0 ? -1 : buf.lastIndexOf(10, end - 1);
-        if (nl < 0 && pos > 0) break;
-        const text = buf
-          .subarray(nl + 1, end)
-          .toString("utf8")
-          .trim();
-        end = Math.max(nl, 0);
-        if (text !== "") {
-          let type: unknown;
-          try {
-            const m: unknown = JSON.parse(text);
-            type = isObj(m) ? m.type : undefined;
-          } catch {
-            return false;
-          }
-          if (type !== "control_response") return isResultLine(text);
-        }
-        if (nl < 0) return false;
+      let end = len;
+      for (let nl = chunk.lastIndexOf(10, end - 1); nl >= 0; nl = chunk.lastIndexOf(10, end - 1)) {
+        const tail = chunk.subarray(nl + 1, end);
+        const said = judge(pieces.length === 0 ? tail : Buffer.concat([tail, ...pieces]));
+        if (said !== undefined) return said;
+        pieces = [];
+        end = nl;
+        if (end === 0) break;
       }
-      rest = buf.subarray(0, end);
+      if (end > 0) pieces.unshift(chunk.subarray(0, end));
     }
+    // the file's first line, when all of it was read
+    if (pos === 0 && pieces.length > 0) return judge(Buffer.concat(pieces)) ?? false;
     return false;
   } catch {
     return false;

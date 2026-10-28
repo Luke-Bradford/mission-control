@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import {
   CANNOT_START,
   DEFAULT_REPO_RULES,
+  FLIGHT_GHOST_MS,
   freezeRules,
   MC_TMP_DIR_NAME,
   NEW_LOOP,
@@ -24,6 +25,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import { createFlightWatch } from "../src/flight/watch.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { rolePrompt } from "../src/runtime/brief.ts";
@@ -1675,6 +1677,104 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true }));
     await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(1));
     expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: false });
+  });
+
+  it("an old keeper's open turn: a line the CLI has not answered yet is seen through once it does", async () => {
+    // the race the transcript check accepts: the line is written, the CLI prints nothing yet, and
+    // the transcript still ends at the last result
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    const transcript = store.run(runId)?.transcriptPath ?? "";
+    await first.sup.message("flight-1", "QUIET", { interrupt: false });
+    await first.sup.stopAll();
+    expect(readFileSync(transcript, "utf8")).not.toContain("QUIETED");
+    prep.oldKeeperHello = true;
+    const { sup } = watchMake();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    await until(() => expect(sup.sessionAlive?.("flight-1")).toBe(true));
+    // taken as between turns until the CLI speaks; then its turn and its end are seen
+    await until(() => expect(readFileSync(transcript, "utf8")).toContain("echo: QUIETED"));
+    // the attach's idle, then the turn's own end
+    await until(() => expect(seen.filter((e) => e.kind === "idle")).toHaveLength(2));
+    expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false });
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("the watch ends a run a take-back left with no session, and its keeper, then starts FLIGHT (#798)", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await first.sup.stopAll();
+    const dir0 = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(dir0, KEEPER_PID_FILE) as number;
+    const cliPid = readPidFile(dir0, CLI_PID_FILE) as number;
+    // A take-back that returns with the run left as it was: a new CLI profile must be denied to
+    // the run, and its old keeper will not end (twice: at the start and at the watch's take-back).
+    const end = vi.spyOn(keeper, "endKeeper");
+    end.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    try {
+      const hub = watchMake();
+      const profile = join(dir, "alt-codex");
+      mkdirSync(profile, { recursive: true });
+      writeFileSync(
+        join(profile, "auth.json"),
+        JSON.stringify({ tokens: { account_id: "acct-alt" } }),
+        { mode: 0o600 },
+      );
+      hub.cfg.accounts.push({
+        id: "codex-alt",
+        vendor: "codex",
+        cliProfile: profile,
+        alertAt: 80,
+        stopAt: 95,
+      });
+      hub.sup.start();
+      await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
+      expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+      expect(pidAlive(keeperPid)).toBe(true);
+      let clock = Date.now();
+      const watch = createFlightWatch({
+        config: hub.cfg,
+        store,
+        bus,
+        enabled: true,
+        now: () => clock,
+        supervisor: hub.sup,
+      });
+      try {
+        await watch.check(); // the take-back: still no session
+        expect(store.run(runId)).toMatchObject({ endedAt: null });
+        clock += FLIGHT_GHOST_MS;
+        await watch.check();
+        expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+        const fresh = store.seatSession("flight-1")?.runId;
+        expect(fresh).not.toBeNull();
+        expect(fresh).not.toBe(runId);
+        await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(true));
+        // the old keeper and its CLI are gone, and so is the old run's token
+        await until(() => expect([pidAlive(keeperPid), pidAlive(cliPid)]).toEqual([false, false]));
+        expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+        expect(existsSync(dir0)).toBe(false);
+        // one start before the restart, one fresh one: nothing resumed beside it
+        await until(() => expect(starts()).toHaveLength(2));
+        expect(starts()[1]?.argv).not.toContain("--resume");
+        expect(
+          store
+            .agentEvents(0)
+            .filter((e) => e.agentId === "flight-1" && e.text.includes("CLI session was gone")),
+        ).toHaveLength(1);
+      } finally {
+        watch.stop();
+      }
+    } finally {
+      end.mockRestore();
+    }
   });
 
   it("says whether a seat's session is alive from its process, not its run row", async () => {
