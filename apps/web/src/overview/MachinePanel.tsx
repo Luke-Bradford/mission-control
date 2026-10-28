@@ -1,7 +1,9 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { RESOURCES, useResource } from "../data.ts";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 
@@ -159,7 +161,8 @@ function AgentSlots({ view }: { view: MachineView }) {
 
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
-  const view = useResource<MachineView>(RESOURCES.machine).data;
+  const machine = useResource<MachineView>(RESOURCES.machine);
+  const view = machine.data;
   const overview = useResource<OverviewSummary>(RESOURCES.overview());
   const summary = overview.data;
   const live = summary !== undefined && overview.error === null;
@@ -170,6 +173,11 @@ export function MachinePanel() {
   return (
     <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
       <div className="pb">
+        {machine.loading ? (
+          <Skeleton />
+        ) : m === null && !machine.error ? (
+          <EmptyState>No machine sample yet.</EmptyState>
+        ) : null}
         <div
           className="res"
           title={`Claude/Codex processes (${m?.agents ? m.agents.count : DASH}) · other apps`}
