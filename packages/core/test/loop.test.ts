@@ -1880,6 +1880,17 @@ describe("review decisions", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
+  it("parks the blocking review after FLIGHT's one extra capped rework round", () => {
+    const s = inReview(
+      withReview([fact({ id: 4, epoch: 1, blocking: 1 })], [finding]),
+      {},
+      { epoch: 1, flightReworks: { [SHA]: 1 } },
+    );
+    const r = reconcile(s);
+    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
+    expect(sends(r.actions)).toEqual([]);
+  });
+
   it("a profile's round limit above 3 sends the third fix line instead of parking", () => {
     const rows = [
       fact({ id: 1, blocking: 1 }),
