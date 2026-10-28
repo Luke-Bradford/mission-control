@@ -247,10 +247,14 @@ button {
   cursor: pointer;
   line-height: 1.3;
   white-space: nowrap;
-  transition:
-    border-color 150ms ease,
-    color 150ms ease,
-    background-color 150ms ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition:
+      border-color 150ms ease,
+      color 150ms ease,
+      background-color 150ms ease;
+  }
 }
 button:hover {
   border-color: color-mix(in srgb, var(--accent) 70%, var(--line-2));
@@ -809,6 +813,13 @@ textarea {
   .lamp.pulse {
     box-shadow: 0 0 0 3px var(--warn-soft);
   }
+  /* No hover or selection transitions anywhere (flight-deck.md, Motion). */
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat every component's transition rule */
+    transition-duration: 0s !important;
+  }
   .lamp.ok.pulse {
     box-shadow: 0 0 0 3px var(--ok-soft);
   }
@@ -880,9 +891,13 @@ textarea {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-  transition:
-    color 150ms ease,
-    box-shadow 150ms ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tabs a {
+    transition:
+      color 150ms ease,
+      box-shadow 150ms ease;
+  }
 }
 .tabs a:hover {
   color: var(--fg);
@@ -1357,7 +1372,8 @@ th {
   flex: none;
 }
 .overview-lanes {
-  --lane-min: 14px;
+  /* the shortest lane that still holds all four sub-tracks: review sits 9.5px above the centre */
+  --lane-min: 19px;
   --lane-max: 28px;
   position: relative;
   display: grid;
@@ -2123,7 +2139,7 @@ th {
   opacity: 0.8;
 }
 @media (prefers-reduced-motion: no-preference) {
-  #machP .machine-now {
+  #machP .machine-now.live {
     animation: now-pulse 2.4s ease-in-out infinite;
   }
 }
@@ -3120,9 +3136,13 @@ pre.diff .h {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* Full-opacity --muted clears 4.5:1 on --surface in both themes (5.4 dark, 5.1 light); on a
+   selected row's accent tint it would not (4.1 / 4.4), so a zero there reads in --fg-2. */
 .comms-nav-counts > small.zero {
   color: var(--muted);
-  opacity: 0.6;
+}
+.comms-nav button.on .comms-nav-counts > small.zero {
+  color: var(--fg-2);
 }
 /* Unread and mention counts: compact filled chips, mono numerals. */
 .comms-nav .comms-unread-count,
@@ -3310,8 +3330,10 @@ pre.diff .h {
   display: flex;
   flex-direction: column;
   width: min(380px, calc(100vw - 34px));
-  max-height: 440px;
+  /* --mentions-room: the room below the bell inside #chatP, measured when the list opens */
+  max-height: min(440px, var(--mentions-room, 440px));
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
@@ -3338,6 +3360,8 @@ pre.diff .h {
   gap: 2px 7px;
   padding: 9px 12px;
   text-align: left;
+  /* buttons do not wrap by default; the mention's text clamps to two lines instead */
+  white-space: normal;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -3797,6 +3821,13 @@ button.nrow.thread.tagged {
   overflow: auto;
   padding: 4px 0;
 }
+/* Under the asks the log's top edge fades, so a line scrolled half out of view reads as the edge
+   of the scroll, not as text running behind the asks. */
+.dwait + .dmsgs {
+  padding-top: 20px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+  mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+}
 .dmsg {
   padding: 5px 14px;
   display: grid;
@@ -3830,26 +3861,41 @@ button.nrow.thread.tagged {
 .dmsg.flight .md-txt .md strong {
   color: var(--accent);
 }
+/* What waits on the operator: an opaque block with the screen's one coloured edge. */
 .dwait {
   flex: none;
   max-height: 40%;
   overflow: auto;
-  padding: 8px 14px;
+  overscroll-behavior: contain;
+  padding: 0 12px 8px;
   border-bottom: 1px solid var(--line);
-  background: var(--warn-soft);
+  border-left: 2px solid var(--warn-mark);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
   display: grid;
-  gap: 4px;
+  align-content: start;
+  gap: 2px;
 }
 .dwait .dwh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0 4px;
   color: var(--warn);
-  font-size: var(--fs-xs);
-  font-weight: 600;
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: inherit;
 }
 .dask {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 26px;
+  font-size: var(--fs-s);
+}
+.dask > button.sm {
+  padding: 1px 8px;
 }
 .briefgrid {
   display: grid;
@@ -4683,128 +4729,241 @@ div.opt {
 }
 
 /* FLIGHT page */
+/* A flight director's console (docs/design/flight-deck.md): hairlines, mono readouts, colour only
+   for state. Selection is an accent edge; the one coloured border is the dock's "Waiting on you". */
 #page-flight {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
+  /* The tabs lay out by the page's own width: the dock takes a share of the window. */
+  container: flight / inline-size;
 }
+/* The tabs scroll sideways rather than wrap; the rule is an inset line so the scroller's
+   clipping keeps the selected tab's edge. */
 .flight-tabs {
   display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px var(--line);
+  scrollbar-width: thin;
 }
 .flight-tabs button {
-  min-height: 32px;
-  color: var(--fg-2);
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 16px 9px;
+  color: var(--muted);
+  font: 600 var(--fs-s) / 1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   background: transparent;
   border: 0;
+  border-radius: 0;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.flight-tabs button::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+.flight-tabs button:hover {
+  color: var(--fg-2);
+  border-color: transparent;
+}
+.flight-tabs button:hover::after {
+  background: var(--line-2);
 }
 .flight-tabs button[aria-selected="true"] {
   color: var(--fg);
-  background: var(--surface-2);
-  box-shadow: inset 0 -2px var(--accent);
+  background: linear-gradient(to top, var(--accent-soft), transparent 85%);
 }
+.flight-tabs button[aria-selected="true"]::after {
+  background: var(--accent);
+}
+.flight-tab-index {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.flight-tabs button[aria-selected="true"] .flight-tab-index {
+  color: var(--accent);
+}
+/* Each tab fits the window where it can; where its panels' minimum heights do not fit, the tab
+   body scrolls rather than cutting the lower panels off. */
 .flight-tab-body {
   min-height: 0;
+}
+.flight-command,
+.flight-queue,
+.flight-notebook,
+.flight-record {
+  overflow: auto;
 }
 .flight-tab-body[hidden] {
   display: none;
 }
-.flight-command {
-  display: grid;
-  grid-template-rows: auto minmax(280px, 1fr);
-  gap: 12px;
+/* Panel headers stay one line: the sub-label is cut rather than pushing the body down. */
+#page-flight .ph {
+  flex-wrap: nowrap;
+  min-height: 40px;
+}
+#page-flight .ph h2 {
+  flex: none;
+}
+#page-flight .ph .sub {
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.flight-command > #sitP {
-  overflow: auto;
-  scrollbar-gutter: stable;
+/* Repo chips are filled, not outlined. */
+#page-flight .rchip {
+  color: var(--c, var(--fg-2));
+  background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);
+  border-color: transparent;
+  border-radius: 3px;
 }
-.flight-command-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
-  gap: 12px;
-  min-height: 0;
-}
-.flight-panel-scroll {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-.flight-panel-scroll[hidden] {
-  display: none;
-}
-.flight-queue {
-  display: grid;
-  grid-template-rows: minmax(260px, 1.2fr) minmax(240px, 1fr);
-  gap: 12px;
-  overflow: hidden;
-  min-height: 0;
-}
-.flight-queue-lower {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.5fr) minmax(280px, 1fr);
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-.flight-queue-signals {
-  display: grid;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-.flight-notebook {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
-.flight-record {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  min-height: 0;
-  overflow: hidden;
-}
+.flight-panel-scroll,
 .flight-knowledge-scroll {
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
-  scrollbar-gutter: stable;
 }
-.flight-notebook .briefgrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.flight-panel-scroll[hidden] {
+  display: none;
 }
-.flight-notebook .briefsec {
-  padding: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-s);
+
+/* shared readouts */
+.flight-source {
+  margin: 0;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
-.flight-command-intent {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  box-shadow: inset 3px 0 var(--accent);
+.flight-source.think {
+  color: var(--think);
+}
+.flight-count {
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.flight-mono,
+.flight-count {
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-subhead {
+  margin: 0;
+  padding: 12px 14px 6px;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+/* A gap in FLIGHT's records (no next action, no checkpoint): quiet, never an alarm colour. */
+.flight-gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.flight-gap::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+}
+button.flight-link {
+  padding: 2px 6px;
+  color: var(--accent);
+  font: 600 10.5px / 1.4 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+button.flight-link:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+/* Command */
+.flight-command {
+  display: grid;
+  grid-template-rows: max-content minmax(min-content, 1fr);
+  gap: 12px;
+}
+/* The briefing keeps its full height; the panels below it give way and scroll inside. */
+.flight-command > #sitP {
+  overflow: visible;
+}
+.flight-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 12px;
+  min-height: 0;
 }
 .flight-briefing {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.8fr);
-  min-height: 88px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
   border-bottom: 1px solid var(--line);
 }
-.flight-intent-copy,
-.flight-contact {
+.flight-intent-copy {
+  display: grid;
+  gap: 8px;
+  align-content: start;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 14px 16px 12px;
 }
-.flight-intent-kicker,
+.flight-intent-kicker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+#sitP .flight-intent-headline {
+  max-width: 96ch;
+  margin: 0;
+  color: var(--fg);
+  font: 600 clamp(17px, 1.35vw, 21px) / 1.35 var(--display);
+  letter-spacing: 0.005em;
+  text-wrap: pretty;
+}
+.flight-headline-age {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 0;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px 10px;
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+  border-left: 1px solid var(--line);
+}
 .flight-contact-head,
 .flight-contact-foot {
   display: flex;
@@ -4812,88 +4971,310 @@ div.opt {
   align-items: center;
   justify-content: space-between;
 }
-.flight-intent-headline {
-  max-width: 100ch;
-  margin: 5px 0;
-  font-size: clamp(15px, 1.25vw, 19px);
-  font-weight: 600;
-  line-height: 1.4;
-}
-.flight-contact {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  background: var(--surface-2);
-  border-left: 1px solid var(--line);
-}
 .flight-contact-line {
   display: -webkit-box;
-  min-height: 2.8em;
   margin: 0;
   overflow: hidden;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: 1.45;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-height: 1.4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.flight-contact-who {
+  color: var(--fg);
+  font-weight: 600;
 }
 .flight-contact-foot {
   margin-top: auto;
 }
+/* the telemetry strip: one instrument per flow measure, label and window above the reading */
 .flight-pulse-rail {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 .flight-pulse {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1px;
+  grid-template-areas:
+    "label window"
+    "value value"
+    "detail detail";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 6px;
   min-width: 0;
-  min-height: 54px;
-  padding: 8px 12px;
+  padding: 10px 14px 11px;
   color: inherit;
+  font: inherit;
   text-align: left;
+  white-space: normal;
   background: transparent;
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
 }
+button.flight-pulse {
+  transition: background-color 150ms ease;
+}
 button.flight-pulse:hover {
   background: var(--surface-2);
+  border-color: var(--line);
 }
 .flight-pulse:last-child {
   border-right: 0;
 }
-.flight-pulse-value {
-  grid-row: 2;
-  color: var(--fg);
-  font: 700 20px / 1.1 var(--mono);
-}
-.flight-pulse.crit .flight-pulse-value {
-  color: var(--crit);
-}
-.flight-pulse.ok .flight-pulse-value {
-  color: var(--ok);
-}
 .flight-pulse-label {
-  grid-row: 1;
+  grid-area: label;
   overflow: hidden;
-  font-size: var(--fs-s);
-  font-weight: 600;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.flight-pulse-window {
+  grid-area: window;
+  color: var(--muted);
+  font: 500 10px / 1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.flight-pulse-value {
+  grid-area: value;
+  overflow: hidden;
+  color: var(--fg);
+  font: 600 clamp(18px, 1.5vw, 24px) / 1.1 var(--mono);
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.flight-unit {
+  margin-left: 0.06em;
+  color: var(--muted);
+  font-size: 0.6em;
+  font-weight: 500;
+}
+.flight-pulse.idle .flight-pulse-value {
+  color: var(--muted);
+}
+.flight-pulse.tone-crit .flight-pulse-value {
+  color: var(--crit);
+}
+.flight-pulse.tone-warn .flight-pulse-value {
+  color: var(--warn);
+}
 .flight-pulse-detail {
-  grid-row: 3;
+  grid-area: detail;
   overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.flight-control-stack {
-  padding: 0 12px 10px;
+
+/* FLIGHT's tables are real tables laid out as grids: each row is a grid, its cells the items. */
+.wif-table,
+.flight-plan-table,
+.flight-outcome-table,
+.wif-table > :is(thead, tbody),
+.flight-plan-table > :is(thead, tbody),
+.flight-outcome-table > :is(thead, tbody) {
+  display: block;
 }
+.wif-table > thead,
+.flight-plan-table > thead,
+.flight-outcome-table > thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* Undo the global th/td look; element-level specificity, so each column's class still wins. */
+:where(.wif-table, .flight-plan-table, .flight-outcome-table) :is(th, td) {
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  border: 0;
+}
+/* Delivery board: the delivery path is a step track on one line */
+.wif-table {
+  min-width: 640px;
+}
+.wif-table-head,
+.wif-row {
+  display: grid;
+  grid-template-columns:
+    minmax(92px, 0.5fr) minmax(150px, 1.1fr) minmax(240px, 1.5fr)
+    minmax(120px, 0.8fr) 60px;
+  column-gap: 12px;
+  align-items: start;
+}
+.wif-table-head {
+  padding: 8px 14px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.wif-table-head > :last-child {
+  text-align: right;
+}
+#wifP .wif-row {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition: background-color 150ms ease;
+}
+#wifP .wif-row:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  border-radius: 0;
+}
+.wif-seat {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+.wif-work {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.wif-title {
+  display: block;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wif-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.wif-meta > .rref {
+  flex: none;
+}
+.wif-doing {
+  display: block;
+}
+.wif-branch {
+  display: block;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+.wif-stage {
+  display: grid;
+  gap: 5px;
+  justify-items: start;
+  min-width: 0;
+}
+.wif-stage > .rref {
+  font-size: 10.5px;
+}
+.wif-next {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--fs-s);
+}
+.wif-next-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.wif-checkpoint {
+  color: var(--fg-2);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.wif-elapsed {
+  color: var(--fg-2);
+  font: 500 var(--fs-s) / 1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+#wifP .wsteps {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+#wifP .wstep {
+  position: relative;
+  display: block;
+  flex: 0 1 auto;
+  min-width: 2.5em;
+  padding: 7px 1px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+#wifP .wstep::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--line-2);
+}
+#wifP .wstep.d {
+  color: var(--fg-2);
+}
+#wifP .wstep.d::before {
+  background: color-mix(in srgb, var(--fg-2) 55%, transparent);
+}
+#wifP .wstep.c,
+#wifP .wstep.w {
+  flex-shrink: 0;
+}
+#wifP .wstep.c {
+  color: var(--fg);
+  font-weight: 600;
+}
+#wifP .wstep.c::before {
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+#wifP .wstep.w {
+  color: var(--warn);
+  font-weight: 600;
+}
+#wifP .wstep.w::before {
+  background: var(--warn-mark);
+}
+#wifP .wstep .titer {
+  padding: 0 0 0 1px;
+  color: var(--accent);
+  font: 600 9px / 0 var(--mono);
+  vertical-align: super;
+  background: none;
+}
+
+/* Stand-up focus */
 .flight-control-group {
-  padding: 9px 0;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--line);
 }
 .flight-control-group:last-child {
@@ -4904,43 +5285,65 @@ button.flight-pulse:hover {
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
 }
 .flight-control-heading h3 {
   margin: 0;
-  font: 600 var(--fs-s) var(--mono);
-  letter-spacing: 0.04em;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 .flight-control-heading > span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font: var(--fs-xs) / 1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-control-heading > span.warn-t {
+  color: var(--warn);
 }
 .flight-control-group > .note {
-  margin: 4px 0;
+  margin: 0;
 }
 .flight-control-list {
   display: grid;
-  gap: 3px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.flight-control-list.numbered {
-  padding-left: 20px;
-  list-style: decimal;
-}
 .flight-control-list li {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  gap: 10px;
+  align-items: flex-start;
   justify-content: space-between;
   min-width: 0;
-  padding: 4px 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.flight-control-list li:first-child {
+  padding-top: 2px;
+  border-top: 0;
+}
+.flight-control-list.numbered {
+  padding-left: 0;
+  list-style: none;
+  counter-reset: flight-next;
+}
+.flight-control-list.numbered li {
+  justify-content: flex-start;
+}
+.flight-control-list.numbered li::before {
+  flex: none;
+  padding-top: 2px;
+  color: var(--accent);
+  font: 600 10.5px / 1.2 var(--mono);
+  content: counter(flight-next, decimal-leading-zero);
+  counter-increment: flight-next;
 }
 .flight-control-list li > div {
   display: grid;
-  gap: 2px;
+  flex: 1 1 auto;
+  gap: 3px;
   min-width: 0;
 }
 .flight-control-list li > div > b,
@@ -4949,222 +5352,524 @@ button.flight-pulse:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.flight-control-list li > div > b {
+  font-size: var(--fs-s);
+}
+.flight-control-list li > div > span.s {
+  color: var(--muted);
+}
 .flight-control-text {
   display: -webkit-box;
   overflow: hidden;
+  font-size: var(--fs-s);
+  line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.flight-control-list li > div > .flight-control-text {
+  white-space: normal;
 }
 .flight-control-meta {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font: var(--fs-xs) / 1.2 var(--mono);
 }
-.flight-source {
-  margin: 0 0 5px;
-  color: var(--accent);
-  font: 600 var(--fs-xs) var(--mono);
+.flight-owner {
+  color: var(--fg-2);
+  font: 600 10px / 1.2 var(--mono);
   letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flight-owner.warn {
+  color: var(--warn);
+}
+.flight-owner.crit {
+  color: var(--crit);
+}
+
+/* Plan */
+.flight-queue {
+  display: grid;
+  grid-template-rows: minmax(240px, 1.1fr) minmax(240px, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-queue-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-queue-signals {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+.flight-summary,
+.flight-summary section {
+  min-width: 0;
+  list-style: none;
+}
+.flight-summary {
+  overflow-wrap: anywhere;
+}
+.flight-summary > .note {
+  margin: 0;
+  padding: 10px 14px;
+}
+.flight-plan-intro {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.flight-plan-intro h3 {
+  flex: none;
+  margin: 0;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.flight-plan-intro p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flight-plan-count {
+  flex: none;
+  color: var(--fg-2);
+  font: var(--fs-xs) / 1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-plan-table {
+  min-width: 880px;
+}
+.flight-plan-head,
+.flight-plan-row,
+.flight-outcome-head,
+.flight-outcome-row {
+  display: grid;
+  column-gap: 14px;
+  align-items: start;
+}
+.flight-plan-head,
+.flight-plan-row {
+  grid-template-columns:
+    76px minmax(170px, 1.3fr) 96px 104px minmax(180px, 1.3fr)
+    minmax(160px, 1fr) 64px;
+}
+.flight-plan-head,
+.flight-outcome-head {
+  padding: 8px 14px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.flight-plan-head > :last-child,
+.flight-outcome-head > :last-child {
+  text-align: right;
+}
+.flight-plan-row,
+.flight-outcome-row {
+  padding: 11px 14px;
+  font-size: var(--fs-s);
+  border-bottom: 1px solid var(--line);
+  transition: background-color 150ms ease;
+}
+.flight-plan-row:hover,
+.flight-outcome-row:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.flight-plan-row > td,
+.flight-outcome-row > td {
+  min-width: 0;
+}
+.flight-plan-horizon {
+  color: var(--fg-2);
+  font: 600 10.5px / 1.7 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flight-plan-work,
+.flight-plan-checkpoint,
+.flight-outcome-row > td:first-child {
+  display: grid;
+  gap: 4px;
+}
+.flight-plan-work > b,
+.flight-outcome-row b {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.flight-plan-next {
+  color: var(--fg);
+  line-height: 1.4;
+}
+.flight-plan-checkpoint {
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+.flight-plan-refs,
+.flight-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--muted);
+}
+.flight-plan-age,
+.flight-outcome-at {
+  color: var(--fg-2);
+  font: 500 var(--fs-xs) / 1.6 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+#page-flight .askcards,
+#page-flight .tlist {
+  gap: 0;
+}
+#page-flight .askcards:empty {
+  display: none;
+}
+/* the dock already carries the one coloured edge for what waits on the operator */
+#page-flight .askcard {
+  padding: 8px 10px;
+  border-color: var(--line);
+  border-radius: 2px;
+}
+#askP .drow {
+  gap: 6px;
+  padding: 10px 14px;
+}
+#askP .drow:first-child {
+  border-top: 0;
+}
+#askP .drow .row {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+#askP .drow .row > .min0 {
+  flex: 1 1 auto;
+  font-size: var(--fs-s);
+  line-height: 1.45;
+}
+#askP .drow .row > .spacer {
+  display: none;
+}
+#askP .drow > .s {
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+#page-flight .incoming-row,
+#page-flight .watch-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+#page-flight .incoming-row:first-child,
+#page-flight .watch-row:first-child {
+  border-top: 0;
+}
+
+/* Notebook */
+.flight-notebook {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-notes .flight-knowledge-scroll > p.note:first-child {
+  max-width: none;
+  margin: 0;
+  padding: 9px 16px;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  border-bottom: 1px solid var(--line);
 }
 .flight-notebook-index {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
-  gap: 6px;
   flex-wrap: wrap;
-  margin: 0 0 10px;
+  margin: 0;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
 .flight-notebook-index a {
-  padding: 4px 8px;
+  position: relative;
+  padding: 9px 10px;
   color: var(--fg-2);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-s);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+.flight-notebook-index a:hover {
+  color: var(--accent);
+}
+.flight-notebook .briefgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+.flight-notebook .briefsec {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 16px 16px;
+  scroll-margin-top: 40px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.flight-notebook .briefsec:target {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 var(--accent);
 }
 .flight-note-heading {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: baseline;
   justify-content: space-between;
-  flex-wrap: wrap;
 }
 .flight-note-heading h3 {
   margin: 0;
+  font: 600 11px / 1.3 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 .flight-note-heading h3 a {
-  color: inherit;
+  color: var(--fg);
+  text-decoration: none;
 }
-.flight-markdown-source {
-  margin-top: 10px;
-  border-top: 1px solid var(--line);
+.flight-note-heading h3 a::before {
+  color: var(--accent);
+  content: "§ ";
+}
+.flight-note-heading .s {
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+.flight-notebook .briefsec .md-txt {
+  max-width: 80ch;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.55;
 }
 .flight-markdown-source summary {
-  padding-top: 8px;
-  color: var(--fg-2);
+  padding-top: 4px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
-  font-size: var(--fs-s);
+}
+.flight-markdown-source summary:hover {
+  color: var(--accent);
 }
 .flight-markdown-source pre {
   max-height: 15rem;
-  margin-bottom: 0;
-  padding: 8px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
   overflow: auto;
+  font: 12px / 1.5 var(--mono);
   white-space: pre-wrap;
-  background: var(--surface);
-  border-radius: var(--r-s);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.flight-memory .flight-knowledge-scroll > .pb {
+  padding: 10px 16px 14px;
+}
+.flight-memory .flight-knowledge-scroll > .pb > .note:first-child {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+#page-flight .memory-repo {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#page-flight .memory-repo select {
+  font: 13px var(--sans, inherit);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.flight-memory section > h3 {
+  margin: 14px 0 0;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Record */
+.flight-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-record-side {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+}
+.flight-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+.flight-tiles > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.flight-tiles dt {
+  color: var(--fg-2);
+}
+.flight-tiles dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 22px;
+}
+#outcomesP .flight-tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+#outcomesP .flight-tiles > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px 11px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+}
+#outcomesP .flight-tiles > div:last-child {
+  border-right: 0;
+}
+#outcomesP .flight-tiles dt {
+  overflow: hidden;
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#outcomesP .flight-tiles dd {
+  color: var(--fg);
+  font: 600 clamp(18px, 1.5vw, 22px) / 1.1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-outcome-table {
+  min-width: 620px;
+}
+.flight-outcome-head,
+.flight-outcome-row {
+  grid-template-columns: minmax(170px, 1.2fr) minmax(170px, 1.2fr) minmax(150px, 1fr) 96px;
+}
+.flight-outcome-row .fg2 {
+  color: var(--muted);
+}
+#decidedP .drow {
+  padding: 10px 14px;
+}
+#decidedP .drow:first-child {
+  border-top: 0;
+}
+.flight-log .dmsg {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.flight-log .dmsg .who {
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+
+@media (max-width: 1439px) {
+  .flight-command-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1.4fr) minmax(200px, 1fr);
+  }
+  .flight-pulse {
+    grid-template-areas:
+      "label label"
+      "value value"
+      "detail window";
+    align-items: baseline;
+    padding: 9px 10px 10px;
+  }
+  .flight-pulse-label {
+    letter-spacing: 0.06em;
+  }
+}
+@media (max-width: 999px), (max-height: 559px) {
+  .flight-record-side {
+    display: flex;
+    flex-direction: column;
+  }
+  .flight-command-grid {
+    grid-template-rows: none;
+  }
+}
+/* A page narrower than three working columns (the dock open on a laptop): Plan's lower panels,
+   Notebook and Record stack, each panel keeping a usable height, and the tab body scrolls. */
+@container flight (width < 900px) {
+  .flight-queue {
+    grid-template-rows: minmax(240px, 1fr) auto;
+  }
+  .flight-queue-lower,
+  .flight-record-side {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(240px, auto);
+  }
+  /* Arrivals and revisit triggers share the last row side by side. */
+  .flight-queue-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .flight-notebook,
+  .flight-record {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(320px, auto);
+  }
 }
 .sittext {
   font-size: 15px;
   line-height: 1.55;
   max-width: 110ch;
-}
-.sitstats {
-  display: flex;
-  gap: 6px 16px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 10px;
-  font-size: var(--fs-s);
-  color: var(--fg-2);
-}
-.sitstats b {
-  font-family: var(--display);
-  font-size: 17px;
-  color: var(--fg);
-}
-.sitstats .warn b {
-  color: var(--warn);
-}
-.sitstats.compact {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.sitstats.compact > span {
-  min-width: 0;
-  padding: 6px 7px;
-  text-align: center;
-  background: var(--surface-2);
-  border-radius: var(--r-s);
-}
-.sitstats.compact b {
-  display: block;
-  font-size: 18px;
-  line-height: 1.1;
-}
-.sitstats.compact button {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-.flight-horizon {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.flight-section-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.flight-section-heading h3 {
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.flight-section-heading span {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-.flight-horizon .tl {
-  height: 62px;
-  margin-top: 6px;
-}
-.tl {
-  position: relative;
-  height: 78px;
-  margin: 16px 10px 2px;
-}
-.tlline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 36px;
-  height: 2px;
-  background: var(--line-2);
-  border-radius: 1px;
-}
-.tlnow {
-  position: absolute;
-  left: 0;
-  top: 26px;
-  width: 2px;
-  height: 22px;
-  background: var(--ok);
-}
-.tlnow span {
-  position: absolute;
-  top: -15px;
-  left: -4px;
-  font-size: 10px;
-  color: var(--ok);
-  font-weight: 600;
-}
-.tlev {
-  position: absolute;
-  top: 30px;
-  width: 14px;
-  margin-left: -7px;
-}
-.tlev i {
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--accent);
-}
-.tlev span {
-  position: absolute;
-  left: -10px;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tlev.up span {
-  bottom: 20px;
-}
-.tlev.dn span {
-  top: 20px;
-}
-.tlev.r span {
-  left: auto;
-  right: -10px;
-}
-.tllater,
-.tlnext {
-  margin-top: 4px;
-}
-.tlnext.narrow {
-  display: none;
-}
-.tlev.bare span {
-  display: none;
-}
-.fgrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.fgrid .scroll {
-  max-height: 470px;
 }
 
 /* away mode */
@@ -5375,71 +6080,6 @@ kbd {
 .pb.tlist {
   padding: 2px 14px 12px;
 }
-.wif-table {
-  min-width: 0;
-}
-.wif-table-head,
-.wif-row {
-  display: grid;
-  grid-template-columns:
-    minmax(88px, 0.6fr) minmax(130px, 1.1fr) minmax(145px, 1.2fr)
-    minmax(125px, 1fr) 48px;
-  gap: 8px;
-  align-items: center;
-}
-.wif-table-head {
-  padding: 6px 14px;
-  color: var(--muted);
-  font: 600 var(--fs-xs) var(--mono);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--line);
-}
-.wif-row {
-  min-height: 58px;
-  padding: 9px 8px;
-  align-items: start;
-  border-bottom: 1px solid var(--line);
-}
-.wif-stage,
-.wif-work > span:first-child {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  min-width: 0;
-}
-.wif-seat {
-  display: grid;
-  gap: 5px;
-  justify-items: start;
-  min-width: 0;
-}
-.wif-work {
-  display: grid;
-  gap: 2px;
-}
-.wif-work > span:first-child b {
-  font-size: var(--fs-s);
-}
-.wif-stage {
-  flex-wrap: wrap;
-}
-#wifP .wif-stage .wsteps {
-  flex-wrap: wrap;
-}
-.wif-doing {
-  display: block;
-}
-.wif-next {
-  display: grid;
-  gap: 2px;
-  padding-left: 8px;
-  border-left: 1px solid var(--line);
-}
-.wif-elapsed {
-  text-align: right;
-  white-space: nowrap;
-}
 .loop-templates > li {
   min-width: 0;
 }
@@ -5632,7 +6272,6 @@ kbd {
   .flight-command,
   .flight-command-grid,
   .flight-queue,
-  .flight-queue-main,
   .flight-queue-lower,
   .flight-queue-signals,
   .flight-notebook,
@@ -5654,19 +6293,25 @@ kbd {
   .flight-pulse:nth-child(2n) {
     border-right: 0;
   }
-  .flight-command > #sitP,
-  .flight-knowledge-scroll,
-  .flight-panel-scroll {
+  .flight-command > #sitP {
     overflow: visible;
   }
-  .flight-summary.compact .flight-tiles {
+  /* Panels take their content's height here, so a body sized from zero would overlap the next. */
+  .flight-knowledge-scroll {
+    flex: none;
+    overflow: visible;
+  }
+  /* The page scrolls down; a table wider than its panel still scrolls sideways inside it. */
+  .flight-panel-scroll {
+    flex: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #outcomesP .flight-tiles {
     grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
   }
   .flight-notebook .briefgrid {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .sitstats.compact {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .comms-page,
   .comms-grid {
@@ -5710,7 +6355,6 @@ kbd {
   .agrid,
   .cgrid,
   .tgrid,
-  .fgrid,
   .awaygrid,
   .boardsplit,
   .boardsplit.withdetail {
@@ -5860,18 +6504,6 @@ kbd {
   }
   .gloss {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .tl {
-    height: 52px;
-  }
-  .tlev span {
-    display: none;
-  }
-  .tlnext.narrow {
-    display: block;
-  }
-  .tlnext.wide {
-    display: none;
   }
 }
 
@@ -6220,261 +6852,6 @@ button.nrow.thread.tagged {
   overflow: visible;
 }
 
-.flight-summary,
-.flight-summary section,
-.flight-summary-list > li {
-  list-style: none;
-  min-width: 0;
-}
-.flight-summary {
-  overflow-wrap: anywhere;
-}
-.flight-summary-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: start;
-}
-.flight-summary h3 {
-  margin: 12px 0 6px;
-}
-.flight-summary .sittext {
-  margin: 0;
-  font-family: var(--display);
-  font-size: 18px;
-  font-weight: 600;
-}
-.flight-headline-age {
-  margin: 3px 0 8px;
-}
-.flight-summary-groups {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 20px;
-}
-.flight-summary.compact .flight-summary-groups {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-.flight-summary.compact .flight-summary-list {
-  margin: 0;
-  padding: 0;
-}
-.flight-summary.compact .flight-summary-list > li {
-  padding: 0;
-}
-.flight-summary.compact .flight-lane {
-  min-height: 76px;
-  padding: 7px 9px 9px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-s);
-  box-shadow: inset 0 3px var(--accent);
-}
-.flight-summary.compact .flight-lane.risk {
-  box-shadow: inset 0 3px var(--warn);
-}
-.flight-summary.compact .flight-lane.next {
-  box-shadow: inset 0 3px var(--fg-2);
-}
-.flight-summary.compact .flight-lane.done {
-  box-shadow: inset 0 3px var(--ok);
-}
-.flight-summary.compact .flight-lane h3 {
-  margin: 4px 0 5px;
-  font: 600 var(--fs-xs) var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.flight-summary.compact .flight-lane > .s {
-  margin: -3px 0 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.flight-summary.compact .flight-summary-line {
-  display: flex;
-  gap: 5px;
-  align-items: flex-start;
-}
-.flight-summary.compact .flight-summary-line > * + * {
-  margin-left: 0;
-}
-.flight-summary.compact .flight-summary-title {
-  display: -webkit-box;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  line-height: 1.3;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-.flight-summary.compact .flight-summary-line .pill {
-  flex: none;
-}
-.flight-summary.compact .flight-tiles {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  margin: 8px 0 0;
-}
-.flight-summary.compact .flight-tiles > div {
-  padding: 5px 8px;
-  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
-  border: 0;
-}
-.flight-summary.compact .flight-tiles dd {
-  font-size: 17px;
-}
-.flight-summary-list {
-  margin: 6px 0;
-  padding-left: 24px;
-}
-.flight-summary-list > li {
-  list-style: none;
-  padding: 5px 0;
-}
-.flight-plan-intro {
-  display: flex;
-  gap: 18px;
-  align-items: end;
-  justify-content: space-between;
-  padding: 4px 14px 10px;
-  border-bottom: 1px solid var(--line);
-}
-.flight-plan-intro h3,
-.flight-plan-intro p {
-  margin: 0;
-}
-.flight-plan-intro > span {
-  flex: none;
-}
-.flight-plan-table {
-  min-width: 850px;
-}
-.flight-plan-head,
-.flight-plan-row {
-  display: grid;
-  grid-template-columns:
-    76px minmax(150px, 1.2fr) 78px 92px minmax(170px, 1.25fr)
-    minmax(160px, 1.1fr) 52px;
-  gap: 9px;
-  align-items: start;
-}
-.flight-plan-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 7px 14px;
-  color: var(--muted);
-  font: 600 var(--fs-xs) var(--mono);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}
-.flight-plan-list,
-.flight-outcome-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.flight-plan-row {
-  min-height: 60px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-}
-.flight-plan-row > span,
-.flight-outcome-row > span {
-  min-width: 0;
-}
-.flight-plan-work,
-.flight-plan-checkpoint {
-  display: grid;
-  gap: 4px;
-}
-.flight-plan-work > b,
-.flight-plan-next,
-.flight-plan-checkpoint {
-  line-height: 1.35;
-}
-.flight-plan-refs,
-.flight-outcome-row .flight-refs {
-  display: flex;
-  gap: 4px 10px;
-  flex-wrap: wrap;
-  color: var(--muted);
-}
-.flight-plan-age {
-  text-align: right;
-  white-space: nowrap;
-}
-.flight-outcome-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 1.2fr) 82px;
-  gap: 10px;
-  align-items: start;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
-}
-.flight-outcome-row > span:first-child {
-  display: grid;
-  gap: 4px;
-}
-.flight-summary-line {
-  display: inline;
-  white-space: normal;
-}
-.flight-summary-line > * + * {
-  margin-left: 8px;
-}
-.flight-summary-line .pill {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.flight-details {
-  margin: 8px 0;
-  font-size: var(--fs-s);
-}
-.flight-details > div {
-  display: grid;
-  grid-template-columns: 5em minmax(0, 1fr);
-  gap: 8px;
-  margin: 4px 0;
-}
-.flight-details dt,
-.flight-tiles dt {
-  color: var(--fg-2);
-}
-.flight-details dd,
-.flight-tiles dd {
-  margin: 0;
-  min-width: 0;
-}
-.flight-refs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-.flight-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
-  gap: 8px;
-  margin: 14px 0;
-}
-.flight-tiles > div {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.flight-tiles dd {
-  font-family: var(--display);
-  font-size: 22px;
-}
-.flight-ledger > summary {
-  cursor: pointer;
-}
 .flight-notes > .disclosure > summary,
 .flight-memory > .disclosure > summary {
   padding: 12px 14px;
@@ -6847,8 +7224,7 @@ button.nrow.thread.tagged {
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .wif-work,
-  .wif-stage,
-  .wif-latest {
+  .wif-stage {
     grid-column: 1 / -1;
   }
   .wif-elapsed {

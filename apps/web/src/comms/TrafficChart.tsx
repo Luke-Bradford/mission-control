@@ -1,4 +1,6 @@
 import { useId } from "react";
+import { useTz } from "../clock.ts";
+import { hhmm } from "../fmt.ts";
 
 export type TrafficHour = {
   hour: number;
@@ -17,8 +19,9 @@ const PAD_B = 18;
 const PLOT_W = W - PAD_L - PAD_R;
 const PLOT_H = H - PAD_T - PAD_B;
 
-function hourLabel(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", hour12: false });
+/** A bucket's start as a clock time in the operator's zone (`—` while the config loads). */
+function bucketLabel(at: number, tz: string | null): string {
+  return tz === null ? "—" : hhmm(at, tz);
 }
 
 /** Two intervals on whole messages: 0 · step · 2·step, with the top at or over the peak. */
@@ -30,7 +33,9 @@ export function niceScale(peak: number): number {
 
 /**
  * An hourly traffic instrument: a 1.5px trace over a gradient on a fixed scale, the subset as a
- * thin dashed trace, and a "now" cursor at the right edge. An hour's figures are its tooltip.
+ * thin dashed trace, and a "now" cursor at the right edge, pulsing while `live`. Buckets are labelled
+ * by their start in the operator's zone (a half-hour zone starts them at :30). An hour's figures are
+ * its tooltip.
  */
 export function TrafficChart({
   hours,
@@ -38,14 +43,18 @@ export function TrafficChart({
   partLabel,
   label,
   emptyText,
+  live = false,
 }: {
   hours: TrafficHour[];
   totalLabel: string;
   partLabel: string;
   label: string;
   emptyText: string;
+  /** The traffic is loaded and its last read succeeded. */
+  live?: boolean;
 }) {
   const gradient = useId();
+  const tz = useTz();
   const peak = Math.max(0, ...hours.map((hour) => hour.total));
   const top = niceScale(peak);
   const band = PLOT_W / Math.max(1, hours.length);
@@ -93,7 +102,7 @@ export function TrafficChart({
             y={H - 4}
             textAnchor="start"
           >
-            {`${hourLabel(hours[index]?.hour ?? Date.now())}:00`}
+            {bucketLabel(hours[index]?.hour ?? Date.now(), tz)}
           </text>
         ))}
         <text className="comms-chart-tick" x={W - PAD_R} y={H - 4} textAnchor="end">
@@ -106,7 +115,13 @@ export function TrafficChart({
             <path className="comms-chart-trace" d={totalLine} />
           </>
         )}
-        <line className="comms-chart-now" x1={W - PAD_R} x2={W - PAD_R} y1={PAD_T - 2} y2={base} />
+        <line
+          className={`comms-chart-now${live ? " live" : ""}`}
+          x1={W - PAD_R}
+          x2={W - PAD_R}
+          y1={PAD_T - 2}
+          y2={base}
+        />
         {hours.map((hour, index) => (
           <rect
             key={hour.hour}
@@ -116,7 +131,7 @@ export function TrafficChart({
             width={band}
             height={PLOT_H}
           >
-            <title>{`${hourLabel(hour.hour)}:00 · ${hour.total} messages · ${hour.part} ${partLabel.toLowerCase()}`}</title>
+            <title>{`${bucketLabel(hour.hour, tz)} · ${hour.total} messages · ${hour.part} ${partLabel.toLowerCase()}`}</title>
           </rect>
         ))}
       </svg>

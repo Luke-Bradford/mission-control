@@ -9,7 +9,7 @@ import {
   type MachineSample,
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
-import { operatorItems } from "../attention.ts";
+import { useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
@@ -48,7 +48,7 @@ const TABS: readonly {
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const attention = operatorItems(useResource<AttentionItem[]>(RESOURCES.attention).data ?? []);
+  const attention = useNeedsYou();
   return (
     <header className="top">
       <span className="brand">MISSION CONTROL</span>

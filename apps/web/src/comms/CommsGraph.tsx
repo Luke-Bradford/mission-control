@@ -28,6 +28,8 @@ const CAPCOM = "CAPCOM";
 const MC = "MC";
 /** Chatter watch lists a pair once it passes this many rounds on one thing. */
 const CHATTER_ROUNDS = 6;
+/** How long a link stays lit after its count rises. */
+const LIVE_MS = 1_800;
 
 /** The graph's size before it is measured (and in tests, where nothing is laid out). */
 const DEFAULT_SIZE = { w: 340, h: 300 };
@@ -160,11 +162,20 @@ export function CommsGraph({
   flightId: string | undefined;
   view: CommsView;
 }) {
-  const links = useResource<{ links: Link[] }>(RESOURCES.commsLinks).data?.links;
-  const hours = useResource<{ hours: Hour[] }>(RESOURCES.commsTraffic).data?.hours;
+  const linksResource = useResource<{ links: Link[] }>(RESOURCES.commsLinks);
+  const links = linksResource.data?.links;
+  // Live only while the links are loaded and the last read of them succeeded.
+  const streaming = links !== undefined && linksResource.error === null;
+  const trafficResource = useResource<{ hours: Hour[] }>(RESOURCES.commsTraffic);
+  const hours = trafficResource.data?.hours;
   const chatter = useResource<{ pairs: ChatterPair[] }>(RESOURCES.commsChatter).data?.pairs;
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
-  const [liveEdges, setLiveEdges] = useState<Set<string>>(() => new Set());
+  // The raw from/to pairs whose count rose on the last read, and a generation per rise so the
+  // pulse replays when the same link rises again.
+  const [pulse, setPulse] = useState<{ pairs: Set<string>; generation: number }>(() => ({
+    pairs: new Set(),
+    generation: 0,
+  }));
   const previousCounts = useRef<Map<string, number> | null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(DEFAULT_SIZE);
@@ -200,11 +211,15 @@ export function CommsGraph({
     }
     return [...combined.values()];
   }, [flight, known, links]);
+  // Rises are read from the links alone (raw endpoints), so crew rows or the FLIGHT seat resolving
+  // later neither re-run this nor make an edge that just became visible look like a rise.
   useEffect(() => {
     if (links === undefined) return;
-    const current = new Map(
-      edges.map((edge) => [`${edge.a}\0${edge.b}`, edge.aToB + edge.bToA] as const),
-    );
+    const current = new Map<string, number>();
+    for (const link of links) {
+      const key = `${link.from}\0${link.to}`;
+      current.set(key, (current.get(key) ?? 0) + link.count);
+    }
     const previous = previousCounts.current;
     previousCounts.current = current;
     if (previous === null) return;
@@ -212,10 +227,29 @@ export function CommsGraph({
       [...current].flatMap(([key, count]) => (count > (previous.get(key) ?? 0) ? [key] : [])),
     );
     if (increased.size === 0) return;
-    setLiveEdges(increased);
-    const timer = window.setTimeout(() => setLiveEdges(new Set()), 1_800);
+    setPulse((last) => ({ pairs: increased, generation: last.generation + 1 }));
+  }, [links]);
+  // Each rise lights its links for LIVE_MS; this timer is the only one that clears them.
+  useEffect(() => {
+    if (pulse.pairs.size === 0) return;
+    const timer = window.setTimeout(
+      () => setPulse((last) => ({ pairs: new Set(), generation: last.generation })),
+      LIVE_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, [edges, links]);
+  }, [pulse]);
+  const liveEdges = useMemo(() => {
+    const keys = new Set<string>();
+    for (const key of pulse.pairs) {
+      const [rawFrom = "", rawTo = ""] = key.split("\0");
+      const from = canonicalEndpoint(rawFrom, flight);
+      const to = canonicalEndpoint(rawTo, flight);
+      if (from === to) continue;
+      const [a, b] = pair(from, to);
+      keys.add(`${a}\0${b}`);
+    }
+    return keys;
+  }, [flight, pulse]);
   const scoped = edges.filter((edge) => inView(view, flight, edge.a, edge.b));
   const total = scoped.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
   const focusedView = view.kind !== "crew" && view.kind !== "ticket";
@@ -368,10 +402,12 @@ export function CommsGraph({
         }
       >
         <div className="comms-graph-readout" aria-hidden="true">
-          <span className="live">
-            <i className="comms-live-dot" />
-            Live
-          </span>
+          {streaming && (
+            <span className="live">
+              <i className="comms-live-dot" />
+              Live
+            </span>
+          )}
           <span>
             <b>{edges.length}</b> links
           </span>
@@ -429,7 +465,14 @@ export function CommsGraph({
                       d={geometry.d}
                       strokeWidth={metric === "tokens" ? 1 : 1 + 3 * weight}
                     />
-                    {live && <path className="comms-edge-pulse" d={geometry.d} pathLength={100} />}
+                    {live && (
+                      <path
+                        key={pulse.generation}
+                        className="comms-edge-pulse"
+                        d={geometry.d}
+                        pathLength={100}
+                      />
+                    )}
                     {metric === "messages" && (
                       <text
                         className="comms-edge-count"
@@ -466,7 +509,11 @@ export function CommsGraph({
                   onClick={() => open(node.id)}
                   aria-label={`Open ${node.label}, ${node.count} messages in 24h`}
                 >
-                  <span className="comms-node-dot" aria-hidden="true" />
+                  <span
+                    key={liveIds.has(node.id) ? `live-${pulse.generation}` : "dot"}
+                    className="comms-node-dot"
+                    aria-hidden="true"
+                  />
                   <span className="comms-node-label" aria-hidden="true">
                     <b className="comms-node-name">{node.label}</b>
                     <em className="comms-node-count">{node.count}</em>
@@ -562,6 +609,7 @@ export function CommsGraph({
             totalLabel="All messages"
             partLabel={agentScope ? `Sent by ${view.agentId}` : "With CAPCOM"}
             emptyText={`No messages in ${scopeLabel(view)} in the last 24h.`}
+            live={trafficResource.error === null}
           />
         )}
       </Panel>

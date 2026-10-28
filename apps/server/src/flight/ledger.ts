@@ -222,11 +222,18 @@ export function flightSummary(
     next: [...open.filter((e) => e.kind === "commitment").map(item), ...planned]
       .sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity) || a.key.localeCompare(b.key))
       .slice(0, FLIGHT_SUMMARY_LISTED),
+    // Arrivals close as routing receipts in Plan, not as outcomes; drop them before the slice.
     done: entries
-      .filter((e) => e.status === "done")
+      .filter((e) => e.status === "done" && e.kind !== "incoming")
       .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key))
       .slice(0, FLIGHT_SUMMARY_LISTED)
-      .map(item),
+      .map((e) => ({
+        ...item(e),
+        outcome: e.outcome,
+        refs: e.refs,
+        basis: e.basis,
+        closedAt: e.updatedAt,
+      })),
     incoming: new Set([
       ...open.filter((e) => e.kind === "incoming").map((e) => e.key),
       ...flightTriageItems(config, store, now, hubLogin, rows, lock).map((e) => e.key),

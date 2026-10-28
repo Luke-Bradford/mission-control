@@ -44,11 +44,14 @@ function MachineAreaChart({
   values,
   max,
   color,
+  live,
 }: {
   label: string;
   values: (number | null)[];
   max?: number;
   color: string;
+  /** The history is loaded and its last read succeeded: the now-cursor pulses. */
+  live: boolean;
 }) {
   const gradient = `machine-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const geometry = machineAreaGeometry(
@@ -56,8 +59,8 @@ function MachineAreaChart({
     max ?? Math.max(1, ...values.filter((value) => value !== null)),
   );
   if (geometry.line === null) return null;
-  // The scale's top (as machineAreaGeometry draws it): `max` (100 %), or the series' own peak.
-  const top = geometry.baseline - (MACHINE_CHART_HEIGHT - 5);
+  // The scale's top: `max` (100 %), or the series' own peak.
+  const { top } = geometry;
   return (
     <svg
       className="machine-chart"
@@ -94,7 +97,13 @@ function MachineAreaChart({
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
-      <line className="machine-now" x1={100} x2={100} y1={0} y2={MACHINE_CHART_HEIGHT} />
+      <line
+        className={`machine-now${live ? " live" : ""}`}
+        x1={100}
+        x2={100}
+        y1={0}
+        y2={MACHINE_CHART_HEIGHT}
+      />
     </svg>
   );
 }
@@ -151,7 +160,9 @@ function AgentSlots({ view }: { view: MachineView }) {
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
   const view = useResource<MachineView>(RESOURCES.machine).data;
-  const summary = useResource<OverviewSummary>(RESOURCES.overview()).data;
+  const overview = useResource<OverviewSummary>(RESOURCES.overview());
+  const summary = overview.data;
+  const live = summary !== undefined && overview.error === null;
   const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
@@ -171,6 +182,7 @@ export function MachinePanel() {
                 values={summary.machine.cpu}
                 max={100}
                 color="var(--accent)"
+                live={live}
               />
             ) : (
               <Bar
@@ -211,6 +223,7 @@ export function MachinePanel() {
                 values={summary.machine.mem}
                 max={100}
                 color="var(--think)"
+                live={live}
               />
             ) : (
               <Bar
@@ -243,6 +256,7 @@ export function MachinePanel() {
                 label="Disk history · GB free"
                 values={summary.machine.disk}
                 color="var(--fg-2)"
+                live={live}
               />
             ) : (
               <Bar

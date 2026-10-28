@@ -189,6 +189,52 @@ describe("Comms routes", () => {
     expect(pane.scrollTop).toBe(200);
   });
 
+  it("brings the reader back to the latest when CAPCOM sends, after they scrolled up", async () => {
+    const message = (id: string, from: string, text: string) => ({
+      id,
+      at: NOW - MIN,
+      from,
+      to: "crew",
+      text,
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    });
+    const messages = [message("comms:older", "alpha", "Read this older message")];
+    stubFetch({
+      "/api/comms/crew": () => ({ status: 200, body: { messages } }),
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms": () => {
+        const sent = message("comms:sent", "CAPCOM", "On my way");
+        messages.push(sent);
+        return { status: 200, body: { message: sent } };
+      },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    await screen.findByText("Read this older message");
+    const pane = document.querySelector(".comms-messages") as HTMLElement;
+    Object.defineProperties(pane, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 300 },
+    });
+    pane.scrollTop = 200;
+    fireEvent.scroll(pane);
+
+    fireEvent.change(screen.getByLabelText(/Post to #crew/), { target: { value: "On my way" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("On my way")).toBeTruthy();
+    expect(pane.scrollTop).toBe(1_000);
+  });
+
   it("waits for a jumped message to render, and routes peer quotes to their actual conversation", async () => {
     const original = {
       id: "comms:peer",
@@ -394,11 +440,11 @@ describe("Comms routes", () => {
     expect(await screen.findByText("question")).toBeTruthy();
     expect(screen.getByText("Pinned")).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Comms" });
-    expect(within(nav).getByTitle("3 unread").querySelector("[aria-hidden]")?.textContent).toBe(
-      "3",
-    );
     expect(
-      within(nav).getByTitle("1 new mentions").querySelector("[aria-hidden]")?.textContent,
+      within(nav).getByTitle("3 unread messages").querySelector("[aria-hidden]")?.textContent,
+    ).toBe("3");
+    expect(
+      within(nav).getByTitle("1 new mention").querySelector("[aria-hidden]")?.textContent,
     ).toBe("@1");
     const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
     expect(bell.closest(".act")).toBeTruthy();
@@ -708,8 +754,8 @@ describe("Comms routes", () => {
     const nav = screen.getByRole("navigation", { name: "Comms" });
     const guido = within(nav).getByText("guido-cx").closest("button");
     const retro = within(nav).getByText("retro-cx").closest("button");
-    expect(guido && within(guido).getByTitle("1 new mentions")).toBeTruthy();
-    expect(retro && within(retro).queryByTitle("1 new mentions")).toBeNull();
+    expect(guido && within(guido).getByTitle("1 new mention")).toBeTruthy();
+    expect(retro && within(retro).queryByTitle("1 new mention")).toBeNull();
     expect(screen.queryByText("packages/core/**")).toBeNull();
     expect(screen.queryByText("apps/review/**")).toBeNull();
   });

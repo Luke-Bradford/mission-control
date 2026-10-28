@@ -50,12 +50,17 @@ export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
         <>
-          <nav className="flight-notebook-index" aria-label="Working context sections">
+          <p className="pb note flight-notebook-horizons">
+            Two horizons: working context is FLIGHT's current view of this session, rewritten as it
+            changes; durable knowledge is sourced repo memory that outlasts it.
+          </p>
+          <nav className="flight-notebook-index" aria-label="Notebook sections">
             {sections.map((s) => (
               <a key={s.section} href={`#flight-note-${s.section}`}>
                 {s.title}
               </a>
             ))}
+            <a href="#memoryP">Durable knowledge</a>
           </nav>
           <div className="pb briefgrid">
             {sections.map((s) => (

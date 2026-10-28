@@ -18,19 +18,23 @@ const change = (series: (number | null)[] | undefined, format = kTokens): string
 };
 
 /**
- * A KPI's last 30 minutes on its own scale: the trace, its peak labelled on the dashed top gridline,
- * and a -30m … now axis. An all-zero series is the bare baseline and says so.
+ * A KPI's last 30 minutes on its own scale: the trace, its real peak labelled on the dashed top
+ * gridline (the scale itself never drops under 1, so a peak under 1 sits below it), and a -30m … now
+ * axis. An all-zero series is the bare baseline and says so.
  */
 function KpiTrace({
   values,
   color,
   label,
   format,
+  live,
 }: {
   values: (number | null)[];
   color: string;
   label: string;
   format: (n: number) => string;
+  /** The summary is loaded and its last read succeeded: the now-cursor pulses. */
+  live: boolean;
 }) {
   const quiet = quietSeries(values);
   const readings = values.filter((v): v is number => v !== null);
@@ -43,14 +47,14 @@ function KpiTrace({
     : `${label} · peak ${format(peak)}${latest == null ? "" : ` · latest ${format(latest)}`}`;
   return (
     <span className="kpi-trace">
-      <Sparkline values={values} color={color} label={aria} live top={9} />
+      <Sparkline values={values} color={color} label={aria} live={live} top={9} />
       {quiet ? (
         <span className="kpi-quiet" aria-hidden="true">
           {empty}
         </span>
       ) : (
         <span className="kpi-peak num" aria-hidden="true" title="Peak in the last 30 minutes">
-          {format(Math.max(1, peak))}
+          {format(peak)}
         </span>
       )}
       <span className="kpi-axis num" aria-hidden="true">
@@ -215,6 +219,7 @@ export function KpiStrip() {
                   color={tile.color}
                   label={`${tile.label} · ${tile.history}`}
                   format={tile.fmt}
+                  live={summary !== undefined && error === null}
                 />
               ) : (
                 <span className="kpi-secondary num" title="History unavailable">

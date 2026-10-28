@@ -1,10 +1,9 @@
 import type { AttentionItem, FlightLedgerView, FlightSummaryView } from "@mc/core";
-import { ownerLabel } from "../attention.ts";
+import { ownerLabel, useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
-import { Pill } from "../hud/Pill.tsx";
 import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 
@@ -22,13 +21,14 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
   const now = useSecond();
   const tz = useTz();
   const { inRepo } = useSessionScope();
-  const seenRisk = new Set<string>();
+  const needsYou = useNeedsYou().length;
+  const seen = new Set<string>();
   const scopedAttention = (attention ?? [])
     .filter((item) => item.repoId === null || inRepo(item.repoId))
     .sort((a, b) => b.at - a.at)
     .filter((item) => {
-      const duplicate = seenRisk.has(item.text);
-      seenRisk.add(item.text);
+      const duplicate = seen.has(item.key);
+      seen.add(item.key);
       return !duplicate;
     });
   const handling = scopedAttention.filter((item) => item.flightTriage === "handling");
@@ -45,7 +45,13 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
       <section className="flight-control-group" aria-labelledby="flight-clear-now">
         <div className="flight-control-heading">
           <h3 id="flight-clear-now">Clear now</h3>
-          <span>{risks.length} open</span>
+          {/* Needs you is the header's count; this list also holds what others are clearing. */}
+          <span>
+            <span className={needsYou > 0 ? "warn-t" : undefined}>
+              {needsYou} {needsYou === 1 ? "needs" : "need"} you
+            </span>
+            {risks.length !== needsYou && ` · ${risks.length} in this list`}
+          </span>
         </div>
         {risks.length === 0 ? (
           <p className="note">No known blocker or decision is waiting.</p>
@@ -55,16 +61,28 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
               <li key={item.key}>
                 <div>
                   <span className="flight-control-meta">
-                    <Pill tone={item.kind === "stalled" || item.kind === "error" ? "crit" : "warn"}>
+                    <span
+                      className={`flight-owner ${
+                        item.kind === "stalled" || item.kind === "error"
+                          ? "crit"
+                          : (item.owner ?? "operator") === "operator"
+                            ? "warn"
+                            : ""
+                      }`}
+                    >
                       {ownerLabel(item.owner ?? "operator")}
-                    </Pill>
+                    </span>
                     {item.at > 0 && tz !== null && <span>{rel(item.at, now, tz)}</span>}
                   </span>
                   <span className="flight-control-text">
                     <MarkdownInline text={item.text} max={90} />
                   </span>
                 </div>
-                <button type="button" className="sm" onClick={() => openItem(item.key)}>
+                <button
+                  type="button"
+                  className="sm ghost flight-link"
+                  onClick={() => openItem(item.key)}
+                >
                   Open
                 </button>
               </li>
@@ -97,7 +115,7 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
       <section className="flight-control-group" aria-labelledby="flight-next-up">
         <div className="flight-control-heading">
           <h3 id="flight-next-up">Next up</h3>
-          <button type="button" className="sm ghost" onClick={onOpenQueue}>
+          <button type="button" className="sm ghost flight-link" onClick={onOpenQueue}>
             Open plan
           </button>
         </div>

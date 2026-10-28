@@ -76,13 +76,13 @@ FLIGHT reconciles each active workstream into one ledger `work` entry with owner
 | --- | --- | --- | --- |
 | Headline judgement | brief headline | Command | FLIGHT's current synthesis, with freshness |
 | Active execution | crew/run/loop/PR state | Command | observed live truth, not FLIGHT prose |
-| Operator asks and drafts | attention, notifications, drafts | Command | exceptions that require the operator |
+| Operator asks and drafts | attention, notifications, drafts | Plan | exceptions that require the operator; Command shows only the Needs-you count, which links to them |
 | Ordered next work and dependencies | open ledger plus planned schedule | Plan | FLIGHT's commitments and future order |
 | Revisit triggers | structured watch entries | Plan | explicit follow-up state and actions |
 | Arrival dispositions | incoming outcomes | Plan | triage receipt, not active work |
 | Current working context | writable brief sections only | Notebook | Markdown authored by FLIGHT |
 | Durable repo knowledge | repo memory | Notebook | sourced facts, lessons and playbooks |
-| Recent outcomes and operating metrics | closed ledger plus metrics | Record | history, never mixed into the forward plan |
+| Recent outcomes and operating metrics | closed ledger plus metrics | Record | history, never mixed into the forward plan; Throughput and Review/CI live on Command's rail, and Record carries the rest of the scorecard |
 | Decisions | decision store | Record | autonomous judgements, with overturn action |
 | Wake/system events | agent stream | Record | diagnostic audit, decisions excluded |
 
@@ -92,7 +92,7 @@ FLIGHT reconciles each active workstream into one ledger `work` entry with owner
 
 - A visually dominant **FLIGHT briefing**: headline, operational state, freshness and a stale warning.
 - **Last contact**: the latest operator/FLIGHT exchange, stated honestly as awaiting a reply or replied-after-message rather than a read receipt.
-- **Operational pulse**: WIP, blocked work, oldest active-item age, review/CI gates, 24-hour throughput, median Ready-to-merged cycle time and operator needs. The first, third, fifth and sixth are the four flow measures; blockers, gates and operator needs explain what to act on.
+- **Operational pulse**: WIP, blocked work, oldest active-item age, review/CI gates, 24-hour throughput, median Ready-to-merged cycle time and operator needs. The first, third, fifth and sixth are the four flow measures; blockers, gates and operator needs explain what to act on. Throughput and Review/CI are shown here only; Cycle time links to Telemetry's flow of work and Needs you to Plan's operator actions.
 - **Delivery board**: one row per active workstream, with owner, ticket, delivery stage, latest event, FLIGHT's recorded next action, checkpoint and elapsed time. Missing next actions and checkpoints are visible data-quality gaps; the UI never guesses an ETA.
 - **Stand-up focus**: a deliberately short roll-up of risks/blockers, next commitments and watches/investigations. Plan and Comms retain the complete records.
 - No history or 24-hour scorecard on Command.
@@ -135,7 +135,7 @@ The current implementation stores notes in the hub database, not `.md` files. Th
 
 ### Record — what happened
 
-- **Outcomes**: recently completed ledger entries and the 24-hour operating scorecard.
+- **Outcomes**: recently completed ledger entries, each with its recorded result, evidence and close time, and the rest of the 24-hour scorecard (CI failures, parks, spend). Throughput and Review/CI live on Command's rail.
 - **Decided without you**: FLIGHT decisions with basis and overturn.
 - **System log**: Mission Control wake/event lines only. It excludes decisions because they already have a canonical panel.
 

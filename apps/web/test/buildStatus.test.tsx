@@ -23,8 +23,8 @@ function Toggle() {
 const toggle = () => fireEvent.click(screen.getByRole("button", { name: "toggle" }));
 
 describe("BUILD_NOTES", () => {
-  it("is the catalogue's table plus the Repos tab: 66 chips with a class, a label and a note", () => {
-    expect(BUILD_NOTES).toHaveLength(66);
+  it("is the catalogue's table plus the Repos tab: 65 chips with a class, a label and a note", () => {
+    expect(BUILD_NOTES).toHaveLength(65);
     for (const n of BUILD_NOTES) {
       expect(["proven", "build", "later", "check"]).toContain(n.cls);
       expect(n.label.length).toBeGreaterThan(0);

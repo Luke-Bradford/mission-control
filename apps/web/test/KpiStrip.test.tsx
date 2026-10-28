@@ -146,6 +146,21 @@ describe("KpiStrip", () => {
     await screen.findByText("1.0k");
   });
 
+  it("labels a peak under 1 as itself, not as the scale's floor", async () => {
+    stubFetch({
+      "/api/overview": {
+        ...OVERVIEW,
+        kpis: { ...kpis, spendToday: { usd: 0.4, perHour: [0.4], series: [0, 0.2, 0.4] } },
+      },
+    });
+    render(<KpiStrip />);
+    const tile = await screen.findByRole("link", { name: /Spend today/ });
+    await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("$0.40"));
+    expect(tile.querySelector(".kpi-peak")?.getAttribute("title")).toBe(
+      "Peak in the last 30 minutes",
+    );
+  });
+
   it("shows eight empty values when the endpoint is unavailable", async () => {
     stubFetch({ "/api/overview": () => ({ status: 503, body: {} }) });
     const { container } = render(<KpiStrip />);
@@ -169,9 +184,12 @@ describe("KpiStrip", () => {
     render(<KpiStrip />);
     await screen.findByText("41.2k");
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.querySelectorAll(".spark-now.live").length).toBeGreaterThan(0);
     failed = true;
     act(() => hub.refetchTopic("agents"));
     const warning = await screen.findByRole("alert");
+    // stale values keep their traces, but the now-cursors stop claiming live
+    expect(document.querySelectorAll(".spark-now.live")).toHaveLength(0);
     expect(warning.textContent).toBe(
       `Last updated ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`,
     );
