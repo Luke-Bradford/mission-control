@@ -813,6 +813,13 @@ textarea {
   .lamp.pulse {
     box-shadow: 0 0 0 3px var(--warn-soft);
   }
+  /* No hover or selection transitions anywhere (flight-deck.md, Motion). */
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat every component's transition rule */
+    transition-duration: 0s !important;
+  }
   .lamp.ok.pulse {
     box-shadow: 0 0 0 3px var(--ok-soft);
   }
