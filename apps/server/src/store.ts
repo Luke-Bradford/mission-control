@@ -2280,9 +2280,9 @@ export class Store {
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
       closingIssues: JSON.parse(r.closing_issues as string) as number[],
-      additions: (r.additions as number | null) ?? null,
-      deletions: (r.deletions as number | null) ?? null,
-      changedFiles: (r.changed_files as number | null) ?? null,
+      ...(r.additions == null ? {} : { additions: r.additions as number }),
+      ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
+      ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
     }));
   }
 

@@ -988,6 +988,7 @@ const NEW_REPO = {
 
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
+  ["GET", "/api/audit"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
