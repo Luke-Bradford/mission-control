@@ -389,6 +389,17 @@ const userLines = () =>
 
 const seatState = (seatId: string) => store.seatSession(seatId)?.state;
 const until = (fn: () => unknown) => vi.waitFor(fn, { timeout: 5000, interval: 10 });
+/**
+ * A run's private directories are removed asynchronously (after its keeper exits); under CI load
+ * that can take seconds, so wait for the path to go rather than asserting at once (#689). Kept under
+ * the 15 s test timeout so a real cleanup failure reports here.
+ */
+const CLEANUP_WAIT_MS = 8000;
+const untilGone = (path: string) =>
+  vi.waitFor(() => expect(existsSync(path)).toBe(false), {
+    timeout: CLEANUP_WAIT_MS,
+    interval: 25,
+  });
 
 async function refusal(p: Promise<unknown> | (() => unknown)): Promise<SupervisorError> {
   try {
@@ -510,5 +521,6 @@ export {
   TZ,
   tmpRoot,
   until,
+  untilGone,
   userLines,
 };
