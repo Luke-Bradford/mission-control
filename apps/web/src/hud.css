@@ -921,6 +921,8 @@ textarea {
 .top-clock {
   color: var(--fg);
   font: 11px var(--mono);
+  line-height: 16px;
+  height: 16px;
   min-width: 5ch;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

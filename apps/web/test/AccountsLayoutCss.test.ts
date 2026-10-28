@@ -15,6 +15,13 @@ const constrainedWidth = (natural: number, available: number, body: string) =>
   Math.min(natural, (available * percentValue(body, "max-width")) / 100);
 
 describe("Setup Accounts usage layout (hud.css)", () => {
+  it("keeps the top-bar clock's line box fixed between ticks", () => {
+    const clock = rule(String.raw`\.top-clock`);
+
+    expect(clock).toContain("line-height: 16px");
+    expect(clock).toContain("height: 16px");
+  });
+
   it.each([1280, 1920])("keeps usage bars inside every quota cell at %ipx", (viewport) => {
     const dockedMain = viewport - 2 * 14 - 14 - 380;
     const table = dockedMain - 2 - 2 * 14;

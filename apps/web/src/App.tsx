@@ -1,5 +1,14 @@
 import type { AttentionItem, ConfigView, Crew } from "@mc/core";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Profiler,
+  type ProfilerOnRenderCallback,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { RESOURCES, useResource } from "./data.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 
@@ -59,7 +68,13 @@ const TITLE = "Mission Control";
  * popped-out window (`?popout=1`) shows the Agent page alone. An old path is redirected to where
  * it now lives; any other unknown path goes to Overview.
  */
-export function App({ onRender }: { onRender?: () => void } = {}) {
+export function App({
+  onRender,
+  onPageRender,
+}: {
+  onRender?: () => void;
+  onPageRender?: ProfilerOnRenderCallback;
+} = {}) {
   onRender?.();
   const path = usePath();
   const search = useSearch();
@@ -124,7 +139,16 @@ export function App({ onRender }: { onRender?: () => void } = {}) {
       <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
-            <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+            <Suspense fallback={<p>Loading…</p>}>
+              {r &&
+                (onPageRender ? (
+                  <Profiler id={r.page} onRender={onPageRender}>
+                    <PageView route={r} />
+                  </Profiler>
+                ) : (
+                  <PageView route={r} />
+                ))}
+            </Suspense>
           </AwayDigest>
         </main>
         {showDock && <Dock />}
@@ -170,24 +194,34 @@ function useItemUrl(popout: boolean) {
 }
 
 function PageView({ route: r }: { route: Route }) {
+  let page: ReactNode;
   switch (r.page) {
     case "overview":
-      return <Overview />;
+      page = <Overview />;
+      break;
     case "flight":
-      return <Flight />;
+      page = <Flight />;
+      break;
     case "board":
-      return <BoardPage repoId={r.repoId} ticket={r.ticket} />;
+      page = <BoardPage repoId={r.repoId} ticket={r.ticket} />;
+      break;
     case "agent":
-      return <Agent id={r.id} />;
+      page = <Agent id={r.id} />;
+      break;
     case "map":
-      return <MapPage repoId={r.repoId} />;
+      page = <MapPage repoId={r.repoId} />;
+      break;
     case "comms":
-      return <Comms item={r.item} view={r.view} />;
+      page = <Comms item={r.item} view={r.view} />;
+      break;
     case "telemetry":
-      return <Telemetry />;
+      page = <Telemetry />;
+      break;
     case "setup":
-      return <Setup tab={r.tab} />;
+      page = <Setup tab={r.tab} />;
+      break;
   }
+  return page;
 }
 
 /** The global shortcuts, reading the latest crew, attention and page when a key is pressed. */
