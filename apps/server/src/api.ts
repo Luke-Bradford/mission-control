@@ -3272,6 +3272,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
           try {
             const out = await updater.update();
+            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
             return "restarting" in out ? reply.code(202).send(out) : out;
           } catch (e) {
             captureError(reply, e);

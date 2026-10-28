@@ -128,7 +128,7 @@ let supervisorCalls: unknown[][];
 let supervisorFail: unknown;
 /** The stub updater's version, what its next update() does, and its calls. */
 let updaterVersion: VersionInfo;
-let updaterResult: () => Promise<{ upToDate: true } | { restarting: true }>;
+let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
 const stubUpdater = (): Updater => ({
@@ -4476,6 +4476,7 @@ describe("telemetry", () => {
     const byDefault = (await get("/api/telemetry")).json() as Telemetry;
     expect(tokensIn(byDefault)).toBeGreaterThan(0);
     expect(byDefault.today.agents).toBe(2);
+    expect(byDefault.series).toEqual({ stateSpans: [], quota: [], tickets: [], annotations: [] });
     const lastHour = (await get("/api/telemetry?range=1h")).json() as Telemetry;
     expect(tokensIn(lastHour)).toBe(0);
     for (const range of ["1h", "6h", "24h", "7d"]) {
@@ -5900,6 +5901,7 @@ describe("update routes", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ upToDate: true });
     expect(updaterCalls).toEqual(["update"]);
+    expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
   it("answers 202 { restarting }, and asks for the restart only after the response", async () => {
@@ -5909,6 +5911,17 @@ describe("update routes", () => {
     expect(r.json()).toEqual({ restarting: true });
     expect(updaterCalls).toEqual(["update", "restart"]);
   });
+
+  it.each([{ restarting: true }, { swapped: true }] as const)(
+    "records a successful manual update for telemetry: %j",
+    async (result) => {
+      updaterResult = async () => result;
+      await post("/api/update");
+      expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([
+        { at: NOW, kind: "hub-update", cause: "Updated manually" },
+      ]);
+    },
+  );
 
   it("passes a refusal (409) and a failed step (500) through, and restarts nothing", async () => {
     for (const [status, text] of [
@@ -5924,6 +5937,7 @@ describe("update routes", () => {
       expect(r.json()).toEqual({ error: text });
     }
     expect(updaterCalls).not.toContain("restart");
+    expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
   it("hides an unexpected error behind fixed text", async () => {
