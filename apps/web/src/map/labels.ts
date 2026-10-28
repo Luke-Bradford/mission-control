@@ -21,18 +21,13 @@ export interface LabelPlacement {
 
 /** What each overlay label class is: its rank, and whether it may move off its anchor. */
 const KINDS: [className: string, rank: number, nudge: boolean][] = [
-  ["map-orb-label", 0, true],
-  ["map-marker", 1, false],
-  ["map-arc", 1, false],
+  ["map-seat-label", 0, true],
   // area names hold their place; a selected file's change label lifts around them
   ["map-area", 2, false],
   ["map-change", 4, true],
 ];
 
-/**
- * null: a mark drawn on its node (rings, and the ▲/◆ finding and conflict marks), never moved or
- * hidden for a label.
- */
+/** null: not an overlay label, never moved or hidden for one. */
 export function labelKind(className: string): { rank: number; nudge: boolean } | null {
   const classes = className.split(/\s+/);
   const kind = KINDS.find(([name]) => classes.includes(name));

@@ -1,16 +1,9 @@
-import type { FindingSeverity, MapDelta, MapSeat, MapSnapshot } from "@mc/core";
+import { MAP_RECENT_CAP, type MapDelta, type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
 import { areaOf, forceLayout } from "./layout.ts";
 
 export const isDocked = (seat: MapSeat, now: number): boolean =>
   seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
 
-export const level = (lines: number): number => [10, 50, 200, 500].filter((n) => lines > n).length;
-export const tokenBand = (tokens: number): number =>
-  tokens < 100 ? 0 : tokens < 1000 ? 1 : tokens < 4000 ? 2 : 3;
-export const pinToken = (severity: FindingSeverity): string =>
-  severity === "Critical" ? "--crit" : severity === "Important" ? "--warn" : "--muted";
-/** A file's brightness in fileStyle: written by a working seat, by a docked one, read, untouched. */
-export const BRIGHTNESS = { written: 1, docked: 0.45, read: 0.55, untouched: 0.3 } as const;
 export interface MapNode {
   path: string;
   parent: string | null;
@@ -84,64 +77,6 @@ export function layoutTree(
   return [...nodes.values()];
 }
 
-export function fileStyle(
-  snapshot: MapSnapshot,
-  files: string[],
-  area: string,
-  now = 0,
-  indices: Record<string, number> = {},
-) {
-  const has = (f: string) => files.includes(f);
-  const seats = snapshot.seats.map((seat, index) => {
-    const docked = isDocked(seat, now);
-    const changes = seat.scope.modified.filter((c) => has(c.file));
-    return { seat, index, docked, changes, read: !docked && seat.scope.read.some(has) };
-  });
-  const writers = seats.filter((s) => s.changes.length);
-  const readers = seats.filter((s) => s.read);
-  const owner = writers[0] ?? readers[0];
-  const add = writers.reduce((n, s) => n + s.changes.reduce((a, c) => a + c.add, 0), 0);
-  const rem = writers.reduce((n, s) => n + s.changes.reduce((a, c) => a + c.rem, 0), 0);
-  return {
-    token: owner
-      ? owner.seat.seat === "FLIGHT"
-        ? "--fg-2"
-        : `--s${((indices[owner.seat.seat] ?? owner.index) % 7) + 1}`
-      : "--muted",
-    area,
-    brightness: owner
-      ? writers.length
-        ? owner.docked
-          ? BRIGHTNESS.docked
-          : BRIGHTNESS.written
-        : BRIGHTNESS.read
-      : BRIGHTNESS.untouched,
-    level: level(add + rem),
-    add,
-    rem,
-    source: writers.some((s) => s.changes.some((c) => c.source === "churn"))
-      ? "edit churn"
-      : "diff",
-    label: writers.some((s) => !s.docked),
-    accessing: seats.some((s) => s.seat.calls.some((c) => c.files.some(has))),
-    recent: seats.some(
-      (s) =>
-        !s.docked &&
-        s.seat.state === "running" &&
-        !s.seat.calls.length &&
-        s.seat.recent.some((r) => has(r.file) && now - r.at < 600_000),
-    ),
-    overlap:
-      writers.length > 1
-        ? "write overlap"
-        : writers.length && readers.some((r) => r.index !== writers[0].index)
-          ? "shared"
-          : null,
-    findings: snapshot.findings.filter((f) => has(f.file)),
-    conflicts: snapshot.conflicts.filter((c) => has(c.file)),
-  };
-}
-
 export function pickRepo(
   ids: string[],
   running: { repoId: string; started: number }[],
@@ -154,6 +89,22 @@ export function pickRepo(
       Math.max(0, ...b.rows.map((r) => r.started)) - Math.max(0, ...a.rows.map((r) => r.started)),
   );
   return ranked[0]?.rows.length ? ranked[0].id : ids.includes(last) ? last : (ids[0] ?? "");
+}
+
+/**
+ * A seat's recent accesses after a call touched `files`: each is moved to the end with this time, as
+ * the hub lists them (its calls' files in order, a run of one file once at its latest), capped.
+ * The hub serves map snapshots at seq 0 today, so LiveMap refetches them instead: this keeps a
+ * delta-applied snapshot consistent for when it doesn't.
+ */
+function trail(recent: MapSeat["recent"], files: string[], now: number): MapSeat["recent"] {
+  const touched = new Set(files);
+  // a file the call already put at the end (its start) moves, it isn't listed twice
+  let keep = recent.length;
+  while (keep > 0 && touched.has(recent[keep - 1]?.file as string)) keep--;
+  return [...recent.slice(0, keep), ...files.map((file) => ({ file, at: now }))].slice(
+    -MAP_RECENT_CAP,
+  );
 }
 
 /** null asks the feed to reload authoritative state, never inventing a missing seat. */
@@ -173,8 +124,11 @@ export function applyDelta(
   switch (delta.type) {
     case "call.start":
       seat.calls.push({ tool: delta.tool, detail: delta.detail, files: delta.files, since: now });
+      // a name-only listing (Glob) opened none of its files: not read, not on the path
+      if (namesOnly(delta.tool)) break;
       for (const file of delta.files)
         if (!seat.scope.read.includes(file)) seat.scope.read.push(file);
+      seat.recent = trail(seat.recent, delta.files, now);
       break;
     case "call.end": {
       // End frames lack a tool id and result time; fetch authoritative badge data.
@@ -183,8 +137,9 @@ export function applyDelta(
         (c) =>
           c.files.length === delta.files.length && c.files.every((f) => delta.files.includes(f)),
       );
+      const listed = i >= 0 && namesOnly(seat.calls[i]?.tool ?? "");
       if (i >= 0) seat.calls.splice(i, 1);
-      seat.recent = delta.files.map((file) => ({ file, at: now }));
+      if (!listed) seat.recent = trail(seat.recent, delta.files, now);
       break;
     }
     case "state":
