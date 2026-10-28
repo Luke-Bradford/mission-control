@@ -32,6 +32,7 @@ import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx"
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
+import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import {
   PIPELINE_LANE_STAGES,
   PIPELINE_STAGES,
@@ -94,6 +95,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const { inView } = useSessionScope();
   const profilesRes = useResource<RepoProfile[]>(RESOURCES.repoProfiles);
   const profiles = profilesRes.data ?? NO_PROFILES;
+  const metrics = useMetrics();
 
   const [stored, setStored] = useState(() => readKey(LANE_KEY));
   const [doneDays, setDoneDays] = useState<DoneRange>(DONE_RANGES[0]);
@@ -194,6 +196,13 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     now,
     tz,
     todayStart,
+    metrics: {
+      "In progress": {
+        label: metricText("inProgress").label,
+        count: metrics.readings.inProgress?.value ?? "—",
+        title: metricTitle(metrics, "inProgress"),
+      },
+    },
   };
 
   const errors = boards.flatMap((b, i) => (b.error ? [`${repos[i]?.id}: ${b.error.message}`] : []));
