@@ -115,7 +115,7 @@ describe("scratch mode", () => {
     fullSuite: ["pnpm -s test"],
   };
 
-  it("scratch: edits allowed, commit and suite denied", () => {
+  it("scratch: edits and locked suites allowed, commit denied", () => {
     expect(guardDecision({ tool: "Edit", input: { file_path: "/w/a.ts" } }, scratch)).toEqual({
       kind: "allow",
     });
@@ -127,7 +127,10 @@ describe("scratch mode", () => {
       rule: "read-only",
       text: "Read-only roles cannot write: mcp__mc__commit (a scratch copy is never committed)",
     });
-    expect(ruleOf(bash("pnpm -s test"), scratch)).toBe("full-suite");
+    expect(guardDecision(bash("pnpm -s test"), scratch)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
     expect(ruleOf(bash("git commit -m x"), scratch)).toBe("git-write");
     expect(ruleOf(bash("pnpm -s vitest run a.test.ts"), scratch)).toBe("allow");
   });
@@ -188,8 +191,19 @@ describe("GUARD_RULES", () => {
     expect(GUARD_RULES["flight-powers"]).toBe(
       "Only repos with flight_powers: superuser may use these tools",
     );
-    expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(10);
+    // Codex commands are no longer an allowlist: only the area, protected files and the sandbox
+    expect(GUARD_RULES["codex-allowlist"]).toBe(
+      "The Codex request is outside the seat’s area, protected files or sandbox",
+    );
+    expect(GUARD_RULES["gh-cli"]).toMatch(/^The GitHub CLI is not available to seats/);
+    expect(GUARD_RULES["gh-cli"]).not.toMatch(/comments|labels/);
+    expect(GUARD_RULES.unreadable).toBe("Commands the guard cannot read to the end are refused");
+    expect(GUARD_RULES.background).toBe(
+      "Commands must stay attached to the seat's current tool call",
+    );
+    // github-write is retired: no guard path produced it once gh got its own rule
+    expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
+    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -295,13 +309,16 @@ describe("guardDecision: gh, network", () => {
     "gh api repos/x/y -f a=b",
     "gh api graphql",
     "gh auth token",
-  ])("denies %s as github-write", (c) => {
-    expect(ruleOf(bash(c))).toBe("github-write");
+  ])("denies %s as gh-cli", (c) => {
+    expect(ruleOf(bash(c))).toBe("gh-cli");
   });
   it.each(["gh pr view 1", "gh api repos/x/y", "gh pr list", "gh api -X GET repos/x/y"])(
-    "allows %s",
+    "denies the read %s as gh-cli, whose text says gh is unavailable",
     (c) => {
-      expect(ruleOf(bash(c))).toBe("allow");
+      expect(ruleOf(bash(c))).toBe("gh-cli");
+      expect((guardDecision(bash(c), writer) as { text: string }).text).toMatch(
+        /^The GitHub CLI is not available to seats/,
+      );
     },
   );
   it("denies curl and wget as network", () => {
@@ -347,11 +364,15 @@ describe("guardDecision: the full suite", () => {
   ])("still locks %s (no background &)", (c) => {
     expect(ruleOf(bash(c))).toBe("lock");
   });
-  it("allows a background command that is not a full suite", () => {
-    expect(ruleOf(bash("sleep 1 &"))).toBe("allow");
+  it("denies a background command that is not a full suite", () => {
+    expect(ruleOf(bash("sleep 1 &"))).toBe("background");
+    expect(ruleOf(bash("sleep 1", { run_in_background: true }))).toBe("background");
   });
-  it("denies a suite in read-only mode", () => {
-    expect(ruleOf(bash("pnpm -s vitest run"), readOnly)).toBe("full-suite");
+  it("locks a suite in read-only mode", () => {
+    expect(guardDecision(bash("pnpm -s vitest run"), readOnly)).toEqual({
+      kind: "lock",
+      command: "pnpm -s vitest run",
+    });
   });
   it("a deny beats a lock in one command line", () => {
     expect(ruleOf(bash("pnpm -s test && git push"))).toBe("git-write");
@@ -541,7 +562,7 @@ describe("guard fix round 1", () => {
     ]) {
       expect(guardDecision(bash(c), writer).kind, c).toBe("lock");
     }
-    expect(ruleOf(bash("pnpm -s vitest run 2>&1 | tail -20"), readOnly)).toBe("full-suite");
+    expect(guardDecision(bash("pnpm -s vitest run 2>&1 | tail -20"), readOnly).kind).toBe("lock");
     expect(ruleOf(bash("git push>/dev/null"))).toBe("git-write");
     expect(ruleOf(bash("git push 2>&1"))).toBe("git-write");
     expect(splitCommands("git status 2>&1 >out.txt")).toEqual([["git", "status"]]);
@@ -554,16 +575,12 @@ describe("guard fix round 1", () => {
     );
     expect(v).toEqual({
       kind: "deny",
-      rule: "github-write",
-      text: `${GUARD_RULES["github-write"]}: gh api`,
+      rule: "gh-cli",
+      text: `${GUARD_RULES["gh-cli"]}: gh api`,
     });
     const t = (c: string) => (guardDecision(bash(c), writer) as { text: string }).text;
-    expect(t("gh pr comment 1 -b SECRETSECRET")).toBe(
-      `${GUARD_RULES["github-write"]}: gh pr comment`,
-    );
-    expect(t("gh pr -R SECRETSECRET/x merge 1")).toBe(
-      `${GUARD_RULES["github-write"]}: gh pr merge`,
-    );
+    expect(t("gh pr comment 1 -b SECRETSECRET")).toBe(`${GUARD_RULES["gh-cli"]}: gh pr comment`);
+    expect(t("gh pr -R SECRETSECRET/x merge 1")).toBe(`${GUARD_RULES["gh-cli"]}: gh pr merge`);
     expect(t("gh SECRETSECRET thing")).not.toContain("SECRET");
     expect(t("gh pr SECRETSECRET")).not.toContain("SECRET");
   });
@@ -657,12 +674,12 @@ describe("guard fix round 2", () => {
 });
 
 describe("guard fix round 3", () => {
-  it.each(['bash -c -- "-x; git push"', "bash -c", "sh -c -e", 'sh -c -e "git push"'])(
-    "fails closed on %s",
-    (c) => {
-      expect(ruleOf(bash(c))).toBe("git-write");
-    },
-  );
+  it.each(['bash -c -- "-x; git push"', 'sh -c -e "git push"'])("judges the script of %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("git-write");
+  });
+  it.each(["bash -c", "sh -c -e"])("fails closed on %s, which has no script to read", (c) => {
+    expect(ruleOf(bash(c))).toBe("unreadable");
+  });
   it("still allows a harmless -c script", () => {
     expect(ruleOf(bash('bash -c "echo ok"'))).toBe("allow");
     expect(ruleOf(bash('bash -c -- "echo ok"'))).toBe("allow");
@@ -674,14 +691,16 @@ describe("guard fix round 4", () => {
     'bash -c -o pipefail "git push"',
     'bash -c +e "git push"',
     'bash -co pipefail "git push"',
-    'bash -O extglob -c "git push"',
-  ])("denies a shell option that takes a value: %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("git-write");
+  ])("denies a shell option that takes a value as unreadable: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("unreadable");
+  });
+  it("judges the script after an option value before -c", () => {
+    expect(ruleOf(bash('bash -O extglob -c "git push"'))).toBe("git-write");
   });
   it.each(['bash -c -o pipefail "echo ok"', 'bash -c +e "echo ok"', 'bash -co pipefail "echo ok"'])(
     "fails closed even on a harmless script: %s",
     (c) => {
-      expect(ruleOf(bash(c))).toBe("git-write");
+      expect(ruleOf(bash(c))).toBe("unreadable");
     },
   );
   it("still allows a plain -c script", () => {
@@ -722,8 +741,8 @@ describe("guard fix round 5 (Task 5 review)", () => {
       expect(ruleOf(bash(c))).toBe("git-write");
     },
   );
-  it("allows a background run that is not a suite", () => {
-    expect(ruleOf(bash("setsid sleep 1"))).toBe("allow");
+  it("denies a background run that is not a suite", () => {
+    expect(ruleOf(bash("setsid sleep 1"))).toBe("background");
   });
   it("names a git subcommand in the text only when it is a known one", () => {
     expect(guardDecision(bash("git SECRETX origin"), writer)).toEqual({
@@ -827,8 +846,8 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
       const v = guardDecision(bash(c), writer);
       expect(v).toEqual({
         kind: "deny",
-        rule: "git-write",
-        text: `${GUARD_RULES["git-write"]}: brace expansion`,
+        rule: "unreadable",
+        text: `${GUARD_RULES.unreadable}: brace expansion`,
       });
     },
   );
@@ -847,7 +866,7 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
 });
 
 describe("guard fix round 7 (Task 5 re-review 2)", () => {
-  const tooLong = { kind: "deny", rule: "git-write", text: GUARD_TOO_LONG_TEXT };
+  const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
   const timed = (c: string) => {
     const t0 = performance.now();
     const v = guardDecision(bash(c), writer);
@@ -862,9 +881,10 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
   it.each([
     ["20 tmux words and a suite", `${"tmux ".repeat(20)}pnpm -s test`, "full-suite"],
     ["18 `tmux a` pairs and a push", `${"tmux a ".repeat(18)}git push`, "git-write"],
-    ["20 tmux words", "tmux ".repeat(20), "allow"],
-    ["300 tmux words", "tmux ".repeat(300), "allow"],
-    ["2000 tmux words", "tmux ".repeat(2000), "git-write"], // past the budget: too long
+    // `tmux tmux …`: an unknown tmux command may start a session
+    ["20 tmux words", "tmux ".repeat(20), "background"],
+    ["300 tmux words", "tmux ".repeat(300), "background"],
+    ["2000 tmux words", "tmux ".repeat(2000), "unreadable"], // past the budget: too long
   ])("decides %s quickly, without throwing", (_n, c, rule) => {
     const { v, ms } = timed(c);
     expect(ms).toBeLessThan(200);
@@ -970,7 +990,7 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
 });
 
 describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested multiplexers", () => {
-  const tooLong = { kind: "deny", rule: "git-write", text: GUARD_TOO_LONG_TEXT };
+  const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
   const background = { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   const timed = (c: string) => {
     const t0 = performance.now();
@@ -985,20 +1005,22 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
     "tmux list-panes -F '#{pane_id} #{?pane_active,*,}'",
     "tmux display -p '#{e|+:1,2}'",
     "tmux send-keys -t x 'ls {a,b}' Enter",
-    "tmux new -d 'ls {a,b}'",
     "'{git,push}' origin",
     '"{a..z}"',
     "\\{git,push} origin",
   ])("allows the quoted braces in %s", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
   });
+  it("denies a detached tmux command even when its quoted argument contains braces", () => {
+    expect(ruleOf(bash("tmux new -d 'ls {a,b}'"))).toBe("background");
+  });
   it.each(["{git,'push'} origin", "tmux {git,push}", "tmux new -d '{git,push} origin'"])(
     "still denies the unquoted brace expansion in %s",
     (c) => {
       expect(guardDecision(bash(c), writer)).toEqual({
         kind: "deny",
-        rule: "git-write",
-        text: `${GUARD_RULES["git-write"]}: brace expansion`,
+        rule: "unreadable",
+        text: `${GUARD_RULES.unreadable}: brace expansion`,
       });
     },
   );
@@ -1007,7 +1029,7 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
   it.each([
     [
       "cat > /tmp/body.md <<'EOF'\nThis doesn't change the API.\nEOF\ngh pr create --title x --body-file /tmp/body.md",
-      "github-write",
+      "gh-cli",
     ],
     [
       "cat > notes.md <<'EOF'\nIt's done\nEOF\ngit add notes.md && git commit -m notes",
@@ -1100,7 +1122,7 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
     const open = timed(`cat > a.md <<'EOF'\n${body}`);
     expect(open.ms).toBeLessThan(200);
     // round 5: an unterminated heredoc cannot be read
-    expect(open.v).toEqual({ kind: "deny", rule: "git-write", text: GUARD_UNREADABLE_TEXT });
+    expect(open.v).toEqual({ kind: "deny", rule: "unreadable", text: GUARD_UNREADABLE_TEXT });
     const unquoted = timed(`cat > a.md <<EOF\n${body.replaceAll("git push", "ls")}EOF`);
     expect(unquoted.ms).toBeLessThan(200);
     expect(unquoted.v.kind).toBe("allow");
@@ -1124,15 +1146,15 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
     // round 5: the last heredoc has no delimiter line, so the line cannot be read
     expect(
       guardDecision(bash(`cat${" <<E".repeat(2000)}\n${"E\n".repeat(1999)}git push`), writer),
-    ).toEqual({ kind: "deny", rule: "git-write", text: GUARD_UNREADABLE_TEXT });
+    ).toEqual({ kind: "deny", rule: "unreadable", text: GUARD_UNREADABLE_TEXT });
   });
 });
 
 describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, the backstop", () => {
   // shell text: `${` opens the shell's parameter expansion, not a template placeholder
   const P = "$" + "{";
-  const unreadable = { kind: "deny", rule: "git-write", text: GUARD_UNREADABLE_TEXT };
-  const tooLong = { kind: "deny", rule: "git-write", text: GUARD_TOO_LONG_TEXT };
+  const unreadable = { kind: "deny", rule: "unreadable", text: GUARD_UNREADABLE_TEXT };
+  const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
   const timed = (c: string) => {
     const t0 = performance.now();
     const v = guardDecision(bash(c), writer);
@@ -1149,7 +1171,7 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     ["bash -es x <<'EOF'\ngit push\nEOF", "git-write"],
     ["bash -- /dev/stdin <<'EOF'\ngit push\nEOF", "git-write"],
     ["bash - arg1 <<'EOF'\ngit push\nEOF", "git-write"],
-    ["cat <<'EOF' | sh\ngit push\nEOF", "git-write"],
+    ["cat <<'EOF' | sh\ngit push\nEOF", "unreadable"],
     ["dash <<'EOF'\ngit push\nEOF", "git-write"],
     ["/bin/bash -e <<'EOF'\ngit push\nEOF", "git-write"],
     ["env FOO=1 bash -o pipefail <<'EOF'\ngit push\nEOF", "git-write"],
@@ -1159,20 +1181,20 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     ["source /dev/stdin <<'EOF'\ngit push\nEOF", "git-write"],
     [". /dev/stdin <<'EOF'\ngit push\nEOF", "git-write"],
     ["bash <<< 'git push'", "git-write"],
-    ["echo 'git push' | sh", "git-write"],
-    ["echo x | bash -s", "git-write"],
-    ["echo x | bash -s foo", "git-write"],
-    ["cat x | zsh -e", "git-write"],
-    ["cat x |& bash", "git-write"],
-    ["cat x | source /dev/stdin", "git-write"],
+    ["echo 'git push' | sh", "unreadable"],
+    ["echo x | bash -s", "unreadable"],
+    ["echo x | bash -s foo", "unreadable"],
+    ["cat x | zsh -e", "unreadable"],
+    ["cat x |& bash", "unreadable"],
+    ["cat x | source /dev/stdin", "unreadable"],
   ])("judges what a shell reads on stdin: %j", (c, rule) => {
     expect(ruleOf(bash(c))).toBe(rule);
   });
   it("names the stdin shell in the deny, never the input", () => {
     expect(guardDecision(bash("echo SECRETSECRET | sh"), writer)).toEqual({
       kind: "deny",
-      rule: "git-write",
-      text: `${GUARD_RULES["git-write"]}: shell reading stdin`,
+      rule: "unreadable",
+      text: `${GUARD_RULES.unreadable}: shell reading stdin`,
     });
   });
   it.each([
@@ -1328,7 +1350,7 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     ],
     [
       'gh pr create --title "x" --body "$(cat <<\'EOF\'\n## Summary\n- it\'s "done"\nEOF\n)"',
-      `${GUARD_RULES["github-write"]}: gh pr create`,
+      `${GUARD_RULES["gh-cli"]}: gh pr create`,
     ],
     [
       "git add -A && git commit -F - <<'EOF'\nfix: it's done\nEOF",
@@ -1413,8 +1435,8 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     "git stash list",
     'echo "it\'s $(echo "nested \'q\'")"',
     "tmux send-keys -t x 'ls {a,b}' Enter",
-  ])("allows the everyday read %j", (c) => {
-    expect(ruleOf(bash(c))).toBe("allow");
+  ])("allows the ordinary read %j, and refuses gh as gh-cli", (c) => {
+    expect(ruleOf(bash(c))).toBe(c.startsWith("gh ") ? "gh-cli" : "allow");
   });
 });
 
@@ -1447,7 +1469,7 @@ describe("guard targeted fix (Task 5 r5 I1): $(( that is a subshell, case in a s
     (c) => {
       expect(guardDecision(bash(c), writer)).toEqual({
         kind: "deny",
-        rule: "git-write",
+        rule: "unreadable",
         text: GUARD_UNREADABLE_TEXT,
       });
     },
@@ -1469,13 +1491,12 @@ describe("guard targeted fix (Task 5 r5 I1): $(( that is a subshell, case in a s
 });
 
 describe("guard targeted fix 2 (security bot on faa3aa5): case at any position in a substitution", () => {
-  const unreadable = { kind: "deny", rule: "git-write", text: GUARD_UNREADABLE_TEXT };
+  const unreadable = { kind: "deny", rule: "unreadable", text: GUARD_UNREADABLE_TEXT };
   it.each([
     'x="$(time case $y in *) git push;; esac)"',
     'x="$(coproc case $y in *) git push;; esac)"',
     'x="$(nohup case $y in *) git push;; esac)"',
     'x="$(env case $y in *) git push;; esac)"',
-    'x="$(case $y { *) git push;; })"',
     'x="$(case $y\nin *) git push;; esac)"',
     'x="$(time case $y in a) echo esac;; *) git push;; esac)"',
   ])("denies %j as git-write", (c) => {
@@ -1492,12 +1513,13 @@ describe("guard targeted fix 2 (security bot on faa3aa5): case at any position i
   ])("allows %j", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
   });
-  it.each(['x="$(echo case a b)"', 'x="$(echo case a b c)" && ls'])(
-    "denies the over-counted %j as unreadable (fail closed)",
-    (c) => {
-      expect(guardDecision(bash(c), writer)).toEqual(unreadable);
-    },
-  );
+  it.each([
+    'x="$(echo case a b)"',
+    'x="$(echo case a b c)" && ls',
+    'x="$(case $y { *) git push;; })"',
+  ])("denies the over-counted %j as unreadable (fail closed)", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual(unreadable);
+  });
   it("decides 64 KB of case words in a substitution quickly", () => {
     const c = `x="$(${"case ".repeat(13 * 1024)})"`;
     expect(c.length).toBeGreaterThan(64 * 1024);
@@ -2072,7 +2094,7 @@ describe("program names compare case-insensitively (PR #143 I1b)", () => {
     expect(ruleOf(bash("GIT push"))).toBe("git-write");
     expect(ruleOf(bash("/usr/bin/Git commit -m x"))).toBe("git-write");
     expect(ruleOf(bash("SH -c 'git push'"))).toBe("git-write");
-    expect(ruleOf(bash("GH pr merge 1"))).toBe("github-write");
+    expect(ruleOf(bash("GH pr merge 1"))).toBe("gh-cli");
     expect(ruleOf(bash("CURL x"))).toBe("network");
     expect(splitCommands("Env GIT push")).toEqual([["git", "push"]]);
   });
@@ -2124,17 +2146,24 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     ]);
   });
 
-  it("locks a full suite spelled with a brace word", () => {
+  it("refuses a pnpm word that brace-expands, since pnpm may run it as a binary", () => {
     const ctx: GuardContext = {
       mode: "writer",
       repo: "dev",
       flightPowers: "standard",
       fullSuite: ["pnpm -s test"],
     };
-    const lock = { kind: "lock", command: "pnpm -s test" };
-    expect(guardDecision(bash("pnpm -s {test,}"), ctx)).toEqual(lock);
-    expect(guardDecision(bash("pnpm -s test{,}"), ctx)).toEqual(lock);
-    expect(ruleOf(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toBe("full-suite");
+    // `pnpm -s {op,}en .` would run /usr/bin/open: the brace word is judged as a command
+    const unreadable = {
+      kind: "deny",
+      rule: "unreadable",
+      text: `${GUARD_RULES.unreadable}: brace expansion`,
+    };
+    for (const c of ["pnpm -s {test,}", "pnpm -s test{,}", "pnpm -s {op,}en ."])
+      expect(guardDecision(bash(c), ctx), c).toEqual(unreadable);
+    expect(guardDecision(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toEqual(
+      unreadable,
+    );
   });
 
   it("a runner runs its command in the foreground", () => {
@@ -2179,8 +2208,8 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
   it("still denies a brace-expanding head word", () => {
     expect(guardDecision(bash("./scripts/{a,b}.sh"), writer)).toEqual({
       kind: "deny",
-      rule: "git-write",
-      text: `${GUARD_RULES["git-write"]}: brace expansion`,
+      rule: "unreadable",
+      text: `${GUARD_RULES.unreadable}: brace expansion`,
     });
   });
 });
@@ -2274,4 +2303,313 @@ describe("seat git environment", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const)
       expect(ruleOf(bash(command), { ...writer, mode })).toBe("allow");
   });
+});
+
+describe("detached work: multiplexers fail closed, schedulers and launchers, arithmetic", () => {
+  it.each([
+    "tmux -L sock new -d sleep 1",
+    "tmux -S /tmp/s new -d",
+    "tmux -f /dev/null new -d",
+    "tmux -Lsock new -d",
+    "tmux neww",
+    "tmux new-s -d",
+    "tmux splitw",
+    "tmux split-window -d sleep 9",
+    "tmux run -b sleep 9",
+    "tmux respawnp",
+    'tmux if-shell true "run -b x"',
+    "tmux pipe-pane",
+    "tmux popup",
+    "tmux source-file x.conf",
+    "tmux ls \\; new -d sleep 9",
+    "tmux ls ';' new -d sleep 9",
+    "tmux ls\\; new -d sleep 9",
+    "tmux",
+    "tmux -u",
+    "tmux display",
+    "tmux display -p '#(sleep 9 &)'",
+    "tmux capture-pane",
+    "/opt/homebrew/bin/tmux neww",
+    "command tmux neww",
+    "screen",
+    "screen -S name",
+    "screen -S name sleep 9",
+    "screen -dmS s sleep 9",
+    "screen -d -m sleep 9",
+    "screen -DR",
+    "screen -R x",
+    "screen -S x -X screen sleep 9",
+  ])("refuses %s as background", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+
+  it.each([
+    "tmux ls",
+    "tmux has -t x",
+    "tmux has-session -t x",
+    "tmux -L s ls",
+    "tmux -S /tmp/s list-sessions",
+    "tmux capture-pane -p",
+    "tmux capturep -p -t x",
+    "tmux display -p '#{pane_id}'",
+    "tmux display-message -p x",
+    "tmux list-windows -a",
+    "tmux show-options -g",
+    "tmux kill-session -t x",
+    "tmux a -t x",
+    "tmux attach-session -t x",
+    "tmux -V",
+    "tmux send-keys -t x 'ls' Enter",
+    "screen -ls",
+    "screen -list",
+    "screen -r x",
+    "screen -x x",
+    "screen -dr x",
+    "screen -d -r x",
+    "screen -d x",
+    "screen -S x -X stuff 'ls\n'",
+    "screen -S x -X quit",
+  ])("allows %s, which starts nothing", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
+  });
+
+  it.each([
+    "at now",
+    "batch",
+    "crontab -l",
+    "crontab x.cron",
+    "launchctl load x.plist",
+    "launchctl submit -l x -- sleep 9",
+    "osascript -e 'do shell script \"sleep 9\"'",
+    "open -a Terminal .",
+    "command at now",
+    "env launchctl list",
+    "/usr/bin/osascript -e x",
+    "/usr/bin/open .",
+    "nice -n 5 crontab -l",
+    "ls && open .",
+    'sh -c "at now"',
+    "find . -exec open {} +",
+  ])("refuses the scheduler or launcher in %s as background", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({
+      kind: "deny",
+      rule: "background",
+      text: expect.stringMatching(/^Commands must stay attached to the seat's current tool call: /),
+    });
+  });
+
+  it.each([
+    "echo $((5 & 3))",
+    'echo "$((5 & 3))"',
+    "(( x = 5 & 3 ))",
+    "echo $[5 & 3]",
+    "cat <<EOF\n$((5 & 3))\nEOF",
+  ])("does not count the arithmetic & in %j as background", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
+  });
+
+  it.each(["((sleep 9 &) )", 'echo "$((sleep 9 &) )"', "sleep 9 & echo $((5 & 3))"])(
+    "still counts a lone & in a subshell that only looked arithmetic: %j",
+    (c) => {
+      expect(ruleOf(bash(c))).toBe("background");
+    },
+  );
+});
+
+describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux expansions", () => {
+  it.each([
+    ["=git push", "git-write"],
+    ["=gh pr merge 1", "gh-cli"],
+    ["=curl https://x", "network"],
+    ["=setsid sleep 9", "background"],
+    ["=open .", "background"],
+    ["=tmux new -d", "background"],
+    ["=pnpm -s test", "lock"],
+    ["- setsid sleep 9", "background"],
+    ["- git push", "git-write"],
+    ["env =git push", "git-write"],
+    ["ls && =git push", "git-write"],
+  ])("judges %s by the command it runs (%s)", (c, rule) => {
+    expect(ruleOf(bash(c))).toBe(rule);
+  });
+  it("still allows an ordinary =word argument, and gpg tools that start nothing", () => {
+    expect(ruleOf(bash("echo =x"))).toBe("allow");
+    expect(ruleOf(bash("gpgconf --list-dirs"))).toBe("allow");
+    expect(ruleOf(bash("gpg-agent --version"))).toBe("allow");
+    expect(ruleOf(bash("gpg-agent --da"))).toBe("allow");
+    expect(ruleOf(bash("gpgconf --l"))).toBe("allow");
+    for (const c of [
+      "pnpm install",
+      "pnpm add -D x",
+      "pnpm run build",
+      "yarn install",
+      "yarn test",
+      // a package command's words are package names, even behind a valued option
+      "pnpm add open",
+      "pnpm --filter @mc/web add open",
+      "pnpm -F web add -D open",
+      "yarn workspace web add open",
+      "pnpm -s lint --fix",
+      "pnpm --filter @mc/server exec vitest run test/at.test.ts",
+    ])
+      expect(ruleOf(bash(c)), c).toBe("allow");
+  });
+
+  // An option known neither to take a value nor to take none may have swallowed the next word
+  // (`--store-dir add` leaves `open .` as the command pnpm runs), so the words after it are judged.
+  it.each([
+    "pnpm --store-dir add open .",
+    "pnpm --lockfile-dir add open .",
+    "pnpm --config.foo add open .",
+    "pnpm --virtual-store-dir install open .",
+  ])("refuses a launcher behind an option whose value is unknown: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+  it("still allows known options before a package command", () => {
+    for (const c of [
+      "pnpm -s add open",
+      "pnpm --frozen-lockfile install",
+      "pnpm install --frozen-lockfile",
+      "pnpm -r build",
+      "pnpm --filter=@mc/server test",
+      "yarn --frozen-lockfile install",
+    ])
+      expect(ruleOf(bash(c)), c).toBe("allow");
+  });
+
+  it("allows a launcher word a multiplexer only types into a session", () => {
+    expect(ruleOf(bash("tmux send-keys -t x open Enter"))).toBe("allow");
+  });
+  // Deliberate fail-closed trade-off: a runner's options are not modelled, so every later word is
+  // judged as a command, and these ordinary lines are refused (refusal telemetry measures the cost).
+  it.each([
+    "pnpm exec vitest run -t batch apps/x.test.ts",
+    "npx vitest run -t open",
+    "npx tsx scripts/run.ts batch",
+    "npx cypress open",
+    "pnpm exec vitest run -t at",
+    "pnpm -s exec vitest run -t at",
+    "pnpm -s exec tsx x.ts open",
+  ])("refuses a launcher word among a runner's arguments: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+  it.each([
+    "env open .",
+    "command at now",
+    'sh -c "open x"',
+    "xargs open",
+    "pnpm exec open .",
+    "npx open .",
+    "ssh-agent sh",
+    "ssh-agent -k",
+    'eval "$(ssh-agent -s)"',
+    "/usr/bin/ssh-agent -s",
+    "gpg-agent --daemon",
+    "gpgconf --launch gpg-agent",
+    "systemd-run sleep 9",
+    "daemonize /bin/sleep 9",
+    // a runner's options, `--` or another runner first: the command may be any later word
+    "npx -y open .",
+    "npx --yes open .",
+    "npx -y -- open .",
+    "npx -p foo open .",
+    "npx --package=foo open .",
+    "npx -c open",
+    "npx -y bash -c open",
+    "bunx --bun open .",
+    "pnpm dlx -y open .",
+    "npm exec -- open .",
+    "npm exec --yes -- open .",
+    "npm x -y open .",
+    "pnpm exec -- open .",
+    "pnpm exec -- launchctl load x.plist",
+    "uvx --from x open",
+    "npx -y osascript -e 'tell app \"Terminal\" to activate'",
+    "npx -y crontab f",
+    "npx -y at now",
+    "npx -y env open .",
+    "watch -n 1 open .",
+    "watch -n1 open .",
+    "watch -n 9 crontab f",
+    "caffeinate -i open .",
+    "caffeinate -t 5 open .",
+    "flock f open .",
+    "flock /tmp/l launchctl submit -l x -- /bin/sh -c x",
+    "script -q /dev/null open .",
+    "taskset 0x1 open .",
+    "ionice -c3 open .",
+    "doas -u root open .",
+    "npx npx open .",
+    "pnpm exec npx open .",
+    "npx watch open .",
+    "watch npx open .",
+    "unbuffer npx open .",
+    "timeout 5 npx -y open .",
+    "=npx -y open .",
+    "npx -y ssh-agent sh",
+    "npx -y =open .",
+    "npx -y vitest run -t open",
+    "npm exec -- vitest run -t batch",
+    // an option value that looks like a run verb only moves where the judged words start
+    "npm --prefix dlx x open .",
+    "npm --prefix x x open .",
+    "pnpm -C dlx dlx open .",
+    "pnpm --filter dlx dlx open .",
+    "pnpm --dir x x open .",
+    "yarn --cwd dlx dlx open .",
+    // an expansion, glob or EQUALS word as the runner's first word
+    "npx $X open .",
+    'npx "$X" open .',
+    "npx ${X} open .",
+    "npx $(echo -y) open .",
+    "npx `echo -y` open .",
+    "npx * open .",
+    "npx [-]y open .",
+    "npx =npx open .",
+    "npx =npx -y open .",
+    "npx =watch open .",
+    // pnpm and yarn run a binary for a word that is not their own command
+    "pnpm open .",
+    "pnpm -s open .",
+    "yarn open .",
+    "yarn run open .",
+    // a verb-looking later word is an argument, not the verb: the binary is still judged
+    "pnpm open . x",
+    "pnpm open -a Calculator --args x",
+    "pnpm open -a Calculator --args exec",
+    "pnpm osascript -e 'display dialog \"hi\"' x",
+    "pnpm crontab x",
+    "pnpm launchctl load x",
+    "pnpm at now dlx",
+    "pnpm gpgconf --launch gpg-agent x",
+    "pnpm Open . x",
+    "yarn open . x",
+    "yarn run open . exec",
+    "npm --prefix foo exec open .",
+    // yarn workspace forms run a command too
+    "yarn workspace foo open .",
+    "yarn workspaces foreach -A open",
+    "yarn workspaces foreach -A run open",
+    // more shells read -c scripts
+    "fish -c open",
+    "ksh -c open",
+    "mksh -c open",
+    "tcsh -c open",
+    "csh -c open",
+    "pwsh -c 'open .'",
+    // GnuPG takes unambiguous option prefixes
+    "gpg-agent --dae",
+    "gpg-agent --daemon=x",
+    "gpgconf --la gpg-agent",
+    "gpgconf --lau gpg-agent",
+  ])("still refuses a launcher that is the command: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+
+  it.each(["tmux kill-$X", "tmux ls $X", "tmux -L $S ls", "tmux ls `x`"])(
+    "refuses tmux with an expansion that could become a command: %s",
+    (c) => {
+      expect(ruleOf(bash(c))).toBe("background");
+    },
+  );
 });
