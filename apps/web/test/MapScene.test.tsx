@@ -102,6 +102,9 @@ it("selects and describes a file point in the large-repo overview", () => {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
   const tree = Array.from({ length: 5_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
   const nodes = layoutTree(tree);
+  const fileNodes = nodes.filter((node) => node.count > 0);
+  const indexedFile = fileNodes[123];
+  if (!indexedFile) throw new Error("test tree is missing point 123");
   const onSelect = vi.fn();
   const snapshot = { ...structuredClone(props.snapshot), tree };
   render(
@@ -122,7 +125,24 @@ it("selects and describes a file point in the large-repo overview", () => {
   const spheres = scene.children.find(
     (child) => child instanceof THREE.InstancedMesh,
   ) as THREE.InstancedMesh;
-  const pointRaycast = vi.spyOn(points, "raycast");
+  const realPointHits: THREE.Intersection[] = [];
+  const realRay = new THREE.Raycaster();
+  realRay.params.Points.threshold = 0.4;
+  realRay.setFromCamera(
+    new THREE.Vector2((clientX / 1440) * 2 - 1, (-clientY / 900) * 2 + 1),
+    camera,
+  );
+  points.raycast(realRay, realPointHits);
+  expect(realPointHits).not.toHaveLength(0);
+  const pointRaycast = vi.spyOn(points, "raycast").mockImplementation((_, hits) => {
+    hits.push({
+      distance: 0,
+      distanceToRay: 0,
+      index: 123,
+      object: points,
+      point: new THREE.Vector3(),
+    });
+  });
   const meshRaycast = vi.spyOn(spheres, "raycast");
   const canvas = screen.getByRole("application");
   Object.assign(canvas, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
@@ -142,11 +162,64 @@ it("selects and describes a file point in the large-repo overview", () => {
   fireEvent.pointerUp(canvas, { clientX, clientY });
   expect(pointRaycast).toHaveBeenCalled();
   expect(meshRaycast).not.toHaveBeenCalled();
-  const selected = onSelect.mock.calls[0]?.[0];
-  expect(selected).toMatch(/^src\/f\d+\.ts$/);
+  expect(onSelect).toHaveBeenCalledWith(indexedFile.path);
   fireEvent.pointerMove(canvas, { clientX, clientY });
   act(() => vi.advanceTimersByTime(40));
-  expect(screen.getByRole("tooltip").textContent).toContain(selected);
+  expect(screen.getByRole("tooltip").textContent).toContain(indexedFile.path);
+});
+
+it("selects and describes a file mesh when point LOD is inactive", () => {
+  const onSelect = vi.fn();
+  const tree = [
+    { path: "src/one.ts", lines: 1 },
+    { path: "src/two.ts", lines: 1 },
+  ];
+  const smallNodes = layoutTree(tree);
+  const smallFileNodes = smallNodes.filter((node) => node.count > 0);
+  const indexedFile = smallFileNodes[1];
+  if (!indexedFile) throw new Error("test tree is missing mesh instance 1");
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(<MapScene {...props} nodes={smallNodes} snapshot={snapshot} onSelect={onSelect} />);
+  act(() => vi.advanceTimersByTime(100));
+
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  expect(points.visible).toBe(false);
+  expect(spheres.visible).toBe(true);
+  const pointRaycast = vi.spyOn(points, "raycast");
+  const meshRaycast = vi.spyOn(spheres, "raycast").mockImplementation((_, hits) => {
+    hits.push({
+      distance: 0,
+      instanceId: 1,
+      object: spheres,
+      point: new THREE.Vector3(),
+    });
+  });
+  const canvas = screen.getByRole("application");
+  Object.assign(canvas, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    bottom: 900,
+    height: 900,
+    left: 0,
+    right: 1440,
+    toJSON() {},
+    top: 0,
+    width: 1440,
+    x: 0,
+    y: 0,
+  });
+
+  fireEvent.pointerDown(canvas, { clientX: 720, clientY: 450 });
+  fireEvent.pointerUp(canvas, { clientX: 720, clientY: 450 });
+  expect(meshRaycast).toHaveBeenCalled();
+  expect(pointRaycast).not.toHaveBeenCalled();
+  expect(onSelect).toHaveBeenCalledWith(indexedFile.path);
+  fireEvent.pointerMove(canvas, { clientX: 720, clientY: 450 });
+  act(() => vi.advanceTimersByTime(40));
+  expect(screen.getByRole("tooltip").textContent).toContain(indexedFile.path);
 });
 
 /* Superseded by the seat-light architecture merged from main.
