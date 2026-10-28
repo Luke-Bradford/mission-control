@@ -214,6 +214,7 @@ export const ACTIONS = {
   notificationPreferences: RESOURCES.notificationPreferences.path,
   notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
+  commsSend: "/api/comms",
   addAccount: "/api/accounts",
   account: (id: string) => `/api/accounts/${enc(id)}`,
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
