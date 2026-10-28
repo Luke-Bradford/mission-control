@@ -306,6 +306,38 @@ export interface AgentSeries {
  * input + output unless named otherwise.
  */
 export interface Telemetry {
+  /** Raw, bounded observations for the Instrument charts. Missing observations are never made up. */
+  series?: {
+    /** State intervals are clipped to the requested range. A terminal span ends at its last observation, never request time. */
+    stateSpans: {
+      agentId: AgentId;
+      state: "running" | "waiting" | "parked" | "idle";
+      startedAt: number;
+      endedAt: number;
+    }[];
+    /** Quota samples keep natural gaps; reset rows mark a newly observed provider reset window. */
+    quota: {
+      accountId: AccountId;
+      window: "5h" | "7d";
+      alertAt: number;
+      stopAt: number;
+      points: { at: number; pct: number }[];
+      resets: { at: number; resetAt: number; cause: string }[];
+    }[];
+    /** The board and run facts used to plot a ticket's cycle in hours. Null means that fact was not observed. */
+    tickets: {
+      ticket: string;
+      readyAt: number | null;
+      startedAt: number | null;
+      mergedAt: number | null;
+      doneAt: number | null;
+    }[];
+    annotations: {
+      at: number;
+      kind: "crew-paused" | "crew-resumed" | "hub-update" | "quota-reset";
+      cause: string;
+    }[];
+  };
   /** The range's crew runs by loop step, pro rata like `tokensByTicket`; all three steps are sent. */
   tokensByStep?: {
     step: "plan" | "build" | "review";

@@ -14,6 +14,7 @@ import type {
 import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { writeCrewPause } from "../src/crew-pause.ts";
 import { NO_LOCK } from "../src/hud.ts";
 import { overviewSummary } from "../src/overview.ts";
 import { Store } from "../src/store.ts";
@@ -532,6 +533,190 @@ describe("agents", () => {
 });
 
 describe("capacity", () => {
+  it("serves bounded chart series without inventing state or quota observations", () => {
+    const since = NOW - 6 * HOUR;
+    store.addAgentEvent({
+      agentId: "shop-app-ta",
+      at: since - HOUR,
+      from: "idle",
+      to: "running",
+      text: "started before range",
+    });
+    store.addAgentEvent({
+      agentId: "shop-app-ta",
+      at: since + HOUR,
+      from: "running",
+      to: "waiting",
+      text: "waiting",
+    });
+    store.addAgentEvent({
+      agentId: "shop-app-ta",
+      at: since + 2 * HOUR,
+      from: "waiting",
+      to: "parked",
+      text: "parked",
+    });
+    store.addAgentEvent({
+      agentId: "shop-app-ta",
+      at: since + 3 * HOUR,
+      from: "parked",
+      to: "idle",
+      text: "idle",
+    });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since + HOUR,
+      pct: 40,
+      resetAt: NOW + HOUR,
+      source: "oauth",
+    });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since + 3 * HOUR,
+      pct: 5,
+      resetAt: NOW + 6 * HOUR,
+      source: "oauth",
+    });
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 42, size: "S", startAt: since, doneAt: since + 4 * HOUR }],
+      [],
+    );
+    store.upsertRun(run({ id: "ticket-run", ticket: "shop-app#42", startedAt: since + HOUR }));
+    store.replacePullRequests(
+      "shop-app",
+      [{ ...pr(9, since + 3 * HOUR), ticket: "shop-app#42" }],
+      NOW,
+    );
+    store.addHubEvent("Updated to abc (auto)", since + 2 * HOUR);
+    writeCrewPause(
+      store,
+      { seats: "all", reason: "operator break", at: since + 4 * HOUR, by: "operator" },
+      since + 4 * HOUR,
+    );
+    writeCrewPause(store, null, since + 5 * HOUR);
+
+    expect(tel("6h", NOW).series).toEqual({
+      stateSpans: [
+        { agentId: "shop-app-ta", state: "running", startedAt: since, endedAt: since + HOUR },
+        {
+          agentId: "shop-app-ta",
+          state: "waiting",
+          startedAt: since + HOUR,
+          endedAt: since + 2 * HOUR,
+        },
+        {
+          agentId: "shop-app-ta",
+          state: "parked",
+          startedAt: since + 2 * HOUR,
+          endedAt: since + 3 * HOUR,
+        },
+        // The current idle state is only observed at its transition; it must not be drawn to now.
+        {
+          agentId: "shop-app-ta",
+          state: "idle",
+          startedAt: since + 3 * HOUR,
+          endedAt: since + 3 * HOUR,
+        },
+      ],
+      quota: [
+        {
+          accountId: "claude-main",
+          window: "5h",
+          alertAt: 85,
+          stopAt: 95,
+          points: [
+            { at: since + HOUR, pct: 40 },
+            { at: since + 3 * HOUR, pct: 5 },
+          ],
+          resets: [{ at: since + 3 * HOUR, resetAt: NOW + 6 * HOUR, cause: "oauth" }],
+        },
+      ],
+      tickets: [
+        {
+          ticket: "shop-app#42",
+          readyAt: since,
+          startedAt: since + HOUR,
+          mergedAt: since + 3 * HOUR,
+          doneAt: since + 4 * HOUR,
+        },
+      ],
+      annotations: [
+        { at: since + 2 * HOUR, kind: "hub-update", cause: "Updated to abc (auto)" },
+        { at: since + 3 * HOUR, kind: "quota-reset", cause: "oauth" },
+        { at: since + 4 * HOUR, kind: "crew-paused", cause: "Crew paused: operator break" },
+        { at: since + 5 * HOUR, kind: "crew-resumed", cause: "Crew resumed" },
+      ],
+    });
+  });
+
+  it("keeps the complete lifecycle of a ticket done in range and omits future annotations", () => {
+    const since = NOW - 6 * HOUR;
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 43,
+          size: "S",
+          startAt: since - 4 * HOUR,
+          doneAt: NOW - HOUR,
+        },
+      ],
+      [],
+    );
+    store.upsertRun(
+      run({
+        id: "early-ticket-run",
+        ticket: "shop-app#43",
+        startedAt: since - 3 * HOUR,
+        endedAt: since - 2 * HOUR,
+      }),
+    );
+    store.replacePullRequests(
+      "shop-app",
+      [{ ...pr(10, since - 2 * HOUR), ticket: "shop-app#43" }],
+      NOW,
+    );
+    store.addHubEvent("Updated to inside (manual)", NOW - HOUR);
+    store.addHubEvent("Updated to future (manual)", NOW + HOUR);
+
+    expect(tel("6h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#43",
+        readyAt: since - 4 * HOUR,
+        startedAt: since - 3 * HOUR,
+        mergedAt: since - 2 * HOUR,
+        doneAt: NOW - HOUR,
+      },
+    ]);
+    expect(tel("6h", NOW).series?.annotations).toEqual([
+      { at: NOW - HOUR, kind: "hub-update", cause: "Updated to inside (manual)" },
+    ]);
+  });
+
+  it("does not attach a future merge to a ticket completed in range", () => {
+    const since = NOW - 6 * HOUR;
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 44, size: "S", startAt: since - HOUR, doneAt: NOW - HOUR }],
+      [],
+    );
+    store.replacePullRequests("shop-app", [{ ...pr(11, NOW + HOUR), ticket: "shop-app#44" }], NOW);
+
+    expect(tel("6h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#44",
+        readyAt: since - HOUR,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - HOUR,
+      },
+    ]);
+  });
+
   it("quota points per account window in range", () => {
     const sample = (accountId: string, window: "5h" | "7d", atMs: number, pct: number) =>
       store.addUsage({ accountId, window, at: atMs, pct, resetAt: NOW + DAY, source: "x" });
