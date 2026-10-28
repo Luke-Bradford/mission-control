@@ -1386,7 +1386,6 @@ describe("guard hits", () => {
       "git-write": 2,
       "git-env": 0,
       "codex-allowlist": 0,
-      "codex-seat-floor": 0,
       "gh-cli": 0,
       "merge-push": 0,
       "flight-powers": 0,

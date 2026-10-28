@@ -203,7 +203,7 @@ describe("GUARD_RULES", () => {
     );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
