@@ -45,6 +45,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run --project server --shard=${{ matrix.shard }}/2
 
+  server-process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run --project server-process
+
   web-core:
     runs-on: ubuntu-latest
     steps:
@@ -61,10 +75,11 @@ jobs:
 
   check:
     if: ${{ always() }}
-    needs: [validate, server, web-core]
+    needs: [validate, server, server-process, web-core]
     runs-on: ubuntu-latest
     steps:
       - run: |
           test "${{ needs.validate.result }}" = success
           test "${{ needs.server.result }}" = success
+          test "${{ needs.server-process.result }}" = success
           test "${{ needs.web-core.result }}" = success
