@@ -20,6 +20,8 @@ export interface LineSeries {
   color: string;
   /** Oldest first; a null value breaks the line. */
   points: { at: number; v: number | null }[];
+  /** A forecast rather than an observed trace. */
+  dash?: string;
 }
 
 const pct = (v: number): string => `${Math.round(v)}%`;
@@ -138,7 +140,9 @@ export function LineChart({
         ? `${s.name} latest ${pct(last.v)}, peak ${pct(Math.max(...vs.map((p) => p.v)))}`
         : `${s.name} no readings`;
     })
-    .join("; ")}${
+    .join(
+      "; ",
+    )}${guides.length ? `; thresholds ${guides.map((guide) => guide.label).join(", ")}` : ""}${
     visibleAnnotations.length
       ? `; events ${visibleAnnotations.map((annotation) => `${at(annotation.at)} ${annotation.label}`).join(", ")}`
       : ""
@@ -249,6 +253,7 @@ export function LineChart({
               d={path(s)}
               fill="none"
               stroke={s.color}
+              strokeDasharray={s.dash}
               strokeWidth={1.5}
               strokeLinejoin="round"
               strokeLinecap="round"
@@ -310,6 +315,12 @@ export function LineChart({
               };
             })
             .concat(
+              guides.map((guide) => ({
+                key: `guide:${guide.label}`,
+                name: "Threshold",
+                color: guide.color ?? "var(--warn)",
+                value: guide.label,
+              })),
               visibleAnnotations
                 .filter((annotation) => annotation.at === hover)
                 .map((annotation) => ({

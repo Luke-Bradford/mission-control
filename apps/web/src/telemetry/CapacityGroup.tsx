@@ -118,15 +118,53 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         ]
       : [];
   });
+  const quotaForecastLines: LineSeries[] = quota.flatMap(({ q, color }) => {
+    const row = limits.find(
+      (limit) => limit.accountId === q.accountId && limit.window === q.window,
+    );
+    const last = q.points.at(-1);
+    // Only the server's 7d projection is used: no client-side pace is invented.
+    return row?.window === "7d" && last && row.projected !== null
+      ? [
+          {
+            id: `${q.accountId}:${q.window}:forecast`,
+            name: `${q.accountId} ${q.window} projected`,
+            color,
+            dash: "4 3",
+            points: [
+              { at: last.at, v: last.pct },
+              { at: row.resetAt, v: row.projected },
+            ],
+          },
+        ]
+      : [];
+  });
   const quotaResetEvents = [
     ...quotaResets,
     ...quota.flatMap(({ q }) => {
       const row = limits.find(
         (limit) => limit.accountId === q.accountId && limit.window === q.window,
       );
-      return row ? [{ at: row.resetAt, label: `${q.accountId} ${q.window} reset` }] : [];
+      return row
+        ? [
+            { at: row.resetAt, label: `${q.accountId} ${q.window} reset` },
+            ...(row.stopForecast === null
+              ? []
+              : [{ at: row.stopForecast, label: `${q.accountId} ${q.window} stop forecast` }]),
+            ...(row.fullAt === null
+              ? []
+              : [{ at: row.fullAt, label: `${q.accountId} ${q.window} full forecast` }]),
+          ]
+        : [];
     }),
   ];
+  const quotaTo = Math.max(now, ...limits.map((row) => row.resetAt));
+  const quotaChart = {
+    ...chart,
+    to: quotaTo,
+    xLabels: [`-${scope.range}`, quotaTo === now ? "now" : "reset"] as [string, string],
+    live: quotaTo === now && scope.live,
+  };
   const machine = t?.machine ?? [];
   const machineLines: LineSeries[] = [
     {
@@ -153,14 +191,14 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         ) : (
           <div className="pb">
             <LineChart
-              series={quotaLines}
+              series={[...quotaLines, ...quotaForecastLines]}
               max={110}
               ticks={[0, 50, 100]}
               limit
               annotations={quotaResetEvents}
               guides={quotaGuides}
               label="Quota used"
-              {...chart}
+              {...quotaChart}
             />
             <Legend items={quotaLegend} />
           </div>

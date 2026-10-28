@@ -193,6 +193,10 @@ describe("LineChart", () => {
         xLabels={["start", "now"]}
         at={(ms) => `${ms}`}
         annotations={[{ at: 100, label: "quota reset" }]}
+        guides={[
+          { value: 80, label: "alert 80%" },
+          { value: 95, label: "stop 95%" },
+        ]}
       />,
     );
     const line = container.querySelector("path.line")?.getAttribute("d") ?? "";
@@ -200,8 +204,10 @@ describe("LineChart", () => {
     expect(container.querySelector(".annotation")?.textContent).toBe("quota reset");
     const svg = container.querySelector("svg") as SVGSVGElement;
     expect(svg.getAttribute("aria-label")).toContain("events 100 quota reset");
+    expect(svg.getAttribute("aria-label")).toContain("thresholds alert 80%, stop 95%");
     fireEvent.focus(svg);
     expect(container.querySelector(".tip")?.textContent).toContain("Eventquota reset");
+    expect(container.querySelector(".tip")?.textContent).toContain("Thresholdalert 80%");
   });
 
   it("shares a keyboard crosshair with the other time charts in its workspace", () => {

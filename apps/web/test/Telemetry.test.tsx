@@ -17,7 +17,17 @@ import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, HOUR, limit5h, METRICS_VIEW, MIN, NOW, seatRow } from "./fixtures.ts";
+import {
+  boardItem,
+  CONFIG,
+  HOUR,
+  limit5h,
+  limit7d,
+  METRICS_VIEW,
+  MIN,
+  NOW,
+  seatRow,
+} from "./fixtures.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -836,6 +846,33 @@ describe("Capacity and cost", () => {
     expect(quota.querySelector("path.line")?.getAttribute("d")?.match(/M/g)).toHaveLength(2);
     expect(quota.textContent).toContain("claude-main alert 85%");
     expect(quota.textContent).toContain("claude-main stop 95%");
+  });
+
+  it("draws the server projection through reset and labels its forecasts", async () => {
+    const data = tel({
+      quota: [{ accountId: "codex-main", window: "7d", points: [{ at: NOW - MIN, pct: 41 }] }],
+    });
+    stubFetch({
+      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.metrics().path]: METRICS_VIEW,
+      [RESOURCES.limits.path]: [
+        limit7d({
+          accountId: "codex-main",
+          projected: 84,
+          stopForecast: NOW + HOUR,
+          fullAt: NOW + 2 * HOUR,
+        }),
+      ],
+    });
+    render(<Telemetry />);
+    await screen.findByText("61.2k");
+    const quota = panel("tQuota");
+    expect(quota.querySelectorAll("path.line")).toHaveLength(2);
+    expect(quota.querySelectorAll("path.line")[1]?.getAttribute("stroke-dasharray")).toBe("4 3");
+    expect(quota.textContent).toContain("codex-main 7d reset");
+    expect(quota.textContent).toContain("codex-main 7d stop forecast");
+    expect(quota.textContent).toContain("codex-main 7d full forecast");
   });
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
