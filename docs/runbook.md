@@ -789,9 +789,10 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 ```
 
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
-and lets the run go on to merge. It is deliberately different from a message to the seat, which sends
-the findings back to the author for rework. The HUD's named waiver and rework actions arrive with #828;
-until then, use this route to waive.
+and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
+action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
+the configured review-round cap for a head, optionally adding a short fix list; a second grant for
+that head is left to the controller.
 
 This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
