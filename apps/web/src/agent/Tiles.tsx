@@ -7,8 +7,8 @@ import {
   type LimitRow,
   type RunLoopView,
 } from "@mc/core";
-import { Children, isValidElement, type ReactNode, useEffect, useRef } from "react";
-import { useTz } from "../clock.ts";
+import { Children, isValidElement, type ReactNode, useEffect } from "react";
+import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import {
   contextPct,
@@ -91,18 +91,17 @@ const compactionsText = (d: CrewRow["digest"]): string =>
 function SeatContext({ row }: { row: CrewRow }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
-  const ref = RESOURCES.seatContext(row.id);
-  const usage = useResource<ContextUsage | null>(ref).data ?? null;
   const running = seatTurn(row) === "running";
-  const wasRunning = useRef(running);
-  // The last reading stays up in between; ask again every interval while running, once at turn end.
+  const contextRef = RESOURCES.seatContext(row.id);
+  const ref = running ? contextRef : null;
+  const usage = useResource<ContextUsage | null>(ref).data ?? null;
+  // Context asks the live CLI, which refuses without an active session. The crew-row summary is
+  // the truthful fallback for stopped, parked, and review seats.
   useEffect(() => {
-    if (wasRunning.current && !running) hub.refetch(ref.path);
-    wasRunning.current = running;
     if (!running) return;
-    const timer = setInterval(() => hub.refetch(ref.path), SEAT_CONTEXT_REFRESH_MS);
+    const timer = setInterval(() => hub.refetch(contextRef.path), SEAT_CONTEXT_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [running, ref.path]);
+  }, [running, contextRef.path]);
   const tail = compactionsText(row.digest);
   const window = usage?.window ?? row.contextWindow;
   if (codex || !usage || window === null || window <= 0) {
@@ -147,14 +146,33 @@ function SeatContext({ row }: { row: CrewRow }) {
 }
 
 /** The header's tiles (catalogue 2.4.3), from the agent's latest run and its digest. */
-export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; now: number }) {
+export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; now?: number }) {
+  const ticking = now === undefined && row.run?.status === "running";
+  if (!ticking) return <TilesBody row={row} limits={limits} current={now ?? Date.now()} />;
+  return <TickingTiles row={row} limits={limits} />;
+}
+
+function TickingTiles({ row, limits }: { row: CrewRow; limits: LimitRow[] }) {
+  const tick = useSecond();
+  return <TilesBody row={row} limits={limits} current={tick} />;
+}
+
+function TilesBody({
+  row,
+  limits,
+  current,
+}: {
+  row: CrewRow;
+  limits: LimitRow[];
+  current: number;
+}) {
   const run = row.run;
   const d = row.digest;
   const pct = contextPct(row);
   const t = run?.tokens ?? null;
   const hit = t ? cacheHitPct(t) : null;
   const quota = limits.filter((l) => l.accountId === row.accountId);
-  const elapsed = run ? runElapsed(run, now) : null;
+  const elapsed = run ? runElapsed(run, current) : null;
   const tz = useTz();
   const running = run?.status === "running";
   const loopView = useResource<RunLoopView>(
@@ -162,11 +180,11 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
   ).data;
   const stepTry = loopView?.tries?.findLast((t) => t.step === row.loop?.phase);
   const stepElapsed = stepTry
-    ? Math.max(0, (stepTry.endedAt ?? run?.endedAt ?? now) - stepTry.startedAt)
+    ? Math.max(0, (stepTry.endedAt ?? run?.endedAt ?? current) - stepTry.startedAt)
     : null;
   /** The Now line's hover text: the ticket's title, else (no ticket, not running) the run's summary. */
   const nowTitle = row.ticket ? row.ticketTitle : running ? null : row.summary;
-  const activity = seatActivity(row, now);
+  const activity = seatActivity(row, current);
   const files = useResource<ChangedFiles>(RESOURCES.files(row.id)).data ?? null;
   const speed = d?.speed ?? null;
   const counted = files?.files.filter((f) => f.add !== null || f.del !== null) ?? null;
@@ -208,7 +226,7 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
               <>
                 last run #{run.seq} · took{" "}
                 <span className="num">{elapsed === null ? DASH : dur(elapsed)}</span> · ended{" "}
-                {run.endedAt !== null && tz ? rel(run.endedAt, now, tz) : DASH}
+                {run.endedAt !== null && tz ? rel(run.endedAt, current, tz) : DASH}
               </>
             ) : run ? (
               <>

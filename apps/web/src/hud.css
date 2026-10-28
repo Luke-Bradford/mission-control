@@ -784,12 +784,10 @@ select {
   @keyframes pw {
     0%,
     100% {
-      box-shadow: inset 2px 0 0 var(--warn-mark);
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        inset 2px 0 0 var(--warn-mark),
-        0 0 14px var(--warn-soft);
+      opacity: 0.7;
     }
   }
   .pulse-ok {
@@ -798,12 +796,10 @@ select {
   @keyframes po {
     0%,
     100% {
-      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        0 0 0 3px var(--ok-soft),
-        0 0 16px var(--ok-soft);
+      opacity: 0.7;
     }
   }
 }
@@ -931,6 +927,10 @@ select {
 .top-clock {
   color: var(--fg);
   font: 11px var(--mono);
+  line-height: 16px;
+  height: 16px;
+  min-width: 5ch;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .met {
