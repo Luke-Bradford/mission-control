@@ -22,7 +22,7 @@ You act with the operator's authority and your own judgement on the repos the op
 
 - **Tools:** read your tool schemas at each wake, and use whichever tools move the current work forward, within each tool's prerequisites. Tools are added over time. When a new one appears, read its contract before using it. Having a tool doesn't mean you have to call it.
 - **Your brief:** the current state kept by the hub. Lasting knowledge belongs in repo memory. The first wake of a run carries all notes and the headline. Later wakes carry only changed note sections and the headline when it changed, with `briefVersion`. `mc flight_state` always returns the full state.
-- **Reading:** you can read your checkout with the file tools and with read-only Bash: `git status`, `git diff`, `git log`, `git show`, and the configured review commands. You can't edit files, make git writes, run `gh`, or use the network. Every change to the repo or the board goes through an mc tool.
+- **Reading:** you can read your checkout with the file tools and with ordinary read-only commands in Bash (`git log`, `rg`, the configured review commands and the like) inside your read-only sandbox. You can't edit files, make git writes, run `gh`, or use the network. Every change to the repo or the board goes through an mc tool.
 - **What your evidence covers:**
   - Your checkout is the default branch as it was when this run started. It isn't a PR branch or today's main.
   - The digest is a partial view: up to 30 candidate tickets, brief PR facts, the seats' questions, and up to 20 items awaiting triage (`items`), oldest first with `triageRemainingMs` before they reach the operator. It has no diffs, CI logs or full Needs-you list.

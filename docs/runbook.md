@@ -524,20 +524,27 @@ and its first live runs, not by a preview.
 
 ### What a seat can do
 
-A writer seat can do these things and nothing else:
-- edit files in its area with Edit and Write (never the protected files, below);
-- run `pnpm -s lint`, `typecheck`, `test`, `build` and `vitest` (with any arguments);
-- read with `git status`, `diff`, `log` and `show`;
-- call the mc tools: `commit`, `report_evidence` and `ask_operator` (the engine pushes and opens the
-  draft PR after a report).
+Seats run ordinary local commands inside their OS sandbox; the repo's configured commands are its
+validation commands, named in the brief, not an allowlist. What holds a seat is a short list of
+hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/2026-10-26-outcome-based-seat-guards.md)):
 
-A read-only seat (RETRO) reads, runs `pnpm -s vitest`, and asks questions (its `report_evidence`
-refuses: read-only runs have no loop).
+- **Sandbox:** no secrets, no home folder and no other seat's worktree (OS sandbox for Claude, the
+  permission profile for Codex), and no network.
+- **Area:** a writer's Edit and Write stay in its area and off the protected files, and `mc commit`
+  refuses changes outside it; shell commands can touch other files in the worktree, so the seat
+  reverts those before committing. A read-only seat (RETRO, FLIGHT) cannot write its checkout.
+- **Git:** no git writes; a seat commits with `mc commit` and brings main in with `mc sync_main`,
+  and the engine pushes and opens the draft PR after a report. Its sandbox cannot write the
+  clone's git dirs either.
+- **GitHub:** no `gh` at all; GitHub goes through Mission Control.
+- **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
+  (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
+  a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
+- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time.
+  This covers the commands the guard sees; a process a seat starts some other way is not covered.
+- **Unreadable lines:** a command line the guard cannot read to the end is refused.
 
-A seat cannot run `git push`, `git commit` or any other git write itself, and its allowlist has no
-`gh` at all. The guard refuses a typed git or gh write by name and records a hit
-(`/api/guard/hits`, Comms › Guard). Code a seat runs fails too: its sandbox cannot write the
-clone's git dirs.
+Each refusal is recorded as a guard hit (`/api/guard/hits`, Comms › Guard).
 
 ### A looped run, step by step
 

@@ -22,6 +22,23 @@ import { CODEX_MCP_ELICITATION, type CodexSessionInput } from "./codex-session.t
 
 const REFUSAL_DETAIL_MAX = 200;
 
+/**
+ * Codex's request to run a command outside the seat's sandbox. On codex-cli 0.154.0 the command
+ * approval params (`codex app-server generate-ts`: `CommandExecutionRequestApprovalParams`) carry
+ * no sandbox or escalation field. Probed through app-server with a local fake model
+ * (docs/spikes/2026-10-24-codex-seat-confinement.md, "Escalation probe"): an ordinary command's
+ * approval has no `reason`; a model call with `sandbox_permissions: "require_escalated"` arrives as
+ * an otherwise identical first approval whose `reason` is the model's own free-text justification;
+ * and the binary holds a sandbox-retry prompt, "command failed; retry without sandbox?", for a
+ * further approval of the same item (the probe's denied commands never raised one). The only other
+ * source of a reason is an execpolicy prompt rule ("`…` requires
+ * approval by policy"), and a seat's CODEX_HOME has no rules. So the hub refuses any command
+ * approval that carries a reason, and any second command approval for an item it was already
+ * asked about.
+ */
+const CODEX_COMMAND_APPROVAL = "item/commandExecution/requestApproval";
+export const CODEX_ESCALATION_TEXT = "Codex asked to run a command outside the seat's sandbox";
+
 export function createCodexApprover(i: {
   config: CcConfig;
   repoId: string;
@@ -36,6 +53,8 @@ export function createCodexApprover(i: {
   seatGrants?: (seatId: string) => readonly string[];
   runGrants?: () => readonly string[];
 }): CodexSessionInput["approve"] {
+  // Command items this approver was asked about: a second request for one is a sandbox retry.
+  const commandItems = new Set<string>();
   return async (req, paths, signal) => {
     const params = isObj(req.params) ? req.params : {};
     const detail =
@@ -53,6 +72,12 @@ export function createCodexApprover(i: {
     };
     // The driver also calls here with an already-aborted signal to audit forced refusals.
     if (signal.aborted) return refuse("codex-allowlist");
+    if (req.method === CODEX_COMMAND_APPROVAL) {
+      const item = typeof params.itemId === "string" ? params.itemId : null;
+      const again = item !== null && commandItems.has(item);
+      if (item !== null) commandItems.add(item);
+      if (again || params.reason != null) return refuse("codex-allowlist", CODEX_ESCALATION_TEXT);
+    }
     const repo = i.config.repos.find((r) => r.id === i.repoId);
     const seatGrants =
       i.runGrants?.() ?? i.seatGrants?.(i.seatId) ?? crewSeatGrants(i.config, i.seatId);

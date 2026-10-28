@@ -777,6 +777,7 @@ describe("startReview", () => {
         since: false,
         touches: [],
         commands: [],
+        fullSuite: [],
       }),
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;

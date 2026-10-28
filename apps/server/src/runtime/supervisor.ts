@@ -153,7 +153,8 @@ import {
   type Store,
 } from "../store.ts";
 import {
-  readRepoClaudeMd,
+  type RepoDocs,
+  readRepoDocs,
   repoReferenceIndex,
   reviewBrief,
   rolePrompt,
@@ -1255,7 +1256,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     cliSessionId: string,
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
-    claudeMd: string | null,
+    repoDocs: RepoDocs | null,
     references = "",
     keepPrompt = false,
     beforeLaunch?: () => Run | undefined,
@@ -1289,7 +1290,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (bindingProblem) throw new SupervisorError(409, bindingProblem);
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
-    return launch(info, run, cliSessionId, checkout, resume, claudeMd, references, keepPrompt);
+    return launch(info, run, cliSessionId, checkout, resume, repoDocs, references, keepPrompt);
   }
 
   function launch(
@@ -1298,7 +1299,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     cliSessionId: string,
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
-    claudeMd: string | null,
+    repoDocs: RepoDocs | null,
     references = "",
     keepPrompt = false,
   ): Live {
@@ -1325,7 +1326,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if ((!resume && !keepPrompt) || !existsSync(promptPath)) {
       if (resume) {
         log(
-          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index`,
+          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md, AGENTS.md or reference index`,
         );
       }
       // The role's prompt becomes the system prompt: only a file whose real path is in the roles folder.
@@ -1361,7 +1362,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               .join("\n");
       writeFileSync(
         promptPath,
-        rolePrompt(roleBrief, claudeMd, [advice, references].filter(Boolean).join("\n\n")),
+        rolePrompt(
+          roleBrief,
+          repoDocs?.claudeMd ?? null,
+          [advice, references].filter(Boolean).join("\n\n"),
+          repoDocs?.agentsMd ?? null,
+        ),
         {
           mode: 0o600,
         },
@@ -2812,7 +2818,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const title = ticket.title;
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
-      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
+      const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
         const where = {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2836,7 +2842,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               });
         return {
           checkout: c,
-          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -2954,7 +2960,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd, references);
+        l = await checkedLaunch(info, run, cliSessionId, checkout, false, repoDocs, references);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -3053,7 +3059,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     starting.add(seatId);
     try {
       // No ticket and no branch: a detached checkout of the default branch, for reading only.
-      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
+      const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
         const c = await prepareDetachedCheckout({
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -3063,7 +3069,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         return {
           checkout: c,
-          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -3105,7 +3111,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           { path: checkout.path, branch: "", gitDir: checkout.gitDir },
           false,
-          claudeMd,
+          repoDocs,
           references,
         );
       } catch (e) {
@@ -3238,7 +3244,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, claudeMd, references } = await inClone(checkout, async () => {
+      const { scratch, inputs, repoDocs, references } = await inClone(checkout, async () => {
         const s = await prepareScratch({
           checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -3252,7 +3258,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return {
             scratch: s,
             inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            claudeMd: await readRepoClaudeMd(checkout, s.baseSha),
+            repoDocs: await readRepoDocs(checkout, s.baseSha),
             references: await repoReferenceIndex(checkout, s.baseSha),
           };
         } catch (e) {
@@ -3304,7 +3310,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           { path: scratch.path, branch: "", gitDir: scratch.gitDir },
           false,
-          claudeMd,
+          repoDocs,
           references,
         );
       } catch (e) {
@@ -3376,6 +3382,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
+        fullSuite: info.repo.fullSuite ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       await session.ready;

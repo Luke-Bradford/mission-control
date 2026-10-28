@@ -23,6 +23,7 @@ import {
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  commsCutMarker,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
@@ -42,6 +43,7 @@ import {
   fixKey,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
+  MC_COMMS_READ_MAX,
   MC_PLAN_ALREADY,
   MC_PLAN_BODY_UNCLOSED,
   MC_PLAN_GH_FAILED,
@@ -61,6 +63,7 @@ import {
   MC_RUN_ENDED,
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
+  MC_TEXT_MAX,
   MC_TOOL_GRANTS,
   MC_TOOL_NAMES,
   MC_TOOLS,
@@ -1200,6 +1203,88 @@ describe("Comms seat tools", () => {
     ]);
     expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
+
+  it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
+    const own = store.addComms({
+      at: NOW - 6,
+      from: "guido-1",
+      to: "retro",
+      ticket: null,
+      text: "mine",
+    });
+    store.addComms({ at: NOW - 5, from: "retro", to: "crew", ticket: null, text: "crew" });
+    const pinned = store.addComms({
+      at: NOW - 4,
+      from: "guido-2",
+      to: "retro",
+      ticket: null,
+      text: "pinned private",
+    });
+    store.addComms({
+      at: NOW - 3,
+      from: "retro",
+      to: "guido-2",
+      ticket: null,
+      text: "reply to mine",
+      replyTo: own?.id,
+    });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    if (own === null || pinned === null) throw new Error("expected stored rows");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
+    const pins = vi.spyOn(store, "commsPins");
+    try {
+      const parsed = JSON.parse((await read({})).text) as {
+        messages: { text: string; pinned: boolean }[];
+      };
+      expect(parsed.messages.map((m) => [m.text, m.pinned])).toEqual([
+        ["mine", false],
+        ["crew", false],
+        ["pinned private", true],
+        ["reply to mine", false],
+      ]);
+      // the pins are read once per call, not once per row
+      expect(pins).toHaveBeenCalledTimes(1);
+    } finally {
+      pins.mockRestore();
+    }
+  });
+
+  it("cuts each message's text at MC_TEXT_MAX with the stored-text marker", async () => {
+    const long = "é".repeat(MC_TEXT_MAX + 5);
+    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: null, text: long });
+    const parsed = JSON.parse((await read({})).text) as { messages: { text: string }[] };
+    expect(parsed.messages[0]?.text).toBe(
+      `${"é".repeat(MC_TEXT_MAX)}${commsCutMarker(MC_TEXT_MAX, MC_TEXT_MAX + 5)}`,
+    );
+  });
+
+  it("keeps the result under MC_COMMS_READ_MAX by leaving out the oldest messages, and says so", async () => {
+    for (let n = 0; n < 30; n++)
+      store.addComms({
+        at: NOW - 100 + n,
+        from: "retro",
+        to: "crew",
+        ticket: null,
+        text: `${n} ${"x".repeat(MC_TEXT_MAX)}`,
+      });
+    const result = await read({ limit: 100 });
+    expect(result.text.length).toBeLessThanOrEqual(MC_COMMS_READ_MAX);
+    const parsed = JSON.parse(result.text) as {
+      omitted: number;
+      note: string;
+      messages: { text: string }[];
+    };
+    expect(parsed.omitted).toBeGreaterThan(0);
+    expect(parsed.omitted + parsed.messages.length).toBe(30);
+    expect(parsed.note).toBe(
+      `${parsed.omitted} older messages were left out to keep this under ${MC_COMMS_READ_MAX} characters.`,
+    );
+    // the newest survive
+    expect(parsed.messages.at(-1)?.text.startsWith("29 ")).toBe(true);
+    expect(parsed.messages[0]?.text.startsWith(`${parsed.omitted} `)).toBe(true);
+    // a small read has no note
+    expect(JSON.parse((await read({ limit: 2 })).text)).not.toHaveProperty("omitted");
   });
 
   it("persists every supported destination, label, ref, reply and mention", async () => {

@@ -1,30 +1,24 @@
 /** Codex seat confinement: the server owns filesystem checks; core supplies pure parsing. */
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
-  bashEntries,
   CODEX_MIN_VERSION,
   CODEX_PROJECT_DOC_CONFIG,
-  CODEX_READ_COMMANDS,
   CODEX_SEAT_PROFILE,
   CODEX_SEAT_TOKEN_ENV,
   type CrewMode,
   type CrewSandboxInput,
   codexCommand,
-  codexGitReadCommand,
-  codexLineCommands,
-  codexReadCommand,
-  DENIED_TOOLS,
-  GIT_READ_TOOLS,
   type GuardEvent,
   isProtectedPath,
   MC_MCP_SERVER,
   pathInArea,
-  type SeatCommands,
   sandboxReadDenies,
-  seatCommands,
   tomlString,
 } from "@mc/core";
+
+/** The project config folder Codex loads from a thread's cwd: never writable by a seat. */
+export const CODEX_PROJECT_DIR = ".codex";
 
 /** The hub-written config in one run's isolated CODEX_HOME. */
 export function codexSeatConfig(
@@ -78,6 +72,12 @@ export function codexSeatConfig(
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
     grant(".", mode === "read-only" ? "read" : "write"),
     grant(".git", "read"),
+    // codex-cli 0.154.0's thread/start trusts its cwd (it appends `[projects."<cwd>"] trust_level =
+    // "trusted"` to this CODEX_HOME's config.toml) and then loads `<cwd>/.codex/config.toml`, hooks
+    // and exec policies, which could widen this very profile on the next start or resume. Codex's
+    // sandbox already keeps `.codex` (like `.git` and `.agents`) read-only inside a writable root;
+    // this says so explicitly rather than rely on that default (docs/spikes/2026-10-24-codex-seat-confinement.md).
+    grant(CODEX_PROJECT_DIR, "read"),
     `[permissions.${CODEX_SEAT_PROFILE}.network]`,
     "enabled = false",
     "",
@@ -185,68 +185,6 @@ export function codexApproval(
     return null;
   const script = codexCommand(p.command, parsed == null ? null : (parsed as string[]));
   return script === null ? null : [{ tool: "Bash", input: { command: script } }];
-}
-
-/** Match the existing CLI's Bash permission entries, including the --output* denies. */
-function codexBashEntry(argv: readonly string[], entry: string): boolean {
-  if (!entry.startsWith("Bash(")) return false;
-  const pattern = entry.slice(5, -1).replace(/:\*$/, "");
-  const words = pattern.split(" ");
-  return (
-    argv.length >= words.length &&
-    words.every((w, n) => (w.endsWith("*") ? argv[n].startsWith(w.slice(0, -1)) : argv[n] === w))
-  );
-}
-
-export function codexCommandAllowed(
-  script: string,
-  mode: CrewMode,
-  commands: SeatCommands,
-  approvalCwd: string,
-  root: string,
-): boolean {
-  if (
-    [...script].some(
-      (c) => c !== "\n" && c !== "\t" && (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
-    )
-  )
-    return false;
-  let allowed: readonly string[];
-  let cwd: string;
-  try {
-    if (!isAbsolute(approvalCwd)) return false;
-    cwd = realpathSync.native(approvalCwd);
-    if (!codexReadAllowed(cwd, root)) return false;
-    allowed = bashEntries(seatCommands(mode, commands));
-  } catch {
-    return false;
-  }
-  const parsed = codexLineCommands(script);
-  if (parsed === null) return false;
-  const allowedPath = (path: string) =>
-    codexReadAllowed(isAbsolute(path) ? path : `${cwd}/${path}`, root);
-  return parsed.every(({ argv, background, braces, piped }, index) => {
-    if (background || braces || DENIED_TOOLS.some((entry) => codexBashEntry(argv, entry)))
-      return false;
-    if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) {
-      return codexReadCommand(argv, (path) => {
-        if (!allowedPath(path)) return false;
-        if (argv[0] !== "diff") return true;
-        try {
-          return statSync(isAbsolute(path) ? path : `${cwd}/${path}`).isFile();
-        } catch (error) {
-          return (error as NodeJS.ErrnoException).code === "ENOENT";
-        }
-      });
-    }
-    const pipeline = piped || parsed[index + 1]?.piped;
-    const gitRead = GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry));
-    if (gitRead) {
-      if (argv[1] === "diff" && argv.includes("--no-index")) return false;
-      return (!pipeline && argv[1] !== "diff") || codexGitReadCommand(argv, allowedPath);
-    }
-    return !pipeline && allowed.some((entry) => codexBashEntry(argv, entry));
-  });
 }
 
 /** Only a readable, stable CLI release at or above the floor may start a seat. */

@@ -372,12 +372,14 @@ describe("a repo's own commands and protected files", () => {
   const bashEntries = (a: string[]) =>
     a.filter((x) => x.startsWith("Bash(") && !x.includes("git "));
 
-  it("replaces the pnpm entries for a writer", () => {
+  it("gives a writer plain Bash, never the repo's commands as an allowlist", () => {
     const a = crewCliArgs({ ...base, commands });
-    expect(a).toContain("Bash");
+    const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
+    expect(allowed).toContain("Bash");
+    expect(bashEntries(allowed)).toEqual([]);
   });
 
-  it.each(["read-only", "scratch"] as const)("gives a %s seat only the review commands", (mode) => {
+  it.each(["read-only", "scratch"] as const)("gives a %s seat plain Bash too", (mode) => {
     const a = crewCliArgs({ ...base, mode, commands });
     const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
     expect(allowed).toContain("Bash");

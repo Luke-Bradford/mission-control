@@ -1156,8 +1156,8 @@ function isExecutableFile(p: string): boolean {
 const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
   r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
 
-/** Whether the CLI would let a seat run `cmd`: one of the repo's writer commands is `cmd` or a word-prefix of it. */
-function seatsMayRun(writer: readonly string[], cmd: string): boolean {
+/** Whether `cmd` is one of the repo's writer validation commands or extends one (a word prefix). */
+function isValidationCommand(writer: readonly string[], cmd: string): boolean {
   return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
 }
 
@@ -1248,7 +1248,8 @@ export function parseConfig(
       });
     }
   });
-  // A suite the guard would lock for but the CLI then refuses would hold the lock to no purpose.
+  // full_suite names which validation commands take the test lock; it is not an allowlist (seats
+  // run ordinary commands in their sandbox), so each entry must be a writer validation command.
   cfg.repos.forEach((r, i) => {
     for (const cmd of r.fullSuite ?? []) {
       // a shorter writer command also runs the suite: it must be a full_suite entry itself
@@ -1261,10 +1262,10 @@ export function parseConfig(
           `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
         );
       }
-      if (!seatsMayRun(writerOf(r), cmd)) {
+      if (!isValidationCommand(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
-          `${cmd} is not a command crew seats may run`,
+          `${cmd} is not one of the repo's writer validation commands (commands.writer)`,
         );
       }
     }

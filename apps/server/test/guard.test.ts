@@ -766,11 +766,13 @@ describe("POST /api/guard/check", () => {
       "codex-allowlist": 0,
       "git-env": 0,
       "github-write": 0,
+      "gh-cli": 0,
       "merge-push": 0,
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      unreadable: 0,
       secret: 0,
     });
     const all = await app.inject({ method: "GET", url: "/api/guard/hits?days=9" });

@@ -6,7 +6,7 @@ import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/co
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { createCodexApprover } from "../src/runtime/codex-approval.ts";
+import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
 
 let cwd: string;
@@ -142,7 +142,7 @@ describe("Codex refusal records", () => {
 
   it.each([
     ["git commit -m x", "git-write"],
-    ["gh pr view 1", "github-write"],
+    ["gh pr view 1", "gh-cli"],
     ["curl https://example.com", "network"],
     ["sleep 1 &", "background"],
   ] as const)(
@@ -213,6 +213,40 @@ describe("Codex refusal records", () => {
       "read-only",
       expect.stringContaining("apps/a.ts, apps/b.ts"),
     );
+  });
+});
+
+describe("Codex sandbox escalation", () => {
+  const request = (id: number, itemId: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    method: "item/commandExecution/requestApproval",
+    params: { kind: "command", cwd, command: "/bin/zsh -lc 'ls apps'", itemId, ...extra },
+  });
+
+  it("accepts an ordinary first approval, which carries no reason", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1"), undefined, signal())).toBe("accept");
+    expect(await h.approve(request(2, "call_2"), undefined, signal())).toBe("accept");
+    expect(h.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "command failed; retry without sandbox?",
+    // require_escalated arrives with the model's own justification as the reason
+    "Need to write outside the workspace",
+  ])("refuses a command approval with a reason: %j", async (reason) => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1", { reason }), undefined, signal())).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith("codex-allowlist", `${CODEX_ESCALATION_TEXT}: ls apps`);
+  });
+
+  it("refuses a second command approval for an item it was already asked about", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1"), undefined, signal())).toBe("accept");
+    expect(await h.approve(request(2, "call_1"), undefined, signal())).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith("codex-allowlist", `${CODEX_ESCALATION_TEXT}: ls apps`);
+    // another approver (another run) starts with no items
+    expect(await approver().approve(request(1, "call_1"), undefined, signal())).toBe("accept");
   });
 });
 

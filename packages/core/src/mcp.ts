@@ -110,6 +110,11 @@ export const MC_TOOLS = {
 
 /** The longest commit message and operator question the mc tools take. */
 export const MC_TEXT_MAX = 2000;
+/**
+ * The most JSON `comms_read` returns, the same bound as FLIGHT's gh_read response
+ * (`FLIGHT_GH_READ_MAX`): past it the oldest messages are left out, and the result says how many.
+ */
+export const MC_COMMS_READ_MAX = 20_000;
 /** The longest note `report_evidence` takes. */
 export const MC_EVIDENCE_MAX = 4000;
 /** An mc tool call whose arguments fail validation: this, then the first problem. */

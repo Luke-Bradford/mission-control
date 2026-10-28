@@ -144,3 +144,52 @@ but does not declare a project-document disable field. Step B now supplies the
 proven max-bytes override at start and resume, checks the schema's actual profile
 field, and still refuses any nonempty instruction sources. These handshakes do not
 replace the controller's full confinement check.
+
+## Escalation probe (28 October, PR #736)
+
+codex-cli 0.154.0, macOS. `codex app-server` with an isolated `CODEX_HOME`, no login, and a
+custom provider pointing at a fake Responses server on `127.0.0.1` that answers the first turn
+with one `exec_command` call and the second with a message. Thread: `approvalPolicy:"untrusted"`,
+`approvalsReviewer:"user"`, the seat's `mc_seat` profile (`":root"="read"`, workspace `"."="write"`,
+network off). Throwaway folders under the session scratchpad only; the "secret" was a dummy file.
+The client accepted the first approval of each turn. The command was `cat <denied>/t.txt; echo x >
+<outside>/escaped.txt`.
+
+| Case | What reached the client | Result |
+|---|---|---|
+| Plain call, profile with a `deny` entry | One `item/commandExecution/requestApproval`, keys `kind, threadId, turnId, itemId, startedAtMs, environmentId, command, cwd, commandActions, proposedExecpolicyAmendment, availableDecisions`; **no `reason`** | Sandboxed: read and write `Operation not permitted`, exit 1. No retry approval followed. |
+| `sandbox_permissions:"require_escalated"` + `justification`, profile with a `deny` entry | One approval, same keys plus `reason` = the model's justification text | Still sandboxed (both denied). |
+| Plain call, profile with **no** `deny` entry | One approval, no `reason` | **Ran outside the sandbox**: the outside file was written. |
+| `require_escalated`, profile with no `deny` entry | One approval with `reason` | Ran outside the sandbox. |
+
+- The approval params have no sandbox or escalation field (`codex app-server generate-ts`:
+  `CommandExecutionRequestApprovalParams`); `reason` is the only sign, and for an escalation it is
+  free text the model writes. The binary also holds `command failed; retry without sandbox?` for a
+  retry approval; none of these runs raised one. The hub now declines any command approval with a
+  `reason`, and any second command approval for the same `itemId` (`codex-approval.ts`).
+- The hub's seat profile always carries deny entries (`SANDBOX_DENY_READ_HOME`, the data dir), so
+  it is in the sandboxed rows. The no-deny rows show that the sandbox for an approved command
+  depends on that; keep at least one deny entry in every seat profile.
+
+## Project `.codex/config.toml` probe (28 October, PR #736)
+
+Handshake only (no turn), same isolated setup, a throwaway git repo holding `.codex/config.toml`
+with `default_permissions = "evil"` (a full-write, network-on profile) and
+`model_reasoning_effort = "minimal"`.
+
+- `config/read {includeLayers:true, cwd}` before any thread listed the project layer as disabled:
+  "add <repo> as a trusted project".
+- `thread/start` in that cwd then appended `[projects."<repo>"] trust_level = "trusted"` to the run's
+  `CODEX_HOME/config.toml` and loaded the project layer: the response reported
+  `activePermissionProfile:{id:"evil"}`, `sandbox:{type:"dangerFullAccess"}` and
+  `reasoningEffort:"minimal"`. The hub's handshake check refuses that profile, but a project config
+  could change keys the check does not see (hooks, exec policies, MCP servers, the shell
+  environment).
+- `codex sandbox -P mc_seat` in a git repo: creating, writing, renaming or symlinking `.codex` at the
+  workspace root is `Operation not permitted` even without an explicit entry (Codex keeps `.codex`,
+  `.git` and `.agents` read-only inside a writable root); `sub/.codex` is writable but is not on the
+  thread cwd's path. The seat profile now also says `".codex"="read"` explicitly, and
+  `codex-floor.test.ts` runs the real `codex sandbox` against the generated profile when Codex is
+  installed.
+- Not changed here: a `.codex/config.toml` committed to the repo's default branch would load at a
+  Codex seat's first `thread/start`.
