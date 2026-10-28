@@ -9,6 +9,7 @@ import {
 import { callSign, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
+import { metricText, useMetrics } from "../metrics.ts";
 import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
@@ -118,11 +119,18 @@ export function CommsNav({
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
   const seats = rows.filter((row) => row.kind === "crew" && row.id !== flightId);
   const crewMembers = seats.length + 1;
+  const agentsLive = useMetrics().readings.agentsLive;
+  const live = metricText("agentsLive");
   return (
     <nav className="comms-nav" aria-label="Comms">
       <div className="comms-section-head">
         <h2>Comms</h2>
-        <span>{`${seats.length} agents live`}</span>
+        <span title={agentsLive?.detail ? `${agentsLive.detail}\n${live.title}` : live.title}>
+          {live.label}{" "}
+          <b className="num" data-metric="agentsLive">
+            {agentsLive?.value ?? "—"}
+          </b>
+        </span>
       </div>
       <button
         type="button"

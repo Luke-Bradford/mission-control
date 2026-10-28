@@ -4136,6 +4136,14 @@ button.nrow.thread.tagged {
 .hrow.util {
   grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 48px;
 }
+/* cycle time: p50 beside the bar, then p85 and the ticket count on one line */
+#tCycle .hrow {
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 56px 150px;
+}
+/* the registry's p50 over every size, above the per-size rows */
+.tcycle-all {
+  margin: 0 0 8px;
+}
 /* a long agent tag is cut at its column instead of running under the bar */
 .hrow.util > :first-child {
   min-width: 0;

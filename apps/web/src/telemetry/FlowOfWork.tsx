@@ -1,8 +1,9 @@
-import { NO_SIZE, type Telemetry } from "@mc/core";
+import { formatHours, NO_SIZE, type Telemetry } from "@mc/core";
 import { dayLabel, dur, narrowDay } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { metricText, useMetrics } from "../metrics.ts";
 import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
@@ -34,10 +35,13 @@ const tickets = (n: number): string => `${n} ${n === 1 ? "ticket" : "tickets"}`;
 export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const nameOf = useSeatName();
   const wait = <p className="pb s muted">{scope.wait}</p>;
-  // A size with no tickets has no median, whatever the number says: no bar, and no say in the scale.
-  const median = (r: { medianDays: number | null; tickets: number }): number | null =>
-    r.tickets === 0 ? null : r.medianDays;
-  const longest = Math.max(1, ...(t?.cycleTime.rows.map((r) => median(r) ?? 0) ?? []));
+  const { readings } = useMetrics();
+  const overall = readings.cycleTime;
+  const cycleLabel = metricText("cycleTime");
+  // A size with no tickets has no p50, whatever the number says: no bar, and no say in the scale.
+  const p50 = (r: { p50Ms: number | null; tickets: number }): number | null =>
+    r.tickets === 0 ? null : r.p50Ms;
+  const longest = Math.max(1, ...(t?.cycleTime.rows.map((r) => p50(r) ?? 0) ?? []));
   const ci = t?.quality.ciGreenFirstPushPct ?? null;
   const reviewed = `${t?.quality.reviewedPrs ?? 0} merged PRs with a review`;
   const noReviewed = "No merged PRs with a review in the last 14 days.";
@@ -75,7 +79,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
 
   return (
     <div className="tgrid">
-      <Panel id="tThru" title="Throughput" sub="tickets merged per day · last 14 days">
+      <Panel id="tThru" title="Throughput" sub="PRs merged per day · last 14 days">
         {!t ? (
           wait
         ) : t.throughput.length === 0 ? (
@@ -83,7 +87,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
         ) : (
           <div className="pb">
             <VBars
-              label="Tickets merged per day"
+              label="PRs merged per day"
               every={2}
               accentLast
               bars={t.throughput.map((d) => ({
@@ -96,27 +100,43 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
           </div>
         )}
       </Panel>
-      {/* Cycle time starts at the ticket's first move into Ready. */}
-      <Panel id="tCycle" title="Cycle time" sub="Ready to Done, median days by size">
+      {/* Cycle time starts at the ticket's first move into Ready (METRICS.cycleTime). */}
+      <Panel
+        id="tCycle"
+        title="Cycle time"
+        sub="Ready to Done, p50 and p85 hours by size · last 14 days"
+      >
         {!t ? (
           wait
         ) : (
           <div className="pb">
+            <p className="tcycle-all s" title={cycleLabel.title}>
+              <span className="fg2">{cycleLabel.label}</span>{" "}
+              <b className="num" data-metric="cycleTime">
+                {overall?.value ?? DASH}
+              </b>{" "}
+              <span className="muted">{overall?.detail ?? ""}</span>
+            </p>
             {t.cycleTime.rows.map((r) => {
-              const days = median(r);
+              const ms = p50(r);
               return (
                 <HBar
                   key={r.size}
                   label={r.size === NO_SIZE ? "no size" : r.size}
                   title={r.size === NO_SIZE ? "no size" : r.size}
-                  pct={((days ?? 0) / longest) * 100}
-                  value={days === null ? DASH : `${days.toFixed(1)} d`}
-                  extra={tickets(r.tickets)}
+                  pct={((ms ?? 0) / longest) * 100}
+                  value={ms === null ? DASH : formatHours(ms)}
+                  extra={
+                    r.tickets === 0 || r.p85Ms === null
+                      ? tickets(r.tickets)
+                      : `p85 ${formatHours(r.p85Ms)} · ${tickets(r.tickets)}`
+                  }
                 />
               );
             })}
             <p className="note xs tnote">
-              Measured from the board: when a ticket entered Ready to when it reached Done.{" "}
+              Measured from the board: when a ticket entered Ready to when it reached Done. Sizes
+              cover every repo; the p50 line above follows the header's session filter.{" "}
               {t.cycleTime.excluded} done tickets left out because they have no Ready entry or their
               timestamps are out of order.
             </p>

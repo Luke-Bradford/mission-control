@@ -7,9 +7,13 @@ import { Panel } from "../hud/Panel.tsx";
 import { followLink } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
+/**
+ * Lane titles. The building-and-checks lane is "Building", not "In progress": the registry's In
+ * progress (METRICS.inProgress) is every lane from Building to Merging.
+ */
 export const PIPELINE_STAGES = {
   ready: "Ready",
-  progress: "In progress",
+  progress: "Building",
   review: "In review",
   merging: "Merging",
   merged: "Done today",

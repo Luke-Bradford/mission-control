@@ -12,6 +12,7 @@ export * from "./loop.ts";
 export * from "./map.ts";
 export * from "./map-fixture.ts";
 export * from "./mcp.ts";
+export * from "./metrics.ts";
 export * from "./profiles.ts";
 export * from "./repo-rules.ts";
 export * from "./repos.ts";

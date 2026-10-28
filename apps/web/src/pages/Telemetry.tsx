@@ -133,7 +133,7 @@ export function Telemetry() {
       {res.error && !res.data && (
         <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
       )}
-      <Kpis t={t} live={scope.live} />
+      <Kpis t={t} live={scope.live} filtered={agent !== "" || account !== "" || ticket !== ""} />
       <h3 className="grp">Flow of work</h3>
       <FlowOfWork t={t} scope={scope} />
       <h3 className="grp">Agents</h3>

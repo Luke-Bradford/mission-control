@@ -1,6 +1,7 @@
 import type { AttentionItem, BoardItem, PullRequestView, Run, RunDigest } from "@mc/core";
 import { CI_FAILED_EVENT_PREFIX, CI_PASSED_EVENT_PREFIX, NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { metricsView } from "../src/metrics.ts";
 import { type OverviewScope, overviewSummary } from "../src/overview.ts";
 import { Store } from "../src/store.ts";
 
@@ -109,9 +110,7 @@ it("returns zeros and nulls from an empty store", () => {
     tokensPerMin: { now: 0, series: Array(30).fill(0) },
     spendToday: { usd: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
     inFlight: { count: 0, oldestAt: null, series: Array(30).fill(0) },
-    mergedToday: { count: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
     ciPassRate24h: { pct: null, runs: 0, redNow: 0, series: Array(30).fill(null) },
-    cycleTime: { medianMs: null, n: 0, avg14dMs: null, series: Array(30).fill(null) },
     needsYou: { count: 0, overHour: 0, series: Array(30).fill(0) },
   });
   expect(result.pipeline).toHaveLength(6);
@@ -163,8 +162,15 @@ it("assigns one card per stage, including set-aside review and merging precedenc
     oldestAt: NOW - HOUR,
     series: Array(30).fill(4),
   });
-  expect(result.kpis.mergedToday.count).toBe(1);
   expect(result.kpis.ciPassRate24h.redNow).toBe(1);
+  // The registry's In progress reads the same pipeline.
+  expect(
+    metricsView(store, NOW, {
+      repoIds: ["repo"],
+      pipelineRepoIds: ["repo"],
+      timezone: "Europe/London",
+    }).inProgress,
+  ).toEqual({ count: 4, oldestAt: NOW - HOUR });
 });
 
 it("caps cards at eight without capping totals; merged cards are newest first", () => {
@@ -264,17 +270,6 @@ it("counts CI outcomes in 24 hours, local-day merges and valid cycle times", () 
     redNow: 0,
     series: [...Array(29).fill(0), 50],
   });
-  expect(summary().kpis.mergedToday).toEqual({
-    count: 1,
-    perHour: [1, ...Array(13).fill(0)],
-    series: Array(30).fill(0),
-  });
-  expect(summary().kpis.cycleTime).toEqual({
-    medianMs: 3 * HOUR,
-    n: 2,
-    avg14dMs: 4 * HOUR,
-    series: Array(30).fill(3 * HOUR),
-  });
 });
 
 it("averages machine readings into complete minutes and takes the latest disk reading", () => {
@@ -302,7 +297,7 @@ it("averages machine readings into complete minutes and takes the latest disk re
   });
 });
 
-it("counts open operator attention, including acknowledgements, and scopes by repo", () => {
+it("counts the operator's whole inbox once per key, including acknowledgements, in any scope", () => {
   const attention: AttentionItem[] = [HOUR + 1, HOUR, MIN].map((age, i) => ({
     key: `item-${i}`,
     kind: "question" as const,
@@ -320,12 +315,18 @@ it("counts open operator attention, including acknowledgements, and scopes by re
   const first = attention[0] as AttentionItem;
   const result = overviewSummary(store, NOW, {
     ...scope,
-    attention: [...attention, { ...first, repoId: "other" }, { ...first, owner: "flight" }],
+    attention: [
+      ...attention,
+      { ...first, key: "other-repo", repoId: "other" },
+      { ...first, repoId: "other" },
+      { ...first, owner: "flight" },
+    ],
   });
+  // Like the web's needsYouItems: another repo's item counts, a repeated key and FLIGHT's do not.
   expect(result.kpis.needsYou).toEqual({
-    count: 3,
-    overHour: 1,
-    series: [...Array(29).fill(2), 3],
+    count: 4,
+    overHour: 2,
+    series: [...Array(29).fill(3), 4],
   });
 });
 
@@ -341,16 +342,6 @@ it("includes a live ticket before the board poll has collected its card", () => 
     ticket: 1,
     title: "New ticket",
     who: "seat",
-  });
-});
-
-it("keeps a merge at local midnight in the first hourly bucket", () => {
-  const midnight = Date.parse("2026-10-16T23:00:00Z");
-  store.replacePullRequests("repo", [pr(1, { state: "merged", mergedAt: midnight })], midnight);
-  expect(overviewSummary(store, midnight, scope).kpis.mergedToday).toEqual({
-    count: 1,
-    perHour: [1],
-    series: Array(30).fill(0),
   });
 });
 
@@ -470,11 +461,10 @@ it("serves complete-minute KPI history with scoped run intervals and rolling out
   const kpis = summary().kpis;
   expect(kpis.inFlight.series).toEqual([...Array(28).fill(0), 1, 0]);
   expect(kpis.ciPassRate24h.series).toEqual([...Array(28).fill(null), 100, 50]);
-  expect(kpis.cycleTime.series).toEqual([...Array(29).fill(null), 2 * MIN]);
   expect(kpis.needsYou.series).toEqual(Array(30).fill(0));
 });
 
-it("serves minute spend and merge buckets without changing today's hourly totals", () => {
+it("serves minute spend buckets without changing today's hourly totals", () => {
   store.upsertRun(run(1, { startedAt: END - 2 * MIN, endedAt: END, status: "ok", costUsd: 4 }));
   store.replacePullRequests(
     "repo",
@@ -483,8 +473,6 @@ it("serves minute spend and merge buckets without changing today's hourly totals
   );
   expect(summary().kpis.spendToday.series).toEqual([...Array(28).fill(0), 2, 2]);
   expect(summary().kpis.spendToday.usd).toBe(4);
-  expect(summary().kpis.mergedToday.series).toEqual([...Array(29).fill(0), 1]);
-  expect(summary().kpis.mergedToday.count).toBe(2);
 });
 
 it("traces currently open operator needs back to their appearance", () => {
@@ -505,7 +493,8 @@ it("traces currently open operator needs back to their appearance", () => {
     ...scope,
     attention: [item, { ...item, key: "other", repoId: "other" }],
   });
-  expect(result.kpis.needsYou.series).toEqual([...Array(29).fill(0), 1]);
+  // Another repo's item is still the operator's: Needs you is the whole inbox.
+  expect(result.kpis.needsYou.series).toEqual([...Array(29).fill(0), 2]);
 });
 
 it("averages known disk samples, preserving missing minutes and excluding the current minute", () => {

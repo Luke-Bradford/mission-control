@@ -336,14 +336,15 @@ export interface Telemetry {
     working: number;
     /** Configured loops. */
     agents: number;
-    /** PRs merged in the last 7 days. */
-    merged7d: number;
   };
   /** FLOW_DAYS local days, oldest first, zeros kept. */
   throughput: { day: string; merged: number }[];
-  /** Start of work to Done; `excluded` = done issues with no start. */
+  /**
+   * Start of work to Done by size over FLOW_DAYS, p50 and p85 in ms (the registry's cycle time,
+   * `METRICS.cycleTime`, broken down); `excluded` = done issues with no start.
+   */
   cycleTime: {
-    rows: { size: string; medianDays: number | null; tickets: number }[];
+    rows: { size: string; p50Ms: number | null; p85Ms: number | null; tickets: number }[];
     excluded: number;
   };
   /** Over FLOW_DAYS of merged PRs whose first-push CI is known; null when there are none. */

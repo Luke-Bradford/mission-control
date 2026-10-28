@@ -14,10 +14,11 @@ import type { ReactNode } from "react";
 import { useSecond, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { cost, dayMonth, dur, hhmm } from "../fmt.ts";
+import { dayMonth, dur, hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
+import { metricText, useMetrics } from "../metrics.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
 
 const DASH = "—";
@@ -205,6 +206,8 @@ export function Summary({ mode }: { mode: SummaryMode }) {
   );
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const now = useSecond();
+  const costReading = useMetrics().readings.cost;
+  const costText = metricText("cost");
   const view = summary.data;
   const entries = ledger.data?.session === view?.session ? (ledger.data?.entries ?? []) : [];
   // A server that predates summary.done has no outcomes to show: Record says none are recorded.
@@ -305,7 +308,7 @@ export function Summary({ mode }: { mode: SummaryMode }) {
           {mode === "record" && (
             <>
               <section aria-label="Last 24 hours">
-                {/* Throughput and Review / CI live on Command's pulse rail; Record has the rest. */}
+                {/* Merged and Review / CI live on Command's pulse rail; cost is the registry's. */}
                 <dl className="flight-tiles">
                   <div>
                     <dt>CI failures</dt>
@@ -315,9 +318,9 @@ export function Summary({ mode }: { mode: SummaryMode }) {
                     <dt>Parks</dt>
                     <dd>{view.metrics.parks.day}</dd>
                   </div>
-                  <div>
-                    <dt>Spend (24 h)</dt>
-                    <dd>{cost(view.metrics.seats.reduce((sum, seat) => sum + seat.costUsd, 0))}</dd>
+                  <div title={costText.title}>
+                    <dt>{costText.label}</dt>
+                    <dd data-metric="cost">{costReading?.value ?? "—"}</dd>
                   </div>
                 </dl>
               </section>

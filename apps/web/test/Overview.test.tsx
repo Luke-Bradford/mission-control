@@ -41,6 +41,7 @@ import {
   itemWithoutOwner,
   limit5h,
   limit7d,
+  METRICS_VIEW,
   MIN,
   NOW,
   OVERVIEW,
@@ -92,6 +93,7 @@ function stub(d: Data = {}) {
   return stubFetch({
     ...d.extra,
     "/api/overview": OVERVIEW,
+    "/api/metrics": METRICS_VIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
@@ -164,7 +166,7 @@ describe("Overview panels", () => {
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
@@ -186,7 +188,7 @@ describe("Overview panels", () => {
     await waitFor(() =>
       expect(
         [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
-      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+      ).toEqual(["0", "41.2k", "~$24.31", "4", "6", "92%", "1.2 h", "0"]),
     );
     expect(
       await within(container.querySelector("#timelineP") as HTMLElement).findByText(

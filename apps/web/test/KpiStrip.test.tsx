@@ -1,10 +1,11 @@
+import { metricHover } from "@mc/core";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { OVERVIEW } from "./fixtures.ts";
+import { METRICS_VIEW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
 
 const kpis = OVERVIEW.kpis;
 
@@ -15,11 +16,14 @@ describe("KpiStrip", () => {
       release = resolve;
     });
     const fetch = stubFetch({
+      ...REGISTRY_ROUTES,
+      "/api/metrics": { ...METRICS_VIEW, cost: { usd: 0 } },
+      "/api/crew": { rows: [], firstRunToday: null },
       "/api/overview": {
         ...OVERVIEW,
         kpis: {
           ...kpis,
-          working: { now: 0, of: 5, series: [0, 0, 0] },
+          inFlight: { count: 0, oldestAt: null, series: [0, 0, 0] },
           spendToday: { usd: 0, perHour: [0, 0, 0] },
         },
       },
@@ -37,46 +41,46 @@ describe("KpiStrip", () => {
     expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(8);
     expect(screen.queryByText("—")).toBeNull();
     await act(async () => release());
-    expect(await screen.findByText("$0.00")).toBeTruthy();
-    expect(
-      within(screen.getByRole("link", { name: /Agents working/ })).getByText("0"),
-    ).toBeTruthy();
-    expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0);
+    expect(await screen.findByText("~$0.00")).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("link", { name: /Agents working/ })).getByText("0"),
+      ).toBeTruthy(),
+    );
+    await waitFor(() => expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0));
     // an all-zero series is the bare baseline (y 23 of 24), labelled as no activity
     const graph = screen.getByRole("img", {
-      name: "Agents working · last 30 minutes · no activity",
+      name: "In progress · now · last 30 minutes · no activity",
     });
     expect(graph.querySelector('path[fill="none"]')?.getAttribute("d")).toBe(
       "M0.0,23.0L50.0,23.0L100.0,23.0",
     );
     expect(graph.querySelectorAll("circle")).toHaveLength(0);
     expect(
-      within(screen.getByRole("link", { name: /Agents working/ })).getByText("no activity"),
+      within(screen.getByRole("link", { name: /In progress/ })).getByText("no activity"),
     ).toBeTruthy();
   });
 
-  it("formats eight linked metrics and labels the available histories honestly", async () => {
+  it("labels eight linked metrics with their windows, registry hover and honest histories", async () => {
     stubFetch({
+      ...REGISTRY_ROUTES,
       "/api/overview": {
         at: OVERVIEW.at,
-        kpis: {
-          ...kpis,
-          working: { ...kpis.working, series: undefined },
-          inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 },
-        },
+        kpis: { ...kpis, inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 } },
       },
     });
     render(<KpiStrip />);
     await screen.findByText("41.2k");
+    await screen.findByText("~$24.31");
     const labels = [
-      "Agents working",
+      "Agents working · now",
       "Tokens/min",
-      "Spend today",
-      "In flight",
-      "Merged today",
+      "Cost · today",
+      "In progress · now",
+      "Merged · 24h",
       "CI pass rate",
-      "Cycle time",
-      "Needs you",
+      "Cycle time p50 · 14d",
+      "Needs you · now",
     ];
     const paths = [
       "/agent",
@@ -85,33 +89,26 @@ describe("KpiStrip", () => {
       "/board",
       "/board",
       "/board",
-      "/board",
+      "/telemetry",
       "/comms",
     ];
     labels.forEach((label, i) => {
-      expect(screen.getByRole("link", { name: new RegExp(label) }).getAttribute("href")).toBe(
-        paths[i],
-      );
+      const tile = screen.getByRole("link", { name: new RegExp(label) });
+      expect(tile.getAttribute("href")).toBe(paths[i]);
+      expect(tile.querySelector(".lbl")?.textContent).toBe(label);
     });
-    for (const text of [
-      "$24.31",
-      "1h 12m",
-      "92%",
-      "10 runs · 1 red now",
-      "of 5 agents",
-      "1 over 1 h",
-    ])
+    // a registry label carries its definition on hover
+    expect(
+      screen
+        .getByRole("link", { name: /Merged · 24h/ })
+        .querySelector(".lbl")
+        ?.getAttribute("title"),
+    ).toBe(metricHover("merged"));
+    await screen.findByText("of 4 agents");
+    for (const text of ["2m oldest", "92%", "10 runs · 1 red now", "1.2 h", "p85 30 h · 8 tickets"])
       expect(screen.getByText(text)).toBeTruthy();
     expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(1);
-    expect(screen.queryAllByRole("img", { name: /hourly today/ })).toHaveLength(0);
-    for (const label of ["Spend today", "Merged today"]) {
-      expect(
-        screen.getByRole("link", { name: new RegExp(label) }).querySelector(".kpi-secondary")
-          ?.textContent,
-      ).toBe("—");
-    }
-    expect(screen.getByText("n=8 · 1h 30m avg (14d)")).toBeTruthy();
-    for (const label of ["In flight", "CI pass rate", "Cycle time", "Needs you"]) {
+    for (const label of ["In progress", "CI pass rate", "Cycle time", "Merged", "Agents working"]) {
       const tile = screen.getByRole("link", { name: new RegExp(label) });
       expect(within(tile).queryByRole("img")).toBeNull();
       expect(tile.querySelector(".kpi-secondary")?.textContent).not.toBe("—");
@@ -126,7 +123,6 @@ describe("KpiStrip", () => {
       kpis: {
         ...kpis,
         ciPassRate24h: { pct: null, runs: 0, redNow: 0 },
-        cycleTime: { medianMs: null, n: 0, avg14dMs: null },
         tokensPerMin: { now: 0, series: [] },
       },
     };
@@ -154,7 +150,7 @@ describe("KpiStrip", () => {
       },
     });
     render(<KpiStrip />);
-    const tile = await screen.findByRole("link", { name: /Spend today/ });
+    const tile = await screen.findByRole("link", { name: /Cost · today/ });
     await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("$0.40"));
     expect(tile.querySelector(".kpi-peak")?.getAttribute("title")).toBe(
       "Peak in the last 30 minutes",
@@ -194,7 +190,6 @@ describe("KpiStrip", () => {
       `Last updated ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`,
     );
     expect(screen.getByText("41.2k")).toBeTruthy();
-    expect(screen.getByText("$24.31")).toBeTruthy();
     failed = false;
     act(() => hub.refetchTopic("agents"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());

@@ -1056,6 +1056,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
+  ["GET", "/api/metrics"],
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
@@ -7014,6 +7015,21 @@ describe("overview", () => {
     expect((await get("/api/overview?session=s1")).json().kpis.working.now).toBe(1);
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
+  });
+
+  it("serves the registry's server figures for the session filter and 404s an unknown session", async () => {
+    withCrew();
+    const all = await get("/api/metrics");
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toEqual({
+      at: NOW,
+      inProgress: { count: 0, oldestAt: null },
+      merged: { count: 0 },
+      cycleTime: { p50Ms: null, p85Ms: null, n: 0, excluded: 0 },
+      cost: { usd: 0 },
+    });
+    expect((await get("/api/metrics?session=s1")).statusCode).toBe(200);
+    expect((await get("/api/metrics?session=missing")).statusCode).toBe(404);
   });
 });
 

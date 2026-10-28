@@ -4,10 +4,12 @@ import type {
   AttentionItem,
   BoardItem,
   ConfigView,
+  Crew,
   CrewRow,
   Escalation,
   GithubRateState,
   LimitRow,
+  MetricsView,
   OverviewSummary,
   PullRequestView,
   Run,
@@ -434,10 +436,40 @@ const overviewKpis: OverviewSummary["kpis"] = {
   tokensPerMin: { now: 41200, series: [100, 200, 300] },
   spendToday: { usd: 24.31, perHour: [1, 2] },
   inFlight: { count: 4, oldestAt: null },
-  mergedToday: { count: 6, perHour: [1, 2] },
   ciPassRate24h: { pct: 92, runs: 10, redNow: 1 },
-  cycleTime: { medianMs: 4320000, n: 8, avg14dMs: 5400000 },
   needsYou: { count: 2, overHour: 1 },
+};
+
+/** `GET /api/metrics`: the registry's server figures. */
+export const METRICS_VIEW: MetricsView = {
+  at: NOW,
+  inProgress: { count: 4, oldestAt: NOW - 2 * MIN },
+  merged: { count: 6 },
+  cycleTime: { p50Ms: 1.2 * 3_600_000, p85Ms: 30.4 * 3_600_000, n: 8, excluded: 1 },
+  cost: { usd: 24.31 },
+};
+
+/**
+ * One fixture behind every registry figure: the server's, the crew's and the inbox. It reads:
+ * in progress 4, blocked 1, merged 6, cycle time 1.2 h (p85 30 h · 8 tickets), needs you 2,
+ * agents live 3 of 4 (the paused loop is not), agents working 1 of 4, cost ~$24.31.
+ */
+export const REGISTRY_ROUTES = {
+  "/api/metrics": METRICS_VIEW,
+  "/api/crew": {
+    rows: [
+      crewRow(),
+      seatRow({ id: "guido-2", hudState: "blocked" }),
+      crewRow({ id: "studio-builder", hudState: "parked", paused: true }),
+      seatRow({ id: "flight-1", hudState: "idle", ticket: null, run: null }),
+    ],
+    firstRunToday: null,
+  } satisfies Crew,
+  "/api/attention": [
+    item(),
+    item({ key: "ask:2", kind: "question" }),
+    item({ key: "flight-own", owner: "flight" }),
+  ],
 };
 
 export const OVERVIEW: OverviewSummary = {
