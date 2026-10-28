@@ -65,6 +65,9 @@ export function Flight() {
             onClick={() => setTab(item)}
             onKeyDown={(event) => moveTab(event, item, setTab)}
           >
+            <span className="flight-tab-index" aria-hidden="true">
+              {String(FLIGHT_TABS.indexOf(item) + 1).padStart(2, "0")}
+            </span>
             {TAB_LABEL[item]}
           </button>
         ))}
@@ -112,7 +115,7 @@ export function Flight() {
           title="Planning board"
           sub="FLIGHT · what is waiting, what comes next, why, and when it must be revisited"
         >
-          <div className="flight-panel-scroll pb">
+          <div className="flight-panel-scroll">
             <Summary mode="queue" />
           </div>
         </Panel>
@@ -173,20 +176,22 @@ export function Flight() {
         hidden={tab !== "record"}
       >
         <Panel id="outcomesP" title="Outcomes" sub="recently completed work and the last 24 hours">
-          <div className="flight-panel-scroll pb">
+          <div className="flight-panel-scroll">
             <Summary mode="record" />
           </div>
         </Panel>
-        <Panel
-          id="decidedP"
-          title="Decided without you"
-          sub="today · decisions FLIGHT made autonomously"
-        >
-          <div className="flight-panel-scroll">
-            <Decided />
-          </div>
-        </Panel>
-        <WorkingLog />
+        <div className="flight-record-side">
+          <Panel
+            id="decidedP"
+            title="Decided without you"
+            sub="today · decisions FLIGHT made autonomously"
+          >
+            <div className="flight-panel-scroll">
+              <Decided />
+            </div>
+          </Panel>
+          <WorkingLog />
+        </div>
       </div>
     </section>
   );

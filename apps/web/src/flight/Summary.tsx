@@ -57,14 +57,15 @@ function Refs({ refs, repoId }: { refs: readonly string[]; repoId?: string }) {
 function horizon(
   item: FlightSummaryItem | FlightLedgerEntry,
   now: number,
-): { label: string; tone: "crit" | "warn" | "plain" } {
+): { label: string; tone: "crit" | "plain" } {
+  // Health carries blocked/waiting colour; the horizon is a plain time bucket unless overdue.
   if (item.status === "blocked" || item.status === "waiting") {
-    return { label: "Waiting", tone: item.status === "blocked" ? "crit" : "warn" };
+    return { label: "Waiting", tone: "plain" };
   }
   if (item.kind === "watch") return { label: "Watch", tone: "plain" };
   if (item.due === null) return { label: "Next", tone: "plain" };
   if (item.due <= now) return { label: "Overdue", tone: "crit" };
-  if (item.due - now <= 24 * 60 * 60_000) return { label: "Today", tone: "warn" };
+  if (item.due - now <= 24 * 60 * 60_000) return { label: "Today", tone: "plain" };
   if (item.due - now <= 7 * 24 * 60 * 60_000) return { label: "This week", tone: "plain" };
   return { label: "Later", tone: "plain" };
 }
@@ -101,8 +102,8 @@ function PlanRow({
   const age = updatedAt === null ? null : Math.max(0, now - updatedAt);
   return (
     <li className="flight-plan-row">
-      <span className="flight-plan-horizon">
-        <Pill tone={lane.tone}>{lane.label}</Pill>
+      <span className={`flight-plan-horizon${lane.tone === "crit" ? " crit-t" : ""}`}>
+        {lane.label}
       </span>
       <span className="flight-plan-work">
         <b>{item.title}</b>
@@ -116,7 +117,9 @@ function PlanRow({
       <span className="flight-plan-owner">
         {entry?.owner ? <AgentTag id={entry.owner} index={0} bare sm /> : DASH}
       </span>
-      <span className="flight-plan-next">{item.next ?? "Next action not recorded"}</span>
+      <span className="flight-plan-next">
+        {item.next ?? <span className="flight-gap">Next action not recorded</span>}
+      </span>
       <span className="flight-plan-checkpoint">
         {entry?.waitsOn && <span>Waiting on {entry.waitsOn}</span>}
         {item.due !== null && (
@@ -124,9 +127,9 @@ function PlanRow({
             Checkpoint <Timestamp at={item.due} />
           </span>
         )}
-        {!entry?.waitsOn && item.due === null && <span className="warn-t">No checkpoint</span>}
+        {!entry?.waitsOn && item.due === null && <span className="flight-gap">No checkpoint</span>}
       </span>
-      <span className="flight-plan-age s num">{age === null ? DASH : dur(age)}</span>
+      <span className="flight-plan-age num">{age === null ? DASH : dur(age)}</span>
     </li>
   );
 }
@@ -150,10 +153,26 @@ function OutcomeRow({
       </span>
       <span>{entry?.outcome ?? item.next ?? "Outcome not recorded"}</span>
       <span className="fg2">{entry?.basis || DASH}</span>
-      <span className="s num">
+      <span className="flight-outcome-at num">
         <Timestamp at={entry?.updatedAt ?? null} />
       </span>
     </li>
+  );
+}
+
+function OutcomeTable({ children }: { children: ReactNode }) {
+  return (
+    <div className="flight-outcome-table">
+      <div className="flight-outcome-head" aria-hidden="true">
+        <span>Outcome</span>
+        <span>Result</span>
+        <span>Basis</span>
+        <span>Closed</span>
+      </div>
+      <ul className="flight-outcome-list" aria-label="Recently done">
+        {children}
+      </ul>
+    </div>
   );
 }
 
@@ -281,14 +300,12 @@ export function Summary({ mode, onOpenQueue }: { mode: SummaryMode; onOpenQueue?
           {mode === "queue" && (
             <section aria-labelledby="flight-plan-title">
               <div className="flight-plan-intro">
-                <div>
-                  <h3 id="flight-plan-title">FLIGHT's forward plan</h3>
-                  <p className="s fg2">
-                    Ordered commitments, unresolved dependencies and deliberate watches. Active
-                    execution remains on Command.
-                  </p>
-                </div>
-                <span className="s fg2">
+                <h3 id="flight-plan-title">FLIGHT's forward plan</h3>
+                <p>
+                  Ordered commitments, unresolved dependencies and deliberate watches. Active
+                  execution stays on Command.
+                </p>
+                <span className="flight-plan-count">
                   {queueItems.length} tracked ·{" "}
                   {
                     queueItems.filter(
@@ -306,7 +323,10 @@ export function Summary({ mode, onOpenQueue }: { mode: SummaryMode; onOpenQueue?
               {queueItems.length ? (
                 <Table label="FLIGHT forward plan">{queueItems.map((item) => row(item))}</Table>
               ) : (
-                <p className="note">No forward commitment, dependency or watch is recorded.</p>
+                <p className="pb note">
+                  No forward commitment, dependency or watch is recorded. FLIGHT records them with
+                  its ledger as it accepts work.
+                </p>
               )}
             </section>
           )}
@@ -317,28 +337,6 @@ export function Summary({ mode, onOpenQueue }: { mode: SummaryMode; onOpenQueue?
                   Outcomes: {fullLedger.error.message}
                 </p>
               )}
-              <section className="flight-lane done" aria-labelledby="flight-summary-done">
-                <h3 id="flight-summary-done">Recently done</h3>
-                {recentlyDone.length ? (
-                  <ul className="flight-outcome-list" aria-label="Recently done">
-                    {recentlyDone.slice(0, listed).map((item) => {
-                      const entry = [...entries, ...fullEntries].find(
-                        (candidate) => candidate.kind === item.kind && candidate.key === item.key,
-                      );
-                      return (
-                        <OutcomeRow
-                          key={`${item.kind}:${item.key}`}
-                          item={item}
-                          entry={entry}
-                          repoId={repoId}
-                        />
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="note">No recent outcomes recorded.</p>
-                )}
-              </section>
               <section aria-label="Last 24 hours">
                 <dl className="flight-tiles">
                   <div>
@@ -362,6 +360,30 @@ export function Summary({ mode, onOpenQueue }: { mode: SummaryMode; onOpenQueue?
                     <dd>{cost(view.metrics.seats.reduce((sum, seat) => sum + seat.costUsd, 0))}</dd>
                   </div>
                 </dl>
+              </section>
+              <section className="flight-lane done" aria-labelledby="flight-summary-done">
+                <h3 id="flight-summary-done" className="flight-subhead">
+                  Recently done
+                </h3>
+                {recentlyDone.length ? (
+                  <OutcomeTable>
+                    {recentlyDone.slice(0, listed).map((item) => {
+                      const entry = [...entries, ...fullEntries].find(
+                        (candidate) => candidate.kind === item.kind && candidate.key === item.key,
+                      );
+                      return (
+                        <OutcomeRow
+                          key={`${item.kind}:${item.key}`}
+                          item={item}
+                          entry={entry}
+                          repoId={repoId}
+                        />
+                      );
+                    })}
+                  </OutcomeTable>
+                ) : (
+                  <p className="pb note">No recent outcomes recorded.</p>
+                )}
               </section>
             </>
           )}

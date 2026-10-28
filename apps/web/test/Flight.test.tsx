@@ -795,10 +795,8 @@ describe("FLIGHT's brief", () => {
     stubDecided(flightView(), { "/api/agents/flight-1/stream": STREAM });
     const { container } = render(<Flight />);
     await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(1));
-    const log = container.querySelector("#workLog") as HTMLDetailsElement;
-    expect(log.tagName).toBe("DETAILS");
-    expect(log.open).toBe(false);
-    expect(log.querySelector("summary")?.textContent).toContain("1 entry");
+    const log = container.querySelector("#workLog") as HTMLElement;
+    expect(container.querySelector("#logP .ph")?.textContent).toContain("1 entry");
     expect(log.querySelectorAll(".dmsg.hub")).toHaveLength(1);
     expect(log.querySelectorAll(".dmsg.decision")).toHaveLength(0);
     expect(log.querySelector(".dmsg.you")).toBeNull();
