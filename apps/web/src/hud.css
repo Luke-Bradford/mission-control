@@ -784,12 +784,10 @@ select {
   @keyframes pw {
     0%,
     100% {
-      box-shadow: inset 2px 0 0 var(--warn-mark);
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        inset 2px 0 0 var(--warn-mark),
-        0 0 14px var(--warn-soft);
+      opacity: 0.7;
     }
   }
   .pulse-ok {
@@ -798,12 +796,10 @@ select {
   @keyframes po {
     0%,
     100% {
-      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        0 0 0 3px var(--ok-soft),
-        0 0 16px var(--ok-soft);
+      opacity: 0.7;
     }
   }
 }
@@ -931,6 +927,10 @@ select {
 .top-clock {
   color: var(--fg);
   font: 11px var(--mono);
+  line-height: 16px;
+  height: 16px;
+  min-width: 5ch;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .met {
@@ -6265,6 +6265,169 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   padding: 6px 8px;
+}
+/* Setup › Loops: the operational chain scrolls as one drawing on narrow screens. */
+.loop-show {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+.loop-show button[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.loop-chain-scroll {
+  overflow-x: auto;
+  padding: 12px 14px;
+}
+.loop-chain {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 170px);
+  gap: 34px;
+  min-width: 1200px;
+  padding: 18px 0 210px;
+}
+.loop-routes {
+  position: absolute;
+  inset: 0;
+  width: 1280px;
+  height: 320px;
+  overflow: visible;
+  pointer-events: none;
+}
+.loop-route {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  marker-end: url(#loop-arrow);
+}
+.loop-route path,
+.loop-route marker {
+  fill: var(--warn);
+}
+.loop-route.review-return {
+  stroke-dasharray: 5 4;
+}
+.loop-route.conflict-route {
+  stroke: var(--crit);
+  stroke-dasharray: 5 4;
+}
+.loop-route.flight-return {
+  stroke: var(--think);
+  stroke-dasharray: 5 4;
+}
+.loop-route.active {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--warn));
+}
+.loop-route-label {
+  position: absolute;
+  z-index: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--warn);
+  font: var(--fs-xs) var(--mono);
+  white-space: nowrap;
+}
+.ci-label {
+  top: 137px;
+  left: 370px;
+}
+.review-label {
+  top: 185px;
+  left: 430px;
+}
+.loop-chain-step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 96px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  background: var(--surface);
+}
+.loop-chain-step:not(:last-of-type)::after {
+  position: absolute;
+  top: 47px;
+  left: 100%;
+  width: 34px;
+  border-top: 2px solid var(--line-2);
+  content: "";
+}
+.loop-chain-step.selected {
+  border: 2px solid var(--accent);
+}
+.loop-chain-step.now {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.loop-chain-step span {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.loop-chain-step small,
+.loop-flight small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.loop-flight {
+  position: absolute;
+  top: 220px;
+  left: 1060px;
+  width: 190px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 9px;
+  border: 1px solid var(--crit);
+  border-radius: var(--r-s);
+}
+.loop-flight span {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.loop-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.loop-inspector {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 0;
+  padding: 12px 14px;
+  font-size: var(--fs-s);
+}
+.loop-inspector dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.loop-inspector dd {
+  min-width: 0;
+  margin: 0;
+}
+.loop-run {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  font-size: var(--fs-s);
+}
+@media (max-width: 700px) {
+  .loop-details {
+    grid-template-columns: 1fr;
+  }
 }
 .askcards {
   display: grid;

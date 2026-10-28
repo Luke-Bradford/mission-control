@@ -2011,7 +2011,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            const tree = await mapTree(checkout);
+            const tree = await mapTree(
+              checkout,
+              "origin/HEAD",
+              store.pullRequests(repo.id),
+              store.board(repo.id),
+              now(),
+            );
             if (!stopMapRing) stopMapRing = mapRing.start();
             mapRing.poll();
             const data = mapSeats(

@@ -5420,6 +5420,76 @@ describe("superuser housekeeping", () => {
     );
     expect(engineCalls).toHaveLength(1);
   });
+  it("grants one capped review rework with a fix list, then leaves a repeat to the controller", async () => {
+    elevated();
+    runPr();
+    const park = (flightReworks?: Record<string, number>) =>
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind: "review", reason: "review round cap", ended: false },
+        ...(flightReworks === undefined ? {} : { flightReworks }),
+      });
+
+    park();
+    expect(
+      await call("settle_park", {
+        runId: "r-pr",
+        action: "rework",
+        note: "Fix the validation branch and add its regression test.",
+      }),
+    ).toEqual({ text: "Settled r-pr: rework." });
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling"],
+          action: "rework",
+          note: "Fix the validation branch and add its regression test.",
+        },
+      ],
+    ]);
+
+    park({ [SHA]: 1 });
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
+      refused("This head already had FLIGHT's extra rework round; ask the controller."),
+    );
+    expect(engineCalls).toHaveLength(1);
+  });
+  it("keeps budget, ruling and operator-held parks out of rework", async () => {
+    elevated();
+    runPr();
+    const park = (kind: string) =>
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind, reason: "held", ended: false },
+      });
+
+    park("budget");
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    park("ruling");
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    park("review");
+    store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-pr",
+      text: "Operator decision",
+      at: NOW - 20 * 60_000,
+    });
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(engineCalls).toEqual([]);
+  });
   it("refused reruns cost no shared budget", async () => {
     elevated();
     runPr();

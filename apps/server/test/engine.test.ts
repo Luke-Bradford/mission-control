@@ -4429,6 +4429,39 @@ describe("the engine runs reviews", () => {
       },
     );
 
+    it("grants one capped rework per head and appends FLIGHT's fix list", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review round cap", ended: false },
+      });
+
+      expect(
+        await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review"],
+          action: "rework",
+          note: "Exercise the invalid input branch before reporting again.",
+        }),
+      ).toBe(true);
+      expect(loopOf()).toMatchObject({
+        phase: "working",
+        flightReworks: { [SHA]: 1 },
+      });
+      expect(h.sent.at(-1)?.text).toContain(
+        "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
+      );
+
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+      expect(
+        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "rework" }),
+      ).toBe(false);
+      expect(loopOf().parked).not.toBeNull();
+    });
+
     it("lift verifies that the current head descends from the push", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
