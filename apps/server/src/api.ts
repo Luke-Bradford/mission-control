@@ -126,7 +126,14 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
+import {
+  COMMS_SNAPSHOT_LIMIT,
+  pinComms,
+  reactComms,
+  sendComms,
+  threadMessages,
+  validateCommsText,
+} from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -3137,17 +3144,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const kind = run.loop.parked?.kind;
           if (kind !== "review" && kind !== "review-ruling")
             return reply.code(409).send({ error: "rework is only available for review parks" });
+          const knownSecrets = deps.knownSecrets ?? (async () => []);
           try {
-            await sendComms(
-              {
-                store,
-                crew: commsCrew,
-                knownSecrets: deps.knownSecrets ?? (async () => []),
-                now,
-              },
-              COMMS_CAPCOM,
-              { to: run.agentId, text: body.data.text, ref: run.ticket ?? undefined },
-            );
+            await validateCommsText(knownSecrets, body.data.text);
           } catch (e) {
             return crewFail(
               new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
@@ -3159,6 +3158,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(409)
               .send({ error: "the review park could not be resumed for rework" });
+          try {
+            await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
+              to: run.agentId,
+              text: body.data.text,
+              ref: run.ticket ?? undefined,
+              targetRunId: run.id,
+            });
+          } catch (e) {
+            return crewFail(
+              new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+              reply,
+            );
+          }
           return { ok: true };
         },
       );

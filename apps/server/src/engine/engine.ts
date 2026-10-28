@@ -435,7 +435,7 @@ export function createEngine(deps: EngineDeps): Engine {
       reviews: store.reviewsOfRun(run.id),
       events: store.loopEventsOfRun(run.id),
       messages: store
-        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER)
+        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER, run.id)
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,

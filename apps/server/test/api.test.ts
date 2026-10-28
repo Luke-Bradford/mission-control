@@ -6478,6 +6478,31 @@ describe("the first loop's engine", () => {
     },
   );
 
+  it("does not queue rework when the engine cannot lift the parked run", async () => {
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        loop: {
+          ...loop,
+          phase: "parked",
+          parked: { kind: "review", reason: "held", ended: false },
+        },
+      }),
+    );
+    const { a, calls } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: "Please address the findings." },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(calls).toEqual([["aside", "CAPCOM", { kinds: ["review"] }]]);
+    expect(store.comms(0)).toEqual([]);
+    await a.close();
+  });
+
   it("enforces rework text bounds and refuses loop writes in a preview", async () => {
     store.upsertRun(
       run({
