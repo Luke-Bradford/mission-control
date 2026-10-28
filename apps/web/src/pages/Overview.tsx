@@ -1,4 +1,3 @@
-import { CrewMapPanel } from "../map/CrewMap.tsx";
 import { ActivityPanel } from "../overview/ActivityPanel.tsx";
 import { AgentsPanel } from "../overview/AgentsPanel.tsx";
 import { KpiStrip } from "../overview/KpiStrip.tsx";
@@ -8,7 +7,10 @@ import { PipelinePanel } from "../overview/PipelinePanel.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
 import { TimelinePanel } from "../overview/TimelinePanel.tsx";
 
-/** Overview (catalogue 2.1): what needs the operator, the crew, activity, the machine and quota. */
+/**
+ * Overview (catalogue 2.1): what needs the operator, the crew, activity, the machine and quota.
+ * The Crew Activity Map is its own page (`/map`); the Timeline links to it.
+ */
 export function Overview() {
   return (
     <section id="page-overview">
@@ -30,7 +32,6 @@ export function Overview() {
           </div>
         </div>
       </div>
-      <CrewMapPanel />
     </section>
   );
 }

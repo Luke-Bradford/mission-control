@@ -23,6 +23,7 @@ import {
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  commsCutMarker,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
@@ -39,8 +40,10 @@ import {
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
   findingFileText,
+  fixKey,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
+  MC_COMMS_READ_MAX,
   MC_PLAN_ALREADY,
   MC_PLAN_BODY_UNCLOSED,
   MC_PLAN_GH_FAILED,
@@ -49,7 +52,9 @@ import {
   MC_PLAN_NO_ROOM,
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
+  MC_PLAN_PROFILE_ONLY,
   MC_PLAN_WRITTEN,
+  MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
@@ -58,6 +63,7 @@ import {
   MC_RUN_ENDED,
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
+  MC_TEXT_MAX,
   MC_TOOL_GRANTS,
   MC_TOOL_NAMES,
   MC_TOOLS,
@@ -75,6 +81,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  type ReviewFinding,
   type Run,
   type RunLoop,
   readOnlyToolText,
@@ -83,11 +90,12 @@ import {
   removeNotFileText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/api.ts";
+import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
+import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -96,6 +104,7 @@ import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mc
 import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
+import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
@@ -304,8 +313,11 @@ afterEach(() => {
 });
 
 describe("the mc tools", () => {
-  it("serves commit (writer), ask_operator and report_evidence (writer and read-only) and report_findings (scratch) under the names the CLI prefixes, and no push or draft_pr", () => {
+  it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
+      [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
+      [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
       ["ask_operator", ["writer", "read-only"]],
@@ -315,6 +327,9 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.commsRead,
+      MC_TOOLS.commsSend,
+      MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
       MC_TOOLS.askOperator,
@@ -1026,7 +1041,7 @@ describe("ask_operator", () => {
 });
 
 describe("through /mcp", () => {
-  it("offers a writer seat every tool and a read-only seat ask_operator and report_evidence; commit runs end to end", async () => {
+  it("offers each seat mode its Comms tools; commit runs end to end", async () => {
     const cfg = config();
     const tokens = new RunTokens();
     const writer = tokens.issue("guido-1", RUN);
@@ -1053,6 +1068,9 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "comms_read",
+        "comms_send",
+        "comms_react",
         "commit",
         "sync_main",
         "ask_operator",
@@ -1066,7 +1084,13 @@ describe("through /mcp", () => {
           })
         ).error.message,
       ).toBe("unknown tool");
-      expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
+      expect(await names(reader)).toEqual([
+        "comms_read",
+        "comms_send",
+        "comms_react",
+        "ask_operator",
+        "report_evidence",
+      ]);
       write("apps/a.ts", "a2\n");
       const r = await rpc(writer, "tools/call", {
         name: "commit",
@@ -1083,6 +1107,309 @@ describe("through /mcp", () => {
     } finally {
       await app.close();
     }
+  });
+
+  it("uses crewGuardDeps run grants to list and call planner and FLIGHT tools", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push(
+      { id: "fao-1", role: "FAO", accountId: "claude-main", model: "haiku", area: [] },
+      { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "haiku", area: [] },
+    );
+    const tokens = new RunTokens();
+    const planner = tokens.issue("fao-1", "fao:mcp");
+    const flight = tokens.issue("flight-1", "flight:mcp");
+    const reportPlan = vi.fn(async () => ({ text: "plan recorded" }));
+    const logDecision = vi.fn(async () => ({ text: "decision recorded" }));
+    const mcpTools: McTool[] = [
+      {
+        name: MC_TOOL_NAMES.reportPlan,
+        description: "record a plan",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: reportPlan,
+      },
+      {
+        name: MC_TOOL_NAMES.logDecision,
+        description: "record a decision",
+        inputSchema: {},
+        modes: [],
+        grantable: ["read-only"],
+        call: logDecision,
+      },
+    ];
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      ...crewGuardDeps(cfg, tokens, new TestLock(), store),
+      mcpTools: () => mcpTools,
+    });
+    await app.ready();
+    try {
+      const rpc = (token: string, method: string, params?: object) =>
+        app
+          .inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { authorization: `Bearer ${token}` },
+            payload: { jsonrpc: "2.0", id: 1, method, params },
+          })
+          .then((r) => r.json());
+      const names = async (token: string) =>
+        (await rpc(token, "tools/list")).result.tools.map((t: { name: string }) => t.name);
+
+      expect(await names(planner)).toContain(MC_TOOL_NAMES.reportPlan);
+      expect(await names(flight)).toContain(MC_TOOL_NAMES.logDecision);
+      expect(
+        (await rpc(planner, "tools/call", { name: MC_TOOL_NAMES.reportPlan, arguments: {} })).result
+          .content[0].text,
+      ).toBe("plan recorded");
+      expect(
+        (await rpc(flight, "tools/call", { name: MC_TOOL_NAMES.logDecision, arguments: {} })).result
+          .content[0].text,
+      ).toBe("decision recorded");
+      expect(reportPlan).toHaveBeenCalledWith({ seatId: "fao-1", runId: "fao:mcp" }, {});
+      expect(logDecision).toHaveBeenCalledWith({ seatId: "flight-1", runId: "flight:mcp" }, {});
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("Comms seat tools", () => {
+  const read = (args: unknown = {}, ts = tools, ctx = CTX) =>
+    tool("comms_read", ts).call(ctx, args);
+  const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
+  const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
+    store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
+    store.addComms({ at: NOW - 3, from: "guido-2", to: "guido-1", ticket: null, text: "direct" });
+    store.addComms({
+      at: NOW - 2,
+      from: "retro",
+      to: "CAPCOM",
+      ticket: null,
+      text: "mentioned @guido-1",
+      mentions: ["guido-1"],
+    });
+    store.addComms({ at: NOW - 1, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    const result = await read({ limit: 2 });
+    const parsed = JSON.parse(result.text) as { messages: { text: string; id: string }[] };
+    expect(parsed.messages.map((message) => message.text)).toEqual([
+      "direct",
+      "mentioned @guido-1",
+    ]);
+    expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
+    expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
+
+  it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
+    const own = store.addComms({
+      at: NOW - 6,
+      from: "guido-1",
+      to: "retro",
+      ticket: null,
+      text: "mine",
+    });
+    store.addComms({ at: NOW - 5, from: "retro", to: "crew", ticket: null, text: "crew" });
+    const pinned = store.addComms({
+      at: NOW - 4,
+      from: "guido-2",
+      to: "retro",
+      ticket: null,
+      text: "pinned private",
+    });
+    store.addComms({
+      at: NOW - 3,
+      from: "retro",
+      to: "guido-2",
+      ticket: null,
+      text: "reply to mine",
+      replyTo: own?.id,
+    });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    if (own === null || pinned === null) throw new Error("expected stored rows");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
+    const pins = vi.spyOn(store, "commsPins");
+    try {
+      const parsed = JSON.parse((await read({})).text) as {
+        messages: { text: string; pinned: boolean }[];
+      };
+      expect(parsed.messages.map((m) => [m.text, m.pinned])).toEqual([
+        ["mine", false],
+        ["crew", false],
+        ["pinned private", true],
+        ["reply to mine", false],
+      ]);
+      // the pins are read once per call, not once per row
+      expect(pins).toHaveBeenCalledTimes(1);
+    } finally {
+      pins.mockRestore();
+    }
+  });
+
+  it("cuts each message's text at MC_TEXT_MAX with the stored-text marker", async () => {
+    const long = "é".repeat(MC_TEXT_MAX + 5);
+    store.addComms({ at: NOW - 1, from: "retro", to: "crew", ticket: null, text: long });
+    const parsed = JSON.parse((await read({})).text) as { messages: { text: string }[] };
+    expect(parsed.messages[0]?.text).toBe(
+      `${"é".repeat(MC_TEXT_MAX)}${commsCutMarker(MC_TEXT_MAX, MC_TEXT_MAX + 5)}`,
+    );
+  });
+
+  it("keeps the result under MC_COMMS_READ_MAX by leaving out the oldest messages, and says so", async () => {
+    for (let n = 0; n < 30; n++)
+      store.addComms({
+        at: NOW - 100 + n,
+        from: "retro",
+        to: "crew",
+        ticket: null,
+        text: `${n} ${"x".repeat(MC_TEXT_MAX)}`,
+      });
+    const result = await read({ limit: 100 });
+    expect(result.text.length).toBeLessThanOrEqual(MC_COMMS_READ_MAX);
+    const parsed = JSON.parse(result.text) as {
+      omitted: number;
+      note: string;
+      messages: { text: string }[];
+    };
+    expect(parsed.omitted).toBeGreaterThan(0);
+    expect(parsed.omitted + parsed.messages.length).toBe(30);
+    expect(parsed.note).toBe(
+      `${parsed.omitted} older messages were left out to keep this under ${MC_COMMS_READ_MAX} characters.`,
+    );
+    // the newest survive
+    expect(parsed.messages.at(-1)?.text.startsWith("29 ")).toBe(true);
+    expect(parsed.messages[0]?.text.startsWith(`${parsed.omitted} `)).toBe(true);
+    // a small read has no note
+    expect(JSON.parse((await read({ limit: 2 })).text)).not.toHaveProperty("omitted");
+  });
+
+  it("persists every supported destination, label, ref, reply and mention", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    for (const [to, label, ref] of [
+      ["guido-2", "question", "#703"],
+      ["crew", "handoff", "PR 711"],
+      ["CAPCOM", "blocker", undefined],
+    ] as const)
+      expect(await send({ to, text: `to ${to} @guido-2`, label, ref })).toMatchObject({
+        text: expect.stringMatching(/^Sent comms:\d+\.$/),
+      });
+    const original = store.commsForPair("guido-1", "guido-2")[0];
+    if (original === undefined) throw new Error("expected direct Comms row");
+    expect(
+      await send({ to: "guido-1", text: "reply", replyTo: original.id }, tools, {
+        seatId: "guido-2",
+        runId: "guido-2:live",
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:/) });
+    expect(store.commsForAgent("guido-1")[0]).toMatchObject({
+      label: "question",
+      ref: "#703",
+      mentions: ["guido-2"],
+    });
+    expect(store.commsForPair("guido-1", "guido-2").at(-1)).toMatchObject({
+      replyTo: original.id,
+      mentions: ["guido-1"],
+    });
+  });
+
+  it.each([
+    [{ to: "unknown", text: "x" }, "Unknown Comms destination."],
+    [{ to: "guido-2", text: "x", label: "wrong" }, "Invalid arguments:"],
+    [{ to: "guido-2", text: "x", ref: "703" }, "Invalid arguments:"],
+    [
+      { to: "guido-2", text: "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "Refused: message contains",
+    ],
+  ])("refuses invalid destination, labels, refs and secrets: %o", async (args, expected) => {
+    liveSeat("guido-2", "guido-2:live");
+    const ts =
+      (args as { text?: string }).text === "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ? make({ knownSecrets: async () => ["ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] })
+        : tools;
+    expect(await send(args, ts)).toMatchObject({
+      text: expect.stringContaining(expected),
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+  });
+
+  it("delivers direct and mentioned seats once, while reactions never wake or add a message", async () => {
+    liveSeat("guido-2", "guido-2:live");
+    const wake = vi.fn();
+    const ts = make({ onComms: wake });
+    await send({ to: "guido-2", text: "@guido-2 direct" }, ts);
+    const message = store.commsForAgent("guido-1")[0];
+    if (message === undefined) throw new Error("expected Comms message");
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(await react({ id: message.id, reaction: "seen" }, ts)).toEqual({
+      text: "Reaction recorded.",
+    });
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(store.comms(0)).toHaveLength(1);
+    expect(store.commsReactions(message.id)).toHaveLength(1);
+  });
+
+  it.each([
+    [{ id: "comms:1", reaction: "nope" }, "Invalid arguments:"],
+    [{ id: "comms:1", reaction: "cant" }, "Invalid arguments:"],
+    [{ id: "comms:1", reaction: "seen", reason: "why" }, "Invalid arguments:"],
+    [{ id: "comms:99", reaction: "seen" }, "Unknown Comms message."],
+  ])("refuses bad reactions: %o", async (args, expected) => {
+    expect(await react(args)).toMatchObject({
+      text: expect.stringContaining(expected),
+      isError: true,
+    });
+  });
+
+  it("refuses a live stored run whose seat was removed from the current crew", async () => {
+    const message = store.addComms({
+      at: NOW,
+      from: "guido-2",
+      to: "guido-1",
+      ticket: null,
+      text: "private",
+    });
+    if (message === null) throw new Error("Comms message was not stored");
+    const removed = make({ crewIds: () => ["guido-2"] });
+    expect(await react({ id: message.id, reaction: "seen" }, removed)).toEqual({
+      text: "This seat is no longer in the crew.",
+      isError: true,
+    });
+    expect(store.commsReactions(message.id)).toEqual([]);
+  });
+
+  it("refuses ended, inaccessible and rate-limited calls without changing their state", async () => {
+    expect(await send({ to: "crew", text: "ended" }, tools, { ...CTX, runId: "gone" })).toEqual({
+      text: "This run has ended.",
+      isError: true,
+    });
+    liveSeat("guido-2", "guido-2:live");
+    liveSeat("retro", "retro:live");
+    await send({ to: "guido-2", text: "private" });
+    const privateMessage = store.commsForPair("guido-1", "guido-2")[0];
+    if (privateMessage === undefined) throw new Error("expected private message");
+    expect(
+      await react({ id: privateMessage.id, reaction: "seen" }, tools, {
+        seatId: "retro",
+        runId: "retro:live",
+      }),
+    ).toMatchObject({ text: "You cannot react to that Comms message.", isError: true });
+    expect(
+      await send({ to: "retro", text: "guess", replyTo: privateMessage.id }, tools, {
+        seatId: "retro",
+        runId: "retro:live",
+      }),
+    ).toMatchObject({ text: "You cannot reply to that Comms message.", isError: true });
+    for (let i = 0; i < 29; i++) await send({ to: "crew", text: String(i) });
+    expect(await send({ to: "crew", text: "one too many" })).toMatchObject({
+      text: "Comms rate limit reached: 30 messages per 10 minutes.",
+      isError: true,
+    });
+    expect(store.comms(0)).toHaveLength(30);
   });
 });
 
@@ -2745,6 +3072,58 @@ describe("report_evidence", () => {
     expect(r.text).toMatch(/^Committed /);
     return head();
   };
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "apps/a.ts",
+    line: 1,
+    summary: "missing case",
+    scenario: "a reply has no test",
+    fix: "add a test",
+  };
+  const startReview = (
+    sha: string,
+    { epoch = 0, attempt = 1, blocking = true, running = false } = {},
+  ): number => {
+    const review = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha,
+      epoch,
+      attempt,
+      round: attempt,
+      at: clock,
+    });
+    if (review === null) throw new Error("review was not queued");
+    store.setReviewState(review, ["queued"], "running", { at: clock, runId: `retro:${review}` });
+    if (!running) {
+      store.recordFindings(review, `retro:${review}`, {
+        verdict: { spec: blocking ? "fail" : "pass", quality: "pass" },
+        summary: blocking ? "hold" : "clean",
+        findings: blocking ? [finding] : [],
+        at: clock,
+      });
+    }
+    return review;
+  };
+  const claimFix = (review: number, epoch = 0) =>
+    store.claimLine(fixKey(RUN, epoch, review), {
+      runId: RUN,
+      seatId: "guido-1",
+      origin: "engine",
+      text: "fix",
+      at: clock,
+    });
+  const reviewedHead = async () => {
+    const sha = await committed();
+    expect(await report("Initial fix report.")).toEqual({ text: EVIDENCE_RECORDED });
+    const evidence = store.latestEvidence(RUN);
+    if (evidence === null) throw new Error("evidence was not recorded");
+    store.setRunPush({ runId: RUN, sha, at: clock });
+    setLoop({ phase: "review", reportedEvidenceId: evidence.id });
+    return sha;
+  };
   const refused = (text: string) => ({ text, isError: true });
 
   beforeEach(() => {
@@ -2762,6 +3141,18 @@ describe("report_evidence", () => {
 
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
+  });
+
+  it("describes a no-commit response as a blocking-review reply", () => {
+    const evidence = tool("report_evidence", ev);
+    expect(evidence.description).toContain(
+      "While responding to blocking review findings on the unchanged head",
+    );
+    const schema = evidence.inputSchema as {
+      properties: { note: { description: string } };
+    };
+    expect(schema.properties.note.description).toContain("unchanged blocking review");
+    expect(schema.properties.note.description).toContain("Ruling: only for a CI decision");
   });
 
   it("answers EVIDENCE_NO_LOOP for a run no loop drives", async () => {
@@ -2794,6 +3185,51 @@ describe("report_evidence", () => {
     // the first report with no commit since: NO_COMMIT beats the text
     expect(await report("fine")).toEqual({ text: EVIDENCE_RECORDED });
     expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
+  });
+
+  it.each(["review", "silent", "refused"])(
+    "records fresh evidence and resumes a %s park",
+    async (kind) => {
+      setLoop({
+        phase: "parked",
+        parked: { kind, reason: "parked", ended: false },
+        transient: 2,
+        lastRefusal: "no",
+      });
+      await committed();
+      expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
+      expect(store.run(RUN)?.loop).toMatchObject({
+        phase: "working",
+        parked: null,
+        transient: 0,
+        lastRefusal: null,
+      });
+      expect(told).toEqual([["guido-1", RUN]]);
+    },
+  );
+
+  it.each(["budget", "account-stop"])("keeps a %s park held", async (kind) => {
+    setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+    await committed();
+    expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+  });
+
+  it("records a refused retry for the same pushed and reported head", async () => {
+    const sha = await committed();
+    expect(await report("first report")).toEqual({ text: EVIDENCE_RECORDED });
+    const reported = store.latestEvidence(RUN);
+    if (reported === null) throw new Error("evidence was not recorded");
+    setLoop({
+      phase: "parked",
+      parked: { kind: "refused", reason: "refused", ended: false },
+      pushFor: sha,
+      reportedEvidenceId: reported.id,
+    });
+
+    expect(await report("retry after refusal")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.evidenceCount(RUN)).toBe(2);
+    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
   });
 
   it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
@@ -2869,6 +3305,37 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(0);
   });
 
+  it("does not unpark when a budget hold lands while git status is pending", async () => {
+    await committed();
+    let statusReads = 0;
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delayed = make({
+      now: () => clock,
+      git: async (cwd, args, common, options) => {
+        if (cwd === wt && args[0] === "status") {
+          statusReads++;
+          await pending;
+        }
+        return crewGit(cwd, args, common, options);
+      },
+    });
+    setLoop({ phase: "parked", parked: { kind: "review", reason: "waiting", ended: false } });
+    const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
+    await vi.waitFor(() => expect(statusReads).toBe(1));
+    setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+    release();
+
+    expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(store.run(RUN)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+    });
+  });
+
   it("refuses a report with no commit since the last one, and takes it after a new one", async () => {
     expect(await report("done")).toEqual(refused(EVIDENCE_NO_COMMIT));
     await committed();
@@ -2896,6 +3363,58 @@ describe("report_evidence", () => {
     });
     expect(await report("Ruling: still no change")).toEqual({ text: EVIDENCE_RECORDED });
     expect(store.evidenceCount(RUN)).toBe(2);
+  });
+
+  it("accepts a plain reply to a blocking RETRO finding without a new commit", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    expect(await report("1. This case is intentionally unsupported.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
+  });
+
+  it("refuses a reply when the blocking review is from a stale epoch", async () => {
+    const sha = await reviewedHead();
+    startReview(sha, { epoch: 1 });
+    setLoop({ phase: "review", epoch: 0, reportedEvidenceId: 1 });
+    expect(await report("Ruling: this old finding no longer applies.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a reply after a later clean review", async () => {
+    const sha = await reviewedHead();
+    startReview(sha);
+    startReview(sha, { attempt: 2, blocking: false });
+    expect(await report("The earlier finding is not applicable.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a reply while the current review is running", async () => {
+    const sha = await reviewedHead();
+    startReview(sha);
+    startReview(sha, { attempt: 2, running: true });
+    expect(await report("The earlier finding is not applicable.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+  });
+
+  it("refuses a repeated reply to the same review", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    setLoop({ phase: "review", reportedEvidenceId: 1, reviewReplyTo: review });
+    expect(await report("I already answered this finding.")).toEqual(refused(EVIDENCE_NO_COMMIT));
+  });
+
+  it("refuses a reply while earlier evidence is unprocessed", async () => {
+    const sha = await reviewedHead();
+    const review = startReview(sha);
+    expect(claimFix(review)).toBe(true);
+    store.addEvidence(RUN, "An earlier report has not been processed.", clock);
+    expect(await report("I am replying to the finding.")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
   it("records the note, answers EVIDENCE_RECORDED, tells the supervisor and the bus", async () => {
@@ -3228,7 +3747,7 @@ describe("report_plan", () => {
     });
   });
 
-  it("is offered to read-only seats whose role is granted it", () => {
+  it("is eligible for planners; build visibility is granted per run", () => {
     expect(tool("report_plan", pt).modes).toEqual([]);
     expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
   });
@@ -3288,6 +3807,143 @@ describe("report_plan", () => {
     expect(emitted).toContain("agents");
     expect(bodyFiles()).toEqual([]);
   });
+
+  it("lets a build seat record its own plan and continue its run", async () => {
+    const runId = "guido:1";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual({
+      text: MC_PLAN_WRITTEN_CONTINUE,
+    });
+    expect(told).toEqual([]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.loopEventsOfRun(runId).map((e) => e.text)).toEqual([planWrittenText("mc#7")]);
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual(refused(MC_PLAN_NOT_FAO));
+  });
+
+  it("fails closed for a build run that started with a plan", async () => {
+    const runId = "guido:planned";
+    store.upsertRun(
+      run({
+        id: runId,
+        agentId: "guido-1",
+        branch: "guido/7",
+        ticket: "mc#7",
+        plan: { by: null, at: null, ref: "mc#7" },
+      }),
+    );
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual(refused(MC_PLAN_NOT_FAO));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("refuses profile fields from a build seat", async () => {
+    const runId = "guido:profile";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      await tool("report_plan", pt).call(
+        { seatId: "guido-1", runId },
+        { plan: PLAN, profile: "bugfix", profile_reason: "it is a bug" },
+      ),
+    ).toEqual(refused(MC_PLAN_PROFILE_ONLY));
+    expect(store.profileOverride("mc", 7)).toBeNull();
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "lists and calls report_plan through MCP for a planless %s build run",
+    async (vendor) => {
+      const seatId = `${vendor}-guido`;
+      const runId = `${vendor}:mcp`;
+      const cfg = config();
+      if (vendor === "codex")
+        cfg.accounts.push({ id: "codex-main", vendor, alertAt: 80, stopAt: 95 });
+      cfg.crew?.sessions[0]?.seats.push({
+        id: seatId,
+        role: "GUIDO",
+        accountId: vendor === "codex" ? "codex-main" : "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      });
+      const mcpTools = createMcTools(deps({ config: cfg, gh: createGh(join(ghDir, "gh")) }));
+      store.upsertRun(
+        run({
+          id: runId,
+          agentId: seatId,
+          branch: `${vendor}/7`,
+          ticket: `mc#${vendor === "claude" ? 7 : 8}`,
+          vendor,
+        }),
+      );
+      store.setSeatSession({
+        seatId,
+        runId,
+        cliSessionId: "cli-build",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const tokens = new RunTokens();
+      const token = tokens.issue(seatId, runId);
+      const app = buildApp({
+        config: cfg,
+        store,
+        bus,
+        tokens,
+        seatMode: (id) => crewSeatMode(cfg, id),
+        runGrants: (who) => runSeatGrants(cfg, store, who),
+        mcpTools: () => mcpTools,
+      });
+      await app.ready();
+      const rpc = (method: string, params?: object) =>
+        app.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { authorization: `Bearer ${token}` },
+          payload: { jsonrpc: "2.0", id: 1, method, ...(params === undefined ? {} : { params }) },
+        });
+      try {
+        expect(
+          ((await rpc("tools/list")).json().result.tools as { name: string }[]).map((t) => t.name),
+        ).toContain("report_plan");
+        expect(
+          (await rpc("tools/call", { name: "report_plan", arguments: { plan: PLAN } })).json()
+            .result.content[0].text,
+        ).toBe(MC_PLAN_WRITTEN_CONTINUE);
+        expect(
+          ((await rpc("tools/list")).json().result.tools as { name: string }[]).map((t) => t.name),
+        ).not.toContain("report_plan");
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it("records the plan landing as the planner to CAPCOM when the session has no FLIGHT seat", async () => {
     await plan();
@@ -3542,7 +4198,7 @@ describe("report_plan", () => {
     expect(await plan()).toEqual({ text: MC_PLAN_WRITTEN });
   });
 
-  it("not a planner", async () => {
+  it("not a planner or build seat", async () => {
     store.upsertRun(run({ id: "retro:1", agentId: "retro", branch: null, ticket: "mc#7" }));
     store.setSeatSession({
       seatId: "retro",

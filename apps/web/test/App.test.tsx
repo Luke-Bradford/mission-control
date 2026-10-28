@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { navigate } from "../src/router.ts";
+import { toggleDock } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, REPOS } from "./fixtures.ts";
 
@@ -27,9 +28,10 @@ const at = (path: string) => {
 describe("App", () => {
   it.each([
     ["/", "page-overview", "Overview"],
-    ["/flight", "page-flight", "FLIGHT"],
+    ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],
-    ["/agent", "page-agent", "Agent"],
+    ["/agent", "page-agent", "Agents"],
+    ["/map/sample", "page-map", "Map"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
     ["/setup/loops", "page-setup", null],
@@ -78,6 +80,46 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Keys and lamps" })).toBeTruthy();
   });
 
+  it("opens FLIGHT in Comms from Setup without changing the unmounted dock state", async () => {
+    act(() => toggleDock(false));
+    const { container } = at("/setup");
+    await waitFor(() => expect(container.querySelector("#page-setup")).not.toBeNull());
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+    });
+    expect(window.location.pathname).toBe("/comms");
+    await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    // On Comms, FLIGHT is already open: f must not toggle a dock that is not mounted.
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+      navigate("/");
+    });
+    await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("g then m opens the Map full width, where f opens FLIGHT in Comms like Setup", async () => {
+    act(() => toggleDock(true));
+    const { container } = at("/");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "g" });
+      fireEvent.keyDown(document.body, { key: "m" });
+    });
+    expect(window.location.pathname).toMatch(/^\/map/);
+    await waitFor(() => expect(container.querySelector("#page-map")).not.toBeNull());
+    expect(container.querySelector(".shell.shell-full")).not.toBeNull();
+    expect(container.querySelector(".dock")).toBeNull();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+    });
+    expect(window.location.pathname).toBe("/comms");
+  });
+
   it("i off the agent page toasts", () => {
     at("/");
     act(() => {
@@ -89,7 +131,7 @@ describe("App", () => {
   it("the footer carries the key hints, Setup included, and no sample-data chip", () => {
     const { container } = at("/");
     const keys = container.querySelector(".keys");
-    expect(keys?.textContent).toContain("g then o f b a c t pages");
+    expect(keys?.textContent).toContain("g then o f b a m c t pages");
     expect(keys?.textContent).toContain("s Setup");
     for (const hint of ["f FLIGHT", "jk next agent", "/ message agent", "i interrupt", "? help"]) {
       expect(keys?.textContent).toContain(hint);
@@ -171,13 +213,13 @@ describe("App", () => {
     await screen.findByRole("button", { name: "Pop out" });
   });
 
-  it("the setup tabs follow the URL", async () => {
+  it("the Setup sidebar follows the URL", async () => {
     at("/setup");
-    const tabs = await screen.findByRole("group", { name: "Setup" });
+    const tabs = await screen.findByRole("navigation", { name: "Setup sections" });
     expect(
-      within(tabs).getByRole("button", { name: "Sessions" }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    fireEvent.click(within(tabs).getByRole("button", { name: "Sources" }));
-    expect(window.location.pathname).toBe("/setup/sources");
+      within(tabs).getByRole("button", { name: "Accounts" }).getAttribute("aria-current"),
+    ).toBe("page");
+    fireEvent.click(within(tabs).getByRole("button", { name: "Loops" }));
+    expect(window.location.pathname).toBe("/setup/loops");
   });
 });

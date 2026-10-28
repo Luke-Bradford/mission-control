@@ -1,6 +1,7 @@
 import {
   type BoardItem,
   type ConfigView,
+  type CrewRow,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
   type PrCheck,
@@ -9,6 +10,7 @@ import {
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { needsYouItems } from "../src/attention.ts";
 import { cardRenderProbe } from "../src/board/Card.tsx";
 import {
   NO_PR_YET,
@@ -220,8 +222,7 @@ describe("at phone width", () => {
       showRepo: false,
       prs: [],
       crew: [],
-      attention: [],
-      unackedAttention: [],
+      needsYou: needsYouItems([]),
       now: NOW,
       tz: "UTC",
       todayStart: 0,
@@ -468,7 +469,6 @@ describe("cards", () => {
       id: "RETRO-1",
       index: 3,
       kind: "crew",
-      run: null,
       ticket: null,
       reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
     });
@@ -491,6 +491,38 @@ describe("cards", () => {
     expect(within(c).getByText("check passing")).toBeTruthy();
     expect(within(c).queryByText(NO_REVIEWER)).toBeNull();
   });
+
+  it.each([
+    [
+      "paused",
+      { crewPause: { seats: ["RETRO-1"], reason: "Save tokens", at: NOW, by: "operator" } },
+      "Paused",
+      "Save tokens",
+    ],
+    ["parked", { hudState: "parked", note: "Awaiting operator" }, "Parked", "Awaiting operator"],
+  ] satisfies [string, Partial<CrewRow>, string, string][])(
+    "shows a %s reviewer's short state and reason tooltip",
+    async (_state, status, label, reason) => {
+      const retro = crewRow({
+        id: "RETRO-1",
+        index: 3,
+        kind: "crew",
+        ticket: null,
+        reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
+        ...status,
+      });
+      stub({
+        shopApp: [todo(3349, { status: "In review", state: "review" })],
+        prs: [pr()],
+        crew: [retro],
+      });
+      const { container } = await open();
+      const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+      const pill = within(c).getByText(label);
+      expect(pill.parentElement?.getAttribute("title")).toBe(reason);
+      expect(container).toBeTruthy();
+    },
+  );
 
   it("a card with none of these says so in words", async () => {
     stub({ shopApp: [todo(1), todo(2, { status: "In review", state: "review" })] });
@@ -562,14 +594,17 @@ describe("cards", () => {
     expect(within(c).queryByText("PR #1")).toBeNull();
   });
 
-  it("a PR waiting on you shows the You pill and pulses the card", async () => {
+  it("a PR in Needs you shows the You chip, which opens its brief, and pulses the card", async () => {
+    const key = `pr:shop-app#40:${NOW - 9 * DAY}`;
     stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],
       prs: [pr({ isDraft: true, updatedAt: NOW - 9 * DAY })],
       attention: [
         item({
-          key: `pr:shop-app#40:${NOW - 9 * DAY}`,
+          key,
           kind: "pr",
+          text: "PR #40 · You: decide on the draft",
+          at: NOW - 9 * DAY,
           agentId: null,
           escalationId: null,
           ticket: "shop-app#3349",
@@ -578,10 +613,38 @@ describe("cards", () => {
     });
     await open();
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
-    expect(within(c).getByText("You: decide on the draft · waiting 9 days").className).toBe(
-      "pill warn",
-    );
+    const chip = within(c).getByRole("button", {
+      name: "You: decide on the draft · waiting 9 days. Opens its brief.",
+    });
+    expect(chip.textContent).toBe("You: decide on the draft · waiting 9 days");
+    expect(chip.className).toBe("kyou pill warn");
     expect(c.className).toContain("pulse-warn");
+    fireEvent.click(chip);
+    expect(new URLSearchParams(window.location.search).get("item")).toBe(key);
+    // the chip opens the brief, not the ticket beside the board
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("a PR waiting by the PR rule alone, with no Needs-you item, shows no chip", async () => {
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [pr({ isDraft: true, updatedAt: NOW - 9 * DAY })],
+      attention: [
+        item({
+          key: "pr:shop-app#40:1",
+          kind: "pr",
+          text: "PR #40 · You: decide on the draft",
+          owner: "lane:octo",
+          agentId: null,
+          escalationId: null,
+          ticket: "shop-app#3349",
+        }),
+      ],
+    });
+    await open();
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    expect(within(c).queryByText(/^You:/)).toBeNull();
+    expect(c.className).not.toContain("pulse-warn");
   });
 
   it("a Done card has no PR line but its outcome and age; any merged PR makes it Merged", async () => {
@@ -606,8 +669,7 @@ describe("cards", () => {
         showRepo={false}
         prs={[]}
         crew={[]}
-        attention={[]}
-        unackedAttention={[]}
+        needsYou={needsYouItems([])}
         now={NOW}
         tz={null}
         todayStart={null}

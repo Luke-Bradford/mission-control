@@ -6,6 +6,7 @@
       "!**/spikes",
       "!**/docs",
       "!**/.superpowers",
+      "!**/.mc-tmp",
       "!**/node_modules",
       "!**/dist",
       "!**/*.html"

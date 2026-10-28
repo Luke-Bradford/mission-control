@@ -74,7 +74,7 @@ export function crewOrder(rows: CrewRow[], items: AttentionItem[], now = Date.no
  * error, else amber; named by their kinds in Needs-you order. null for none (render nothing).
  */
 export function needsLamp(
-  items: AttentionItem[],
+  items: readonly AttentionItem[],
   pulse: boolean,
 ): { kind: HudLampKind; pulse: boolean; label: string } | null {
   if (items.length === 0) return null;
@@ -172,6 +172,7 @@ export function doingLine(
   /** The seat's repo's PRs (the PRs resource), where an idle seat's PR title is found. */
   repoPrs?: readonly PullRequestView[],
 ): string {
+  if (row.crewPause) return `Paused: ${row.crewPause.reason}`;
   if (isSeatFree(row) && row.hudState === "idle") return SEAT_FREE_LINE;
   // In `review` the PR line (idle case below) wins: it carries the title.
   if (row.loop?.phase !== "review") {
@@ -642,10 +643,12 @@ export const isSeatFree = (row: Pick<CrewRow, "kind" | "run">): boolean =>
   row.kind === "crew" && (row.run === null || row.run.endedAt !== null);
 
 /** What a crew row's state pill says, beyond the engine's own states. */
+export const MAX_STATE_PILL_LENGTH = 10;
 export const SEAT_STATUS_LABEL = {
-  ci: "Waiting on CI",
-  review: "In review",
+  ci: "Watching",
+  review: "Review",
   blocked: "Blocked",
+  parked: "Parked",
   idle: "Idle",
   free: "Free",
 } as const;
@@ -653,16 +656,30 @@ export const SEAT_STATUS_LABEL = {
 /** The doing line of a free seat. */
 export const SEAT_FREE_LINE = "Free for work";
 
-const ENGINE_STATES: readonly HudState[] = ["running", "stalled", "error", "stopped", "parked"];
+const ENGINE_STATES: readonly HudState[] = [
+  "running",
+  "stalled",
+  "blocked",
+  "error",
+  "stopped",
+  "parked",
+];
 
 /**
  * The one rule for a state pill: an observed loop keeps the engine's state; a crew seat says what
  * its open run is doing (waiting on CI or review, blocked, between turns) or that it is free.
  */
-export function seatStatus(row: CrewRow): { label: string; tone: HudTone } {
-  if (row.crewPause) return { label: `Paused: ${row.crewPause.reason}`, tone: "warn" };
+export type SeatStatus = { label: string; tone: HudTone; reason?: string };
+
+export function seatStatus(row: CrewRow): SeatStatus {
+  if (row.crewPause) return { label: "Paused", tone: "warn", reason: row.crewPause.reason };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
-  if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) return engine;
+  const reason = row.loop?.parked ?? row.note ?? undefined;
+  if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
+    return (row.hudState === "blocked" || row.hudState === "parked") && reason
+      ? { ...engine, reason }
+      : engine;
+  }
   if (isSeatFree(row)) return { label: SEAT_STATUS_LABEL.free, tone: "neutral" };
   switch (row.loop?.phase) {
     case "ci":
@@ -670,7 +687,9 @@ export function seatStatus(row: CrewRow): { label: string; tone: HudTone } {
     case "review":
       return { label: SEAT_STATUS_LABEL.review, tone: "neutral" };
     case "parked":
-      return { label: SEAT_STATUS_LABEL.blocked, tone: "warn" };
+      return reason
+        ? { label: SEAT_STATUS_LABEL.parked, tone: "warn", reason }
+        : { label: SEAT_STATUS_LABEL.parked, tone: "warn" };
     default:
       return row.hudState === "idle" ? { label: SEAT_STATUS_LABEL.idle, tone: "neutral" } : engine;
   }

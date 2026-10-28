@@ -177,6 +177,31 @@ it("does not infer an observed loop turn from a stalled-to-running event", () =>
   expect(view().lanes[0]?.spans).toEqual([]);
 });
 
+it("joins a crew seat's open turn seen both in its status events and in its unended run", () => {
+  seat();
+  store.upsertRun(run({ loop: null }));
+  store.addAgentEvent({ agentId: "dev", at: FROM - 100, from: "idle", to: "running", text: "" });
+  expect(view().lanes[1]?.spans).toEqual([{ kind: "turn", from: FROM, to: null }]);
+});
+
+it("joins overlapping spans of one kind and keeps other kinds apart", () => {
+  store.upsertRun(run({ loop: null, startedAt: FROM + 10, endedAt: FROM + 50 }));
+  store.addAgentEvent({ agentId: "dev", at: FROM + 20, from: "idle", to: "running", text: "" });
+  store.addAgentEvent({ agentId: "dev", at: FROM + 60, from: "running", to: "idle", text: "" });
+  store.addLockHold({
+    runId: "r",
+    toolUseId: "t",
+    seatId: "dev",
+    command: "test",
+    since: FROM + 30,
+  });
+  store.deleteLockHold("r", "t", FROM + 40);
+  expect(view().lanes[1]?.spans).toEqual([
+    { kind: "turn", from: FROM + 10, to: FROM + 60 },
+    { kind: "lock", from: FROM + 30, to: FROM + 40 },
+  ]);
+});
+
 it("takes observed loop turns from runs, including ended and open runs", () => {
   store.upsertRun(
     run({ id: "ended", agentId: "loop", loop: null, startedAt: FROM - 10, endedAt: FROM + 20 }),

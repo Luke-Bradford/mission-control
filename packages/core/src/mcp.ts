@@ -21,6 +21,10 @@ export const MC_TOOL_NAMES = {
   answerQuestion: "answer_question",
   startSeat: "start_seat",
   messageSeat: "message_seat",
+  commsRead: "comms_read",
+  commsSend: "comms_send",
+  commsReact: "comms_react",
+  commsPin: "comms_pin",
   flightState: "flight_state",
   promote: "promote",
   endRun: "end_run",
@@ -71,6 +75,10 @@ export const MC_TOOLS = {
   answerQuestion: mcTool(MC_TOOL_NAMES.answerQuestion),
   startSeat: mcTool(MC_TOOL_NAMES.startSeat),
   messageSeat: mcTool(MC_TOOL_NAMES.messageSeat),
+  commsRead: mcTool(MC_TOOL_NAMES.commsRead),
+  commsSend: mcTool(MC_TOOL_NAMES.commsSend),
+  commsReact: mcTool(MC_TOOL_NAMES.commsReact),
+  commsPin: mcTool(MC_TOOL_NAMES.commsPin),
   flightState: mcTool(MC_TOOL_NAMES.flightState),
   promote: mcTool(MC_TOOL_NAMES.promote),
   endRun: mcTool(MC_TOOL_NAMES.endRun),
@@ -102,6 +110,11 @@ export const MC_TOOLS = {
 
 /** The longest commit message and operator question the mc tools take. */
 export const MC_TEXT_MAX = 2000;
+/**
+ * The most JSON `comms_read` returns, the same bound as FLIGHT's gh_read response
+ * (`FLIGHT_GH_READ_MAX`): past it the oldest messages are left out, and the result says how many.
+ */
+export const MC_COMMS_READ_MAX = 20_000;
 /** The longest note `report_evidence` takes. */
 export const MC_EVIDENCE_MAX = 4000;
 /** An mc tool call whose arguments fail validation: this, then the first problem. */
@@ -371,7 +384,11 @@ export const PLAN_HEADING = "## Plan";
 export const planByLine = (call: string): string => `Planned by ${call} (Mission Control).`;
 export const MC_PLAN_WRITTEN =
   "Written to the ticket under ## Plan. Mission Control ends this run now; stop.";
-export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner seats.";
+export const MC_PLAN_WRITTEN_CONTINUE =
+  "Written to the ticket under ## Plan. Continue this build run now.";
+export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build seats.";
+export const MC_PLAN_PROFILE_ONLY =
+  "Not written: profile and profile_reason are for planner seats.";
 export const MC_PLAN_ALREADY =
   "Not written: the ticket already has a ## Plan section. Ask the operator with mc ask_operator if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";

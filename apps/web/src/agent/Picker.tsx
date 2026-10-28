@@ -40,7 +40,9 @@ export function Picker({
           >
             {lamp && <Lamp {...lamp} />}
             <AgentTag id={r.id} index={r.index} sm />
-            <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+            <span title={seatStatus(r).reason ?? seatStatus(r).label}>
+              <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+            </span>
           </button>
         );
       })}

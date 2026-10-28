@@ -7,6 +7,7 @@ import type {
   Escalation,
   FlightDecision,
   GuardHit,
+  GuardRule,
   MachineSample,
   Profile,
   ReviewFinding,
@@ -809,7 +810,7 @@ describe("Store", () => {
     expect(typeof gh?.at).toBe("number");
   });
 
-  it("keeps lastOkAt: set on ok, unchanged on failure, null before any success", () => {
+  it("keeps lastOkAt and failingSince: a run of failures keeps its first time, ok clears it", () => {
     const now = vi.spyOn(Date, "now");
     try {
       now.mockReturnValue(1000);
@@ -820,13 +821,27 @@ describe("Store", () => {
         error: "boom",
         at: 1000,
         lastOkAt: null,
+        failingSince: 1000,
       });
+      now.mockReturnValue(1500);
+      store.setStatus("gh", false, "boom");
+      expect(store.status()[0]).toMatchObject({ at: 1500, failingSince: 1000 });
       now.mockReturnValue(2000);
       store.setStatus("gh", true, null);
-      expect(store.status()[0]).toMatchObject({ ok: true, at: 2000, lastOkAt: 2000 });
+      expect(store.status()[0]).toMatchObject({
+        ok: true,
+        at: 2000,
+        lastOkAt: 2000,
+        failingSince: null,
+      });
       now.mockReturnValue(3000);
       store.setStatus("gh", false, "HTTP 502");
-      expect(store.status()[0]).toMatchObject({ ok: false, at: 3000, lastOkAt: 2000 });
+      expect(store.status()[0]).toMatchObject({
+        ok: false,
+        at: 3000,
+        lastOkAt: 2000,
+        failingSince: 3000,
+      });
     } finally {
       now.mockRestore();
     }
@@ -1257,6 +1272,7 @@ describe("seat sessions", () => {
     worktree: "/w/guido",
     updatedAt: 5,
     lastTurnEndedAt: null,
+    lastTurnStartedAt: null,
     ...over,
   });
 
@@ -1363,16 +1379,20 @@ describe("guard hits", () => {
     store.addGuardHit(hit({ at: now - 2 * DAY }));
     store.addGuardHit(hit({ at: now - 3 * DAY, rule: "network" }));
     store.addGuardHit(hit({ at: now - 8 * DAY, rule: "read-only" }));
+    // a hit stored under a rule since retired (github-write) is listed but not counted
+    store.addGuardHit(hit({ at: now - DAY, rule: "github-write" as GuardRule }));
     expect(store.guardHitCounts(now - 7 * DAY)).toEqual({
+      background: 0,
       "git-write": 2,
       "git-env": 0,
       "codex-allowlist": 0,
-      "github-write": 0,
+      "gh-cli": 0,
       "merge-push": 0,
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      unreadable: 0,
       secret: 0,
     });
   });
@@ -1674,6 +1694,7 @@ describe("liveSeatRuns and branchCommitSpan", () => {
     worktree: null,
     updatedAt: 5,
     lastTurnEndedAt: null,
+    lastTurnStartedAt: null,
     ...over,
   });
 
@@ -1839,6 +1860,137 @@ describe("comms", () => {
       ticket: "mc#1",
       text: "late",
     });
+  });
+
+  it("counts chatter rounds only when both sides exchanged messages", () => {
+    for (let index = 0; index < 14; index++) {
+      store.addComms({ at: index, from: "alpha", to: "beta", ticket: "mc#one-way", text: "ping" });
+    }
+    for (let index = 0; index < 8; index++) {
+      store.addComms({
+        at: 100 + index,
+        from: "alpha",
+        to: "beta",
+        ticket: "mc#exchange",
+        text: "ping",
+      });
+    }
+    for (let index = 0; index < 7; index++) {
+      store.addComms({
+        at: 200 + index,
+        from: "beta",
+        to: "alpha",
+        ticket: "mc#exchange",
+        text: "pong",
+      });
+    }
+
+    expect(store.commsChatter(0)).toEqual([
+      { from: "alpha", to: "beta", ticket: "mc#exchange", rounds: 7 },
+    ]);
+  });
+
+  it("migrates a retained legacy comms table additively", () => {
+    const legacyPath = join(dir, "legacy-comms.sqlite");
+    const legacy = new DatabaseSync(legacyPath);
+    legacy.exec(`CREATE TABLE comms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+      to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
+    ); INSERT INTO comms(at,from_id,to_id,ticket,text) VALUES(1,'a','b',NULL,'legacy')`);
+    legacy.close();
+    const migrated = new Store(legacyPath);
+    try {
+      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: null });
+      expect(migrated.addComms({ ...row("new"), label: "question", ref: "#7" })).toMatchObject({
+        label: "question",
+        ref: "#7",
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
+  it("stores complete rows, related facts and monotonic scoped cursors", () => {
+    const first = store.addComms({
+      ...row("@b first"),
+      label: "handoff",
+      ref: "#7",
+      mentions: ["b"],
+    });
+    const second = store.addComms({ ...row("second", 101), replyTo: first?.id });
+    if (first === null || second === null) throw new Error("Comms rows were not stored");
+    expect(store.addCommsReaction(first.id, "b", "cant", "blocked", 102)).toMatchObject({
+      messageId: first.id,
+      reaction: "cant",
+    });
+    expect(store.setCommsPinned(second.id, true, "CAPCOM", 103)).toBe(true);
+    expect(store.commsForAgent("guido-1")[0]).toMatchObject({
+      id: first.id,
+      label: "handoff",
+      ref: "#7",
+      mentions: ["b"],
+    });
+    expect(store.commsReactions(first.id)).toHaveLength(1);
+    expect(store.commsPins().map((m) => m.id)).toEqual([second.id]);
+    expect(store.commsMentions("b").map((m) => m.id)).toEqual([first.id]);
+    store.markCommsScopeRead("crew", second.id);
+    store.markCommsScopeRead("crew", first.id);
+    expect(store.commsScopeCursor("crew")).toBe(second.id);
+  });
+
+  it("accepts only prefixed Comms IDs for reads and related writes", () => {
+    const message = store.addComms(row("stored"));
+    if (message === null) throw new Error("Comms row was not stored");
+    expect(store.commsMessage("1")).toBeNull();
+    expect(store.addCommsReaction("1", "b", "seen", undefined, 1)).toBeNull();
+    expect(store.setCommsPinned("1", true, "CAPCOM", 1)).toBe(false);
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("enforces SQL reaction and label constraints", () => {
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const inserted = db
+      .prepare("INSERT INTO comms(at,from_id,to_id,ticket,text) VALUES(1,'a','b',NULL,'x')")
+      .run();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO comms_reactions(message_id,actor_id,reaction,reason,at) VALUES(?,?,?,?,?)",
+        )
+        .run(inserted.lastInsertRowid, "a", "cant", null, 1),
+    ).toThrow();
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO comms(at,from_id,to_id,ticket,text,label) VALUES(1,'a','b',NULL,'x','nope')",
+        )
+        .run(),
+    ).toThrow();
+  });
+
+  it("rate limits atomically and hydrates only ticket candidates with no linked PR", () => {
+    const first = store.addComms({ ...row("first") }, { since: 0, limit: 1 });
+    expect(first).not.toBeNull();
+    expect(store.addComms({ ...row("second", 101) }, { since: 0, limit: 1 })).toBeNull();
+    for (let i = 0; i < 40; i++) store.addComms({ ...row(`unrelated ${i}`, 200 + i) });
+    const ref = store.addComms({ ...row("mentions #703", 300) });
+    const direct = store.addComms({ ...row("ref", 301), ref: "#703" });
+    const hydrate = vi.spyOn(store as never, "commsRow" as never);
+    expect(store.commsForTicket("#703").rows.map((m) => m.id)).toEqual([ref?.id, direct?.id]);
+    expect(hydrate).toHaveBeenCalledTimes(2);
+  });
+
+  it("prunes dependent Comms rows with their retained message", async () => {
+    const old = store.addComms({ ...row("old", 0), mentions: ["b"] });
+    if (old === null) throw new Error("Comms row was not stored");
+    store.addCommsReaction(old.id, "b", "seen", undefined, 1);
+    store.setCommsPinned(old.id, true, "CAPCOM", 1);
+    await store.pruneHistory(91 * 86_400_000);
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_mentions").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_reactions").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM comms_pins").get()).toEqual({ n: 0 });
   });
 });
 

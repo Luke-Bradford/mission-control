@@ -8,7 +8,9 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
+import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
+import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { contextPct, doingLine } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -19,7 +21,6 @@ import {
   kindLabel,
   type PendingMsg,
   sameMessage,
-  waitingAsks,
   withPending,
 } from "../flight/conversation.ts";
 import {
@@ -101,14 +102,20 @@ function Composer({
   busy,
   err,
   onSend,
+  prefill,
+  onPrefillConsumed,
 }: {
   where: ChatPlace;
   seat: FlightSeat | null;
   busy: boolean;
   err: string | null;
   onSend: (body: string) => Promise<boolean>;
+  prefill?: ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
 }) {
   const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const used = useRef<number | null>(null);
   const live = seat?.live === true;
   const send = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -116,10 +123,18 @@ function Composer({
     if (!live || body === "") return;
     if (await onSend(body)) setText("");
   };
+  useEffect(() => {
+    if (!prefill || used.current === prefill.token) return;
+    used.current = prefill.token;
+    setText(prefill.text);
+    input.current?.focus();
+    onPrefillConsumed?.(prefill.token);
+  }, [onPrefillConsumed, prefill]);
   return (
     <form className="composer" id={`${ID_PREFIX[where]}Form`} onSubmit={(e) => void send(e)}>
       <input
         id={`${ID_PREFIX[where]}Input`}
+        ref={input}
         autoComplete="off"
         aria-label="Message FLIGHT"
         placeholder={
@@ -156,10 +171,19 @@ export type ChatPlace = "dock" | "comms";
 const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
 
 /**
- * FLIGHT's conversation: the asks waiting on the operator, the message log and the message box.
- * With no FLIGHT seat the log is empty and the input is switched off.
+ * FLIGHT's conversation: what is waiting on the operator (the whole Needs-you set, as the header
+ * counts it), the message log and the message box. With no FLIGHT seat the log is empty and the
+ * input is switched off; what waits on the operator still shows.
  */
-export function FlightChat({ where }: { where: ChatPlace }) {
+export function FlightChat({
+  where,
+  prefill,
+  onPrefillConsumed,
+}: {
+  where: ChatPlace;
+  prefill?: ComposerPrefill;
+  onPrefillConsumed?: (token: number) => void;
+}) {
   const msgs = useRef<HTMLDivElement>(null);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
@@ -168,8 +192,7 @@ export function FlightChat({ where }: { where: ChatPlace }) {
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const decisions = flight?.decisions;
-  const asks = useMemo(() => waitingAsks(attention ?? [], decisions ?? []), [attention, decisions]);
+  const asks = useMemo(() => sortNeeds(needsYouItems(attention)), [attention]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -215,7 +238,7 @@ export function FlightChat({ where }: { where: ChatPlace }) {
 
   return (
     <>
-      {seat && asks.length > 0 && (
+      {asks.length > 0 && (
         <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
           <div className="dwh">Waiting on you · {asks.length}</div>
           {asks.map((i) => {
@@ -250,7 +273,15 @@ export function FlightChat({ where }: { where: ChatPlace }) {
           <Msg key={r.id} row={r} tz={tz} />
         ))}
       </div>
-      <Composer where={where} seat={seat} busy={busy} err={err} onSend={send} />
+      <Composer
+        where={where}
+        seat={seat}
+        busy={busy}
+        err={err}
+        onSend={send}
+        prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
+      />
     </>
   );
 }

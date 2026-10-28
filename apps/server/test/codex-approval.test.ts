@@ -6,7 +6,7 @@ import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/co
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { createCodexApprover } from "../src/runtime/codex-approval.ts";
+import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
 
 let cwd: string;
@@ -15,7 +15,11 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(cwd, { recursive: true, force: true }));
 
-function approver(mode: CrewMode = "writer", grants: string[] = []) {
+function approver(
+  mode: CrewMode = "writer",
+  grants: string[] = [],
+  runGrants?: () => readonly string[],
+) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
     accounts: [],
@@ -36,6 +40,7 @@ function approver(mode: CrewMode = "writer", grants: string[] = []) {
     lock: new TestLock(),
     record,
     seatGrants,
+    ...(runGrants === undefined ? {} : { runGrants }),
   });
   return { approve, record, seatGrants, config };
 }
@@ -52,6 +57,15 @@ const elicitation = (tool: string = MC_TOOL_NAMES.commit, server: string = MC_MC
   mcpCall: { itemId: "item", server, tool },
 });
 const signal = () => new AbortController().signal;
+const commandRequest = (command: string) => ({
+  id: 1,
+  method: "item/commandExecution/requestApproval",
+  params: {
+    kind: "command",
+    cwd,
+    command: `/bin/zsh -lc "${command}"`,
+  },
+});
 
 describe("Codex MCP approvals", () => {
   it.each([
@@ -67,6 +81,14 @@ describe("Codex MCP approvals", () => {
     const h = approver(mode, [...grants]);
     expect(await h.approve(elicitation(tool), undefined, signal())).toBe(decision);
     expect(h.seatGrants).toHaveBeenCalledWith("seat");
+  });
+
+  it("accepts report_plan from a planless build run grant", async () => {
+    const h = approver("writer", [], () => [MC_TOOL_NAMES.reportPlan]);
+    expect(await h.approve(elicitation(MC_TOOL_NAMES.reportPlan), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(h.seatGrants).not.toHaveBeenCalled();
   });
 
   it("refuses foreign servers, unknown tools and missing or mismatched call context", async () => {
@@ -110,6 +132,28 @@ describe("Codex MCP approvals", () => {
 });
 
 describe("Codex refusal records", () => {
+  it("accepts an ordinary local read pipeline without recording a refusal", async () => {
+    const h = approver();
+    expect(
+      await h.approve(commandRequest("nl -ba apps/a.ts | sed -n '1,5p'"), undefined, signal()),
+    ).toBe("accept");
+    expect(h.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["git commit -m x", "git-write"],
+    ["gh pr view 1", "gh-cli"],
+    ["curl https://example.com", "network"],
+    ["sleep 1 &", "background"],
+  ] as const)(
+    "routes the retained hard gate for %s through the shared guard",
+    async (command, rule) => {
+      const h = approver();
+      expect(await h.approve(commandRequest(command), undefined, signal())).toBe("decline");
+      expect(h.record).toHaveBeenCalledWith(rule, expect.stringContaining(command));
+    },
+  );
+
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();
     const command = "sed -n 1p a && curl x";
@@ -129,10 +173,7 @@ describe("Codex refusal records", () => {
         signal(),
       ),
     ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith(
-      "codex-allowlist",
-      `${GUARD_RULES["codex-allowlist"]}: ${command}`,
-    );
+    expect(h.record).toHaveBeenCalledWith("network", `${GUARD_RULES.network}: curl: ${command}`);
   });
 
   it.each([false, true])(
@@ -172,6 +213,54 @@ describe("Codex refusal records", () => {
       "read-only",
       expect.stringContaining("apps/a.ts, apps/b.ts"),
     );
+  });
+});
+
+describe("Codex sandbox escalation", () => {
+  const request = (id: number, itemId: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    method: "item/commandExecution/requestApproval",
+    params: { kind: "command", cwd, command: "/bin/zsh -lc 'ls apps'", itemId, ...extra },
+  });
+
+  it("accepts an ordinary first approval, which carries no reason", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1"), undefined, signal())).toBe("accept");
+    expect(await h.approve(request(2, "call_2"), undefined, signal())).toBe("accept");
+    expect(h.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "command failed; retry without sandbox?",
+    // require_escalated arrives with the model's own justification as the reason
+    "Need to write outside the workspace",
+  ])("refuses a command approval with a reason: %j", async (reason) => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1", { reason }), undefined, signal())).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith("codex-allowlist", `${CODEX_ESCALATION_TEXT}: ls apps`);
+  });
+
+  it("refuses a second command approval for an item it was already asked about", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1"), undefined, signal())).toBe("accept");
+    expect(await h.approve(request(2, "call_1"), undefined, signal())).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith("codex-allowlist", `${CODEX_ESCALATION_TEXT}: ls apps`);
+    // another approver (another run) starts with no items
+    expect(await approver().approve(request(1, "call_1"), undefined, signal())).toBe("accept");
+  });
+
+  it("keys repeats on approvalId when Codex gives one (callbacks sharing an itemId)", async () => {
+    const h = approver();
+    expect(await h.approve(request(1, "call_1", { approvalId: "cb-1" }), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(await h.approve(request(2, "call_1", { approvalId: "cb-2" }), undefined, signal())).toBe(
+      "accept",
+    );
+    expect(await h.approve(request(3, "call_1", { approvalId: "cb-1" }), undefined, signal())).toBe(
+      "decline",
+    );
+    expect(h.record).toHaveBeenCalledTimes(1);
   });
 });
 

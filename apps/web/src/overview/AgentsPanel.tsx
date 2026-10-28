@@ -44,6 +44,7 @@ import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { metricTitle, useMetrics } from "../metrics.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -262,7 +263,7 @@ function FlightRow({
         </a>
       </span>
       <ModelCell row={row} />
-      <span role="cell" className={row ? "state-cell" : undefined} title={label}>
+      <span role="cell" className={row ? "state-cell" : undefined} title={status?.reason ?? label}>
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
             <span>{label}</span>
@@ -384,10 +385,17 @@ function AgentRow({
   const statusLabel = row.crewPause
     ? status.label
     : lockSince(lock, row.run?.id) !== null
-      ? "Waiting on lock"
+      ? "Watching"
       : status.label === "Free" && crewStatus?.enabled === false
-        ? "Idle (crew paused)"
+        ? "Idle"
         : status.label;
+  const statusTitle = row.crewPause
+    ? status.reason
+    : lockSince(lock, row.run?.id) !== null
+      ? "Waiting on test lock"
+      : status.label === "Free" && crewStatus?.enabled === false
+        ? "Crew is paused"
+        : (status.reason ?? statusLabel);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const aside = row.asideRuns ?? [];
@@ -411,7 +419,7 @@ function AgentRow({
     <div
       role="row"
       className={cls.filter(Boolean).join(" ")}
-      title={statusLabel === "Idle (crew paused)" ? "Crew is paused" : doing}
+      title={status.label === "Free" && crewStatus?.enabled === false ? "Crew is paused" : doing}
       onClick={(e) => {
         // a link in the row (a ticket on GitHub) goes where it points, not to the Agent page
         if (!(e.target as Element).closest("a, button")) go();
@@ -436,9 +444,9 @@ function AgentRow({
         </span>
       </span>
       <ModelCell row={row} title={identityTitle} />
-      <span role="cell" className="state-cell" title={statusLabel}>
+      <span role="cell" className="state-cell" title={statusTitle}>
         <Pill tone={status.tone}>
-          <span>{statusLabel === "Idle (crew paused)" ? "Idle" : statusLabel}</span>
+          <span>{statusLabel}</span>
         </Pill>
         {row.stateSince > 0 && <span className="xs muted block">{age(row.stateSince, now)}</span>}
       </span>
@@ -497,7 +505,9 @@ export function AgentsPanel() {
         now,
       )
     : null;
-  const working = rows?.filter((r) => r.hudState === "running").length ?? 0;
+  // The registry's figure (every agent in view, FLIGHT and loops included), not this table's count.
+  const metrics = useMetrics();
+  const working = metrics.readings.agentsWorking;
 
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
@@ -510,7 +520,11 @@ export function AgentsPanel() {
       title="Crew"
       sub={
         <>
-          {rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : null}
+          {working ? (
+            <span className="crew-working" title={metricTitle(metrics, "agentsWorking")}>
+              <span data-metric="agentsWorking">{working.value}</span> {working.detail} working
+            </span>
+          ) : null}
           <CrewOff compact />
         </>
       }

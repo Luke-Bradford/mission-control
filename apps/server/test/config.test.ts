@@ -839,6 +839,9 @@ ${modelless("flight-2", "FLIGHT")}
   });
 
   it("rejects a seat id that repeats a loop id or another seat, or is malformed", () => {
+    expect(fails(crewText({ seats: [seat("crew", "GUIDO")] })).path).toBe(
+      "crew.sessions[0].seats[0].id",
+    );
     expect(fails(crewText({ seats: [seat("shop-app-ta", "GUIDO")] })).path).toBe(
       "crew.sessions[0].seats[0].id",
     );
@@ -1318,7 +1321,9 @@ describe("guard config", () => {
       const t = text.replace(FULL_SUITE_BLOCK, `full_suite: [${JSON.stringify(cmd)}]`);
       const e = errorOf(() => parse(t));
       expect(e.path).toBe("repos[2].full_suite");
-      expect(e.message).toBe(`repos[2].full_suite: ${cmd} is not a command crew seats may run`);
+      expect(e.message).toBe(
+        `repos[2].full_suite: ${cmd} is not one of the repo's writer validation commands (commands.writer)`,
+      );
     },
   );
 
@@ -1613,7 +1618,9 @@ describe("repo commands and protected files", () => {
         ),
       ),
     );
-    expect(e.message).toBe("repos[0].full_suite: pnpm -s test is not a command crew seats may run");
+    expect(e.message).toBe(
+      "repos[0].full_suite: pnpm -s test is not one of the repo's writer validation commands (commands.writer)",
+    );
     expect(() => parse(withRepo0(EXAMPLE_KEYS))).not.toThrow();
   });
 

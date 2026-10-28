@@ -23,6 +23,7 @@ import {
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
+  EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
@@ -739,6 +740,164 @@ afterEach(() => {
   h.engine.stop();
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("idle-seat wakes", () => {
+  it("wakes once when failing findings arrived during the turn", async () => {
+    store.setSeatTurnStarted(SEAT, clock);
+    const id = store.requestReview({
+      authorRunId: RUN,
+      repoId: REPO,
+      seatId: RETRO,
+      prNumber: 12,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: clock,
+    }) as number;
+    store.setReviewState(id, ["queued"], "running", { at: clock, runId: "retro-run" });
+    clock += 9 * MIN;
+    expect(
+      store.recordFindings(id, "retro-run", {
+        verdict: { spec: "fail", quality: "pass" },
+        summary: "broken",
+        findings: [
+          {
+            severity: "Important",
+            file: "apps/a.ts",
+            line: 1,
+            summary: "bad",
+            scenario: "breaks",
+            fix: "fix",
+          },
+        ],
+        at: clock,
+      }),
+    ).toBe(true);
+    expect(store.seatSession(SEAT)?.lastTurnStartedAt).toBe(START + 10 * MIN);
+    expect(store.reviewsOfRun(RUN)[0]?.endedAt).toBe(clock);
+    for (const listener of h.listeners)
+      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await vi.waitFor(() =>
+      expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1),
+    );
+    expect(h.sent.at(-1)?.text).toContain("RETRO round 2 findings");
+    for (const listener of h.listeners)
+      listener({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await Promise.resolve();
+    expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toHaveLength(1);
+  });
+
+  it("reminds once for a green head without evidence, then raises Needs-you", async () => {
+    setLoop({
+      phase: "working",
+      parked: null,
+      prNumber: 12,
+    });
+    setPr({ ci: "passing", headSha: SHA });
+    store.addLoopEvent(`${RUN}:ci-passed:${SHA}`, RUN, `CI passed on ${SHA.slice(0, 7)}`, clock);
+    await h.engine.tick();
+    expect(sentKeys()).not.toContain(`evidence-remind:${RUN}:${SHA}`);
+    clock += EVIDENCE_REMIND_MS;
+    await h.engine.tick();
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA}`);
+    expect(store.claimedKeys(RUN)[`evidence-remind:${RUN}:${SHA}`]).toBe(clock);
+    expect(store.run(RUN)?.endedAt).toBeNull();
+    expect(store.evidenceCount(RUN)).toBe(0);
+    expect(store.run(RUN)?.loop).not.toBeNull();
+    h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(true);
+    await h.engine.tick();
+    expect(sentKeys().filter((key) => key === `evidence-remind:${RUN}:${SHA}`)).toHaveLength(1);
+  });
+
+  it("does not wake or remind a rate-limited, account-stopped, or parked seat", async () => {
+    const setup = () => {
+      store.setSeatTurnStarted(SEAT, clock);
+      store.addLoopEvent(`${RUN}:ci-failed`, RUN, `CI failed on ${SHA.slice(0, 7)}`, clock);
+      store.addLoopEvent(
+        `${RUN}:ci-passed:${SHA}`,
+        RUN,
+        `CI passed on ${SHA.slice(0, 7)}`,
+        clock - EVIDENCE_REMIND_MS - 1,
+      );
+      setLoop({ phase: "working", parked: null, prNumber: 12 });
+      setPr({ ci: "passing", headSha: SHA });
+    };
+    const noWakeOrReminder = () => {
+      expect(sentKeys().some((key) => key.startsWith(`wake:${RUN}:`))).toBe(false);
+      expect(sentKeys()).not.toContain(`evidence-remind:${RUN}:${SHA}`);
+    };
+
+    setup();
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: clock + MIN };
+    await h.engine.tick();
+    noWakeOrReminder();
+
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: clock,
+      pct: 96,
+      resetAt: clock + MIN,
+      source: "test",
+    });
+    await h.engine.tick();
+    noWakeOrReminder();
+
+    clock += MIN + 1;
+    store.setSeatSession({ ...(store.seatSession(SEAT) as SeatSessionRow), state: "idle" });
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "waiting", ended: false },
+    });
+    await h.engine.tick();
+    noWakeOrReminder();
+  });
+
+  it("tracks reminders by head and clears stale evidence flags", async () => {
+    setLoop({ phase: "working", parked: null, prNumber: 12 });
+    setPr({ ci: "passing", headSha: SHA });
+    store.addLoopEvent(
+      `${RUN}:ci-passed:${SHA}`,
+      RUN,
+      `CI passed on ${SHA.slice(0, 7)}`,
+      clock - EVIDENCE_REMIND_MS - 1,
+    );
+    await h.engine.tick();
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA}`);
+
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(true);
+
+    setPr({ ci: "passing", headSha: SHA_B });
+    store.addLoopEvent(
+      `${RUN}:ci-passed:${SHA_B}`,
+      RUN,
+      `CI passed on ${SHA_B.slice(0, 7)}`,
+      clock - EVIDENCE_REMIND_MS - 1,
+    );
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA}` && n.clearedAt === null),
+    ).toBe(false);
+    expect(sentKeys()).toContain(`evidence-remind:${RUN}:${SHA_B}`);
+
+    clock += EVIDENCE_REMIND_MS + 1;
+    await h.engine.tick();
+    expect(
+      store.notes().some((n) => n.key === `evidence:${RUN}:${SHA_B}` && n.clearedAt === null),
+    ).toBe(true);
+  });
 });
 
 describe("sync_main", () => {
@@ -2731,6 +2890,26 @@ describe("the engine runs reviews", () => {
         .filter((e) => e.runId === RUN2)
         .map((e) => e.text),
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
+  });
+
+  it("does not make a newer PR wait for the same author's older PR", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((pr) => ({ ...pr, author: "same-author" })),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === RUN2)
+        .map((e) => e.text),
+    ).not.toContain("waits for #12 (shared: packages/core/src/guard.ts)");
   });
 
   it("ignores older manual PRs without a run", async () => {

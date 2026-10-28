@@ -33,6 +33,7 @@ import {
   store,
   TZ,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -1206,7 +1207,7 @@ describe("Codex lifecycle events", () => {
     );
     expect(store.seatSession("guido-1")?.cliSessionId).toBe("codex-thread-1");
     await next.sup.endRunByEngine(runId);
-    expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+    await untilGone(crewCodexDir(dbPath, runId));
   });
 
   it("folds cumulative tokens, unknown cost and the latest plan into the stored run", async () => {
@@ -1339,7 +1340,7 @@ describe("Codex interrupt failures", () => {
       expect(Date.now() - began).toBeLessThan(5000);
       expect(recorded().filter((m) => m.method === "turn/interrupt")).toHaveLength(1);
       expect(store.run(runId)).toMatchObject({ endedBy: "operator", status: "ok" });
-      expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+      await untilGone(crewCodexDir(dbPath, runId));
       expect(pidAlive(unrelated.pid as number)).toBe(true);
     } finally {
       unrelated.kill("SIGTERM");

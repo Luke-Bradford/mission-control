@@ -6,6 +6,7 @@ import type { FlightView } from "./flight/flightTypes.ts";
 
 import {
   agentPath,
+  FULL_WIDTH_PAGES,
   isPopout,
   itemParam,
   legacyRedirect,
@@ -14,6 +15,7 @@ import {
   type Route,
   route,
   usePath,
+  useSearch,
 } from "./router.ts";
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
@@ -42,6 +44,7 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
+const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
 const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.Setup })));
@@ -59,9 +62,10 @@ const TITLE = "Mission Control";
  */
 export function App() {
   const path = usePath();
+  const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.
   const [popout] = useState(() => isPopout(window.location.search));
-  const r = route(path);
+  const r = route(path, search);
   const moved = r ? null : (legacyRedirect(path, window.location.hash) ?? PAGE_PATHS.overview);
   useEffect(() => {
     if (moved) navigate(moved, { replace: true });
@@ -78,6 +82,10 @@ export function App() {
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
+  // Comms has its own FLIGHT conversation, and Setup and the Map need the full width (Setup's
+  // approved configuration frame; the Map's stage beside its agent rail). The dock remains
+  // available on the other operational pages.
+  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(shown.page);
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -113,13 +121,13 @@ export function App() {
   return (
     <div className={cls}>
       <Header page={shown.page} />
-      <div className="shell">
+      <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
           </AwayDigest>
         </main>
-        <Dock />
+        {showDock && <Dock />}
       </div>
       <Footer />
       <Toast />
@@ -171,8 +179,10 @@ function PageView({ route: r }: { route: Route }) {
       return <BoardPage repoId={r.repoId} ticket={r.ticket} />;
     case "agent":
       return <Agent id={r.id} />;
+    case "map":
+      return <MapPage repoId={r.repoId} />;
     case "comms":
-      return <Comms item={r.item} />;
+      return <Comms item={r.item} view={r.view} />;
     case "telemetry":
       return <Telemetry />;
     case "setup":
@@ -218,7 +228,15 @@ function useShellKeys(current: Route, popout: boolean) {
         if (latest.current.popout) return;
         if (route(to)?.page !== latest.current.current.page) navigate(to);
       },
-      toggleDock: () => toggleDock(),
+      toggleDock: () => {
+        const { current: on, popout: isPopout } = latest.current;
+        // Setup and the Map open FLIGHT in its full Comms view. Comms is already that view, and
+        // neither Comms, Setup, the Map nor a pop-out mounts the dock, so never change its
+        // stored state there.
+        if (isPopout || on.page === "comms") return;
+        if (FULL_WIDTH_PAGES.has(on.page)) navigate(PAGE_PATHS.comms);
+        else toggleDock();
+      },
       help: openHelp,
       selectNext: () => select(1),
       selectPrev: () => select(-1),

@@ -36,6 +36,7 @@ import {
   guardHookCommand,
   isProtectedPath,
   LOOP_KINDS,
+  MC_TMP_DIR_NAME,
   MC_TOOL_GRANTS,
   MODE_LOOPS,
   modeOfSeat,
@@ -210,7 +211,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).toContain("mcp__mc__ask_operator");
   });
 
-  it("a read-only seat may ask the operator, and nothing that writes", () => {
+  it("a read-only seat may ask the operator and send Comms, with no git writes", () => {
     expect(READONLY_TOOLS).toContain(MC_TOOLS.askOperator);
     for (const t of MC_WRITER_TOOLS) expect(READONLY_TOOLS as readonly string[]).not.toContain(t);
     const a = crewCliArgs({ ...base, mode: "read-only" });
@@ -218,6 +219,9 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_operator",
       "mcp__mc__report_evidence",
+      "mcp__mc__comms_read",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 
@@ -226,6 +230,12 @@ describe("the allowlist in phase 2b", () => {
     const a = crewCliArgs({ ...base, mode: "read-only", mcTools: ["report_plan"] });
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed.at(-1)).toBe(MC_TOOLS.reportPlan);
+  });
+
+  it("a planless build run may report its own plan", () => {
+    const a = crewCliArgs({ ...base, runTools: ["report_plan"] });
+    const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
+    expect(allowed).toContain(MC_TOOLS.reportPlan);
   });
 
   it("names the mc tools as the CLI shows them: mcp__<server>__<tool>", () => {
@@ -253,6 +263,10 @@ describe("the allowlist in phase 2b", () => {
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
+      commsRead: "mcp__mc__comms_read",
+      commsSend: "mcp__mc__comms_send",
+      commsReact: "mcp__mc__comms_react",
+      commsPin: "mcp__mc__comms_pin",
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
       endRun: "mcp__mc__end_run",
@@ -291,7 +305,7 @@ describe("the allowlist in phase 2b", () => {
     });
   });
 
-  it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
+  it("keeps Claude pnpm stores private", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
     expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
@@ -299,6 +313,7 @@ describe("the allowlist in phase 2b", () => {
     );
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
+    expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
   });
 });
 
@@ -357,17 +372,18 @@ describe("a repo's own commands and protected files", () => {
   const bashEntries = (a: string[]) =>
     a.filter((x) => x.startsWith("Bash(") && !x.includes("git "));
 
-  it("replaces the pnpm entries for a writer", () => {
+  it("gives a writer plain Bash, never the repo's commands as an allowlist", () => {
     const a = crewCliArgs({ ...base, commands });
-    expect(a).toContain("Bash(uv run pytest:*)");
-    expect(a).toContain("Bash(uv run ruff check:*)");
-    expect(a.some((x) => x.startsWith("Bash(pnpm"))).toBe(false);
+    const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
+    expect(allowed).toContain("Bash");
+    expect(bashEntries(allowed)).toEqual([]);
   });
 
-  it.each(["read-only", "scratch"] as const)("gives a %s seat only the review commands", (mode) => {
+  it.each(["read-only", "scratch"] as const)("gives a %s seat plain Bash too", (mode) => {
     const a = crewCliArgs({ ...base, mode, commands });
     const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
-    expect(bashEntries(allowed)).toEqual(["Bash(uv run pytest:*)"]);
+    expect(allowed).toContain("Bash");
+    expect(bashEntries(allowed)).toEqual([]);
   });
 
   it("keeps the default argv without inputs", () => {
@@ -549,6 +565,7 @@ describe("crew constants", () => {
           "answer_question",
           "start_seat",
           "message_seat",
+          "comms_pin",
           "flight_state",
           "promote",
           "end_run",
@@ -649,6 +666,7 @@ describe("mc tool grants", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "comms_pin",
       "flight_state",
       "promote",
       "end_run",
@@ -679,6 +697,7 @@ describe("mc tool grants", () => {
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
+    expect(MC_TOOL_GRANTS.writer.grantable).toEqual([]);
     expect(MC_TOOL_GRANTS.writer.grantable).not.toContain("log_decision");
   });
 
@@ -718,7 +737,7 @@ describe("scratch mode", () => {
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed).toContain("Edit(//w/retro-1-review-3/**)");
     expect(allowed).toContain("Write(//w/retro-1-review-3/**)");
-    expect(allowed).toContain("Bash(pnpm -s vitest:*)");
+    expect(allowed).toContain("Bash");
     expect(allowed).toContain("mcp__mc__report_findings");
     for (const t of [
       "mcp__mc__commit",
@@ -740,13 +759,12 @@ describe("scratch mode", () => {
       "Edit(//w/retro-1-review-3/**)",
       "Write(//w/retro-1-review-3/**)",
       "TodoWrite",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(pnpm -s vitest:*)",
+      "Bash",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
+      "mcp__mc__comms_read",
+      "mcp__mc__comms_send",
+      "mcp__mc__comms_react",
     ]);
   });
 

@@ -7,6 +7,7 @@ import {
   type AccountId,
   type AgentId,
   BUILTIN_ROLES,
+  COMMS_CREW,
   CONFIG_SEAT_MODES,
   type ConfigSeatMode,
   CREW_EFFORTS,
@@ -218,6 +219,17 @@ export interface CcConfig {
     autonomy: RepoAutonomy;
     /** What FLIGHT may do here; only config.yaml sets it. Loaded: always set (default `standard`). */
     flightPowers?: FlightPowers;
+    /** Preferred account for new seats in this repo. */
+    defaultAccountId?: AccountId;
+    /** Non-binding hints handed to FLIGHT for this repo. */
+    guidance?: {
+      priority: string[];
+      milestone: string[];
+      labels: string[];
+      labelMode: "any" | "all";
+      avoid: string[];
+      direction: string;
+    };
   }[];
   loops: AdoptedLoop[];
   poll: {
@@ -465,6 +477,17 @@ const fileSchema = z
         rules: repoRulesSchema.optional(),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
         flight_powers: z.enum(FLIGHT_POWERS).default("standard"),
+        default_account_id: nonEmpty.optional(),
+        guidance: z
+          .strictObject({
+            priority: z.array(nonEmpty).max(20).default([]),
+            milestone: z.array(nonEmpty).max(20).default([]),
+            labels: z.array(nonEmpty).max(30).default([]),
+            label_mode: z.enum(["any", "all"]).default("any"),
+            avoid: z.array(nonEmpty).max(30).default([]),
+            direction: z.string().max(4000).default(""),
+          })
+          .optional(),
       }),
     ),
     loops: z.array(
@@ -563,6 +586,19 @@ const fileSchema = z
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
         autonomy: r.autonomy,
         flightPowers: r.flight_powers,
+        ...(r.default_account_id === undefined ? {} : { defaultAccountId: r.default_account_id }),
+        ...(r.guidance === undefined
+          ? {}
+          : {
+              guidance: {
+                priority: r.guidance.priority,
+                milestone: r.guidance.milestone,
+                labels: r.guidance.labels,
+                labelMode: r.guidance.label_mode,
+                avoid: r.guidance.avoid,
+                direction: r.guidance.direction,
+              },
+            }),
       })),
       loops: f.loops.map((l) => ({
         id: l.id,
@@ -987,6 +1023,9 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
     const writers: CrewSeatConfig[] = [];
     session.seats.forEach((seat, i) => {
       const sp = `${at}.seats[${i}]`;
+      if (seat.id === COMMS_CREW) {
+        throw new ConfigError(`${sp}.id`, `"${COMMS_CREW}" is reserved for the Comms channel`);
+      }
       if (seatIds.has(seat.id)) {
         throw new ConfigError(
           `${sp}.id`,
@@ -1117,8 +1156,8 @@ function isExecutableFile(p: string): boolean {
 const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
   r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
 
-/** Whether the CLI would let a seat run `cmd`: one of the repo's writer commands is `cmd` or a word-prefix of it. */
-function seatsMayRun(writer: readonly string[], cmd: string): boolean {
+/** Whether `cmd` is one of the repo's writer validation commands or extends one (a word prefix). */
+function isValidationCommand(writer: readonly string[], cmd: string): boolean {
   return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
 }
 
@@ -1209,7 +1248,8 @@ export function parseConfig(
       });
     }
   });
-  // A suite the guard would lock for but the CLI then refuses would hold the lock to no purpose.
+  // full_suite names which validation commands take the test lock; it is not an allowlist (seats
+  // run ordinary commands in their sandbox), so each entry must be a writer validation command.
   cfg.repos.forEach((r, i) => {
     for (const cmd of r.fullSuite ?? []) {
       // a shorter writer command also runs the suite: it must be a full_suite entry itself
@@ -1222,10 +1262,10 @@ export function parseConfig(
           `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
         );
       }
-      if (!seatsMayRun(writerOf(r), cmd)) {
+      if (!isValidationCommand(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
-          `${cmd} is not a command crew seats may run`,
+          `${cmd} is not one of the repo's writer validation commands (commands.writer)`,
         );
       }
     }

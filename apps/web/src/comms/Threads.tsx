@@ -7,10 +7,11 @@ import type {
   FlightView,
 } from "@mc/core";
 import { useMemo } from "react";
+import { isOperatorItem, needsYouItems } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { crewOrder, doingLine, needsLamp, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { chatRows, dockRows, waitingAsks } from "../flight/conversation.ts";
+import { chatRows, dockRows } from "../flight/conversation.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -24,7 +25,7 @@ export const FLIGHT_THREAD = "flight";
 
 const DASH = "—";
 
-/** The FLIGHT entry: a lamp and "{n} for you" while asks are open, then FLIGHT's last message. */
+/** The FLIGHT entry: a lamp and "{n} for you" while anything needs you, then FLIGHT's last message. */
 function FlightEntry({
   items,
   selected,
@@ -37,7 +38,7 @@ function FlightEntry({
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
-  const asks = useMemo(() => waitingAsks(items, flight?.decisions ?? []), [items, flight]);
+  const asks = useMemo(() => needsYouItems(items), [items]);
   const lamp = needsLamp(
     asks,
     asks.some((a) => !a.acked),
@@ -137,7 +138,8 @@ function Thread({
 }) {
   const nameOf = useSeatName();
   const mine = items.filter((i) => i.agentId === r.id);
-  const tagged = mine.some((i) => i.kind === "tag");
+  // only a tag the operator owns tags them; a seat's @CAPCOM goes to FLIGHT first
+  const tagged = mine.some((i) => i.kind === "tag" && isOperatorItem(i));
   const lamp = needsLamp(
     mine,
     mine.some((i) => !i.acked),
@@ -145,6 +147,7 @@ function Thread({
   // text only: the row is a button, and a link inside one is invalid
   const doing = doingLine(r, now, tz, useReviewPrs(r));
   const line = last ? commsLine(last, r.id, nameOf) : doing;
+  const status = seatStatus(r);
   return (
     <button
       type="button"
@@ -156,7 +159,9 @@ function Thread({
       <div className="tbody">
         <AgentTag id={r.id} index={r.index} sm />
         {tagged && <Pill tone="warn">Tagged you</Pill>}
-        <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+        <span title={status.reason ?? status.label}>
+          <Pill tone={status.tone}>{status.label}</Pill>
+        </span>
         <span className="s fg2 doing" title={line}>
           {line}
         </span>

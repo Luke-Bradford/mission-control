@@ -352,7 +352,11 @@ beforeEach(async () => {
             fields: { pageInfo: { hasNextPage: false }, nodes: projectFields },
           },
         },
-        repository: { labels: { nodes: previewLabels.map((name) => ({ name })) } },
+        repository: {
+          labels: { nodes: previewLabels.map((name) => ({ name })) },
+          defaultBranchRef: { name: "main" },
+          workflows: { __typename: "Tree" },
+        },
       };
     }
     return {
@@ -408,6 +412,501 @@ const post = (url: string, headers: Record<string, string> = json, body: object 
 const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
+describe("Comms API", () => {
+  const commsConfig = (): CcConfig => ({
+    ...config,
+    crew: {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 4,
+      sessions: [
+        {
+          id: "crew",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            {
+              id: "flight",
+              role: "FLIGHT",
+              accountId: "claude-main",
+              model: "haiku",
+              area: [],
+            },
+            {
+              id: "alpha",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["apps/**"],
+            },
+            {
+              id: "beta",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["web/**"],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  const withCommsApp = async (
+    fn: (comms: FastifyInstance, delivered: ReturnType<typeof vi.fn>) => Promise<void>,
+  ) => {
+    const delivered = vi.fn();
+    const comms = buildApp({
+      config: commsConfig(),
+      store,
+      bus,
+      now: () => clock,
+      knownSecrets: async () => [],
+      deliverComms: delivered,
+    });
+    await comms.ready();
+    try {
+      await fn(comms, delivered);
+    } finally {
+      await comms.close();
+    }
+  };
+
+  const commsRow = (
+    from: string,
+    to: string,
+    text: string,
+    at = clock,
+    ticket: string | null = null,
+    ref?: string,
+  ) => {
+    const row = store.addComms({
+      at,
+      from,
+      to,
+      ticket,
+      text,
+      ref,
+      mentions: text.includes("@CAPCOM") ? ["CAPCOM"] : [],
+    });
+    if (row === null) throw new Error("Comms row was not stored");
+    clock++;
+    return row;
+  };
+
+  it("returns cursor-derived unread counts for every page scope and keeps scopes isolated", async () => {
+    const crew = commsRow("alpha", "crew", "crew");
+    const flight = commsRow("CAPCOM", "flight", "flight");
+    const inbox = commsRow("beta", "alpha", "inbox");
+    const all = commsRow("alpha", "CAPCOM", "all");
+    await withCommsApp(async (comms) => {
+      const getComms = async (url: string) => (await comms.inject({ method: "GET", url })).json();
+      const read = (scope: string, messageId: string) =>
+        comms.inject({
+          method: "POST",
+          url: "/api/comms/read",
+          headers: json,
+          payload: { scope, messageId },
+        });
+      for (const [url, scope, id, key] of [
+        ["/api/comms/crew", "crew", crew.id, "unread"],
+        ["/api/comms/flight", "flight", flight.id, "unread"],
+        ["/api/comms/agents/alpha", "agent-all:alpha", all.id, "unread"],
+        ["/api/comms/agents/alpha", "inbox:alpha", inbox.id, "inboxUnread"],
+      ] as const) {
+        expect((await getComms(url))[key]).toBeGreaterThan(0);
+        expect((await read(scope, id)).statusCode).toBe(200);
+        expect((await getComms(url))[key]).toBe(0);
+      }
+      const agent = await getComms("/api/comms/agents/alpha");
+      expect(agent).toMatchObject({
+        cursor: all.id,
+        inboxCursor: inbox.id,
+        unread: 0,
+        inboxUnread: 0,
+      });
+      expect((await getComms("/api/comms/crew")).cursor).toBe(crew.id);
+      expect((await getComms("/api/comms/flight")).cursor).toBe(flight.id);
+    });
+  });
+
+  it("sends, reacts to, and pins CAPCOM messages with validation and exactly-once direct delivery", async () => {
+    await withCommsApp(async (comms, delivered) => {
+      const postComms = (url: string, payload: object) =>
+        comms.inject({ method: "POST", url, headers: json, payload });
+      const sent = await postComms("/api/comms", {
+        to: "alpha",
+        text: "operator @beta",
+        label: "question",
+        ref: "#703",
+      });
+      expect(sent.statusCode).toBe(200);
+      const message = sent.json().message;
+      expect(message).toMatchObject({
+        from: "CAPCOM",
+        operator: true,
+        label: "question",
+        ref: "#703",
+      });
+      expect(delivered).toHaveBeenCalledTimes(2);
+      expect(delivered).toHaveBeenCalledWith("alpha", "operator @beta", "CAPCOM");
+      expect(delivered).toHaveBeenCalledWith("beta", "operator @beta", "CAPCOM");
+      expect(
+        (
+          await postComms(`/api/comms/${message.id}/reactions`, {
+            reaction: "cant",
+            reason: "blocked",
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await comms.inject({
+            method: "PUT",
+            url: `/api/comms/${message.id}/pin`,
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await comms.inject({
+            method: "DELETE",
+            url: `/api/comms/${message.id}/pin`,
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(200);
+      for (const payload of [
+        { to: "nobody", text: "x" },
+        { to: "alpha", text: "x", label: "wrong" },
+        { to: "alpha", text: "x", ref: "703" },
+        { to: "alpha", text: "x", extra: true },
+      ])
+        expect((await postComms("/api/comms", payload)).statusCode).toBe(400);
+      for (const payload of [
+        { reaction: "nope" },
+        { reaction: "cant" },
+        { reaction: "seen", reason: "why" },
+      ])
+        expect((await postComms(`/api/comms/${message.id}/reactions`, payload)).statusCode).toBe(
+          400,
+        );
+    });
+  });
+
+  it("rejects malformed reaction and pin message IDs without adding related rows", async () => {
+    const message = commsRow("alpha", "beta", "stored");
+    await withCommsApp(async (comms) => {
+      for (const [method, url, payload] of [
+        ["POST", "/api/comms/1/reactions", { reaction: "seen" }],
+        ["PUT", "/api/comms/1/pin", {}],
+      ] as const)
+        expect((await comms.inject({ method, url, headers: json, payload })).statusCode).toBe(400);
+    });
+    expect(store.commsReactions(message.id)).toEqual([]);
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
+    const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
+    commsRow("beta", "crew", "not #7030");
+    const pinned = commsRow("beta", "alpha", "pin");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", clock++);
+    store.replaceBoard("shop-app", [
+      {
+        repoId: "shop-app",
+        issueNumber: 703,
+        title: "Comms metadata",
+        status: "In progress",
+        state: "in progress",
+        labels: [],
+        assignees: [],
+        priority: null,
+        updatedAt: clock,
+        url: "",
+        stage: null,
+        owner: "Agent",
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: clock,
+        itemId: null,
+        projectId: null,
+      },
+    ]);
+    await withCommsApp(async (comms) => {
+      const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
+      expect(ticket.json()).toMatchObject({
+        ticket: {
+          ref: "#703",
+          linkedPr: null,
+          title: "Comms metadata",
+          status: "In progress",
+          owner: "Agent",
+          repoId: "shop-app",
+          issueNumber: 703,
+        },
+      });
+      expect(ticket.json().messages.map((m: { id: string }) => m.id)).toEqual([mention.id]);
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number: 711,
+            title: "linked",
+            url: "",
+            branch: "fix/703",
+            ticket: "shop-app#703",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: clock,
+            updatedAt: clock,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        clock,
+      );
+      const linked = store.addComms({
+        at: clock++,
+        from: "beta",
+        to: "crew",
+        ticket: null,
+        text: "ignored",
+        ref: "PR 711",
+      });
+      const linkedTicket = (
+        await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" })
+      ).json();
+      expect(linkedTicket).toMatchObject({
+        ticket: { ref: "#703", linkedPr: "PR 711" },
+      });
+      expect(linkedTicket.messages.map((m: { id: string }) => m.id)).toContain(linked?.id);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0],
+      ).toMatchObject({
+        message: { id: mention.id },
+        seen: false,
+      });
+      expect(
+        (
+          await comms.inject({
+            method: "POST",
+            url: "/api/comms/mentions/seen",
+            headers: json,
+            payload: { ids: [mention.id] },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+      ).toBe(true);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
+      ).toBe(pinned.id);
+      expect((await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links).toEqual(
+        expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew", count: 1 })]),
+      );
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/traffic" })).json().hours,
+      ).toEqual(expect.arrayContaining([expect.objectContaining({ from: "alpha", to: "crew" })]));
+    });
+  });
+
+  it("returns ticket metadata only when Comms identifies its repository", async () => {
+    commsRow("alpha", "crew", "#703");
+    for (const [repoId, title] of [
+      ["shop-app", "Shop issue"],
+      ["site-builder", "Site issue"],
+    ] as const)
+      store.replaceBoard(repoId, [
+        {
+          repoId,
+          issueNumber: 703,
+          title,
+          status: "In progress",
+          state: "in progress",
+          labels: [],
+          assignees: [],
+          priority: null,
+          updatedAt: clock,
+          url: "",
+          stage: null,
+          owner: "Agent",
+          parent: null,
+          subIssues: null,
+          blockedBy: [],
+          milestone: null,
+          size: null,
+          closed: false,
+          prioritySource: null,
+          createdAt: clock,
+          itemId: null,
+          projectId: null,
+        },
+      ]);
+    await withCommsApp(async (comms) => {
+      const ticket = await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" });
+      expect(ticket.json().ticket).toMatchObject({
+        ref: "#703",
+        title: null,
+        status: null,
+        owner: null,
+        repoId: null,
+        issueNumber: null,
+      });
+      commsRow("beta", "crew", "site ticket #703", clock, "site-builder#703", "#703");
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/tickets/%23703" })).json(),
+      ).toMatchObject({
+        ticket: {
+          title: "Site issue",
+          repoId: "site-builder",
+          issueNumber: 703,
+        },
+      });
+    });
+  });
+
+  it("keeps a clicked message's repository when issue numbers and PRs overlap", async () => {
+    const board = (repoId: string, title: string) => ({
+      repoId,
+      issueNumber: 703,
+      title,
+      status: "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [board("shop-app", "Shop issue")]);
+    store.replaceBoard("site-builder", [board("site-builder", "Site issue")]);
+    const clicked = commsRow("alpha", "crew", "Shop ticket #703", clock, "shop-app#703");
+    const other = commsRow("beta", "crew", "Site ticket #703", clock, "site-builder#703");
+    store.upsertPullRequests(
+      "site-builder",
+      [
+        {
+          repoId: "site-builder",
+          number: 711,
+          title: "other repo only",
+          url: "",
+          branch: "fix/703",
+          ticket: "site-builder#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    await withCommsApp(async (comms) => {
+      const shop = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=shop-app%23703",
+        })
+      ).json();
+      expect(shop.ticket).toMatchObject({
+        linkedPr: null,
+        title: "Shop issue",
+        repoId: "shop-app",
+        issueNumber: 703,
+      });
+      expect(shop.messages.map((message: { id: string }) => message.id)).toEqual([clicked.id]);
+
+      const site = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/%23703?ticket=site-builder%23703",
+        })
+      ).json();
+      expect(site.ticket).toMatchObject({
+        linkedPr: "PR 711",
+        title: "Site issue",
+        repoId: "site-builder",
+        issueNumber: 703,
+      });
+      expect(site.messages.map((message: { id: string }) => message.id)).toEqual([other.id]);
+    });
+  });
+
+  it("uses a PR link's ticket only as repository context", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 711,
+          title: "linked",
+          url: "",
+          branch: "fix/703",
+          ticket: "shop-app#703",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    const clicked = commsRow("alpha", "crew", "Please review PR 711", clock, "shop-app#999");
+    const thread = commsRow("beta", "crew", "Work on #703", clock, "shop-app#703", "#703");
+    const otherRepo = commsRow("gamma", "crew", "Work on #703", clock, "site-builder#703", "#703");
+    await withCommsApp(async (comms) => {
+      const result = (
+        await comms.inject({
+          method: "GET",
+          url: "/api/comms/tickets/PR%20711?ticket=shop-app%23999",
+        })
+      ).json();
+      expect(result.ticket).toMatchObject({ ref: "#703", linkedPr: "PR 711" });
+      expect(result.messages.map((message: { id: string }) => message.id)).toEqual([
+        clicked.id,
+        thread.id,
+      ]);
+      expect(result.messages.map((message: { id: string }) => message.id)).not.toContain(
+        otherRepo.id,
+      );
+    });
+  });
+});
+
 const run = (over: Partial<Run>): Run => ({
   id: "r",
   agentId: "shop-app-ta",
@@ -456,6 +955,23 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/agents/shop-app-ta/stream"],
   ["GET", "/api/comms/guido-1"],
   ["POST", "/api/comms/guido-1/read", { messageIds: [] }],
+  ["GET", "/api/comms/crew"],
+  ["GET", "/api/comms/flight"],
+  ["GET", "/api/comms/agents/guido-1"],
+  ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
+  ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
+  ["GET", "/api/comms/tickets/%237"],
+  ["GET", "/api/comms/mentions"],
+  ["POST", "/api/comms/mentions/seen", { ids: [] }],
+  ["GET", "/api/comms/pins"],
+  ["GET", "/api/comms/links"],
+  ["GET", "/api/comms/traffic"],
+  ["GET", "/api/comms/chatter"],
+  ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
+  ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
+  ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
+  ["PUT", "/api/comms/comms:1/pin", {}],
+  ["DELETE", "/api/comms/comms:1/pin", {}],
   ["GET", "/api/agents/shop-app-ta/files"],
   ["GET", "/api/agents/shop-app-ta/files/diff?path=a.ts"],
   ["GET", "/api/agents/guido-1/stream"],
@@ -464,8 +980,29 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["POST", "/api/repos", NEW_REPO],
+  ["POST", "/api/repos/onboard"],
+  [
+    "POST",
+    "/api/repos/shop-app/setup",
+    {
+      defaultAccountId: "claude-main",
+      guidance: {
+        priority: [],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "",
+      },
+    },
+  ],
   ["GET", "/api/repos/profiles"],
   ["POST", "/api/repos/preview", { github: "octo-org/studio", project: 4 }],
+  [
+    "POST",
+    "/api/repos/checkout-preview",
+    { github: "o/shop-app", source: "/nope", branch: "main" },
+  ],
   ["GET", "/api/boards/shop-app"],
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
@@ -496,11 +1033,16 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/profiles"],
+  ["GET", "/api/accounts/models"],
   ["GET", "/api/accounts/status"],
+  ["GET", "/api/accounts/claude-main/models"],
   ["GET", "/api/sources/teams"],
   ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
+  ["POST", "/api/accounts/claude-main/models/refresh"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
+  ["PUT", "/api/accounts/claude-main", { provider: "claude", alertAt: 85, stopAt: 95 }],
+  ["DELETE", "/api/accounts/claude-main"],
   ["POST", "/api/config/reload"],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
@@ -514,6 +1056,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
+  ["GET", "/api/metrics"],
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
@@ -550,14 +1093,15 @@ const API_ROUTES: [string, string, object?][] = [
     "/api/notification-preferences",
     {
       categories: {
-        people: true,
-        decisions: true,
-        stalls: true,
-        prs: true,
-        capcom: true,
+        asks: true,
+        flightDown: true,
+        people: false,
+        decisions: false,
+        stalls: false,
+        prs: false,
+        capcom: false,
         awayDigest: true,
         quota: false,
-        agentMessages: false,
       },
       quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
       softChime: true,
@@ -642,6 +1186,49 @@ describe("repo profiles and the add-repo preview", () => {
     const r = await post("/api/repos/preview", { ...json, origin: "https://evil.example" }, body);
     expect(r.statusCode).toBe(403);
     expect(gqlCalls).toEqual([]);
+  });
+});
+
+describe("account model catalogs", () => {
+  it("does not fabricate Claude choices from configured roles", async () => {
+    const r = await get("/api/accounts/models");
+    expect(r.statusCode).toBe(200);
+    expect(
+      r
+        .json<{ accountId: string; models: unknown[] }[]>()
+        .find((x) => x.accountId === "claude-main"),
+    ).toEqual({ accountId: "claude-main", models: [] });
+  });
+
+  it("returns the catalog discovered for each Codex binding only", async () => {
+    config.accounts.push(
+      { id: "codex-profile", vendor: "codex", alertAt: 70, stopAt: 80, cliProfile: "/profile" },
+      { id: "codex-unavailable", vendor: "codex", alertAt: 70, stopAt: 80, cliProfile: "/none" },
+    );
+    const models = buildApp({
+      config,
+      store,
+      bus,
+      codexModelsFor: (account) => ({
+        entries: () =>
+          account.id === "codex-main"
+            ? [{ model: "machine-only", efforts: ["low"] }]
+            : account.id === "codex-profile"
+              ? [{ model: "profile-only", efforts: ["high"] }]
+              : [],
+      }),
+    });
+    await models.ready();
+    try {
+      expect((await models.inject({ method: "GET", url: "/api/accounts/models" })).json()).toEqual([
+        { accountId: "claude-main", models: [] },
+        { accountId: "codex-main", models: [{ model: "machine-only", efforts: ["low"] }] },
+        { accountId: "codex-profile", models: [{ model: "profile-only", efforts: ["high"] }] },
+        { accountId: "codex-unavailable", models: [] },
+      ]);
+    } finally {
+      await models.close();
+    }
   });
 });
 
@@ -772,6 +1359,242 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("repo onboarding (POST /api/repos/onboard)", () => {
+  const checkout = () => {
+    const path = join(dir, "studio-clone");
+    mkdirSync(path);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: path });
+    writeFileSync(join(path, "README.md"), "studio\n");
+    execFileSync("git", ["add", "README.md"], { cwd: path });
+    execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-qm", "init"], {
+      cwd: path,
+    });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/octo-org/studio.git"], {
+      cwd: path,
+    });
+    return path;
+  };
+  const body = (source: string, over: Record<string, unknown> = {}) => ({
+    repo: NEW_REPO,
+    repoId: "studio",
+    defaultAccountId: "claude-main",
+    guidance: {
+      priority: [],
+      milestone: [],
+      labels: [],
+      labelMode: "any",
+      avoid: [],
+      direction: "",
+    },
+    checkout: { source, branch: "main" },
+    session: null,
+    ...over,
+  });
+
+  it("writes a repo and setup fields together, only applying live state after success", async () => {
+    const source = checkout();
+    const events: string[] = [];
+    bus.subscribe((event) => events.push(event));
+    const r = await postBody("/api/repos/onboard", body(source));
+    expect(r.statusCode).toBe(200);
+    expect(config.repos.at(-1)).toMatchObject({ id: "studio", defaultAccountId: "claude-main" });
+    expect(readFileSync(configPath, "utf8")).toContain("default_account_id: claude-main");
+    expect(events).toContain("config");
+  });
+
+  it("leaves disk and live state unchanged when setup or session preparation is refused", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const badAccount = await postBody(
+      "/api/repos/onboard",
+      body(source, { defaultAccountId: "not-configured" }),
+    );
+    expect(badAccount.statusCode).toBe(400);
+    const badSession = await postBody(
+      "/api/repos/onboard",
+      body(source, { session: { id: "studio", checkoutStrategy: "shared" } }),
+    );
+    expect(badSession.statusCode).toBe(409);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("requires GitHub's default branch again during final submission", async () => {
+    const source = checkout();
+    const before = readFileSync(configPath, "utf8");
+    const r = await postBody(
+      "/api/repos/onboard",
+      body(source, { checkout: { source, branch: "other" } }),
+    );
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(config.repos).toHaveLength(2);
+  });
+
+  it("rejects converted repo identity drift even when both default branches are main", async () => {
+    const source = checkout();
+    execFileSync(
+      "git",
+      ["remote", "set-url", "origin", "https://github.com/octo-org/current-shop-app.git"],
+      { cwd: source },
+    );
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8")
+        .replace("github: octo-org/shop-app", "github: octo-org/current-shop-app")
+        .replace("    project: 2", "    project: 44"),
+    );
+    const gql: Gql = async (_query, _vars) => ({
+      repositoryOwner: {
+        projectV2: {
+          title: "Current",
+          items: { totalCount: 0 },
+          fields: { pageInfo: { hasNextPage: false }, nodes: [] },
+        },
+      },
+      repository: {
+        labels: { nodes: [] },
+        defaultBranchRef: { name: "main" },
+        workflows: { __typename: "Tree" },
+      },
+    });
+    const onboard = buildApp({
+      config,
+      store,
+      bus,
+      configPath,
+      githubGql: async () => gql,
+    });
+    await onboard.ready();
+    try {
+      const r = await onboard.inject({
+        method: "POST",
+        url: "/api/repos/onboard",
+        headers: json,
+        payload: JSON.stringify(
+          body(source, {
+            repo: undefined,
+            repoId: "shop-app",
+            checkout: { source, branch: "main" },
+          }),
+        ),
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("identity changed");
+      expect(readFileSync(configPath, "utf8")).toContain("github: octo-org/current-shop-app");
+      expect(config.repos.find((repo) => repo.id === "shop-app")).toMatchObject({
+        github: "o/shop-app",
+        project: 2,
+      });
+    } finally {
+      await onboard.close();
+    }
+  });
+
+  it("keeps unrelated disk crew changes out of live state while onboarding", async () => {
+    const source = checkout();
+    config.crew = structuredClone(loadConfig(configPath).crew);
+    const pendingPrivate = join(dir, "pending-private");
+    mkdirSync(pendingPrivate);
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8")
+        .replace("  max_seats: 8", "  max_seats: 7")
+        .replace("  # deny_read: [~/code/work, ~/Documents]", `  deny_read: [${pendingPrivate}]`),
+    );
+    let reloads = 0;
+    const reloader = {
+      ...stubReloader(),
+      reload: async () => {
+        reloads++;
+        return { ...NO_CHANGES, applied: [] };
+      },
+    };
+    const gql: Gql = async () => ({
+      repositoryOwner: {
+        projectV2: {
+          title: "Studio",
+          items: { totalCount: 0 },
+          fields: { pageInfo: { hasNextPage: false }, nodes: [] },
+        },
+      },
+      repository: {
+        labels: { nodes: [] },
+        defaultBranchRef: { name: "main" },
+        workflows: { __typename: "Tree" },
+      },
+    });
+    const onboard = buildApp({
+      config,
+      store,
+      bus,
+      configPath,
+      crewReloader: reloader,
+      seatWrites: true,
+      githubGql: async () => gql,
+    });
+    await onboard.ready();
+    try {
+      const r = await onboard.inject({
+        method: "POST",
+        url: "/api/repos/onboard",
+        headers: json,
+        payload: JSON.stringify(
+          body(source, { session: { id: "studio", checkoutStrategy: "shared" } }),
+        ),
+      });
+      expect(r.statusCode).toBe(200);
+      expect(config.crew).toMatchObject({ maxSeats: 8, denyRead: [] });
+      expect(config.crew?.sessions.some((session) => session.id === "studio")).toBe(false);
+      expect(reloads).toBe(1);
+    } finally {
+      await onboard.close();
+    }
+  });
+
+  it("rejects a non-default branch during checkout preflight", async () => {
+    const r = await postBody("/api/repos/checkout-preview", {
+      github: "octo-org/studio",
+      source: "/not-used-after-branch-check",
+      branch: "other",
+      defaultBranch: "main",
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toContain("default branch");
+  });
+});
+
+describe("repo setup (POST /api/repos/:repoId/setup)", () => {
+  it("does not apply an unrelated on-disk flight_powers change", async () => {
+    writeFileSync(
+      configPath,
+      readFileSync(configPath, "utf8").replace(
+        "    # flight_powers: standard   # standard (default) | superuser.",
+        "    flight_powers: superuser # unapplied manual change",
+      ),
+    );
+    const r = await postBody("/api/repos/shop-app/setup", {
+      defaultAccountId: "codex-main",
+      guidance: {
+        priority: ["P1"],
+        milestone: [],
+        labels: [],
+        labelMode: "any",
+        avoid: [],
+        direction: "focus the next milestone",
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(config.repos[0]).toMatchObject({
+      defaultAccountId: "codex-main",
+      guidance: { priority: ["P1"] },
+    });
+    expect(config.repos[0]?.flightPowers).toBeUndefined();
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
   });
 });
 
@@ -983,6 +1806,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
@@ -1034,6 +1858,15 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(202);
         continue;
       }
+      if (url === "/api/repos/checkout-preview") {
+        // The shared route table body names no real checkout; route-specific tests supply one.
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/onboard") {
+        expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
       if (
         (method === "POST" && url.endsWith("/focus")) ||
         url.includes("/queue/reorder") ||
@@ -1048,6 +1881,10 @@ describe("local access", () => {
       if (url === "/api/accounts" && method === "POST") {
         expect(r.statusCode).toBe(409);
         expect(r.json().error).toContain("one account per provider");
+        continue;
+      }
+      if (url === "/api/accounts/claude-main" && method === "DELETE") {
+        expect(r.statusCode).toBe(409);
         continue;
       }
       if (url === "/api/attention/unknown") {
@@ -1274,10 +2111,16 @@ describe("local access", () => {
           `${m} ${u
             .split("?")[0]
             ?.replace("/attention/unknown", "/attention/:key")
+            .replace("/comms/agents/guido-1/contacts/CAPCOM", "/comms/agents/:id/contacts/:contact")
+            .replace("/comms/agents/guido-1", "/comms/agents/:id")
+            .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
+            .replace("/comms/tickets/%237", "/comms/tickets/:ref")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
+            .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
+            .replace(/\/accounts\/claude-main$/, "/accounts/:id")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
@@ -2173,8 +3016,11 @@ describe("crew and attention", () => {
   });
 
   it("POST /api/attention/:key/dismiss dismisses a hard-rule flag", async () => {
-    store.raiseNote({ ...parked("flag:r1:hard-rules:abc"), kind: "flag" });
-    const key = "note:flag:r1:hard-rules:abc";
+    store.raiseNote({
+      ...parked("flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af"),
+      kind: "flag",
+    });
+    const key = "note:flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af";
     const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ dismissed: key });
@@ -2748,6 +3594,7 @@ describe("boards, escalations, health", () => {
       repoId: "shop-app",
       seq: 0,
       conflicts: [],
+      conflictsUnchecked: [],
       findings: [],
       seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
     });
@@ -2881,6 +3728,8 @@ describe("boards, escalations, health", () => {
       { file: "file.ts", add: 2, rem: 1, source: "churn" },
     ]);
     expect(response.json().seats[0].scope.read).toEqual([]);
+    // the set-aside branch still names the seat in conflicts and their unchecked notes
+    expect(response.json().seats[0].branches).toContain("aside-branch");
     store.upsertPullRequests(
       "shop-app",
       [
@@ -2909,7 +3758,33 @@ describe("boards, escalations, health", () => {
       ],
       NOW,
     );
-    expect((await get("/api/repos/shop-app/map")).json().seats[0].scope.modified).toEqual([]);
+    const merged = (await get("/api/repos/shop-app/map")).json().seats[0];
+    expect(merged.scope.modified).toEqual([]);
+    expect(merged.branches).not.toContain("aside-branch");
+  });
+
+  it("flags a park from a run the operator stopped, so the map never calls it stuck", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    store.upsertRun(
+      run({
+        id: "stopped-loop",
+        agentId: "guido-1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+        },
+      }),
+    );
+    store.setRunEnded("stopped-loop", NOW, "ok", "operator");
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].badges.waiting).toMatchObject({
+      kind: "parked",
+      reason: "run ended (stopped)",
+      stopped: true,
+    });
   });
 
   it("uses the loop park reason and its state age for waiting", async () => {
@@ -2933,6 +3808,7 @@ describe("boards, escalations, health", () => {
       kind: "parked",
       reason: "Check the plan",
       since: response.json().seats[0].since,
+      stopped: false,
     });
   });
 
@@ -3056,7 +3932,9 @@ describe("boards, escalations, health", () => {
         expect(parked.seats[0]).toMatchObject({
           calls: [],
           scope: { read: [], modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
-          badges: { waiting: { kind: "parked", since: NOW, reason: "Waiting for input" } },
+          badges: {
+            waiting: { kind: "parked", since: NOW, reason: "Waiting for input", stopped: false },
+          },
         });
       } finally {
         await a.close();
@@ -3161,6 +4039,7 @@ describe("boards, escalations, health", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       conflicts: [{ file: "file.txt", branches: ["right", "left"], shas: [right, left] }],
+      unchecked: [],
     });
     expect(git("count-objects", "-v")).toBe(before);
     expect(git("status", "--porcelain")).toBe("");
@@ -3170,7 +4049,19 @@ describe("boards, escalations, health", () => {
       prs.map((pr) => ({ ...pr, state: "closed" })),
       0,
     );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({ conflicts: [] });
+    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({
+      conflicts: [],
+      unchecked: [],
+    });
+    // a head the checkout hasn't fetched is named unchecked, never reported clean
+    store.upsertPullRequests(
+      "shop-app",
+      [prs[0], { ...prs[1], headSha: "f".repeat(40) }].map((pr) => ({ ...pr, state: "open" })),
+      0,
+    );
+    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toMatchObject({
+      unchecked: [{ reason: "head not fetched" }],
+    });
   });
 
   it("does not report a clean merge when the map checkout is unavailable", async () => {
@@ -3303,6 +4194,7 @@ describe("boards, escalations, health", () => {
         error: "github: HTTP 502",
         at: expect.any(Number),
         lastOkAt: null,
+        failingSince: expect.any(Number),
       },
     ]);
   });
@@ -5246,7 +6138,7 @@ describe("the first loop's engine", () => {
     touches: null,
     cardFor: null,
   } as const;
-  const engineApp = (seatRunId: string | null) => {
+  const engineApp = (seatRunId: string | null, knownSecrets?: () => Promise<readonly string[]>) => {
     const told: string[] = [];
     const sup = stubSupervisor();
     sup.seat = () =>
@@ -5266,6 +6158,7 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: sup,
+      knownSecrets,
       engine: {
         onOperatorMessage: async (runId) => {
           told.push(runId);
@@ -5394,6 +6287,29 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(409);
     expect(store.comms(0)).toHaveLength(1);
     await none.a.close();
+  });
+
+  it("does not deliver or store when the seat leaves during secret scanning", async () => {
+    let scanned!: () => void;
+    let release!: () => void;
+    const scanStarted = new Promise<void>((resolve) => (scanned = resolve));
+    const scan = new Promise<readonly string[]>((resolve) => (release = () => resolve([])));
+    const { a } = engineApp(null, () => {
+      scanned();
+      return scan;
+    });
+    const pending = message(a);
+    await scanStarted;
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("expected crew session");
+    session.seats = session.seats.filter((seat) => seat.id !== "guido-1");
+    release();
+    const response = await pending;
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Unknown Comms destination." });
+    expect(supervisorCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+    await a.close();
   });
 
   it("does not when the message is refused", async () => {
@@ -5654,6 +6570,12 @@ vi.mock("../src/accounts.ts", () => ({
     status: "unknown",
     checkedAt: now,
     detail: null,
+  }),
+  discoverAccountModels: async (account: { id: string }, now: number) => ({
+    accountId: account.id,
+    models: [{ id: "test-model", efforts: ["medium"] }],
+    checkedAt: now,
+    error: null,
   }),
 }));
 
@@ -5995,6 +6917,7 @@ describe("FLIGHT ledger views", () => {
     expect(summary.headline).toBe("H");
     expect(summary.now.map((e) => e.key)).toEqual(["w2", "w5", "w3", "w1", "w4"]);
     expect(summary.next.map((e) => e.due)).toEqual([10, 20, 30, 40, 50]);
+    expect(summary.done.map((e) => e.key)).toEqual(["watch-done"]);
     expect(summary.watching.top).toHaveLength(5);
     expect(summary.watching.top[0]?.key).toBe("watch6");
     expect(summary.watching.counts).toEqual({
@@ -6096,28 +7019,6 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it("scopes seats by session even when sessions share a repo", async () => {
-    withCrew();
-    const first = config.crew?.sessions[0];
-    const seat = first?.seats[0];
-    if (!first || !seat) throw new Error("missing crew fixture");
-    config.crew?.sessions.push({
-      ...first,
-      id: "s2",
-      seats: [{ ...seat, id: "guido-2" }],
-    });
-    store.addAgentEvent({ agentId: "guido-2", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working).toMatchObject({
-      now: 0,
-      of: 1,
-    });
-    expect((await get("/api/overview?session=s2")).json().kpis.working).toMatchObject({
-      now: 1,
-      of: 1,
-    });
-    expect((await get("/api/overview")).json().kpis.working).toMatchObject({ now: 1, of: 2 });
-  });
-
   it("serves live figures and validates the selected session", async () => {
     withCrew();
     store.raiseNote({
@@ -6133,18 +7034,39 @@ describe("overview", () => {
     expect(first.statusCode).toBe(200);
     expect(first.json()).toMatchObject({
       at: NOW,
-      kpis: { working: { now: 0, of: 1 }, needsYou: { count: 1, overHour: 1 } },
+      kpis: { needsYou: { count: 1, overHour: 1 } },
     });
-    store.addAgentEvent({ agentId: "guido-1", at: NOW, from: "idle", to: "running", text: "turn" });
-    expect((await get("/api/overview?session=s1")).json().kpis.working.now).toBe(1);
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
+  });
+
+  it("serves the registry's server figures for the session filter and 404s an unknown session", async () => {
+    withCrew();
+    const all = await get("/api/metrics");
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toEqual({
+      at: NOW,
+      inProgress: { count: 0, oldestAt: null },
+      merged: { count: 0, loops: 0 },
+      cycleTime: { p50Ms: null, p85Ms: null, n: 0, excluded: 0 },
+      cost: { usd: null },
+    });
+    expect((await get("/api/metrics?session=s1")).statusCode).toBe(200);
+    expect((await get("/api/metrics?session=missing")).statusCode).toBe(404);
   });
 });
 
 it("bounds tag text in attention and reads the whole message on open", async () => {
-  const text = `@CAPCOM ${"x".repeat(1000)}`;
-  store.addComms({ at: NOW, from: "shop-app-ta", to: "CAPCOM", ticket: null, text });
+  withCrew();
+  config.crew?.sessions[0]?.seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "opus",
+    area: [],
+  });
+  const text = `@CAPCOM ${"x".repeat(1000)}?`;
+  store.addComms({ at: NOW, from: "flight-1", to: "CAPCOM", ticket: null, text });
   const items = (await get("/api/attention")).json<AttentionItem[]>();
   const tag = items.find((i) => i.kind === "tag");
   expect(tag).toBeDefined();

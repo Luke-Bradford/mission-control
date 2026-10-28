@@ -42,6 +42,7 @@ describe("installKeys", () => {
     ["f", "/flight"],
     ["b", "/board"],
     ["a", "/agent"],
+    ["m", "/map"],
     ["c", "/comms"],
     ["t", "/telemetry"],
     ["s", "/setup"],

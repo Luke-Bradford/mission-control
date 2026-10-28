@@ -41,6 +41,7 @@ import {
   HOOK_RETRY_ENV,
   lockBusyText,
   MC_MCP_SERVER,
+  MC_TMP_DIR_NAME,
   MC_TOOL_NAMES,
   mergedMainText,
   NEW_LOOP,
@@ -56,7 +57,6 @@ import {
   START_NO_RULES,
   startClosedText,
   startMissingNeedsText,
-  startNeedsPlanText,
   type TicketView,
   ticketHasRunText,
   twoAreasText,
@@ -120,6 +120,7 @@ import {
   sups,
   TICKET,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -294,9 +295,16 @@ describe("startRun eligibility", () => {
     });
   });
 
-  it("10: refuses Size M with no plan", async () => {
+  it("10: starts Size M with no plan so its seat can write it", async () => {
     onBoard(boardCard(42, { size: "M" }));
-    await refused(422, startNeedsPlanText("mc#42", "M"));
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(store.run(runId)?.plan).toBeUndefined();
+    expect(userLines()[0]).toContain(
+      "This ticket has no ## Plan. Before changing code, write its plan",
+    );
   });
 
   it("refuses a card that is not on the board", async () => {
@@ -406,7 +414,7 @@ describe("startRun profiles", () => {
     expect(profileHash(file.find((p) => p.name === "feature") as Profile)).not.toBe(before?.hash);
   });
 
-  it("a profile that needs no plan starts a Size M build without one", async () => {
+  it("a planless Size M build exposes report_plan to its own seat", async () => {
     writeFileSync(profilesFile(), FILE(3));
     store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
     const { sup } = make({
@@ -416,6 +424,8 @@ describe("startRun profiles", () => {
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     expect(store.run(runId)?.profile?.profile.name).toBe("small-change");
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    expect(recorded()[0]?.argv).toContain("mcp__mc__report_plan");
   });
 });
 
@@ -605,6 +615,8 @@ describe("startRun", () => {
       "LANG",
       "LC_ALL",
       "TMPDIR",
+      "TMP",
+      "TEMP",
       "CLAUDE_CODE_TMPDIR",
       "SHELL",
       "TERM",
@@ -662,6 +674,8 @@ describe("startRun", () => {
       expect(tmp).toBeTruthy();
       expect(tmp.startsWith("/tmp/")).toBe(true);
       expect(r.env.CLAUDE_CODE_TMPDIR).toBe(tmp);
+      expect(r.env.TMP).toBe(tmp);
+      expect(r.env.TEMP).toBe(tmp);
       expect(tmp).not.toContain("/claude-");
       expect(Buffer.byteLength(join(tmp, `claude-${process.getuid?.()}`))).toBeLessThanOrEqual(44);
       expect(statSync(tmp).mode & 0o777).toBe(0o700);
@@ -1058,7 +1072,7 @@ describe("startRun", () => {
     expect(fs.denyWrite[0]).toBe(join(root, "mc-crew", "retro-42"));
   });
 
-  it("a writer on a repo with its own commands and protected files gets them", async () => {
+  it("a writer gets broad Bash while repo commands still define its checks", async () => {
     const { sup } = make({
       repo: {
         commands: {
@@ -1076,8 +1090,8 @@ describe("startRun", () => {
       argv.indexOf("--allowedTools") + 1,
       argv.indexOf("--disallowedTools"),
     );
-    expect(allowed).toContain("Bash(uv run pytest:*)");
-    expect(allowed).not.toContain("Bash(pnpm -s lint:*)");
+    expect(allowed).toContain("Bash");
+    expect(allowed.some((entry) => entry.startsWith("Bash("))).toBe(false);
     const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
     expect(denied).toContain(
       `Edit(/${realpathSync(join(root, "mc-crew", "guido-1-42"))}/pyproject.toml)`,
@@ -1096,7 +1110,7 @@ describe("startRun", () => {
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
     expect(brief).toContain(
-      "Commands you may run here: `uv run pytest`, `uv run ruff check`. A whole suite (`uv run pytest`) takes the test lock",
+      "Configured validation commands: `uv run pytest`, `uv run ruff check`. You may also use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`uv run pytest`) takes the test lock",
     );
     expect(brief).not.toContain("pnpm");
   });
@@ -1117,7 +1131,9 @@ describe("startRun", () => {
     await sup.startRun("fao-1", 42);
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
-    expect(brief).toContain("Commands you may run here: `uv run pytest`.");
+    expect(brief).toContain(
+      "Configured validation commands: `uv run pytest`. You may also use ordinary local commands to inspect and complete the work inside the sandbox.",
+    );
     expect(brief).not.toContain("ruff");
     expect(brief).not.toContain("test lock");
   });
@@ -2171,6 +2187,74 @@ describe("the mc tools and the guard (phase 2b)", () => {
   });
 });
 
+describe("repo guidance at launch", () => {
+  const FLIGHT: CrewSeatConfig = {
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "opus",
+    area: [],
+  };
+  const guidance = {
+    priority: ["P0", "customer-impact"],
+    milestone: ["Launch"],
+    labels: ["area:server", "urgent"],
+    labelMode: "all" as const,
+    avoid: ["large rewrites"],
+    direction: "Keep the launch path boring.",
+  };
+  const advice = [
+    "# Mission Control work guidance (advice, not rules)",
+    "Prefer priority: P0, customer-impact.",
+    "Prefer milestone: Launch.",
+    "Labels (all): area:server, urgent.",
+    "Avoid: large rewrites.",
+    "Keep the launch path boring.",
+  ].join("\n");
+  const launchGrants = (start: { argv: unknown }) => {
+    const argv = start.argv as string[];
+    const allowedAt = argv.indexOf("--allowedTools");
+    const deniedAt = argv.indexOf("--disallowedTools");
+    const promptAt = argv.indexOf("--append-system-prompt-file");
+    return {
+      tools: argv[argv.indexOf("--tools") + 1],
+      allowed: argv.slice(allowedAt + 1, deniedAt),
+      denied: argv.slice(deniedAt + 1, promptAt),
+    };
+  };
+  const launches = () => recorded().filter((line) => Array.isArray(line.argv));
+
+  it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {
+    const { sup, cfg } = make({ extraSeat: FLIGHT });
+    sup.start();
+
+    const plain = await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(1));
+    const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
+    const plainGrants = launchGrants(launches()[0] as { argv: unknown });
+    await sup.endRun("flight-1");
+
+    const repo = cfg.repos[0];
+    if (!repo) throw new Error("missing test repo");
+    repo.guidance = guidance;
+    const guided = await sup.startWatch("flight-1");
+    await until(() => expect(launches()).toHaveLength(2));
+    const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
+    expect(guidedPrompt).toContain(advice);
+    expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
+    expect(launchGrants(launches()[1] as { argv: unknown })).toEqual(plainGrants);
+    await sup.endRun("flight-1");
+
+    const build = await sup.startRun("guido-1", 42);
+    const review = await sup.startRun("retro", 43);
+    await until(() => expect(launches()).toHaveLength(4));
+    for (const runId of [build.runId, review.runId])
+      expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
+        "# Mission Control work guidance (advice, not rules)",
+      );
+  });
+});
+
 describe("Codex launch through a test-only account", () => {
   afterEach(() => {
     vi.mocked(homedir).mockReset();
@@ -2207,6 +2291,66 @@ import(${JSON.stringify(fixture)});
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
 
+  it("gives Codex FLIGHT guidance only, without changing its prompt or tool grants", async () => {
+    const flight: CrewSeatConfig = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    };
+    const guidance = {
+      priority: ["P0", "customer-impact"],
+      milestone: ["Launch"],
+      labels: ["area:server", "urgent"],
+      labelMode: "all" as const,
+      avoid: ["large rewrites"],
+      direction: "Keep the launch path boring.",
+    };
+    const advice = [
+      "# Mission Control work guidance (advice, not rules)",
+      "Prefer priority: P0, customer-impact.",
+      "Prefer milestone: Launch.",
+      "Labels (all): area:server, urgent.",
+      "Avoid: large rewrites.",
+      "Keep the launch path boring.",
+    ].join("\n");
+    const spawns = () => recorded().filter((line) => line.type === "spawn");
+    const grants = (spawn: { env: Record<string, string> }) =>
+      readFileSync(join(spawn.env.CODEX_HOME, "config.toml"), "utf8").replaceAll(
+        spawn.env.TMPDIR,
+        "<seat-temp>",
+      );
+    const { sup, cfg } = codex();
+    cfg.crew?.sessions[0]?.seats.push(flight);
+    sup.start();
+
+    const plain = await sup.startWatch("flight-1");
+    await until(() => expect(spawns()).toHaveLength(1));
+    const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
+    const plainGrants = grants(spawns()[0] as { env: Record<string, string> });
+    await sup.endRun("flight-1");
+
+    const repo = cfg.repos[0];
+    if (!repo) throw new Error("missing test repo");
+    repo.guidance = guidance;
+    const guided = await sup.startWatch("flight-1");
+    await until(() => expect(spawns()).toHaveLength(2));
+    const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
+    expect(guidedPrompt).toContain(advice);
+    expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
+    expect(grants(spawns()[1] as { env: Record<string, string> })).toBe(plainGrants);
+    await sup.endRun("flight-1");
+
+    const build = await sup.startRun("guido-1", 42);
+    const review = await sup.startRun("retro", 43);
+    await until(() => expect(spawns()).toHaveLength(4));
+    for (const runId of [build.runId, review.runId])
+      expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
+        "# Mission Control work guidance (advice, not rules)",
+      );
+  });
+
   it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
     const { sup, log } = codex();
     unlinkSync(join(dir, "home", ".codex", "auth.json"));
@@ -2241,7 +2385,6 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
-      PNPM_STORE_ENV,
       "UV_CACHE_DIR",
       "PYTHONPYCACHEPREFIX",
       "RUFF_CACHE_DIR",
@@ -2250,6 +2393,11 @@ import(${JSON.stringify(fixture)});
     ]) {
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
+    expect(spawn.env[PNPM_STORE_ENV]).toBe(
+      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+    );
+    expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
+    expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
     expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(statSync(home).mode & 0o777).toBe(0o700);
     for (const name of ["config.toml", "auth.json"])
@@ -2258,13 +2406,31 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
     const parent = dirname(spawn.env.TMPDIR);
-    expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
+    expect(parent).toBe(join(spawn.cwd, MC_TMP_DIR_NAME));
+    expect(basename(spawn.env.TMPDIR)).toBe(
+      basename(crewTempRoot(dbPath, runId, process.getuid?.() ?? 0)),
+    );
+    expect(spawn.env.TMPDIR).not.toBe(process.env.TMPDIR);
     expect(statSync(parent).mode & 0o777).toBe(0o700);
-    expect(config).toContain(`${JSON.stringify(parent)}="deny"`);
+    expect(config).not.toContain(`${JSON.stringify(parent)}="deny"`);
+    // the Claude seats' shared temp parent stays closed to Codex
+    const claudeParent = realpathSync(
+      dirname(crewTempRoot(dbPath, runId, process.getuid?.() ?? 0)),
+    );
+    expect(config).toContain(`${JSON.stringify(claudeParent)}="deny"`);
     expect(config).not.toContain('"/tmp"="deny"');
     expect(config).not.toContain('"/private/tmp"="deny"');
     expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
+    expect(config).not.toContain(`${JSON.stringify(spawn.env[PNPM_STORE_ENV])}="write"`);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBe(
+      JSON.stringify({ worktree: spawn.cwd, tmp: spawn.env.TMPDIR }),
+    );
+    const exclude = readFileSync(
+      join(realpathSync(join(clone, ".git")), "info", "exclude"),
+      "utf8",
+    );
+    expect(exclude.split("\n").filter((line) => line === `${MC_TMP_DIR_NAME}/`)).toHaveLength(1);
     expect(spawn.env.TMPDIR).not.toContain("/claude-");
     expect(statSync(spawn.env.TMPDIR).mode & 0o777).toBe(0o700);
     for (const prefix of ["/tmp", "/private/tmp"]) {
@@ -2282,6 +2448,7 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
   });
 
   it.each([false, true])(
@@ -2341,10 +2508,8 @@ import(${JSON.stringify(fixture)});
   });
 
   it.each([
-    { command: "git commit -m x" },
     { command: "ls", params: { kind: "writeStdin" } },
     { command: "ls", params: { networkApprovalContext: { host: "example.com" } } },
-    { command: "sleep 1 &" },
     { method: "item/permissions/requestApproval" },
     { method: "item/tool/requestUserInput" },
     { method: "execCommandApproval" },
@@ -2364,6 +2529,19 @@ import(${JSON.stringify(fixture)});
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({ runId, rule: "codex-allowlist" }),
     );
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRunByEngine(runId);
+  });
+
+  it.each([
+    ["git commit -m x", "git-write"],
+    ["sleep 1 &", "background"],
+  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
+    const { sup } = codex({ command });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(decision()).toBe("decline"));
+    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
@@ -2534,8 +2712,8 @@ import(${JSON.stringify(fixture)});
     },
   );
 
-  it("applies the ordinary guard after the command allowlist", async () => {
-    // The log prefix allows this; the ordinary guard catches the output write.
+  it("applies the shared outcome guard to an ordinary command", async () => {
+    // The ordinary guard catches the output write.
     const { sup } = codex({ command: "git log HEAD --output=out" });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -2603,7 +2781,7 @@ import(${JSON.stringify(fixture)});
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm the seat floor"));
     // Keeper cleanup can finish after the refusal is recorded on a loaded runner.
-    await vi.waitFor(() => expect(existsSync(crewKeeperDir(dbPath, runId))).toBe(false));
+    await untilGone(crewKeeperDir(dbPath, runId));
   });
 
   it.each(["codex-cli 0.153.9", "unreadable"])(

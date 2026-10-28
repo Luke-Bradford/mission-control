@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
+  type AccountModelsView,
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
@@ -12,9 +13,15 @@ import {
   areaOwnsFolder,
   type ChangedFiles,
   type CliAccountStatus,
+  COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_LABELS,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_REACTIONS,
+  COMMS_REF,
+  COMMS_TICKET,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -87,7 +94,7 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { readAccountStatus } from "./accounts.ts";
+import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -118,18 +125,18 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
+import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
   configuredAgents,
   crewSeatDef,
-  crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
   TeamsSelection,
 } from "./config.ts";
 import {
+  AccountBody,
   accountDuplicateReason,
   addAccount,
   addRepo,
@@ -140,8 +147,14 @@ import {
   NewAccountBody,
   NewRepoBody,
   NewSessionBody,
+  onboardRepo,
   RepoLocation,
+  RepoOnboardBody,
+  RepoSetupBody,
+  removeAccount,
   SeatsBody,
+  setAccount,
+  setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
 } from "./config-write.ts";
@@ -185,8 +198,9 @@ import { mapSeats } from "./map/seats.ts";
 import { mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
-import type { RunTokens } from "./mcp/tokens.ts";
+import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
+import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
@@ -197,8 +211,15 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
+import {
+  adminDirOf,
+  CheckoutError,
+  removeSessionCheckout,
+  validateSessionCheckout,
+} from "./runtime/checkouts.ts";
+import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
+import { runSeatGrants } from "./runtime/grants.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import {
   type BoardTitleCache,
@@ -209,7 +230,7 @@ import {
   runView,
 } from "./runview.ts";
 import { setSeatFocus } from "./seat-focus.ts";
-import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
+import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
@@ -281,12 +302,16 @@ export interface AppDeps {
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   config: CcConfig;
+  /** Cached Codex model catalogs, isolated by each account's CLI binding. */
+  codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
+  /** Delivers a direct Comms message to a local live seat. */
+  deliverComms?: (seatId: string, text: string, from: string) => void;
   store: Store;
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
@@ -338,6 +363,8 @@ export interface AppDeps {
   seatMode?: (seatId: string) => CrewMode;
   /** The extra mc tools a seat's role holds; default: none. */
   seatGrants?: (seatId: string) => readonly string[];
+  /** The extra mc tools an authenticated run holds; default: none. */
+  runGrants?: (who: RunIdentity) => readonly string[];
   /** The test lock the guard takes for a full suite; absent: a full suite is denied, never run unlocked. */
   lock?: TestLock;
   /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
@@ -352,17 +379,18 @@ export function crewGuardDeps(
   config: CcConfig,
   tokens: RunTokens,
   lock: TestLock,
+  store: Store,
 ): {
   tokens: RunTokens;
   lock: TestLock;
   seatMode: (seatId: string) => CrewMode;
-  seatGrants: (seatId: string) => McToolName[];
+  runGrants: (who: RunIdentity) => McToolName[];
 } {
   return {
     tokens,
     lock,
     seatMode: (seatId) => crewSeatMode(config, seatId),
-    seatGrants: (seatId) => crewSeatGrants(config, seatId),
+    runGrants: (who) => runSeatGrants(config, store, who),
   };
 }
 
@@ -541,6 +569,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   let stopMapRing: (() => void) | undefined;
 
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const accountModels = new Map<string, AccountModels>();
+  let localAccountUpdate: Promise<void> | null = null;
+  const withAccountUpdate = <T>(fn: () => Promise<T>): Promise<T> => {
+    if (deps.supervisor) return deps.supervisor.withAccountUpdate(fn);
+    const update = (localAccountUpdate ?? Promise.resolve()).then(fn);
+    const settled = update
+      .then(
+        () => {},
+        () => {},
+      )
+      .finally(() => {
+        if (localAccountUpdate === settled) localAccountUpdate = null;
+      });
+    localAccountUpdate = settled;
+    return update;
+  };
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
     const key = `${account.vendor}:${account.id}`;
@@ -710,6 +754,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       mcpTools: deps.mcpTools ?? (() => []),
       seatMode: deps.seatMode ?? (() => "read-only"),
       ...(deps.seatGrants === undefined ? {} : { seatGrants: deps.seatGrants }),
+      ...(deps.runGrants === undefined ? {} : { runGrants: deps.runGrants }),
     });
   }
 
@@ -974,6 +1019,280 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
 
+      const commsCrew = () =>
+        configuredAgents(config)
+          .filter((agent) => agent.kind === "crew")
+          .map((agent) => agent.id);
+      const commsSendBody = z.strictObject({
+        to: z.string().min(1),
+        text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        label: z.enum(COMMS_LABELS).optional(),
+        ref: z.string().regex(COMMS_REF).optional(),
+        replyTo: z
+          .string()
+          .regex(/^comms:\d+$/)
+          .optional(),
+      });
+      // Reader: apps/web/src/App.tsx#App (operator messages)
+      api.post("/comms", async (req, reply) => {
+        const body = commsSendBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const message = await sendComms(
+            {
+              store,
+              crew: commsCrew,
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              now,
+              seatSender: false,
+              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
+            },
+            COMMS_CAPCOM,
+            body.data,
+          );
+          bus.emit("agents");
+          return { message };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms message refused." });
+        }
+      });
+      // Reader: apps/web/src/App.tsx#App (operator reactions)
+      api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
+        if (commsMessageNumber(req.params.id) === null)
+          return reply.code(400).send({ error: "invalid Comms message id" });
+        const body = z
+          .strictObject({
+            reaction: z.enum(COMMS_REACTIONS),
+            reason: z.string().max(COMMS_CANT_REASON_MAX).optional(),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const reaction = reactComms(
+            store,
+            COMMS_CAPCOM,
+            req.params.id,
+            body.data.reaction,
+            body.data.reason,
+            now(),
+          );
+          bus.emit("agents");
+          return { reaction };
+        } catch (e) {
+          return reply
+            .code(400)
+            .send({ error: e instanceof Error ? e.message : "Comms reaction refused." });
+        }
+      });
+      const pinRoute =
+        (pinned: boolean) =>
+        async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+          if (commsMessageNumber(req.params.id) === null)
+            return reply.code(400).send({ error: "invalid Comms message id" });
+          try {
+            pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
+            bus.emit("agents");
+            return { pinned };
+          } catch (e) {
+            return reply
+              .code(404)
+              .send({ error: e instanceof Error ? e.message : "Unknown Comms message." });
+          }
+        };
+      // Reader: apps/web/src/App.tsx#App (operator pins)
+      api.put<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(true));
+      // Reader: apps/web/src/App.tsx#App (operator pins)
+      api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
+
+      const storedCommsMessage = (row: ReturnType<Store["commsMessage"]>) => {
+        if (row === null) throw new Error("Unknown Comms message.");
+        return {
+          ...row,
+          reactions: store.commsReactions(row.id),
+          pinned: store.commsPins().some((pin) => pin.id === row.id),
+          operator: row.from === COMMS_CAPCOM,
+        };
+      };
+      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
+        rows.map((row) => storedCommsMessage(row));
+      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
+      const unreadAfter = (rows: ReturnType<Store["commsForCrew"]>, cursor: string | null) => {
+        const offset = cursor === null ? 0 : Number(cursor.slice("comms:".length));
+        return rows.filter((row) => Number(row.id.slice("comms:".length)) > offset).length;
+      };
+      const commsScope = (
+        scope: string,
+      ): { key: string; rows: ReturnType<Store["commsForCrew"]> } | null => {
+        if (scope === "crew") return { key: scope, rows: store.commsForCrew() };
+        const flight = flightSeat(config)?.seat.id;
+        if (scope === "flight")
+          return {
+            key: scope,
+            rows: flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight),
+          };
+        const agent = scope.match(/^agent-all:([A-Za-z0-9_-]+)$/)?.[1];
+        if (agent !== undefined && knownCommsAgent(agent))
+          return { key: `agent-all:${agent}`, rows: store.commsForAgent(agent) };
+        const inbox = scope.match(/^inbox:([A-Za-z0-9_-]+)$/)?.[1];
+        if (inbox !== undefined && knownCommsAgent(inbox))
+          return { key: `inbox:${inbox}`, rows: store.commsInbox(inbox) };
+        const pair = scope.match(/^pair:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/);
+        if (pair !== null && knownCommsAgent(pair[1]) && knownCommsAgent(pair[2]))
+          return { key: pairScope(pair[1], pair[2]), rows: store.commsForPair(pair[1], pair[2]) };
+        return null;
+      };
+
+      // Reader: apps/web/src/App.tsx#App (crew Comms)
+      api.get("/comms/crew", () => {
+        const rows = store.commsForCrew();
+        const cursor = store.commsScopeCursor("crew");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
+      api.get("/comms/flight", () => {
+        const flight = flightSeat(config)?.seat.id;
+        const rows = flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight);
+        const cursor = store.commsScopeCursor("flight");
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (agent Comms)
+      api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
+        const id = req.params.id;
+        if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
+        const rows = store.commsForAgent(id);
+        const inboxRows = store.commsInbox(id);
+        const messages = storedCommsMessages(rows);
+        const inbox = storedCommsMessages(inboxRows);
+        const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
+          .filter((contact) => contact !== id && contact !== COMMS_CREW)
+          .map((contact) => {
+            const contactRows = store.commsForPair(id, contact);
+            const cursor = store.commsScopeCursor(pairScope(id, contact));
+            const contactMessages = storedCommsMessages(contactRows);
+            return {
+              id: contact,
+              lastMessage: contactMessages.at(-1) ?? null,
+              count: contactMessages.length,
+              unread: unreadAfter(contactRows, cursor),
+            };
+          });
+        return {
+          messages,
+          inbox,
+          contacts,
+          cursor: store.commsScopeCursor(`agent-all:${id}`),
+          unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
+          inboxCursor: store.commsScopeCursor(`inbox:${id}`),
+          inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
+          // Needs you no longer counts direct-line replies; the thread does (#757)
+          directUnread:
+            id === COMMS_CAPCOM
+              ? 0
+              : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
+                  .length,
+        };
+      });
+      // Reader: apps/web/src/App.tsx#App (agent contact Comms)
+      api.get<{ Params: { id: string; contact: string } }>(
+        "/comms/agents/:id/contacts/:contact",
+        (req, reply) => {
+          if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
+            return reply.code(404).send({ error: "unknown Comms agent" });
+          const rows = store.commsForPair(req.params.id, req.params.contact);
+          const cursor = store.commsScopeCursor(pairScope(req.params.id, req.params.contact));
+          return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+        },
+      );
+      // Reader: apps/web/src/App.tsx#App (pair Comms)
+      api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
+        if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
+          return reply.code(404).send({ error: "unknown Comms agent" });
+        const rows = store.commsForPair(req.params.a, req.params.b);
+        const cursor = store.commsScopeCursor(pairScope(req.params.a, req.params.b));
+        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+      });
+      // Reader: apps/web/src/App.tsx#App (ticket Comms)
+      api.get<{ Params: { ref: string }; Querystring: { ticket?: string } }>(
+        "/comms/tickets/:ref",
+        (req, reply) => {
+          const supplied = decodeURIComponent(req.params.ref);
+          if (!COMMS_REF.test(supplied))
+            return reply.code(400).send({ error: "invalid Comms ref" });
+          if (req.query.ticket !== undefined && !COMMS_TICKET.test(req.query.ticket))
+            return reply.code(400).send({ error: "invalid Comms ticket" });
+          const context = store.commsForTicket(supplied, req.query.ticket);
+          const issueNumber = context.ref.startsWith("#") ? Number(context.ref.slice(1)) : null;
+          const board =
+            issueNumber === null ||
+            context.repoId === null ||
+            !config.repos.some((repo) => repo.id === context.repoId)
+              ? undefined
+              : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
+          return {
+            messages: storedCommsMessages(context.rows),
+            ticket: {
+              ref: context.ref,
+              linkedPr: context.linkedPr,
+              title: board?.title ?? null,
+              status: board?.status ?? null,
+              owner: board?.owner ?? null,
+              repoId: board?.repoId ?? null,
+              issueNumber: board?.issueNumber ?? null,
+            },
+          };
+        },
+      );
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
+      api.get("/comms/mentions", () => ({
+        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+          message: storedCommsMessage(row),
+          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+        })),
+      }));
+      // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
+      api.post("/comms/mentions/seen", (req, reply) => {
+        const body = z
+          .strictObject({ ids: z.array(z.string().regex(/^comms:\d+$/)).max(500) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.ids.some((id) => store.commsMessage(id) === null))
+          return reply.code(400).send({ error: "unknown Comms message" });
+        store.markCommsMentionsSeen(COMMS_CAPCOM, body.data.ids, now());
+        return { ok: true };
+      });
+      // Reader: apps/web/src/App.tsx#App (pinned Comms)
+      api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
+      // Reader: apps/web/src/App.tsx#App (Comms link activity)
+      api.get("/comms/links", () => ({
+        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (24 hour Comms Traffic bars)
+      api.get("/comms/traffic", () => ({
+        hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
+      api.get("/comms/chatter", () => ({
+        pairs: store.commsChatter(now() - 24 * 60 * 60 * 1000),
+      }));
+      // Reader: apps/web/src/App.tsx#App (Comms read cursors)
+      api.post("/comms/read", (req, reply) => {
+        const body = z
+          .strictObject({
+            scope: z.string().min(1).max(200),
+            messageId: z.string().regex(/^comms:\d+$/),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const scope = commsScope(body.data.scope);
+        if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
+        store.markCommsScopeRead(scope.key, body.data.messageId);
+        return { ok: true };
+      });
+
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
       /**
@@ -1131,7 +1450,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
             deps.superuserTools,
-            deps.seatGrants?.(who.seatId),
+            deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
           if (verdict.kind === "allow") return answer();
@@ -1244,11 +1563,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
+      // Reader: apps/web/src/setup/Repos.tsx (seat model pickers). Only providers which have actually published a catalog
+      // are selectable here; role defaults are configuration, not model discovery.
+      api.get("/accounts/models", (): AccountModelsView[] => {
+        const catalogFor = deps.codexModelsFor ?? codexModelsFor;
+        return config.accounts.map((account) => ({
+          accountId: account.id,
+          // Claude currently exposes no model/list equivalent. An empty catalog is more honest
+          // than offering values inferred from roles (which can include Codex-only models).
+          models:
+            account.vendor === "codex"
+              ? catalogFor(account)
+                  .entries()
+                  .map(({ model, efforts }) => ({
+                    model,
+                    efforts: [...efforts],
+                  }))
+              : [],
+        }));
+      });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
         if (!account) return reply.code(404).send({ error: "account not found" });
         return accountStatus(account, true);
+      });
+      // Reader/writer: Setup › Accounts model list. A failed refresh is retained and shown stale.
+      api.get<{ Params: { id: string } }>("/accounts/:id/models", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        const listed = accountModels.get(account.id);
+        if (listed) return listed;
+        const models = await discoverAccountModels(account, now());
+        accountModels.set(account.id, models);
+        return models;
+      });
+      api.post<{ Params: { id: string } }>("/accounts/:id/models/refresh", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        const models = await discoverAccountModels(account, now());
+        const previous = accountModels.get(account.id);
+        const next =
+          models.error === null || !previous ? models : { ...models, models: previous.models };
+        accountModels.set(account.id, next);
+        return next;
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
@@ -1282,7 +1640,98 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
           }
         };
-        return deps.supervisor ? deps.supervisor.withAccountUpdate(update) : update();
+        return withAccountUpdate(update);
+      });
+
+      const accountUsers = (id: string): string[] => [
+        ...config.loops.filter((loop) => loop.accountId === id).map((loop) => `loop ${loop.id}`),
+        ...(config.crew?.sessions ?? []).flatMap((session) =>
+          session.seats
+            .filter((seat) => seat.accountId === id)
+            .map((seat) => `seat ${seat.id} in ${session.id}`),
+        ),
+      ];
+      const applyAccounts = (next: CcConfig) => {
+        config.accounts.splice(0, config.accounts.length, ...next.accounts);
+        accountStatuses.clear();
+        accountModels.clear();
+      };
+      // Writer: Setup › Accounts (edit an account; its id is deliberately immutable).
+      // Reader: apps/web/src/setup/Accounts.tsx (Edit account, via ACTIONS.account)
+      api.put<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = AccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const current = config.accounts.find((account) => account.id === req.params.id);
+        if (!current) return reply.code(404).send({ error: "account not found" });
+        const bindingChanged =
+          current.vendor !== body.data.provider || current.cliProfile !== body.data.cliProfile;
+        const update = async () => {
+          if (
+            bindingChanged &&
+            (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+          )
+            return reply
+              .code(409)
+              .send({ error: "end existing seat processes before changing a CLI profile" });
+          try {
+            const result = await setAccount(
+              deps.configPath as string,
+              req.params.id,
+              body.data,
+              now(),
+            );
+            applyAccounts(result.config);
+            bus.emit("config");
+            return {
+              account: result.config.accounts.find((account) => account.id === req.params.id),
+            };
+          } catch (e) {
+            captureError(reply, e);
+            if (e instanceof ConfigWriteError)
+              return reply
+                .code(
+                  e.kind === "missing"
+                    ? 404
+                    : e.kind === "current" || e.kind === "invalid"
+                      ? 409
+                      : 500,
+                )
+                .send({ error: e.message });
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+          }
+        };
+        return withAccountUpdate(update);
+      });
+      // Writer: Setup › Accounts (only orphaned accounts can be removed).
+      // Reader: apps/web/src/setup/Accounts.tsx (Remove account, via ACTIONS.account)
+      api.delete<{ Params: { id: string } }>("/accounts/:id", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        if (!config.accounts.some((account) => account.id === req.params.id))
+          return reply.code(404).send({ error: "account not found" });
+        const users = accountUsers(req.params.id);
+        if (users.length > 0)
+          return reply.code(409).send({ error: `account is in use by ${users.join(", ")}` });
+        const update = async () => {
+          if (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+            return reply
+              .code(409)
+              .send({ error: "end existing seat processes before removing an account" });
+          try {
+            const result = await removeAccount(deps.configPath as string, req.params.id, now());
+            applyAccounts(result.config);
+            bus.emit("config");
+            return { removed: req.params.id };
+          } catch (e) {
+            captureError(reply, e);
+            if (e instanceof ConfigWriteError)
+              return reply
+                .code(e.kind === "missing" ? 404 : e.kind === "current" ? 409 : 500)
+                .send({ error: e.message });
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+          }
+        };
+        return withAccountUpdate(update);
       });
 
       api.get("/limits", async () => limitRows(config, store, now()));
@@ -1302,6 +1751,52 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
 
+      // Configuration-only fields from Setup › Repos & seats. This never reads a board or
+      // changes a queue: guidance is handed to FLIGHT as advice when it next starts.
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/setup", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (configPath === undefined)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoSetupBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoSetup(configPath, req.params.repoId, body.data, now());
+          const index = config.repos.findIndex((repo) => repo.id === req.params.repoId);
+          if (index < 0) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can contain unapplied crew/rotation changes.  This narrow route must never make
+          // any of them live; it owns only these two card fields.
+          const repo = config.repos[index];
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          if (body.data.defaultAccountId === null) delete repo.defaultAccountId;
+          else repo.defaultAccountId = body.data.defaultAccountId;
+          const guidance = body.data.guidance;
+          if (
+            guidance.priority.length === 0 &&
+            guidance.milestone.length === 0 &&
+            guidance.labels.length === 0 &&
+            guidance.labelMode === "any" &&
+            guidance.avoid.length === 0 &&
+            guidance.direction === ""
+          )
+            delete repo.guidance;
+          else repo.guidance = { ...guidance };
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof ConfigWriteError) {
+            const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+              missing: 404,
+              invalid: 400,
+              current: 409,
+            };
+            const code = status[e.kind];
+            if (code !== undefined) return reply.code(code).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -1320,6 +1815,129 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply
             .code(502)
             .send({ error: e instanceof Error ? e.message : "github: request failed" });
+        }
+      });
+
+      // Read-only preflight for the add/convert stepper.  Session creation repeats this check
+      // immediately before its write, but this lets Setup reject a bad checkout before any config
+      // path is changed.
+      api.post("/repos/checkout-preview", async (req, reply) => {
+        const body = z
+          .strictObject({
+            github: z.string().min(3),
+            source: z.string().min(1),
+            branch: z.string().min(1).max(255),
+            defaultBranch: z.string().min(1).max(255),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.branch !== body.data.defaultBranch) {
+          return reply
+            .code(400)
+            .send({ error: "the checkout branch must match GitHub's default branch" });
+        }
+        try {
+          await validateSessionCheckout(
+            body.data.source,
+            body.data.branch,
+            body.data.github,
+            true,
+            [
+              ...config.loops.map((loop) => ({
+                label: `loop ${loop.id} worktree`,
+                dir: loop.worktree,
+              })),
+              ...(config.crew?.sessions ?? []).map((session) => ({
+                label: `session ${session.id} checkout`,
+                dir: session.checkout,
+              })),
+            ],
+          );
+          return { ok: true };
+        } catch (e) {
+          return reply.code(400).send({
+            error: e instanceof Error ? e.message : "could not validate the checkout",
+          });
+        }
+      });
+
+      // The add/convert stepper has exactly one durable operation. Its GitHub and checkout
+      // validation runs again here, immediately before the one atomic config replacement.
+      api.post("/repos/onboard", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoOnboardBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.session && (!deps.crewReloader || !deps.seatWrites)) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const liveRepo = config.repos.find((repo) => repo.id === body.data.repoId);
+        const known = body.data.repo ?? liveRepo;
+        if (!known) return reply.code(404).send({ error: `unknown repo ${body.data.repoId}` });
+        // Conversion updates only this card's setup fields. Capture its live identity before the
+        // writer re-reads config.yaml, so a concurrent/manual config edit cannot apply setup to
+        // a different repo that happens to share the checkout's default branch.
+        const conversionIdentity =
+          body.data.repo === undefined && liveRepo
+            ? { github: liveRepo.github, project: liveRepo.project }
+            : undefined;
+        try {
+          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
+            if (
+              conversionIdentity &&
+              (repo.github !== conversionIdentity.github ||
+                repo.project !== conversionIdentity.project)
+            )
+              throw new ConfigWriteError(
+                "conflict",
+                "the repo identity changed in config.yaml; refresh and try again",
+              );
+            const preview = await repoPreview(
+              await githubGql(),
+              { github: repo.github, project: repo.project },
+              config,
+              store,
+            );
+            if (body.data.checkout.branch !== preview.defaultBranch)
+              throw new ConfigWriteError(
+                "invalid",
+                "the checkout branch must match GitHub's default branch",
+              );
+          });
+          const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
+          if (!onboarded)
+            throw new ConfigWriteError("write", "the new config.yaml has no added repo");
+          // Disk can include pending crew edits.  Only make this card's setup live here; the
+          // reloader owns every crew change so it can drain seats before applying it.
+          const index = config.repos.findIndex((repo) => repo.id === body.data.repoId);
+          if (body.data.repo) config.repos.push(onboarded);
+          else if (index >= 0) {
+            const live = config.repos[index];
+            if (!live) throw new ConfigWriteError("missing", `unknown repo ${body.data.repoId}`);
+            if (body.data.defaultAccountId === null) delete live.defaultAccountId;
+            else live.defaultAccountId = onboarded.defaultAccountId;
+            if (onboarded.guidance === undefined) delete live.guidance;
+            else live.guidance = { ...onboarded.guidance };
+          }
+          if (body.data.session) await deps.crewReloader?.reload();
+          bus.emit("config");
+          bus.emit("boards");
+          if (body.data.repo) refreshBoards();
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof PreviewError) return reply.code(e.status).send({ error: e.message });
+          if (e instanceof ConfigWriteError) {
+            const status = {
+              invalid: 400,
+              missing: 404,
+              duplicate: 409,
+              current: 409,
+              conflict: 409,
+            }[e.kind as string];
+            if (status !== undefined) return reply.code(status).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
         }
       });
 
@@ -1369,7 +1987,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map panel)
+      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         async (req, reply): Promise<MapSnapshot | FastifyReply> => {
@@ -1409,21 +2027,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 : null;
               seat.context = context ? { total: context.total, window: context.window } : null;
             }
+            const conflicts = await mapConflicts.check(checkout, store.pullRequests(repo.id));
+            for (const failure of conflicts.failures)
+              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
             return {
               repoId: repo.id,
               ...tree,
               ...data,
-              conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)),
+              conflicts: conflicts.conflicts,
+              conflictsUnchecked: conflicts.unchecked,
               // Slice 1b will publish sequenced deltas; none have been emitted yet.
               seq: 0,
             };
-          } catch {
+          } catch (e) {
+            reply.log.warn(
+              { reason: e instanceof Error ? e.message : String(e) },
+              "map snapshot unavailable",
+            );
             return reply.code(503).send({ error: "map snapshot unavailable" });
           }
         },
       );
 
-      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
         if (!config.repos.some((r) => r.id === req.params.repoId))
           return reply.code(404).send({ error: "unknown repo" });
@@ -1431,7 +2057,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { seats: deps.mapRing.scopes(req.params.repoId) };
       });
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
+      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/conflicts",
         async (req, reply) => {
@@ -1443,8 +2069,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            return { conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)) };
-          } catch {
+            const { conflicts, unchecked, failures } = await mapConflicts.check(
+              checkout,
+              store.pullRequests(repo.id),
+            );
+            for (const failure of failures)
+              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
+            return { conflicts, unchecked };
+          } catch (e) {
+            reply.log.warn(
+              { reason: e instanceof Error ? e.message : String(e) },
+              "map conflicts unavailable",
+            );
             return reply.code(503).send({ error: "map conflicts unavailable" });
           }
         },
@@ -2060,8 +2696,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
-          await sup.message(id, b.text, { interrupt: b.interrupt === true });
-          store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
+          try {
+            await sendComms(
+              {
+                store,
+                crew: commsCrew,
+                knownSecrets: deps.knownSecrets ?? (async () => []),
+                now,
+                seatSender: false,
+                notify: async (seatId, text) => {
+                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                },
+              },
+              COMMS_CAPCOM,
+              { to: id, text: b.text, ref: ticket ?? undefined },
+            );
+          } catch (e) {
+            if (e instanceof SupervisorError) throw e;
+            throw new SupervisorError(
+              400,
+              e instanceof Error ? e.message : "Comms message refused.",
+            );
+          }
           // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
           if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };
@@ -2526,23 +3182,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/crew", async (): Promise<Crew> => sharedCrew());
 
-      api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
-        const selected = req.query.session;
+      // The header's session filter: its repo, else every repo (the pipeline: the crew's repos).
+      const viewScope = (selected: string | undefined) => {
         const session = config.crew?.sessions.find((s) => s.id === selected);
-        if (selected !== undefined && session === undefined)
-          return reply.code(404).send({ error: "unknown session" });
-        const at = now();
-        const repoIds = session ? [session.repoId] : config.repos.map((r) => r.id);
-        return overviewSummary(store, at, {
-          repoIds,
+        if (selected !== undefined && session === undefined) return null;
+        return {
+          repoIds: session ? [session.repoId] : config.repos.map((r) => r.id),
           pipelineRepoIds: session
             ? [session.repoId]
             : [...new Set(config.crew?.sessions.map((s) => s.repoId))],
-          seatIds: configuredAgents(config)
-            .filter(
-              (a) => a.kind === "crew" && (session === undefined || a.sessionId === session.id),
-            )
-            .map((a) => a.id),
+          timezone: config.operator.timezone,
+        };
+      };
+
+      // The registry figures the server measures (METRICS in @mc/core); read-only.
+      api.get<{ Querystring: { session?: string } }>("/metrics", (req, reply) => {
+        const scope = viewScope(req.query.session);
+        if (scope === null) return reply.code(404).send({ error: "unknown session" });
+        return metricsView(store, now(), scope);
+      });
+
+      api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
+        const scope = viewScope(req.query.session);
+        if (scope === null) return reply.code(404).send({ error: "unknown session" });
+        const at = now();
+        return overviewSummary(store, at, {
+          repoIds: scope.repoIds,
+          pipelineRepoIds: scope.pipelineRepoIds,
           timezone: config.operator.timezone,
           attention: sharedAttention(),
         });

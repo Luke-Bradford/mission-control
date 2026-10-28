@@ -4,61 +4,62 @@ import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { type DockRow, dockRows, feedRows, kindLabel } from "./conversation.ts";
+import { type DockRow, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
 
 export const NOTHING_LOGGED = "Nothing logged yet.";
 
 export const entriesLabel = (n: number): string => (n === 1 ? "1 entry" : `${n} entries`);
 
-function LogRow({ row, tz }: { row: DockRow; tz: string | null }) {
+type LogEntry = Extract<DockRow, { kind: "hub" }>;
+
+function LogRow({ row, tz }: { row: LogEntry; tz: string | null }) {
   const at = row.at !== null && tz !== null ? ` · ${clockHm(row.at, tz)}` : "";
-  const who = row.kind === "decision" ? `FLIGHT · ${kindLabel(row.d.kind)}` : "Mission Control";
   return (
     <div className={`dmsg ${row.kind}`}>
       <div className="who">
-        {who}
+        Mission Control
         {at}
       </div>
       <div className="txt">
-        <Expandable lines={2}>
-          {row.kind === "decision" ? `${row.d.about} → ${row.d.decision}` : row.text}
-        </Expandable>
+        <Expandable lines={2}>{row.text}</Expandable>
       </div>
     </div>
   );
 }
 
-/** FLIGHT › Working log: Mission Control's wake lines and FLIGHT's decisions, collapsed. */
+/**
+ * Mission Control wakes and recorded actions. Every FLIGHT decision, whatever its day or kind, is
+ * left out: decisions have their one presentation in Decided without you.
+ */
 export function WorkingLog() {
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const seat = view?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
-  const decisions = view?.decisions;
   const rows = useMemo(
-    () => (seat ? feedRows(dockRows(stream, decisions ?? [])) : []),
-    [seat, stream, decisions],
+    () => (seat ? dockRows(stream, []).filter((row): row is LogEntry => row.kind === "hub") : []),
+    [seat, stream],
   );
   return (
     <Panel
       id="logP"
-      title="Working log"
-      sub="Mission Control's wake lines and FLIGHT's decisions, oldest first"
+      title="System log"
+      sub="Mission Control wakes and recorded actions, newest first"
+      actions={seat ? <span className="flight-count">{entriesLabel(rows.length)}</span> : undefined}
     >
       {view === undefined ? (
         <p className="pb note">—</p>
       ) : !seat ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
-        <details className="guard" id="workLog">
-          <summary>{entriesLabel(rows.length)}</summary>
+        <div className="flight-panel-scroll flight-log" id="workLog">
           {rows.length === 0 ? (
-            <p className="note">{NOTHING_LOGGED}</p>
+            <p className="pb note">{NOTHING_LOGGED}</p>
           ) : (
-            rows.map((r) => <LogRow key={r.id} row={r} tz={tz} />)
+            [...rows].reverse().map((r) => <LogRow key={r.id} row={r} tz={tz} />)
           )}
-        </details>
+        </div>
       )}
     </Panel>
   );

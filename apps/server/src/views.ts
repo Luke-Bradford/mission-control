@@ -437,9 +437,13 @@ export function configView(
     accounts: config.accounts.map((a) => ({
       id: a.id,
       vendor: a.vendor,
-      binding: "machine",
+      ...(a.cliProfile === undefined ? {} : { cliProfile: a.cliProfile }),
+      binding: a.cliProfile === undefined ? "machine" : "profile",
       canCheck: true,
-      signInHint: `Sign in with the ${a.vendor === "claude" ? "Claude" : "Codex"} CLI on this machine.`,
+      signInHint:
+        a.vendor === "codex" && a.cliProfile !== undefined
+          ? "Sign in with the Codex CLI in this account's profile folder."
+          : `Sign in with the ${a.vendor === "claude" ? "Claude" : "Codex"} CLI on this machine.`,
       alertAt: a.alertAt,
       stopAt: a.stopAt,
     })),
@@ -450,6 +454,19 @@ export function configView(
       statusMap: { ...r.statusMap },
       needsYouLabels: r.needsYouLabels ?? null,
       fullSuite: [...(r.fullSuite ?? [])],
+      ...(r.defaultAccountId === undefined ? {} : { defaultAccountId: r.defaultAccountId }),
+      ...(r.guidance === undefined
+        ? {}
+        : {
+            guidance: {
+              priority: [...r.guidance.priority],
+              milestone: [...r.guidance.milestone],
+              labels: [...r.guidance.labels],
+              labelMode: r.guidance.labelMode,
+              avoid: [...r.guidance.avoid],
+              direction: r.guidance.direction,
+            },
+          }),
     })),
     loops: config.loops.map((l) => ({
       id: l.id,

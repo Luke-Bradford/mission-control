@@ -83,12 +83,6 @@ export const BUILD_NOTES: BuildNote[] = [
     note: "FLIGHT writes the summary from the store whenever something changes.",
   },
   {
-    panel: "sitP",
-    cls: "build",
-    label: "Timeline",
-    note: "Mission Control schedules each check and shows what is coming.",
-  },
-  {
     panel: "askP",
     cls: "proven",
     label: "GitHub",

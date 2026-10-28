@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -11,11 +12,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 import {
   DIFF_CUT_LINE,
+  MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
@@ -25,6 +27,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CheckoutError,
+  COMMIT_ADD_PATHSPEC,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -127,6 +130,21 @@ const hasBranch = (b: string) => {
     return false;
   }
 };
+
+function expectPrivateCodexPnpmStore(worktree: string): void {
+  const root = realpathSync(worktree);
+  const store = join(dirname(root), ".mc-pnpm-store", basename(root));
+  for (const [path, expected] of [
+    [dirname(store), dirname(store)],
+    [store, store],
+  ]) {
+    const stat = lstatSync(path);
+    expect(stat.isDirectory()).toBe(true);
+    expect(stat.uid).toBe(process.getuid?.());
+    expect(stat.mode & 0o777).toBe(0o700);
+    expect(realpathSync(path)).toBe(expected);
+  }
+}
 
 /** Plant disk changes after worktree creation without configuring a git helper. */
 function afterWorktreeAdd(script: string): void {
@@ -596,6 +614,12 @@ describe("prepareCheckout", () => {
     expect(git(r.path, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain(PNPM_STORE_DIR_NAME);
   });
 
+  it("keeps Codex worktree temp directories out of commits", () => {
+    expect(COMMIT_ADD_PATHSPEC).toContain(`:(top,exclude,glob)**/${MC_TMP_DIR_NAME}/**`);
+    expect(COMMIT_ADD_PATHSPEC).toContain(`:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`);
+    expect(COMMIT_ADD_PATHSPEC).not.toContain(":(top,exclude,glob)**/pnpm-store/**");
+  });
+
   it("answers up-to-date when the reused branch contains main", async () => {
     const first = await prepareCheckout(input());
     const tip = commit(first.path, { "b.txt": "branch\n" });
@@ -802,6 +826,68 @@ describe("prepareCheckout", () => {
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
   });
 
+  it("relinks a reused worktree from its old pnpm store before its scripts run", async () => {
+    const scriptPackage = `${JSON.stringify({
+      name: "x",
+      version: "1.0.0",
+      private: true,
+      scripts: { check: 'node -e ""' },
+      dependencies: { dep: "file:vendor/dep" },
+    })}\n`;
+    const depPackage = '{"name":"dep","version":"1.0.0"}\n';
+    writeFileSync(join(seed, "package.json"), scriptPackage);
+    mkdirSync(join(seed, "vendor", "dep"), { recursive: true });
+    writeFileSync(join(seed, "vendor", "dep", "package.json"), depPackage);
+    execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
+      cwd: seed,
+      env: installEnv(seed),
+    });
+    commit(seed, {
+      "package.json": scriptPackage,
+      "pnpm-lock.yaml": readFileSync(join(seed, "pnpm-lock.yaml"), "utf8"),
+      "vendor/dep/package.json": depPackage,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input());
+    const oldStore = join(dir, "pre-upgrade-pnpm-store");
+    const modulesPath = join(first.path, "node_modules", ".modules.yaml");
+    const modules = JSON.parse(readFileSync(modulesPath, "utf8")) as { storeDir: string };
+    modules.storeDir = join(oldStore, basename(modules.storeDir));
+    mkdirSync(modules.storeDir, { recursive: true });
+    writeFileSync(modulesPath, `${JSON.stringify(modules, null, 2)}\n`);
+    expect(readFileSync(modulesPath, "utf8")).toContain(oldStore);
+
+    const reused = await prepareCheckout(input());
+    expect(reused).toMatchObject({ path: first.path, created: false });
+    expectPrivateCodexPnpmStore(reused.path);
+    expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
+      installEnv(reused.path).pnpm_config_store_dir,
+    );
+    expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+    for (let n = 0; n < 2; n++)
+      execFileSync("pnpm", ["-s", "check"], { cwd: reused.path, env: installEnv(reused.path) });
+
+    const fresh = await prepareCheckout({ ...input(), issue: 43 });
+    expectPrivateCodexPnpmStore(fresh.path);
+    expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
+  });
+
+  it("verifies a reused manifest before clearing node_modules", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const first = await prepareCheckout(input());
+    const preserved = join(first.path, "node_modules", "preserve-on-refusal");
+    writeFileSync(preserved, "keep\n");
+    commit(first.path, { "package.json": `${PKG}\n` });
+
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("protected");
+    expect(e.message).toBe(
+      `branch ${BRANCH} changes package.json; Mission Control won't install from it`,
+    );
+    expect(readFileSync(preserved, "utf8")).toBe("keep\n");
+  });
+
   it("installs when a base lockfile is over the 4 MiB default read", async () => {
     commit(seed, {
       "package.json": PKG,
@@ -909,7 +995,7 @@ describe("prepareCheckout", () => {
     ]);
   });
 
-  it("installs without CI markers, npm_* or GIT_* from the server's environment", () => {
+  it("installs without inherited CI, npm or git settings, using Codex's stable worktree store", () => {
     const keys = [
       "CI",
       "CONTINUOUS_INTEGRATION",
@@ -927,6 +1013,7 @@ describe("prepareCheckout", () => {
       expect(env.CI).toBe("false");
       // pnpm never walks up to an ancestor's workspace
       expect(env.NPM_CONFIG_WORKSPACE_DIR).toBe("/w/guido-42");
+      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/guido-42");
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     } finally {
       for (const [k, v] of Object.entries(saved)) {

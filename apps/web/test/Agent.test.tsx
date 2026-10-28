@@ -3587,7 +3587,18 @@ describe("Agent page: the header pill", () => {
     stub({ rows: [seat({ hudState: "idle", loop }), studio()], extra: SEAT_ROUTES() });
     const { container } = render(<Agent id="guido-1" />);
     await seatLoaded();
-    expect($(container, "#ahead .pill")?.textContent).toBe("Waiting on CI");
+    expect($(container, "#ahead .pill")?.textContent).toBe("Watching");
+  });
+
+  it("keeps the pause reason in the tooltip and detail line", async () => {
+    const crewPause = { seats: ["guido-1"], reason: "Save tokens", at: NOW, by: "operator" };
+    stub({ rows: [seat({ crewPause }), studio()], extra: SEAT_ROUTES() });
+    const { container } = render(<Agent id="guido-1" />);
+    await seatLoaded();
+    const pill = $(container, "#ahead .pill") as HTMLElement;
+    expect(pill.textContent).toBe("Paused");
+    expect(pill.parentElement?.getAttribute("title")).toBe("Save tokens");
+    expect($(container, "#ahead .doing")?.textContent).toBe("Paused: Save tokens");
   });
 });
 

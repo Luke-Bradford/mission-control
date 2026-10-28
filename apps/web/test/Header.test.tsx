@@ -1,6 +1,6 @@
-import type { AttentionItem, AwaySettings, Crew } from "@mc/core";
+import type { AttentionItem, AwaySettings, Crew, LimitRow } from "@mc/core";
 import { DEFAULT_AWAY, LOCK_HEADER_TITLE, type TestLockState } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Header } from "../src/shell/Header.tsx";
@@ -18,10 +18,10 @@ import {
   HOUR,
   item,
   itemWithoutOwner,
+  limit7d,
   MIN,
   NOW,
   REPOS,
-  seatRow,
 } from "./fixtures.ts";
 
 const crew = (over: Partial<Crew> = {}): Crew => ({
@@ -38,6 +38,7 @@ function routes(
     away?: AwaySettings;
     machine?: unknown;
     lock?: TestLockState;
+    limits?: LimitRow[];
   } = {},
 ) {
   return stubFetch({
@@ -46,6 +47,7 @@ function routes(
     "/api/attention": over.attention ?? [],
     "/api/settings/away": over.away ?? DEFAULT_AWAY,
     "/api/machine": over.machine ?? { latest: null },
+    "/api/limits": over.limits ?? [],
     "/api/repos": REPOS,
     "/api/config": over.config ?? CONFIG,
     "/api/flight": { seat: null, decisions: [] },
@@ -62,17 +64,19 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("badges the asks FLIGHT has put to you and names the count", async () => {
+  it("badges the Needs-you count, briefed or not, and names it", async () => {
     routes({
       attention: [
         item({ key: "esc:a#1", brief: brief() }),
         item({ key: "esc:a#2", brief: brief() }),
         item({ key: "esc:a#3" }),
+        item({ key: "esc:a#4", owner: "flight", brief: brief() }),
       ],
     });
     render(<Header page="board" />);
-    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 waiting on you" });
-    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 3 waiting on you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("3");
+    expect(screen.getByRole("button", { name: /^Needs you 3:/ })).toBeTruthy();
   });
 
   it("shows no badge for unread replies alone", async () => {
@@ -85,57 +89,18 @@ describe("Header chat button", () => {
   });
 });
 
-describe("Header machine button", () => {
-  const lock = (waiting: number): TestLockState => ({
-    holder: { runId: "r-1", seatId: "guido-1", command: "pnpm test", since: NOW - MIN },
-    waiting: Array.from({ length: waiting }, (_, i) => ({
-      runId: `r-${i + 2}`,
-      seatId: "guido-2",
-      command: "pnpm -s test",
-      since: NOW - MIN,
-    })),
-  });
-
-  it("turns amber, with the stalled tooltip, when the holder is stalled and someone is queued", async () => {
-    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
-    render(<Header page="board" />);
-    await screen.findByText(/^Lock: guido-1/i);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await waitFor(() => expect(btn.classList.contains("hot")).toBe(true));
-    expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled");
-  });
-
-  it("stays plain with a running holder", async () => {
-    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "running" })] }) });
-    render(<Header page="board" />);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await screen.findByText(/^Lock: guido-1/i);
-    expect(btn.classList.contains("hot")).toBe(false);
-    expect(within(btn).getByText(/^Lock:/).title).toBe(LOCK_HEADER_TITLE);
-  });
-
-  it("a stalled holder with nobody queued gives the tooltip but no amber", async () => {
-    routes({ lock: lock(0), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
-    render(<Header page="board" />);
-    const btn = screen.getByRole("button", { name: /^CPU/ });
-    await waitFor(() =>
-      expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled"),
-    );
-    expect(btn.classList.contains("hot")).toBe(false);
-  });
-});
-
 describe("Header", () => {
   it("shows the brand, the pages in order and marks the current one", () => {
     routes();
     render(<Header page="board" />);
-    expect(screen.getByText("Mission Control")).toBeTruthy();
+    expect(screen.getByText("MISSION CONTROL")).toBeTruthy();
     const links = within(screen.getByRole("navigation", { name: "Pages" })).getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual([
       "Overview",
-      "FLIGHT",
+      "Flight",
       "Board",
-      "Agent",
+      "Agents",
+      "Map",
       "Comms",
       "Telemetry",
     ]);
@@ -144,6 +109,7 @@ describe("Header", () => {
       "/flight",
       "/board",
       "/agent",
+      "/map",
       "/comms",
       "/telemetry",
     ]);
@@ -151,7 +117,25 @@ describe("Header", () => {
     expect(tab(/^Board/).className).toBe("on");
   });
 
-  it("puts lamps on the tabs from the attention list", async () => {
+  it("shows the highest 7-day usage across a provider's accounts", async () => {
+    routes({
+      config: {
+        ...CONFIG,
+        accounts: [
+          ...CONFIG.accounts,
+          { id: "codex-backup", vendor: "codex", alertAt: 70, stopAt: 80 },
+        ],
+      },
+      limits: [
+        limit7d({ accountId: "codex-main", used: 18 }),
+        limit7d({ accountId: "codex-backup", used: 92 }),
+      ],
+    });
+    render(<Header page="overview" />);
+    expect(await screen.findByRole("img", { name: "Claude —; Codex 92%" })).toBeTruthy();
+  });
+
+  it("puts no lamps on the page tabs: Needs you is the one lamp", async () => {
     routes({
       attention: [
         item({ key: "esc:1", kind: "decision", escalationId: "shop-app#1" }),
@@ -159,47 +143,49 @@ describe("Header", () => {
       ],
     });
     render(<Header page="overview" />);
-    const comms = await within(tab(/^Comms/)).findByRole("img");
-    expect(comms.className).toBe("lamp crit"); // tab lamps never pulse (cat 1.1)
-    expect(comms.getAttribute("aria-label")).toBe("Error, Decision");
-    const flight = within(tab(/^FLIGHT/)).getByRole("img");
-    expect(flight.className).toBe("lamp warn");
-    expect(flight.getAttribute("aria-label")).toBe("Decision");
-    const board = within(tab(/^Board/)).getByRole("img");
-    expect(board.getAttribute("aria-label")).toBe("Decision");
-    expect(within(tab(/^Overview/)).queryByRole("img")).toBeNull();
+    const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
+    expect(btn.querySelector(".lamp.crit")).not.toBeNull();
+    for (const name of [
+      /^Overview/,
+      /^Flight/,
+      /^Board/,
+      /^Agents/,
+      /^Map/,
+      /^Comms/,
+      /^Telemetry/,
+    ])
+      expect(within(tab(name)).queryByRole("img")).toBeNull();
   });
 
-  it("FLIGHT lights for decisions and people, Board for escalations; acked items hold still", async () => {
-    routes({
-      attention: [
-        item({ key: "stall:a:r", kind: "stalled", escalationId: null, acked: true }),
-        item({ key: "esc:2", kind: "question", escalationId: "shop-app#2", acked: true }),
-      ],
-    });
-    render(<Header page="overview" />);
-    const comms = await within(tab(/^Comms/)).findByRole("img");
-    expect(comms.className).toBe("lamp warn");
-    expect(comms.getAttribute("aria-label")).toBe("Stalled, Question");
-    expect(within(tab(/^FLIGHT/)).queryByRole("img")).toBeNull();
-    expect(
-      within(tab(/^Board/))
-        .getByRole("img")
-        .getAttribute("aria-label"),
-    ).toBe("Question");
+  it("clicking Needs you while already there brings Operator actions back into view", async () => {
+    routes({ attention: [item({ key: "a" })] });
+    window.history.replaceState(null, "", "/flight#askP");
+    const panel = document.createElement("section");
+    panel.id = "askP";
+    panel.scrollIntoView = vi.fn();
+    document.body.append(panel);
+    render(<Header page="flight" />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Needs you 1:/ }));
+    expect(panel.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
+    panel.remove();
+    window.history.replaceState(null, "", "/");
   });
 
   it("counts what needs you and says whether any is unacknowledged", async () => {
     routes({ attention: [item({ key: "a" }), item({ key: "b", acked: true })] });
     render(<Header page="overview" />);
     const btn = await screen.findByRole("button", {
-      name: "Needs you 2: 2 things, some not yet acknowledged. Opens Comms.",
+      name: "Needs you 2: 2 things, some not yet acknowledged. Opens FLIGHT's Operator actions.",
     });
     expect(btn.textContent).toBe("Needs you 2");
     expect(btn.className).toBe("needs-btn has");
-    expect(btn.title).toBe("Everything waiting on you (on Comms) · 1 not acknowledged");
+    expect(btn.title).toBe(
+      "Everything waiting on you (FLIGHT › Plan › Operator actions) · 1 not acknowledged",
+    );
     fireEvent.click(btn);
-    expect(window.location.pathname).toBe("/comms");
+    // FLIGHT › Needs you until #766 builds it: Plan › Operator actions.
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
   });
 
   it("counts only the operator's items; one with no owner counts", async () => {
@@ -233,12 +219,16 @@ describe("Header", () => {
   it("all acknowledged, and nothing at all", async () => {
     routes({ attention: [item({ acked: true })] });
     const { unmount } = render(<Header page="overview" />);
-    const acked = await screen.findByRole("button", { name: "Needs you 1: 1 thing. Opens Comms." });
-    expect(acked.title).toBe("Everything waiting on you (on Comms)"); // none to explain
+    const acked = await screen.findByRole("button", {
+      name: "Needs you 1: 1 thing. Opens FLIGHT's Operator actions.",
+    });
+    expect(acked.title).toBe("Everything waiting on you (FLIGHT › Plan › Operator actions)"); // none to explain
     unmount();
     routes({ attention: [] });
     render(<Header page="overview" />);
-    const zero = await screen.findByRole("button", { name: "Needs you 0: nothing. Opens Comms." });
+    const zero = await screen.findByRole("button", {
+      name: "Needs you 0: nothing. Opens FLIGHT's Operator actions.",
+    });
     expect(zero.className).toBe("needs-btn");
     expect(within(zero).getByRole("img").className).toBe("lamp off");
   });
@@ -260,7 +250,7 @@ describe("Header", () => {
     await vi.waitFor(() => expect(met.textContent).toBe("MET 01:02:03"));
   });
 
-  it("the machine button reads the latest sample and the lock", async () => {
+  it("keeps machine status reachable by keyboard and opens Overview", async () => {
     routes({
       machine: {
         latest: {
@@ -276,9 +266,18 @@ describe("Header", () => {
       },
     });
     render(<Header page="flight" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toBe("CPU 12%RAM 50%Lock: free"));
-    expect(within(btn).getByText("Lock: free").title).toBe(LOCK_HEADER_TITLE);
+    const btn = await screen.findByRole("button", {
+      name: "Machine status: CPU 12%, RAM 50%, Lock: free. Opens Overview.",
+    });
+    expect(btn.closest(".top-status")).not.toBeNull();
+    expect(btn.closest(".sr-only")).toBeNull();
+    const tooltip = within(btn).getByRole("tooltip");
+    expect(btn.getAttribute("aria-describedby")).toBe(tooltip.id);
+    expect(tooltip.textContent).toBe(`CPU 12%, RAM 50%, Lock: free${LOCK_HEADER_TITLE}`);
+    expect(btn.hasAttribute("title")).toBe(false);
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    expect(tooltip.className).toBe("mach-tooltip");
     fireEvent.click(btn);
     expect(window.location.pathname).toBe("/");
   });
@@ -291,15 +290,32 @@ describe("Header", () => {
       },
     });
     render(<Header page="flight" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toContain("Lock: GUIDO-2 +1"));
+    const btn = await screen.findByRole("button", { name: /Lock: GUIDO-2 \+1/ });
+    expect(btn).toBeTruthy();
+  });
+
+  it("puts a stalled lock warning in the machine tooltip", async () => {
+    routes({
+      crew: crew({ rows: [crewRow({ id: "guido-2", hudState: "stalled" })] }),
+      lock: {
+        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW },
+        waiting: [{ runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW }],
+      },
+    });
+    render(<Header page="flight" />);
+    const btn = await screen.findByRole("button", { name: /Lock: guido-2 \+1/ });
+    expect(within(btn).getByRole("tooltip").textContent).toContain(
+      "The run holding the lock is stalled",
+    );
   });
 
   it("the machine button shows dashes without a sample", async () => {
     routes();
     render(<Header page="overview" />);
-    const btn = screen.getByTitle("Machine and test lock (on Overview)");
-    await vi.waitFor(() => expect(btn.textContent).toBe("CPU —RAM —Lock: free"));
+    const btn = await screen.findByRole("button", {
+      name: "Machine status: CPU —, RAM —, Lock: free. Opens Overview.",
+    });
+    expect(btn).toBeTruthy();
   });
 
   it.each([
@@ -417,15 +433,27 @@ describe("Header", () => {
     expect(seen).toBe("s1");
   });
 
-  it("Setup is a button, on while on Setup; the FLIGHT chat button has no badge", () => {
+  it("keeps Setup in the top-right settings button and opens FLIGHT from it", () => {
     routes();
-    render(<Header page="setup" />);
+    const { unmount } = render(<Header page="setup" />);
+    expect(
+      within(screen.getByRole("navigation", { name: "Pages" })).queryByText("Setup"),
+    ).toBeNull();
     const setup = screen.getByRole("button", { name: "Setup" });
-    expect(setup.className).toBe("ghost iconbtn on");
+    expect(setup.className).toContain("on");
+    expect(setup.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(setup);
     expect(window.location.pathname).toBe("/setup");
     const chat = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(chat.title).toBe("Show or hide FLIGHT's chat (f)");
+    expect(chat.title).toBe("Open FLIGHT chat in Comms (f)");
+    expect(chat.getAttribute("aria-pressed")).toBeNull();
     expect(chat.querySelector(".badge")).toBeNull();
+    fireEvent.click(chat);
+    expect(window.location.pathname).toBe("/comms");
+    unmount();
+    render(<Header page="comms" />);
+    const open = screen.getByRole("button", { name: "FLIGHT chat" });
+    expect(open.title).toBe("FLIGHT chat is open in Comms");
+    expect(open.getAttribute("aria-pressed")).toBe("true");
   });
 });

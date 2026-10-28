@@ -2,21 +2,22 @@ import {
   type BoardItem,
   CI_PILL,
   type CrewRow,
-  HUD_STATE_LABEL,
-  HUD_STATE_TONE,
   type HudColumn,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
+import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath } from "../router.ts";
+import { openItem } from "../shell/overlays.ts";
 import {
   type CardSeat,
+  type CardYou,
   cardColumn,
   checksText,
   firstBlocker,
@@ -73,8 +74,8 @@ export interface CardProps {
   when: string;
   /** The issue's open/closed state and the board's Status disagree; null when they agree. */
   statusOutOfDate: string | null;
-  /** What you must do to the card's PR and how long it has waited; null when nothing waits on you. */
-  youWait: { action: string; waiting: string } | null;
+  /** The card's "You:" chip, from its Needs-you items; null when none. */
+  you: CardYou | null;
 }
 
 /**
@@ -104,7 +105,7 @@ export const Card = memo(function Card({
   outcome,
   when,
   statusOutOfDate,
-  youWait,
+  you,
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
@@ -122,7 +123,9 @@ export const Card = memo(function Card({
     agent && (
       <span key="agent" className="row">
         <AgentTag id={agent.id} index={agent.index} sm />
-        <Pill tone={HUD_STATE_TONE[agent.hudState]}>{HUD_STATE_LABEL[agent.hudState]}</Pill>
+        <span title={seatStatus(agent).reason ?? seatStatus(agent).label}>
+          <Pill tone={seatStatus(agent).tone}>{seatStatus(agent).label}</Pill>
+        </span>
         {step && <span className="xs">{step}</span>}
       </span>
     ),
@@ -146,10 +149,10 @@ export const Card = memo(function Card({
           <a href={agentPath(reviewer.id)} onClick={(e) => followLink(e, agentPath(reviewer.id))}>
             <AgentTag id={reviewer.id} index={reviewer.index} sm />
           </a>
-          {reviewer.hudState && (
-            <Pill tone={HUD_STATE_TONE[reviewer.hudState]}>
-              {HUD_STATE_LABEL[reviewer.hudState]}
-            </Pill>
+          {reviewer.status && (
+            <span title={reviewer.status.reason ?? reviewer.status.label}>
+              <Pill tone={reviewer.status.tone}>{reviewer.status.label}</Pill>
+            </span>
           )}
         </span>
       ) : (
@@ -183,10 +186,22 @@ export const Card = memo(function Card({
         </span>
       </span>
     ),
-    youWait && (
-      <Pill key="you" tone="warn">
-        You: {youWait.action} · waiting {youWait.waiting}
-      </Pill>
+    you && (
+      <button
+        key="you"
+        type="button"
+        className="kyou pill warn"
+        title={you.title}
+        aria-label={`${you.text}${you.more > 0 ? `, and ${you.more} more` : ""}. Opens its brief.`}
+        onClick={(e) => {
+          // the card's own click would open the ticket instead
+          e.stopPropagation();
+          openItem(you.key);
+        }}
+      >
+        {you.text}
+        {you.more > 0 && <span className="kyou-more">{` +${you.more}`}</span>}
+      </button>
     ),
     statusOutOfDate && (
       <span key="stale" className="xs warn-t" title={statusOutOfDate}>

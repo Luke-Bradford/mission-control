@@ -20,6 +20,7 @@ import {
   type ReviewRunSnapshot,
   reviewDepth,
   reviewFor,
+  reviewParkText,
   reviewRunStep,
   reviewStatusOf,
 } from "../src/review.ts";
@@ -58,9 +59,12 @@ describe("fixText", () => {
         fin({ summary: "c" }),
       ],
     });
-    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to fix");
+    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to resolve");
+    expect(t).toContain("or explain in your evidence note why you think it should not change");
+    expect(t).not.toContain("as written");
+    expect(t).not.toContain("Ruling:");
     expect(t).toContain(
-      "1. [Critical] a.ts — b\n   Why: w\n   Fix: f\n\n2. [Important] a.ts:3 — a",
+      "1. [Critical] a.ts — b\n   Why: w\n   Suggested fix: f\n\n2. [Important] a.ts:3 — a",
     );
     expect(t.indexOf("3. [Important] a.ts:3 — c")).toBeGreaterThan(t.indexOf("2."));
     expect(t).not.toContain(":0");
@@ -80,8 +84,44 @@ describe("fixText", () => {
       sha: "abcdef1",
       findings: [fin({ severity: "Minor" }), fin({ severity: "Critical" })],
     });
-    expect(t).toContain("found 1 issue to fix");
+    expect(t).toContain("found 1 issue to resolve");
     expect(t).not.toContain("2. ");
+  });
+});
+
+describe("reviewParkText", () => {
+  it("gives FLIGHT both sides' last words, including each finding's reason", () => {
+    const t = reviewParkText("RETRO", "abcdef1234", 3, {
+      developer: "The guard already covers this path.",
+      findings: [
+        fin({
+          summary: "The guard is bypassed",
+          scenario: "A symlink skips it",
+          fix: "Check links",
+        }),
+        fin({
+          summary: "The test misses it",
+          scenario: "Only files are covered",
+          fix: "Add a link test",
+        }),
+      ],
+    });
+    expect(t).toContain("Developer's last reply: The guard already covers this path.");
+    expect(t).toContain(
+      "RETRO's last findings: The guard is bypassed\nWhy: A symlink skips it\nSuggested fix: Check links\n\nThe test misses it\nWhy: Only files are covered\nSuggested fix: Add a link test",
+    );
+  });
+
+  it("caps the complete RETRO findings section at 1000 characters", () => {
+    const t = reviewParkText("RETRO", "abcdef1234", 3, {
+      developer: "reply",
+      findings: [
+        fin({ summary: "s".repeat(250), scenario: "w".repeat(800), fix: "f".repeat(500) }),
+      ],
+    });
+    const section = t.slice(t.indexOf("RETRO's last findings:"));
+    expect(section.length).toBeLessThanOrEqual(1000);
+    expect(section).toContain("Why:");
   });
 });
 

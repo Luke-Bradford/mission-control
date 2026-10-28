@@ -101,7 +101,6 @@ import {
   retiredBriefText,
   type SeatSessionRow,
   startMissingNeedsText,
-  startNeedsPlanText,
   type TestLockState,
   type TicketView,
   ticketHasRunText,
@@ -229,6 +228,7 @@ let ghCalls: string[][];
 let ghInputs: (string | undefined)[];
 let ghImpl: (args: string[]) => Promise<GhResult>;
 let secrets: string[];
+let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
@@ -316,6 +316,7 @@ beforeEach(() => {
   ghInputs = [];
   ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
   secrets = [];
+  secretSource = async () => secrets;
   logs = [];
   stateSeen.mockClear();
   tools = createFlightTools({
@@ -339,7 +340,7 @@ beforeEach(() => {
       return ghImpl(a);
     },
     dbPath: join(dir, "mc.sqlite"),
-    knownSecrets: async () => secrets,
+    knownSecrets: () => secretSource(),
     log: (l) => logs.push(l),
     supervisor: {
       message: async (...a) => {
@@ -569,6 +570,7 @@ describe("tool list", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "comms_pin",
       "flight_state",
       "promote",
       "end_run",
@@ -1075,13 +1077,10 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("refuses a Size M card without a plan when its template needs one, and starts it when not", async () => {
+  it("starts a Size M card without a plan so its developer can write it", async () => {
     board(sc(7, { size: "M" }));
     fetchImpl = async (n) => ticket(n, { body: DONE });
-    expect((await start()).text).toBe(startNeedsPlanText("mc#7", "M"));
-    expect(
-      (await start({ profile: "research", profile_reason: "no code" })).isError,
-    ).toBeUndefined();
+    expect((await start()).isError).toBeUndefined();
   });
 
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
@@ -1363,9 +1362,9 @@ describe("start_seat", () => {
       await nothingStarted(startMissingNeedsText("mc#7", ["done_when", "size"]));
     });
 
-    it("10: Size M with no plan", async () => {
+    it("10: starts Size M with no plan", async () => {
       board(sc(7, { labels: ["area:server"], size: "M" }));
-      await nothingStarted(startNeedsPlanText("mc#7", "M"));
+      expect((await start()).isError).toBeUndefined();
     });
   });
 });
@@ -1586,6 +1585,75 @@ describe("message_seat", () => {
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
     expect(store.comms(0)).toEqual([]);
+  });
+
+  it("does not deliver or store when the seat leaves during secret scanning", async () => {
+    let scanned!: () => void;
+    let release!: () => void;
+    const scanStarted = new Promise<void>((resolve) => (scanned = resolve));
+    const scan = new Promise<readonly string[]>((resolve) => (release = () => resolve([])));
+    secretSource = () => {
+      scanned();
+      return scan;
+    };
+    const pending = call("message_seat", M());
+    await scanStarted;
+    const session = cfg.crew?.sessions[0];
+    if (session === undefined) throw new Error("expected crew session");
+    session.seats = session.seats.filter((member) => member.id !== "guido-1");
+    release();
+    expect(await pending).toEqual(refused("Unknown Comms destination."));
+    expect(messageCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+  });
+});
+
+describe("comms_pin", () => {
+  const message = () =>
+    store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: null,
+      text: "Please decide",
+    });
+
+  it("lets the live FLIGHT run pin and unpin a stored message", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual({
+      text: "Comms message pinned.",
+    });
+    expect(store.commsPins().map((m) => m.id)).toEqual([stored.id]);
+    expect(await call("comms_pin", { id: stored.id, pinned: false })).toEqual({
+      text: "Comms message unpinned.",
+    });
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("refuses every non-FLIGHT caller", async () => {
+    const stored = message();
+    if (stored === null) throw new Error("message was rate limited");
+    live("guido-1", "r-guido");
+    expect(
+      await call("comms_pin", { id: stored.id, pinned: true }, ctx("guido-1", "r-guido")),
+    ).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.commsPins()).toEqual([]);
+  });
+
+  it("refuses a guessed private message outside FLIGHT's inbox", async () => {
+    const stored = store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "inco-1",
+      ticket: null,
+      text: "private",
+    });
+    if (stored === null) throw new Error("message was rate limited");
+    expect(await call("comms_pin", { id: stored.id, pinned: true })).toEqual(
+      refused("You cannot pin that Comms message."),
+    );
+    expect(store.commsPins()).toEqual([]);
   });
 });
 
@@ -2650,17 +2718,9 @@ describe("promote", () => {
     expect(seen).toContain("flight");
   });
 
-  it("refuses Size M with no plan for Ready, and moves it with a plan or at Size S", async () => {
+  it("moves Size M with no plan to Ready for its developer to plan", async () => {
     board(backlog({ size: "M" }));
-    expect(await call("promote", P())).toEqual(
-      refused(
-        "Not moved: mc#7 is Size M and has no ## Plan; start the planner on it with mc start_seat first.",
-      ),
-    );
-    expect(moveCalls).toEqual([]);
-    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
     expect((await call("promote", P())).isError).toBeUndefined();
-    fetchImpl = async (n) => ticket(n, { body: GOOD });
     board(backlog({ size: "S" }));
     expect((await call("promote", P())).isError).toBeUndefined();
     expect(moveCalls).toHaveLength(2);
@@ -3376,14 +3436,14 @@ describe("brief_item", () => {
     seen.length = 0;
   });
 
-  it("refuses to triage FLIGHT's own direct reply and tag", async () => {
+  it("refuses to triage FLIGHT's own question tag", async () => {
     store.addComms({ at: NOW, from: "CAPCOM", to: "flight-1", ticket: null, text: "Status?" });
     store.addComms({
       at: NOW + 1,
       from: "flight-1",
       to: "CAPCOM",
       ticket: null,
-      text: "Waiting @CAPCOM",
+      text: "Which branch, @CAPCOM?",
     });
     const items = operatorItems(config(), store, NOW + 2, null).filter(
       (i) => i.agentId === "flight-1" && ["message", "tag"].includes(i.kind),
@@ -3682,7 +3742,7 @@ describe("brief_item", () => {
 
   it.each([
     ["hub-update-held", "blocked"],
-    ["flag:r1:hard-rules:abc", "flag"],
+    ["flag:r1:hard-rules:00c296383f2b261b436d5a1d7951db07f82174af", "flag"],
     ["flag:r1:floor:abc", "flag"],
     ["ratelimit:r1", "ratelimit"],
   ])("requires passing up %s with a brief", async (noteKey, kind) => {
@@ -3741,7 +3801,7 @@ describe("brief_item", () => {
   });
 
   it.each(["operator", "flight"])(
-    "retains only an operator brief when a %s-briefed stray moves its time",
+    "keeps a %s brief when the same stray is recorded again (its time stays first-seen)",
     async (forWhom) => {
       const stray = {
         sessionId: "s1",
@@ -3759,12 +3819,16 @@ describe("brief_item", () => {
       if (forWhom === "operator") {
         expect(item).toMatchObject({
           owner: "operator",
-          at: nowMs,
+          at: NOW,
           brief: { for: "operator", at: NOW },
         });
       } else {
-        expect(item).toMatchObject({ owner: "flight", flightTriage: "waiting", at: nowMs });
-        expect(item).not.toHaveProperty("brief");
+        expect(item).toMatchObject({
+          owner: "flight",
+          flightTriage: "handling",
+          at: NOW,
+          brief: { for: "flight" },
+        });
       }
     },
   );

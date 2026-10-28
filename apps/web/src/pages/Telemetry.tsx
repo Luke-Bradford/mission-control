@@ -83,6 +83,7 @@ export function Telemetry() {
     account,
     ticket,
     wait: res.error && !t ? "Telemetry did not load." : "Loading…",
+    live: res.data !== undefined && res.error === null,
   };
   const turnAgent = agents.find((a) => a.id === selected)?.id ?? agents[0]?.id ?? null;
 
@@ -132,7 +133,7 @@ export function Telemetry() {
       {res.error && !res.data && (
         <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
       )}
-      <Kpis t={t} />
+      <Kpis t={t} live={scope.live} filtered={agent !== "" || account !== "" || ticket !== ""} />
       <h3 className="grp">Flow of work</h3>
       <FlowOfWork t={t} scope={scope} />
       <h3 className="grp">Agents</h3>

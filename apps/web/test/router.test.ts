@@ -3,9 +3,15 @@ import {
   addAgentParam,
   agentPath,
   boardPath,
+  commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
+  commsInboxPath,
+  commsTicketPath,
   isPopout,
   itemPath,
   legacyRedirect,
+  mapPath,
   PAGE_PATHS,
   route,
   SETUP_TABS,
@@ -28,15 +34,32 @@ describe("route()", () => {
     ["/agent", { page: "agent", id: null }],
     ["/agent/shop-app-ta", { page: "agent", id: "shop-app-ta" }],
     ["/agent/a%20b/", { page: "agent", id: "a b" }],
-    ["/comms", { page: "comms", item: null }],
-    ["/comms/esc:shop-app%233227", { page: "comms", item: "esc:shop-app#3227" }],
-    ["/comms/stall%3Ashop-app-ta%3Ar-12", { page: "comms", item: "stall:shop-app-ta:r-12" }],
+    ["/map", { page: "map", repoId: null }],
+    ["/map/", { page: "map", repoId: null }],
+    ["/map/mission-control", { page: "map", repoId: "mission-control" }],
+    ["/map/a%20b/", { page: "map", repoId: "a b" }],
+    ["/comms", { page: "comms", item: null, view: { kind: "flight" } }],
+    ["/comms/crew", { page: "comms", item: null, view: { kind: "crew" } }],
+    ["/comms/agents/a%20b", { page: "comms", item: null, view: { kind: "agent", agentId: "a b" } }],
+    ["/comms/agents/a/inbox", { page: "comms", item: null, view: { kind: "inbox", agentId: "a" } }],
+    [
+      "/comms/agents/a/contacts/b%2Fc",
+      { page: "comms", item: null, view: { kind: "contact", agentId: "a", contactId: "b/c" } },
+    ],
+    [
+      "/comms/esc:shop-app%233227",
+      { page: "comms", item: "esc:shop-app#3227", view: { kind: "flight" } },
+    ],
+    [
+      "/comms/stall%3Ashop-app-ta%3Ar-12",
+      { page: "comms", item: "stall:shop-app-ta:r-12", view: { kind: "flight" } },
+    ],
     ["/telemetry", { page: "telemetry" }],
-    ["/setup", { page: "setup", tab: "sessions" }],
+    ["/setup", { page: "setup", tab: "accounts" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
     ["/setup/sources", { page: "setup", tab: "sources" }],
     ["/setup/access/", { page: "setup", tab: "access" }],
-    ["/setup/nope", { page: "setup", tab: "sessions" }],
+    ["/setup/nope", { page: "setup", tab: "accounts" }],
   ])("%s", (path, expected) => {
     expect(route(path)).toEqual(expected);
   });
@@ -44,6 +67,8 @@ describe("route()", () => {
   it.each([
     "/agent/%E0%A4%A",
     "/comms/%zz",
+    "/map/%zz",
+    "/map/repo/extra",
     "/board/%",
     "/board/shop-app/0",
     "/board/shop-app/007",
@@ -120,13 +145,37 @@ describe("path helpers", () => {
     expect(route(itemPath("esc:shop-app#3227"))).toEqual({
       page: "comms",
       item: "esc:shop-app#3227",
+      view: { kind: "flight" },
+    });
+    expect(route(commsCrewPath())).toEqual({ page: "comms", item: null, view: { kind: "crew" } });
+    expect(route(commsInboxPath("a b"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "inbox", agentId: "a b" },
+    });
+    expect(route(commsContactPath("a", "b/c"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "contact", agentId: "a", contactId: "b/c" },
+    });
+    expect(commsAgentPath("a b")).toBe("/comms/agents/a%20b");
+    expect(commsTicketPath("#703", "shop-app#703")).toBe(
+      "/comms/tickets/%23703?ticket=shop-app%23703",
+    );
+    expect(route(commsTicketPath("#703", "shop-app#703"))).toEqual({
+      page: "comms",
+      item: null,
+      view: { kind: "ticket", ref: "#703", ticket: "shop-app#703" },
     });
     expect(route(agentPath("x/y"))).toEqual({ page: "agent", id: "x/y" });
+    expect(mapPath("a/b c")).toBe("/map/a%2Fb%20c");
+    expect(route(mapPath("a/b c"))).toEqual({ page: "map", repoId: "a/b c" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",
       flight: "/flight",
       board: "/board",
       agent: "/agent",
+      map: "/map",
       comms: "/comms",
       telemetry: "/telemetry",
       setup: "/setup",
@@ -142,10 +191,10 @@ describe("legacyRedirect()", () => {
     ["/agents", "", "/"],
     ["/agents/", "", "/"],
     ["/loops", "", "/"],
-    ["/needs", "", "/comms"],
-    ["/needs/", "", "/comms"],
-    ["/needs-you", "", "/comms"],
-    ["/needs-you/", "", "/comms"],
+    ["/needs", "", "/flight#askP"],
+    ["/needs/", "", "/flight#askP"],
+    ["/needs-you", "", "/flight#askP"],
+    ["/needs-you/", "", "/flight#askP"],
     ["/cto", "", "/flight"],
     ["/metrics", "", "/telemetry"],
     ["/metrics/", "", "/telemetry"],
@@ -164,7 +213,11 @@ describe("legacyRedirect()", () => {
   it("sends an old needs link to the same item as its comms path", () => {
     const to = legacyRedirect("/needs/shop-app%233227", "");
     expect(to).toBe("/comms/esc%3Ashop-app%233227");
-    expect(route(to ?? "")).toEqual({ page: "comms", item: "esc:shop-app#3227" });
+    expect(route(to ?? "")).toEqual({
+      page: "comms",
+      item: "esc:shop-app#3227",
+      view: { kind: "flight" },
+    });
     expect(route(to ?? "")).toEqual(route("/comms/esc:shop-app%233227"));
   });
 

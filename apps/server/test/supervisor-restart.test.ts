@@ -2,9 +2,25 @@
 import "./supervisor-harness.ts";
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { CANNOT_START, DEFAULT_REPO_RULES, freezeRules, otherLaneText } from "@mc/core";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import {
+  CANNOT_START,
+  DEFAULT_REPO_RULES,
+  freezeRules,
+  MC_TMP_DIR_NAME,
+  NEW_LOOP,
+  otherLaneText,
+} from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
@@ -54,6 +70,7 @@ import {
   store,
   TICKET,
   until,
+  untilGone,
   userLines,
 } from "./supervisor-harness.ts";
 
@@ -704,7 +721,7 @@ describe("reattach after a restart", () => {
       rolePrompt(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8"), null),
     );
     expect(log).toHaveBeenCalledWith(
-      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index",
+      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md, AGENTS.md or reference index",
     );
   });
 
@@ -1387,6 +1404,138 @@ describe("a seat keeps running through a restart", () => {
     },
   );
 
+  it("does not follow a seat-replaced Codex temp parent during cleanup", () => {
+    const runId = "ended-codex-run";
+    const worktree = join(dir, "codex-worktree");
+    const key = "0123456789ab";
+    const parent = join(worktree, MC_TMP_DIR_NAME);
+    const tmp = join(parent, key);
+    const target = join(dir, "outside-temp");
+    const protectedTmp = join(target, key);
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    mkdirSync(protectedTmp, { recursive: true, mode: 0o700 });
+    writeFileSync(join(protectedTmp, "secret"), "keep");
+    rmSync(parent, { recursive: true, force: true });
+    symlinkSync(target, parent);
+    store.upsertRun({
+      id: runId,
+      vendor: "codex",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSetting(`codex-tmp:${runId}`, JSON.stringify({ worktree, tmp }));
+    const { sup, log } = make();
+    sup.start();
+    expect(existsSync(protectedTmp)).toBe(true);
+    expect(log).toHaveBeenCalledWith(`could not remove run files of ${runId}: temp root changed`);
+  });
+
+  it.each(["parent", "run"] as const)(
+    "does not remove a Codex temp root whose %s directory lost mode 0700",
+    (changed) => {
+      const runId = `ended-codex-mode-${changed}`;
+      const worktree = join(dir, `codex-mode-${changed}`);
+      const parent = join(worktree, MC_TMP_DIR_NAME);
+      const tmp = join(parent, "0123456789ab");
+      mkdirSync(tmp, { recursive: true, mode: 0o700 });
+      chmodSync(changed === "parent" ? parent : tmp, 0o755);
+      store.upsertRun({
+        id: runId,
+        vendor: "codex",
+        agentId: "guido-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: 2,
+        status: "ok",
+        sessionId: null,
+        model: null,
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+      });
+      store.setSetting(`codex-tmp:${runId}`, JSON.stringify({ worktree, tmp }));
+      const { sup, log } = make();
+      sup.start();
+      expect(existsSync(tmp)).toBe(true);
+      expect(log).toHaveBeenCalledWith(`could not remove run files of ${runId}: temp root changed`);
+    },
+  );
+
+  it("removes persisted Codex temp roots after restart when the seat row is gone", () => {
+    const runId = "ended-codex-restart";
+    const worktree = join(dir, "codex-restart-worktree");
+    const tmp = join(worktree, MC_TMP_DIR_NAME, "0123456789ab");
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
+    store.upsertRun({
+      id: runId,
+      vendor: "codex",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSetting(`codex-tmp:${runId}`, JSON.stringify({ worktree, tmp }));
+    const row = store.seatSession("guido-1");
+    if (row) store.setSeatSession({ ...row, runId: null, state: "idle", reason: null });
+    const { sup } = make();
+    sup.start();
+    expect(existsSync(tmp)).toBe(false);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
+  });
+
+  it("removes a set-aside Codex run's persisted temp root after restart", async () => {
+    const first = codexSupervisor();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const aside = await first.sup.setAside(runId);
+    expect(aside).not.toBeNull();
+    store.setRunLoop(runId, {
+      ...NEW_LOOP,
+      aside: { worktree: aside?.worktree ?? "", wake: false },
+    });
+    const saved = store.getSetting(`codex-tmp:${runId}`);
+    if (saved === null) throw new Error("missing Codex temp root");
+    const tmp = (JSON.parse(saved) as { tmp: string }).tmp;
+    expect(dirname(tmp)).toBe(join(aside?.worktree ?? "", MC_TMP_DIR_NAME));
+    await first.sup.stopAll();
+
+    const next = codexSupervisor();
+    next.sup.start();
+    await next.sup.endAsideRun(runId);
+    expect(existsSync(tmp)).toBe(false);
+    expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
+  });
+
   it("the start's sweep ends a keeper whose run is not active", async () => {
     const first = make();
     first.sup.start();
@@ -1612,10 +1761,20 @@ describe("Codex restart", () => {
     await noKeepers();
     const turns = recorded().filter((m) => m.method === "turn/start").length;
     const next = codexSupervisor({ bad });
+    let off = () => {};
+    const refused = new Promise<void>((resolve) => {
+      off = next.sup.on((e) => {
+        if (e.kind === "run-ended" && e.runId === runId) {
+          off();
+          resolve();
+        }
+      });
+    });
     next.sup.start();
-    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    await refused;
     expect(store.seatSession("guido-1")?.reason).toBeTruthy();
     expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(turns);
+    await until(() => expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false));
     expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
   });
 });
@@ -1726,7 +1885,7 @@ it("ends a reattached Codex run whose live floor changed before answering pendin
   expect(store.seatSession("guido-1")?.reason).toBe(CANNOT_START);
   expect(recorded().some((m) => m.result?.decision === "accept")).toBe(false);
   expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
-  expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+  await untilGone(crewCodexDir(dbPath, runId));
 });
 
 it("recovers an acknowledged Codex message queued behind a pending start across stopAll", async () => {

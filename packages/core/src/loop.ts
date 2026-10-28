@@ -24,7 +24,6 @@ import {
   reviewFailedParkText,
   reviewFor,
   reviewParkText,
-  reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
 import { globMatches } from "./runtime.ts";
@@ -80,6 +79,19 @@ export const EVIDENCE_NO_LOOP =
 /** The run's loop is parked, waiting on the operator. */
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
+/** Parks a new committed report can clear without weakening an operator or budget hold. */
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused"] as const;
+
+/** Whether a report of newly committed work is allowed to resume this park. */
+export function evidenceCanUnpark(
+  parked: RunLoop["parked"],
+): parked is NonNullable<RunLoop["parked"]> {
+  return (
+    parked !== null &&
+    !parked.ended &&
+    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(parked.kind)
+  );
+}
 /** The last push is in CI. */
 export const EVIDENCE_IN_CI =
   "CI is running on your last push; Mission Control will message you the result.";
@@ -116,6 +128,8 @@ export const NO_CI_AFTER_MS = 10 * 60_000;
 
 /** The engine reconciles every looped run this often. */
 export const ENGINE_TICK_MS = 60_000;
+/** How long a green PR may wait without its seat recording evidence. */
+export const EVIDENCE_REMIND_MS = 20 * 60_000;
 /** Seats' queues are refilled to this many issues. */
 export const QUEUE_DEPTH = 3;
 /** A queue row taken this long ago whose run never began is given back. */
@@ -173,11 +187,16 @@ export const isCleanupNoteKey = (key: string): boolean =>
 /** The flag note while a run's PR touches hard-rule files, per pushed sha. */
 export const hardRulesFlagKey = (runId: string, sha: string): string =>
   `flag:${runId}:hard-rules:${sha}`;
-export const isHardRulesFlagKey = (key: string): boolean => /^flag:[^:]+:hard-rules:/.test(key);
+/** A run id may itself contain colons (`guido-1:20261021T165337Z`), so only the sha is anchored. */
+export const isHardRulesFlagKey = (key: string): boolean =>
+  /^flag:.+:hard-rules:[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(key);
 /** The flag note for a CI failure that passed on its one re-run, per sha. */
 export const flakeNoteKey = (runId: string, sha: string): string => `flake:${runId}:${sha}`;
 /** A flake record is the controller's to follow up. */
 export const isFlakeNoteKey = (key: string): boolean => key.startsWith("flake:");
+/** The engine's own flag for a green head left without evidence; the planner leaves it alone. */
+export const evidenceNoteKey = (runId: string, sha: string): string => `evidence:${runId}:${sha}`;
+export const isEvidenceNoteKey = (key: string): boolean => key.startsWith("evidence:");
 export const flakeText = (ref: string, sha: string, runs: { id: number; name: string }[]): string =>
   `${ref}: CI failed on ${sha.slice(0, 7)} and passed on re-run (a flake): ${
     runs.length === 0 ? "run not read" : runs.map((r) => `${r.name} run ${r.id}`).join(", ")
@@ -215,9 +234,10 @@ export const mainConflictText = (mainSha: string, n: number): string =>
 /** The Activity row for a park. */
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
-  "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. When the work is committed, call mc report_evidence.";
+  "Carry on with {ref}: Mission Control restarted, or your rate limit has reset. There is no turn or time limit: work until it is done or truly blocked; if blocked, name the blocker. When the work is committed, call mc report_evidence.";
 export const NUDGE_TEXT =
-  "No report yet for {ref}. When the work is committed, call mc report_evidence with a note; if you are blocked, say why.";
+  "Carry on with {ref}: commit and report evidence when done. There is no turn or time limit; work until it is done or truly blocked, and name the blocker if so.";
+export const NUDGE_TRIES = 3;
 
 /** Fills `{name}` placeholders of a loop text; an unknown name is left as written. */
 export const fillLoopText = (template: string, vars: Readonly<Record<string, string>>): string =>
@@ -294,6 +314,87 @@ export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
 export const reworkFirstText = (call: string, ref: string): string =>
   `${call} has rework waiting on ${ref}; that goes first`;
+
+/** A hub-recorded item that arrived while a seat was in a turn. */
+export interface PendingSeatWork {
+  key: string;
+  kind: "findings" | "ci" | "message";
+  at: number;
+  text: string;
+}
+
+export interface PendingSeatWorkInput {
+  lastTurnStartedAt: number | null;
+  reviews: readonly {
+    id: number;
+    round: number;
+    state: string;
+    blocking: number;
+    verdict: { spec: "pass" | "fail"; quality: "pass" | "fail" } | null;
+    endedAt: number | null;
+  }[];
+  events: readonly { key: string; text: string; at: number }[];
+  messages: readonly { key: string; from: string; at: number }[];
+  woken: readonly string[];
+}
+
+/**
+ * Purely classifies hub records which reached a seat after its current turn began.  Callers give
+ * it only records for the seat's current run; `woken` is the durable set of earlier wake causes.
+ */
+export function pendingSeatWork(input: PendingSeatWorkInput): PendingSeatWork[] {
+  const since = input.lastTurnStartedAt;
+  if (since === null) return [];
+  const out: PendingSeatWork[] = [];
+  for (const r of input.reviews) {
+    const failed = r.verdict?.spec === "fail" || r.verdict?.quality === "fail";
+    if (
+      r.state === "reported" &&
+      r.blocking > 0 &&
+      failed &&
+      r.endedAt !== null &&
+      r.endedAt >= since
+    )
+      out.push({
+        key: `review:${r.id}`,
+        kind: "findings",
+        at: r.endedAt,
+        text: `RETRO round ${r.round} findings`,
+      });
+  }
+  for (const e of input.events) {
+    if (e.at < since || !e.text.startsWith(CI_FAILED_EVENT_PREFIX)) continue;
+    const sha =
+      e.text.slice(CI_FAILED_EVENT_PREFIX.length).match(/^[0-9a-f]{7,}/i)?.[0] ?? "the PR head";
+    out.push({
+      key: `ci:${e.key}`,
+      kind: "ci",
+      at: e.at,
+      text: `a CI failure on ${sha.slice(0, 7)}`,
+    });
+  }
+  for (const m of input.messages) {
+    if (m.at >= since && (m.from === "CAPCOM" || m.from === "flight-1"))
+      out.push({
+        key: `message:${m.key}`,
+        kind: "message",
+        at: m.at,
+        text: `a message from ${m.from}`,
+      });
+  }
+  const woken = new Set(input.woken);
+  return out
+    .filter((x) => !woken.has(x.key))
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+}
+
+/** The one short line that restarts an idle seat for its newly-arrived work. */
+export const pendingWakeText = (
+  work: readonly PendingSeatWork[],
+  ref: string,
+  tz: string,
+): string =>
+  `Waking you: ${work.map((x) => `${x.text} (${clockHm(x.at, tz)})`).join(" and ")} are waiting for ${ref}.`;
 export const ticketInReviewText = (ref: string): string =>
   `${ref} is in review; it comes back to its seat when it needs rework`;
 export const NOT_ASIDE = "the run is not waiting on its review";
@@ -324,7 +425,7 @@ export interface LoopSnapshot {
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
   /** The latest evidence. */
-  evidence: { id: number; at: number; ruling: boolean } | null;
+  evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
   /** The newest run_commits sha. */
   headCommit: string | null;
@@ -447,7 +548,13 @@ const park = (loop: RunLoop, kind: string, reason: string): Step => ({
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
 
-const nudgeKey = (s: LoopSnapshot): string => `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
+const nudgePrefix = (s: LoopSnapshot): string =>
+  `nudge:${s.runId}:${s.loop.epoch}:${s.evidenceCount}`;
+const nudges = (s: LoopSnapshot): number[] =>
+  Object.entries(s.claimed).flatMap(([key, at]) =>
+    key === nudgePrefix(s) || key.startsWith(`${nudgePrefix(s)}:`) ? [at] : [],
+  );
+const nudgeKey = (s: LoopSnapshot): string => `${nudgePrefix(s)}:${nudges(s).length + 1}`;
 
 /** Working, or in review with a fix committed but not yet reported: the seat owes a report. */
 const owesReport = (s: LoopSnapshot): boolean => {
@@ -623,22 +730,19 @@ function stateStep(s: LoopSnapshot): Step {
 
   const rv = reviewView(s, loop);
   const reporting = loop.phase === "working" || loop.phase === "review";
+  // A developer may answer a RETRO finding without changing the head.  That answer belongs to
+  // RETRO, not the operator: remember which review it answers and request one fresh judgement.
   if (
     loop.phase === "review" &&
-    rv.R !== null &&
     rv.P !== null &&
+    rv.cur !== null &&
     evidence !== null &&
     evidence.id > loop.reportedEvidenceId &&
-    evidence.ruling &&
     headCommit === rv.P &&
     rv.blocked &&
     !rv.waived
   ) {
-    return park(
-      { ...loop, reportedEvidenceId: evidence.id },
-      "review-ruling",
-      reviewRulingParkText(seat.call, rv.R.retro, rv.P),
-    );
+    return unchanged({ ...loop, reportedEvidenceId: evidence.id, reviewReplyTo: rv.cur.id });
   }
   if (reporting && evidence !== null && evidence.id > loop.reportedEvidenceId) {
     const seen = { ...loop, reportedEvidenceId: evidence.id };
@@ -687,9 +791,21 @@ function stateStep(s: LoopSnapshot): Step {
     } else if (
       rv.blocked &&
       !(fixKey(s.runId, loop.epoch, cur.id) in s.claimed) &&
+      loop.reviewReplyTo !== cur.id &&
       fixesSent(s.claimed, s.runId, loop.epoch) + 1 >= rounds
     ) {
-      return park(loop, "review", reviewParkText(R.retro, P, rounds));
+      return park(
+        loop,
+        "review",
+        reviewParkText(
+          R.retro,
+          P,
+          rounds,
+          evidence?.note !== undefined && evidence.id === loop.reportedEvidenceId
+            ? { developer: evidence.note, findings: R.findings }
+            : undefined,
+        ),
+      );
     }
   }
 
@@ -811,8 +927,10 @@ function stateStep(s: LoopSnapshot): Step {
     );
   }
   if (owesReport(s)) {
-    const t = s.claimed[nudgeKey(s)];
+    const tried = nudges(s);
+    const t = tried.length === 0 ? undefined : Math.max(...tried);
     if (
+      tried.length >= NUDGE_TRIES &&
       t !== undefined &&
       seat.state === "idle" &&
       !seat.inTurn &&
@@ -820,7 +938,11 @@ function stateStep(s: LoopSnapshot): Step {
       seat.lastTurnEndedAt !== null &&
       seat.lastTurnEndedAt > t
     ) {
-      return park(loop, "silent", "stopped twice without reporting");
+      return park(
+        loop,
+        "silent",
+        `stopped after ${NUDGE_TRIES} carry-on resumes without reporting`,
+      );
     }
   }
   return unchanged(loop);
@@ -1158,6 +1280,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     }
     // a flake record stays for the controller to dismiss
     if (isFlakeNoteKey(key)) continue;
+    // the engine raises and clears the missing-evidence flag itself
+    if (isEvidenceNoteKey(key)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
@@ -1168,7 +1292,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     const { R, P, cur } = rv;
     if (
       cur === null ||
-      (cur.state === "failed" && failedAttempts(R.rows, loop.epoch, P) < REVIEW_ATTEMPTS)
+      (cur.state === "failed" && failedAttempts(R.rows, loop.epoch, P) < REVIEW_ATTEMPTS) ||
+      (cur.state === "reported" && cur.blocking > 0 && loop.reviewReplyTo === cur.id)
     ) {
       actions.push({ kind: "request-review", sha: P, attempt: nextAttempt(R.rows, loop.epoch, P) });
     } else if (cur.state === "reported" && cur.blocking === 0) {

@@ -7,6 +7,8 @@ import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
 
 const NOTIFY: [NotificationCategory, string][] = [
+  ["asks", "Asks FLIGHT has briefed for me"],
+  ["flightDown", "FLIGHT is down"],
   ["people", "People asking me something in Teams or GitHub"],
   ["decisions", "Decisions waiting for me"],
   ["stalls", "Stalls and stuck runs"],
@@ -14,7 +16,6 @@ const NOTIFY: [NotificationCategory, string][] = [
   ["capcom", "Anything tagged @CAPCOM"],
   ["awayDigest", "The away-mode digest when I come back"],
   ["quota", "Quota above 90%"],
-  ["agentMessages", "Every agent message"],
 ];
 
 const SAMPLES = [
@@ -30,6 +31,14 @@ const SAMPLES = [
     text: "GUIDO-2's full-suite run has printed nothing for 11 min and holds the test lock.",
     actions: ["Stop the run", "Open"],
   },
+];
+
+const AUTO_APPROVE = [
+  "GitHub comments",
+  "Labels",
+  "Board moves and Priority changes",
+  "Starting and stopping agents",
+  "Switching accounts",
 ];
 
 type Edits = Partial<Omit<NotificationPreferences, "categories" | "quietHours">> & {
@@ -141,7 +150,9 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             required
           />
         </label>
-        <span className="muted">{prefs.quietHours.timezone} · stalls still notify</span>
+        <span className="muted">
+          {prefs.quietHours.timezone} · FLIGHT down and stalls still notify
+        </span>
       </div>
       <label>
         <input
@@ -189,6 +200,15 @@ export function Access() {
   const resource = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   return (
     <>
+      <Panel title="Auto-approve" sub="outward writes wait for you until switched on" phase="P2">
+        <div className="pb">
+          {AUTO_APPROVE.map((label) => (
+            <label key={label} className="block s">
+              <input type="checkbox" disabled /> {label}
+            </label>
+          ))}
+        </div>
+      </Panel>
       <Panel
         className="wide"
         title="Devices"

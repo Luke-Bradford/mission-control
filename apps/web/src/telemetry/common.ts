@@ -28,6 +28,8 @@ export interface Scope {
   ticket?: string;
   /** What a panel says while there is no data: loading, or why not. */
   wait: string;
+  /** The telemetry on screen is this scope's and its last read succeeded: now-cursors pulse. */
+  live: boolean;
 }
 
 export const indexOf = (scope: Scope, id: AgentId): number =>

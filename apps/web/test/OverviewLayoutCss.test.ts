@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const main = readFileSync(join(import.meta.dirname, "../src/main.tsx"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
@@ -29,7 +30,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
     expect(rule(String.raw`\.overview-kpis`)).toContain("gap: 12px");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
-    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 26px");
+    expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
     expect(rule(String.raw`\.pipeline-grid`)).toContain("repeat(5, minmax(0, 1fr))");
     expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
@@ -38,9 +39,9 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#machP \.resrow \.spark`)).toContain("width: 100%");
   });
 
-  it("shares available Timeline height equally between lanes within 14–28px", () => {
+  it("shares available Timeline height equally between lanes within 19–28px", () => {
     const lanes = rule(String.raw`\.overview-lanes`);
-    expect(lanes).toContain("--lane-min: 14px");
+    expect(lanes).toContain("--lane-min: 19px");
     expect(lanes).toContain("--lane-max: 28px");
     expect(lanes).toContain("repeat(var(--lane-count), minmax(var(--lane-min), 1fr))");
     expect(lanes).toContain("min-height: calc(var(--lane-count) * var(--lane-min))");
@@ -48,7 +49,44 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.timeline-body`)).toContain("flex-direction: column");
     expect(rule("#timelineP")).toContain("align-self: start");
     expect(rule(String.raw`\.overview-track`)).toContain("height: 100%");
-    expect(rule(String.raw`\.overview-span`)).toContain("bottom: 3px");
+    expect(rule(String.raw`\.overview-span`)).toContain("height: var(--sub)");
+    expect(rule(String.raw`\.overview-span\.k-turn`)).toContain("top: calc(50% - var(--sub) / 2)");
+  });
+
+  it("keeps all four sub-tracks inside the track at the shortest lane", () => {
+    const px = (block: string, name: string) =>
+      Number(block.match(new RegExp(`${name}: ([\\d.]+)px`))?.[1]);
+    const laneMin = px(rule(String.raw`\.overview-lanes`), "--lane-min");
+    const track = rule(String.raw`\.overview-track`);
+    const sub = px(track, "--sub");
+    const gap = px(track, "--sub-gap");
+    const top = (kind: string) =>
+      rule(String.raw`\.overview-span\.k-${kind}`).match(/top: calc\((.*)\);/)?.[1] ?? "";
+    // The offsets as hud.css writes them, evaluated at the shortest lane (50% = half of it).
+    expect(top("turn")).toBe("50% - var(--sub) / 2");
+    expect(top("checks")).toBe("50% - 1.5 * var(--sub) - var(--sub-gap)");
+    expect(top("review")).toBe("50% - 2.5 * var(--sub) - 2 * var(--sub-gap)");
+    expect(top("lock")).toBe("50% + var(--sub) / 2 + var(--sub-gap)");
+    const half = laneMin / 2;
+    const tops = {
+      turn: half - sub / 2,
+      checks: half - 1.5 * sub - gap,
+      review: half - 2.5 * sub - 2 * gap,
+      lock: half + sub / 2 + gap,
+    };
+    for (const [kind, at] of Object.entries(tops)) {
+      expect(at, kind).toBeGreaterThanOrEqual(0);
+      expect(at + sub, kind).toBeLessThanOrEqual(laneMin);
+    }
+  });
+
+  it("aligns Machine labels, fixed-height charts and values on shared columns", () => {
+    const row = rule("#machP .resrow");
+    expect(row).toContain("grid-template-columns: 42px minmax(24px, 1fr) 128px");
+    expect(row).toContain("align-items: center");
+    expect(rule("#machP .machine-chart")).toContain("height: 24px");
+    expect(rule("#machP .ph")).toContain("flex-wrap: nowrap");
+    expect(rule("#timelineP .ph")).toContain("flex-wrap: nowrap");
   });
 
   it("wraps KPI labels without ellipses and keeps eight Crew rows below the 45% cap", () => {
@@ -63,18 +101,55 @@ describe("Overview layout (hud.css)", () => {
     expect(8 * height + 56).toBeLessThanOrEqual((900 - 160) * 0.45);
   });
 
-  it("fits every measured header control at 1440px while keeping narrow wrapping", () => {
+  it("uses the approved header spacing while keeping narrow wrapping", () => {
     const desktop = css.match(/@media \(min-width: 1200px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
     const gap = Number(desktop.match(/gap: 8px (\d+)px/)?.[1]);
-    expect(gap).toBeGreaterThan(0);
-    const controls = [145, 132, 443, 56, 35, 201, 115, 90, 32, 32, 32];
-    // Twelve gaps include the spacer; the app has 16px padding on either side.
-    expect(controls.reduce((sum, width) => sum + width, 0) + 12 * gap + 32).toBeLessThanOrEqual(
-      1440,
-    );
+    expect(gap).toBe(20);
     expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
-    expect(rule(String.raw`\.top`)).toContain("gap: 8px 10px");
+    expect(rule(String.raw`\.top`)).toContain("gap: 8px 20px");
+    expect(rule(String.raw`\.top-status`)).toContain("margin-left: auto");
     expect(desktop).not.toContain("display: none");
+  });
+
+  it("uses the full viewport width rather than recapping the app shell", () => {
+    const shell = rule(String.raw`\.shell`);
+    expect(shell).toContain("width: 100%");
+    expect(shell).not.toContain("max-width");
+    expect(shell).not.toContain("margin: 0 auto");
+  });
+
+  it("wraps the header before its desktop contents fit and keeps tabs within their row", () => {
+    const desktop = css.match(/@media \(min-width: 1280px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
+    expect(desktop).toContain("flex-wrap: nowrap");
+    expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
+    expect(rule(String.raw`\.tabs`)).toContain("overflow-x: auto");
+    expect(rule(String.raw`\.tabs`)).toContain("max-width: 100%");
+    expect(css).toMatch(
+      /@media \(max-width: 390px\) \{[\s\S]*?\.top-status \{[\s\S]*?display: grid/,
+    );
+    expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.top \{[\s\S]*?overflow-x: clip/);
+  });
+
+  it("shows the machine tooltip on pointer hover and keyboard focus", () => {
+    expect(css).toMatch(
+      /\.mach-btn:hover \.mach-tooltip,[\s\S]*?\.mach-btn:focus-visible \.mach-tooltip/,
+    );
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("visibility: hidden");
+    expect(rule(String.raw`\.mach-tooltip`)).toContain("position: absolute");
+  });
+
+  it("clamps the machine tooltip to the full status row below 761px", () => {
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.top-status \{\s*position: relative;\s*width: 100%;/,
+    );
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[\s\S]*?\.mach-btn \{\s*position: static;/);
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*?\.mach-tooltip \{\s*top: calc\(100% \+ 6px\);\s*right: 0;\s*left: 0;\s*width: auto;\s*max-width: none;/,
+    );
+  });
+
+  it("bundles the wordmark's Barlow Semi Condensed 700 weight", () => {
+    expect(main).toContain('"@fontsource/barlow-semi-condensed/latin-700.css"');
   });
 });
 

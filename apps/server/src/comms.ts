@@ -1,7 +1,158 @@
 import { statSync } from "node:fs";
-import { COMMS_CAPCOM, COMMS_MC, type CommsThreadMessage } from "@mc/core";
+import {
+  COMMS_CANT_REASON_MAX,
+  COMMS_CAPCOM,
+  COMMS_CREW,
+  COMMS_MC,
+  COMMS_RATE_LIMIT_COUNT,
+  COMMS_RATE_LIMIT_WINDOW_MS,
+  type CommsMessage,
+  type CommsReaction,
+  type CommsReactionKind,
+  type CommsSendInput,
+  type CommsThreadMessage,
+  scanSecrets,
+} from "@mc/core";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
+
+export interface CommsServiceDeps {
+  store: Store;
+  crew: () => readonly string[];
+  knownSecrets: () => Promise<readonly string[]>;
+  now?: () => number;
+  /** Only direct seat delivery wakes a worker; reactions never use it. */
+  notify?: (to: string, text: string, from: string) => void | Promise<void>;
+  seatSender?: boolean;
+}
+
+const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
+  if (row === null) throw new Error("Comms message was not stored.");
+  return { ...row, operator: row.from === COMMS_CAPCOM, reactions: [] };
+};
+
+export async function validateCommsText(
+  knownSecrets: () => Promise<readonly string[]>,
+  text: string,
+): Promise<void> {
+  const findings = scanSecrets(`\0commit ${"0".repeat(40)}\n${text}`, await knownSecrets());
+  if (findings.length)
+    throw new Error(
+      `Refused: message contains ${[...new Set(findings.map((f) => f.kind))].join(", ")}.`,
+    );
+}
+
+/** Store a normal Comms message after validating the small, local address space. */
+export async function sendComms(
+  deps: CommsServiceDeps,
+  from: string,
+  input: CommsSendInput,
+): Promise<CommsMessage> {
+  const now = deps.now?.() ?? Date.now();
+  let crew = deps.crew();
+  let members = new Set([...crew, COMMS_CAPCOM]);
+  if (input.to !== COMMS_CREW && !members.has(input.to))
+    throw new Error("Unknown Comms destination.");
+  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  await validateCommsText(deps.knownSecrets, input.text);
+  let replyFrom: string | undefined;
+  if (input.replyTo !== undefined) {
+    const original = deps.store.commsMessage(input.replyTo);
+    if (original === null) throw new Error("Unknown reply message.");
+    if (from !== COMMS_CAPCOM && !canReadComms(deps.store, from, original))
+      throw new Error("You cannot reply to that Comms message.");
+    replyFrom = original.from;
+  }
+  crew = deps.crew();
+  members = new Set([...crew, COMMS_CAPCOM]);
+  if (input.to !== COMMS_CREW && !members.has(input.to))
+    throw new Error("Unknown Comms destination.");
+  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  const mentions = new Set<string>();
+  for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
+    if (members.has(found[2])) mentions.add(found[2]);
+  }
+  if (replyFrom !== undefined) mentions.add(replyFrom);
+  const notify = new Set<string>();
+  if (crew.includes(input.to)) notify.add(input.to);
+  for (const to of mentions) if (crew.includes(to)) notify.add(to);
+  const storeMessage = () =>
+    deps.store.addComms(
+      {
+        at: now,
+        from,
+        to: input.to,
+        ticket: input.ref ?? null,
+        text: input.text,
+        label: input.label,
+        ref: input.ref,
+        replyTo: input.replyTo,
+        mentions: [...mentions],
+      },
+      deps.seatSender
+        ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
+        : undefined,
+    );
+  // A seat's rate limit is enforced atomically before it can wake anyone.
+  let stored = deps.seatSender ? storeMessage() : null;
+  if (deps.seatSender && stored === null)
+    throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
+  for (const to of notify) await deps.notify?.(to, input.text, from);
+  if (!deps.seatSender) stored = storeMessage();
+  if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
+  return message(stored);
+}
+
+export function canReadComms(
+  store: Store,
+  actor: string,
+  message: NonNullable<ReturnType<Store["commsMessage"]>>,
+  /** The pinned message ids, when the caller checks many messages and read them once. */
+  pins?: ReadonlySet<string>,
+): boolean {
+  return (
+    message.to === COMMS_CREW ||
+    message.from === actor ||
+    message.to === actor ||
+    message.mentions.includes(actor) ||
+    (pins?.has(message.id) ?? store.commsPins().some((pin) => pin.id === message.id)) ||
+    (message.replyTo !== null && store.commsMessage(message.replyTo)?.from === actor)
+  );
+}
+
+export function reactComms(
+  store: Store,
+  actor: string,
+  id: string,
+  reaction: CommsReactionKind,
+  reason: string | undefined,
+  at: number,
+): CommsReaction {
+  if (
+    reaction === "cant" &&
+    (reason === undefined || reason.trim() === "" || reason.length > COMMS_CANT_REASON_MAX)
+  )
+    throw new Error("A nonblank reason of at most 80 characters is required for cant.");
+  if (reaction !== "cant" && reason !== undefined)
+    throw new Error("Only cant may include a reason.");
+  const message = store.commsMessage(id);
+  if (message === null) throw new Error("Unknown Comms message.");
+  if (actor !== COMMS_CAPCOM && !canReadComms(store, actor, message))
+    throw new Error("You cannot react to that Comms message.");
+  const added = store.addCommsReaction(id, actor, reaction, reason, at);
+  if (added === null) throw new Error("Unknown Comms message.");
+  return added;
+}
+
+export function pinComms(
+  store: Store,
+  actor: string,
+  id: string,
+  pinned: boolean,
+  at: number,
+): void {
+  if (!store.setCommsPinned(id, pinned, actor, at)) throw new Error("Unknown Comms message.");
+}
 
 /** A thread scans at most three transcripts, with 200 events per transcript. */
 const THREAD_RUNS = 3;
@@ -119,6 +270,35 @@ export function threadMessages(
           (position.offset === cursor.offset && position.block <= cursor.block));
       return { ...m, seen };
     });
+}
+
+/**
+ * The unread lines an agent's thread raises in Needs you, by item kind: `tag`, its own `@CAPCOM`
+ * tags (FLIGHT's only when they ask a question), and `message`, its own direct-line questions
+ * (never FLIGHT's: its summaries are not needs). Only lines the agent wrote count, never another
+ * agent's line to it. A seat's `ask_operator` question is mirrored to Comms at the instant it is
+ * asked; that line is its `ask:` item alone. Shared by the attention builder and FLIGHT's brief.
+ */
+export function attentionChatter(
+  store: Store,
+  agentId: string,
+  crew: boolean,
+  /** The agent is FLIGHT. */
+  own: boolean,
+): { tag: CommsThreadMessage[]; message: CommsThreadMessage[] } {
+  let asked: Set<number> | undefined;
+  const mirrored = (m: CommsThreadMessage) => {
+    if (!m.id.startsWith("comms:") || m.at === null) return false;
+    asked ??= store.questionTimes(agentId);
+    return asked.has(m.at);
+  };
+  const lines = threadMessages(store, agentId, crew, "attention").filter(
+    (m) => !m.seen && m.from === agentId && !mirrored(m),
+  );
+  return {
+    tag: lines.filter((m) => m.tagged && (!own || flightQuestion(m.text))),
+    message: own ? [] : lines.filter((m) => m.direct && flightQuestion(m.text)),
+  };
 }
 
 /** Direct messages that need a decision, excluding punctuation in links and code. */

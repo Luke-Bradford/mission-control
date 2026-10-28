@@ -1,10 +1,9 @@
 import type { AttentionItem, AwaySettings } from "@mc/core";
-import { operatorItems } from "../attention.ts";
+import { needsYouItems, openNeedsYou } from "../attention.ts";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { untilLabel } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { navigate, PAGE_PATHS } from "../router.ts";
 import { openAway } from "../shell/overlays.ts";
 
 /** Count bits in the mockup's order: label, kinds counted, and whether the label pluralises. */
@@ -22,7 +21,8 @@ const BITS: { label: string; kinds: AttentionItem["kind"][]; plural: boolean }[]
 /** The Overview's banner (catalogue 2.1.1): the away strip when on, then All clear or the count. */
 export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
   const all = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const items = all && operatorItems(all);
+  // The header's Needs you set: the whole inbox, one per key (attention.ts).
+  const items = all && needsYouItems(all);
   const away = useResource<AwaySettings>(RESOURCES.away).data;
   const lamp = items
     ? needsLamp(
@@ -54,7 +54,7 @@ export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
         </div>
       )}
       {!awayOnly && items && items.length > 0 && (
-        <button type="button" className="nbanner" onClick={() => navigate(PAGE_PATHS.comms)}>
+        <button type="button" className="nbanner" onClick={openNeedsYou}>
           {lamp && <Lamp {...lamp} />}
           <b className="num">{items.length}</b>
           <span>things need you</span>
@@ -70,7 +70,7 @@ export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
             {notAcked > 0 && <span>· {notAcked} not acknowledged</span>}
           </span>
           <span className="spacer" />
-          <span className="s accent">Open Comms →</span>
+          <span className="s accent">Open in FLIGHT →</span>
         </button>
       )}
     </div>

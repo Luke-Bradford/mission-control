@@ -25,7 +25,7 @@ export async function enableBrowser(): Promise<BrowserPermission> {
 export function notificationTarget(event: NotificationEvent): string {
   return event.category === "quota"
     ? "/telemetry"
-    : event.category === "agentMessages" || event.category === "capcom"
+    : event.category === "capcom"
       ? "/comms"
       : "/flight";
 }
@@ -80,7 +80,7 @@ export function createDelivery(show = showNotification) {
       !event.test &&
       (prefs.enabled === false ||
         !prefs.categories[event.category] ||
-        (quiet && event.category !== "stalls"))
+        (quiet && event.category !== "stalls" && event.category !== "flightDown"))
     )
       return;
     show(event, prefs);

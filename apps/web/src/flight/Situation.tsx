@@ -1,137 +1,265 @@
 import {
-  type AttentionItem,
-  type BoardItem,
-  type Crew,
-  FLIGHT_TRIAGE_LABEL,
-  type PullRequestView,
-  type ReplyDraft,
-  type RepoView,
+  type AgentStream,
+  type FlightSummaryView,
+  type FlightView,
+  METRICS,
+  type MetricId,
 } from "@mc/core";
-import { isOperatorItem } from "../attention.ts";
-import { cardColumn, cardYouWait } from "../board/cards.ts";
-import { useNow, useTz } from "../clock.ts";
-import { RESOURCES, useResource, useResources } from "../data.ts";
+import { useSecond, useTz } from "../clock.ts";
+import { MarkdownInline } from "../components/Markdown.tsx";
+import { RESOURCES, useResource } from "../data.ts";
+import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
-import type { NotificationsView } from "../notifications.ts";
-import { navigate, PAGE_PATHS } from "../router.ts";
-import { useSessionScope } from "../shell/session.ts";
-import { answersToday } from "./conversation.ts";
-import type { FlightView } from "./flightTypes.ts";
-import { Summary } from "./Summary.tsx";
-import { Timeline } from "./Timeline.tsx";
+import { Pill } from "../hud/Pill.tsx";
+import { metricTitle, useMetrics } from "../metrics.ts";
+import { NEEDS_YOU_PATH, navigate, PAGE_PATHS } from "../router.ts";
+import { chatRows, dockRows } from "./conversation.ts";
+import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
+import { SUMMARY_EMPTY } from "./Summary.tsx";
 
-const NO_REPOS: RepoView[] = [];
+const DASH = "—";
+/** Where a pulse leads: the canonical detail behind that reading. */
+const PULSE_TARGET = {
+  /** Needs you's home. */
+  needs: NEEDS_YOU_PATH,
+  /** Telemetry's flow of work shows cycle time over time. */
+  cycle: PAGE_PATHS.telemetry,
+} as const;
+type PulseTarget = keyof typeof PULSE_TARGET;
 
-const count = (items: AttentionItem[], kinds: AttentionItem["kind"][]): number =>
-  items.filter((i) => kinds.includes(i.kind)).length;
+type PulseTone = "crit" | "warn" | "plain";
 
-/**
- * FLIGHT › Situation: the short summary, with the existing counts and timeline.
- */
-export function Situation() {
-  const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const drafts = useResource<ReplyDraft[]>(RESOURCES.drafts).data;
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
-  const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
-  const prs = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const { inRepo } = useSessionScope();
-  const loaded = repos.length > 0 && boards.every((b) => b.data !== undefined);
-  const all = boards.flatMap((b) => b.data ?? []).filter((i) => inRepo(i.repoId));
-  const inColumn = (...cols: string[]): string =>
-    loaded ? String(all.filter((i) => cols.includes(cardColumn(i))).length) : "—";
-  // An item with no repo belongs to no session, so it stays in view (as on the Activity panel).
-  const items = (attention ?? []).filter((i) => i.repoId === null || inRepo(i.repoId));
-  const known = attention !== undefined;
-  const num = (n: number): string => (known ? String(n) : "—");
-  const decisions = count(items.filter(isOperatorItem), ["decision"]);
-  const approvals = count(items.filter(isOperatorItem), ["approval", "question"]);
-  const stalls = count(items, ["stalled", "error"]);
-  const inProgress = inColumn("In progress");
-  // An answer belongs to FLIGHT, not to a repo, so the session filter does not apply.
-  const flightView = useResource<FlightView>(RESOURCES.flight).data;
+/** Colour only where the reading is bad; no target is inferred, so nothing is ever "green". */
+function pulseTone(value: number, bad: "crit" | "warn" | null = null): PulseTone {
+  return value > 0 && bad !== null ? bad : "plain";
+}
+
+/** A reading with its units set smaller than its digits ("36h 34m"), as an instrument shows it. */
+function Reading({ value }: { value: number | string }) {
+  const text = String(value);
+  const parts = [...text.matchAll(/([^a-zA-Z]*)([a-zA-Z]+)/g)];
+  if (parts.length === 0) return <>{text}</>;
+  // A duration's units ("h", "m", "s") appear once each, so each keys its part.
+  return (
+    <>
+      {parts.map(([, digits, unit]) => (
+        <span key={unit}>
+          {digits}
+          <span className="flight-unit">{unit}</span>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** FLIGHT's last message as one plain line: its first paragraph, with inline Markdown kept. */
+const firstLine = (text: string): string =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? "";
+
+function LatestContact({ seatId }: { seatId: string | null | undefined }) {
+  const stream = useResource<AgentStream>(seatId ? RESOURCES.stream(seatId) : null).data;
+  const now = useSecond();
   const tz = useTz();
-  const now = useNow();
-  const people = notes?.open.filter(
-    (t) => inRepo(t.repoId) && !items.some((i) => i.key === t.key && !isOperatorItem(i)),
-  ).length;
-  const otherPeople = all.filter((i) => {
-    const col = cardColumn(i);
-    return (
-      col === "Ready for QA" ||
-      (col === "In review" &&
-        cardYouWait(
-          i,
-          prs.flatMap((p) => p.data ?? []),
-          crew?.rows ?? [],
-          now,
-        ) === null)
-    );
-  }).length;
-  const answered =
-    flightView === undefined || tz === null
-      ? "—"
-      : String(answersToday(flightView.decisions, now, tz).length);
+  const rows = chatRows(dockRows(stream, []));
+  const latestYou = [...rows].reverse().find((row) => row.kind === "you");
+  const latestFlight = [...rows].reverse().find((row) => row.kind === "flight");
+  const replied =
+    latestYou !== undefined &&
+    latestFlight !== undefined &&
+    latestYou.at !== null &&
+    latestFlight.at !== null &&
+    latestFlight.at >= latestYou.at;
+  const waiting = latestYou !== undefined && !replied;
+  const flightOnly = latestYou === undefined && latestFlight !== undefined;
+  const latest = rows.at(-1);
 
   return (
-    <Panel id="sitP" title="Situation" sub="FLIGHT's read of everything, updated as things change">
-      <div className="pb">
-        <Summary />
-        {items.some((i) => i.flightTriage === "handling") && (
-          <section aria-label={FLIGHT_TRIAGE_LABEL.handling}>
-            <h3>{FLIGHT_TRIAGE_LABEL.handling}</h3>
-            {items
-              .filter((i) => i.flightTriage === "handling")
-              .map((i) => (
-                <div key={i.key} className="nrow">
-                  <div>
-                    <b>{i.text}</b>
-                    {(i.brief?.assessment ?? i.brief?.context) && (
-                      <p>{i.brief?.assessment ?? i.brief?.context}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-          </section>
-        )}
-        <div className="sitstats">
-          <span className={people !== undefined && people > 0 ? "warn" : undefined}>
-            <b className="num">{people ?? "—"}</b> {people === 1 ? "person" : "people"} waiting on
-            you
-          </span>
-          <span>
-            <b className="num">{inProgress}</b> {inProgress === "1" ? "ticket" : "tickets"} in
-            progress
-          </span>
-          <span>
-            <b className="num">{loaded ? otherPeople : "—"}</b> waiting on other people
-          </span>
-          <span className={decisions > 0 ? "warn" : undefined}>
-            <b className="num">{num(decisions)}</b> {decisions === 1 ? "decision" : "decisions"} for
-            you
-          </span>
-          <span>
-            <b className="num">{num(approvals)}</b> routine{" "}
-            {approvals === 1 ? "approval" : "approvals"}
-          </span>
-          <span>
-            <b className="num">{drafts === undefined ? "—" : drafts.length}</b> drafts to send
-          </span>
-          <span>
-            <b className="num">{answered}</b> answered by FLIGHT today
-          </span>
-          <span>
-            <b className="num">{num(stalls)}</b> {stalls === 1 ? "stall" : "stalls"}
-          </span>
-          {(decisions > 0 || approvals > 0) && (
-            <button type="button" className="primary" onClick={() => navigate(PAGE_PATHS.comms)}>
-              Open what needs you
-            </button>
-          )}
-        </div>
+    <div className="flight-contact">
+      <div className="flight-contact-head">
+        <span className="flight-source">LAST CONTACT</span>
+        <Pill tone={waiting ? "neutral" : replied ? "ok" : "plain"}>
+          {waiting
+            ? "Awaiting reply"
+            : replied
+              ? "Reply received"
+              : flightOnly
+                ? "FLIGHT updated"
+                : "No exchange"}
+        </Pill>
       </div>
-      <Timeline />
+      <p className="flight-contact-line">
+        {seatId === undefined ? (
+          "Loading the current FLIGHT exchange…"
+        ) : seatId === null ? (
+          FLIGHT_NO_SEAT
+        ) : latest === undefined ? (
+          "No operator conversation in the current FLIGHT run."
+        ) : (
+          <>
+            <span className="flight-contact-who">{latest.kind === "you" ? "You" : "FLIGHT"}:</span>{" "}
+            <MarkdownInline text={"text" in latest ? firstLine(latest.text) : ""} />
+          </>
+        )}
+      </p>
+      <div className="flight-contact-foot">
+        <span className="flight-mono">
+          {latest?.at === null || latest?.at === undefined || tz === null
+            ? DASH
+            : rel(latest.at, now, tz)}
+        </span>
+        <button
+          type="button"
+          className="sm ghost flight-link"
+          onClick={() => navigate(PAGE_PATHS.comms)}
+        >
+          Open comms
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The stand-up header: FLIGHT's judgement plus observed health, contact and forward load. */
+export function Situation() {
+  const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
+  const summary = summaryResource.data;
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const now = useSecond();
+  // The registry's figures (METRICS in @mc/core), so the rail agrees with every other page.
+  const metrics = useMetrics();
+  const { readings: r, view } = metrics;
+  const blocked = r.blocked?.n ?? 0;
+  const inProgress = r.inProgress?.n ?? 0;
+  const needsYou = r.needsYou?.n ?? 0;
+  // Two counts, not a sum: a PR in review can also have CI pending, so adding them double-counts.
+  const inReview = summary?.metrics.inReview ?? 0;
+  const inCi = summary?.metrics.inCi ?? 0;
+  const oldestAt = view?.inProgress.oldestAt ?? null;
+  const oldest = oldestAt === null ? 0 : Math.max(0, now - oldestAt);
+  const headlineStale = (summary?.headlineAgeMin ?? 0) >= 60;
+  // Operational state only: a stale briefing is FLIGHT's data quality, shown on the age line.
+  const status =
+    flight?.seat === null || flight?.seat?.live === false
+      ? { label: "FLIGHT offline", tone: "crit" as const }
+      : blocked > 0
+        ? { label: "Blocked work", tone: "crit" as const }
+        : needsYou > 0
+          ? { label: "Needs you", tone: "warn" as const }
+          : inProgress > 0
+            ? { label: "Work moving", tone: "ok" as const }
+            : { label: "Standing by", tone: "plain" as const };
+  const seatId = flight === undefined ? undefined : (flight.seat?.id ?? null);
+
+  const pulse = (
+    label: string,
+    value: number | string,
+    detail: string,
+    tone: PulseTone,
+    window: string,
+    target?: PulseTarget,
+    metric?: MetricId,
+  ) => {
+    const idle = value === 0 || value === DASH;
+    const content = (
+      <>
+        <span className="flight-pulse-value" data-metric={metric}>
+          <Reading value={value} />
+        </span>
+        <span className="flight-pulse-label">{label}</span>
+        <span className="flight-pulse-window" aria-hidden="true">
+          {window}
+        </span>
+        <span className="flight-pulse-detail">{detail}</span>
+      </>
+    );
+    // tone-* rather than bare crit/warn: a bare .warn on a button is the global warn button style.
+    const cls = `flight-pulse tone-${tone}${idle ? " idle" : ""}`;
+    const title = metric ? metricTitle(metrics, metric) : undefined;
+    return target ? (
+      <button
+        type="button"
+        className={cls}
+        title={title}
+        aria-label={`${label}: ${value} ${detail}, ${window}`}
+        onClick={() => navigate(PULSE_TARGET[target])}
+      >
+        {content}
+      </button>
+    ) : (
+      <div className={cls} title={title}>
+        {content}
+      </div>
+    );
+  };
+  /** A registry figure: its label, window, value and hover come from the registry. */
+  const figure = (id: MetricId, detail: string, tone: PulseTone = "plain", target?: PulseTarget) =>
+    pulse(METRICS[id].label, r[id]?.value ?? DASH, detail, tone, METRICS[id].window, target, id);
+
+  return (
+    <Panel
+      id="sitP"
+      className="flight-briefing-panel"
+      title="FLIGHT briefing"
+      sub="stand-up view · live"
+    >
+      <div className="flight-briefing">
+        <div className="flight-intent-copy">
+          <div className="flight-intent-kicker">
+            <span className="flight-source think">Commander's intent</span>
+            <Pill tone={status.tone}>{status.label}</Pill>
+          </div>
+          <p className="flight-intent-headline sittext">
+            {summary ? summary.headline || SUMMARY_EMPTY : DASH}
+          </p>
+          {summaryResource.error && (
+            // Live runs below come from the crew, so they stay current without the summary.
+            <p role="alert" className="note err">
+              FLIGHT summary unavailable: {summaryResource.error.message}
+            </p>
+          )}
+          <p className="flight-headline-age">
+            <span>
+              {summary?.session === null
+                ? FLIGHT_NO_SEAT
+                : summary?.headlineAgeMin === null || summary === undefined
+                  ? "FLIGHT has not refreshed this briefing yet."
+                  : summary.headlineAgeMin === 0
+                    ? "Synthesised now"
+                    : `Synthesised ${dur(summary.headlineAgeMin * 60_000)} ago`}
+            </span>
+            {headlineStale && (
+              <span className="flight-gap" title="FLIGHT refreshes a headline at least hourly">
+                stale · refresh due
+              </span>
+            )}
+          </p>
+        </div>
+        <LatestContact seatId={seatId} />
+      </div>
+      <div className="flight-pulse-rail">
+        {figure("inProgress", "tickets started, not merged")}
+        {figure("blocked", "agents to clear", pulseTone(blocked, "crit"))}
+        {pulse(
+          "Oldest",
+          oldest === 0 ? DASH : dur(oldest),
+          "in-progress ticket, since work started",
+          "plain",
+          "now",
+        )}
+        {pulse(
+          "Review / CI",
+          inReview + inCi === 0 ? 0 : `${inReview} / ${inCi}`,
+          "PRs in review / CI pending",
+          "plain",
+          "now",
+        )}
+        {figure("merged", r.merged?.detail ? `PRs merged · ${r.merged.detail}` : "PRs merged")}
+        {figure("cycleTime", `Ready → Done · ${r.cycleTime?.detail ?? DASH}`, "plain", "cycle")}
+        {figure("needsYou", "decisions or replies", pulseTone(needsYou, "warn"), "needs")}
+      </div>
     </Panel>
   );
 }

@@ -1,5 +1,4 @@
 import {
-  ATTENTION_KINDS,
   ATTENTION_LABEL,
   type AttentionHoldCondition,
   type AttentionItem,
@@ -19,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
-import { isOperatorItem, itemOwner, ownerLabel } from "../attention.ts";
+import { isOperatorItem, itemOwner, needsYouItems, ownerLabel, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -110,12 +109,6 @@ function NeedText({
   );
 }
 
-/** Kind order (`ATTENTION_KINDS`), then as the server sent them. */
-export function sortNeeds(items: AttentionItem[]): AttentionItem[] {
-  const rank = (i: AttentionItem) => ATTENTION_KINDS.indexOf(i.kind);
-  return [...items].sort((a, b) => rank(a) - rank(b));
-}
-
 /** The kinds the row's Answer button opens, when no escalation on GitHub carries the question. */
 const ANSWERED_HERE: readonly AttentionKind[] = ["approval", "question"];
 
@@ -151,12 +144,14 @@ export function NeedsList({
   const lock = useTestLock();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const list = sortNeeds((items ?? []).filter(isOperatorItem));
-  const handled = sortNeeds(
-    (items ?? []).filter(
-      (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
-    ),
+  // The header's Needs you set: the whole inbox, one per key (attention.ts).
+  const list = sortNeeds(needsYouItems(items));
+  const others = (items ?? []).filter(
+    (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
   );
+  // FLIGHT's items while it is down: nobody is handling them (#758 adds the one item for this)
+  const flightDown = sortNeeds(others.filter((i) => i.flightTriage === "down"));
+  const handled = sortNeeds(others.filter((i) => i.flightTriage !== "down"));
   const unacked = list.filter((i) => !i.acked);
   // Acknowledging a channel item does not mark its messages read.
   const ackable = unacked.map((i) => i.key);
@@ -401,6 +396,23 @@ export function NeedsList({
           ))}
         </details>
       )}
+      {flightDown.length > 0 && (
+        <details id="cFlightDown" className="guard">
+          <summary>
+            {FLIGHT_TRIAGE_LABEL.down} · {flightDown.length}
+          </summary>
+          {flightDown.map((i) => (
+            <div key={i.key} className="nrow" data-kind={i.kind}>
+              <div>
+                <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
+                <Expandable lines={2}>
+                  <NeedText item={i} now={now} lock={lock} full />
+                </Expandable>
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
       {handled.length > 0 && (
         <details id="cHandled" className="guard">
           <summary>Being handled · {handled.length}</summary>
@@ -408,7 +420,11 @@ export function NeedsList({
             <div key={i.key} className="nrow" data-kind={i.kind}>
               <div>
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
-                <span className="xs muted">{ownerLabel(itemOwner(i))}</span>{" "}
+                <span className="xs muted">
+                  {i.flightTriage === "missed"
+                    ? FLIGHT_TRIAGE_LABEL.missed
+                    : ownerLabel(itemOwner(i))}
+                </span>{" "}
                 <Expandable lines={2}>
                   <NeedText item={i} now={now} lock={lock} full />
                 </Expandable>
@@ -491,7 +507,7 @@ function GuardDrawer({
   );
 }
 
-function HoldForm({
+export function HoldForm({
   busy,
   onCancel,
   onHold,

@@ -34,7 +34,11 @@ export function CrewPauseControl() {
   }
   return (
     <span className="crew-pause">
-      {pause && <Pill tone="warn">Paused: {pause.reason}</Pill>}
+      {pause && (
+        <span title={pause.reason}>
+          <Pill tone="warn">Paused</Pill>
+        </span>
+      )}
       <button
         type="button"
         className="sm"

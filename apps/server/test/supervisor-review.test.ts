@@ -1,3 +1,19 @@
+const codexProbe = vi.hoisted(() => ({
+  checks: 0,
+  gate: null as Promise<void> | null,
+}));
+vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/runtime/codex-version.ts")>();
+  return {
+    ...real,
+    probeCodexVersion: async (...args: Parameters<typeof real.probeCodexVersion>) => {
+      codexProbe.checks++;
+      if (codexProbe.gate) await codexProbe.gate;
+      return real.probeCodexVersion(...args);
+    },
+  };
+});
+
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
@@ -428,6 +444,7 @@ describe("startWatch", () => {
       "mcp__mc__answer_question",
       "mcp__mc__start_seat",
       "mcp__mc__message_seat",
+      "mcp__mc__comms_pin",
       "mcp__mc__flight_state",
       "mcp__mc__promote",
       "mcp__mc__end_run",
@@ -628,7 +645,9 @@ describe("startReview", () => {
     await sup.startReview("retro", r.reviewId);
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
-    expect(brief).toContain("`uv run pytest` followed by a test file path");
+    expect(brief).toContain(
+      "Configured review checks are `uv run pytest`; use them with a test file path where possible, and use ordinary local inspection commands as needed.",
+    );
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
   });
@@ -753,10 +772,12 @@ describe("startReview", () => {
         notes: [],
         prevSha: null,
         prevFindings: [],
+        prevReply: null,
         diffCut: false,
         since: false,
         touches: [],
         commands: [],
+        fullSuite: [],
       }),
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
@@ -1153,15 +1174,169 @@ describe("a run set aside in review", () => {
     expect(starts()).toHaveLength(1);
   });
 
-  it("startRun is refused while rework waits and on a ticket in review", async () => {
+  it("startRun keeps another ticket's rework first, but resumes the ticket in review", async () => {
     const { sup, runId } = await aside(true);
     const first = await refusal(sup.startRun("guido-1", 43));
     expect([first.status, first.message]).toEqual([409, reworkFirstText("GUIDO-1", "mc#42")]);
     store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
-    const same = await refusal(sup.startRun("guido-1", 42));
-    expect([same.status, same.message]).toEqual([409, ticketInReviewText("mc#42")]);
-    const next = await sup.startRun("guido-1", 43);
-    expect(store.run(next.runId)).toMatchObject({ endedAt: null });
+    const same = await sup.startRun("guido-1", 42);
+    expect(same).toEqual({ runId, branch: BRANCH });
+    expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", worktree: wt() });
+    expect(store.run(runId)?.loop?.aside).toBeNull();
+  });
+
+  it("does not launch a review resume when a budget park lands during its checkout", async () => {
+    const { sup, runId } = await aside(false);
+    const before = store.seatSession("guido-1");
+    let release = () => {};
+    prep.resumeChecks = 0;
+    prep.resumeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(prep.resumeChecks).toBe(1));
+    store.setRunLoop(runId, {
+      ...REVIEW,
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+    release();
+
+    const e = await refusal(resuming);
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(starts()).toHaveLength(1);
+    // `setAside` keeps the seat's idle row; a refused wake must not attach it to the run.
+    expect(store.seatSession("guido-1")).toEqual(before);
+    expect(store.run(runId)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+  });
+
+  it("does not launch a Claude review resume when the engine ends it after checkout", async () => {
+    const { sup, runId } = await aside(false);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const accountUpdate = sup.withAccountUpdate(async () => {
+      await gate;
+    });
+    prep.resumeChecks = 0;
+
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(prep.resumeChecks).toBe(1));
+    // The pending account update is one of checkedLaunch's post-checkout awaits.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    store.setRunEnded(runId, Date.now(), "ok", "engine");
+    release();
+
+    const e = await refusal(resuming);
+    await accountUpdate;
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(starts()).toHaveLength(1);
+    expect(store.run(runId)).toMatchObject({ endedAt: expect.any(Number), endedBy: "engine" });
+  });
+
+  it("does not resurrect or launch a Codex review resume ended during its version check", async () => {
+    const { sup } = codexSupervisor();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, { loop: REVIEW });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.setAside(runId);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const spawned = recorded().filter((line) => line.type === "spawn").length;
+    let release = () => {};
+    codexProbe.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const beforeProbe = codexProbe.checks;
+    const resuming = sup.startRun("guido-1", 42);
+    await until(() => expect(codexProbe.checks).toBe(beforeProbe + 1));
+
+    try {
+      store.setRunEnded(runId, Date.now(), "ok", "engine");
+      release();
+      const e = await refusal(resuming);
+      expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    } finally {
+      codexProbe.gate = null;
+    }
+    expect(recorded().filter((line) => line.type === "spawn")).toHaveLength(spawned);
+    expect(store.run(runId)).toMatchObject({ endedAt: expect.any(Number), endedBy: "engine" });
+  });
+
+  it("keeps due rework from another aside run first, even when the ticket is in review", async () => {
+    const { sup, runId } = await aside(false);
+    const matching = store.run(runId);
+    if (matching === null) throw new Error("missing matching aside run");
+    const otherId = "guido-1:other-aside";
+    store.upsertRun({ ...matching, id: otherId, seq: matching.seq + 1, ticket: "mc#43" });
+    store.setRunLoop(otherId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([409, reworkFirstText("GUIDO-1", "mc#43")]);
+    expect(store.run(otherId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
+  });
+
+  it("does not wake a budget-parked aside run for the ticket", async () => {
+    const { sup, runId } = await aside(false);
+    store.setRunLoop(runId, {
+      ...REVIEW,
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+
+    const blocked = await refusal(sup.startRun("guido-1", 42));
+    expect([blocked.status, blocked.message]).toEqual([409, ticketInReviewText("mc#42")]);
+    expect(store.seatSession("guido-1")?.runId).toBeNull();
+    expect(store.run(runId)?.loop).toMatchObject({
+      phase: "parked",
+      parked: { kind: "budget", reason: "held", ended: false },
+      aside: { worktree: wt(), wake: false },
+    });
+  });
+
+  it("does not wake another seat's run set aside for the ticket", async () => {
+    const { sup } = make({
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["libs/**"],
+      },
+    });
+    sup.start();
+    const runId = "guido-1:aside";
+    store.upsertRun({
+      id: runId,
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: null,
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+    const blocked = await refusal(sup.startRun("guido-2", 42));
+    expect([blocked.status, blocked.message]).toEqual([409, ticketInReviewText("mc#42")]);
+    expect(store.seatSession("guido-1")).toBeNull();
+    expect(store.seatSession("guido-2")).toBeNull();
+    expect(store.run(runId)?.loop?.aside).toEqual({ worktree: wt(), wake: true });
   });
 
   it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {

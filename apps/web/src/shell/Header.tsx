@@ -3,21 +3,20 @@ import {
   type AwaySettings,
   type ConfigView,
   type Crew,
+  type LimitRow,
   LOCK_HEADER_TITLE,
   lockHeaderText,
   type MachineSample,
 } from "@mc/core";
-import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
-import { operatorItems } from "../attention.ts";
+import { type ReactNode, useEffect, useSyncExternalStore } from "react";
+import { openNeedsYou, useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { waitingAsks } from "../flight/conversation.ts";
-import type { FlightView } from "../flight/flightTypes.ts";
 import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
+import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
@@ -25,69 +24,46 @@ import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
-const TABS: readonly { page: Page; label: string; needs?: (i: AttentionItem) => boolean }[] = [
-  { page: "overview", label: "Overview" },
-  { page: "flight", label: "FLIGHT", needs: (i) => i.kind === "decision" || i.kind === "person" },
-  { page: "board", label: "Board", needs: (i) => i.kind === "pr" || i.escalationId !== null },
-  { page: "agent", label: "Agent" },
-  { page: "comms", label: "Comms", needs: () => true },
-  { page: "telemetry", label: "Telemetry" },
+/** The page tabs carry no lamps: Needs you is the one lamp, and its home is FLIGHT (roadmap item 2). */
+const TABS: readonly { page: Page; label: string; to: string }[] = [
+  { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
+  { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
+  { page: "board", label: "Board", to: PAGE_PATHS.board },
+  { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
+  { page: "map", label: "Map", to: PAGE_PATHS.map },
+  { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
+  { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const attention = operatorItems(useResource<AttentionItem[]>(RESOURCES.attention).data ?? []);
+  const attention = useNeedsYou();
   return (
     <header className="top">
-      <span className="brand">
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <circle className="ring" cx="10" cy="10" r="8.5" fill="none" strokeWidth="1.5" />
-          <path
-            className="ring"
-            d="M10 3.5v3M10 13.5v3M3.5 10h3M13.5 10h3"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle className="dot" cx="10" cy="10" r="2.2" />
-        </svg>
-        Mission Control
-      </span>
-      <SessionSelect />
+      <span className="brand">MISSION CONTROL</span>
       <nav className="tabs" aria-label="Pages">
         {TABS.map((t) => (
-          <Tab key={t.page} to={PAGE_PATHS[t.page]} on={page === t.page}>
+          <Tab key={t.label} to={t.to} on={page === t.page}>
             {t.label}
-            {t.needs && <NeedsLamp items={attention.filter(t.needs)} />}
           </Tab>
         ))}
       </nav>
       <span className="spacer" />
-      <LiveIndicator />
-      <Met />
-      <MachineButton />
-      <NeedsButton items={attention} />
-      <AwayButton />
-      <ThemeButton />
-      <button
-        type="button"
-        className={`ghost iconbtn${page === "setup" ? " on" : ""}`}
-        title="Setup: sessions, loops, accounts, guard, access and notifications"
-        aria-label="Setup"
-        onClick={() => navigate(PAGE_PATHS.setup)}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            d="M2 4h12M2 8h12M2 12h12"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle className="knob" cx="5" cy="4" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-          <circle className="knob" cx="11" cy="8" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-          <circle className="knob" cx="7" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      </button>
-      <DockButton />
+      <div className="top-status">
+        <Usage />
+        <Clock />
+        <MachineButton />
+        <SessionSelect />
+        <NeedsButton items={attention} />
+        <AwayButton />
+        <ThemeButton />
+        <SetupButton on={page === "setup"} />
+        <DockButton page={page} waiting={attention.length} />
+      </div>
+      <span className="sr-only">
+        <LiveIndicator />
+        <Met />
+      </span>
     </header>
   );
 }
@@ -105,10 +81,67 @@ function Tab({ to, on, children }: { to: string; on: boolean; children: ReactNod
   );
 }
 
-/** A tab's lamp; tab lamps never pulse (catalogue 1.1): the Needs-you button carries the pulse. */
-function NeedsLamp({ items }: { items: AttentionItem[] }) {
-  const lamp = needsLamp(items, false);
-  return lamp ? <Lamp {...lamp} /> : null;
+/** Configuration stays out of the operational page tabs. */
+function SetupButton({ on }: { on: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`ghost iconbtn${on ? " on" : ""}`}
+      title="Setup: sessions, loops, accounts, guard, access and notifications"
+      aria-label="Setup"
+      aria-pressed={on}
+      onClick={() => navigate(PAGE_PATHS.setup)}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M2 4h12M2 8h12M2 12h12"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <circle className="knob" cx="5" cy="4" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+        <circle className="knob" cx="11" cy="8" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+        <circle className="knob" cx="7" cy="12" r="1.7" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    </button>
+  );
+}
+
+/** Compact provider usage in the approved top bar. A missing reading stays an honest dash. */
+function Usage() {
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
+  const used = (vendor: "claude" | "codex") => {
+    const ids = new Set(config?.accounts.filter((a) => a.vendor === vendor).map((a) => a.id) ?? []);
+    const rows = limits.filter((row) => ids.has(row.accountId) && row.window === "7d");
+    return rows.length > 0 ? `${Math.round(Math.max(...rows.map((row) => row.used)))}%` : "—";
+  };
+  return (
+    <span
+      className="usage"
+      role="img"
+      aria-label={`Claude ${used("claude")}; Codex ${used("codex")}`}
+    >
+      <span>
+        CLAUDE <b className="usage-claude">{used("claude")}</b>
+      </span>
+      <span>
+        CODEX <b className="usage-codex">{used("codex")}</b>
+      </span>
+    </span>
+  );
+}
+
+function Clock() {
+  const now = useSecond();
+  const tz = useResource<ConfigView>(RESOURCES.config).data?.operator.timezone;
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: tz,
+  }).format(now);
+  return <time className="top-clock">{time}</time>;
 }
 
 function SessionSelect() {
@@ -138,7 +171,7 @@ function SessionSelect() {
   );
 }
 
-/** Mission elapsed time: since the first run started today (operator's timezone). */
+/** Kept as a keyboard and assistive shortcut; the approved shell keeps status in Overview. */
 function Met() {
   const now = useSecond();
   const first = useResource<Crew>(RESOURCES.crew).data?.firstRunToday ?? null;
@@ -150,7 +183,6 @@ function Met() {
 }
 
 const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
-
 const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
 function MachineButton() {
@@ -160,9 +192,7 @@ function MachineButton() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const holderStalled =
     lock?.holder != null &&
-    crew?.rows.find((r) => r.id === lock.holder?.seatId)?.hudState === "stalled";
-  // Blocked: the holder is stalled and someone is queued behind it.
-  const blocked = holderStalled && (lock?.waiting.length ?? 0) > 0;
+    crew?.rows.find((row) => row.id === lock.holder?.seatId)?.hudState === "stalled";
   const lockText =
     lock === undefined
       ? "Lock: —"
@@ -174,39 +204,67 @@ function MachineButton() {
     m && m.memUsedBytes !== null && m.memTotalBytes > 0
       ? (100 * m.memUsedBytes) / m.memTotalBytes
       : null;
+  const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
+  const label = `Machine status: ${status}. Opens Overview.`;
+  const lockExplanation = holderStalled
+    ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`
+    : LOCK_HEADER_TITLE;
   return (
     <button
       type="button"
-      className={`mach-btn${blocked ? " hot" : ""}`}
-      title="Machine and test lock (on Overview)"
+      className={`mach-btn iconbtn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
+      aria-label={label}
+      aria-describedby="machine-tooltip"
       onClick={() => {
         navigate(PAGE_PATHS.overview);
-        // once the Overview has rendered
         setTimeout(() => document.getElementById("machP")?.scrollIntoView?.({ block: "nearest" }));
       }}
     >
-      <span className="num">{`CPU ${pct(m?.cpuPct ?? null)}`}</span>
-      <span className="num">{`RAM ${pct(ram)}`}</span>
-      <span title={holderStalled ? LOCK_STALLED_TITLE : LOCK_HEADER_TITLE}>{lockText}</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect
+          x="2"
+          y="2.5"
+          width="12"
+          height="8.5"
+          rx="1.25"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M5.5 13.5h5M8 11v2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      <span id="machine-tooltip" className="mach-tooltip" role="tooltip">
+        <span>{status}</span>
+        <span>{lockExplanation}</span>
+      </span>
     </button>
   );
 }
 
-function NeedsButton({ items }: { items: AttentionItem[] }) {
+/** Where the Needs-you button leads, in its accessible name. */
+const NEEDS_YOU_OPENS = "Opens FLIGHT's Operator actions";
+
+function NeedsButton({ items }: { items: readonly AttentionItem[] }) {
   const notAcked = items.filter((i) => !i.acked).length;
   const unacked = notAcked > 0;
   const lamp = needsLamp(items, unacked);
   // The accessible name starts with the visible "Needs you {n}" (WCAG 2.5.3), then says more.
   const n = items.length;
   const what = n === 0 ? "nothing" : `${n} ${n === 1 ? "thing" : "things"}`;
-  const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. Opens Comms.`;
+  const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. ${NEEDS_YOU_OPENS}.`;
   return (
     <button
       type="button"
       className={`needs-btn${items.length ? " has" : ""}`}
-      title={`Everything waiting on you (on Comms)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
+      title={`Everything waiting on you (FLIGHT › Plan › Operator actions)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
       aria-label={label}
-      onClick={() => navigate(PAGE_PATHS.comms)}
+      onClick={openNeedsYou}
     >
       {lamp ? (
         <Lamp {...lamp} title={false} />
@@ -304,23 +362,31 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: toggles the dock; an amber badge counts the asks FLIGHT has put to you. */
-function DockButton() {
+/**
+ * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge is the
+ * Needs-you count, which the chat's "Waiting on you" lists.
+ */
+function DockButton({ page, waiting }: { page: Page; waiting: number }) {
   const dock = useDock();
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const decisions = useResource<FlightView>(RESOURCES.flight).data?.decisions;
-  const waiting = useMemo(
-    () => waitingAsks(attention ?? [], decisions ?? []).length,
-    [attention, decisions],
-  );
+  const inComms = page === "comms";
+  const fullWidth = FULL_WIDTH_PAGES.has(page);
+  const title = inComms
+    ? "FLIGHT chat is open in Comms"
+    : fullWidth
+      ? "Open FLIGHT chat in Comms (f)"
+      : "Show or hide FLIGHT's chat (f)";
   return (
     <button
       type="button"
-      className={`iconbtn${dock.visible ? " on" : ""}`}
-      title="Show or hide FLIGHT's chat (f)"
+      className={`iconbtn${inComms || (!fullWidth && dock.visible) ? " on" : ""}`}
+      title={title}
       aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
-      aria-pressed={dock.visible}
-      onClick={dock.toggle}
+      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible}
+      onClick={() => {
+        if (fullWidth) navigate(PAGE_PATHS.comms);
+        // Comms already is FLIGHT's full conversation; the dock is not mounted here.
+        else if (!inComms) dock.toggle();
+      }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path

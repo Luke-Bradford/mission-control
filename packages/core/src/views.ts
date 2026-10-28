@@ -139,7 +139,9 @@ export interface ConfigView {
     vendor: "claude" | "codex";
     alertAt: number;
     stopAt: number;
-    binding?: "machine";
+    /** An absolute Codex profile directory; never contains credentials itself. */
+    cliProfile?: string;
+    binding?: "machine" | "profile";
     canCheck?: boolean;
     signInHint?: string;
     status?: CliAccountStatus;
@@ -154,6 +156,17 @@ export interface ConfigView {
     needsYouLabels: string[] | null;
     /** Commands that count as a full suite: they take the test lock. */
     fullSuite: string[];
+    /** The account selected for new seats; null lets the repo use the first available account. */
+    defaultAccountId?: string | null;
+    /** Advice supplied to FLIGHT when it works this repo. It is deliberately not an eligibility rule. */
+    guidance?: {
+      priority: string[];
+      milestone: string[];
+      labels: string[];
+      labelMode: "any" | "all";
+      avoid: string[];
+      direction: string;
+    };
   }[];
   loops: {
     id: AgentId;
@@ -211,6 +224,12 @@ export interface ConfigView {
     error: string | null;
     list: ConfigProfile[];
   };
+}
+
+/** Models a configured account may use. Codex entries come from its live model/list catalog. */
+export interface AccountModelsView {
+  accountId: AccountId;
+  models: { model: string; efforts: string[] }[];
 }
 
 /** A seat as config.yaml says it (what Setup edits). */
@@ -317,14 +336,15 @@ export interface Telemetry {
     working: number;
     /** Configured loops. */
     agents: number;
-    /** PRs merged in the last 7 days. */
-    merged7d: number;
   };
   /** FLOW_DAYS local days, oldest first, zeros kept. */
   throughput: { day: string; merged: number }[];
-  /** Start of work to Done; `excluded` = done issues with no start. */
+  /**
+   * Start of work to Done by size over FLOW_DAYS, p50 and p85 in ms (the registry's cycle time,
+   * `METRICS.cycleTime`, broken down); `excluded` = done issues with no start.
+   */
   cycleTime: {
-    rows: { size: string; medianDays: number | null; tickets: number }[];
+    rows: { size: string; p50Ms: number | null; p85Ms: number | null; tickets: number }[];
     excluded: number;
   };
   /** Over FLOW_DAYS of merged PRs whose first-push CI is known; null when there are none. */

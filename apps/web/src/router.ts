@@ -1,6 +1,7 @@
+import { COMMS_TICKET } from "@mc/core";
 import { type MouseEvent, useSyncExternalStore } from "react";
 
-/** A tiny History-API router: seven pages and a few ids do not justify a library. */
+/** A tiny History-API router: eight pages and a few ids do not justify a library. */
 const NAV_EVENT = "mc:navigate";
 
 export function navigate(to: string, opts: { replace?: boolean } = {}): void {
@@ -32,6 +33,19 @@ export const usePath = (): string =>
 export const useSearch = (): string =>
   useSyncExternalStore(subscribe, () => window.location.search);
 
+function subscribeHash(fn: () => void): () => void {
+  const off = subscribe(fn);
+  window.addEventListener("hashchange", fn);
+  return () => {
+    off();
+    window.removeEventListener("hashchange", fn);
+  };
+}
+
+/** The location's fragment (`#id`, or ""), following in-app navigation and fragment links. */
+export const useHash = (): string =>
+  useSyncExternalStore(subscribeHash, () => window.location.hash);
+
 export const SETUP_TABS = [
   "sessions",
   "repos",
@@ -43,16 +57,37 @@ export const SETUP_TABS = [
 ] as const;
 export type SetupTab = (typeof SETUP_TABS)[number];
 
-export type Page = "overview" | "flight" | "board" | "agent" | "comms" | "telemetry" | "setup";
+export type Page =
+  | "overview"
+  | "flight"
+  | "board"
+  | "agent"
+  | "map"
+  | "comms"
+  | "telemetry"
+  | "setup";
+
+export type CommsView =
+  | { kind: "flight" }
+  | { kind: "crew" }
+  | { kind: "ticket"; ref: string; ticket?: string }
+  | { kind: "agent"; agentId: string }
+  | { kind: "inbox"; agentId: string }
+  | { kind: "contact"; agentId: string; contactId: string };
 
 export type Route =
   | { page: "overview" }
   | { page: "flight" }
   | { page: "board"; repoId: string | null; ticket: number | null }
   | { page: "agent"; id: string | null }
-  | { page: "comms"; item: string | null }
+  /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
+  | { page: "map"; repoId: string | null }
+  | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
   | { page: "setup"; tab: SetupTab };
+
+/** Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. */
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
 export const PAGE_PATHS: Record<Page, string> = {
@@ -60,18 +95,34 @@ export const PAGE_PATHS: Record<Page, string> = {
   flight: "/flight",
   board: "/board",
   agent: "/agent",
+  map: "/map",
   comms: "/comms",
   telemetry: "/telemetry",
   setup: "/setup",
 };
 
 const enc = encodeURIComponent;
+/** The panel that holds Needs you: Plan › Operator actions until #766 builds FLIGHT › Needs you. */
+export const NEEDS_YOU_PANEL = "askP";
+
+/** Needs you's home, where the header's button, the FLIGHT pulse and every "all of it" link lead. */
+export const NEEDS_YOU_PATH = `${PAGE_PATHS.flight}#${NEEDS_YOU_PANEL}`;
+
 export const agentPath = (id: string): string => `/agent/${enc(id)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
+export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
 export const ticketPath = (repoId: string, issueNumber: number): string =>
   `${boardPath(repoId)}/${issueNumber}`;
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
+export const commsFlightPath = (): string => "/comms";
+export const commsCrewPath = (): string => "/comms/crew";
+export const commsTicketPath = (ref: string, ticket?: string | null): string =>
+  `/comms/tickets/${enc(ref)}${ticket && COMMS_TICKET.test(ticket) ? `?ticket=${enc(ticket)}` : ""}`;
+export const commsAgentPath = (agentId: string): string => `/comms/agents/${enc(agentId)}`;
+export const commsInboxPath = (agentId: string): string => `${commsAgentPath(agentId)}/inbox`;
+export const commsContactPath = (agentId: string, contactId: string): string =>
+  `${commsAgentPath(agentId)}/contacts/${enc(contactId)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
 /** The query parameter that names the session whose Add agent form should open (`?add=s1`). */
 export const ADD_AGENT_PARAM = "add";
@@ -144,8 +195,9 @@ const bare = (path: string): string =>
   path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 
 /** The page a path shows; null when it is not one (see legacyRedirect, then Overview). */
-export function route(path: string): Route | null {
-  const p = bare(path);
+export function route(path: string, search = ""): Route | null {
+  const [pathname, query = search] = path.split("?", 2);
+  const p = bare(pathname ?? path);
   if (p === "/") return { page: "overview" };
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
@@ -155,11 +207,49 @@ export function route(path: string): Route | null {
   if (ticket) return { page: "board", ...ticket };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
+  const map = withId(path, "map");
+  if (map) return { page: "map", repoId: map.id };
+  if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
+  if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
+  const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
+  if (commsTicket) {
+    const ref = decode(commsTicket[1]);
+    const ticket = new URLSearchParams(query).get("ticket");
+    if (ref && /^(?:#\d+|PR \d+)$/.test(ref) && (ticket === null || COMMS_TICKET.test(ticket)))
+      return {
+        page: "comms",
+        item: null,
+        view: { kind: "ticket", ref, ...(ticket === null ? {} : { ticket }) },
+      };
+    return null;
+  }
+  const contact = /^\/comms\/agents\/([^/]+)\/contacts\/([^/]+)$/.exec(p);
+  if (contact) {
+    const agentId = decode(contact[1]);
+    const contactId = decode(contact[2]);
+    if (agentId !== null && contactId !== null)
+      return { page: "comms", item: null, view: { kind: "contact", agentId, contactId } };
+    return null;
+  }
+  const inbox = /^\/comms\/agents\/([^/]+)\/inbox$/.exec(p);
+  if (inbox) {
+    const agentId = decode(inbox[1]);
+    return agentId === null
+      ? null
+      : { page: "comms", item: null, view: { kind: "inbox", agentId } };
+  }
+  const agentComms = /^\/comms\/agents\/([^/]+)$/.exec(p);
+  if (agentComms) {
+    const agentId = decode(agentComms[1]);
+    return agentId === null
+      ? null
+      : { page: "comms", item: null, view: { kind: "agent", agentId } };
+  }
   const comms = withId(path, "comms");
-  if (comms) return { page: "comms", item: comms.id };
+  if (comms?.id) return { page: "comms", item: comms.id, view: { kind: "flight" } };
   const setup = withId(path, "setup");
   if (setup)
-    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "sessions" };
+    return { page: "setup", tab: setup.id && isSetupTab(setup.id) ? setup.id : "accounts" };
   return null;
 }
 
@@ -171,7 +261,7 @@ const GLOSSARY = `${setupPath("sources")}#glossary`;
  */
 export function legacyRedirect(path: string, hash = ""): string | null {
   const p = bare(path);
-  if (p === "/needs-you" || p === "/needs") return PAGE_PATHS.comms;
+  if (p === "/needs-you" || p === "/needs") return NEEDS_YOU_PATH;
   if (p === "/cto") return PAGE_PATHS.flight;
   if (p === "/metrics") return PAGE_PATHS.telemetry;
   if (p === "/agents" || p === "/loops") return PAGE_PATHS.overview;

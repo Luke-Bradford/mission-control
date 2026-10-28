@@ -1,5 +1,5 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   BrowserNotifications,
@@ -17,6 +17,8 @@ import { stubFetch } from "./fetchStub.ts";
 export const PREFS: NotificationPreferences = {
   enabled: true,
   categories: {
+    asks: true,
+    flightDown: true,
     people: true,
     decisions: true,
     stalls: true,
@@ -24,7 +26,6 @@ export const PREFS: NotificationPreferences = {
     capcom: true,
     awayDigest: true,
     quota: false,
-    agentMessages: false,
   },
   quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
   softChime: true,
@@ -40,6 +41,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("keeps auto-approve controls in Safety", () => {
+  stubFetch({ "/api/notification-preferences": PREFS });
+  render(<Access />);
+  const auto = screen.getByRole("region", { name: "Auto-approve" });
+  const boxes = auto.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  expect(boxes).toHaveLength(5);
+  expect([...boxes].every((box) => box.disabled)).toBe(true);
+  expect(auto.textContent).toContain("P2");
+});
+
 it("saves and reloads categories, quiet hours and chime without asking permission", async () => {
   let saved = PREFS;
   const request = vi.fn();
@@ -53,9 +64,10 @@ it("saves and reloads categories, quiet hours and chime without asking permissio
   });
   const view = render(<Access />);
   const quota = await screen.findByLabelText("Quota above 90%");
-  const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
-  expect(boxes).toHaveLength(10);
-  expect(boxes.filter((box) => box.checked)).toHaveLength(8);
+  const preferences = screen.getByRole("region", { name: "Notify me about" });
+  const boxes = within(preferences).getAllByRole("checkbox") as HTMLInputElement[];
+  expect(boxes).toHaveLength(11);
+  expect(boxes.filter((box) => box.checked)).toHaveLength(10);
   expect(boxes.every((box) => !box.disabled)).toBe(true);
   fireEvent.click(quota);
   fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "20:00" } });
@@ -94,7 +106,8 @@ it("deduplicates, suppresses categories and quiet hours, but allows stalls", () 
   deliver({ ...event, id: "quota", category: "quota" }, PREFS);
   deliver({ ...event, id: "quiet", at: Date.UTC(2026, 9, 23, 20) }, PREFS);
   deliver({ ...event, id: "stall", category: "stalls", at: Date.UTC(2026, 9, 23, 20) }, PREFS);
-  expect(show.mock.calls.map(([e]) => e.id)).toEqual(["example", "stall"]);
+  deliver({ ...event, id: "down", category: "flightDown", at: Date.UTC(2026, 9, 23, 20) }, PREFS);
+  expect(show.mock.calls.map(([e]) => e.id)).toEqual(["example", "stall", "down"]);
 });
 it("test delivery and sample stop never stop a run or post replies", async () => {
   vi.stubGlobal("Notification", undefined);
@@ -181,6 +194,8 @@ it("opens the relevant page on browser click without writing", async () => {
   expect(close).toHaveBeenCalledOnce();
   expect(notificationTarget({ ...event, category: "quota" })).toBe("/telemetry");
   expect(notificationTarget({ ...event, category: "capcom" })).toBe("/comms");
+  expect(notificationTarget({ ...event, category: "asks" })).toBe("/flight");
+  expect(notificationTarget({ ...event, category: "flightDown" })).toBe("/flight");
   expect(fetch).not.toHaveBeenCalled();
 });
 

@@ -49,6 +49,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
   MC_TOOL_NAMES.messageSeat,
+  MC_TOOL_NAMES.commsPin,
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.promote,
   MC_TOOL_NAMES.endRun,
@@ -87,12 +88,38 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
-  writer: { base: ["commit", "sync_main", "ask_operator", "report_evidence"], grantable: [] },
+  writer: {
+    base: [
+      "commit",
+      "sync_main",
+      "ask_operator",
+      "report_evidence",
+      MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
+    grantable: [],
+  },
   "read-only": {
-    base: ["ask_operator", "report_evidence"],
+    base: [
+      "ask_operator",
+      "report_evidence",
+      MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
-  scratch: { base: [MC_TOOL_NAMES.reportFindings, MC_TOOL_NAMES.restoreFile], grantable: [] },
+  scratch: {
+    base: [
+      MC_TOOL_NAMES.reportFindings,
+      MC_TOOL_NAMES.restoreFile,
+      MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
+    grantable: [],
+  },
 };
 
 /** A role: what a seat of it runs as, unless its own config says otherwise. */
@@ -209,7 +236,11 @@ export function modeOfSeat(seat: { role: string; mode?: ConfigSeatMode; def?: Se
  * `--restricted` ignores user, project and local settings and confines the file tools to the
  * working directory, symlinks included (probe 2026-10-20: Read, Grep and Glob are refused outside
  * the worktree and through a symlink pointing out of it); it drops Bash unless `--tools` names it,
- * so every seat's set is explicit.
+ * so every seat's set is explicit. So a `.claude/settings*.json` a seat writes into its worktree
+ * with Bash is never loaded: `claude --help` (2.1.312) says `--restricted` "ignores user, project
+ * and local settings files (managed settings and --settings still apply)", and
+ * docs/spikes/2026-10-22-crewing-other-repos.md found the repo's `.claude` settings and hooks
+ * ignored. (`mc commit` refuses `.claude/**` as a protected path either way.)
  */
 export const CREW_ISOLATION_FLAGS = [
   "--restricted",
@@ -229,13 +260,6 @@ export const CREW_GIT_ENV = {
   GIT_CONFIG_VALUE_1: "/dev/null",
   GIT_PAGER: "cat",
 } as const;
-
-export const GIT_READ_TOOLS = [
-  "Bash(git status:*)",
-  "Bash(git diff:*)",
-  "Bash(git log:*)",
-  "Bash(git show:*)",
-] as const;
 
 /** The commands a seat may run: a writer's gates, and what a read-only or scratch seat may run. */
 export interface SeatCommands {
@@ -261,8 +285,6 @@ export function seatCommands(mode: CrewMode, commands: SeatCommands): readonly s
   return mine;
 }
 
-export const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
-
 export const WRITER_TOOLS = [
   "Read",
   "Grep",
@@ -270,12 +292,14 @@ export const WRITER_TOOLS = [
   "Edit",
   "Write",
   "TodoWrite",
-  ...bashEntries(DEFAULT_SEAT_COMMANDS.writer),
-  ...GIT_READ_TOOLS,
+  "Bash",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsRead,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const READONLY_TOOLS = [
@@ -283,10 +307,12 @@ export const READONLY_TOOLS = [
   "Grep",
   "Glob",
   "TodoWrite",
-  ...GIT_READ_TOOLS,
-  ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
+  "Bash",
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsRead,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 export const SCRATCH_TOOLS = [
@@ -296,10 +322,12 @@ export const SCRATCH_TOOLS = [
   "Edit",
   "Write",
   "TodoWrite",
-  ...GIT_READ_TOOLS,
-  ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
+  "Bash",
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
+  MC_TOOLS.commsRead,
+  MC_TOOLS.commsSend,
+  MC_TOOLS.commsReact,
 ] as const;
 
 /** A scratch seat starts only on a review Mission Control hands it. */
@@ -709,8 +737,10 @@ export const CODEX_CLI_ENV = {
   npm_config_update_notifier: "false",
 } as const;
 
-/** The folder pnpm makes for a project-local store; the commit tool never stages one. */
+/** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
+/** A Codex seat's private, worktree-local temporary directory. */
+export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
  * pnpm 11 reads settings from `pnpm_config_*` variables only: it ignores `npm_config_store_dir`
  * (pnpm 11.0.6's config reader; `pnpm store path` under each, 2026-10-21).
@@ -721,9 +751,8 @@ export const PNPM_STORE_ENV = "pnpm_config_store_dir";
  */
 export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
- * A seat's pnpm store, in the sandbox's temp root. A sandboxed pnpm cannot write the global store
- * in `~/Library`, and with no store set it falls back to `.pnpm-store/` at the top of the worktree,
- * where the commit tool's `add -A` would find it.
+ * A seat's pnpm store in its own sandbox temp root. A sandboxed pnpm cannot write the global store
+ * in `~/Library`, and each Claude seat must not share its store with another seat.
  */
 export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
   `${tempRoot}/mc-pnpm-store/${seatId}`;
@@ -964,6 +993,8 @@ export interface CrewCliInput {
   hook: CrewHook;
   /** Extra mc tools the seat's role holds, after the mode's own; each must be grantable. Default []. */
   mcTools?: readonly McToolName[];
+  /** Extra tools held only by this authenticated run. Never accepted from role configuration. */
+  runTools?: readonly McToolName[];
   /** The repo's own commands; they replace the default pnpm entries. Default DEFAULT_SEAT_COMMANDS. */
   commands?: SeatCommands;
   /** Extra Edit and Write denies, on top of PROTECTED_FILES. Default []. */
@@ -1001,30 +1032,26 @@ export function guardHookCommand(i: GuardHookInput): string {
 export function crewCliArgs(i: CrewCliInput): string[] {
   const base: readonly string[] =
     i.mode === "writer" ? WRITER_TOOLS : i.mode === "scratch" ? SCRATCH_TOOLS : READONLY_TOOLS;
-  const cmds = i.commands ?? DEFAULT_SEAT_COMMANDS;
-  const mine = seatCommands(i.mode, cmds);
-  const defaults = bashEntries(
-    i.mode === "writer" ? DEFAULT_SEAT_COMMANDS.writer : DEFAULT_SEAT_COMMANDS.review,
-  );
+  // Validation only: the repo's commands are named in the brief, never a Bash allowlist.
+  seatCommands(i.mode, i.commands ?? DEFAULT_SEAT_COMMANDS);
   const granted = i.mcTools ?? [];
   for (const t of granted) {
     if (!MC_TOOL_GRANTS[i.mode].grantable.includes(t)) {
       throw new Error(`crew rules: ${t} cannot be granted to a ${i.mode} seat`);
     }
   }
+  const runTools = i.runTools ?? [];
+  for (const t of runTools) {
+    if (t !== MC_TOOL_NAMES.reportPlan)
+      throw new Error(`crew rules: ${t} cannot be granted to a single run`);
+  }
   const globs = i.area.length > 0 ? i.area : ["**"];
-  // the repo's commands take the place of the default pnpm entries, in the same position
-  let placed = false;
-  const allowed = base.flatMap((t) => {
-    if (t === "Edit" || t === "Write") {
-      return globs.map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`);
-    }
-    if (!defaults.includes(t)) return [t];
-    if (placed) return [];
-    placed = true;
-    return bashEntries(mine);
-  });
-  allowed.push(...granted.map((t) => `mcp__${MC_MCP_SERVER}__${t}`));
+  const allowed = base.flatMap((t) =>
+    t === "Edit" || t === "Write"
+      ? globs.map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`)
+      : [t],
+  );
+  allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   return [
     "-p",
     "--input-format",

@@ -33,7 +33,8 @@ it("pauses selected seats with a reason and resumes the crew", async () => {
       }),
     ),
   );
-  expect(await screen.findByText("Paused: Save tokens")).toBeTruthy();
+  const paused = await screen.findByText("Paused");
+  expect(paused.parentElement?.getAttribute("title")).toBe("Save tokens");
   fireEvent.click(screen.getByRole("button", { name: "Resume crew" }));
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(
@@ -46,13 +47,13 @@ it("pauses selected seats with a reason and resumes the crew", async () => {
   );
 });
 
-it("shows the paused reason on crew status pills even for a live run", () => {
+it("keeps the paused reason out of crew status pills even for a live run", () => {
   expect(
     seatStatus({
       ...seatRow(),
       crewPause: { seats: "all", reason: "Save tokens", at: 1, by: "operator" },
     }),
-  ).toEqual({ label: "Paused: Save tokens", tone: "warn" });
+  ).toEqual({ label: "Paused", tone: "warn", reason: "Save tokens" });
 });
 
 it("offers watch seats and renders the form outside clipping panels", async () => {

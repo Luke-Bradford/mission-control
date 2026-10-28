@@ -2,6 +2,7 @@ import type {
   FlightLedgerEntry,
   FlightLedgerView,
   FlightSummaryItem,
+  FlightSummaryOutcome,
   FlightSummaryView,
 } from "@mc/core";
 import { MIN, NOW } from "./fixtures.ts";
@@ -33,6 +34,13 @@ export const summaryItem = (entry: FlightLedgerEntry): FlightSummaryItem => ({
   priority: entry.priority,
   ageMin: 10,
 });
+export const summaryOutcome = (entry: FlightLedgerEntry): FlightSummaryOutcome => ({
+  ...summaryItem(entry),
+  outcome: entry.outcome,
+  refs: entry.refs,
+  basis: entry.basis,
+  closedAt: entry.updatedAt,
+});
 export const flightLedger = (entries: FlightLedgerEntry[] = []): FlightLedgerView => ({
   session: "s1",
   entries,
@@ -46,6 +54,7 @@ export const flightSummary = (over: Partial<FlightSummaryView> = {}): FlightSumm
   now: [],
   watching: { counts: { active: 3, blocked: 1, waiting: 2, done: 4, dropped: 1 }, top: [] },
   next: [],
+  done: [],
   incoming: 0,
   metrics: {
     since: NOW - 12 * 60 * MIN,

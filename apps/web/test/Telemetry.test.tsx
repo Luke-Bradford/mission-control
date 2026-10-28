@@ -10,12 +10,14 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCES } from "../src/data.ts";
+import { kTokens, narrowDay } from "../src/fmt.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
+import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, HOUR, MIN, NOW, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, HOUR, METRICS_VIEW, MIN, NOW, seatRow } from "./fixtures.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -39,7 +41,6 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
       turns: 64,
       working: 2,
       agents: 3,
-      merged7d: 5,
     },
     throughput: Array.from({ length: 14 }, (_, i) => ({
       day: `2026-10-${String(4 + i).padStart(2, "0")}`,
@@ -47,12 +48,12 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
     })),
     cycleTime: {
       rows: [
-        { size: "XS", medianDays: 0.6, tickets: 4 },
-        { size: "S", medianDays: 1.44, tickets: 11 },
-        { size: "M", medianDays: 2.9, tickets: 1 },
-        { size: "L", medianDays: 0, tickets: 0 }, // 0 tickets reads —, whatever the median says
-        { size: "XL", medianDays: null, tickets: 0 },
-        { size: "none", medianDays: 3, tickets: 2 },
+        { size: "XS", p50Ms: 6 * HOUR, p85Ms: 9.5 * HOUR, tickets: 4 },
+        { size: "S", p50Ms: 34.6 * HOUR, p85Ms: 50 * HOUR, tickets: 11 },
+        { size: "M", p50Ms: 69.6 * HOUR, p85Ms: 69.6 * HOUR, tickets: 1 },
+        { size: "L", p50Ms: 0, p85Ms: 0, tickets: 0 }, // 0 tickets reads —, whatever p50 says
+        { size: "XL", p50Ms: null, p85Ms: null, tickets: 0 },
+        { size: "none", p50Ms: 72 * HOUR, p85Ms: 80 * HOUR, tickets: 2 },
       ],
       excluded: 7,
     },
@@ -184,13 +185,13 @@ const EMPTY: TelemetryData = {
     turns: 0,
     working: 0,
     agents: 0,
-    merged7d: 0,
   },
   throughput: [],
   cycleTime: {
     rows: ["XS", "S", "M", "L", "XL", "none"].map((size) => ({
       size,
-      medianDays: null,
+      p50Ms: null,
+      p85Ms: null,
       tickets: 0,
     })),
     excluded: 0,
@@ -218,6 +219,7 @@ function stub(data: TelemetryData = tel(), config: ConfigView = CFG) {
     "/api/telemetry?range=6h&account=codex-main": data,
     "/api/telemetry?range=6h&agent=studio&account=codex-main": data,
     "/api/config": config,
+    "/api/metrics": METRICS_VIEW,
   });
 }
 
@@ -240,6 +242,27 @@ async function loaded(data?: TelemetryData, config?: ConfigView) {
 }
 
 describe("Telemetry refetch", () => {
+  it("claims live only while the telemetry on screen is this range's and fresh", async () => {
+    const { fetch } = await loaded();
+    expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0);
+    const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fetch.mockImplementation(async (...a: unknown[]) => {
+      if (a[0] === "/api/telemetry?range=24h") await gate;
+      return answer(...a);
+    });
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "24h" }),
+    );
+    await waitFor(() => expect(document.querySelectorAll(".kpi.live")).toHaveLength(0));
+    expect(document.querySelectorAll(".nowc.live")).toHaveLength(0);
+    await act(async () => release());
+    await waitFor(() => expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0));
+  });
+
   it("keeps the last range on screen, dimmed, while a new one loads", async () => {
     const { fetch } = await loaded();
     const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
@@ -434,6 +457,7 @@ describe("KPI tiles", () => {
 
   it("computed tiles show today's numbers; the others show — with the phase that brings them", async () => {
     const { container } = await loaded();
+    await screen.findByText("~$24.31");
     const tiles = [...container.querySelectorAll(".kpi")].map((k) => ({
       label: k.querySelector(".lbl")?.textContent,
       value: k.querySelector(".v")?.textContent,
@@ -447,11 +471,12 @@ describe("KPI tiles", () => {
         detail: "today, in + out · 1.25M cache read",
         title: null,
       },
-      { label: "~Cost", value: "~$3.50", detail: "today, API-equivalent", title: null },
+      // the registry's cost, merged and working; the stub serves no crew, so working reads —
+      { label: "Cost · today", value: "~$24.31", detail: "API-equivalent", title: null },
       { label: "Tool calls", value: "812", detail: "today · 64 turns", title: null },
       { label: "Commits", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
-      { label: "Working", value: "2", detail: "now, of 3 agents", title: null },
-      { label: "Merged", value: "5", detail: "PRs, last 7 days", title: null },
+      { label: "Agents working · now", value: "—", detail: "", title: null },
+      { label: "Merged · 24h", value: "6", detail: "PRs · +2 loops", title: null },
       { label: "Lock wait", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
       {
         label: "Your response",
@@ -463,6 +488,23 @@ describe("KPI tiles", () => {
       { label: "Guard", value: "—", detail: "", title: null },
       { label: "Test lock", value: "—", detail: "", title: null },
     ]);
+  });
+
+  it("names the session a registry tile follows, since Telemetry's own figures ignore it", async () => {
+    const { container } = await loaded();
+    act(() => setSession("shop-app-session"));
+    const labels = () =>
+      [...container.querySelectorAll(".kpi .lbl")].map((l) => l.textContent ?? "");
+    await waitFor(() => expect(labels()).toContain("Cost · today · s/shop-app-session"));
+    expect(labels()).toContain("Merged · 24h · s/shop-app-session");
+    expect(labels()).toContain("Tokens");
+    const merged = [...container.querySelectorAll(".kpi .lbl")].find((l) =>
+      l.textContent?.startsWith("Merged"),
+    );
+    expect(merged?.getAttribute("title")).toContain(
+      "On Telemetry this follows the header's session filter (s/shop-app-session)",
+    );
+    act(() => resetSession());
   });
 
   it("Commits, Lock wait and Your response read — until the hub answers", async () => {
@@ -486,9 +528,14 @@ describe("KPI tiles", () => {
 
 describe("Flow of work", () => {
   it("throughput: 14 bars, the last in the accent", async () => {
-    await loaded();
+    const data = tel();
+    await loaded(data);
     const svg = within(panel("tThru")).getByRole("img");
-    expect(svg.getAttribute("aria-label")).toMatch(/^Tickets merged per day: /);
+    expect(svg.getAttribute("aria-label")).toBe(
+      `PRs merged per day: ${data.throughput
+        .map((day) => `${narrowDay(day.day)} ${day.merged}`)
+        .join(", ")}`,
+    );
     const bars = svg.querySelectorAll("path.bar");
     expect(bars).toHaveLength(7); // the odd days and the last; the even days are 0
     expect(bars[bars.length - 1]?.getAttribute("fill")).toBe("var(--accent)");
@@ -500,17 +547,24 @@ describe("Flow of work", () => {
   it("cycle time: a row per size, — where none, and the measurement note", async () => {
     await loaded();
     const p = panel("tCycle");
-    screen.getByText("Ready to Done, median days by size");
+    screen.getByText("Ready to Done, p50 and p85 hours by size · last 14 days");
     expect([...p.querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
-      "XS0.6 d4 tickets",
-      "S1.4 d11 tickets",
-      "M2.9 d1 ticket",
+      // p85 only from five tickets
+      "XS6.0 h4 tickets",
+      "S35 hp85 50 h · 11 tickets",
+      "M70 h1 ticket",
       "L—0 tickets",
       "XL—0 tickets",
-      "no size3.0 d2 tickets",
+      "no size72 h2 tickets",
     ]);
+    // the registry's cycle time over all sizes, with its window in the label
+    await waitFor(() =>
+      expect(p.querySelector(".tcycle-all")?.textContent).toBe(
+        "Cycle time p50 · 14d 1.2 h p85 30 h · 8 tickets · 1 left out",
+      ),
+    );
     within(p).getByText(
-      "Measured from the board: when a ticket entered Ready to when it reached Done. 7 done tickets left out because they have no Ready entry or their timestamps are out of order.",
+      "Measured from the board: when a ticket entered Ready to when it reached Done. Sizes cover every repo; the p50 line above follows the header's session filter. 7 done tickets left out because they have no Ready entry or their timestamps are out of order.",
     );
   });
 
@@ -519,8 +573,8 @@ describe("Flow of work", () => {
       tel({
         cycleTime: {
           rows: [
-            { size: "XS", medianDays: 2, tickets: 4 },
-            { size: "L", medianDays: 8, tickets: 0 },
+            { size: "XS", p50Ms: 2 * HOUR, p85Ms: 2 * HOUR, tickets: 4 },
+            { size: "L", p50Ms: 8 * HOUR, p85Ms: 8 * HOUR, tickets: 0 },
           ],
           excluded: 0,
         },
@@ -657,7 +711,8 @@ describe("Agents", () => {
   });
 
   it("tokens per turn: the selected agent's latest run, else the first", async () => {
-    await loaded();
+    const data = tel();
+    await loaded(data);
     within(panel("tTurn")).getByText("shop-app-ta · latest run");
     // two turns × three kinds
     expect(panel("tTurn").querySelectorAll("path.bar")).toHaveLength(6);
@@ -666,6 +721,15 @@ describe("Agents", () => {
       "output",
       "cache read",
     ]);
+    const svg = within(panel("tTurn")).getByRole("img");
+    const turns = data.turnUsage[0]?.turns ?? [];
+    const hits = svg.querySelectorAll("rect.hit");
+    turns.forEach((turn, i) => {
+      fireEvent.pointerEnter(hits[i] as Element);
+      expect(panel("tTurn").querySelector(".tip")?.textContent).toBe(
+        `turn ${i + 1}cache read${kTokens(turn.cacheRead)}output${kTokens(turn.output)}input${kTokens(turn.input)}`,
+      );
+    });
     setSelectedAgent("codex-ta");
     await within(panel("tTurn")).findByText("codex-ta · latest run");
     within(panel("tTurn")).getByText("No turns recorded for codex-ta yet.");
@@ -720,14 +784,32 @@ describe("Capacity and cost", () => {
     ]);
   });
 
-  it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
+  it("quota tooltip only reports an account's API reading at the selected sample time", async () => {
     await loaded();
-    expect(panel("tMach").querySelectorAll("path.line")).toHaveLength(2);
-    expect([...panel("tMach").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
+    const svg = within(panel("tQuota")).getByRole("img");
+    fireEvent.keyDown(svg, { key: "Home" });
+    const tip = panel("tQuota").querySelector(".tip") as HTMLElement;
+    expect(tip.textContent).toContain("claude-main 5h10%");
+    expect(tip.textContent).toContain("codex-main 7d—");
+  });
+
+  it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
+    const data = tel();
+    await loaded(data);
+    const p = panel("tMach");
+    expect(p.querySelectorAll("path.line")).toHaveLength(2);
+    expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "CPU",
       "Memory",
       "test lock held",
     ]);
+    const svg = within(p).getByRole("img");
+    data.machine.forEach((sample, i) => {
+      fireEvent.keyDown(svg, { key: i === 0 ? "Home" : "ArrowRight" });
+      const percent = (value: number | null): string => (value === null ? "—" : `${value}%`);
+      expect(p.querySelector(".tip")?.textContent).toContain(`CPU${percent(sample.cpuPct)}`);
+      expect(p.querySelector(".tip")?.textContent).toContain(`Memory${percent(sample.memPct)}`);
+    });
     within(panel("tLock")).getByText(NOT_TRACKED);
     within(panel("tStepBars")).getByText(NOT_TRACKED);
   });
@@ -881,9 +963,11 @@ describe("empty and failing telemetry", () => {
     expect(ci?.querySelector("b")?.getAttribute("title")).toBe(
       "No merged PRs with a known first-push CI result in the last 14 days.",
     );
-    expect(screen.getAllByText("~Cost")[0]?.parentElement?.querySelector(".v")?.textContent).toBe(
-      "—",
+    // the cost tile is the registry's figure, not this page's
+    const costTile = [...document.querySelectorAll(".kpi")].find(
+      (k) => k.querySelector(".lbl")?.textContent === "Cost · today",
     );
+    expect(costTile?.querySelector(".v")?.getAttribute("data-metric")).toBe("cost");
   });
 
   it("all-zero tokens show the empty state, not a flat chart", async () => {

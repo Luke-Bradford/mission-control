@@ -16,6 +16,7 @@ import {
   loopSteps,
   loopTemplate,
   loopTryText,
+  MAX_STATE_PILL_LENGTH,
   modelLine,
   needLine,
   needsLamp,
@@ -884,23 +885,72 @@ describe("seatStatus", () => {
     parked: null,
   });
 
+  it.each([
+    ["running", "Running"],
+    ["stalled", "Stalled"],
+    ["blocked", "Blocked"],
+    ["parked", "Parked"],
+    ["waiting", "Waiting"],
+    ["idle", "Idle"],
+    ["stopped", "Stopped"],
+    ["error", "Error"],
+  ] as const)("maps the %s engine state to the short %s pill", (hudState, label) => {
+    const status = seatStatus(crewRow({ hudState }));
+    expect(status.label).toBe(label);
+    expect(status.label.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
+  });
+
+  it.each([
+    ["working", "Idle"],
+    ["ci", "Watching"],
+    ["review", "Review"],
+    ["parked", "Parked"],
+    ["done", "Idle"],
+  ] as const)("maps the %s loop state to the short %s pill", (phase, label) => {
+    const status = seatStatus(seat({ loop: loop(phase) }));
+    expect(status.label).toBe(label);
+    expect(status.label.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
+  });
+
+  it("never gives a state pill more than ten characters or a pause reason", () => {
+    const status = seatStatus(
+      seat({
+        crewPause: { seats: ["guido-1"], reason: "Save tokens", at: NOW, by: "operator" },
+      }),
+    );
+    expect(status.label).toBe("Paused");
+    expect(status.label.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
+    expect(status.reason).toBe("Save tokens");
+  });
+
   it("an idle seat with a ci loop on an open run is waiting on CI", () => {
     expect(seatStatus(seat({ loop: loop("ci") }))).toEqual({
       label: SEAT_STATUS_LABEL.ci,
       tone: "neutral",
     });
-    expect(SEAT_STATUS_LABEL.ci).toBe("Waiting on CI");
+    expect(SEAT_STATUS_LABEL.ci).toBe("Watching");
   });
 
-  it("a review loop is In review", () => {
+  it("a review loop is Review", () => {
     expect(seatStatus(seat({ loop: loop("review") }))).toEqual({
-      label: "In review",
+      label: "Review",
       tone: "neutral",
     });
   });
 
-  it("a parked loop is Blocked, in warn", () => {
-    expect(seatStatus(seat({ loop: loop("parked") }))).toEqual({ label: "Blocked", tone: "warn" });
+  it("a parked loop is Parked, in warn", () => {
+    expect(seatStatus(seat({ loop: loop("parked") }))).toEqual({
+      label: "Parked",
+      tone: "warn",
+    });
+  });
+
+  it("keeps a blocked crew seat's reason for its tooltip", () => {
+    expect(seatStatus(seat({ hudState: "blocked", note: "Needs operator approval" }))).toEqual({
+      label: "Blocked",
+      tone: "warn",
+      reason: "Needs operator approval",
+    });
   });
 
   it("an idle seat between turns, with no loop or a working one, is Idle", () => {
