@@ -459,6 +459,7 @@ export const FLIGHT_TRIAGE_LABEL = {
   waiting: "Waiting for FLIGHT triage",
   handling: "FLIGHT is handling",
   missed: "FLIGHT hasn't triaged this",
+  down: "Waiting on FLIGHT — FLIGHT is down",
 } as const;
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
 export const OWNER_CONTROLLER = "controller" satisfies AttentionOwner;

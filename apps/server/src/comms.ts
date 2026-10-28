@@ -270,6 +270,35 @@ export function threadMessages(
     });
 }
 
+/**
+ * The unread lines an agent's thread raises in Needs you, by item kind: `tag`, its own `@CAPCOM`
+ * tags (FLIGHT's only when they ask a question), and `message`, its own direct-line questions
+ * (never FLIGHT's: its summaries are not needs). Only lines the agent wrote count, never another
+ * agent's line to it. A seat's `ask_operator` question is mirrored to Comms at the instant it is
+ * asked; that line is its `ask:` item alone. Shared by the attention builder and FLIGHT's brief.
+ */
+export function attentionChatter(
+  store: Store,
+  agentId: string,
+  crew: boolean,
+  /** The agent is FLIGHT. */
+  own: boolean,
+): { tag: CommsThreadMessage[]; message: CommsThreadMessage[] } {
+  let asked: Set<number> | undefined;
+  const mirrored = (m: CommsThreadMessage) => {
+    if (!m.id.startsWith("comms:") || m.at === null) return false;
+    asked ??= store.questionTimes(agentId);
+    return asked.has(m.at);
+  };
+  const lines = threadMessages(store, agentId, crew, "attention").filter(
+    (m) => !m.seen && m.from === agentId && !mirrored(m),
+  );
+  return {
+    tag: lines.filter((m) => m.tagged && (!own || flightQuestion(m.text))),
+    message: own ? [] : lines.filter((m) => m.direct && flightQuestion(m.text)),
+  };
+}
+
 /** Direct messages that need a decision, excluding punctuation in links and code. */
 export function flightQuestion(text: string): boolean {
   const prose = text.replace(/```[\s\S]*?```|`[^`]*`/g, " ").replace(/https?:\/\/\S+/g, " ");

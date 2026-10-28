@@ -33,6 +33,7 @@ function AgentNavRow({
   const since = Date.now() - 24 * 60 * 60 * 1000;
   const recent = messages.filter((message) => message.at !== null && message.at >= since).length;
   const unread = data?.unread ?? 0;
+  const direct = data?.directUnread ?? 0;
   const active = "agentId" in view && view.agentId === row.id;
   const status = seatStatus(row);
   return (
@@ -50,7 +51,7 @@ function AgentNavRow({
         <small className={recent === 0 ? "zero" : undefined} title={`${recent} messages in 24h`}>
           {recent}
         </small>
-        <CountBadges unread={unread} mentions={mentions} />
+        <CountBadges unread={unread} mentions={mentions} direct={direct} />
       </span>
     </button>
   );
@@ -58,11 +59,27 @@ function AgentNavRow({
 
 const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-function CountBadges({ unread = 0, mentions = 0 }: { unread?: number; mentions?: number }) {
+function CountBadges({
+  unread = 0,
+  mentions = 0,
+  direct = 0,
+}: {
+  unread?: number;
+  mentions?: number;
+  /** Unread replies to CAPCOM on the agent's direct line, its transcript included. */
+  direct?: number;
+}) {
   const unreadLabel = counted(unread, "unread message", "unread messages");
   const mentionsLabel = counted(mentions, "new mention", "new mentions");
+  const directLabel = counted(direct, "unread reply to you", "unread replies to you");
   return (
     <>
+      {direct > 0 && (
+        <span className="comms-unread-count comms-direct-count" title={directLabel}>
+          <span aria-hidden="true">↩{direct}</span>
+          <span className="sr-only">{directLabel}</span>
+        </span>
+      )}
       {unread > 0 && (
         <span className="comms-unread-count" title={unreadLabel}>
           <span aria-hidden="true">{unread}</span>

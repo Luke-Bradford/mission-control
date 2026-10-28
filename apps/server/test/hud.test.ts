@@ -2458,10 +2458,63 @@ describe("messages are not Needs you", () => {
       ["flight", "missed"],
       ["flight", "missed"],
     ]);
-    // FLIGHT down: nobody triages, and still nothing reaches Needs you
+    // FLIGHT down: nobody triages, it says so, and still nothing reaches Needs you
     store.upsertRun(run({ id: "r-flight-1", agentId: "flight-1", endedAt: NOW, status: "ok" }));
-    expect(chatter().map((i) => i.owner)).toEqual(["flight", "flight"]);
+    expect(chatter().map((i) => [i.owner, i.flightTriage])).toEqual([
+      ["flight", "down"],
+      ["flight", "down"],
+    ]);
   });
+
+  it("raises a seat's @CAPCOM line to FLIGHT under the seat only, never as FLIGHT's own", () => {
+    up("flight-1");
+    say(NOW - 8 * MIN, "guido-1", "flight-1", "@CAPCOM should I drop the table?");
+    expect(chatter().map((i) => [i.kind, i.agentId, i.owner])).toEqual([
+      ["tag", "guido-1", "flight"],
+    ]);
+  });
+
+  it.each([
+    ["tag", "guido-1", "crew", "@CAPCOM the API key is missing", "@CAPCOM and the secret too"],
+    [
+      "message",
+      "guido-1",
+      COMMS_CAPCOM,
+      "Which branch should I use?",
+      "Also, which base for the PR?",
+    ],
+  ] as const)(
+    "keeps FLIGHT's brief on a seat's %s for the operator while it writes again",
+    (kind, from, to, first, next) => {
+      up("flight-1");
+      say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
+      say(NOW - 8 * MIN, from, to, first);
+      const key = chatter()[0]?.key ?? "";
+      expect(chatter()).toEqual([expect.objectContaining({ kind, owner: "flight" })]);
+      store.addBrief({
+        key,
+        context: "GUIDO-1 needs the operator.",
+        ask: "Decide for GUIDO-1?",
+        recommendation: "Yes.",
+        options: [],
+        basis: "product direction",
+        at: NOW - 7 * MIN,
+        for: "operator",
+      });
+      // promoted by the brief, and still the same item after the seat writes again
+      expect(chatter()).toEqual([expect.objectContaining({ key, kind, owner: "operator" })]);
+      say(NOW - 5 * MIN, from, to, next);
+      expect(chatter()).toEqual([
+        expect.objectContaining({
+          key,
+          kind,
+          owner: "operator",
+          text: next,
+          brief: expect.objectContaining({ ask: "Decide for GUIDO-1?" }),
+        }),
+      ]);
+    },
+  );
 
   it("hands a seat's tag to the operator once FLIGHT briefs it for them", () => {
     up("flight-1");

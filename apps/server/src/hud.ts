@@ -73,7 +73,7 @@ import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
-import { flightQuestion, threadMessages } from "./comms.ts";
+import { attentionChatter } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -622,23 +622,21 @@ export function attentionItems(
     const own = agent.id === flightId;
     // with no FLIGHT seat, another agent's chatter has nobody to triage it but its Comms thread
     if (!own && flightId === null) continue;
-    const unread = threadMessages(store, agent.id, agent.kind === "crew", "attention").filter(
-      (m) =>
-        !m.seen &&
-        !(m.id.startsWith("comms:") && m.from === agent.id && store.askedAt(agent.id, m.at ?? -1)),
-    );
-    const tags = unread.filter((m) => m.tagged && (!own || flightQuestion(m.text)));
-    const questions = own ? [] : unread.filter((m) => m.direct && flightQuestion(m.text));
-    for (const [kind, messages] of [
-      ["tag", tags],
-      ["message", questions],
-    ] as const) {
+    const lines = attentionChatter(store, agent.id, agent.kind === "crew", own);
+    for (const kind of ["tag", "message"] as const) {
+      const messages = lines[kind];
+      const first = messages[0];
       const last = messages.at(-1);
-      if (!last) continue;
+      if (!first || !last) continue;
+      // Another agent's item is keyed on its first unread line, so a brief stays attached while it
+      // writes again until the thread is read. FLIGHT's own question is the operator's to ack, and
+      // each new one is a new ask.
+      const keyed = own ? last : first;
       items.push({
-        // another agent's line is routed to FLIGHT below, once its brief is read
+        // routed below: FLIGHT's question stays the operator's; another agent's line is FLIGHT's
+        // unless FLIGHT briefs it for the operator
         owner: OWNER_OPERATOR,
-        key: `${kind}:${agent.id}:${last.id}`,
+        key: `${kind}:${agent.id}:${keyed.id}`,
         kind,
         agentId: agent.id,
         repoId: agent.repoId,
@@ -810,11 +808,13 @@ export function attentionItems(
       const item = route(i);
       // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
       // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
+      // With FLIGHT down it is still FLIGHT's (#758 adds the one "FLIGHT is not triaging" item).
       const chatter = (i.kind === "tag" || i.kind === "message") && !ownReply(i, flightId);
       const briefed = item.brief !== undefined && item.brief.for !== "flight";
-      return chatter && !briefed && item.owner === OWNER_OPERATOR
+      if (!chatter || briefed || item.owner !== OWNER_OPERATOR) return item;
+      return live
         ? { ...item, owner: OWNER_FLIGHT }
-        : item;
+        : { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     });
   const partition = partitionAttention(store, result, acks);
   return includeHeld ? [...partition.items, ...partition.held] : partition.items;

@@ -363,6 +363,9 @@ it("counts only replies after CAPCOM's latest direct message and clears them whe
     // narration on the direct line is counted on the thread, not raised as a Needs-you item
     expect(f.direct()).toEqual(["First answer", "Second answer"]);
     expect(f.needs()).toEqual([]);
+    const directUnread = async () =>
+      (await app.inject({ url: "/api/comms/agents/guido-1" })).json().directUnread;
+    expect(await directUnread()).toBe(2);
     const snapshot = (await app.inject({ url: "/api/comms/guido-1" })).json();
     expect(snapshot.messages.map((m: { direct: boolean }) => m.direct)).toEqual([
       false,
@@ -380,6 +383,7 @@ it("counts only replies after CAPCOM's latest direct message and clears them whe
       ).statusCode,
     ).toBe(200);
     expect(f.direct()).toEqual([]);
+    expect(await directUnread()).toBe(0);
     f.store.addComms({
       from: "CAPCOM",
       to: "guido-1",

@@ -153,11 +153,12 @@ export function NeedsList({
   const [error, setError] = useState<string | null>(null);
   // The header's Needs you set: the whole inbox, one per key (attention.ts).
   const list = sortNeeds(needsYouItems(items));
-  const handled = sortNeeds(
-    (items ?? []).filter(
-      (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
-    ),
+  const others = (items ?? []).filter(
+    (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
   );
+  // FLIGHT's items while it is down: nobody is handling them (#758 adds the one item for this)
+  const flightDown = sortNeeds(others.filter((i) => i.flightTriage === "down"));
+  const handled = sortNeeds(others.filter((i) => i.flightTriage !== "down"));
   const unacked = list.filter((i) => !i.acked);
   // Acknowledging a channel item does not mark its messages read.
   const ackable = unacked.map((i) => i.key);
@@ -402,6 +403,23 @@ export function NeedsList({
           ))}
         </details>
       )}
+      {flightDown.length > 0 && (
+        <details id="cFlightDown" className="guard">
+          <summary>
+            {FLIGHT_TRIAGE_LABEL.down} · {flightDown.length}
+          </summary>
+          {flightDown.map((i) => (
+            <div key={i.key} className="nrow" data-kind={i.kind}>
+              <div>
+                <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
+                <Expandable lines={2}>
+                  <NeedText item={i} now={now} lock={lock} full />
+                </Expandable>
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
       {handled.length > 0 && (
         <details id="cHandled" className="guard">
           <summary>Being handled · {handled.length}</summary>
@@ -409,7 +427,11 @@ export function NeedsList({
             <div key={i.key} className="nrow" data-kind={i.kind}>
               <div>
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
-                <span className="xs muted">{ownerLabel(itemOwner(i))}</span>{" "}
+                <span className="xs muted">
+                  {i.flightTriage === "missed"
+                    ? FLIGHT_TRIAGE_LABEL.missed
+                    : ownerLabel(itemOwner(i))}
+                </span>{" "}
                 <Expandable lines={2}>
                   <NeedText item={i} now={now} lock={lock} full />
                 </Expandable>
