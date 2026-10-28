@@ -32,8 +32,9 @@ export function codexSeatConfig(
   mode: CrewMode,
   mcpUrl: string,
   tmpDir: string,
+  profileDenies = sandboxReadDenies(i),
 ): string {
-  const denied = sandboxReadDenies(i);
+  const denied = profileDenies;
   requireCodexProfileDeny(denied);
   for (const path of [
     i.cwd,

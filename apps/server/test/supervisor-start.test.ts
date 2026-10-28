@@ -2785,6 +2785,9 @@ import(${JSON.stringify(fixture)});
     expect(seat).toMatchObject({ state: "error", reason: CANNOT_START, runId: expect.any(String) });
     const runId = seat?.runId ?? "";
     expect(store.run(runId)).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    expect(store.guardHits(0)).toContainEqual(
+      expect.objectContaining({ runId, rule: "codex-seat-floor" }),
+    );
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm the seat floor"));
     // Keeper cleanup can finish after the refusal is recorded on a loaded runner.

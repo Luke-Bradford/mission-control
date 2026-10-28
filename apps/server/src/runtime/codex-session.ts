@@ -6,6 +6,7 @@ import {
   CANNOT_START,
   CODEX_COMMAND,
   CODEX_PROJECT_DOC_CONFIG,
+  CODEX_SEAT_EFFECTIVE_CONFIG,
   CODEX_SEAT_PROFILE,
   CONTROL_TIMEOUT_MS,
   isObj,
@@ -127,6 +128,27 @@ const rpcId = (value: unknown): value is RpcId =>
   typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 const tokens = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+
+class CodexSeatFloorError extends Error {}
+
+function seatConfigMatches(value: unknown): boolean {
+  if (!isObj(value)) return false;
+  const servers = value.mcp_servers;
+  if (
+    !isObj(servers) ||
+    Object.keys(servers).sort().join("\n") !== CODEX_SEAT_EFFECTIVE_CONFIG.mcpServers.join("\n")
+  )
+    return false;
+  const empty = (v: unknown) => v === undefined || (isObj(v) && Object.keys(v).length === 0);
+  if (!empty(value.hooks) || !empty(value.tools)) return false;
+  const shell = value.shell_environment_policy;
+  return (
+    isObj(shell) &&
+    Array.isArray(shell.exclude) &&
+    shell.exclude.length === CODEX_SEAT_EFFECTIVE_CONFIG.shellEnvironment.exclude.length &&
+    shell.exclude.every((v, n) => v === CODEX_SEAT_EFFECTIVE_CONFIG.shellEnvironment.exclude[n])
+  );
+}
 
 export function startCodexSession(i: CodexSessionInput): CrewSession {
   const outbox = readOutbox(i.outboxPath, i.resumeThreadId === null ? undefined : i.transcriptPath);
@@ -610,6 +632,12 @@ function codexSession(
     failed = true;
     const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
     i.log?.(why);
+    if (e instanceof CodexSeatFloorError)
+      emit({
+        kind: "guard-refusal",
+        rule: "codex-seat-floor",
+        text: "effective Codex seat settings differ",
+      });
     emit({ kind: "stderr", text: why });
     finish();
     void transport.close();
@@ -643,7 +671,10 @@ function codexSession(
       result.thread.id === "" ||
       (resumeId !== null && result.thread.id !== resumeId)
     )
-      throw new Error("Codex thread did not confirm the seat floor");
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
+    const effective = await request("config/read", { cwd: i.cwd });
+    if (!isObj(effective) || !seatConfigMatches(effective.config))
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
     init(result.thread.id);
   };
 

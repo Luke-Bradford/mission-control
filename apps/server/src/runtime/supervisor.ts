@@ -1063,6 +1063,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.lastStderrAt = now();
         log(`${l.info.seat.id}: ${e.text}`);
         break;
+      case "guard-refusal":
+        store.addGuardHit({
+          agentId: l.info.seat.id,
+          runId: l.run.id,
+          rule: e.rule,
+          text: e.text,
+          at: now(),
+        });
+        bus.emit("guard");
+        break;
       case "exit":
         onExit(l, e);
         break;

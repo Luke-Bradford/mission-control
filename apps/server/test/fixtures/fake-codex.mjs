@@ -123,6 +123,19 @@ rl.on("line", (line) => {
     }
     notify("thread/started", { thread: result.thread });
     say({ id, result });
+  } else if (method === "config/read") {
+    const config = {
+      mcp_servers: { mc: {} },
+      hooks: {},
+      tools: {},
+      shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
+    };
+    const bad = configured.badConfig;
+    if (bad === "mcp") config.mcp_servers.evil = {};
+    if (bad === "hooks") config.hooks = { PreToolUse: [] };
+    if (bad === "execPolicy") config.tools = { shell: { enabled: true } };
+    if (bad === "shell") config.shell_environment_policy = { exclude: [] };
+    say({ id, result: { config } });
   } else if (method === "turn/start" || method === "turn/steer") {
     let scenario = configured;
     try {

@@ -849,6 +849,14 @@ export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
 /** Apply at thread start/resume too: the run config alone does not exclude project docs. */
 export const CODEX_PROJECT_DOC_CONFIG = Object.freeze({ project_doc_max_bytes: 0 });
 
+/** Security-sensitive settings which must be owned exclusively by the hub. */
+export const CODEX_SEAT_EFFECTIVE_CONFIG = Object.freeze({
+  mcpServers: [MC_MCP_SERVER],
+  hooks: Object.freeze({}),
+  execPolicy: Object.freeze({}),
+  shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
+});
+
 /** TOML strings in a seat config never need escaping; refuse input that would. */
 export function tomlString(value: string): string {
   if (
@@ -1103,6 +1111,8 @@ export type SessionEvent =
   | { kind: "tool-result"; toolUseId: string }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
+  /** The Codex app-server reported a seat configuration which the hub did not create. */
+  | { kind: "guard-refusal"; rule: "codex-seat-floor"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };

@@ -127,6 +127,7 @@ describe("Codex session", () => {
       "initialize",
       "initialized",
       "thread/start",
+      "config/read",
       "turn/start",
     ]);
     expect(messages[2].params).toEqual({
@@ -179,6 +180,21 @@ describe("Codex session", () => {
     expect(events.some((e) => e.kind === "init")).toBe(false);
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
   });
+
+  it.each(["mcp", "hooks", "execPolicy", "shell"])(
+    "closes before the first turn when effective %s settings differ",
+    async (badConfig) => {
+      const { session, events } = start({ badConfig });
+      session.send("must never run");
+      await session.ready;
+      await until(() =>
+        expect(events).toContainEqual(
+          expect.objectContaining({ kind: "guard-refusal", rule: "codex-seat-floor" }),
+        ),
+      );
+      expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
+    },
+  );
 
   it("does not treat the old fixture's permissionProfile as confirmation", async () => {
     const { session, events } = start({ legacyPermissionProfile: true });

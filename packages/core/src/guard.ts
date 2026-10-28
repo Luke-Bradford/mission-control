@@ -9,6 +9,8 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 export const GUARD_RULES = {
   background: "Commands must stay attached to the seat's current tool call",
   "codex-allowlist": "The Codex request is outside the seat’s area, protected files or sandbox",
+  "codex-seat-floor":
+    "The Codex thread's effective configuration differs from the hub seat profile",
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
