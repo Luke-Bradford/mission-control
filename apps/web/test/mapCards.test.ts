@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   agentCard,
   badgeModels,
+  changeTotals,
+  factLine,
   isStuck,
+  isWorking,
   recentFailures,
   uncheckedNotes,
 } from "../src/map/cards.ts";
@@ -17,6 +20,40 @@ function seat(): MapSeat {
   s.badges = { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null };
   return s;
 }
+
+describe("who the stage shows, and its one line", () => {
+  const now = 1_000_000;
+  it("shows a seat live now or with an unmerged change, and folds the rest", () => {
+    const s = seat();
+    s.state = "idle";
+    s.calls = [];
+    s.since = now - 120_000;
+    s.scope = { read: ["src/main.ts"], modified: [] };
+    expect(isWorking(s, now)).toBe(false);
+    s.scope.modified = [{ file: "src/main.ts", add: 1, rem: 0, source: "diff" }];
+    expect(isWorking(s, now)).toBe(true);
+    s.scope.modified = [];
+    s.since = now - 30_000; // within a minute of its last turn
+    expect(isWorking(s, now)).toBe(true);
+    s.since = now - 120_000;
+    s.calls = [{ tool: "Read", detail: "x", files: [], since: now }];
+    expect(isWorking(s, now)).toBe(true);
+  });
+  it("reads call sign · ticket · files · +added −removed, counting each file once", () => {
+    const s = seat();
+    s.scope.modified = [
+      { file: "a.ts", add: 10, rem: 2, source: "diff" },
+      { file: "b.ts", add: 5, rem: 0, source: "churn" },
+    ];
+    expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #7 · 2 files · +15 −2");
+    expect(changeTotals(s)).toEqual({ files: 2, add: 15, rem: 2 });
+    s.ticket = null;
+    s.scope.modified = [{ file: "a.ts", add: 1, rem: 1, source: "diff" }];
+    expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1");
+    s.scope.modified = [];
+    expect(factLine(s)).toBe("GUIDO-1 · no changes yet");
+  });
+});
 
 describe("unchecked conflict notes", () => {
   it("names each unmerged branch's unchecked reason, and the branch when the seat has several", () => {

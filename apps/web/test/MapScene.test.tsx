@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { orbPlacement } from "../src/map/agents.ts";
 import { renderer } from "./mapRendererMock.ts";
 
-const { MapScene } = await import("../src/map/MapScene.tsx");
+const { MapScene, fileTip } = await import("../src/map/MapScene.tsx");
 
 import { applyDelta, layoutTree } from "../src/map/model.ts";
 import type { MotionEvent } from "../src/map/motion.ts";
@@ -84,8 +84,16 @@ it("keeps rotation static for reduced motion and renders named severity pins", (
   const { unmount } = render(<MapScene {...props} snapshot={snapshot} rotate />);
   act(() => vi.advanceTimersByTime(1000));
   expect(renderer.render).toHaveBeenCalledOnce();
+  // one small mark per file, its words in the tooltip; a click opens the file
+  const mark = screen.getByRole("button", { name: /^3 review findings on src\/main\.ts/ });
+  expect(mark.textContent).toBe("▲");
   for (const severity of ["Critical", "Important", "Minor"])
-    expect(screen.getByText(`▲ ${severity}`)).toBeTruthy();
+    expect(mark.getAttribute("title")).toContain(`${severity} · line 12 · Empty input throws`);
+  fireEvent.click(mark);
+  expect(props.onSelect).toHaveBeenCalledWith("src/main.ts");
+  // the agent's one fact line; its live state is the tooltip
+  const label = screen.getByRole("button", { name: /^GUIDO-1 · #7 · 1 file · \+12 −3$/ });
+  expect(label.getAttribute("title")).toMatch(/^reading src\/util\.ts/);
   unmount();
 });
 
@@ -136,7 +144,7 @@ it("selects an orb without moving the camera, zooms explicitly, and resets Home"
   act(() => vi.advanceTimersByTime(100));
   const camera = renderer.render.mock.lastCall?.[1] as import("three").Camera;
   const home = camera.position.clone();
-  fireEvent.click(screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^GUIDO-1 · #7 · 1 file · \+12 −3$/ }));
   expect(onAgentSelect).toHaveBeenCalledWith("GUIDO-1");
   rerender(<MapScene {...props} agent="GUIDO-1" />);
   act(() => vi.advanceTimersByTime(100));
@@ -276,7 +284,7 @@ it("releases labels, instance resources and geometries on seat removal and unmou
     });
     return disposed;
   };
-  const oldLabel = screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  const oldLabel = screen.getByRole("button", { name: /^GUIDO-1 · #7 · 1 file · \+12 −3$/ });
   const oldResources = watch();
   rerender(
     <MapScene {...props} snapshot={{ ...props.snapshot, seats: props.snapshot.seats.slice(1) }} />,
@@ -350,7 +358,7 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   act(() => vi.advanceTimersByTime(40));
   const canvas = document.querySelector("canvas") as HTMLCanvasElement;
   const without = { ...props.snapshot, seats: props.snapshot.seats.slice(1) };
-  const label = () => screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  const label = () => screen.getByRole("button", { name: /^GUIDO-1 · #7 · 1 file · \+12 −3$/ });
   act(() => label().focus());
   rerender(<MapScene {...props} snapshot={without} />);
   await act(async () => {
@@ -373,4 +381,28 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   expect(document.activeElement).toBe(outside);
   outside.remove();
   unmount();
+});
+
+it("says in a file's tooltip what it is, who changed or read it, and its findings and conflicts", () => {
+  const node = nodes.find((n) => n.path === "src/main.ts");
+  if (!node) throw new Error("fixture node missing");
+  const snapshot: MapSnapshot = {
+    ...structuredClone(mapSnapshotFixture),
+    conflicts: [
+      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
+    ],
+  };
+  expect(fileTip(node, { snapshot, names: { "GUIDO-1": "GUIDO-1" } }).split("\n")).toEqual([
+    "src/main.ts",
+    "GUIDO-1 +12 −3 (edit churn)",
+    "▲ 1 review finding",
+    "◆ conflict: a / b",
+  ]);
+  const util = nodes.find((n) => n.path === "src/util.ts");
+  if (!util) throw new Error("fixture node missing");
+  expect(fileTip(util, { snapshot }).split("\n")).toEqual([
+    "src/util.ts",
+    "GUIDO-1 read it",
+    "GUIDO-1 is on it now",
+  ]);
 });

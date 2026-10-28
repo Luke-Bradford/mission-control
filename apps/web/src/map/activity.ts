@@ -2,6 +2,7 @@ import type { MapSnapshot } from "@mc/core";
 import * as THREE from "three";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { haloSize, orbPlacement, type Position, stateLabel } from "./agents.ts";
+import { factLine } from "./cards.ts";
 import type { MapNode } from "./model.ts";
 import {
   arcPoint,
@@ -18,6 +19,8 @@ import {
 
 export interface ActivityProps {
   snapshot: MapSnapshot;
+  /** Each seat's call sign (the crew's display name), for its fact line. */
+  names?: Record<string, string>;
   indices: Record<string, number>;
   events?: MotionEvent[];
   epoch?: number;
@@ -171,14 +174,11 @@ export function activityLayer(
       label.className = "map-orb-label";
       // the agent cards carry the same selection in the tab order; an orb label is for the pointer
       label.tabIndex = -1;
-      label.textContent = `${seat.seat}${!placement.docked && seat.ticket !== null ? ` · #${seat.ticket}` : ""} · ${stateLabel(seat, Date.now(), memory.current.ended[seat.seat])}${placement.more ? ` · +${placement.more} more` : ""}`;
-      label.title = seat.calls.length
-        ? "Calls in flight"
-        : placement.docked
-          ? "Docked"
-          : "Position: last observed accesses";
+      // one fact line: who, which ticket, how much changed; the live state is its tooltip
+      label.textContent = factLine(seat, props.names?.[seat.seat]);
+      label.title = `${stateLabel(seat, Date.now(), memory.current.ended[seat.seat])}${placement.more ? ` · +${placement.more} more files in flight` : ""}`;
       label.style.color = colorOf(seat.seat).getStyle();
-      label.style.opacity = String(dim(seat.seat) * (placement.docked ? 0.5 : 1));
+      label.style.opacity = String(dim(seat.seat) * (placement.docked ? 0.75 : 1));
       label.setAttribute("aria-pressed", String(props.agent === seat.seat));
       label.onclick = () =>
         current?.onAgentSelect?.(current.agent === seat.seat ? null : seat.seat);
@@ -194,12 +194,9 @@ export function activityLayer(
     for (const old of previous.values())
       if (!agents.some((a) => a.id === old.id)) old.label.remove();
     for (const marker of markers) marker.el.remove();
+    // CAPCOM, HUB and other message ends are named only while a message arc is in the air
     const ids = [
-      ...new Set([
-        "CAPCOM",
-        "HUB",
-        ...sampleMotion(memory.current, Date.now()).arcs.flatMap((a) => [a.from, a.to]),
-      ]),
+      ...new Set(sampleMotion(memory.current, Date.now()).arcs.flatMap((a) => [a.from, a.to])),
     ];
     markers = ids
       .filter((id) => !agents.some((a) => a.id === id))

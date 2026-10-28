@@ -15,6 +15,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 const snapshot = (): MapSnapshot => structuredClone(mapSnapshotFixture);
+/** A working row shows its badges and details once selected (a click also frames its work). */
+const openCard = (name = "GUIDO-1") =>
+  fireEvent.click(
+    within(screen.getByRole("article", { name })).getAllByRole("button")[0] as HTMLElement,
+  );
 const message = (overrides: Partial<CommsThreadMessage>): CommsThreadMessage => ({
   id: "comms:1",
   at: 1000,
@@ -30,6 +35,7 @@ const message = (overrides: Partial<CommsThreadMessage>): CommsThreadMessage => 
 
 it("renders fixture title, folder, counts and the run's actual context window", () => {
   render(<CrewMapView snapshot={snapshot()} indices={{ "GUIDO-1": 4 }} />);
+  openCard();
   const card = screen.getByRole("article", { name: "GUIDO-1" });
   expect(card.textContent).toContain("Handle empty input");
   expect(card.textContent).toContain("Branch folder: src");
@@ -50,6 +56,7 @@ it.each([
   "opens %s in the shared drawer, and restores focus on Escape",
   async (badge, title, detail) => {
     render(<CrewMapView snapshot={snapshot()} />);
+    openCard();
     const button = screen.getByRole("button", { name: badge });
     expect(button.textContent).toContain("1m ago");
     fireEvent.click(button);
@@ -75,12 +82,8 @@ it("shows parked waiting data and marks the state in warn when the wait exceeds 
     stopped: false,
   };
   render(<CrewMapView snapshot={s} />);
+  openCard();
   expect(screen.getByText(/Stuck ·/).className).toContain("stuck");
-  fireEvent.click(
-    within(screen.getByRole("article", { name: "GUIDO-1" })).getByRole("button", {
-      name: /Stuck/,
-    }),
-  );
   fireEvent.click(screen.getByRole("button", { name: /Waiting: parked · Needs CAPCOM · 15m ago/ }));
   expect(screen.getByRole("dialog", { name: "Waiting" }).textContent).toContain("Needs CAPCOM");
 });
@@ -92,6 +95,7 @@ it("filters pending-question headers by lane and ticket", () => {
     { id: 3, from: "RETRO-1", to: "GUIDO-1", ticket: null, since: 2500 },
   );
   render(<CrewMapView snapshot={s} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /Questions: 3/ }));
   const drawer = screen.getByRole("dialog", { name: "Conversation lane" });
   expect(drawer.textContent).toContain("Question 1");
@@ -128,6 +132,7 @@ it("loads read-only lane messages oldest first and filters string tickets alongs
     { id: 3, from: "RETRO-1", to: "GUIDO-1", ticket: null, since: 2500 },
   );
   const { rerender } = render(<CrewMapView snapshot={s} />);
+  openCard();
   expect(fetch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /Questions: 3/ }));
   expect(screen.getByRole("status").textContent).toContain("Loading conversation");
@@ -175,6 +180,7 @@ it("shows a conversation load error while retaining the pending-question header"
     "/api/comms/GUIDO-1": () => ({ status: 503, body: { error: "Comms unavailable" } }),
   });
   render(<CrewMapView snapshot={snapshot()} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /Questions: 1/ }));
   expect((await screen.findByRole("alert")).textContent).toContain("Comms unavailable");
   expect(screen.getByRole("dialog").textContent).toContain("Question 1 · #7 · awaiting reply");
@@ -182,6 +188,7 @@ it("shows a conversation load error while retaining the pending-question header"
 
 it("shows an empty conversation without fabricating bodies from pending-question metadata", async () => {
   render(<CrewMapView snapshot={snapshot()} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /Questions: 1/ }));
   expect(await screen.findByText("No messages in this lane.")).toBeTruthy();
   expect(screen.getByRole("dialog").textContent).toContain("Question 1 · #7 · awaiting reply");
@@ -192,6 +199,7 @@ it("keeps only the latest ticket review and updates an open drawer from new snap
   s.findings.push({ ...s.findings[0], round: 0, summary: "Old review" });
   s.findings.push({ ...s.findings[0], ticket: 99, summary: "Other ticket" });
   const { rerender } = render(<CrewMapView snapshot={s} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /Review round 1:/ }));
   const drawer = screen.getByRole("dialog", { name: "Review findings" });
   expect(drawer.textContent).not.toContain("Old review");
@@ -218,6 +226,7 @@ it("updates duplicate-location findings independently without duplicate React ke
     { ...s.findings[0], scenario: "Second scenario", fix: "Second fix" },
   ];
   const { rerender } = render(<CrewMapView snapshot={s} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /Review round 1:/ }));
   const drawer = screen.getByRole("dialog");
   expect(drawer.textContent).toContain("First scenario");
@@ -234,7 +243,7 @@ it("updates duplicate-location findings independently without duplicate React ke
   ).toEqual([]);
 });
 
-it("selects and dims cards without moving the camera; docked cards are one line until selected", () => {
+it("folds idle and stopped seats into one line; selecting one opens it without moving the camera", async () => {
   const s = snapshot();
   s.seats.push({
     ...structuredClone(s.seats[0]),
@@ -242,20 +251,45 @@ it("selects and dims cards without moving the camera; docked cards are one line 
     state: "idle",
     since: 0,
     calls: [],
+    scope: { read: [], modified: [] },
   });
   render(<CrewMapView snapshot={s} />);
-  const docked = screen.getByRole("article", { name: "RETRO-1" });
+  await screen.findByText("3D scene");
+  const scene = () => vi.mocked(MapScene).mock.lastCall?.[0];
+  // the stage draws the working agent only
+  expect(scene()?.snapshot.seats.map((seat) => seat.seat)).toEqual(["GUIDO-1"]);
+  const fold = screen.getByText(/1 idle or stopped · RETRO-1/).closest("details") as HTMLElement;
+  expect(fold.hasAttribute("open")).toBe(false);
+  const docked = within(fold).getByRole("article", { name: "RETRO-1" });
   expect(docked.textContent).toBe("RETRO-1idle 1m⌖");
   const button = within(docked).getByRole("button", { name: /idle/ });
   fireEvent.click(button);
   expect(button.getAttribute("aria-pressed")).toBe("true");
+  expect(fold.hasAttribute("open")).toBe(true);
   expect(docked.textContent).toContain("Handle empty input");
   expect(screen.getByRole("article", { name: "GUIDO-1" }).className).toContain("dim");
+  expect(scene()?.agentFocus).toBeNull();
+});
+
+it("says nobody is working, with every seat folded, when no seat is live or has changes", () => {
+  const s = snapshot();
+  s.seats[0] = {
+    ...s.seats[0],
+    state: "stopped",
+    since: 0,
+    calls: [],
+    recent: [],
+    scope: { read: [], modified: [] },
+  } as (typeof s.seats)[number];
+  render(<CrewMapView snapshot={s} />);
+  expect(screen.getByText(/No agent is working in this repo right now/)).toBeTruthy();
+  expect(screen.getByText(/1 idle or stopped · GUIDO-1/)).toBeTruthy();
 });
 
 it("focuses the agents heading on close when the badge opener disappears", async () => {
   const s = snapshot();
   const { rerender } = render(<CrewMapView snapshot={s} />);
+  openCard();
   const opener = screen.getByRole("button", { name: /1 refused in 10 min/ });
   fireEvent.click(opener);
   const next = snapshot();
@@ -273,6 +307,7 @@ it("focuses the agents heading on close when the badge opener disappears", async
 it("closes the badge drawer and restores fallback focus when its seat leaves the snapshot", async () => {
   const s = snapshot();
   const { rerender } = render(<CrewMapView snapshot={s} />);
+  openCard();
   const opener = screen.getByRole("button", { name: /1 refused in 10 min/ });
   fireEvent.click(opener);
   rerender(<CrewMapView snapshot={{ ...s, seats: [] }} />);
@@ -307,6 +342,7 @@ it("omits context with no reported window, and treats unparsed tests and empty C
   s.seats[0].context = { total: 12000, window: null };
   s.seats[0].badges.tests = { runner: null, status: "unknown", at: 1000, editedSince: false };
   render(<CrewMapView snapshot={s} />);
+  openCard();
   expect(screen.queryByRole("meter")).toBeNull();
   expect(screen.getByRole("button", { name: /Local tests: unknown/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /CI @aaaaaaaa: unknown/ }));
@@ -317,6 +353,7 @@ it("renders untrusted reasons as inert text and replaces the badge drawer when a
   const s = snapshot();
   s.seats[0].badges.failures[0].why = '<img src=x onerror="alert(1)">';
   render(<CrewMapView snapshot={s} />);
+  openCard();
   fireEvent.click(screen.getByRole("button", { name: /1 refused in 10 min/ }));
   const drawer = screen.getByRole("dialog");
   expect(drawer.textContent).toContain('<img src=x onerror="alert(1)">');
@@ -329,25 +366,28 @@ it("renders untrusted reasons as inert text and replaces the badge drawer when a
   );
 });
 
-it("shares card and orb selection with the scene, and sends zoom only from the card control", async () => {
+it("frames an agent's work when its row is clicked; an orb selects it without moving the camera", async () => {
   render(<CrewMapView snapshot={snapshot()} />);
   await screen.findByText("3D scene");
   const scene = () => vi.mocked(MapScene).mock.lastCall?.[0];
   const card = screen.getByRole("article", { name: "GUIDO-1" });
-  fireEvent.click(within(card).getByRole("button", { name: /GUIDO-1#7/ }));
+  const row = within(card).getByRole("button", { name: /GUIDO-1#7/ });
+  expect(row.textContent).toBe("GUIDO-1#71 file · +12 −3reading src/util.ts 1m");
+  fireEvent.click(row);
   expect(scene()?.agent).toBe("GUIDO-1");
-  expect(scene()?.agentFocus).toBeNull();
-  act(() => scene()?.onAgentSelect?.(null));
-  expect(
-    within(card)
-      .getByRole("button", { name: /GUIDO-1#7/ })
-      .getAttribute("aria-pressed"),
-  ).toBe("false");
-  fireEvent.click(screen.getByRole("button", { name: "Zoom to GUIDO-1" }));
   expect(scene()?.agentFocus?.seat).toBe("GUIDO-1");
+  // deselecting leaves the camera where it is
+  fireEvent.click(row);
+  expect(scene()?.agent).toBeNull();
+  expect(scene()?.agentFocus?.request).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Home view" }));
   expect(scene()?.agentFocus).toBeNull();
+  act(() => scene()?.onAgentSelect?.("GUIDO-1"));
+  expect(row.getAttribute("aria-pressed")).toBe("true");
+  expect(scene()?.agentFocus).toBeNull();
   expect(scene()?.home).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "Whole repo" }));
+  expect(scene()?.overview).toBe(1);
 });
 
 it("opens an arc's exact conversation pair and ticket even without a pending question", async () => {
@@ -363,6 +403,7 @@ it("opens an arc's exact conversation pair and ticket even without a pending que
     },
   });
   render(<CrewMapView snapshot={s} />);
+  openCard();
   await screen.findByText("3D scene");
   const opener = screen.getByRole<HTMLButtonElement>("button", { name: "Zoom to GUIDO-1" });
   act(() =>
@@ -393,6 +434,7 @@ it.each(["CAPCOM", "HUB", "MC"])(
       },
     });
     render(<CrewMapView snapshot={snapshot()} />);
+    openCard();
     await screen.findByText("3D scene");
     act(() =>
       vi
@@ -418,6 +460,7 @@ it("translates the FLIGHT display alias to its configured thread id", async () =
     },
   });
   render(<CrewMapView snapshot={s} />);
+
   await screen.findByText("3D scene");
   act(() =>
     vi

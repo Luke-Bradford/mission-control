@@ -1,4 +1,4 @@
-import type { MapSeat, MapSnapshot } from "@mc/core";
+import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
 import { stateLabel } from "./agents.ts";
 import { isDocked } from "./model.ts";
 
@@ -161,4 +161,33 @@ export function questionLanes(seat: MapSeat) {
       questions: seat.badges.questions.filter((q) => JSON.stringify([q.from, q.to].sort()) === key),
     }),
   );
+}
+
+/**
+ * A seat the stage shows: live now (a call in flight, a running turn, or less than a minute since
+ * one), or carrying an unmerged branch with changes. Everyone else folds into the rail's idle line.
+ */
+export function isWorking(seat: MapSeat, now: number): boolean {
+  return !isDocked(seat, now) || seat.scope.modified.length > 0;
+}
+
+/** What a seat has changed on its unmerged branches: distinct files, lines added and removed. */
+export function changeTotals(seat: MapSeat): { files: number; add: number; rem: number } {
+  const files = new Set(seat.scope.modified.map((c) => c.file));
+  return {
+    files: files.size,
+    add: seat.scope.modified.reduce((n, c) => n + c.add, 0),
+    rem: seat.scope.modified.reduce((n, c) => n + c.rem, 0),
+  };
+}
+
+/** The stage's one line per working agent: `GUIDO-CX · #698 · 12 files · +77 −30`. */
+export function factLine(seat: MapSeat, callSign = seatCallSign(seat.seat)): string {
+  const { files, add, rem } = changeTotals(seat);
+  return [
+    callSign,
+    ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
+    files ? `${files} file${files === 1 ? "" : "s"}` : "no changes yet",
+    ...(files ? [`+${add} −${rem}`] : []),
+  ].join(" · ");
 }

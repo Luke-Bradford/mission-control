@@ -157,11 +157,14 @@ describe("Map page", () => {
     });
     at("/map/sample");
     await screen.findByText("3D scene");
-    expect(screen.getByText(/No crew activity recorded on sample right now/)).toBeTruthy();
-    expect(screen.getByText(/2 files at origin\/HEAD, each its own node/)).toBeTruthy();
+    expect(screen.getByText(/No agent is working in this repo right now/)).toBeTruthy();
+    expect(screen.getByText(/1 idle or stopped · GUIDO-1/)).toBeTruthy();
+    // the full key, file count included, opens behind "?"
+    fireEvent.click(screen.getByRole("button", { name: "Map key" }));
+    expect(screen.getByRole("note").textContent).toContain("2 files at origin/HEAD");
   });
 
-  it("names the branches whose conflicts went unchecked, on the seat's card too", async () => {
+  it("names the branches whose conflicts went unchecked on the seat's card", async () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
@@ -173,12 +176,9 @@ describe("Map page", () => {
     });
     at("/map/sample");
     await screen.findByText("3D scene");
-    expect(
-      screen.getByText(/Conflicts not checked for feature\/7-empty-input \(head not fetched\)\./),
-    ).toBeTruthy();
-    expect(screen.getByRole("article", { name: "GUIDO-1" }).textContent).toContain(
-      "Conflicts not checked: head not fetched",
-    );
+    const card = screen.getByRole("article", { name: "GUIDO-1" });
+    fireEvent.click(within(card).getAllByRole("button")[0] as HTMLElement);
+    expect(card.textContent).toContain("Conflicts not checked: head not fetched");
   });
 
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {

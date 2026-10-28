@@ -24,7 +24,8 @@ const KINDS: [className: string, rank: number, nudge: boolean][] = [
   ["map-arc", 1, false],
   // area names hold their place; pins and change labels lift around them
   ["map-area", 2, false],
-  ["map-pin", 3, true],
+  // findings and conflicts: small marks that stay on their file, hidden if something better is there
+  ["map-mark", 3, false],
   ["map-change", 4, true],
 ];
 

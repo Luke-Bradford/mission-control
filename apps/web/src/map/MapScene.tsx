@@ -1,4 +1,4 @@
-import type { MapSnapshot } from "@mc/core";
+import { type MapSnapshot, seatCallSign } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -21,6 +21,8 @@ type Props = ActivityProps & {
   focus: string | null;
   home: number;
   rotate: boolean;
+  /** Bumped to frame the whole tree; `home` frames the active work (the tree when there is none). */
+  overview?: number;
   selected: string | null;
   indices: Record<string, number>;
   onSelect: (path: string) => void;
@@ -215,17 +217,50 @@ function mountStage(
   };
 
   let atHome = true;
-  // the prototype's home: from a little right of and above the middle, the whole tree, the dock
-  // and the markers filling the stage
+  /** What the home view frames: the active work (the default), or the whole tree. */
+  let framing: "work" | "tree" = "work";
+  /**
+   * The active work's box: the files the stage's agents changed or have in flight, and their orbs;
+   * at least 40 units a side so one file isn't framed edge to edge. null when nobody is working.
+   */
+  const workBox = (): THREE.Box3 | null => {
+    if (!g || !current) return null;
+    const points: THREE.Vector3[] = [];
+    for (const seat of current.snapshot.seats) {
+      for (const file of [
+        ...seat.scope.modified.map((c) => c.file),
+        ...seat.calls.flatMap((c) => c.files),
+      ]) {
+        const p = g.filePositions.get(file);
+        if (p) points.push(p);
+      }
+      const orb = g.activity.focus(seat.seat);
+      if (orb && points.length) points.push(new THREE.Vector3(...orb));
+    }
+    if (!points.length) return null;
+    const box = new THREE.Box3().setFromPoints(points);
+    const size = box.getSize(new THREE.Vector3());
+    return box.expandByVector(
+      new THREE.Vector3(
+        Math.max(0, 40 - size.x) / 2,
+        Math.max(0, 40 - size.y) / 2,
+        Math.max(0, 40 - size.z) / 2,
+      ),
+    );
+  };
+  // from a little right of and above the middle, the box filling the stage
   const reset = () => {
     if (!g) return;
+    const work = framing === "work" ? workBox() : null;
+    const centre = work ? work.getCenter(new THREE.Vector3()) : g.centre;
+    const extent = work ? work.getSize(new THREE.Vector3()) : g.extent;
     const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const distance =
-      Math.max(30, g.extent.y / 2 / half, g.extent.x / 2 / (half * Math.max(0.5, camera.aspect))) *
-        0.96 +
-      g.extent.z / 2;
-    controls.target.copy(g.centre);
-    camera.position.copy(g.centre).addScaledVector(homeDirection, distance);
+      Math.max(30, extent.y / 2 / half, extent.x / 2 / (half * Math.max(0.5, camera.aspect))) *
+        (work ? 1.15 : 0.96) +
+      extent.z / 2;
+    controls.target.copy(centre);
+    camera.position.copy(centre).addScaledVector(homeDirection, distance);
     controls.update();
     atHome = true;
   };
@@ -246,6 +281,8 @@ function mountStage(
 
   let current: Props | null = null;
   let previousHome = -1;
+  let previousOverview: number | undefined;
+  let workKey = "";
   let previousFocus: string | null = null;
   let previousAgentFocus: Props["agentFocus"];
   let frame: ReturnType<typeof setTimeout> | undefined;
@@ -399,8 +436,28 @@ function mountStage(
     activity.update(next, reduced.matches);
     controls.autoRotate = next.rotate && !reduced.matches;
     if (next.home !== previousHome) {
+      framing = "work";
       if (previousHome !== -1) reset();
       previousHome = next.home;
+    }
+    if (next.overview !== previousOverview) {
+      if (previousOverview !== undefined) {
+        framing = "tree";
+        reset();
+      }
+      previousOverview = next.overview;
+    }
+    // until the operator moves the camera, the home view follows the work as it moves
+    const work = next.snapshot.seats
+      .flatMap((seat) => [
+        ...seat.scope.modified.map((c) => c.file),
+        ...seat.calls.flatMap((c) => c.files),
+      ])
+      .sort()
+      .join("\n");
+    if (work !== workKey) {
+      workKey = work;
+      if (atHome && framing === "work") reset();
     }
     if (next.focus !== previousFocus) {
       const p = next.focus ? positions.get(next.focus) : undefined;
@@ -455,6 +512,26 @@ function mountStage(
           ...(seat?.calls.flatMap((c) => c.files) ?? []),
         ])
       : null;
+    // a mark is a glyph with its words as a tooltip; a click selects its file for the drawer
+    const addMark = (
+      glyph: string,
+      position: THREE.Vector3,
+      token: string,
+      title: string,
+      path: string,
+    ) => {
+      const mark = document.createElement("button");
+      mark.type = "button";
+      mark.className = "map-mark";
+      mark.tabIndex = -1;
+      mark.textContent = glyph;
+      mark.style.color = css(token);
+      mark.title = title;
+      mark.setAttribute("aria-label", title);
+      mark.addEventListener("click", () => current?.onSelect(path));
+      labels.append(mark);
+      projected.push({ el: mark, position });
+    };
     const matrix = new THREE.Matrix4();
     visuals.length = 0;
     spheres.forEach((node, i) => {
@@ -506,7 +583,8 @@ function mountStage(
       const grew = edited && s.level > previous.level;
       if (grew) flashes.set(node.path, now);
       previousChanges.set(node.path, { add: s.add, rem: s.rem, level: s.level });
-      if (s.label) {
+      // a file's +/− shows on the stage only while it is selected; the rail and tooltip carry it
+      if (s.label && node.path === next.selected) {
         const change = addLabel(
           grew ? "▲ " : "",
           p.clone().add(new THREE.Vector3(0, size + 2, 0)),
@@ -525,24 +603,26 @@ function mountStage(
           change.append(part);
         }
       }
-      for (const [j, finding] of s.findings.entries())
-        addLabel(
-          `▲ ${finding.severity}`,
-          p.clone().add(new THREE.Vector3(0, size + 5 + j * 4, 0)),
-          "map-pin",
-          pinToken(finding.severity),
-          finding.summary,
+      // findings and conflicts are small marks: their words are in the tooltip and the drawer
+      if (s.findings.length) {
+        const worst = (["Critical", "Important", "Minor"] as const).find((severity) =>
+          s.findings.some((f) => f.severity === severity),
         );
-      // one marker per file however many branch pairs conflict on it; the drawer lists them
+        addMark(
+          "▲",
+          p.clone().add(new THREE.Vector3(0, size + 2.5, 0)),
+          worst ? pinToken(worst) : "--muted",
+          `${s.findings.length} review finding${s.findings.length === 1 ? "" : "s"} on ${node.path}:\n${s.findings.map((f) => `${f.severity} · line ${f.line} · ${f.summary}`).join("\n")}`,
+          node.path,
+        );
+      }
       if (s.conflicts.length)
-        addLabel(
-          s.conflicts.length === 1
-            ? `Conflict: ${s.conflicts[0]?.branches.join(" / ")}`
-            : `Conflict ×${s.conflicts.length}`,
-          p.clone().add(new THREE.Vector3(0, -5, 0)),
-          "map-pin map-conflict",
+        addMark(
+          "◆",
+          p.clone().add(new THREE.Vector3(0, -size - 2.5, 0)),
           "--crit",
-          s.conflicts.map((c) => c.branches.join(" / ")).join("\n"),
+          `Merge conflict on ${node.path} between:\n${s.conflicts.map((c) => c.branches.join(" / ")).join("\n")}`,
+          node.path,
         );
     });
     for (const area of g.areaCentres) {
@@ -627,6 +707,50 @@ function mountStage(
   };
   canvas.addEventListener("pointerdown", pointerDown);
   canvas.addEventListener("pointerup", pick);
+  // hovering a file says what it is and who changed it; nothing is written on the stage for it
+  const tip = document.createElement("div");
+  tip.className = "map-tip";
+  tip.hidden = true;
+  tip.setAttribute("role", "tooltip");
+  el.append(tip);
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  const hover = (e: PointerEvent) => {
+    clearTimeout(hoverTimer);
+    if (e.buttons) {
+      tip.hidden = true;
+      return;
+    }
+    const { clientX, clientY } = e;
+    hoverTimer = setTimeout(() => {
+      if (!g || !current) return;
+      const rect = canvas.getBoundingClientRect();
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(
+        new THREE.Vector2(
+          ((clientX - rect.left) / rect.width) * 2 - 1,
+          (-(clientY - rect.top) / rect.height) * 2 + 1,
+        ),
+        camera,
+      );
+      const hit = ray.intersectObject(g.mesh)[0];
+      const node = hit?.instanceId === undefined ? undefined : g.spheres[hit.instanceId];
+      if (!node) {
+        tip.hidden = true;
+        return;
+      }
+      tip.textContent = fileTip(node, current);
+      tip.hidden = false;
+      const x = clientX - rect.left + 14;
+      tip.style.left = `${Math.min(x, rect.width - tip.offsetWidth - 8)}px`;
+      tip.style.top = `${clientY - rect.top + 14}px`;
+    }, 40);
+  };
+  const leave = () => {
+    clearTimeout(hoverTimer);
+    tip.hidden = true;
+  };
+  canvas.addEventListener("pointermove", hover);
+  canvas.addEventListener("pointerleave", leave);
   const visibility = () => {
     if (document.hidden) {
       clearTimeout(frame);
@@ -676,6 +800,10 @@ function mountStage(
       themeMedia.removeEventListener("change", preference);
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointerup", pick);
+      canvas.removeEventListener("pointermove", hover);
+      canvas.removeEventListener("pointerleave", leave);
+      clearTimeout(hoverTimer);
+      tip.remove();
       // release the WebGL context now, not when the browser collects the canvas: twenty visits
       // must not reach Chrome's limit of sixteen live contexts
       renderer.forceContextLoss();
@@ -685,4 +813,29 @@ function mountStage(
       activityLabels.remove();
     },
   };
+}
+
+/** A file's tooltip: its path, then each working agent's change or read, its findings and conflicts. */
+export function fileTip(node: MapNode, props: Pick<Props, "snapshot" | "names">): string {
+  const { snapshot } = props;
+  const has = (f: string) => node.files.includes(f);
+  const name = (seat: string) => props.names?.[seat] ?? seatCallSign(seat);
+  const lines = [node.files.length > 1 ? `${node.path} · ${node.files.length} files` : node.path];
+  for (const seat of snapshot.seats) {
+    const changes = seat.scope.modified.filter((c) => has(c.file));
+    if (changes.length) {
+      const add = changes.reduce((n, c) => n + c.add, 0);
+      const rem = changes.reduce((n, c) => n + c.rem, 0);
+      const churn = changes.some((c) => c.source === "churn");
+      lines.push(`${name(seat.seat)} +${add} −${rem}${churn ? " (edit churn)" : ""}`);
+    } else if (seat.scope.read.some(has)) lines.push(`${name(seat.seat)} read it`);
+    if (seat.calls.some((c) => c.files.some(has))) lines.push(`${name(seat.seat)} is on it now`);
+  }
+  const findings = snapshot.findings.filter((f) => has(f.file));
+  if (findings.length)
+    lines.push(`▲ ${findings.length} review finding${findings.length === 1 ? "" : "s"}`);
+  for (const c of snapshot.conflicts.filter((c) => has(c.file)))
+    lines.push(`◆ conflict: ${c.branches.join(" / ")}`);
+  if (lines.length === 1) lines.push("untouched");
+  return lines.join("\n");
 }
