@@ -2146,17 +2146,24 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     ]);
   });
 
-  it("locks a full suite spelled with a brace word", () => {
+  it("refuses a pnpm word that brace-expands, since pnpm may run it as a binary", () => {
     const ctx: GuardContext = {
       mode: "writer",
       repo: "dev",
       flightPowers: "standard",
       fullSuite: ["pnpm -s test"],
     };
-    const lock = { kind: "lock", command: "pnpm -s test" };
-    expect(guardDecision(bash("pnpm -s {test,}"), ctx)).toEqual(lock);
-    expect(guardDecision(bash("pnpm -s test{,}"), ctx)).toEqual(lock);
-    expect(guardDecision(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toEqual(lock);
+    // `pnpm -s {op,}en .` would run /usr/bin/open: the brace word is judged as a command
+    const unreadable = {
+      kind: "deny",
+      rule: "unreadable",
+      text: `${GUARD_RULES.unreadable}: brace expansion`,
+    };
+    for (const c of ["pnpm -s {test,}", "pnpm -s test{,}", "pnpm -s {op,}en ."])
+      expect(guardDecision(bash(c), ctx), c).toEqual(unreadable);
+    expect(guardDecision(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toEqual(
+      unreadable,
+    );
   });
 
   it("a runner runs its command in the foreground", () => {
@@ -2429,18 +2436,33 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     expect(ruleOf(bash("echo =x"))).toBe("allow");
     expect(ruleOf(bash("gpgconf --list-dirs"))).toBe("allow");
     expect(ruleOf(bash("gpg-agent --version"))).toBe("allow");
+    expect(ruleOf(bash("gpg-agent --da"))).toBe("allow");
+    expect(ruleOf(bash("gpgconf --l"))).toBe("allow");
+    for (const c of [
+      "pnpm install",
+      "pnpm add -D x",
+      "pnpm run build",
+      "yarn install",
+      "yarn test",
+    ])
+      expect(ruleOf(bash(c)), c).toBe("allow");
   });
 
+  it("allows a launcher word a multiplexer only types into a session", () => {
+    expect(ruleOf(bash("tmux send-keys -t x open Enter"))).toBe("allow");
+  });
+  // Deliberate fail-closed trade-off: a runner's options are not modelled, so every later word is
+  // judged as a command, and these ordinary lines are refused (refusal telemetry measures the cost).
   it.each([
     "pnpm exec vitest run -t batch apps/x.test.ts",
     "npx vitest run -t open",
     "npx tsx scripts/run.ts batch",
     "npx cypress open",
+    "pnpm exec vitest run -t at",
     "pnpm -s exec vitest run -t at",
     "pnpm -s exec tsx x.ts open",
-    "tmux send-keys -t x open Enter",
-  ])("allows a launcher name that is only an argument: %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("allow");
+  ])("refuses a launcher word among a runner's arguments: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
   });
   it.each([
     "env open .",
@@ -2497,9 +2519,43 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "=npx -y open .",
     "npx -y ssh-agent sh",
     "npx -y =open .",
-    // accepted: an option before a command-first runner's command cancels the exemption
     "npx -y vitest run -t open",
     "npm exec -- vitest run -t batch",
+    // an option value that looks like a run verb only moves where the judged words start
+    "npm --prefix dlx x open .",
+    "npm --prefix x x open .",
+    "pnpm -C dlx dlx open .",
+    "pnpm --filter dlx dlx open .",
+    "pnpm --dir x x open .",
+    "yarn --cwd dlx dlx open .",
+    // an expansion, glob or EQUALS word as the runner's first word
+    "npx $X open .",
+    'npx "$X" open .',
+    "npx ${X} open .",
+    "npx $(echo -y) open .",
+    "npx `echo -y` open .",
+    "npx * open .",
+    "npx [-]y open .",
+    "npx =npx open .",
+    "npx =npx -y open .",
+    "npx =watch open .",
+    // pnpm and yarn run a binary for a word that is not their own command
+    "pnpm open .",
+    "pnpm -s open .",
+    "yarn open .",
+    "yarn run open .",
+    // more shells read -c scripts
+    "fish -c open",
+    "ksh -c open",
+    "mksh -c open",
+    "tcsh -c open",
+    "csh -c open",
+    "pwsh -c 'open .'",
+    // GnuPG takes unambiguous option prefixes
+    "gpg-agent --dae",
+    "gpg-agent --daemon=x",
+    "gpgconf --la gpg-agent",
+    "gpgconf --lau gpg-agent",
   ])("still refuses a launcher that is the command: %s", (c) => {
     expect(ruleOf(bash(c))).toBe("background");
   });

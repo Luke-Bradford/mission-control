@@ -240,7 +240,7 @@ const WRAPPERS: Readonly<Record<string, { valued: readonly string[]; operands: n
 };
 /** `env -S <string>`: the string is a command line of its own. */
 const ENV_SPLIT = /^(?:-S|--split-string)(?:=?)(.*)$/;
-const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "fish", "ksh", "mksh", "tcsh", "csh", "pwsh"]);
 const SHELL_KEYWORDS = new Set([
   "!",
   "if",
@@ -273,20 +273,26 @@ const BACKGROUND_LAUNCHERS = new Set([
   "systemd-run",
   "daemonize",
 ]);
-/** Programs that start a daemon only with one option: `gpg-agent --daemon`, `gpgconf --launch`. */
-const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, string>> = {
-  "gpg-agent": "--daemon",
-  gpgconf: "--launch",
+/**
+ * Programs that start a daemon only with one option, which GnuPG also takes as any unambiguous
+ * prefix: `gpg-agent --daemon` (from `--dae`), `gpgconf --launch` (from `--la`).
+ */
+const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; shortest: number }>> = {
+  "gpg-agent": { option: "--daemon", shortest: "--dae".length },
+  gpgconf: { option: "--launch", shortest: "--la".length },
 };
 /** Whether `program` with `args` hands work to something that outlives this tool call. */
-const launches = (program: string, args: readonly string[]): boolean =>
-  BACKGROUND_LAUNCHERS.has(program) ||
-  (Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program) &&
-    args.some(
-      (a) =>
-        a === BACKGROUND_LAUNCH_OPTIONS[program] ||
-        a.startsWith(`${BACKGROUND_LAUNCH_OPTIONS[program]}=`),
-    ));
+function launches(program: string, args: readonly string[]): boolean {
+  if (BACKGROUND_LAUNCHERS.has(program)) return true;
+  const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
+    ? BACKGROUND_LAUNCH_OPTIONS[program]
+    : undefined;
+  if (spec === undefined) return false;
+  return args.some((a) => {
+    const name = a.split("=")[0] ?? "";
+    return name.length >= spec.shortest && spec.option.startsWith(name);
+  });
+}
 /** tmux's global options that take a value (`tmux -L sock ls`): the value is not the command. */
 const TMUX_VALUED = "cfLST";
 /** tmux commands that start nothing: they list, query, attach to, type into or end what exists. */
@@ -423,13 +429,135 @@ const RUNNERS = new Set([
   "bunx",
   "uvx",
 ]);
-/** Runners whose first word, when it is not an option, is the command they run. */
-const COMMAND_FIRST_RUNNERS = new Set(["npx", "bunx", "uvx"]);
 /** `pnpm exec`, `npm x`, `yarn dlx`: a package manager running a command (the verb may follow options: `pnpm -s exec`). */
 const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn"]);
-/** A first word that runs some other command line: no later word of it is known to be data. */
-const RUNNER_HEADS = new Set([...RUNNERS, ...PACKAGE_MANAGERS, ...MULTIPLEXERS, ...SHELLS, "eval"]);
 const PACKAGE_RUN_VERBS = new Set(["exec", "dlx", "x"]);
+
+/**
+ * pnpm's own commands. Any other first word runs a package.json script or, failing that, a binary
+ * (pnpm 11 ran `/usr/bin/open` for `pnpm open .`), so it is judged as `pnpm exec <word>`.
+ */
+const PNPM_COMMANDS = new Set([
+  "add",
+  "approve-builds",
+  "audit",
+  "bin",
+  "c",
+  "cache",
+  "cat-file",
+  "cat-index",
+  "config",
+  "create",
+  "dedupe",
+  "deploy",
+  "doctor",
+  "env",
+  "fetch",
+  "find-hash",
+  "get",
+  "help",
+  "i",
+  "ignored-builds",
+  "import",
+  "init",
+  "install",
+  "install-test",
+  "it",
+  "la",
+  "licenses",
+  "link",
+  "list",
+  "ll",
+  "ln",
+  "login",
+  "logout",
+  "ls",
+  "outdated",
+  "pack",
+  "patch",
+  "patch-commit",
+  "patch-remove",
+  "prune",
+  "publish",
+  "rb",
+  "rebuild",
+  "remove",
+  "rm",
+  "root",
+  "run",
+  "run-script",
+  "self-update",
+  "server",
+  "set",
+  "setup",
+  "start",
+  "store",
+  "t",
+  "test",
+  "tst",
+  "un",
+  "uninstall",
+  "unlink",
+  "up",
+  "update",
+  "upgrade",
+  "version",
+  "why",
+]);
+/**
+ * yarn's own commands. Any other first word, and the word after `yarn run`, may be a package
+ * binary; that is not established from yarn's docs here, so it is judged as a command (fail closed).
+ */
+const YARN_COMMANDS = new Set([
+  "add",
+  "autoclean",
+  "bin",
+  "cache",
+  "check",
+  "config",
+  "constraints",
+  "create",
+  "dedupe",
+  "explain",
+  "generate-lock-entry",
+  "global",
+  "help",
+  "import",
+  "info",
+  "init",
+  "install",
+  "licenses",
+  "link",
+  "list",
+  "login",
+  "logout",
+  "npm",
+  "outdated",
+  "owner",
+  "pack",
+  "patch",
+  "patch-commit",
+  "plugin",
+  "policies",
+  "publish",
+  "rebuild",
+  "remove",
+  "set",
+  "start",
+  "tag",
+  "team",
+  "test",
+  "unlink",
+  "unplug",
+  "up",
+  "upgrade",
+  "upgrade-interactive",
+  "version",
+  "versions",
+  "why",
+  "workspace",
+  "workspaces",
+]);
 
 /** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
 function runnerStart(name: string, rest: readonly string[]): number {
@@ -439,6 +567,21 @@ function runnerStart(name: string, rest: readonly string[]): number {
     return i === -1 ? -1 : i + 1;
   }
   return -1;
+}
+
+/**
+ * Where `pnpm <word>` / `yarn <word>` / `yarn run <word>` may run a binary (no run verb), or -1.
+ * Every word from there is judged as a command. An option first may take the next word as its
+ * value (`pnpm -C add open .`), so then the first plain word is judged even if it is a built-in.
+ */
+function packageBinStart(name: string, rest: readonly string[]): number {
+  if (name !== "pnpm" && name !== "yarn") return -1;
+  const first = rest.findIndex((w) => !w.startsWith("-"));
+  if (first === -1) return -1;
+  const word = rest[first] ?? "";
+  if (name === "yarn" && word === "run") return first + 1;
+  if (first > 0) return first;
+  return (name === "pnpm" ? PNPM_COMMANDS : YARN_COMMANDS).has(word) ? -1 : first;
 }
 
 /**
@@ -523,10 +666,7 @@ interface Cmd {
   braces?: boolean;
   /** The command receives a pipeline's output (preserved by the Codex walk). */
   piped?: boolean;
-  /**
-   * Judged from a later word of a runner's or multiplexer's arguments (`npx cypress open`: `open`),
-   * which may be an argument, not a command: only rules that fail closed on any word use it.
-   */
+  /** Judged from a later word of a multiplexer's arguments (`tmux send-keys -t x open`: `open`). */
   suffix?: boolean;
 }
 
@@ -1246,26 +1386,35 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     // a multiplexer among a runner's words returns early as a suffix: its command is background
     const runBg = multiplexer || bg || run.some((w) => MULTIPLEXERS.has(baseName(w)));
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
-    // Later words are data only where the runner's first word is certainly the command: a
-    // multiplexer (its own rules judge it), or a command-first runner whose first word is a plain
-    // program. An option, `--` or another runner first means the command may be any later word.
-    const head = run[0];
-    const exempt =
-      multiplexer ||
-      ((COMMAND_FIRST_RUNNERS.has(name) || PACKAGE_MANAGERS.has(name)) &&
-        head !== undefined &&
-        !head.startsWith("-") &&
-        !RUNNER_HEADS.has(baseName(head)) &&
-        !Object.hasOwn(WRAPPERS, baseName(head)));
+    // A runner's later words are all judged as commands, launchers included: its options and
+    // their values are not modelled, so any word may be the one it runs. This refuses some
+    // ordinary lines (`npx vitest run -t open`, `npx cypress open`) on purpose (fail closed;
+    // refusal telemetry measures the cost). Accepted gap: a program that runs its own arguments
+    // (`npx cross-env A=1 open .`, `bun x open`) is beyond the guard, as it is without npx.
+    // Only a multiplexer's later words skip the launcher check: its own rules decide what it
+    // starts, and typing into a session (`tmux send-keys -t x open Enter`) is allowed.
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
       const judged = wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix"));
-      out.push(...(i === 0 || !exempt ? judged : judged.map((cmd) => ({ ...cmd, suffix: true }))));
+      out.push(
+        ...(i > 0 && multiplexer ? judged.map((cmd) => ({ ...cmd, suffix: true })) : judged),
+      );
     }
     for (const w of run) {
       if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
     }
     return out;
+  }
+  // `pnpm open .` runs /usr/bin/open: each word from the binary on is judged as a command, in the
+  // foreground (no command-line splitting: that is a runner's, and these are scripts or binaries)
+  const bin = runnerStart(name, rest) === -1 ? packageBinStart(name, rest) : -1;
+  if (bin !== -1) {
+    for (let i = bin; i < rest.length; i++) {
+      const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));
+      out.push(
+        ...wrappedGit(normalise(suffix, walk, depth + 1, bg, mux === "none" ? "suffix" : mux)),
+      );
+    }
   }
   if (name === "find") {
     for (let i = 0; i < rest.length; i++) {
@@ -1729,7 +1878,7 @@ export function guardDecision(
     if (program === UNREADABLE_SCRIPT) return deny("unreadable", "shell -c");
     if (program === STDIN_SCRIPT) return deny("unreadable", "shell reading stdin");
     if (program === BRACE_WORD) return deny("unreadable", "brace expansion");
-    // only a real command word: `npx cypress open` and `vitest -t batch` pass `open`/`batch` as data
+    // not a multiplexer's later word: `tmux send-keys -t x open Enter` types `open` into a session
     if (suffix !== true && launches(program, args)) return deny("background", program);
     if (
       program === GIT_ENV_OVERRIDE ||
