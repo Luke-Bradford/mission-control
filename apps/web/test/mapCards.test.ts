@@ -9,6 +9,7 @@ import {
   isWorking,
   recentFailures,
   uncheckedNotes,
+  waitsOnYou,
 } from "../src/map/cards.ts";
 import { applyDelta } from "../src/map/model.ts";
 
@@ -25,6 +26,7 @@ describe("who the stage shows, and its one line", () => {
   const now = 1_000_000;
   it("shows a seat live now or with an unmerged change, and folds the rest", () => {
     const s = seat();
+    s.badges.questions = [];
     s.state = "idle";
     s.calls = [];
     s.since = now - 120_000;
@@ -39,19 +41,45 @@ describe("who the stage shows, and its one line", () => {
     s.calls = [{ tool: "Read", detail: "x", files: [], since: now }];
     expect(isWorking(s, now)).toBe(true);
   });
-  it("reads call sign · ticket · files · +added −removed, counting each file once", () => {
+  it("reads call sign · ticket · files · +added −removed from the branch diff, labelling churn", () => {
     const s = seat();
+    s.badges.questions = [];
     s.scope.modified = [
       { file: "a.ts", add: 10, rem: 2, source: "diff" },
-      { file: "b.ts", add: 5, rem: 0, source: "churn" },
+      { file: "b.ts", add: 5, rem: 0, source: "diff" },
+      { file: "mode-only.sh", add: 0, rem: 0, source: "diff" },
     ];
     expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #7 · 2 files · +15 −2");
-    expect(changeTotals(s)).toEqual({ files: 2, add: 15, rem: 2 });
+    expect(changeTotals(s)).toEqual({ files: 2, add: 15, rem: 2, churn: false });
+    // a file not in the diff yet comes from edit churn, and the line says so
+    s.scope.modified.push({ file: "new.ts", add: 4, rem: 0, source: "churn" });
+    expect(factLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #7 · 3 files · +19 −2 (churn)");
     s.ticket = null;
     s.scope.modified = [{ file: "a.ts", add: 1, rem: 1, source: "diff" }];
     expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1");
+    s.branches = ["feature/1", "feature/0-set-aside"];
+    expect(factLine(s)).toBe("GUIDO-1 · 1 file · +1 −1 · 2 branches");
+    s.branches = ["feature/1"];
     s.scope.modified = [];
     expect(factLine(s)).toBe("GUIDO-1 · no changes yet");
+    expect(factLine({ ...s, seat: "FLIGHT" }, "FLIGHT")).toBe("FLIGHT");
+    s.badges.questions = [{ id: 1, from: "GUIDO-1", to: "CAPCOM", ticket: null, since: 0 }];
+    expect(factLine(s)).toBe("GUIDO-1 · no changes yet · waiting on you");
+  });
+  it("never folds a seat waiting on the operator; a stopped run or the test lock isn't that", () => {
+    const s = seat();
+    Object.assign(s, { state: "idle", calls: [], since: 0, scope: { read: [], modified: [] } });
+    s.badges.questions = [];
+    expect(isWorking(s, 1_000_000)).toBe(false);
+    s.badges.waiting = { kind: "parked", since: 0, reason: "Needs CAPCOM", stopped: false };
+    expect(waitsOnYou(s)).toBe(true);
+    expect(isWorking(s, 1_000_000)).toBe(true);
+    s.badges.waiting = { kind: "parked", since: 0, reason: "run ended (stopped)", stopped: true };
+    expect(waitsOnYou(s)).toBe(false);
+    s.badges.waiting = { kind: "test-lock", since: 0, reason: "pnpm test", stopped: false };
+    expect(waitsOnYou(s)).toBe(false);
+    s.badges.questions = [{ id: 1, from: "GUIDO-1", to: "CAPCOM", ticket: null, since: 0 }];
+    expect(isWorking(s, 1_000_000)).toBe(true);
   });
 });
 
@@ -219,7 +247,6 @@ describe("map badge data", () => {
       modified: 1,
       accessing: 2,
       folder: "src",
-      docked: false,
     });
     // The card and the orb label read the same state.
     expect(agentCard(s, now).state).toBe("reading src/main.ts 1s · +1 calls");
@@ -227,7 +254,7 @@ describe("map badge data", () => {
     expect(agentCard(s, now).state).toBe("thinking");
     s.state = "idle";
     s.since = now - 60_000;
-    expect(agentCard(s, now)).toMatchObject({ docked: true, state: "idle 1m" });
+    expect(agentCard(s, now)).toMatchObject({ state: "idle 1m" });
   });
 });
 

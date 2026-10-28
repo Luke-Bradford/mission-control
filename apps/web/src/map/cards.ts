@@ -139,7 +139,6 @@ export function agentCard(seat: MapSeat, now: number) {
     scope: scope.size,
     modified: new Set(seat.scope.modified.map((c) => c.file)).size,
     accessing: active.size,
-    docked: isDocked(seat, now),
     stuck: isStuck(seat, now),
   };
 }
@@ -163,31 +162,65 @@ export function questionLanes(seat: MapSeat) {
   );
 }
 
+/** A change that moved at least one line (a mode-only or empty entry counts for nothing). */
+const counted = (seat: MapSeat) => seat.scope.modified.filter((c) => c.add + c.rem > 0);
+
+/** Acting now: a call in flight or a running turn. */
+export const isActing = (seat: MapSeat): boolean =>
+  seat.calls.length > 0 || seat.state === "running";
+
+/**
+ * Waiting on the operator: a question awaiting a reply, or parked for a reason other than the
+ * operator stopping its run (a test-lock queue waits on the lock, not on anyone).
+ */
+export const waitsOnYou = (seat: MapSeat): boolean =>
+  seat.badges.questions.length > 0 ||
+  (seat.badges.waiting?.kind === "parked" && !seat.badges.waiting.stopped);
+
 /**
  * A seat the stage shows: live now (a call in flight, a running turn, or less than a minute since
- * one), or carrying an unmerged branch with changes. Everyone else folds into the rail's idle line.
+ * one), carrying an unmerged branch with changes, or waiting on the operator. Everyone else folds
+ * into the rail's idle line.
  */
 export function isWorking(seat: MapSeat, now: number): boolean {
-  return !isDocked(seat, now) || seat.scope.modified.length > 0;
+  return !isDocked(seat, now) || counted(seat).length > 0 || waitsOnYou(seat);
 }
 
-/** What a seat has changed on its unmerged branches: distinct files, lines added and removed. */
-export function changeTotals(seat: MapSeat): { files: number; add: number; rem: number } {
-  const files = new Set(seat.scope.modified.map((c) => c.file));
+/**
+ * What a seat has changed on its unmerged branches: distinct files, lines added and removed, and
+ * whether any of it is edit churn rather than the branch's real diff.
+ */
+export function changeTotals(seat: MapSeat): {
+  files: number;
+  add: number;
+  rem: number;
+  churn: boolean;
+} {
+  const changes = counted(seat);
   return {
-    files: files.size,
-    add: seat.scope.modified.reduce((n, c) => n + c.add, 0),
-    rem: seat.scope.modified.reduce((n, c) => n + c.rem, 0),
+    files: new Set(changes.map((c) => c.file)).size,
+    add: changes.reduce((n, c) => n + c.add, 0),
+    rem: changes.reduce((n, c) => n + c.rem, 0),
+    churn: changes.some((c) => c.source === "churn"),
   };
 }
 
-/** The stage's one line per working agent: `GUIDO-CX · #698 · 12 files · +77 −30`. */
+/**
+ * The stage's one line per working agent: `GUIDO-CX · #698 · 12 files · +77 −30`, with
+ * "(churn)" when any of it is edit churn, "· 2 branches" when it spans several, and "· waiting on
+ * you" when it waits on the operator. FLIGHT has no branch, so it never says "no changes yet".
+ */
 export function factLine(seat: MapSeat, callSign = seatCallSign(seat.seat)): string {
-  const { files, add, rem } = changeTotals(seat);
+  const { files, add, rem, churn } = changeTotals(seat);
   return [
     callSign,
     ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
-    files ? `${files} file${files === 1 ? "" : "s"}` : "no changes yet",
-    ...(files ? [`+${add} −${rem}`] : []),
+    ...(files
+      ? [`${files} file${files === 1 ? "" : "s"}`, `+${add} −${rem}${churn ? " (churn)" : ""}`]
+      : seat.seat === "FLIGHT"
+        ? []
+        : ["no changes yet"]),
+    ...(seat.branches.length > 1 ? [`${seat.branches.length} branches`] : []),
+    ...(waitsOnYou(seat) ? ["waiting on you"] : []),
   ].join(" · ");
 }

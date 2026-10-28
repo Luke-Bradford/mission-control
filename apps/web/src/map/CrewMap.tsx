@@ -221,7 +221,8 @@ export function CrewMapView({
               onSelect={select}
               events={events}
               epoch={epoch}
-              agent={agent}
+              agent={agent && stage.seats.some((seat) => seat.seat === agent) ? agent : null}
+              dockSeats={snapshot.seats.length}
               agentFocus={agentFocus}
               onAgentSelect={setAgent}
               onArc={(conversation, button) => {
@@ -276,6 +277,7 @@ export function CrewMapView({
                 setBadge({ seat, kind });
               }}
             />
+            <ConflictLine snapshot={snapshot} onFile={searchSelect} />
           </div>
           <section className="map-card map-card-selected" aria-label="Selected">
             <h3>Selected</h3>
@@ -376,6 +378,60 @@ export function CrewMapView({
   );
 }
 
+/**
+ * One muted line for merge conflicts and branches whose conflicts went unchecked; it opens to the
+ * list, each conflicted file a button that selects it (the keyboard's way to every conflict).
+ */
+function ConflictLine({
+  snapshot,
+  onFile,
+}: {
+  snapshot: MapSnapshot;
+  onFile: (path: string) => void;
+}) {
+  const files = new Map<string, string[]>();
+  for (const c of snapshot.conflicts)
+    files.set(c.file, [...(files.get(c.file) ?? []), c.branches.join(" / ")]);
+  const unchecked = snapshot.conflictsUnchecked;
+  if (!files.size && !unchecked.length) return null;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return (
+    <details className="map-conflicts">
+      <summary>
+        {files.size > 0 && (
+          <>
+            <b className="map-conflict-glyph">◆</b>{" "}
+            {plural(files.size, "file in conflict", "files in conflict")}
+          </>
+        )}
+        {files.size > 0 && unchecked.length > 0 && " · "}
+        {unchecked.length > 0 && `${plural(unchecked.length, "branch", "branches")} not checked`}
+      </summary>
+      {files.size > 0 && (
+        <ul aria-label="Merge conflicts between open PRs">
+          {[...files].map(([file, pairs]) => (
+            <li key={file}>
+              <button type="button" onClick={() => onFile(file)}>
+                {file}
+              </button>
+              <span>{pairs.join("; ")}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {unchecked.length > 0 && (
+        <ul aria-label="Branches not checked for conflicts">
+          {unchecked.map((u) => (
+            <li key={u.branch}>
+              {u.branch}: {u.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
 /** The stage's key: one line of area colours; the full key opens behind "?". */
 function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"] }) {
   const [open, setOpen] = useState(false);
@@ -405,8 +461,11 @@ function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"]
             Each file is a point, coloured by its area. An agent's colour lights the files its
             unmerged branch changed (bright, bigger with more lines) and the files it read (dim).
             Its orb sits over the files it is working on, with one line: call sign · ticket · files
-            changed · <b className="add">+added</b> <b className="rem">−removed</b> (the branch
-            diff, or edit churn where the tooltip says so).
+            changed · <b className="add">+added</b> <b className="rem">−removed</b>: the branch's
+            real diff from its merge base, or edit churn from its Edit and Write calls where it says
+            "(churn)" (a file not committed or added yet, or before the diff has been read). "2
+            branches" when its changes span a set-aside branch too; "waiting on you" when it has a
+            question or is parked for you.
           </p>
           <p>
             ○ a file a call is using now · ◌ shared with another branch · ◎ written by two branches
@@ -425,6 +484,7 @@ function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"]
             removed. Arcs are messages. Drag to orbit, scroll to zoom, arrow keys to pan.
           </p>
           <p>
+            Crew seats only, one repo at a time; history stays in each agent's own view.{" "}
             {tree.length.toLocaleString()} files at origin/HEAD.
             {tree.length > 2000 && " Files are collapsed into folders (more than 2,000 files)."}{" "}
             Findings are the current review's; the hub keeps no fixed state for one. No recorded

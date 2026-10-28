@@ -21,6 +21,8 @@ type Props = ActivityProps & {
   focus: string | null;
   home: number;
   rotate: boolean;
+  /** Every seat on the repo, on stage or folded, for the dock's size; the stage's count if absent. */
+  dockSeats?: number;
   /** Bumped to frame the whole tree; `home` frames the active work (the tree when there is none). */
   overview?: number;
   selected: string | null;
@@ -47,7 +49,8 @@ export function MapScene(props: Props) {
   const [unavailable, setUnavailable] = useState(false);
   const { nodes } = props;
   const areasKey = (props.areas ?? []).join("\n");
-  const seatCount = props.snapshot.seats.length;
+  // the dock is sized for every seat, so a seat joining or leaving the stage rebuilds nothing
+  const seatCount = props.dockSeats ?? props.snapshot.seats.length;
   useEffect(() => {
     const el = host.current;
     if (!el) return;
@@ -227,6 +230,7 @@ function mountStage(
     if (!g || !current) return null;
     const points: THREE.Vector3[] = [];
     for (const seat of current.snapshot.seats) {
+      const before = points.length;
       for (const file of [
         ...seat.scope.modified.map((c) => c.file),
         ...seat.calls.flatMap((c) => c.files),
@@ -235,7 +239,8 @@ function mountStage(
         if (p) points.push(p);
       }
       const orb = g.activity.focus(seat.seat);
-      if (orb && points.length) points.push(new THREE.Vector3(...orb));
+      // an orb counts only when its own seat has work on the tree, never one parked in the dock
+      if (orb && points.length > before) points.push(new THREE.Vector3(...orb));
     }
     if (!points.length) return null;
     const box = new THREE.Box3().setFromPoints(points);
@@ -282,6 +287,7 @@ function mountStage(
   let current: Props | null = null;
   let previousHome = -1;
   let previousOverview: number | undefined;
+  let overviewSeen = false; // the first update records the counter; later bumps frame the tree
   let workKey = "";
   let previousFocus: string | null = null;
   let previousAgentFocus: Props["agentFocus"];
@@ -418,6 +424,7 @@ function mountStage(
       const place = placed[i];
       if (!place) return;
       label.hidden = place.hidden;
+      label.style.left = `${place.x}px`;
       label.style.top = `${place.y}px`;
       label.classList.toggle("lifted", place.lift > 0);
       label.style.setProperty("--lift", `${place.lift}px`);
@@ -441,18 +448,18 @@ function mountStage(
       previousHome = next.home;
     }
     if (next.overview !== previousOverview) {
-      if (previousOverview !== undefined) {
+      if (overviewSeen) {
         framing = "tree";
         reset();
       }
       previousOverview = next.overview;
     }
-    // until the operator moves the camera, the home view follows the work as it moves
+    overviewSeen = true;
+    // until the operator moves the camera, the home view follows the changed files: a new file in
+    // the working set reframes it, a tool call doesn't
+    if (next.rotate) atHome = false;
     const work = next.snapshot.seats
-      .flatMap((seat) => [
-        ...seat.scope.modified.map((c) => c.file),
-        ...seat.calls.flatMap((c) => c.files),
-      ])
+      .flatMap((seat) => seat.scope.modified.map((c) => c.file))
       .sort()
       .join("\n");
     if (work !== workKey) {
@@ -682,6 +689,11 @@ function mountStage(
   const observer = new ResizeObserver(resize);
   observer.observe(el);
   controls.addEventListener("change", schedule);
+  // panning with the arrow keys is the operator moving the camera, as a drag is
+  const keyMove = (e: KeyboardEvent) => {
+    if (e.key.startsWith("Arrow")) atHome = false;
+  };
+  canvas.addEventListener("keydown", keyMove);
   let down = [0, 0];
   const pointerDown = (e: PointerEvent) => {
     down = [e.clientX, e.clientY];
@@ -742,13 +754,15 @@ function mountStage(
       tip.hidden = false;
       const x = clientX - rect.left + 14;
       tip.style.left = `${Math.min(x, rect.width - tip.offsetWidth - 8)}px`;
-      tip.style.top = `${clientY - rect.top + 14}px`;
+      tip.style.top = `${Math.min(clientY - rect.top + 14, rect.height - tip.offsetHeight - 8)}px`;
     }, 40);
   };
   const leave = () => {
     clearTimeout(hoverTimer);
     tip.hidden = true;
   };
+  // the file under a tooltip moves with the camera
+  controls.addEventListener("change", leave);
   canvas.addEventListener("pointermove", hover);
   canvas.addEventListener("pointerleave", leave);
   const visibility = () => {
@@ -801,6 +815,7 @@ function mountStage(
       canvas.removeEventListener("pointerdown", pointerDown);
       canvas.removeEventListener("pointerup", pick);
       canvas.removeEventListener("pointermove", hover);
+      canvas.removeEventListener("keydown", keyMove);
       canvas.removeEventListener("pointerleave", leave);
       clearTimeout(hoverTimer);
       tip.remove();

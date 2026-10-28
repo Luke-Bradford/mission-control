@@ -1,5 +1,5 @@
 import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
-import type { CSSProperties, Ref } from "react";
+import { type CSSProperties, type Ref, useEffect, useState } from "react";
 import { useNow } from "../clock.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import {
@@ -7,8 +7,10 @@ import {
   type BadgeKind,
   badgeModels,
   changeTotals,
+  isActing,
   isWorking,
   uncheckedNotes,
+  waitsOnYou,
 } from "./cards.ts";
 
 interface RowProps {
@@ -35,6 +37,12 @@ export function AgentCards({
   const working = snapshot.seats.filter((seat) => isWorking(seat, now));
   const resting = snapshot.seats.filter((seat) => !isWorking(seat, now));
   const name = (seat: MapSeat) => names[seat.seat] ?? seatCallSign(seat.seat);
+  // opens when a folded seat is selected (from an orb or a search), and stays open on deselect
+  const [restingOpen, setRestingOpen] = useState(false);
+  const selectedRests = resting.some((seat) => seat.seat === selected);
+  useEffect(() => {
+    if (selectedRests) setRestingOpen(true);
+  }, [selectedRests]);
   return (
     <section className="map-agents" aria-label="Agents working in this repo">
       <h3 ref={headingRef} tabIndex={-1}>
@@ -53,7 +61,8 @@ export function AgentCards({
       {resting.length > 0 && (
         <details
           className="map-resting"
-          open={resting.some((seat) => seat.seat === selected) || undefined}
+          open={restingOpen}
+          onToggle={(e) => setRestingOpen(e.currentTarget.open)}
         >
           <summary>
             {resting.length} idle or stopped · {resting.map(name).join(", ")}
@@ -106,13 +115,20 @@ function AgentRow({
         type="button"
         className="map-agent-select"
         aria-pressed={open}
-        title={rest ? undefined : "Show where this agent is working"}
+        title={
+          rest
+            ? undefined
+            : `Show where this agent is working${seat.branches.length > 1 ? ` · branches: ${seat.branches.join(", ")}` : ""}${totals.churn ? " · (churn): edit churn, not the branch diff" : ""}`
+        }
         onClick={() => {
           onSelect(open ? null : seat.seat);
           if (!open && !rest) onZoom(seat.seat);
         }}
       >
-        <span className="map-agent-name">{name}</span>
+        <span className="map-agent-name">
+          {!rest && isActing(seat) && <i className="map-live-dot" title="acting now" />}
+          {name}
+        </span>
         {!rest && seat.ticket !== null && <span className="map-agent-ticket">#{seat.ticket}</span>}
         {!rest && (
           <span className="map-agent-changes">
@@ -120,8 +136,10 @@ function AgentRow({
               <>
                 {totals.files} file{totals.files === 1 ? "" : "s"} ·{" "}
                 <b className="add">+{totals.add}</b> <b className="rem">−{totals.rem}</b>
+                {totals.churn && " (churn)"}
+                {seat.branches.length > 1 && ` · ${seat.branches.length} branches`}
               </>
-            ) : (
+            ) : seat.seat === "FLIGHT" ? null : (
               "no changes yet"
             )}
           </span>
@@ -129,17 +147,20 @@ function AgentRow({
         <span className={card.stuck ? "map-agent-state stuck" : "map-agent-state"}>
           {card.stuck && "Stuck · "}
           {card.state}
+          {!rest && waitsOnYou(seat) && <b className="map-waits"> · waiting on you</b>}
         </span>
       </button>
-      <button
-        type="button"
-        className="map-agent-zoom"
-        aria-label={`Zoom to ${seat.seat}`}
-        title={`Zoom to ${name}`}
-        onClick={() => onZoom(seat.seat)}
-      >
-        ⌖
-      </button>
+      {!rest && (
+        <button
+          type="button"
+          className="map-agent-zoom"
+          aria-label={`Zoom to ${seat.seat}`}
+          title={`Zoom to ${name}`}
+          onClick={() => onZoom(seat.seat)}
+        >
+          ⌖
+        </button>
+      )}
       {(!rest || open) && seat.title && <p className="map-agent-title">{seat.title}</p>}
       {/* questions, refusals, review, tests, CI and waits: one click away, not standing notes */}
       {open && badges.length > 0 && (

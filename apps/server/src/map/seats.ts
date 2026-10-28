@@ -72,12 +72,16 @@ export function mapSeats(
           .some((p) => p.branch === candidate.branch && p.state === "merged")
       )
         continue;
-      if (candidate.branch && !branches.includes(candidate.branch)) branches.push(candidate.branch);
-      for (const change of ring.scope(candidate.id).modified) {
+      const changes = runChanges(candidate.id, ring, store);
+      if (changes.length && candidate.branch && !branches.includes(candidate.branch))
+        branches.push(candidate.branch);
+      for (const change of changes) {
         const previous = modified.get(change.file);
         if (previous) {
           previous.add += change.add;
           previous.rem += change.rem;
+          // a total that includes any churn is labelled churn: never pass it off as the diff
+          if (change.source === "churn") previous.source = "churn";
         } else modified.set(change.file, { ...change });
       }
     }
@@ -161,4 +165,27 @@ export function mapSeats(
     };
   });
   return { seats, findings };
+}
+
+/**
+ * A run's change: the branch's real diff from its merge base, read from its worktree, plus edit
+ * churn for files it touched since its last commit that the diff doesn't show yet (a new file not
+ * yet added). Before the diff has been read, or where it can't be, the churn alone, labelled churn.
+ */
+export function runChanges(
+  runId: string,
+  ring: Pick<CallRing, "diff" | "scope">,
+  store: Pick<Store, "newestRunCommit">,
+): MapSeat["scope"]["modified"] {
+  const scope = ring.scope(runId);
+  const real = ring.diff(runId);
+  if (real === null) return scope.modified;
+  const since = store.newestRunCommit(runId)?.at ?? Number.NEGATIVE_INFINITY;
+  const inDiff = new Set(real.map((c) => c.file));
+  return [
+    ...real,
+    ...scope.modified
+      .filter((c) => !inDiff.has(c.file) && (scope.touched[c.file] ?? 0) > since)
+      .map((c) => ({ ...c, source: "churn" as const })),
+  ];
 }

@@ -252,6 +252,7 @@ it("folds idle and stopped seats into one line; selecting one opens it without m
     since: 0,
     calls: [],
     scope: { read: [], modified: [] },
+    badges: { ...structuredClone(s.seats[0].badges), questions: [], waiting: null },
   });
   render(<CrewMapView snapshot={s} />);
   await screen.findByText("3D scene");
@@ -261,7 +262,7 @@ it("folds idle and stopped seats into one line; selecting one opens it without m
   const fold = screen.getByText(/1 idle or stopped · RETRO-1/).closest("details") as HTMLElement;
   expect(fold.hasAttribute("open")).toBe(false);
   const docked = within(fold).getByRole("article", { name: "RETRO-1" });
-  expect(docked.textContent).toBe("RETRO-1idle 1m⌖");
+  expect(docked.textContent).toBe("RETRO-1idle 1m");
   const button = within(docked).getByRole("button", { name: /idle/ });
   fireEvent.click(button);
   expect(button.getAttribute("aria-pressed")).toBe("true");
@@ -269,6 +270,13 @@ it("folds idle and stopped seats into one line; selecting one opens it without m
   expect(docked.textContent).toContain("Handle empty input");
   expect(screen.getByRole("article", { name: "GUIDO-1" }).className).toContain("dim");
   expect(scene()?.agentFocus).toBeNull();
+  // a folded seat isn't on the stage, so selecting it doesn't darken the stage's agents
+  expect(scene()?.agent).toBeNull();
+  // the dock is sized for every seat, folded ones included
+  expect(scene()?.dockSeats).toBe(2);
+  // deselecting keeps the fold open
+  fireEvent.click(button);
+  expect(fold.hasAttribute("open")).toBe(true);
 });
 
 it("says nobody is working, with every seat folded, when no seat is live or has changes", () => {
@@ -280,6 +288,7 @@ it("says nobody is working, with every seat folded, when no seat is live or has 
     calls: [],
     recent: [],
     scope: { read: [], modified: [] },
+    badges: { ...s.seats[0].badges, questions: [] },
   } as (typeof s.seats)[number];
   render(<CrewMapView snapshot={s} />);
   expect(screen.getByText(/No agent is working in this repo right now/)).toBeTruthy();
@@ -372,7 +381,9 @@ it("frames an agent's work when its row is clicked; an orb selects it without mo
   const scene = () => vi.mocked(MapScene).mock.lastCall?.[0];
   const card = screen.getByRole("article", { name: "GUIDO-1" });
   const row = within(card).getByRole("button", { name: /GUIDO-1#7/ });
-  expect(row.textContent).toBe("GUIDO-1#71 file · +12 −3reading src/util.ts 1m");
+  expect(row.textContent).toBe(
+    "GUIDO-1#71 file · +12 −3 (churn)reading src/util.ts 1m · waiting on you",
+  );
   fireEvent.click(row);
   expect(scene()?.agent).toBe("GUIDO-1");
   expect(scene()?.agentFocus?.seat).toBe("GUIDO-1");

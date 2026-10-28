@@ -37,6 +37,7 @@ const idle: MapSnapshot = {
     calls: [],
     recent: [],
     scope: { read: [], modified: [] },
+    badges: { ...structuredClone(s.badges), questions: [], waiting: null },
   })),
   findings: [],
 };

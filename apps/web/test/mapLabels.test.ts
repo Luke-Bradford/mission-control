@@ -24,10 +24,10 @@ describe("declutter", () => {
       box({ rank: 1, nudge: true, x: 90 }),
     ];
     const placed = declutter(boxes, 800, 600);
-    expect(placed[1]).toEqual({ y: 100, hidden: false, lift: 0 });
+    expect(placed[1]).toEqual({ x: 110, y: 100, hidden: false, lift: 0 });
     expect(placed[0]?.hidden).toBe(true);
     // the nudgeable label moves up a row, with its lift for the leader line
-    expect(placed[2]).toEqual({ y: 84, hidden: false, lift: 16 });
+    expect(placed[2]).toEqual({ x: 90, y: 84, hidden: false, lift: 16 });
     const shown = boxes
       .map((b, i) => ({ ...b, y: placed[i]?.y ?? b.y, hidden: placed[i]?.hidden }))
       .filter((b) => !b.hidden);
@@ -39,6 +39,13 @@ describe("declutter", () => {
     const placed = declutter(stack, 800, 600, 2, 3);
     expect(placed.filter((p) => !p.hidden)).toHaveLength(4);
     expect(declutter([box({ x: -200 })], 800, 600)[0]?.hidden).toBe(true);
+    // a label that may move slides in from the edge instead of being cut off
+    expect(declutter([box({ x: 790, nudge: true })], 800, 600)[0]).toEqual({
+      x: 766,
+      y: 100,
+      hidden: false,
+      lift: 0,
+    });
   });
 
   it("knows each overlay label kind and leaves the rings on their nodes", () => {
@@ -46,6 +53,8 @@ describe("declutter", () => {
     expect(labelKind("map-change map-edited")).toEqual({ rank: 4, nudge: true });
     expect(labelKind("map-area")).toEqual({ rank: 2, nudge: false });
     expect(labelKind("map-ring faint")).toBeNull();
+    // finding and conflict marks are never hidden by a label
+    expect(labelKind("map-mark")).toBeNull();
   });
 });
 

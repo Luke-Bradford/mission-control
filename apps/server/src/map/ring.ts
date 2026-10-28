@@ -61,7 +61,10 @@ function tests(output: string): MapTests {
 
 interface RunScope {
   read: string[];
+  /** Edit churn from the run's Edit and Write calls: never the branch's real change. */
   modified: MapChange[];
+  /** file → when a call last edited it, so churn can be limited to edits since the last commit. */
+  touched: Record<string, number>;
   editedAt: number;
   tests: { tests: MapTests; at: number } | null;
 }
@@ -72,7 +75,13 @@ export class CallRing {
 
   scope(runId: string): RunScope {
     return structuredClone(
-      this.runScopes.get(runId) ?? { read: [], modified: [], editedAt: 0, tests: null },
+      this.runScopes.get(runId) ?? {
+        read: [],
+        modified: [],
+        touched: {},
+        editedAt: 0,
+        tests: null,
+      },
     );
   }
 
@@ -129,6 +138,14 @@ export class CallRing {
     for (const [file, { add, rem }] of changes)
       if (add || rem)
         this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
+  }
+
+  /**
+   * The run's real branch change (`git diff --numstat` from its merge base to the worktree, cached
+   * per HEAD and index), or null while it is unread or unavailable.
+   */
+  diff(runId: string): MapChange[] | null {
+    return this.diffs.get(runId)?.diff.changes() ?? null;
   }
 
   calls(seat: string): RingCall[] {
@@ -416,6 +433,7 @@ export class CallRing {
     const scope = this.runScopes.get(source.id) ?? {
       read: [],
       modified: [],
+      touched: {},
       editedAt: 0,
       tests: null,
     };
@@ -428,6 +446,7 @@ export class CallRing {
           previous.add += change.add;
           previous.rem += change.rem;
         } else scope.modified.push({ ...change });
+        scope.touched[change.file] = Math.max(scope.touched[change.file] ?? 0, call.since);
         scope.editedAt = Math.max(scope.editedAt, call.since);
       }
     }

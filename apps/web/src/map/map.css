@@ -11,6 +11,7 @@
   --void-muted: #8391ad;
   --void-faint: #4a5675;
   --void-scrim: rgba(4, 6, 12, 0.84);
+  --void-panel: rgba(10, 15, 29, 0.96);
   --signal: #9fe8ff;
   --add: #4fdc8a;
   --rem: #ff6b6b;
@@ -181,7 +182,7 @@
   line-height: 1.5;
   color: var(--void-ink);
   text-shadow: none;
-  background: rgba(10, 15, 29, 0.96);
+  background: var(--void-panel);
   border: 1px solid var(--void-line);
   border-radius: var(--r);
 }
@@ -191,10 +192,6 @@
   height: 8px;
   border-radius: 50%;
   margin-right: 6px;
-}
-.map-legend i.ring {
-  box-sizing: border-box;
-  border: 2px solid #fff;
 }
 .map-page .add {
   color: var(--add);
@@ -277,7 +274,7 @@
   font-size: 11px;
   line-height: 1.5;
   color: var(--void-ink);
-  background: rgba(10, 15, 29, 0.96);
+  background: var(--void-panel);
   border: 1px solid var(--void-line);
   border-radius: var(--r-s);
 }
@@ -316,7 +313,7 @@
 .map-orb-label,
 .map-arc {
   pointer-events: auto;
-  max-width: 300px;
+  max-width: 640px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -562,6 +559,59 @@
 }
 .map-agent-changes b {
   font-weight: 500;
+}
+/* acting now: a call in flight or a running turn */
+.map-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--agent);
+  box-shadow: 0 0 6px var(--agent);
+}
+/* waits on the operator: the one amber on a row */
+.map-waits {
+  color: var(--warn);
+  font-weight: 500;
+}
+.map-conflicts {
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.map-conflicts > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.map-conflicts > summary:hover {
+  color: var(--fg-2);
+}
+.map-conflict-glyph {
+  color: var(--crit);
+  font-weight: 400;
+}
+.map-conflicts ul {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.map-conflicts li {
+  display: grid;
+  gap: 2px;
+}
+.map-conflicts li button {
+  justify-self: start;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .map-empty {
   color: var(--fg-2);

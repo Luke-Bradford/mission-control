@@ -3981,6 +3981,9 @@ describe("boards, escalations, health", () => {
       expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
         404,
       );
+      // the snapshot reads the same per-run diff (map/seats.ts runChanges)
+      expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
+      expect(ring.diff("unknown")).toBeNull();
     } finally {
       stop();
       await a.close();
