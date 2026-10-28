@@ -132,30 +132,52 @@ const tokens = (value: unknown): number | null =>
 
 class CodexSeatFloorError extends Error {}
 
-function sameConfig(actual: unknown, expected: unknown): boolean {
+/** Matches only the hub-owned floor keys: Codex adds harmless descriptive fields to config/read. */
+function hasConfigFloor(actual: unknown, expected: unknown): boolean {
   if (actual === expected) return true;
   if (Array.isArray(actual) && Array.isArray(expected))
     return (
-      actual.length === expected.length && actual.every((item, n) => sameConfig(item, expected[n]))
+      actual.length === expected.length &&
+      actual.every((item, n) => hasConfigFloor(item, expected[n]))
     );
   if (!isObj(actual) || !isObj(expected)) return false;
-  const actualKeys = Object.keys(actual).sort();
-  const expectedKeys = Object.keys(expected).sort();
+  return Object.keys(expected).every((key) => hasConfigFloor(actual[key], expected[key]));
+}
+
+const CODEX_MCP_METADATA_FIELDS = new Set(["environment_id", "enabled", "tool_timeout_sec"]);
+
+function matchesMcpServer(actual: unknown, expected: Readonly<Record<string, string>>): boolean {
+  if (!isObj(actual)) return false;
   return (
-    actualKeys.length === expectedKeys.length &&
-    actualKeys.every((key, n) => key === expectedKeys[n] && sameConfig(actual[key], expected[key]))
+    Object.keys(actual).every((key) => key in expected || CODEX_MCP_METADATA_FIELDS.has(key)) &&
+    hasConfigFloor(actual, expected)
   );
 }
 
 function seatConfigMatches(value: unknown, expected: CodexSeatEffectiveConfig): boolean {
   if (!isObj(value)) return false;
-  const emptyOr = (actual: unknown, empty: object) =>
-    actual === undefined || sameConfig(actual, empty);
+  const servers = value.mcp_servers;
+  const expectedServers = Object.keys(expected.mcpServers);
+  const roots =
+    isObj(value.permissions) && isObj(value.permissions[CODEX_SEAT_PROFILE])
+      ? value.permissions[CODEX_SEAT_PROFILE].filesystem
+      : undefined;
+  const workspaceRoots = isObj(roots) ? roots[":workspace_roots"] : undefined;
   return (
-    sameConfig(value.mcp_servers, expected.mcpServers) &&
-    emptyOr(value.hooks, expected.hooks) &&
-    emptyOr(value.rules, expected.execPolicy) &&
-    sameConfig(value.shell_environment_policy, expected.shellEnvironment)
+    isObj(servers) &&
+    Object.keys(servers).length === expectedServers.length &&
+    expectedServers.every((name) => matchesMcpServer(servers[name], expected.mcpServers[name])) &&
+    hasConfigFloor(value, expected.approval) &&
+    hasConfigFloor(value.permissions, {
+      [CODEX_SEAT_PROFILE]: {
+        network: expected.sandbox.network,
+      },
+    }) &&
+    isObj(workspaceRoots) &&
+    Object.entries(workspaceRoots).every(
+      ([path, access]) => access !== "write" || expected.writableRoots[path] === "write",
+    ) &&
+    hasConfigFloor(workspaceRoots, expected.writableRoots)
   );
 }
 
@@ -699,7 +721,7 @@ function codexSession(
       (resumeId !== null && result.thread.id !== resumeId)
     )
       throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
-    const effective = await request("config/read", { cwd: i.cwd });
+    const effective = await request("config/read", { cwd: i.cwd, includeLayers: true });
     if (!isObj(effective) || !seatConfigMatches(effective.config, i.effectiveConfig))
       throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
     const hooks = await request("hooks/list", { cwd: i.cwd });

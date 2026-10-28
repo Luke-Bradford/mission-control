@@ -2260,7 +2260,11 @@ describe("Codex launch through a test-only account", () => {
     vi.mocked(homedir).mockReset();
   });
 
-  function codex(scenario: Record<string, unknown> = {}, version = "codex-cli 0.154.0") {
+  function codex(
+    scenario: Record<string, unknown> = {},
+    version = "codex-cli 0.154.0",
+    over: { worktrees?: string } = {},
+  ) {
     const home = join(dir, "home");
     writeCodexHostileFiles(home);
     writeFileSync(join(home, ".codex", "auth.json"), '{"fake":"account"}', { mode: 0o600 });
@@ -2281,6 +2285,7 @@ import(${JSON.stringify(fixture)});
       codexCommand: command,
       codexAuthPath: join(home, ".codex", "auth.json"),
       repo: { fullSuite: ["pnpm -s test"] },
+      ...over,
     });
     const account = made.cfg.accounts[0];
     if (account) account.vendor = "codex";
@@ -2455,6 +2460,19 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
+  });
+
+  it("quotes a dotted worktree path in the untrusted-project override", async () => {
+    const { sup } = codex({}, "codex-cli 0.154.0", {
+      worktrees: join(dir, "dotted.worktrees"),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const spawn = recorded().find((m) => m.type === "spawn");
+    expect(spawn.cwd).toContain("dotted.worktrees");
+    expect(spawn.args).toContain(`projects.${JSON.stringify(spawn.cwd)}.trust_level="untrusted"`);
+    await sup.endRunByEngine(runId);
   });
 
   it.each([false, true])(

@@ -94,12 +94,17 @@ function attached(approve = vi.fn<CodexSessionInput["approve"]>(async () => "acc
             id: config.id,
             result: {
               config: {
+                default_permissions: "mc_seat",
+                approvals_reviewer: "user",
                 mcp_servers: {
                   mc: { url: "http://hub/mcp", bearer_token_env_var: "MC_SEAT_TOKEN" },
                 },
-                hooks: {},
-                rules: {},
-                shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
+                permissions: {
+                  mc_seat: {
+                    filesystem: { ":workspace_roots": { ".": "write" } },
+                    network: { enabled: false },
+                  },
+                },
               },
             },
           }),

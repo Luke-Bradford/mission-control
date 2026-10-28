@@ -185,7 +185,15 @@ describe("Codex session", () => {
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
   });
 
-  it.each(["mcp", "sameNameMcp", "hooks", "effectiveHooks", "execPolicy", "shell", "shellExtra"])(
+  it.each([
+    "mcp",
+    "sameNameMcp",
+    "sameNameMcpCommand",
+    "approvalConfig",
+    "sandboxConfig",
+    "writableRoot",
+    "effectiveHooks",
+  ])(
     "closes before the first turn when effective %s settings differ on start and resume",
     async (badConfig) => {
       for (const resumeThreadId of [null, "codex-thread-1"]) {
@@ -208,6 +216,14 @@ describe("Codex session", () => {
       }
     },
   );
+
+  it("accepts the extra fields Codex 0.154 emits beside the effective MCP floor", async () => {
+    const { session, events } = start({ realConfigShape: true });
+    session.send("checked config shape");
+    await session.ready;
+    await until(() => expect(events.some((e) => e.kind === "result")).toBe(true));
+    expect(recorded().some((m) => m.method === "turn/start")).toBe(true);
+  });
 
   it("does not treat the old fixture's permissionProfile as confirmation", async () => {
     const { session, events } = start({ legacyPermissionProfile: true });

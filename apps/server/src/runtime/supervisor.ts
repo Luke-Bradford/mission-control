@@ -1574,7 +1574,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           resumeThreadId: resume ? cliSessionId : null,
           outboxPath: join(runDir, CODEX_OUTBOX_FILE),
           approve: codexApprover(info, run, cwd),
-          effectiveConfig: codexSeatEffectiveConfig(`${hub}${MCP_PATH}`),
+          effectiveConfig: codexSeatEffectiveConfig(`${hub}${MCP_PATH}`, def.mode),
           log,
           controlTimeoutMs: deps.controlTimeoutMs,
           stopGraceMs: deps.stopGraceMs,
@@ -2359,6 +2359,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 log,
                 effectiveConfig: codexSeatEffectiveConfig(
                   `http://${LOOPBACK_HOST}:${deps.hubPort}${MCP_PATH}`,
+                  seatDef(info.seat).mode,
                 ),
               },
               session,

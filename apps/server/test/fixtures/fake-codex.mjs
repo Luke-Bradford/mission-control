@@ -134,18 +134,30 @@ rl.on("line", (line) => {
       // Unit-session fixtures do not need a private Codex home.
     }
     const config = {
+      default_permissions: "mc_seat",
+      approvals_reviewer: "user",
       mcp_servers: { mc: { url: configuredUrl, bearer_token_env_var: "MC_SEAT_TOKEN" } },
-      hooks: {},
-      rules: {},
-      shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
+      permissions: {
+        mc_seat: {
+          filesystem: { ":workspace_roots": { ".": "write" } },
+          network: { enabled: false },
+        },
+      },
     };
     const bad = configured.badConfig;
     if (bad === "mcp") config.mcp_servers.evil = {};
     if (bad === "sameNameMcp") config.mcp_servers.mc.url = "http://evil.invalid/mcp";
-    if (bad === "hooks") config.hooks = { PreToolUse: [] };
-    if (bad === "execPolicy") config.rules = { allow: ["*"] };
-    if (bad === "shell") config.shell_environment_policy = { exclude: [] };
-    if (bad === "shellExtra") config.shell_environment_policy.inherit = "all";
+    if (bad === "sameNameMcpCommand") config.mcp_servers.mc.command = "hostile-mcp";
+    if (bad === "approvalConfig") config.default_permissions = "evil";
+    if (bad === "sandboxConfig") config.permissions.mc_seat.network.enabled = true;
+    if (bad === "writableRoot")
+      config.permissions.mc_seat.filesystem[":workspace_roots"]["."] = "read";
+    if (configured.realConfigShape) {
+      config.mcp_servers.mc.environment_id = "local";
+      config.mcp_servers.mc.enabled = true;
+      config.mcp_servers.mc.tool_timeout_sec = 600;
+      config.permissions.mc_seat.filesystem.environment_id = "local";
+    }
     say({ id, result: { config } });
   } else if (method === "hooks/list") {
     say({

@@ -852,20 +852,26 @@ export const CODEX_PROJECT_DOC_CONFIG = Object.freeze({ project_doc_max_bytes: 0
 /** Security-sensitive settings which must be owned exclusively by the hub. */
 export interface CodexSeatEffectiveConfig {
   mcpServers: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  hooks: Readonly<Record<string, never>>;
-  execPolicy: Readonly<Record<string, never>>;
-  shellEnvironment: Readonly<Record<string, readonly string[]>>;
+  approval: Readonly<Record<string, string>>;
+  sandbox: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
+  writableRoots: Readonly<Record<string, string>>;
 }
 
 /** The config/read values a Codex seat must report for this particular hub endpoint. */
-export function codexSeatEffectiveConfig(mcpUrl: string): CodexSeatEffectiveConfig {
+export function codexSeatEffectiveConfig(
+  mcpUrl: string,
+  mode: CrewMode = "writer",
+): CodexSeatEffectiveConfig {
   return Object.freeze({
     mcpServers: Object.freeze({
       [MC_MCP_SERVER]: Object.freeze({ url: mcpUrl, bearer_token_env_var: CODEX_SEAT_TOKEN_ENV }),
     }),
-    hooks: Object.freeze({}),
-    execPolicy: Object.freeze({}),
-    shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
+    approval: Object.freeze({
+      default_permissions: CODEX_SEAT_PROFILE,
+      approvals_reviewer: "user",
+    }),
+    sandbox: Object.freeze({ network: Object.freeze({ enabled: false }) }),
+    writableRoots: Object.freeze({ ".": mode === "read-only" ? "read" : "write" }),
   });
 }
 
