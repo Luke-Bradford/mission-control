@@ -3153,24 +3153,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               reply,
             );
           }
-          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", { kinds: [kind] });
+          let commsError: unknown = null;
+          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
+            kinds: [kind],
+            beforeLift: async () => {
+              try {
+                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
+                  to: run.agentId,
+                  text: body.data.text,
+                  ref: run.ticket ?? undefined,
+                  targetRunId: run.id,
+                });
+                return true;
+              } catch (e) {
+                commsError = e;
+                return false;
+              }
+            },
+          });
+          if (commsError !== null)
+            return crewFail(
+              new SupervisorError(
+                400,
+                commsError instanceof Error ? commsError.message : "Comms message refused.",
+              ),
+              reply,
+            );
           if (!lifted)
             return reply
               .code(409)
               .send({ error: "the review park could not be resumed for rework" });
-          try {
-            await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
-              to: run.agentId,
-              text: body.data.text,
-              ref: run.ticket ?? undefined,
-              targetRunId: run.id,
-            });
-          } catch (e) {
-            return crewFail(
-              new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
-              reply,
-            );
-          }
           return { ok: true };
         },
       );

@@ -6272,6 +6272,8 @@ describe("the first loop's engine", () => {
           const [runId] = args;
           told.push(runId);
           calls.push(args);
+          if (lifts && args[2]?.beforeLift !== undefined && !(await args[2].beforeLift()))
+            return false;
           return lifts;
         },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
@@ -6440,7 +6442,13 @@ describe("the first loop's engine", () => {
         payload: { text: "Please address the findings." },
       });
       expect(r.statusCode).toBe(200);
-      expect(calls).toEqual([["aside", "CAPCOM", { kinds: [kind] }]]);
+      expect(calls).toEqual([
+        [
+          "aside",
+          "CAPCOM",
+          expect.objectContaining({ kinds: [kind], beforeLift: expect.any(Function) }),
+        ],
+      ]);
       expect(store.comms(0)).toEqual([
         expect.objectContaining({
           from: "CAPCOM",
@@ -6498,7 +6506,13 @@ describe("the first loop's engine", () => {
       payload: { text: "Please address the findings." },
     });
     expect(r.statusCode).toBe(409);
-    expect(calls).toEqual([["aside", "CAPCOM", { kinds: ["review"] }]]);
+    expect(calls).toEqual([
+      [
+        "aside",
+        "CAPCOM",
+        expect.objectContaining({ kinds: ["review"], beforeLift: expect.any(Function) }),
+      ],
+    ]);
     expect(store.comms(0)).toEqual([]);
     await a.close();
   });

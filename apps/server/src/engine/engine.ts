@@ -206,7 +206,12 @@ export interface Engine {
   onOperatorMessage(
     runId: string,
     by?: "CAPCOM" | "FLIGHT",
-    opts?: { kinds?: readonly string[]; action?: "lift" | "rereview" | "accept" | "rework" },
+    opts?: {
+      kinds?: readonly string[];
+      action?: "lift" | "rereview" | "accept" | "rework";
+      /** Stores operator work after lift guards pass but before the resumed run can wake. */
+      beforeLift?: () => Promise<boolean>;
+    },
   ): Promise<boolean>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -2196,6 +2201,7 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           if (flightHeld(store.run(run.id) ?? run)) return;
         }
+        if (opts?.beforeLift !== undefined && !(await opts.beforeLift())) return;
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
