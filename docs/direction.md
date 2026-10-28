@@ -11,7 +11,7 @@ FLIGHT is the head agent. It should run the crew the way the operator would run 
 ## Principles
 
 1. **Run on intent, not tickets.** Each repo carries a short direction (its `CLAUDE.md` goals and this file). FLIGHT turns direction into tickets, assigns them to lanes, drives the crew and keeps the board honest. Seats decide *how* to do their work, and all of it lands as a PR.
-2. **A short decision inbox.** Needs you holds only decisions that truly need the operator: money, product direction, security exceptions, anything irreversible. Each item carries a recommendation and a sensible default, so the operator can accept in one click. Everything else is FLIGHT's to decide and report.
+2. **A short decision inbox.** Needs you holds only decisions that truly need the operator: money, product direction, security exceptions, anything irreversible, and approvals the safety floor reserves for the operator (such as hard-rule clearance on a repo that keeps it). Each item carries a recommendation and a sensible default, so the operator can accept in one click. Everything else is FLIGHT's to decide and report.
 3. **Guard outcomes, not commands.** Hard gates exist only where the operator asked for them:
    - no secrets or home-folder reads;
    - read-only repos and other lanes' files stay read-only;
