@@ -33,7 +33,7 @@ function mergedFixture(checkout: string, number: number, files: string[]): strin
   git(checkout, "checkout", "-qb", `feature/${number}`);
   for (const path of files) writeFileSync(join(checkout, path), `// ${number}\n`);
   git(checkout, "add", ".");
-  git(checkout, "commit", "-qm", `change ${number}`);
+  git(checkout, "commit", "--allow-empty", "-qm", `change ${number}`);
   git(checkout, "checkout", "main");
   git(checkout, "merge", "--no-ff", `feature/${number}`, "-m", `merge ${number}`);
   return git(checkout, "rev-parse", "HEAD");
@@ -149,6 +149,15 @@ it("keeps oversized PRs out of coupling frequency and caps qualifying pairs", as
     const files = Array.from({ length: 25 }, (_, n) => `group-${group}-${n}.ts`);
     for (let i = 0; i < 4; i++) merge(files);
   }
+  git(
+    checkout,
+    "rm",
+    ...Array.from({ length: 5 }, (_, i) => [
+      ...Array.from({ length: 25 }, (_, n) => `large-a-${i}-${n}.ts`),
+      ...Array.from({ length: 25 }, (_, n) => `large-b-${i}-${n}.ts`),
+    ]).flat(),
+  );
+  git(checkout, "commit", "-qm", "remove oversized files");
   git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
   const data = await mapTree(
     checkout,
@@ -166,4 +175,19 @@ it("keeps oversized PRs out of coupling frequency and caps qualifying pairs", as
     expect.arrayContaining([Math.min(belowA, belowB), Math.max(belowA, belowB)]),
   );
   expect(data.hist.coupling).toHaveLength(600);
+});
+
+it("recomputes history when an empty default-branch merge keeps the same tree", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-history-cache-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  const first = mergedFixture(checkout, 1, ["packages/core/src/map.ts"]);
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const firstPr = storedPr(1, first);
+  expect((await mapTree(checkout, "origin/HEAD", [firstPr], [], NOW)).hist.prCount).toBe(1);
+  const second = mergedFixture(checkout, 2, []);
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  expect(
+    (await mapTree(checkout, "origin/HEAD", [firstPr, storedPr(2, second)], [], NOW)).hist,
+  ).toMatchObject({ prCount: 2, files: expect.any(Object) });
 });

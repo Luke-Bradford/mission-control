@@ -172,7 +172,12 @@ export function mapTree(
         .filter((pr) => pr.state === "merged" && pr.mergeCommitSha)
         .map((pr) => [pr.mergeCommitSha as string, pr]),
     );
-    const changes: { pr: PullRequestView; files: string[]; bug: boolean }[] = [];
+    const changes: {
+      pr: PullRequestView;
+      files: string[];
+      changedFileCount: number;
+      bug: boolean;
+    }[] = [];
     const mergeShas = (await git("log", "--merges", "--first-parent", "--format=%H", commit))
       .trim()
       .split("\n")
@@ -180,15 +185,16 @@ export function mapTree(
     for (const mergeSha of mergeShas) {
       const pr = byMerge.get(mergeSha);
       if (!pr || pr.mergedAt === null || pr.mergedAt < since) continue;
-      const files = (
+      const changedPaths = (
         await git("diff-tree", "--no-commit-id", "--name-only", "-r", `${mergeSha}^1`, mergeSha)
       )
         .split("\n")
-        .filter((path) => pathIndex.has(path));
+        .filter(Boolean);
+      const files = changedPaths.filter((path) => pathIndex.has(path));
       const bug =
         pr.branch.startsWith("fix/") ||
         tickets.get(pr.ticket ?? "")?.labels.includes("bug") === true;
-      changes.push({ pr, files, bug });
+      changes.push({ pr, files, changedFileCount: new Set(changedPaths).size, bug });
     }
     const hist: Tree["hist"] = {
       since,
@@ -210,7 +216,7 @@ export function mapTree(
         });
         filePrs.set(file, rows);
       }
-      if (change.files.length > MAP_COUPLING_PR_FILES_MAX) continue;
+      if (change.changedFileCount > MAP_COUPLING_PR_FILES_MAX) continue;
       const unique = [...new Set(change.files)].sort();
       for (const file of unique) couplingFiles.set(file, (couplingFiles.get(file) ?? 0) + 1);
       for (let i = 0; i < unique.length; i++)
