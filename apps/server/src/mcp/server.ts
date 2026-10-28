@@ -30,6 +30,8 @@ export interface McTool {
   modes: readonly CrewMode[];
   /** The modes where the tool shows only to a seat whose role is granted it. */
   grantable?: readonly CrewMode[];
+  /** When set, a seat this returns false for is never offered the tool, whatever its mode. */
+  offeredTo?: (seatId: string) => boolean;
   call(ctx: McToolContext, args: unknown): Promise<{ text: string; isError?: boolean }>;
 }
 
@@ -137,9 +139,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       .mcpTools()
       .filter(
         (t) =>
-          t.modes.includes(mode) ||
-          (t.grantable?.includes(mode) === true && grants.includes(t.name)) ||
-          (t.name === "report_plan" && mode === "writer" && grants.includes(t.name)),
+          (t.offeredTo === undefined || t.offeredTo(who.seatId)) &&
+          (t.modes.includes(mode) ||
+            (t.grantable?.includes(mode) === true && grants.includes(t.name)) ||
+            (t.name === "report_plan" && mode === "writer" && grants.includes(t.name))),
       );
   };
 

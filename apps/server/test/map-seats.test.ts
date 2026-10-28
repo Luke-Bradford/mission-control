@@ -255,6 +255,24 @@ describe("mapSeats", () => {
     expect(mixed?.ticket).toBe(800);
     expect(mixed?.nowTicket).toBeNull();
   });
+
+  it("points a seat's question badge at the FLIGHT node when a FLIGHT seat exists (#758)", () => {
+    const current = run({ id: "now", ticket: "mission-control#42" });
+    const store = {
+      ...storeOf([current]),
+      openQuestions: () => [
+        { id: 7, agentId: "guido-1", runId: "now", text: "Which lane?", at: 900, passedAt: null },
+      ],
+    } as unknown as Store;
+    const ring = ringOf({ now: { diff: [], branch: null } }) as unknown as CallRing;
+    const questions = (flightId?: string) =>
+      mapSeats([row({ run: { id: "now" } as CrewRow["run"] })], store, ring, lock, 1000, flightId)
+        .seats[0]?.badges.questions;
+    expect(questions("flight-1")).toEqual([
+      { id: 7, from: "guido-1", to: "FLIGHT", ticket: 42, since: 900 },
+    ]);
+    expect(questions()?.[0]?.to).toBe("CAPCOM");
+  });
 });
 
 describe("SeatDiff", () => {

@@ -18,8 +18,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ASK_FLIGHT_SELF,
+  ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
@@ -320,7 +323,7 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
-      ["ask_operator", ["writer", "read-only"]],
+      ["ask_flight", ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
@@ -332,7 +335,7 @@ describe("the mc tools", () => {
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.askOperator,
+      MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
@@ -547,7 +550,7 @@ describe("commit", () => {
       [
         "Not committed: README.md and docs/c.md are outside your area (apps/**).",
         "Not committed: web/b.ts is in GUIDO-2's area.",
-        "Not committed: apps/package.json and package.json are protected (build, install and CI files); ask the operator if the ticket needs them.",
+        "Not committed: apps/package.json and package.json are protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs them.",
         REVERT,
       ].join("\n"),
     );
@@ -565,14 +568,14 @@ describe("commit", () => {
   it("refuses one protected file, inside the area or nested, as it", async () => {
     write("apps/tsconfig.json", "{}\n");
     expect((await commit("chore: ts")).text).toBe(
-      `Not committed: apps/tsconfig.json is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+      `Not committed: apps/tsconfig.json is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
     expect(store.strays()).toEqual([]);
     write("apps/tsconfig.json", "{}\n");
     rmSync(join(wt, "apps/tsconfig.json"));
     write("apps/.github/workflows/ci.yml", "on: push\n");
     expect((await commit("ci")).text).toBe(
-      `Not committed: apps/.github/workflows/ci.yml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+      `Not committed: apps/.github/workflows/ci.yml is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
   });
 
@@ -586,7 +589,7 @@ describe("commit", () => {
     const base = head();
     write("apps/pyproject.toml", "[project]\n");
     expect((await commit("chore: py", withProtected())).text).toBe(
-      `Not committed: apps/pyproject.toml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+      `Not committed: apps/pyproject.toml is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
     expect(head()).toBe(base);
     expect(store.strays()).toEqual([]);
@@ -861,7 +864,7 @@ describe("commit: remove", () => {
       text: [
         "Not committed: docs/c.md is outside your area (apps/**).",
         "Not committed: web/b.ts is in GUIDO-2's area.",
-        "Not committed: package.json is protected (build, install and CI files); ask the operator if the ticket needs it.",
+        "Not committed: package.json is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.",
         "Not committed: apps/é.ts is not plain ASCII paths; the crew commits ASCII paths only.",
         MC_REMOVE_REFUSED,
       ].join("\n"),
@@ -982,13 +985,29 @@ describe("commit: remove", () => {
   });
 });
 
-describe("ask_operator", () => {
-  const ask = (args: unknown) => tool("ask_operator").call(CTX, args);
+/** The test crew with a FLIGHT seat (a watch seat) beside the others. */
+const withFlight = (): CcConfig => {
+  const c = config();
+  const session = c.crew?.sessions[0];
+  if (session === undefined) throw new Error("no session");
+  session.seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "haiku",
+    area: [],
+  });
+  return c;
+};
+
+describe("ask_flight", () => {
+  const ask = (args: unknown) => tool("ask_flight").call(CTX, args);
 
   it("records the question and tells the seat to carry on", async () => {
     expect(await ask({ question: "Lanes per customer, or one global list?" })).toEqual({
-      text: "Asked the operator. The answer arrives as a message; carry on with what you can meanwhile.",
+      text: ASKED_FLIGHT,
     });
+    expect(ASKED_FLIGHT).toMatch(/^Asked FLIGHT\./);
     expect(store.openQuestions()).toEqual([
       {
         id: expect.any(Number),
@@ -1002,18 +1021,66 @@ describe("ask_operator", () => {
     expect(emitted).toContain("attention");
   });
 
-  it("records the question as the seat to CAPCOM, about its run's ticket", async () => {
+  it("mirrors the question to FLIGHT, not CAPCOM, about its run's ticket (#758)", async () => {
+    tools = make({ config: withFlight() });
+    await ask({ question: "Lanes per customer?" });
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "guido-1", to: "flight-1", ticket: "mc#42", text: "Lanes per customer?" },
+    ]);
+    expect(emitted).toContain("agents");
+  });
+
+  it("with no FLIGHT seat, mirrors it to CAPCOM: nobody else can answer it", async () => {
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
       { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
     ]);
-    expect(emitted).toContain("agents");
+  });
+
+  it("refuses FLIGHT itself, recording nothing: FLIGHT briefs the operator instead", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const t = tool("ask_flight");
+    expect(t.offeredTo?.("flight-1")).toBe(false);
+    expect(t.offeredTo?.("guido-1")).toBe(true);
+    expect(t.offeredTo?.("retro")).toBe(true);
+    expect(await t.call({ seatId: "flight-1", runId: "flight-1:1" }, { question: "x?" })).toEqual({
+      text: ASK_FLIGHT_SELF,
+      isError: true,
+    });
+    expect(store.openQuestions()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+  });
+
+  it("refuses a seat's question to CAPCOM over comms_send, pointing at ask_flight (#758)", async () => {
+    tools = make({ config: withFlight() });
+    const send = (ctx: McToolContext, args: unknown) => tool("comms_send").call(ctx, args);
+    expect(await send(CTX, { to: "CAPCOM", text: "Which lane?", label: "question" })).toEqual({
+      text: COMMS_QUESTION_TO_FLIGHT,
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+    // a plain line, or a question to FLIGHT, still goes
+    expect((await send(CTX, { to: "CAPCOM", text: "Done with #42." })).isError).toBeUndefined();
+    expect(
+      (await send(CTX, { to: "flight-1", text: "Which lane?", label: "question" })).isError,
+    ).toBeUndefined();
+    // FLIGHT's own question to CAPCOM is its channel to the operator
+    liveSeat("flight-1", "flight-1:1");
+    expect(
+      (
+        await send(
+          { seatId: "flight-1", runId: "flight-1:1" },
+          { to: "CAPCOM", text: "Merge #551?", label: "question" },
+        )
+      ).isError,
+    ).toBeUndefined();
   });
 
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
     await ask({ question: "one?" });
     liveSeat("retro", "retro:1");
-    await tool("ask_operator").call({ seatId: "retro", runId: "retro:1" }, { question: "two?" });
+    await tool("ask_flight").call({ seatId: "retro", runId: "retro:1" }, { question: "two?" });
     store.answerQuestions("guido-1", NOW + 1);
     expect(store.openQuestions().map((q) => q.text)).toEqual(["two?"]);
   });
@@ -1021,7 +1088,7 @@ describe("ask_operator", () => {
   it("refuses a run that has ended, or is not the seat's live one, recording nothing", async () => {
     store.upsertRun(run({ endedAt: NOW, status: "ok" }));
     expect(await ask({ question: "one?" })).toEqual({ text: "This run has ended.", isError: true });
-    const other = await tool("ask_operator").call(
+    const other = await tool("ask_flight").call(
       { seatId: "guido-1", runId: "guido-1:none" },
       { question: "two?" },
     );
@@ -1041,6 +1108,47 @@ describe("ask_operator", () => {
 });
 
 describe("through /mcp", () => {
+  it("never offers FLIGHT ask_flight; a seat beside it still has it (#758)", async () => {
+    const cfg = withFlight();
+    tools = make({ config: cfg });
+    const tokens = new RunTokens();
+    const flight = tokens.issue("flight-1", "flight-1:1");
+    const reader = tokens.issue("retro", "retro:1");
+    liveSeat("flight-1", "flight-1:1");
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      tokens,
+      mcpTools: () => tools,
+      seatMode: (id) => crewSeatMode(cfg, id),
+    });
+    await app.ready();
+    try {
+      const rpc = (tok: string, method: string, params?: unknown) =>
+        app
+          .inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
+            payload: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          })
+          .then((r) => r.json());
+      const names = async (tok: string) =>
+        (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
+      expect(await names(flight)).not.toContain("ask_flight");
+      expect(await names(reader)).toContain("ask_flight");
+      const call = await rpc(flight, "tools/call", {
+        name: "ask_flight",
+        arguments: { question: "x?" },
+      });
+      expect(call.error.message).toBe("unknown tool");
+      expect(store.openQuestions()).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("offers each seat mode its Comms tools; commit runs end to end", async () => {
     const cfg = config();
     const tokens = new RunTokens();
@@ -1073,7 +1181,7 @@ describe("through /mcp", () => {
         "comms_react",
         "commit",
         "sync_main",
-        "ask_operator",
+        "ask_flight",
         "report_evidence",
       ]);
       expect(
@@ -1088,7 +1196,7 @@ describe("through /mcp", () => {
         "comms_read",
         "comms_send",
         "comms_react",
-        "ask_operator",
+        "ask_flight",
         "report_evidence",
       ]);
       write("apps/a.ts", "a2\n");
@@ -1488,7 +1596,7 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
   it("refuses a symlink named for a protected folder as protected", async () => {
     symlinkSync("evil", join(wt, "apps/.claude"));
     expect((await commit("feat: x")).text).toBe(
-      `Not committed: apps/.claude is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+      `Not committed: apps/.claude is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
   });
 
@@ -1496,7 +1604,7 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
     write("apps/x/Package.json", "{}\n");
     write("apps/Vitest.config.ts", "x\n");
     expect((await commit("feat: x")).text).toBe(
-      `Not committed: apps/Vitest.config.ts and apps/x/Package.json are protected (build, install and CI files); ask the operator if the ticket needs them.\n${REVERT}`,
+      `Not committed: apps/Vitest.config.ts and apps/x/Package.json are protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs them.\n${REVERT}`,
     );
   });
 
@@ -1527,7 +1635,7 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
         return crewGit(cwd, args, common, o);
       };
       expect(await commit("feat: x", make({ git: slow }))).toEqual({
-        text: "Not committed: git took too long to stage or commit your changes, so the index was reset. Try again; if it keeps happening, tell the operator.",
+        text: "Not committed: git took too long to stage or commit your changes, so the index was reset. Try again; if it keeps happening, tell FLIGHT with mc ask_flight.",
         isError: true,
       });
       expect(head()).toBe(base);
@@ -1567,7 +1675,7 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
 
 describe("commit: fix round 2", () => {
   const PROT_ONE =
-    "is protected (build, install and CI files); ask the operator if the ticket needs it.";
+    "is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.";
 
   it("refuses any path that is not plain ASCII, wherever it is", async () => {
     const base = head();
@@ -1687,7 +1795,7 @@ describe("commit: fix round 2", () => {
     const tiny: McToolsDeps["git"] = async (cwd, args, common, o) =>
       crewGit(cwd, args, common, args[0] === "diff" ? { ...o, maxBuffer: 10 } : o);
     expect(await commit("feat: x", make({ git: tiny }))).toEqual({
-      text: "Not committed: the change is too large for the commit tool to check, so the index was reset. Commit fewer files at once; if it keeps happening, tell the operator.",
+      text: "Not committed: the change is too large for the commit tool to check, so the index was reset. Commit fewer files at once; if it keeps happening, tell FLIGHT with mc ask_flight.",
       isError: true,
     });
     expect(head()).toBe(base);
@@ -1740,7 +1848,7 @@ describe("commit: fix round 3", () => {
     const tiny: McToolsDeps["git"] = async (cwd, args, common, o) =>
       crewGit(cwd, args, common, args[0] === "ls-files" ? { ...o, maxBuffer: 10 } : o);
     expect(await commit("feat: x", make({ git: tiny }))).toEqual({
-      text: "Not committed: the commit tool could not list the index; ask the operator.",
+      text: "Not committed: the commit tool could not list the index; ask FLIGHT with mc ask_flight.",
       isError: true,
     });
     expect(head()).toBe(base);

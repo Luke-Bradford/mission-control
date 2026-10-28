@@ -135,8 +135,8 @@ describe("scratch mode", () => {
     expect(ruleOf(bash("pnpm -s vitest run a.test.ts"), scratch)).toBe("allow");
   });
 
-  it("scratch: ask_operator, report_evidence and report_plan denied, report_findings allowed", () => {
-    for (const tool of [MC_TOOLS.askOperator, MC_TOOLS.reportEvidence, MC_TOOLS.reportPlan]) {
+  it("scratch: ask_flight, report_evidence and report_plan denied, report_findings allowed", () => {
+    for (const tool of [MC_TOOLS.askFlight, MC_TOOLS.reportEvidence, MC_TOOLS.reportPlan]) {
       expect(guardDecision({ tool, input: {} }, scratch)).toEqual({
         kind: "deny",
         rule: "read-only",
@@ -146,7 +146,7 @@ describe("scratch mode", () => {
     expect(guardDecision({ tool: MC_TOOLS.reportFindings, input: {} }, scratch)).toEqual({
       kind: "allow",
     });
-    expect(guardDecision({ tool: MC_TOOLS.askOperator, input: {} }, writer)).toEqual({
+    expect(guardDecision({ tool: MC_TOOLS.askFlight, input: {} }, writer)).toEqual({
       kind: "allow",
     });
   });
@@ -396,7 +396,7 @@ describe("guardDecision: read-only seats", () => {
     expect(ruleOf({ tool, input: {} }, readOnly)).toBe("read-only");
     expect(ruleOf({ tool, input: {} }, writer)).toBe("allow");
   });
-  it.each(["mcp__mc__ask_operator", "mcp__mc__report_evidence"])(
+  it.each(["mcp__mc__ask_flight", "mcp__mc__report_evidence"])(
     "allows %s in both modes",
     (tool) => {
       expect(ruleOf({ tool, input: {} }, readOnly)).toBe("allow");

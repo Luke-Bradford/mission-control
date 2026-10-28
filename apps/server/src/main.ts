@@ -57,6 +57,7 @@ import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
+import { markHubStarted } from "./hud.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -110,6 +111,7 @@ export async function main(): Promise<void> {
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
   writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
+  markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
   const bus = new ChangeBus();
   // per-run bearer tokens for /mcp and the guard: the supervisor issues one at each spawn and

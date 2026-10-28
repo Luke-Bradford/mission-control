@@ -3757,6 +3757,14 @@ pre.diff .h {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* What the one "FLIGHT is not triaging" item stands for, listed under it (#758). */
+.not-triaging-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
 .kind {
   font-size: var(--fs-xs);
   font-weight: 600;
