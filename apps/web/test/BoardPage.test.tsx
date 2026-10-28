@@ -27,7 +27,7 @@ import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { LANE_KEY, writeKey } from "../src/storage.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, crewRow, HOUR, item, NOW, REPOS } from "./fixtures.ts";
+import { boardItem, CONFIG, crewRow, HOUR, item, METRICS_VIEW, NOW, REPOS } from "./fixtures.ts";
 
 const DAY = 86_400_000;
 const GH = "https://github.com/octo-org/shop-app";
@@ -78,6 +78,7 @@ function stub(d: Data = {}) {
     "/api/repos/site-builder/prs?linked=1": [],
     "/api/crew": { rows: d.crew ?? [], firstRunToday: null },
     "/api/attention": d.attention ?? [],
+    "/api/metrics": METRICS_VIEW,
     ...(d.profiles ? { "/api/repos/profiles": d.profiles } : {}),
     "/api/boards/site-builder/items/2": {
       number: 2,
@@ -158,7 +159,7 @@ describe("at phone width", () => {
     expect(screen.queryByText("Ticket 2")).toBeNull();
     const ready = screen.getByRole("button", { name: "Ready 1" });
     expect(ready.getAttribute("aria-expanded")).toBe("true");
-    const progress = screen.getByRole("button", { name: "In progress 1" });
+    const progress = screen.getByRole("button", { name: "In progress · now 4" });
     expect(progress.getAttribute("aria-expanded")).toBe("false");
     // an empty column is a header with its count and nothing to open
     expect(screen.queryByRole("button", { name: "Backlog 0" })).toBeNull();
@@ -185,7 +186,7 @@ describe("at phone width", () => {
     await open();
     await screen.findByText("Ticket 1");
     const ready = screen.getByRole("button", { name: "Ready 1" });
-    const progress = screen.getByRole("button", { name: "In progress 1" });
+    const progress = screen.getByRole("button", { name: "In progress · now 4" });
     const panel = document.getElementById(ready.getAttribute("aria-controls") ?? "");
     expect(panel?.className).toBe("kb");
     expect(panel?.textContent).toContain("Ticket 1");
@@ -241,6 +242,17 @@ describe("at phone width", () => {
 });
 
 describe("columns", () => {
+  it("shows the Overview's registry In progress value and definition, not the Status-column total", async () => {
+    stub({ shopApp: [todo(1), todo(2, { status: "In Progress", state: "in progress" })] });
+    const { container } = await open();
+    const heading = [...container.querySelectorAll<HTMLElement>(".kcol .kh")].find(
+      (element) => element.textContent === "In progress · now 4",
+    );
+    expect(heading?.querySelector("[title]")?.getAttribute("title")).toContain(
+      "Tickets started and not yet merged",
+    );
+  });
+
   it("shows the eight Status columns from both repos' statuses, with counts", async () => {
     stub({
       shopApp: [todo(1), todo(2, { status: "In Progress", state: "in progress" })],
@@ -257,7 +269,7 @@ describe("columns", () => {
       "Refinement 0",
       "Blocked 0",
       "Ready 1",
-      "In progress 1",
+      "In progress · now 4",
       "In review 0",
       "Ready for QA 1",
       "Done 0",
@@ -1551,7 +1563,7 @@ describe("repos together or apart", () => {
     seed();
     const [shopApp] = await apartKanbans();
     await waitFor(() =>
-      expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]),
+      expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress · now 4", "Done 0"]),
     );
   });
 
@@ -1567,7 +1579,7 @@ describe("repos together or apart", () => {
         "Backlog 0",
         "Blocked 1",
         "Ready 1",
-        "In progress 0",
+        "In progress · now 4",
         "Done 0",
       ]),
     );
@@ -1600,7 +1612,7 @@ describe("repos together or apart", () => {
     act(() => resolveProfiles?.(Response.json(PROFILES)));
     await waitFor(() => expect(view.container.querySelectorAll(".repokanban")).toHaveLength(2));
     const [shopApp] = Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
-    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]);
+    expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress · now 4", "Done 0"]);
   });
 
   it("Apart before profiles load: every column, headed by the repo id alone", async () => {
