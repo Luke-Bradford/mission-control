@@ -548,6 +548,12 @@ function CurrentDoingLine({
   tz: string | null;
   repoPrs?: readonly PullRequestView[];
 }) {
+  if (row.run?.status !== "running")
+    return <DoingLine row={row} now={Date.now()} tz={tz} repoPrs={repoPrs} />;
+  return <TickingDoingLine row={row} tz={tz} repoPrs={repoPrs} />;
+}
+
+function TickingDoingLine({ row, tz, repoPrs }: Parameters<typeof CurrentDoingLine>[0]) {
   const now = useSecond();
   return <DoingLine row={row} now={now} tz={tz} repoPrs={repoPrs} />;
 }

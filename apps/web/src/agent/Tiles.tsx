@@ -147,8 +147,25 @@ function SeatContext({ row }: { row: CrewRow }) {
 
 /** The header's tiles (catalogue 2.4.3), from the agent's latest run and its digest. */
 export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; now?: number }) {
+  const ticking = now === undefined && row.run?.status === "running";
+  if (!ticking) return <TilesBody row={row} limits={limits} current={now ?? Date.now()} />;
+  return <TickingTiles row={row} limits={limits} />;
+}
+
+function TickingTiles({ row, limits }: { row: CrewRow; limits: LimitRow[] }) {
   const tick = useSecond();
-  const current = now ?? tick;
+  return <TilesBody row={row} limits={limits} current={tick} />;
+}
+
+function TilesBody({
+  row,
+  limits,
+  current,
+}: {
+  row: CrewRow;
+  limits: LimitRow[];
+  current: number;
+}) {
   const run = row.run;
   const d = row.digest;
   const pct = contextPct(row);

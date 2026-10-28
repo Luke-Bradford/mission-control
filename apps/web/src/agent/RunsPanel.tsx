@@ -125,6 +125,7 @@ export const RunRow = memo(function RunRow({
   open,
   onToggle,
   onRender,
+  onTimeRender,
 }: {
   row: CrewRow;
   run: RunView;
@@ -134,6 +135,8 @@ export const RunRow = memo(function RunRow({
   onToggle: (id: string) => void;
   /** Test instrumentation for the static row boundary. */
   onRender?: () => void;
+  /** Test instrumentation for the clock-owning cell. */
+  onTimeRender?: () => void;
 }) {
   onRender?.();
   const pill = runPill(run, row);
@@ -151,7 +154,7 @@ export const RunRow = memo(function RunRow({
       <span>
         <Pill tone={pill.tone}>{pill.label}</Pill>
       </span>
-      <RunTimes run={run} tz={tz} />
+      <RunTimes run={run} tz={tz} onRender={onTimeRender} />
       <span className="num right">{tokens}</span>
       <span className="num right">{cost(run.costUsd)}</span>
       {run.endedAt === null && run.loop?.aside && run.id !== row.run?.id && (
@@ -197,8 +200,37 @@ export const RunRow = memo(function RunRow({
   );
 });
 
-function RunTimes({ run, tz }: { run: RunView; tz: string | null }) {
+function RunTimes({
+  run,
+  tz,
+  onRender,
+}: {
+  run: RunView;
+  tz: string | null;
+  onRender?: () => void;
+}) {
+  if (run.status !== "running") {
+    onRender?.();
+    return <RunTimesBody run={run} tz={tz} now={Date.now()} />;
+  }
+  return <TickingRunTimes run={run} tz={tz} onRender={onRender} />;
+}
+
+function TickingRunTimes({
+  run,
+  tz,
+  onRender,
+}: {
+  run: RunView;
+  tz: string | null;
+  onRender?: () => void;
+}) {
+  onRender?.();
   const now = useSecond();
+  return <RunTimesBody run={run} tz={tz} now={now} />;
+}
+
+function RunTimesBody({ run, tz, now }: { run: RunView; tz: string | null; now: number }) {
   return (
     <>
       <Started ms={run.startedAt} now={now} tz={tz} />

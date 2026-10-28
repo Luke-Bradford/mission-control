@@ -12,7 +12,28 @@ import { needLine, seatItems } from "../crew.ts";
  * for its unacknowledged items (shown only while there are any).
  */
 export function NeedBanner({ row, items }: { row: CrewRow; items: AttentionItem[] }) {
+  const ticking = seatItems(row, items).some((item) => item.kind === "stalled");
+  return ticking ? (
+    <TickingNeedBanner row={row} items={items} />
+  ) : (
+    <NeedBannerBody row={row} items={items} now={Date.now()} />
+  );
+}
+
+function TickingNeedBanner({ row, items }: { row: CrewRow; items: AttentionItem[] }) {
   const now = useSecond();
+  return <NeedBannerBody row={row} items={items} now={now} />;
+}
+
+function NeedBannerBody({
+  row,
+  items,
+  now,
+}: {
+  row: CrewRow;
+  items: AttentionItem[];
+  now: number;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parts = needLine(row, items, now, useTestLock());

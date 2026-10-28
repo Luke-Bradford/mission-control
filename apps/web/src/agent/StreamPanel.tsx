@@ -157,6 +157,16 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
  * was written; a waiting run names its queued full suite and the lock holder.
  */
 function LiveCall({ row, tz }: { row: CrewRow; tz: string | null }) {
+  const lock = useTestLock();
+  const running = row.run?.status === "running";
+  const waiting = running ? lock?.waiting.find((w) => w.runId === row.run?.id) : undefined;
+  const live = running ? (row.digest?.liveTool ?? null) : null;
+  const stalled = running && row.hudState === "stalled";
+  if (!waiting && !live && !stalled) return <div id="liveCall" />;
+  return <TickingLiveCall row={row} tz={tz} />;
+}
+
+function TickingLiveCall({ row, tz }: { row: CrewRow; tz: string | null }) {
   const now = useSecond();
   const nameOf = useSeatName();
   const lock = useTestLock();

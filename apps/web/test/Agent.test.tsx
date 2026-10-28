@@ -212,12 +212,14 @@ describe("Agent page: static run rows", () => {
         prs={[]}
         open={false}
         onToggle={() => {}}
-        onRender={renders}
+        onTimeRender={renders}
       />,
     );
     const initial = renders.mock.calls.length;
 
-    await act(async () => vi.advanceTimersByTime(1000));
+    await act(async () => {});
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
 
     expect(renders).toHaveBeenCalledTimes(initial);
     vi.useRealTimers();
