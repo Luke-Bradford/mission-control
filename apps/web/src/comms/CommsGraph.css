@@ -46,8 +46,7 @@
   min-height: 320px;
   overflow: hidden;
 }
-.comms-edge-line,
-.comms-edge-run {
+.comms-edge-line {
   position: absolute;
   display: block;
   transform-origin: 0 50%;
@@ -59,39 +58,13 @@
 }
 .comms-edge.active .comms-edge-line {
   background: #7188aa;
-  box-shadow: 0 0 5px #8db0ff44;
   opacity: 0.92;
 }
 .comms-edge.watching .comms-edge-line {
   background: var(--warn);
-  box-shadow: 0 0 6px #f2b53a66;
 }
-.comms-edge.dim .comms-edge-line,
-.comms-edge.dim .comms-edge-count,
-.comms-edge-run.dim {
-  opacity: 0.15;
-}
-.comms-edge-run {
-  height: 6px;
-  margin-top: -3px;
-}
-.comms-edge-dot {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  box-shadow: 0 0 6px currentColor;
-  animation: comms-dot-travel linear infinite;
-}
-@keyframes comms-dot-travel {
-  to {
-    left: calc(100% - 5px);
-  }
-}
-.comms-graph.paused .comms-edge-dot {
-  animation-play-state: paused;
+.comms-edge.live .comms-edge-line {
+  animation: comms-edge-live 1.8s ease-out 1;
 }
 .comms-edge-count {
   position: absolute;
@@ -104,6 +77,21 @@
   background: var(--surface);
   border-radius: 3px;
   transform: translate(-50%, -50%);
+}
+.comms-edge.dim .comms-edge-line,
+.comms-edge.dim .comms-edge-count {
+  opacity: 0.15;
+}
+@keyframes comms-edge-live {
+  0% {
+    filter: brightness(2.2);
+    box-shadow: 0 0 12px #8db0ff;
+    opacity: 1;
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow: 0 0 0 transparent;
+  }
 }
 .comms-node {
   position: absolute;
@@ -127,9 +115,6 @@
   opacity: 0.34;
   filter: saturate(0.55);
 }
-.comms-node.inactive > span {
-  border-style: dashed;
-}
 .comms-node > span {
   display: grid;
   width: clamp(28px, calc(25px + var(--count, 0) * 1px), 46px);
@@ -143,9 +128,6 @@
   background: var(--bg);
   border: 2px solid var(--node-color);
   border-radius: 50%;
-}
-.comms-node.selected > span {
-  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .comms-node small {
   max-width: 88px;
@@ -297,8 +279,9 @@
   color: var(--muted);
   font-size: var(--fs-s);
 }
-@media (prefers-reduced-motion: reduce) {
-  .comms-edge-dot {
-    display: none;
-  }
+.comms-node.inactive > span {
+  border-style: dashed;
+}
+.comms-node.selected > span {
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }

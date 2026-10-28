@@ -1,10 +1,10 @@
 import { type AgentStream, clockHm } from "@mc/core";
 import { useMemo } from "react";
-import { useTz } from "../clock.ts";
+import { useNow, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { type DockRow, dockRows, feedRows, kindLabel } from "./conversation.ts";
+import { answersToday, type DockRow, dockRows, feedRows, kindLabel } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
 
 export const NOTHING_LOGGED = "Nothing logged yet.";
@@ -29,22 +29,28 @@ function LogRow({ row, tz }: { row: DockRow; tz: string | null }) {
   );
 }
 
-/** FLIGHT › Working log: Mission Control's wake lines and FLIGHT's decisions, collapsed. */
+/** Mission Control wakes and actions not already presented in Decided without you. */
 export function WorkingLog() {
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const seat = view?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
+  const now = useNow();
   const decisions = view?.decisions;
-  const rows = useMemo(
-    () => (seat ? feedRows(dockRows(stream, decisions ?? [])) : []),
-    [seat, stream, decisions],
-  );
+  const rows = useMemo(() => {
+    if (!seat) return [];
+    const shown = new Set(
+      tz === null ? [] : answersToday(decisions ?? [], now, tz).map((d) => d.id),
+    );
+    return feedRows(dockRows(stream, decisions ?? [])).filter(
+      (row) => row.kind !== "decision" || !shown.has(row.d.id),
+    );
+  }, [seat, stream, decisions, now, tz]);
   return (
     <Panel
       id="logP"
-      title="Working log"
-      sub="Mission Control's wake lines and FLIGHT's decisions, oldest first"
+      title="System log"
+      sub="Mission Control wakes and recorded actions · answers shown once, alongside"
     >
       {view === undefined ? (
         <p className="pb note">—</p>

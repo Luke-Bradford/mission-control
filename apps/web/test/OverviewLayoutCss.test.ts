@@ -83,6 +83,13 @@ describe("Overview layout (hud.css)", () => {
     expect(desktop).not.toContain("display: none");
   });
 
+  it("uses the full viewport width rather than recapping the app shell", () => {
+    const shell = rule(String.raw`\.shell`);
+    expect(shell).toContain("width: 100%");
+    expect(shell).not.toContain("max-width");
+    expect(shell).not.toContain("margin: 0 auto");
+  });
+
   it("wraps the header before its desktop contents fit and keeps tabs within their row", () => {
     const desktop = css.match(/@media \(min-width: 1280px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
     expect(desktop).toContain("flex-wrap: nowrap");

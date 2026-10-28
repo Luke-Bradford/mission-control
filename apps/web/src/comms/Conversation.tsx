@@ -355,22 +355,32 @@ function MessagePane({
   flightId: string | undefined;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const followsLatest = useRef(true);
+  const onJumpedRef = useRef(onJumped);
+  onJumpedRef.current = onJumped;
   const [highlightId, setHighlightId] = useState(jumpId);
   const latestId = messages.at(-1)?.id;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow the newest rendered message.
   useLayoutEffect(() => {
     if (jumpId) {
       const target = document.getElementById(`comms-message-${jumpId}`);
       if (target) {
         setHighlightId(jumpId);
         target.scrollIntoView?.({ block: "center" });
-        onJumped();
+        followsLatest.current = jumpId === latestId;
+        onJumpedRef.current();
       }
-    } else if (box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [jumpId, latestId, onJumped]);
+    } else if (box.current && followsLatest.current) {
+      box.current.scrollTop = box.current.scrollHeight;
+    }
+  }, [jumpId, latestId]);
+  const rememberScrollPosition = () => {
+    const el = box.current;
+    if (!el) return;
+    followsLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+  };
   const byId = new Map(lookupMessages.map((message) => [message.id, message]));
   return (
-    <div className="comms-messages scroll" id="convo" ref={box}>
+    <div className="comms-messages scroll" id="convo" ref={box} onScroll={rememberScrollPosition}>
       <div className="comms-message-stack">
         {messages.length === 0 ? <p className="pb note">No messages yet.</p> : null}
         {messages.map((message) => {
@@ -765,9 +775,9 @@ function ModernConversation({
           <span className="comms-chat-hint" title={conversationHint(view)}>
             {conversationHint(view)}
           </span>
-          <MentionsBell onOpenMessage={onOpenMessage} flightId={flightSeat?.id} />
         </div>
       }
+      actions={<MentionsBell onOpenMessage={onOpenMessage} flightId={flightSeat?.id} />}
     >
       {readError && (
         <p className="pb crit-t s">

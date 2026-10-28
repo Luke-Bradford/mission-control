@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { hub } from "../src/data.ts";
@@ -38,7 +38,7 @@ it.each([3, 6, 10])(
   },
 );
 
-it("lays out every live seat, draws directional link totals, and changes scope with the page", async () => {
+it("lays out every live seat, draws static link totals, and changes scope with the page", async () => {
   stubFetch({
     "/api/comms/links": {
       links: [
@@ -56,6 +56,7 @@ it("lays out every live seat, draws directional link totals, and changes scope w
   expect(screen.getByRole("button", { name: /Open guido-1/ })).toBeTruthy();
   expect(screen.getByRole("button", { name: /Open retro-1/ })).toBeTruthy();
   expect(document.querySelectorAll(".comms-edge-count")).toHaveLength(2);
+  expect(document.querySelectorAll(".comms-edge-dot")).toHaveLength(0);
   expect(screen.getByText("10")).toBeTruthy();
 
   graph.rerender(
@@ -72,6 +73,24 @@ it("lays out every live seat, draws directional link totals, and changes scope w
   expect(screen.getByRole("button", { name: /Open retro-1/ }).classList).toContain("selected");
   expect(screen.getByRole("button", { name: /Open FLIGHT/ }).classList).not.toContain("selected");
   expect(screen.getByRole("button", { name: /Open CAPCOM/ }).classList).not.toContain("selected");
+});
+
+it("lights an edge only when its message count increases after the initial load", async () => {
+  let count = 1;
+  stubFetch({
+    "/api/comms/links": () => ({
+      status: 200,
+      body: { links: [{ from: "guido-1", to: "retro-1", count }] },
+    }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
+  expect(document.querySelector(".comms-edge.live")).toBeNull();
+  count = 2;
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(document.querySelector(".comms-edge.live")).not.toBeNull());
 });
 
 it("keeps selected seats lit without traffic and dims crew-paused seats", async () => {

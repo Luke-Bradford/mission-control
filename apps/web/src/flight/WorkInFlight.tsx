@@ -1,4 +1,11 @@
-import { type Crew, type CrewRow, FIX_STEP, type RunLoopView } from "@mc/core";
+import {
+  type Crew,
+  type CrewRow,
+  FIX_STEP,
+  type FlightLedgerEntry,
+  type FlightLedgerView,
+  type RunLoopView,
+} from "@mc/core";
 import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
 import {
@@ -74,35 +81,80 @@ function StepCells({ r }: { r: CrewRow }) {
 }
 
 /** One row of Work in flight; its doing line is the Overview's, with the whole line as hover text. */
-function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null }) {
+function ticketNumber(ticket: string | null): string | null {
+  return ticket?.match(/#\d+$/)?.[0] ?? null;
+}
+
+function ledgerWork(row: CrewRow, entries: readonly FlightLedgerEntry[]): FlightLedgerEntry | null {
+  const ticket = ticketNumber(row.ticket);
+  const work = entries.filter((entry) => entry.kind === "work");
+  return (
+    (ticket
+      ? work.find((entry) =>
+          entry.refs.some((ref) => !ref.startsWith("PR ") && ref.endsWith(ticket)),
+        )
+      : undefined) ??
+    work.find((entry) => entry.owner === row.id) ??
+    null
+  );
+}
+
+function WorkRow({
+  r,
+  now,
+  tz,
+  entry,
+}: {
+  r: CrewRow;
+  now: number;
+  tz: string | null;
+  entry: FlightLedgerEntry | null;
+}) {
   const to = agentPath(r.id);
   const elapsed = r.run ? runElapsed(r.run, now) : null;
   const repoPrs = useReviewPrs(r);
   const doing = doingLine(r, now, tz, repoPrs);
   return (
     <li>
-      <div className="row">
-        <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
-          <AgentTag id={r.id} index={r.index} />
-        </a>
-        <span title={seatStatus(r).reason ?? seatStatus(r).label}>
-          <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
-        </span>
-        {r.ticket && <TicketRef ticket={r.ticket} />}
-        {r.ticketTitle && (
-          <span className="s min0 ellip" title={r.ticketTitle}>
-            {r.ticketTitle}
+      <div className="row wif-row">
+        <div className="wif-seat">
+          <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
+            <AgentTag id={r.id} index={r.index} bare />
+          </a>
+          <span title={seatStatus(r).reason ?? seatStatus(r).label}>
+            <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
           </span>
-        )}
-        <StepCells r={r} />
-        {r.loop?.prNumber != null && (
-          <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
-        )}
-        <span className="s">{r.run?.branch ?? DASH}</span>
-        <span className="s num">{elapsed === null ? DASH : dur(elapsed)}</span>
-        <span className="s fg2 min0 ellip" title={doing}>
-          <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
+        </div>
+        <div className="wif-work min0">
+          <span>
+            {r.ticket && <TicketRef ticket={r.ticket} />}
+            {r.ticketTitle && (
+              <b className="min0 ellip" title={r.ticketTitle}>
+                {r.ticketTitle}
+              </b>
+            )}
+          </span>
+          <span className="wif-doing s fg2 min0 ellip" title={doing}>
+            <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
+          </span>
+        </div>
+        <div className="wif-stage min0">
+          <StepCells r={r} />
+          {r.loop?.prNumber != null && (
+            <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
+          )}
+        </div>
+        <span className="wif-next min0" title={entry?.next ?? "No next action recorded"}>
+          <span className="s ellip">{entry?.next ?? "No next action recorded"}</span>
+          <span className={`s ${entry?.due == null ? "warn-t" : "fg2"}`}>
+            {entry?.due == null || tz === null
+              ? "No checkpoint"
+              : entry.due <= now
+                ? `Checkpoint overdue ${dur(now - entry.due)}`
+                : `Checkpoint in ${dur(entry.due - now)}`}
+          </span>
         </span>
+        <span className="wif-elapsed s num">{elapsed === null ? DASH : dur(elapsed)}</span>
       </div>
     </li>
   );
@@ -113,24 +165,47 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
  * per run in a loop that is not done (its steps and PR beside the ticket). Observed loops are not
  * listed here.
  */
-export function WorkInFlight() {
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const now = useSecond();
-  const tz = useTz();
-  const { inView: matchesSession } = useSessionScope();
-  const active = (crew?.rows ?? []).filter(
+export function activeCrewRows(
+  crew: Crew | undefined,
+  matchesSession: (row: Pick<CrewRow, "sessionId" | "repoId">) => boolean,
+): CrewRow[] {
+  return (crew?.rows ?? []).filter(
     (r) =>
       r.kind === "crew" &&
       r.ticket !== null &&
       (hasActiveRun(r) || isLoopInFlight(r)) &&
       matchesSession(r),
   );
+}
+
+export function WorkInFlight() {
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedgerOpen).data;
+  const now = useSecond();
+  const tz = useTz();
+  const { inView: matchesSession } = useSessionScope();
+  const active = activeCrewRows(crew, matchesSession);
   if (active.length === 0) return <p className="pb note">{crew ? NO_CREW_RUNS : DASH}</p>;
   return (
-    <ul className="pb tlist" aria-label="Crew runs">
-      {active.map((r) => (
-        <WorkRow key={r.id} r={r} now={now} tz={tz} />
-      ))}
-    </ul>
+    <div className="wif-table">
+      <div className="wif-table-head" aria-hidden="true">
+        <span>Owner</span>
+        <span>Workstream</span>
+        <span>Delivery path</span>
+        <span>Next / checkpoint</span>
+        <span>Age</span>
+      </div>
+      <ul className="pb tlist" aria-label="Crew runs">
+        {active.map((r) => (
+          <WorkRow
+            key={r.id}
+            r={r}
+            now={now}
+            tz={tz}
+            entry={ledger?.session === r.sessionId ? ledgerWork(r, ledger.entries ?? []) : null}
+          />
+        ))}
+      </ul>
+    </div>
   );
 }

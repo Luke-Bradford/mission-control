@@ -149,6 +149,46 @@ describe("Threads", () => {
 });
 
 describe("Comms routes", () => {
+  it("keeps the reader's place when the conversation rerenders", async () => {
+    const message = {
+      id: "comms:older",
+      at: NOW - MIN,
+      from: "alpha",
+      to: "crew",
+      text: "Read this older message",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    stubFetch({
+      "/api/comms/crew": { messages: [message] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    const { rerender } = render(
+      <CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />,
+    );
+    await screen.findByText("Read this older message");
+    const pane = document.querySelector(".comms-messages") as HTMLElement;
+    Object.defineProperties(pane, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 300 },
+    });
+    pane.scrollTop = 200;
+    fireEvent.scroll(pane);
+
+    rerender(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+
+    expect(pane.scrollTop).toBe(200);
+  });
+
   it("waits for a jumped message to render, and routes peer quotes to their actual conversation", async () => {
     const original = {
       id: "comms:peer",
@@ -343,7 +383,7 @@ describe("Comms routes", () => {
       "/api/crew": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
-      "/api/comms/crew": { messages: [message] },
+      "/api/comms/crew": { messages: [message], unread: 3 },
       "/api/comms/mentions": { mentions: [{ message, seen: false }] },
       "/api/comms/pins": { messages: [message] },
       "POST /api/comms/read": { ok: true },
@@ -353,7 +393,15 @@ describe("Comms routes", () => {
     render(<Comms item={null} view={{ kind: "crew" }} />);
     expect(await screen.findByText("question")).toBeTruthy();
     expect(screen.getByText("Pinned")).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Comms" });
+    expect(within(nav).getByTitle("3 unread").querySelector("[aria-hidden]")?.textContent).toBe(
+      "3",
+    );
+    expect(
+      within(nav).getByTitle("1 new mentions").querySelector("[aria-hidden]")?.textContent,
+    ).toBe("@1");
     const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    expect(bell.closest(".act")).toBeTruthy();
     fireEvent.click(bell);
     const panel = screen.getByRole("region", { name: "Mentions" });
     fireEvent.click(within(panel).getByText("@CAPCOM please check #707"));
@@ -611,6 +659,20 @@ describe("Comms routes", () => {
   });
 
   it("uses a crew seat's area label or role in the agent nav, never its path globs", async () => {
+    const mention = {
+      id: "comms:direct-mention",
+      at: NOW,
+      from: "guido-cx",
+      to: "CAPCOM",
+      text: "@CAPCOM can you check this?",
+      ticket: null,
+      label: "question",
+      ref: null,
+      replyTo: null,
+      mentions: ["CAPCOM"],
+      reactions: [],
+      operator: false,
+    };
     stubFetch({
       "/api/attention": [],
       "/api/crew": {
@@ -634,7 +696,7 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/flight": { messages: [] },
-      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/mentions": { mentions: [{ message: mention, seen: false }] },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
       "/api/comms/agents/retro-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
@@ -642,6 +704,11 @@ describe("Comms routes", () => {
     render(<Comms item={null} view={{ kind: "flight" }} />);
     expect(await screen.findByText("core · running")).toBeTruthy();
     expect(screen.getByText("review · idle")).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Comms" });
+    const guido = within(nav).getByText("guido-cx").closest("button");
+    const retro = within(nav).getByText("retro-cx").closest("button");
+    expect(guido && within(guido).getByTitle("1 new mentions")).toBeTruthy();
+    expect(retro && within(retro).queryByTitle("1 new mentions")).toBeNull();
     expect(screen.queryByText("packages/core/**")).toBeNull();
     expect(screen.queryByText("apps/review/**")).toBeNull();
   });
@@ -1597,6 +1664,23 @@ describe("Threads fit and open", () => {
     expect(rule("\\.yaml \\.ytx")).toContain("white-space: pre-wrap");
     expect(rule("\\.yaml \\.ytx")).toContain("overflow-wrap: anywhere");
     expect(rule("\\.tw")).toContain("overflow-x: auto");
+  });
+
+  it("keeps each desktop Comms column scrollable without clipping the stacked layout", () => {
+    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const rule = (sel: string) => css.match(new RegExp(`${sel} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule("\\.comms-page")).toContain("overflow: hidden");
+    expect(rule("\\.comms-grid")).toContain("overflow: hidden");
+    expect(rule("\\.comms-agent")).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(rule("\\.comms-agent")).toContain("height: 100%");
+    expect(rule("\\.comms-messages")).toContain("overflow-y: auto");
+    expect(rule("\\.comms-messages")).toContain("scrollbar-gutter: stable");
+    expect(rule("\\.comms-message-stack")).not.toContain("justify-content: flex-end");
+    expect(rule("\\.comms-message-stack > :first-child")).toContain("margin-top: auto");
+    expect(css).toMatch(/\.comms-left,\s*\.comms-right \{[^}]*overflow-y: auto/);
+    expect(css).toMatch(
+      /@media \(max-width: 999px\), \(max-height: 559px\) \{[\s\S]*?\.comms-page,[\s\S]*?\.comms-grid \{[\s\S]*?overflow: visible/,
+    );
   });
 
   function narrow(matches: boolean) {

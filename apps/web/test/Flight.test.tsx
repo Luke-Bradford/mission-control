@@ -26,7 +26,7 @@ import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
-import { flightSummary } from "./flightSummaryFixture.ts";
+import { flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
 
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
   fetchStub({
@@ -38,6 +38,7 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/flight/incoming": { entries: [] },
     "/api/flight/brief": { session: null, sections: [] },
     "/api/flight/summary": flightSummary({ session: null }),
+    "/api/flight/ledger?status=open": { session: null, entries: [], more: false, nextOffset: null },
     "/api/flight/ledger?status=all": { session: null, entries: [] },
     "/api/flight/schedule": { session: null, entries: [] },
     ...routes,
@@ -50,12 +51,10 @@ import {
   crewRow,
   HOUR,
   item,
-  limit5h,
   MIN,
   NOW,
   prView,
   REPOS,
-  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -91,46 +90,6 @@ const personItem = item({
   text: "alice mentioned you: Fix the stop race",
 });
 
-const board = [
-  boardItem({ issueNumber: 1, status: "In progress", state: "in progress" }),
-  boardItem({ issueNumber: 2, status: "In progress", state: "in progress" }),
-  boardItem({ issueNumber: 3, status: "In review", state: "review" }),
-  boardItem({ issueNumber: 4, status: "Ready for QA", state: "review" }),
-  boardItem({ issueNumber: 5, status: "Done", state: "done" }),
-];
-
-function stub() {
-  stubFetch({
-    "/api/repos": REPOS,
-    "/api/boards/shop-app": board,
-    "/api/boards/site-builder": [],
-    "/api/attention": [
-      item({ key: "a", kind: "decision" }),
-      item({ key: "b", kind: "decision" }),
-      item({ key: "c", kind: "approval" }),
-      item({ key: "d", kind: "question" }),
-      item({ key: "e", kind: "stalled" }),
-      item({ key: "f", kind: "error" }),
-      item({ key: "g", kind: "tag" }),
-    ],
-    "/api/limits": [
-      limit5h({ resetAt: NOW + 26 * MIN }),
-      limit5h({ accountId: "codex", window: "5h", resetAt: NOW + 30 * HOUR }),
-    ],
-    "/api/health": [
-      { collector: "github:shop-app", ok: false, error: "x", at: NOW - 50_000, lastOkAt: null },
-      {
-        collector: "usage:claude-main",
-        ok: true,
-        error: null,
-        at: NOW - 10 * MIN,
-        lastOkAt: NOW - 10 * MIN,
-      },
-    ],
-    "/api/config": CONFIG,
-  });
-}
-
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -140,6 +99,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   hub.clear();
   resetSession();
+  window.history.replaceState(null, "", "/");
 });
 
 const decided = (id: string, at: number, over: Partial<FlightDecision> = {}): FlightDecision => ({
@@ -218,6 +178,7 @@ describe("Decided without you", () => {
       "POST /api/seats/flight-1/message": {},
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
     fireEvent.click(await screen.findByRole("button", { name: "Overturn" }));
     expect(await screen.findByText("You overturned it")).toBeTruthy();
     const post = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
@@ -232,6 +193,7 @@ describe("Decided without you", () => {
       "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }),
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
     fireEvent.click(await screen.findByRole("button", { name: "Overturn" }));
     expect((await screen.findByRole("alert")).textContent).toBe("seat busy");
     expect(screen.getByRole("button", { name: "Overturn" })).toBeTruthy();
@@ -244,6 +206,7 @@ describe("Decided without you", () => {
       }),
     );
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
     const [btn] = await screen.findAllByRole("button", { name: "Overturn" });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
   });
@@ -301,7 +264,6 @@ describe("FLIGHT page", () => {
     expect(text).toContain("guido-1");
     expect(text).toContain("Running");
     expect(text).toContain("shop-app #5");
-    expect(text).toContain("feature/5-stop-race");
     expect(text).toContain("12m 00s");
     expect(text).toContain("run #12");
     expect(container.querySelector("#wifP a")?.getAttribute("href")).toBe("/agent/guido-1");
@@ -321,7 +283,7 @@ describe("FLIGHT page", () => {
     render(<Flight />);
     const list = await screen.findByRole("list", { name: "Crew runs" });
     // the ticket's title is an ellipsised span too: the doing line is the grey one
-    const doing = list.querySelector("li .ellip.fg2") as HTMLElement;
+    const doing = list.querySelector("li .wif-doing") as HTMLElement;
     const line = "Draft PR #166 · Backfill the quote cache";
     await waitFor(() => expect(doing.textContent).toBe(line));
     expect(doing.title).toBe(line);
@@ -673,194 +635,74 @@ describe("FLIGHT page", () => {
     expect(list.textContent).toContain("run #12");
   });
 
-  it("Situation counts people waiting on you and excludes In review cards with a you action", async () => {
+  it("does not duplicate Board counts, metrics or future schedule in Command", async () => {
     stubFetch({
-      "/api/repos": REPOS,
-      "/api/config": CONFIG,
-      "/api/crew": { rows: [], firstRunToday: null },
-      "/api/notifications": { open: [thread()], handledToday: [] },
-      "/api/boards/shop-app": [
-        boardItem({ issueNumber: 12, status: "In review", state: "review" }),
-        boardItem({ issueNumber: 13, status: "In review", state: "review" }),
-        boardItem({ issueNumber: 14, status: "Ready for QA", state: "review" }),
-      ],
-      "/api/boards/site-builder": [],
-      "/api/repos/shop-app/prs?linked=1": [
-        prView({ ticket: "shop-app#12", isDraft: true, updatedAt: NOW - 2 * HOUR }),
-      ],
-      "/api/repos/site-builder/prs?linked=1": [],
-    });
-    const { container } = render(<Flight />);
-    const strip = container.querySelector(".sitstats") as HTMLElement;
-    await waitFor(() => expect(strip.textContent).toContain("1 person waiting on you"));
-    expect(within(strip).getByText(/person waiting on you/).className).toContain("warn");
-    await waitFor(() => expect(strip.textContent).toContain("2 waiting on other people"));
-  });
-
-  it("the stats strip comes from the board and the attention list", async () => {
-    stub();
-    const { container } = render(<Flight />);
-    const strip = container.querySelector(".sitstats") as HTMLElement;
-    await waitFor(() => expect(strip.textContent).toContain("2 tickets in progress"));
-    expect(strip.textContent).toContain("2 waiting on other people");
-    expect(strip.textContent).toContain("2 decisions for you");
-    expect(strip.textContent).toContain("2 routine approvals");
-    expect(strip.textContent).toContain("2 stalls");
-    expect(screen.getByRole("button", { name: "Open what needs you" })).toBeTruthy();
-  });
-
-  it("the Situation panel carries no phase badge, and counts what FLIGHT answered today", async () => {
-    stubFetch({
-      "/api/repos": REPOS,
-      "/api/boards/shop-app": board,
-      "/api/boards/site-builder": [],
-      "/api/attention": [],
-      "/api/flight": flightView({
-        decisions: [
-          decided("d1", NOW - HOUR),
-          decided("d2", NOW - 2 * HOUR),
-          decided("d3", NOW - 26 * HOUR),
-          decided("d4", NOW - HOUR, { kind: "brief" }),
-        ],
-      }),
-      "/api/config": CONFIG,
-    });
-    const { container } = render(<Flight />);
-    const strip = container.querySelector(".sitstats") as HTMLElement;
-    expect(strip.textContent).toContain("— answered by FLIGHT today");
-    await waitFor(() => expect(strip.textContent).toContain("2 answered by FLIGHT today"));
-    expect(container.querySelector("#sitP .phase")).toBeNull();
-  });
-
-  it("the stats strip counts only the selected session's tickets and attention items", async () => {
-    stubFetch({
-      "/api/repos": REPOS,
-      "/api/boards/shop-app": board,
-      "/api/boards/site-builder": [
-        boardItem({ repoId: "site-builder", issueNumber: 9, status: "In progress" }),
-      ],
-      "/api/attention": [
-        item({ key: "a", kind: "decision" }),
-        item({ key: "b", kind: "decision", repoId: "site-builder" }),
-        item({ key: "c", kind: "stalled", repoId: "site-builder" }),
-        item({ key: "d", kind: "approval", repoId: "site-builder" }),
-        // no repo: it belongs to no session, so every session still counts it
-        item({ key: "e", kind: "stalled", repoId: null }),
-      ],
-      "/api/config": SESSION_CONFIG,
-    });
-    const { container } = render(<Flight />);
-    const strip = container.querySelector(".sitstats") as HTMLElement;
-    await waitFor(() => expect(strip.textContent).toContain("3 tickets in progress"));
-    expect(strip.textContent).toContain("2 decisions for you");
-    act(() => setSession("site-builder-session"));
-    await waitFor(() => expect(strip.textContent).toContain("1 ticket in progress"));
-    expect(strip.textContent).not.toContain("1 tickets");
-    expect(strip.textContent).toContain("1 decision for you");
-    expect(strip.textContent).toContain("1 routine approval");
-    expect(strip.textContent).toContain("2 stalls");
-    act(() => setSession("shop-app-session"));
-    await waitFor(() => expect(strip.textContent).toContain("2 tickets in progress"));
-    expect(strip.textContent).toContain("1 decision for you");
-    expect(strip.textContent).toContain("0 routine approvals");
-    expect(strip.textContent).toContain("1 stall");
-    expect(strip.textContent).not.toContain("2 stalls");
-  });
-
-  it("shows — before the data, and no Open button without decisions or approvals", async () => {
-    stubFetch({
-      "/api/repos": REPOS,
+      "/api/flight/summary": flightSummary(),
       "/api/attention": [],
       "/api/config": CONFIG,
-      "/api/limits": [],
-      "/api/health": [],
     });
     const { container } = render(<Flight />);
-    const strip = container.querySelector(".sitstats") as HTMLElement;
-    expect(strip.textContent).toContain("— tickets in progress");
-    await waitFor(() => expect(strip.textContent).toContain("0 decisions for you"));
-    expect(screen.queryByRole("button", { name: "Open what needs you" })).toBeNull();
-  });
-
-  it("the timeline places events and the Later line carries the rest", async () => {
-    stub();
-    const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
-    const text = container.querySelector("#timeline")?.textContent ?? "";
-    expect(text).toContain("claude-main 5h window resets");
-    expect(text).toContain("Board and notifications poll (every 60 s)");
-    expect(text).toContain("Usage read (every 30 min)");
-    const later = container.querySelector(".tllater") as HTMLElement;
-    expect(later.textContent).toBe("Later: Sun 19:00 codex 5h window resets");
-  });
-
-  it("each marker names its event, and the narrow Next list gives them all, joined by ' · '", async () => {
-    stub();
-    const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
-    const evs = [...container.querySelectorAll<HTMLElement>(".tlev")];
-    for (const ev of evs) expect(ev.title).toBe(ev.querySelector("span")?.textContent);
-    const labels = evs.map((e) => e.querySelector("span")?.textContent);
-    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(
-      `Next: ${labels.join(" · ")}`,
+    await waitFor(() =>
+      expect(container.querySelector("#sitP .sittext")?.textContent).toBe(flightSummary().headline),
     );
-    const bare = [...container.querySelectorAll(".tlev.bare")].map(
-      (e) => e.querySelector("span")?.textContent,
-    );
-    expect(container.querySelector(".tlnext.wide")?.textContent).toBe(`Next: ${bare.join(" · ")}`);
+    expect(container.querySelector("#sitP .sitstats")).toBeNull();
+    expect(container.querySelector("#sitP #timeline")).toBeNull();
+    expect(container.querySelector("#sitP .flight-tiles")).toBeNull();
   });
 
-  it("a well-spaced timeline has no wide Next list; the narrow one lists every label", async () => {
+  it("puts the live stand-up, next commitment and investigation on Command", async () => {
+    const next = ledgerEntry({
+      kind: "commitment",
+      key: "commitment:release",
+      title: "Prepare the release",
+      next: "Confirm the migration window",
+      due: NOW + 2 * HOUR,
+    });
+    const watch = ledgerEntry({
+      kind: "watch",
+      key: "watch:cache",
+      title: "Spike cache pressure",
+      next: "Compare the next load run",
+    });
+    const work = ledgerEntry({
+      key: "work:5",
+      refs: ["#5"],
+      next: "Get RETRO's verdict",
+      due: NOW + HOUR,
+    });
     stubFetch({
-      "/api/repos": REPOS,
-      "/api/boards/shop-app": [],
-      "/api/boards/site-builder": [],
-      "/api/attention": [],
-      "/api/limits": ["a", "b", "c"].map((id, i) =>
-        limit5h({ accountId: `acct-${id}`, resetAt: NOW + (20 + i * 100) * MIN }),
-      ),
-      "/api/health": [],
+      "/api/flight": flightView(),
+      "/api/flight/summary": flightSummary({ next: [summaryItem(next)] }),
+      "/api/flight/ledger?status=open": {
+        session: "s1",
+        entries: [work, watch, next],
+        more: false,
+        nextOffset: null,
+      },
+      "/api/crew": {
+        rows: [seatRow({ hudState: "blocked" })],
+        firstRunToday: null,
+      },
+      "/api/attention": [item({ key: "decision:release", text: "Choose a release window" })],
+      "/api/notifications": { open: [], handledToday: [] },
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
-    expect(container.querySelectorAll(".tlev.bare").length).toBe(0);
-    expect(container.querySelector(".tlnext.wide")).toBeNull();
-    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(
-      "Next: 13:20 acct-a 5h window resets · 15:00 acct-b 5h window resets · 16:40 acct-c 5h window resets",
+    const pulses = () => [...container.querySelectorAll(".flight-pulse")];
+    await waitFor(() =>
+      expect(
+        pulses()
+          .find((pulse) => pulse.querySelector(".flight-pulse-label")?.textContent === "Blocked")
+          ?.querySelector(".flight-pulse-value")?.textContent,
+      ).toBe("1"),
     );
-  });
-
-  it("a crowded timeline lists on the Next line only the labels the line could not show", async () => {
-    stubFetch({
-      "/api/repos": REPOS,
-      "/api/boards/shop-app": [],
-      "/api/boards/site-builder": [],
-      "/api/attention": [],
-      "/api/limits": ["a", "b", "c", "d", "e", "f"].map((id, i) =>
-        limit5h({ accountId: `acct-${id}`, resetAt: NOW + (20 + i) * MIN }),
-      ),
-      "/api/health": [],
-      "/api/config": CONFIG,
-    });
-    const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(6));
-    const label = (e: Element) => e.querySelector("span")?.textContent;
-    const all = [...container.querySelectorAll(".tlev")].map(label);
-    const bare = [...container.querySelectorAll(".tlev.bare")].map(label);
-    // the first two labels fit on the line (one above, one below); the other four found no room
-    expect(bare).toEqual([
-      "13:22 acct-c 5h window resets",
-      "13:23 acct-d 5h window resets",
-      "13:24 acct-e 5h window resets",
-      "13:25 acct-f 5h window resets",
-    ]);
-    expect(all.slice(0, 2)).toEqual([
-      "13:20 acct-a 5h window resets",
-      "13:21 acct-b 5h window resets",
-    ]);
-    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(`Next: ${all.join(" · ")}`);
-    expect(container.querySelector(".tlnext.wide")?.textContent).toBe(`Next: ${bare.join(" · ")}`);
+    expect(container.querySelector("#wifP")?.textContent).toContain("Get RETRO's verdict");
+    expect(container.querySelector("#wifP")?.textContent).toContain("Checkpoint in 1h 00m");
+    expect(container.querySelector("#controlP")?.textContent).toContain("Choose a release window");
+    expect(container.querySelector("#controlP")?.textContent).toContain("Prepare the release");
+    expect(container.querySelector("#controlP")?.textContent).toContain("Spike cache pressure");
+    fireEvent.click(screen.getByRole("button", { name: "Needs you: 1 decisions or replies" }));
+    expect(window.location.pathname).toBe(PAGE_PATHS.comms);
   });
 });
 
@@ -891,21 +733,51 @@ const STREAM = {
 };
 
 describe("FLIGHT's brief", () => {
-  it("the brief panel renders its nine sections, each with when it was last updated", async () => {
+  it.each([
+    {
+      name: "awaiting a reply",
+      events: [{ id: "1:0", at: NOW - HOUR, kind: "op", text: "Did you see the blocker?" }],
+      state: "Awaiting reply",
+      latest: "You: Did you see the blocker?",
+    },
+    {
+      name: "replied after the operator's message",
+      events: STREAM.events,
+      state: "Reply received",
+      latest: "FLIGHT: hello",
+    },
+  ])("shows contact as $name", async ({ events, state, latest }) => {
+    stubFetch({
+      "/api/flight": flightView(),
+      "/api/agents/flight-1/stream": { ...STREAM, events },
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector(".flight-contact")?.textContent).toContain(state),
+    );
+    expect(container.querySelector(".flight-contact")?.textContent).toContain(latest);
+  });
+
+  it("the Notebook renders only FLIGHT's four writable sections with live Markdown source", async () => {
     stubFetch({
       "/api/flight/brief": briefView({
-        goals: { text: "Ship the **brief**.", updatedAt: NOW - 5 * MIN },
+        project: { text: "Ship the **brief**.", updatedAt: NOW - 5 * MIN },
       }),
       "/api/config": CONFIG,
     });
     render(<Flight />);
     const secs = await screen.findAllByTestId("brief-section");
-    expect(secs).toHaveLength(9);
+    expect(secs).toHaveLength(4);
     expect(secs.map((e) => e.querySelector("h3")?.textContent)).toEqual(
-      FLIGHT_BRIEF_SECTIONS.map((k) => FLIGHT_BRIEF_TITLES[k]),
+      ["project", "crew", "operator", "lessons"].map(
+        (k) => FLIGHT_BRIEF_TITLES[k as FlightBriefSectionKey],
+      ),
     );
     expect(secs[0]?.textContent).toContain("updated 5 min ago");
     expect(secs[0]?.querySelector(".md strong")?.textContent).toBe("brief");
+    expect(secs[0]?.id).toBe("flight-note-project");
+    expect(within(secs[0] as HTMLElement).getByText("Markdown source")).toBeTruthy();
     expect(secs[1]?.textContent).toContain("never updated");
     expect(secs[1]?.textContent).toContain(BRIEF_EMPTY);
   });
@@ -919,16 +791,16 @@ describe("FLIGHT's brief", () => {
     expect(screen.queryAllByTestId("brief-section")).toHaveLength(0);
   });
 
-  it("the working log sits collapsed on the FLIGHT page with wake lines and decisions only", async () => {
+  it("the system log excludes decisions because Record presents them once", async () => {
     stubDecided(flightView(), { "/api/agents/flight-1/stream": STREAM });
     const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(3));
+    await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(1));
     const log = container.querySelector("#workLog") as HTMLDetailsElement;
     expect(log.tagName).toBe("DETAILS");
     expect(log.open).toBe(false);
-    expect(log.querySelector("summary")?.textContent).toContain("3 entries");
+    expect(log.querySelector("summary")?.textContent).toContain("1 entry");
     expect(log.querySelectorAll(".dmsg.hub")).toHaveLength(1);
-    expect(log.querySelectorAll(".dmsg.decision")).toHaveLength(2);
+    expect(log.querySelectorAll(".dmsg.decision")).toHaveLength(0);
     expect(log.querySelector(".dmsg.you")).toBeNull();
     expect(log.querySelector(".dmsg.flight")).toBeNull();
   });
@@ -952,11 +824,11 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Situation shows the summary and keeps the brief in collapsed notes", async () => {
+  it("opens on Command and keeps writable context in Notebook", async () => {
     stubFetch({
       "/api/flight/brief": briefView({
-        goals: { text: "Ship the brief." },
-        in_progress: { text: "Wiring the page." },
+        project: { text: "Ship the brief." },
+        crew: { text: "Wiring the page." },
       }),
       "/api/flight/summary": flightSummary(),
       "/api/config": CONFIG,
@@ -968,15 +840,34 @@ describe("FLIGHT's brief", () => {
     const situation = container.querySelector("#sitP") as HTMLElement;
     expect(situation.textContent).not.toContain("Ship the brief.");
     expect(situation.textContent).not.toContain("Wiring the page.");
-    const notes = container.querySelector("#briefP details") as HTMLDetailsElement;
-    expect(notes.open).toBe(false);
+    expect((container.querySelector("#flight-command") as HTMLElement).hidden).toBe(false);
+    expect((container.querySelector("#flight-queue") as HTMLElement).hidden).toBe(true);
+    expect((container.querySelector("#flight-notebook") as HTMLElement).hidden).toBe(true);
+    expect((container.querySelector("#flight-record") as HTMLElement).hidden).toBe(true);
+    fireEvent.click(screen.getByRole("tab", { name: "Notebook" }));
+    expect((container.querySelector("#flight-command") as HTMLElement).hidden).toBe(true);
+    expect((container.querySelector("#flight-notebook") as HTMLElement).hidden).toBe(false);
+    const notes = container.querySelector("#briefP") as HTMLElement;
     const memory = container.querySelector("#memoryP") as HTMLElement;
-    expect(container.querySelector("#briefP")?.nextElementSibling).toBe(memory);
-    expect(memory.querySelector("details")?.open).toBe(false);
-    fireEvent.click(within(notes).getByText("FLIGHT's notes"));
-    expect(notes.open).toBe(true);
+    expect(notes.querySelector(":scope > details")).toBeNull();
+    expect(memory.querySelector("details")).toBeNull();
     expect(notes.textContent).toContain("Ship the brief.");
     expect(notes.textContent).toContain("Wiring the page.");
+  });
+
+  it("opens Notebook for a copied working-context section link", async () => {
+    window.history.replaceState(null, "", "/flight#flight-note-project");
+    stubFetch({
+      "/api/flight/brief": briefView({ project: { text: "Linked context." } }),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect((container.querySelector("#flight-notebook") as HTMLElement).hidden).toBe(false),
+    );
+    expect(container.querySelector("#flight-note-project")?.textContent).toContain(
+      "Linked context.",
+    );
   });
 
   it("lists items FLIGHT is handling with its note", async () => {
@@ -1045,6 +936,7 @@ describe("FLIGHT's brief", () => {
         <Flight />
       </>,
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     const rows = await screen.findAllByTestId("ask-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("Pick a cache");
@@ -1091,6 +983,7 @@ describe("FLIGHT's brief", () => {
         <Flight />
       </>,
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     const cards = await screen.findAllByTestId("person-card");
     expect(cards).toHaveLength(2);
     const first = cards[0]?.textContent ?? "";
@@ -1223,6 +1116,7 @@ describe("FLIGHT's brief", () => {
       },
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     const rows = await screen.findAllByTestId("incoming-row");
     expect(rows[0]?.textContent).toContain("Teams");
     expect(rows[0]?.textContent).toContain("Asked of you");
@@ -1289,7 +1183,7 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Incoming keeps recorded outcomes; Watch list is structured and risks stay in the brief", async () => {
+  it("Incoming keeps recorded outcomes; revisit triggers and Notebook context stay distinct", async () => {
     const cards = [
       boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
       boardItem({ issueNumber: 11, status: "Refinement", createdAt: NOW - 2 * HOUR }),
@@ -1327,7 +1221,7 @@ describe("FLIGHT's brief", () => {
         ],
       },
       "/api/flight/brief": {
-        ...briefView({ risks: { text: "The cache may thrash." } }),
+        ...briefView({ project: { text: "The cache may thrash." } }),
         watch: [
           {
             id: "cache",
@@ -1483,7 +1377,12 @@ describe("Draft replies", () => {
       expect(row.querySelector("button, textarea")).toBeNull();
     }
     expect(container.querySelectorAll(".draft-row.acked")).toHaveLength(2);
-    expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    expect(
+      within(container.querySelector("#draftsP") as HTMLElement).getByRole("button", {
+        name: "Post on GitHub",
+      }),
+    ).toBeTruthy();
   });
 
   it.each([false, true])(
@@ -1540,6 +1439,7 @@ describe("Draft replies", () => {
           <Toast />
         </>,
       );
+      fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
       const button = await screen.findByRole("button", { name: "Copy for Teams" });
       button.focus();
       expect(document.activeElement).toBe(button);
@@ -1600,6 +1500,7 @@ describe("Draft replies", () => {
         },
       });
       const { container } = render(<Flight />);
+      fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
       fireEvent.click(await screen.findByRole("button", { name: "Copy for Teams" }));
       if (failed) {
         expect(await screen.findByRole("alert")).toHaveProperty(
@@ -1610,9 +1511,6 @@ describe("Draft replies", () => {
       } else {
         expect(await screen.findByText("History copy")).toBeTruthy();
         expect(container.querySelector(".draft-row.acked")?.textContent).toContain("Copied");
-        await waitFor(() =>
-          expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send"),
-        );
         expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
       }
       expect(
@@ -1640,14 +1538,14 @@ describe("Draft replies", () => {
         return { status: 200, body: { ok: true } };
       },
     });
-    const { container } = render(
+    render(
       <>
         <Flight />
         <Toast />
       </>,
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     expect(await screen.findByText("Prepared reply")).toBeTruthy();
-    expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
     expect(screen.getByText("To shop-app#12")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Draft for shop-app#12" }), {
@@ -1661,7 +1559,6 @@ describe("Draft replies", () => {
     expect(screen.getByText(postedText("shop-app#12"))).toBeTruthy();
     const post = fn.mock.calls.find(([p]) => p === "/api/drafts/1/post");
     expect(JSON.parse(post?.[1]?.body as string)).toEqual({ text: "Approved reply" });
-    expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send");
   });
 
   it("discards a draft and displays posting failures", async () => {
@@ -1684,6 +1581,7 @@ describe("Draft replies", () => {
       },
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     fireEvent.click(await screen.findByRole("button", { name: "Post on GitHub" }));
     expect((await screen.findByRole("alert")).textContent).toBe("mentions are refused");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));

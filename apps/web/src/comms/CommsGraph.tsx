@@ -1,5 +1,5 @@
 import type { CrewRow } from "@mc/core";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -60,18 +60,6 @@ function hourLabel(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", hour12: false });
 }
 
-function visibleDots(edge: Edge, start: string, end: string, color: string, lit: boolean) {
-  const count = start === edge.a ? edge.aToB : edge.bToA;
-  const dots = Math.min(8, Math.max(0, Math.ceil(count / 3)));
-  return Array.from({ length: dots }, (_, i) => ({
-    key: `${start}-${end}-${i}`,
-    color,
-    delay: `${-(i / Math.max(dots, 1)) * Math.max(1.25, 4.5 - count / 10)}s`,
-    duration: `${Math.max(1.25, 4.5 - count / 10)}s`,
-    dim: !lit,
-  }));
-}
-
 /** The live crew's communication map. Token telemetry is intentionally optional until #T3 lands. */
 export function CommsGraph({
   rows,
@@ -86,12 +74,8 @@ export function CommsGraph({
   const hours = useResource<{ hours: Hour[] }>(RESOURCES.commsTraffic).data?.hours;
   const chatter = useResource<{ pairs: ChatterPair[] }>(RESOURCES.commsChatter).data?.pairs;
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
-  const [hidden, setHidden] = useState(() => document.hidden);
-  useEffect(() => {
-    const onVisibility = () => setHidden(document.hidden);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+  const [liveEdges, setLiveEdges] = useState<Set<string>>(() => new Set());
+  const previousCounts = useRef<Map<string, number> | null>(null);
 
   const crewRows = useMemo(() => rows.filter((row) => row.kind === "crew"), [rows]);
   const flight = flightId ?? crewRows.find((row) => row.role === "FLIGHT")?.id ?? "FLIGHT";
@@ -113,6 +97,22 @@ export function CommsGraph({
     }
     return [...combined.values()];
   }, [flight, known, links]);
+  useEffect(() => {
+    if (links === undefined) return;
+    const current = new Map(
+      edges.map((edge) => [`${edge.a}\0${edge.b}`, edge.aToB + edge.bToA] as const),
+    );
+    const previous = previousCounts.current;
+    previousCounts.current = current;
+    if (previous === null) return;
+    const increased = new Set(
+      [...current].flatMap(([key, count]) => (count > (previous.get(key) ?? 0) ? [key] : [])),
+    );
+    if (increased.size === 0) return;
+    setLiveEdges(increased);
+    const timer = window.setTimeout(() => setLiveEdges(new Set()), 1_800);
+    return () => window.clearTimeout(timer);
+  }, [edges, links]);
   const scoped = edges.filter((edge) => inView(view, flight, edge.a, edge.b));
   const total = scoped.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
   const selected = new Set(
@@ -240,7 +240,7 @@ export function CommsGraph({
         }
       >
         <div
-          className={`comms-graph${hidden ? " paused" : ""}${metric === "tokens" ? " tokens" : ""}`}
+          className={`comms-graph${metric === "tokens" ? " tokens" : ""}`}
           role="img"
           aria-label={graphLabel}
         >
@@ -257,15 +257,12 @@ export function CommsGraph({
                 (entry.from === edge.a && entry.to === edge.b) ||
                 (entry.from === edge.b && entry.to === edge.a),
             );
+            const live = liveEdges.has(`${edge.a}\0${edge.b}`);
             const width = metric === "tokens" ? 1 : 1 + Math.min(5, (edge.aToB + edge.bToA) / 8);
-            const dots = [
-              ...visibleDots(edge, edge.a, edge.b, a.color, lit),
-              ...visibleDots(edge, edge.b, edge.a, b.color, lit),
-            ];
             return (
               <div
                 key={`${edge.a}-${edge.b}`}
-                className={`comms-edge${lit ? " active" : " dim"}${watching ? " watching" : ""}`}
+                className={`comms-edge${lit ? " active" : " dim"}${watching ? " watching" : ""}${live ? " live" : ""}`}
               >
                 <span
                   className="comms-edge-line"
@@ -283,32 +280,6 @@ export function CommsGraph({
                 >
                   {metric === "messages" ? edge.aToB + edge.bToA : "—"}
                 </span>
-                {metric === "messages" &&
-                  dots.map((dot) => {
-                    const reverse = dot.key.startsWith(`${edge.b}-`);
-                    const origin = reverse ? b : a;
-                    return (
-                      <span
-                        key={dot.key}
-                        className={`comms-edge-run${dot.dim ? " dim" : ""}`}
-                        style={{
-                          left: origin.x,
-                          top: origin.y,
-                          width: length,
-                          transform: `rotate(${reverse ? Math.atan2(-dy, -dx) : Math.atan2(dy, dx)}rad)`,
-                        }}
-                      >
-                        <i
-                          className="comms-edge-dot"
-                          style={{
-                            background: dot.color,
-                            animationDelay: dot.delay,
-                            animationDuration: dot.duration,
-                          }}
-                        />
-                      </span>
-                    );
-                  })}
               </div>
             );
           })}

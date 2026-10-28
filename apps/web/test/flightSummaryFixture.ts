@@ -46,6 +46,7 @@ export const flightSummary = (over: Partial<FlightSummaryView> = {}): FlightSumm
   now: [],
   watching: { counts: { active: 3, blocked: 1, waiting: 2, done: 4, dropped: 1 }, top: [] },
   next: [],
+  done: [],
   incoming: 0,
   metrics: {
     since: NOW - 12 * 60 * MIN,

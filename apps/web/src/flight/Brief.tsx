@@ -1,4 +1,10 @@
-import type { CrewRow, FlightBriefView, FlightWatchEntry, TestLockState } from "@mc/core";
+import {
+  type CrewRow,
+  FLIGHT_NOTE_SECTIONS,
+  type FlightBriefView,
+  type FlightWatchEntry,
+  type TestLockState,
+} from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { useSecond, useTz } from "../clock.ts";
@@ -6,6 +12,7 @@ import { Expandable } from "../components/Expandable.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
+import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { CATCH_UP_LABEL } from "../notifications.ts";
 import { draftRowId } from "./Drafts.tsx";
@@ -25,39 +32,80 @@ export function briefUpdated(at: number | null, now: number, tz: string | null):
 export const useBrief = (): FlightBriefView | undefined =>
   useResource<FlightBriefView>(RESOURCES.flightBrief).data;
 
-/** FLIGHT › FLIGHT's notes: its nine sections, each with when FLIGHT last changed it. */
-export function BriefPanel() {
+/** FLIGHT's writable working-context notes, as rendered Markdown and exact stored source. */
+export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
   const view = useBrief();
   const now = useSecond();
   const tz = useTz();
-  return (
-    <section className="panel flight-notes" id="briefP" aria-label="FLIGHT's notes">
-      <Expandable summary={<h2>FLIGHT's notes</h2>}>
-        <p className="pb note">
-          FLIGHT's working memory · each section says when FLIGHT last changed it
-        </p>
-        {view === undefined ? (
-          <p className="pb note">{DASH}</p>
-        ) : view.session === null ? (
-          <p className="pb note">{FLIGHT_NO_SEAT}</p>
-        ) : (
+  const writable: readonly string[] = FLIGHT_NOTE_SECTIONS;
+  const sections = view?.sections.filter((section) => writable.includes(section.section)) ?? [];
+  const content = (
+    <>
+      <p className="pb note">
+        Live Markdown from the hub · the same working context FLIGHT reads and updates
+      </p>
+      {view === undefined ? (
+        <p className="pb note">{DASH}</p>
+      ) : view.session === null ? (
+        <p className="pb note">{FLIGHT_NO_SEAT}</p>
+      ) : (
+        <>
+          <nav className="flight-notebook-index" aria-label="Working context sections">
+            {sections.map((s) => (
+              <a key={s.section} href={`#flight-note-${s.section}`}>
+                {s.title}
+              </a>
+            ))}
+          </nav>
           <div className="pb briefgrid">
-            {view.sections.map((s) => (
-              <section className="briefsec" key={s.section} data-testid="brief-section">
-                <h3>{s.title}</h3>
-                <span className="s fg2">{briefUpdated(s.updatedAt, now, tz)}</span>
+            {sections.map((s) => (
+              <section
+                className="briefsec"
+                id={`flight-note-${s.section}`}
+                key={s.section}
+                data-testid="brief-section"
+              >
+                <div className="flight-note-heading">
+                  <h3>
+                    <a href={`#flight-note-${s.section}`}>{s.title}</a>
+                  </h3>
+                  <span className="s fg2">
+                    FLIGHT{`${s.updatedBy ? ` · ${s.updatedBy}` : ""}`} ·{" "}
+                    {briefUpdated(s.updatedAt, now, tz)}
+                  </span>
+                </div>
                 {s.text.trim() === "" ? (
                   <p className="note">{BRIEF_EMPTY}</p>
                 ) : (
-                  <div className="md-txt">
-                    <Markdown text={s.text} />
-                  </div>
+                  <>
+                    <div className="md-txt">
+                      <Markdown text={s.text} />
+                    </div>
+                    <details className="flight-markdown-source">
+                      <summary>Markdown source</summary>
+                      <pre>{s.text}</pre>
+                    </details>
+                  </>
                 )}
               </section>
             ))}
           </div>
-        )}
-      </Expandable>
+        </>
+      )}
+    </>
+  );
+  return expanded ? (
+    <Panel
+      id="briefP"
+      className="flight-notes"
+      title="Working context"
+      sub="project, crew, operator and lessons · live Markdown authored by FLIGHT"
+    >
+      <div className="flight-knowledge-scroll">{content}</div>
+    </Panel>
+  ) : (
+    <section className="panel flight-notes" id="briefP" aria-label="FLIGHT's notes">
+      <Expandable summary={<h2>FLIGHT's notes</h2>}>{content}</Expandable>
     </section>
   );
 }

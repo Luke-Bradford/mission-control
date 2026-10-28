@@ -543,6 +543,23 @@ describe("ledger storage and summaries", () => {
     expect(next[0]).toMatchObject({ kind: "plan", ageMin: 0 });
     expect(next[0]?.title).toHaveLength(80);
   });
+
+  it("shows the five most recently completed ledger outcomes", () => {
+    for (let n = 0; n < 7; n++)
+      store.putFlightLedgerEntry(
+        "s1",
+        entry(`done-${n}`, { status: "done", updatedAt: NOW - n * MIN, outcome: `Outcome ${n}` }),
+        0,
+      );
+    store.putFlightLedgerEntry("s1", entry("dropped", { status: "dropped" }), 0);
+    expect(flightSummary(config, store, NOW).done.map((item) => item.key)).toEqual([
+      "done-0",
+      "done-1",
+      "done-2",
+      "done-3",
+      "done-4",
+    ]);
+  });
 });
 
 describe("retrospective measures", () => {

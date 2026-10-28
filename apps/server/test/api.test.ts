@@ -6866,6 +6866,7 @@ describe("FLIGHT ledger views", () => {
     expect(summary.headline).toBe("H");
     expect(summary.now.map((e) => e.key)).toEqual(["w2", "w5", "w3", "w1", "w4"]);
     expect(summary.next.map((e) => e.due)).toEqual([10, 20, 30, 40, 50]);
+    expect(summary.done.map((e) => e.key)).toEqual(["incoming-done", "watch-done"]);
     expect(summary.watching.top).toHaveLength(5);
     expect(summary.watching.top[0]?.key).toBe("watch6");
     expect(summary.watching.counts).toEqual({

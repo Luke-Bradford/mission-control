@@ -222,6 +222,11 @@ export function flightSummary(
     next: [...open.filter((e) => e.kind === "commitment").map(item), ...planned]
       .sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity) || a.key.localeCompare(b.key))
       .slice(0, FLIGHT_SUMMARY_LISTED),
+    done: entries
+      .filter((e) => e.status === "done")
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key))
+      .slice(0, FLIGHT_SUMMARY_LISTED)
+      .map(item),
     incoming: new Set([
       ...open.filter((e) => e.kind === "incoming").map((e) => e.key),
       ...flightTriageItems(config, store, now, hubLogin, rows, lock).map((e) => e.key),

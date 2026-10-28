@@ -38,12 +38,12 @@ const SECTIONS = [
   { tab: "repos", label: "Repos & seats" },
   { tab: "roles", label: "Roles" },
   { tab: "loops", label: "Loops" },
+  { tab: "sources", label: "Sources" },
   { tab: "access", label: "Safety" },
 ] as const;
 
 const sectionFor = (tab: SetupTab): SetupTab => {
   if (tab === "sessions") return "repos";
-  if (tab === "sources") return "loops";
   return tab;
 };
 
@@ -154,8 +154,8 @@ export function Setup({ tab }: { tab: SetupTab }) {
   ) : null;
 
   const body =
-    // Old deep links show their exact old page, while each sidebar route combines the related
-    // settings as the approved dependency-order shell calls for.
+    // The legacy Sessions deep link keeps its original page. Sidebar routes remain narrowly
+    // scoped so changing loop configuration never looks like it also changes source integrations.
     tab === "sessions" ? (
       config ? (
         <Sessions config={config} />
@@ -180,11 +180,10 @@ export function Setup({ tab }: { tab: SetupTab }) {
       )
     ) : tab === "roles" ? (
       <Roles />
+    ) : config ? (
+      <Loops config={config} />
     ) : (
-      <>
-        {config ? <Loops config={config} /> : loading}
-        <Sources config={config} error={error} />
-      </>
+      loading
     );
   return (
     <section id="page-setup" aria-label="Setup">

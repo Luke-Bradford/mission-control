@@ -210,6 +210,8 @@ export interface FlightSummaryView {
   watching: { counts: Record<FlightLedgerStatus, number>; top: FlightSummaryItem[] };
   /** Items of kind plan resolve by id through GET /api/flight/schedule. */
   next: FlightSummaryItem[];
+  /** Most recently closed ledger outcomes, newest first. */
+  done: FlightSummaryItem[];
   incoming: number;
   metrics: FlightMetrics;
 }
