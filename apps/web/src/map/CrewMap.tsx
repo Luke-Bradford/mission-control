@@ -291,7 +291,15 @@ export function CrewMapView({
                 {!matches.length && <p>No file or folder matches.</p>}
               </div>
             )}
-            <aside className="map-detail" aria-label="Selection detail" aria-live="polite">
+            {/* Announces the selection only: the card's "Now" line ticks every few seconds. */}
+            <p className="sr-only" role="status">
+              {selectedSeat
+                ? `Selected ${named.names?.[selectedSeat.seat] ?? selectedSeat.seat}`
+                : selectedPath !== null
+                  ? `Selected ${selectedPath}`
+                  : ""}
+            </p>
+            <aside className="map-detail" aria-label="Selection detail">
               {selectedSeat ? (
                 <SeatDetail
                   {...named}

@@ -164,11 +164,16 @@ it("names each row for a screen reader, and takes its ticket and PR from the cre
   const { unmount } = render(<CrewMapView snapshot={crew()} />);
   expect(screen.getByRole("button", { name: "GUIDO-1: #7 · Handle empty input" })).toBeTruthy();
   unmount();
+  // the card holds a ticking "Now" line, so only a short status line announces the selection
   expect(
     screen
       .getAllByRole("complementary", { name: "Selection detail" })[0]
       ?.getAttribute("aria-live"),
-  ).toBe("polite");
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "GUIDO-1: #9 · PR #31 · Other work" }));
+  expect(screen.getAllByRole("status").some((s) => s.textContent === "Selected GUIDO-1")).toBe(
+    true,
+  );
 });
 
 afterEach(() => {
