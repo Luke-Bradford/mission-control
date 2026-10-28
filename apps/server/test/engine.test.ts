@@ -298,6 +298,7 @@ interface Harness {
   stepEnded: Record<string, string[]>;
   /** The next results of each merge step, oldest first; empty: success. */
   stepResults: Record<string, PublishResult[]>;
+  minorIssueCalls: (number | undefined)[];
   /** The branch updates asked for, and their next results, oldest first; empty: wait. */
   tip: string;
   mergeHead?: string;
@@ -386,6 +387,7 @@ function harness(): Harness {
     steps: [],
     stepEnded: {},
     stepResults: {},
+    minorIssueCalls: [],
     tip: "d".repeat(40),
     updates: [],
     updateResults: [],
@@ -531,10 +533,13 @@ function harness(): Harness {
         markDraft: (r) => step("draft", r),
         merge: (r) => step("merge", r),
         closeIssue: (r) => step("close", r),
-        fileMinorFindings: async (r) => ({
-          ...(await step("file-minor", r)),
-          ...(r.loop?.minorIssueNumber ? { issueNumber: r.loop.minorIssueNumber } : {}),
-        }),
+        fileMinorFindings: async (r, _pr, techDebtIssue) => {
+          x.minorIssueCalls.push(techDebtIssue);
+          return {
+            ...(await step("file-minor", r)),
+            ...(r.loop?.minorIssueNumber ? { issueNumber: r.loop.minorIssueNumber } : {}),
+          };
+        },
         deleteRemoteBranch: (r) => step("delete-remote", r),
         deleteLocalBranch: (r) => step("delete-local", r),
         localBranchGone: async () => x.branchGone,
@@ -3561,6 +3566,12 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.steps.filter((s) => s === "file-minor")).toHaveLength(1);
       expect(loopOf().merging?.done).toContain("file-minor");
+    });
+    it("passes the repo's rolling tech-debt issue to the publisher", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, techDebtIssue: 656 });
+      await gateOpen();
+      await vi.waitFor(() => expect(authorEnded()).toHaveLength(1));
+      expect(h.minorIssueCalls).toEqual([656]);
     });
     it("flags a failed minor issue create naming the PR and still ends the run", async () => {
       h.stepResults["file-minor"] = [{ ok: false, text: "create denied", transient: true }];

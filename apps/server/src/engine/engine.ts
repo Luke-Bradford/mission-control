@@ -1217,7 +1217,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const pr = cur.prNumber;
         let failure: string | null = null;
         try {
-          const r = await publisher.fileMinorFindings(live(), pr ?? 0);
+          const rules = await rulesFor(run.repoId);
+          const r = await publisher.fileMinorFindings(live(), pr ?? 0, rules?.techDebtIssue);
           if (r.issueNumber !== undefined) cur.minorIssueNumber = r.issueNumber;
           if (!r.ok) failure = r.text;
           else if (r.issueNumber !== undefined) {
