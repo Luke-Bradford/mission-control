@@ -1071,7 +1071,7 @@ describe("startRun", () => {
     expect(fs.denyWrite[0]).toBe(join(root, "mc-crew", "retro-42"));
   });
 
-  it("a writer on a repo with its own commands and protected files gets them", async () => {
+  it("a writer gets broad Bash while repo commands still define its checks", async () => {
     const { sup } = make({
       repo: {
         commands: {
@@ -1090,7 +1090,7 @@ describe("startRun", () => {
       argv.indexOf("--disallowedTools"),
     );
     expect(allowed).toContain("Bash");
-    expect(allowed).not.toContain("Bash(uv run pytest:*)");
+    expect(allowed.some((entry) => entry.startsWith("Bash("))).toBe(false);
     const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
     expect(denied).toContain(
       `Edit(/${realpathSync(join(root, "mc-crew", "guido-1-42"))}/pyproject.toml)`,
@@ -1109,7 +1109,7 @@ describe("startRun", () => {
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
     expect(brief).toContain(
-      "Commands you may run here: `uv run pytest`, `uv run ruff check`. A whole suite (`uv run pytest`) takes the test lock",
+      "Configured validation commands: `uv run pytest`, `uv run ruff check`. You may also use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`uv run pytest`) takes the test lock",
     );
     expect(brief).not.toContain("pnpm");
   });
@@ -1130,7 +1130,9 @@ describe("startRun", () => {
     await sup.startRun("fao-1", 42);
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
-    expect(brief).toContain("Commands you may run here: `uv run pytest`.");
+    expect(brief).toContain(
+      "Configured validation commands: `uv run pytest`. You may also use ordinary local commands to inspect and complete the work inside the sandbox.",
+    );
     expect(brief).not.toContain("ruff");
     expect(brief).not.toContain("test lock");
   });
@@ -2505,10 +2507,8 @@ import(${JSON.stringify(fixture)});
   });
 
   it.each([
-    { command: "git commit -m x" },
     { command: "ls", params: { kind: "writeStdin" } },
     { command: "ls", params: { networkApprovalContext: { host: "example.com" } } },
-    { command: "sleep 1 &" },
     { method: "item/permissions/requestApproval" },
     { method: "item/tool/requestUserInput" },
     { method: "execCommandApproval" },
@@ -2526,16 +2526,21 @@ import(${JSON.stringify(fixture)});
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(
-      expect.objectContaining({
-        runId,
-        rule:
-          scenario.command === "git commit -m x"
-            ? "git-write"
-            : scenario.command === "sleep 1 &"
-              ? "background"
-              : "codex-allowlist",
-      }),
+      expect.objectContaining({ runId, rule: "codex-allowlist" }),
     );
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRunByEngine(runId);
+  });
+
+  it.each([
+    ["git commit -m x", "git-write"],
+    ["sleep 1 &", "background"],
+  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
+    const { sup } = codex({ command });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(decision()).toBe("decline"));
+    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
@@ -2706,8 +2711,8 @@ import(${JSON.stringify(fixture)});
     },
   );
 
-  it("applies the ordinary guard after the command allowlist", async () => {
-    // The log prefix allows this; the ordinary guard catches the output write.
+  it("applies the shared outcome guard to an ordinary command", async () => {
+    // The ordinary guard catches the output write.
     const { sup } = codex({ command: "git log HEAD --output=out" });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -2775,9 +2780,7 @@ import(${JSON.stringify(fixture)});
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm the seat floor"));
     // Keeper cleanup can finish after the refusal is recorded on a loaded runner.
-    await vi.waitFor(() => expect(existsSync(crewKeeperDir(dbPath, runId))).toBe(false), {
-      timeout: 5_000,
-    });
+    await vi.waitFor(() => expect(existsSync(crewKeeperDir(dbPath, runId))).toBe(false));
   });
 
   it.each(["codex-cli 0.153.9", "unreadable"])(

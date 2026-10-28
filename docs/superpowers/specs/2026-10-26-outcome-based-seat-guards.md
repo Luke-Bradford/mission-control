@@ -4,22 +4,24 @@
 
 Seat guards constrain outcomes, not ordinary development commands. The operator's hard gates are:
 
-- OS/profile controls prevent secrets and home-folder reads.
-- Read-only repositories and other lanes cannot be written.
-- Git and GitHub writes use the PR tools.
-- Seats have no network access.
-- Full test runs serialize through the shared test lock.
+- OS/profile controls prevent secrets, home-folder reads and access to other seats' worktrees.
+- Read-only repositories cannot be written; writers stay inside their assigned area.
+- Git writes use the mc commit and sync tools.
+- Seats have no network or GitHub CLI access.
+- Detached/background commands are refused so work stays attached to its current tool call.
+- Full test runs, including proportionate reviewer runs, serialize through the shared test lock.
 
-Codex permits commands within its OS sandbox except for a small denylist: Git write subcommands, `gh`, background jobs, and full-suite commands that bypass the test lock. Claude exposes broad `Bash` within its sandbox and applies the same denylist in its guard hook. RETRO may use the full suite through the test lock.
-
-## Rollout
-
-Deploy by updating Mission Control to the merged commit and restarting the hub through the normal operator procedure. For the following seven days, inspect guard-refusal telemetry daily and keep the hard-gate tests in CI. Success requires zero refusals for ordinary command reads; refusals for Git or GitHub writes, network access, background commands, cross-seat writes, and lock-bypassing suites remain expected.
-
-If any hard gate regresses, stop rollout, restore the previous hub revision, and escalate the guard hit and reproduction to the operator. If ordinary-read refusals persist during the week, capture the command and approval event, then escalate it for a targeted guard correction rather than restoring a command allowlist.
+Codex sends ordinary commands to the shared guard and then its OS sandbox. Claude exposes broad Bash inside the equivalent sandbox and uses the same guard hook. The role prompt explains the workflow and available Mission Control tools; it is not a command allowlist.
 
 ## Test plan
 
-- Prove ordinary read commands are allowed.
+- Prove ordinary local commands reach the sandbox.
 - Retain coverage for each hard gate and Git hardening.
 - Run lint, typecheck, changed tests, build, and the full suite.
+
+## Rollout
+
+- Merge and deploy through Mission Control's normal operator-controlled Update flow; Mission Control does not restart itself.
+- Watch guard-refusal telemetry for seven days. Success means zero refusals for ordinary read-only local commands while the retained hard gates continue to fire in their covered cases.
+- If an ordinary local read is refused, capture the bounded command excerpt and correct the parser or approval path without weakening a hard gate.
+- If a retained hard gate regresses, stop the rollout, revert the guard change and escalate with the failing command and rule.

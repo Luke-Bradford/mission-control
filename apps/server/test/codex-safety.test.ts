@@ -137,7 +137,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
 
 describe("Codex mode and seat boundaries", () => {
   it.each(["writer", "read-only", "scratch"] as const)(
-    "keeps %s approvals inside each of two seats",
+    "leaves %s command reads to the OS sandbox while enforcing writes and modes",
     async (mode) => {
       const lock = new TestLock();
       const a = seat("a", mode, lock);
@@ -170,8 +170,8 @@ describe("Codex mode and seat boundaries", () => {
         await driver.session.close();
         expect(lock.state().holder).toBeNull();
       }
-      expect(a.hits.length).toBeGreaterThanOrEqual(mode === "read-only" ? 3 : 2);
-      expect(b.hits.length).toBeGreaterThanOrEqual(mode === "read-only" ? 3 : 2);
+      expect(a.hits.length).toBeGreaterThanOrEqual(2);
+      expect(b.hits.length).toBeGreaterThanOrEqual(2);
     },
   );
 

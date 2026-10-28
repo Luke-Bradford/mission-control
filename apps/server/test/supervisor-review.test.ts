@@ -645,7 +645,9 @@ describe("startReview", () => {
     await sup.startReview("retro", r.reviewId);
     await until(() => expect(userLines()).toHaveLength(1));
     const brief = userLines()[0] as string;
-    expect(brief).toContain("`uv run pytest` followed by a test file path");
+    expect(brief).toContain(
+      "Configured review checks are `uv run pytest`; use them with a test file path where possible, and use ordinary local inspection commands as needed.",
+    );
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
   });

@@ -57,6 +57,15 @@ const elicitation = (tool: string = MC_TOOL_NAMES.commit, server: string = MC_MC
   mcpCall: { itemId: "item", server, tool },
 });
 const signal = () => new AbortController().signal;
+const commandRequest = (command: string) => ({
+  id: 1,
+  method: "item/commandExecution/requestApproval",
+  params: {
+    kind: "command",
+    cwd,
+    command: `/bin/zsh -lc "${command}"`,
+  },
+});
 
 describe("Codex MCP approvals", () => {
   it.each([
@@ -123,44 +132,27 @@ describe("Codex MCP approvals", () => {
 });
 
 describe("Codex refusal records", () => {
-  it("accepts ordinary command reads and retains hard-gate denials", async () => {
+  it("accepts an ordinary local read pipeline without recording a refusal", async () => {
     const h = approver();
     expect(
-      await h.approve(
-        {
-          id: 1,
-          method: "item/commandExecution/requestApproval",
-          params: {
-            kind: "command",
-            cwd,
-            command: "/bin/zsh -lc 'nl -ba apps/a.ts | sed -n 1,5p'",
-          },
-        },
-        undefined,
-        signal(),
-      ),
+      await h.approve(commandRequest("nl -ba apps/a.ts | sed -n '1,5p'"), undefined, signal()),
     ).toBe("accept");
     expect(h.record).not.toHaveBeenCalled();
-    for (const [command, rule] of [
-      ["git commit -m x", "git-write"],
-      ["gh issue list", "github-write"],
-      ["curl https://example.test", "network"],
-      ["sleep 1 &", "background"],
-    ] as const) {
-      expect(
-        await h.approve(
-          {
-            id: 1,
-            method: "item/commandExecution/requestApproval",
-            params: { kind: "command", cwd, command: `/bin/zsh -lc '${command}'` },
-          },
-          undefined,
-          signal(),
-        ),
-      ).toBe("decline");
-      expect(h.record).toHaveBeenLastCalledWith(rule, expect.stringContaining(command));
-    }
   });
+
+  it.each([
+    ["git commit -m x", "git-write"],
+    ["gh pr view 1", "github-write"],
+    ["curl https://example.com", "network"],
+    ["sleep 1 &", "background"],
+  ] as const)(
+    "routes the retained hard gate for %s through the shared guard",
+    async (command, rule) => {
+      const h = approver();
+      expect(await h.approve(commandRequest(command), undefined, signal())).toBe("decline");
+      expect(h.record).toHaveBeenCalledWith(rule, expect.stringContaining(command));
+    },
+  );
 
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();

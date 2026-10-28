@@ -164,7 +164,7 @@ import { z } from "zod";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import { reactComms, sendComms } from "../comms.ts";
+import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
@@ -255,6 +255,7 @@ const CommitArgs = z.strictObject({
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
+const CommsReadArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
@@ -1124,6 +1125,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const run = store.run(ctx.runId);
     if (row?.runId !== ctx.runId || run === null || run.endedAt !== null) return null;
     return { run, worktree: row.worktree };
+  }
+
+  async function commsRead(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = CommsReadArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    if (liveRun(ctx) === null) return ENDED;
+    const rows = new Map(
+      [...store.commsForCrew(), ...store.commsForAgent(ctx.seatId), ...store.commsInbox(ctx.seatId)]
+        .filter((row) => canReadComms(store, ctx.seatId, row))
+        .map((row) => [row.id, row] as const),
+    );
+    const pinned = new Set(store.commsPins().map((row) => row.id));
+    const messages = [...rows.values()]
+      .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)))
+      .slice(-parsed.data.limit)
+      .map((row) => ({
+        ...row,
+        operator: row.from === COMMS_CAPCOM,
+        pinned: pinned.has(row.id),
+        reactions: store.commsReactions(row.id),
+      }));
+    return { text: JSON.stringify({ messages }) };
   }
 
   async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2045,6 +2068,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   }
 
   return [
+    {
+      name: MC_TOOL_NAMES.commsRead,
+      description:
+        "Read recent stored Comms visible to this seat, including crew messages, direct messages, mentions and pinned messages. Use this after a wake or when recovering context; each message includes its id for replies and reactions.",
+      inputSchema: {
+        type: "object",
+        properties: { limit: { type: "number", minimum: 1, maximum: 100, default: 50 } },
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      call: commsRead,
+    },
     {
       name: MC_TOOL_NAMES.commsSend,
       description: "Send a message to a local seat, CAPCOM, or the crew channel.",

@@ -7,7 +7,7 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
-  background: "Do not run commands in the background",
+  background: "Commands must stay attached to the seat's current tool call",
   "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
@@ -257,6 +257,27 @@ const SHELL_KEYWORDS = new Set([
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
+const TMUX_START_COMMANDS = new Set([
+  "new",
+  "new-session",
+  "new-window",
+  "respawn-pane",
+  "respawn-window",
+  "run-shell",
+]);
+
+/** Whether the multiplexer invocation itself starts work that outlives this tool call. */
+function startsDetachedMultiplexer(name: string, rest: readonly string[]): boolean {
+  if (name === "tmux") {
+    const command = rest.find((word) => !word.startsWith("-"));
+    return command !== undefined && TMUX_START_COMMANDS.has(command);
+  }
+  // `screen cmd` and its `-d`/`-m` forms start a session. Listing, attaching and sending a
+  // command to an existing named session do not create detached work of their own.
+  if (rest.some((word) => /^-[A-Za-z]*[dm]/.test(word))) return true;
+  const first = rest[0];
+  return first !== undefined && !first.startsWith("-");
+}
 /** Runners whose options are not modelled (`watch`, `flock -c`, `script -c`, `parallel`, `npx -c` take a command line as one word): judged like a multiplexer, in the foreground. */
 const RUNNERS = new Set([
   "watch",
@@ -375,6 +396,8 @@ interface Cmd {
 interface Walk {
   /** A lone `&` somewhere in the line (or a script inside it). */
   lineBackground: boolean;
+  /** A wrapper or multiplexer explicitly starts work detached from this tool call. */
+  detachedCommand: boolean;
   /** Words still to examine; past it the line is too long to judge (fail closed). */
   budget: number;
   /** Codex must match exact argv: no expansion, hidden redirects or wrapper stripping. */
@@ -962,7 +985,10 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     } else if (Object.hasOwn(WRAPPERS, base)) {
       const spec = WRAPPERS[base];
       if (spec === undefined) break;
-      if (BACKGROUND_WRAPPERS.has(base)) bg = true;
+      if (BACKGROUND_WRAPPERS.has(base)) {
+        bg = true;
+        walk.detachedCommand = true;
+      }
       if (base === "xargs") viaXargs = true;
       if (base === "env") afterEnv = true;
       at++;
@@ -1036,6 +1062,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     ...extra,
   ];
   const multiplexer = MULTIPLEXERS.has(name);
+  if (multiplexer && startsDetachedMultiplexer(name, rest)) walk.detachedCommand = true;
   const from = multiplexer ? 0 : runnerStart(name, rest);
   if (multiplexer || from !== -1) {
     // `tmux new -d 'pnpm -s test'`, `screen -dmS s pnpm -s test`: which word starts the command is
@@ -1131,7 +1158,11 @@ export function splitCommands(cmd: string): string[][] {
     .map((c) => c.argv);
 }
 
-const newWalk = (): Walk => ({ lineBackground: false, budget: WORD_BUDGET });
+const newWalk = (): Walk => ({
+  lineBackground: false,
+  detachedCommand: false,
+  budget: WORD_BUDGET,
+});
 
 /**
  * The line's commands. One the budget or the depth cannot judge is the `TOO_LONG`
@@ -1772,7 +1803,6 @@ function gitReadOnly(sub: string, rest: readonly string[]): boolean {
 
 /** `gh` group verbs that only read. */
 const GH_READ_VERBS = new Set(["view", "list", "diff", "checks", "status", "show"]);
-const GH_API_WRITE_FLAGS = new Set(["-f", "-F", "--field", "--raw-field", "--input"]);
 
 /** `gh` groups and verbs that may appear in a guard-hit text; anything else is never echoed. */
 const GH_GROUPS = new Set([
@@ -1860,27 +1890,6 @@ function ghText(args: readonly string[]): string {
   return verb !== undefined && GH_VERBS.has(verb) ? `gh ${group} ${verb}` : `gh ${group}`;
 }
 
-function _ghReadOnly(args: readonly string[]): boolean {
-  const [group, ...rest] = args;
-  if (group === undefined) return true;
-  if (group === "search") return true;
-  if (group === "api") {
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i] ?? "";
-      const flag = a.split("=")[0] ?? a;
-      if (GH_API_WRITE_FLAGS.has(flag) || /^-[fF]./.test(a)) return false;
-      if (flag === "-X" || flag === "--method") {
-        const m = a.includes("=") ? a.slice(a.indexOf("=") + 1) : (rest[i + 1] ?? "");
-        if (m.toUpperCase() !== "GET") return false;
-      }
-      if (/^-X./.test(a) && a.slice(2).toUpperCase() !== "GET") return false;
-    }
-    return !rest.some((a) => a === "graphql");
-  }
-  const verb = ghVerb(rest);
-  return verb !== undefined && GH_READ_VERBS.has(verb) && group !== "auth" && group !== "secret";
-}
-
 const deny = (rule: GuardRule, what: string): GuardVerdict => ({
   kind: "deny",
   rule,
@@ -1916,6 +1925,7 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
+  const backgroundCommand = e.input.run_in_background === true;
   let gitEnvDenied = false;
   let githubDenied: string | null = null;
   const walk = newWalk();
@@ -2069,21 +2079,18 @@ export function guardDecision(
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
     if (suite !== null) {
-      if (background) backgroundSuite = true;
+      if (backgroundCommand || background) backgroundSuite = true;
       lock ??= suite;
     }
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");
   if (githubDenied !== null) return deny("github-write", githubDenied);
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
-  if (
-    lock !== null &&
-    (e.input.run_in_background === true || backgroundSuite || walk.lineBackground)
-  ) {
+  if (lock !== null && (backgroundSuite || walk.lineBackground)) {
     return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   }
-  if (e.input.run_in_background === true || walk.lineBackground)
-    return { kind: "deny", rule: "background", text: GUARD_RULES.background };
+  if (backgroundCommand || walk.lineBackground || walk.detachedCommand)
+    return deny("background", "detached or background command");
   if (lock === null) return { kind: "allow" };
   return { kind: "lock", command: lock };
 }

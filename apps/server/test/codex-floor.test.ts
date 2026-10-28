@@ -74,8 +74,8 @@ function claudeBashAllowed(
     }
     return pattern.endsWith("*") ? command.startsWith(pattern.slice(0, -1)) : command === pattern;
   };
-  // Codex's local parser remains intentionally stricter than Claude's broad Bash grant; this
-  // compatibility oracle preserves the parser's former command vocabulary.
+  // This oracle still covers the legacy Codex parser. Production approvals now send ordinary
+  // commands to the shared outcome guard and OS sandbox instead of using this vocabulary as a gate.
   const legacyAllowed = [
     ...(mode === "writer" ? commands.writer : commands.review),
     "git status",

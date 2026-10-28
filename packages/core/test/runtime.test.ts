@@ -219,6 +219,7 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
       "mcp__mc__ask_operator",
       "mcp__mc__report_evidence",
+      "mcp__mc__comms_read",
       "mcp__mc__comms_send",
       "mcp__mc__comms_react",
     ]);
@@ -262,6 +263,7 @@ describe("the allowlist in phase 2b", () => {
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
+      commsRead: "mcp__mc__comms_read",
       commsSend: "mcp__mc__comms_send",
       commsReact: "mcp__mc__comms_react",
       commsPin: "mcp__mc__comms_pin",
@@ -758,6 +760,7 @@ describe("scratch mode", () => {
       "Bash",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
+      "mcp__mc__comms_read",
       "mcp__mc__comms_send",
       "mcp__mc__comms_react",
     ]);

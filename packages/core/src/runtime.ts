@@ -94,19 +94,27 @@ export const MC_TOOL_GRANTS: Readonly<
       "sync_main",
       "ask_operator",
       "report_evidence",
+      MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
     grantable: [],
   },
   "read-only": {
-    base: ["ask_operator", "report_evidence", MC_TOOL_NAMES.commsSend, MC_TOOL_NAMES.commsReact],
+    base: [
+      "ask_operator",
+      "report_evidence",
+      MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsSend,
+      MC_TOOL_NAMES.commsReact,
+    ],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
   scratch: {
     base: [
       MC_TOOL_NAMES.reportFindings,
       MC_TOOL_NAMES.restoreFile,
+      MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
@@ -294,6 +302,7 @@ export const WRITER_TOOLS = [
   MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsRead,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;
@@ -306,6 +315,7 @@ export const READONLY_TOOLS = [
   "Bash",
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
+  MC_TOOLS.commsRead,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;
@@ -320,6 +330,7 @@ export const SCRATCH_TOOLS = [
   "Bash",
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
+  MC_TOOLS.commsRead,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;

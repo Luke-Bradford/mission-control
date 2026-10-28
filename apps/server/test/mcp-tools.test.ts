@@ -312,6 +312,7 @@ afterEach(() => {
 describe("the mc tools", () => {
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
@@ -323,6 +324,7 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.commsRead,
       MC_TOOLS.commsSend,
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
@@ -1063,6 +1065,7 @@ describe("through /mcp", () => {
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
+        "comms_read",
         "comms_send",
         "comms_react",
         "commit",
@@ -1079,6 +1082,7 @@ describe("through /mcp", () => {
         ).error.message,
       ).toBe("unknown tool");
       expect(await names(reader)).toEqual([
+        "comms_read",
         "comms_send",
         "comms_react",
         "ask_operator",
@@ -1171,8 +1175,32 @@ describe("through /mcp", () => {
 });
 
 describe("Comms seat tools", () => {
+  const read = (args: unknown = {}, ts = tools, ctx = CTX) =>
+    tool("comms_read", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
+    store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
+    store.addComms({ at: NOW - 3, from: "guido-2", to: "guido-1", ticket: null, text: "direct" });
+    store.addComms({
+      at: NOW - 2,
+      from: "retro",
+      to: "CAPCOM",
+      ticket: null,
+      text: "mentioned @guido-1",
+      mentions: ["guido-1"],
+    });
+    store.addComms({ at: NOW - 1, from: "guido-2", to: "retro", ticket: null, text: "private" });
+    const result = await read({ limit: 2 });
+    const parsed = JSON.parse(result.text) as { messages: { text: string; id: string }[] };
+    expect(parsed.messages.map((message) => message.text)).toEqual([
+      "direct",
+      "mentioned @guido-1",
+    ]);
+    expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
+    expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
 
   it("persists every supported destination, label, ref, reply and mention", async () => {
     liveSeat("guido-2", "guido-2:live");

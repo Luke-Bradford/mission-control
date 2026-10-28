@@ -115,7 +115,7 @@ describe("scratch mode", () => {
     fullSuite: ["pnpm -s test"],
   };
 
-  it("scratch: edits allowed, commit denied and suite locked", () => {
+  it("scratch: edits and locked suites allowed, commit denied", () => {
     expect(guardDecision({ tool: "Edit", input: { file_path: "/w/a.ts" } }, scratch)).toEqual({
       kind: "allow",
     });
@@ -192,6 +192,9 @@ describe("GUARD_RULES", () => {
       "Only repos with flight_powers: superuser may use these tools",
     );
     expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
+    expect(GUARD_RULES.background).toBe(
+      "Commands must stay attached to the seat's current tool call",
+    );
     expect(Object.keys(GUARD_RULES)).toHaveLength(11);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
@@ -350,16 +353,10 @@ describe("guardDecision: the full suite", () => {
   ])("still locks %s (no background &)", (c) => {
     expect(ruleOf(bash(c))).toBe("lock");
   });
-  it.each([bash("sleep 1 &"), bash("sleep 1", { run_in_background: true })])(
-    "denies any background command",
-    (event) => {
-      expect(guardDecision(event, writer)).toEqual({
-        kind: "deny",
-        rule: "background",
-        text: "Do not run commands in the background",
-      });
-    },
-  );
+  it("denies a background command that is not a full suite", () => {
+    expect(ruleOf(bash("sleep 1 &"))).toBe("background");
+    expect(ruleOf(bash("sleep 1", { run_in_background: true }))).toBe("background");
+  });
   it("locks a suite in read-only mode", () => {
     expect(guardDecision(bash("pnpm -s vitest run"), readOnly)).toEqual({
       kind: "lock",
@@ -735,8 +732,8 @@ describe("guard fix round 5 (Task 5 review)", () => {
       expect(ruleOf(bash(c))).toBe("git-write");
     },
   );
-  it("allows a background wrapper that is not a suite", () => {
-    expect(ruleOf(bash("setsid sleep 1"))).toBe("allow");
+  it("denies a background run that is not a suite", () => {
+    expect(ruleOf(bash("setsid sleep 1"))).toBe("background");
   });
   it("names a git subcommand in the text only when it is a known one", () => {
     expect(guardDecision(bash("git SECRETX origin"), writer)).toEqual({
@@ -998,12 +995,14 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
     "tmux list-panes -F '#{pane_id} #{?pane_active,*,}'",
     "tmux display -p '#{e|+:1,2}'",
     "tmux send-keys -t x 'ls {a,b}' Enter",
-    "tmux new -d 'ls {a,b}'",
     "'{git,push}' origin",
     '"{a..z}"',
     "\\{git,push} origin",
   ])("allows the quoted braces in %s", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
+  });
+  it("denies a detached tmux command even when its quoted argument contains braces", () => {
+    expect(ruleOf(bash("tmux new -d 'ls {a,b}'"))).toBe("background");
   });
   it.each(["{git,'push'} origin", "tmux {git,push}", "tmux new -d '{git,push} origin'"])(
     "still denies the unquoted brace expansion in %s",
