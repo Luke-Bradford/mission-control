@@ -3717,6 +3717,8 @@ describe("boards, escalations, health", () => {
         agentId: "guido-1",
         transcriptPath,
         branch: "aside-branch",
+        ticket: "shop-app#41",
+        ticketTitle: "Set-aside work",
         loop: { ...NEW_LOOP, aside: { worktree: dir, wake: false } },
       }),
     );
@@ -3728,6 +3730,12 @@ describe("boards, escalations, health", () => {
     expect(response.json().seats[0].scope.read).toEqual([]);
     // the set-aside branch still names the seat in conflicts and their unchecked notes
     expect(response.json().seats[0].branches).toContain("aside-branch");
+    // the only branch with changes is the set-aside one: its run owns the seat's ticket and title
+    expect(response.json().seats[0]).toMatchObject({
+      ticket: 41,
+      title: "Set-aside work",
+      tickets: { "aside-branch": 41 },
+    });
     store.upsertPullRequests(
       "shop-app",
       [

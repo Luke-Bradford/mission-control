@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   agentCard,
   badgeModels,
+  branchList,
   changeTotals,
   factLine,
   isStuck,
   isWorking,
   recentFailures,
+  stageLine,
   uncheckedNotes,
   waitsOnYou,
 } from "../src/map/cards.ts";
@@ -65,6 +67,22 @@ describe("who the stage shows, and its one line", () => {
     expect(factLine({ ...s, seat: "FLIGHT" }, "FLIGHT")).toBe("FLIGHT");
     s.badges.questions = [{ id: 1, from: "GUIDO-1", to: "CAPCOM", ticket: null, since: 0 }];
     expect(factLine(s)).toBe("GUIDO-1 · no changes yet · waiting on you");
+  });
+  it("keeps the stage's line to facts: ~ for churn, 2br for branches, no words", () => {
+    const s = seat();
+    s.scope.modified = [
+      { file: "a.ts", add: 100, rem: 60, source: "diff" },
+      { file: "new.ts", add: 13, rem: 3, source: "churn" },
+    ];
+    s.ticket = 717;
+    s.branches = ["feature/717-audit", "feature/708-pill"];
+    s.tickets = { "feature/717-audit": 717, "feature/708-pill": 708 };
+    expect(stageLine(s, "INCO-CX")).toBe("INCO-CX · #717 · 2 files · ~+113 −63 · 2br");
+    expect(branchList(s)).toBe("feature/717-audit (#717), feature/708-pill (#708)");
+    s.scope.modified = [{ file: "a.ts", add: 175, rem: 29, source: "diff" }];
+    s.branches = ["feature/747-models"];
+    s.ticket = 747;
+    expect(stageLine(s, "GUIDO-CX")).toBe("GUIDO-CX · #747 · 1 file · +175 −29");
   });
   it("never folds a seat waiting on the operator; a stopped run or the test lock isn't that", () => {
     const s = seat();

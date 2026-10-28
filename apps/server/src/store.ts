@@ -1402,6 +1402,16 @@ export class Store {
     return new Set(rows.map((r) => r.ticket as string));
   }
 
+  /** The newest run (ended or not, not a review) on `branch`, which owns that branch's ticket. */
+  latestRunOnBranch(repoId: RepoId, branch: string): Run | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL ORDER BY started_at DESC LIMIT 1",
+      )
+      .get(repoId, branch) as Row | undefined;
+    return row ? toRun(row) : null;
+  }
+
   /** Whether this hub has a run (ended or not) on `branch`. */
   hasRunOnBranch(repoId: RepoId, branch: string): boolean {
     return (

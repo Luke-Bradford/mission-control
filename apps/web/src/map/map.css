@@ -12,6 +12,8 @@
   --void-faint: #4a5675;
   --void-scrim: rgba(4, 6, 12, 0.84);
   --void-panel: rgba(10, 15, 29, 0.96);
+  /* the dark theme's amber, so a mark on the void reads the same in both themes */
+  --void-warn: #f2b53a;
   --signal: #9fe8ff;
   --add: #4fdc8a;
   --rem: #ff6b6b;
@@ -570,6 +572,16 @@
   vertical-align: 1px;
   background: var(--agent);
   box-shadow: 0 0 6px var(--agent);
+}
+/* waits on the operator: a small amber dot before an agent's name on the stage */
+.map-waits-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--void-warn);
 }
 /* waits on the operator: the one amber on a row */
 .map-waits {

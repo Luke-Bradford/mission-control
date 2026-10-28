@@ -18,9 +18,18 @@ export class SeatDiff {
   private key: string | null = null;
   private running = false;
   private value: MapChange[] | null = null;
+  private onBranch: string | null = null;
 
   changes(): MapChange[] | null {
     return this.value === null ? null : structuredClone(this.value);
+  }
+
+  /**
+   * The branch the worktree had checked out when the diff was read (null when detached or
+   * unread): a seat's worktree can move on to a later run's branch, and the diff is that branch's.
+   */
+  branch(): string | null {
+    return this.value === null ? null : this.onBranch;
   }
 
   poll(cwd: string, revision: string): void {
@@ -46,12 +55,15 @@ export class SeatDiff {
       if (this.key === key && (!this.due || Date.now() < this.due)) return;
       if (this.due && Date.now() < this.due) return;
       const revision = this.revision;
+      const branch = (await git([...args, "rev-parse", "--abbrev-ref", "HEAD"])).trim();
       this.value = await mapChanges(cwd, git);
+      this.onBranch = branch && branch !== "HEAD" ? branch : null;
       this.key = key;
       if (this.revision === revision) this.due = 0;
     } catch {
       // Unavailable bases, binary counts and filters must never become invented zeroes.
       this.value = null;
+      this.onBranch = null;
       this.key = null;
     }
   }

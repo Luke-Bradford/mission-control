@@ -6,6 +6,7 @@ import {
   agentCard,
   type BadgeKind,
   badgeModels,
+  branchList,
   changeTotals,
   isActing,
   isWorking,
@@ -118,7 +119,7 @@ function AgentRow({
         title={
           rest
             ? undefined
-            : `Show where this agent is working${seat.branches.length > 1 ? ` · branches: ${seat.branches.join(", ")}` : ""}${totals.churn ? " · (churn): edit churn, not the branch diff" : ""}`
+            : `Show where this agent is working${seat.branches.length > 1 ? ` · branches: ${branchList(seat)}` : ""}${totals.churn ? " · (churn): edit churn, not the branch diff" : ""}`
         }
         onClick={() => {
           onSelect(open ? null : seat.seat);
@@ -181,6 +182,7 @@ function AgentRow({
       )}
       {open && (
         <div className="map-agent-more">
+          {seat.branches.length > 1 && <p className="map-note">Branches: {branchList(seat)}</p>}
           {card.folder && (
             <p className="map-note">
               Branch folder: {card.folder === "." ? "repo root" : card.folder}

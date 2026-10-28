@@ -16,6 +16,7 @@ export const mapSnapshotFixture = {
       ticket: 7,
       title: "Handle empty input",
       branches: ["feature/7-empty-input"],
+      tickets: { "feature/7-empty-input": 7 },
       calls: [{ tool: "Read", detail: "src/util.ts", files: ["src/util.ts"], since: 2000 }],
       scope: {
         read: ["src/main.ts", "src/util.ts"],

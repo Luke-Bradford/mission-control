@@ -2,7 +2,7 @@ import type { MapSnapshot } from "@mc/core";
 import * as THREE from "three";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { haloSize, orbPlacement, type Position, stateLabel } from "./agents.ts";
-import { factLine } from "./cards.ts";
+import { branchList, changeTotals, factLine, stageLine, waitsOnYou } from "./cards.ts";
 import type { MapNode } from "./model.ts";
 import {
   arcPoint,
@@ -174,9 +174,26 @@ export function activityLayer(
       label.className = "map-orb-label";
       // the agent cards carry the same selection in the tab order; an orb label is for the pointer
       label.tabIndex = -1;
-      // one fact line: who, which ticket, how much changed; the live state is its tooltip
-      label.textContent = factLine(seat, props.names?.[seat.seat]);
-      label.title = `${stateLabel(seat, Date.now(), memory.current.ended[seat.seat])}${placement.more ? ` · +${placement.more} more files in flight` : ""}`;
+      // facts only on the stage: who, which ticket, how much changed. Waiting on you is an amber
+      // dot; the words, the live state, churn and branches are its accessible name and tooltip.
+      const name = props.names?.[seat.seat];
+      const text = document.createTextNode(stageLine(seat, name));
+      if (waitsOnYou(seat)) {
+        const dot = document.createElement("i");
+        dot.className = "map-waits-dot";
+        dot.setAttribute("aria-hidden", "true");
+        label.replaceChildren(dot, text);
+      } else label.replaceChildren(text);
+      label.setAttribute("aria-label", factLine(seat, name));
+      const { churn } = changeTotals(seat);
+      label.title = [
+        factLine(seat, name),
+        `${stateLabel(seat, Date.now(), memory.current.ended[seat.seat])}${placement.more ? ` · +${placement.more} more files in flight` : ""}`,
+        ...(churn
+          ? ["~ edit churn: some lines counted from Edit and Write calls, not the diff"]
+          : []),
+        ...(seat.branches.length > 1 ? [`branches: ${branchList(seat)}`] : []),
+      ].join("\n");
       label.style.color = colorOf(seat.seat).getStyle();
       label.style.opacity = String(dim(seat.seat) * (placement.docked ? 0.75 : 1));
       label.setAttribute("aria-pressed", String(props.agent === seat.seat));

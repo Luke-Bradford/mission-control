@@ -95,7 +95,12 @@ it("keeps rotation static for reduced motion and renders named severity pins", (
   const label = screen.getByRole("button", {
     name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
   });
-  expect(label.getAttribute("title")).toMatch(/^reading src\/util\.ts/);
+  // on the stage: facts only, churn as "~", waiting on you as an amber dot; the words are its
+  // accessible name and tooltip
+  expect(label.textContent).toBe("GUIDO-1 · #7 · 1 file · ~+12 −3");
+  expect(label.querySelector(".map-waits-dot")).not.toBeNull();
+  expect(label.getAttribute("title")).toContain("reading src/util.ts");
+  expect(label.getAttribute("title")).toContain("~ edit churn");
   unmount();
 });
 

@@ -148,6 +148,11 @@ export class CallRing {
     return this.diffs.get(runId)?.diff.changes() ?? null;
   }
 
+  /** The branch that diff was read on: the worktree's checkout, which may be a later run's. */
+  diffBranch(runId: string): string | null {
+    return this.diffs.get(runId)?.diff.branch() ?? null;
+  }
+
   calls(seat: string): RingCall[] {
     return structuredClone(this.rows.get(seat) ?? []);
   }

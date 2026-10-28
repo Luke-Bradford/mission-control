@@ -206,7 +206,32 @@ export function changeTotals(seat: MapSeat): {
 }
 
 /**
- * The stage's one line per working agent: `GUIDO-CX · #698 · 12 files · +77 −30`, with
+ * The stage's label: facts only, `GUIDO-CX · #747 · 6 files · +175 −29`. Edit churn is a "~" on
+ * the numbers and several branches a "· 2br"; the words (and waiting on you, shown as a dot) are in
+ * factLine, which is the label's accessible name and the tooltip's.
+ */
+export function stageLine(seat: MapSeat, callSign = seatCallSign(seat.seat)): string {
+  const { files, add, rem, churn } = changeTotals(seat);
+  return [
+    callSign,
+    ...(seat.ticket !== null ? [`#${seat.ticket}`] : []),
+    ...(files
+      ? [`${files} file${files === 1 ? "" : "s"}`, `${churn ? "~" : ""}+${add} −${rem}`]
+      : seat.seat === "FLIGHT"
+        ? []
+        : ["no changes yet"]),
+    ...(seat.branches.length > 1 ? [`${seat.branches.length}br`] : []),
+  ].join(" · ");
+}
+
+/** Each branch with its ticket, for a tooltip: `feature/717-x (#717), feature/708-y (#708)`. */
+export const branchList = (seat: MapSeat): string =>
+  seat.branches
+    .map((b) => (seat.tickets[b] !== undefined ? `${b} (#${seat.tickets[b]})` : b))
+    .join(", ");
+
+/**
+ * The stage's one line per working agent, in words: `GUIDO-CX · #698 · 12 files · +77 −30`, with
  * "(churn)" when any of it is edit churn, "· 2 branches" when it spans several, and "· waiting on
  * you" when it waits on the operator. FLIGHT has no branch, so it never says "no changes yet".
  */

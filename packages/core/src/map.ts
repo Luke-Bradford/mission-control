@@ -55,6 +55,8 @@ export interface MapSeat {
    * runs set aside), which name the seat in conflicts and conflictsUnchecked.
    */
   branches: string[];
+  /** The ticket of each branch in `branches`, from the newest run on it, where it has one. */
+  tickets: Record<string, number>;
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };
