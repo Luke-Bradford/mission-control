@@ -205,7 +205,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
-        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
+        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
         author { login }
         assignees(first: 10) { nodes { login } }
@@ -1074,6 +1074,9 @@ function mapPr(
     mergeable: lookup(MERGEABLE, n.mergeable),
     author: str(path(n, "author", "login"), "") || null,
     assignees: logins(n.assignees),
+    additions: typeof n.additions === "number" ? n.additions : null,
+    deletions: typeof n.deletions === "number" ? n.deletions : null,
+    changedFiles: typeof n.changedFiles === "number" ? n.changedFiles : null,
   };
 }
 
