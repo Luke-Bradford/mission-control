@@ -100,7 +100,7 @@ const floor = (): Record<string, unknown> => ({
   approvalPolicy: "untrusted",
   approvalsReviewer: "user",
   activePermissionProfile: { id: "mc_seat" },
-  sandbox: { networkAccess: false },
+  sandbox: { type: "workspaceWrite", networkAccess: false },
   instructionSources: [],
 });
 const request = (id: string | number, itemId = "item") => ({
