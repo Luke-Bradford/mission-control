@@ -8,7 +8,15 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import {
@@ -188,6 +196,7 @@ function parseHello(line: string): KeeperHello | { version: number | null } {
           cliPid: typeof v.cliPid === "number" ? v.cliPid : null,
           lines: n(v.lines),
           awaiting: v.awaiting === true,
+          parsedResults: v.parsedResults === true,
         };
       }
       return { version };
@@ -646,13 +655,105 @@ export type Attached =
   /** No keeper to attach to (null), or one that speaks another version (its number). */
   | { kind: "gone"; version: number | null };
 
+/** How far back `endsAtResult` reads a transcript for its last turn line. */
+const TURN_TAIL_MAX_BYTES = 64 * 1024 * 1024;
+const TURN_TAIL_CHUNK = 1024 * 1024;
+
+/**
+ * What a Claude stdout line says about the turn: "end" for a `result`, "turn" for a line only a
+ * running turn prints (`assistant`, `user`, `stream_event`, `system/init`, a `tool_progress` that is
+ * not a heartbeat), null for any other line (a control response, a keep-alive, a task notification,
+ * a hook or status line) that may come between turns.
+ */
+function turnLine(m: unknown): "end" | "turn" | null {
+  if (!isObj(m)) return null;
+  switch (m.type) {
+    case "result":
+      return "end";
+    case "assistant":
+    case "user":
+    case "stream_event":
+      return "turn";
+    case "system":
+      return m.subtype === "init" ? "turn" : null;
+    case "tool_progress":
+      return m.heartbeat === true ? null : "turn";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether a Claude transcript's last turn line is a `result`: the CLI is between turns, unless a
+ * line was written that it has not answered yet (it prints `system/init` at once when it gets one).
+ * Lines that may come between turns are skipped (see `turnLine`), and so is a complete line that is
+ * not JSON. False for a transcript that cannot be read, one whose last line is cut off (no newline
+ * yet, and not JSON), and one with no turn line in its last 64 MiB.
+ */
+export function endsAtResult(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    let pos = size;
+    // the bytes after the last newline found, in order: a line whose start is further back
+    let pieces: Buffer[] = [];
+    // the next segment taken is the file's last, which has no newline after it
+    let last = true;
+    /** The answer, or undefined to read on. */
+    const judge = (segment: Buffer): boolean | undefined => {
+      const final = last;
+      last = false;
+      const text = segment.toString("utf8").trim();
+      if (text === "") return undefined;
+      let m: unknown;
+      try {
+        m = JSON.parse(text);
+      } catch {
+        return final ? false : undefined;
+      }
+      const said = turnLine(m);
+      return said === null ? undefined : said === "end";
+    };
+    while (pos > 0 && size - pos < TURN_TAIL_MAX_BYTES) {
+      const len = Math.min(TURN_TAIL_CHUNK, pos);
+      pos -= len;
+      const chunk = Buffer.alloc(len);
+      readSync(fd, chunk, 0, len, pos);
+      let end = len;
+      for (let nl = chunk.lastIndexOf(10, end - 1); nl >= 0; nl = chunk.lastIndexOf(10, end - 1)) {
+        const tail = chunk.subarray(nl + 1, end);
+        const said = judge(pieces.length === 0 ? tail : Buffer.concat([tail, ...pieces]));
+        if (said !== undefined) return said;
+        pieces = [];
+        end = nl;
+        if (end === 0) break;
+      }
+      if (end > 0) pieces.unshift(chunk.subarray(0, end));
+    }
+    // the file's first line, when all of it was read
+    if (pos === 0 && pieces.length > 0) return judge(Buffer.concat(pieces)) ?? false;
+    return false;
+  } catch {
+    return false;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /**
  * Attaches to the keeper of a run folder that an earlier hub started. `from` says which keeper line
- * to replay from, given the keeper's hello. Never throws.
+ * to replay from, given the keeper's hello; `awaiting`, when given, is what the hub takes the
+ * hello's `awaiting` to be (the hello returned and the `attached` event carry it). Never throws.
  */
 export async function attachSession(i: {
   dir: string;
   from: (h: KeeperHello) => number;
+  awaiting?: (h: KeeperHello) => boolean;
   raw?: boolean;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
@@ -705,11 +806,12 @@ export async function attachSession(i: {
         resolve(line);
       });
     });
-    const h = first === null ? { version: null } : parseHello(first);
-    if (!isHello(h)) {
+    const said = first === null ? { version: null } : parseHello(first);
+    if (!isHello(said)) {
       s.destroy();
-      return { kind: "gone", version: h.version };
+      return { kind: "gone", version: said.version };
     }
+    const h = i.awaiting === undefined ? said : { ...said, awaiting: i.awaiting(said) };
     const driver = createDriver({
       dir: i.dir,
       controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,

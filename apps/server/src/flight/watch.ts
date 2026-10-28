@@ -9,6 +9,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_GHOST_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
@@ -19,6 +20,9 @@ import {
   type FlightState,
   flightDownText,
   flightStartFailedText,
+  HUD_STATE_LABEL,
+  type HudState,
+  type SeatSessionRow,
   type TestLockState,
   wakeKey,
   wakeLine,
@@ -29,7 +33,7 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { transcriptMtime } from "../hud.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
-import type { Store } from "../store.ts";
+import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { lastOutputAt } from "../stream.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -54,7 +58,15 @@ export interface FlightWatchDeps {
   bus: ChangeBus;
   supervisor: Pick<
     Supervisor,
-    "on" | "send" | "seatFacts" | "startWatch" | "endRunByEngine" | "busy" | "status"
+    | "on"
+    | "send"
+    | "seatFacts"
+    | "sessionAlive"
+    | "startWatch"
+    | "endRunByEngine"
+    | "resumeRun"
+    | "busy"
+    | "status"
   >;
   /** main.ts passes engineOn: off in a preview, with MC_NO_LOOP_WRITES=1, or with no crew. */
   enabled: boolean;
@@ -114,6 +126,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let rotating = false;
   let rotationRequested = false;
   let lastFailure: string | null = null;
+  /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
+  let processGone = false;
   const announced = new Set<string>();
   let preparingDay: string | null = null;
   let attemptedDay: string | null = null;
@@ -157,6 +171,67 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     store.clearNote(FLIGHT_DOWN_NOTE_KEY, t);
     bus.emit("attention");
   };
+
+  /** FLIGHT's run that its row holds while the hub has no session for it, and when that was seen. */
+  let ghost: { runId: string; since: number } | null = null;
+
+  /**
+   * A run FLIGHT's row holds while the hub has no live session for it (its CLI died unseen, or a
+   * take-back left it behind) would refuse every start "already has a run", for days. It is taken
+   * back once, as at a restart (its session resumed with its context, or failed with the reason);
+   * one still without a session FLIGHT_GHOST_MS later is ended (`endedBy: engine`, the reason in
+   * Activity), so FLIGHT starts afresh. A pause, a CLI hold or a pending change keeps it as it is.
+   * True while it waits.
+   */
+  async function settleGhost(
+    id: string,
+    row: SeatSessionRow | null,
+    alive: boolean | null,
+    t: number,
+  ): Promise<boolean> {
+    const run = row?.runId == null ? null : store.run(row.runId);
+    if (
+      alive !== false ||
+      row === null ||
+      run === null ||
+      run.endedAt !== null ||
+      !ACTIVE_SEAT_STATES.includes(row.state) ||
+      deps.blocked?.(id) === true
+    ) {
+      ghost = null;
+      return false;
+    }
+    if (ghost?.runId !== run.id) {
+      ghost = { runId: run.id, since: t };
+      log(`flight watch: run #${run.seq} has no live session; taking it back`);
+      // a take-back that works, or fails and ends the run, emits an event that checks again
+      await supervisor.resumeRun(run.id);
+      later(FLIGHT_GHOST_MS);
+      return true;
+    }
+    const left = ghost.since + FLIGHT_GHOST_MS - t;
+    if (left > 0) {
+      later(left);
+      return true;
+    }
+    ghost = null;
+    log(`flight watch: run #${run.seq}'s CLI session is gone; ending it to start FLIGHT afresh`);
+    const from: HudState = row.state === "starting" ? "running" : row.state;
+    try {
+      store.addAgentEvent({
+        agentId: id,
+        at: t,
+        from,
+        to: "idle",
+        text: `${HUD_STATE_LABEL[from]} → ${HUD_STATE_LABEL.idle}: its CLI session was gone (run #${run.seq} ended to start FLIGHT afresh)`,
+      });
+    } catch (e) {
+      log(`flight watch: could not record the end: ${e instanceof Error ? e.message : e}`);
+    }
+    processGone = true;
+    await supervisor.endRunByEngine(run.id);
+    return false;
+  }
 
   async function pass(): Promise<void> {
     if (stopped) return;
@@ -204,7 +279,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (added) bus.emit("attention");
 
     const row = store.seatSession(id);
-    if (!flightLive(config, store)) {
+    // judged from FLIGHT's session, not only its run row: a run with no session is not live
+    const alive = supervisor.sessionAlive?.(id) ?? null;
+    if (!flightLive(config, store, () => alive)) {
       const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
       const atStop = accountAtStop(config, store, accountId, t);
       // Parked or held at a stop line is an outage; the operator's own Stop is not, and a failed
@@ -214,9 +291,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       else if (atStop && row?.state !== "stopped" && !noteOpen())
         raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
       else clearDown(t);
-      if (row?.state === "stopped" || row?.state === "parked" || noteOpen() || atStop) {
-        return;
-      }
+      if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
+      // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
+      // before any start, which it would refuse
+      if (await settleGhost(id, row, alive, t)) return;
+      if (noteOpen()) return;
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
         clearDown(t);
@@ -229,6 +308,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
           at: t,
         });
+        processGone = false; // said once, in this note
         bus.emit("attention");
         return;
       }
@@ -251,6 +331,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const { runId } = await supervisor.startWatch(id, {
           first: wakeLine(state, digest, causes.length > 0 ? causes : ["initial"]),
         });
+        processGone = false;
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
@@ -258,7 +339,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       } catch (e) {
-        lastFailure = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+        const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+        lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
         log(`flight watch: start failed: ${lastFailure}`);
       }
       return;
@@ -403,7 +485,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       offSupervisor = supervisor.on((e) => {
         if (e.seatId === flightSeat(config)?.seat.id) {
           if (e.kind === "idle") lastTurnEndAt = now();
-          if (!flightLive(config, store)) bus.emit("attention");
+          if (!flightLive(config, store, (seatId) => supervisor.sessionAlive?.(seatId) ?? null))
+            bus.emit("attention");
           void check();
         } else schedule();
       });
@@ -416,6 +499,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     },
     stop() {
       stopped = true;
+      ghost = null;
+      processGone = false;
       offSupervisor?.();
       offBus?.();
       offSupervisor = null;

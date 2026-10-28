@@ -210,8 +210,15 @@ export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
   return new Set(found.session.seats.filter((s) => s.id !== found.seat.id).map((s) => s.id));
 }
 
-/** The watch seat has an unended active run and is not held (parked). */
-export function flightLive(config: CcConfig, store: Store): boolean {
+/** Whether a seat's CLI session is alive; null when the hub cannot tell (`Supervisor.sessionAlive`). */
+export type SessionAlive = (seatId: string) => boolean | null;
+
+/**
+ * The watch seat has an unended active run and is not held (parked). With `alive`, a run the hub
+ * holds no live session for is not live, whatever its row says; null from `alive` (the hub cannot
+ * tell yet, as during a restart's take-back) leaves it to the row.
+ */
+export function flightLive(config: CcConfig, store: Store, alive?: SessionAlive): boolean {
   const found = flightSeat(config);
   if (found === null) return false;
   const row = store.seatSession(found.seat.id);
@@ -222,7 +229,8 @@ export function flightLive(config: CcConfig, store: Store): boolean {
     !ACTIVE_SEAT_STATES.includes(row.state)
   )
     return false;
-  return store.run(row.runId)?.endedAt === null;
+  if (store.run(row.runId)?.endedAt !== null) return false;
+  return alive?.(found.seat.id) !== false;
 }
 
 /** The wakes a FLIGHT run has had: its claimed wake keys. */
@@ -231,7 +239,12 @@ export function flightWakes(store: Store, runId: string): number {
   return Object.keys(store.claimedKeys(runId)).filter((k) => k.startsWith(prefix)).length;
 }
 
-export function flightView(config: CcConfig, store: Store, now: number): FlightView {
+export function flightView(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  alive?: SessionAlive,
+): FlightView {
   const found = flightSeat(config);
   const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
   return {
@@ -243,7 +256,7 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
             call: seatCallSign(found.seat.id),
             model: found.seat.model,
             state: store.seatSession(found.seat.id)?.state ?? null,
-            live: flightLive(config, store),
+            live: flightLive(config, store, alive),
             turns:
               runId === null
                 ? null
