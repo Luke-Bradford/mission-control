@@ -3277,6 +3277,34 @@ describe("report_evidence", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
   });
 
+  it("describes structured test evidence to MCP clients", () => {
+    expect(tool("report_evidence", ev).inputSchema).toMatchObject({
+      properties: {
+        tests: {
+          items: {
+            properties: {
+              command: { type: "string", minLength: 1 },
+              passed: { type: "integer", minimum: 0 },
+              duration: { type: "integer", minimum: 0 },
+            },
+            required: ["command", "passed", "failed", "skipped", "duration"],
+            additionalProperties: false,
+          },
+        },
+        testsAdded: {
+          items: {
+            properties: {
+              file: { type: "string", minLength: 1 },
+              failedOnBase: { type: "boolean" },
+            },
+            required: ["file", "failedOnBase"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+  });
+
   it("describes a no-commit response as a blocking-review reply", () => {
     const evidence = tool("report_evidence", ev);
     expect(evidence.description).toContain(
@@ -3694,6 +3722,48 @@ describe("report_findings", () => {
     expect(t.inputSchema).toMatchObject({
       required: ["verdict", "summary", "findings"],
       additionalProperties: false,
+    });
+  });
+
+  it("describes every structured review field to MCP clients", () => {
+    expect(tool("report_findings", rt).inputSchema).toMatchObject({
+      properties: {
+        checked: {
+          items: {
+            properties: {
+              check: { type: "string" },
+              result: { type: "string" },
+              note: { type: "string" },
+            },
+            required: ["check", "result"],
+            additionalProperties: false,
+          },
+        },
+        tests: {
+          items: {
+            properties: { command: { type: "string" }, failed: { type: "integer", minimum: 0 } },
+            required: ["command", "passed", "failed", "skipped", "duration"],
+            additionalProperties: false,
+          },
+        },
+        resolutions: {
+          items: {
+            properties: {
+              findingRef: {
+                properties: {
+                  reviewId: { type: "integer", minimum: 1 },
+                  pos: { type: "integer", minimum: 0 },
+                },
+                required: ["reviewId", "pos"],
+                additionalProperties: false,
+              },
+              outcome: { type: "string" },
+            },
+            required: ["findingRef", "outcome"],
+            additionalProperties: false,
+          },
+        },
+      },
     });
   });
 

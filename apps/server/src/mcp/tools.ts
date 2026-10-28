@@ -349,6 +349,56 @@ const EvidenceArgs = z.strictObject({
     .optional(),
 });
 
+const ReportedTestSchema = {
+  type: "object",
+  properties: {
+    command: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+    file: { type: "string", minLength: 1, maxLength: FINDING_FILE_MAX },
+    passed: { type: "integer", minimum: 0 },
+    failed: { type: "integer", minimum: 0 },
+    skipped: { type: "integer", minimum: 0 },
+    duration: { type: "integer", minimum: 0 },
+  },
+  required: ["command", "passed", "failed", "skipped", "duration"],
+  additionalProperties: false,
+};
+const TestsAddedSchema = {
+  type: "object",
+  properties: {
+    file: { type: "string", minLength: 1, maxLength: FINDING_FILE_MAX },
+    failedOnBase: { type: "boolean" },
+  },
+  required: ["file", "failedOnBase"],
+  additionalProperties: false,
+};
+const ReviewCheckSchema = {
+  type: "object",
+  properties: {
+    check: { type: "string", enum: [...REVIEW_CHECK_IDS] },
+    result: { type: "string", enum: [...REVIEW_CHECK_RESULTS] },
+    note: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+  },
+  required: ["check", "result"],
+  additionalProperties: false,
+};
+const FindingResolutionSchema = {
+  type: "object",
+  properties: {
+    findingRef: {
+      type: "object",
+      properties: {
+        reviewId: { type: "integer", minimum: 1 },
+        pos: { type: "integer", minimum: 0 },
+      },
+      required: ["reviewId", "pos"],
+      additionalProperties: false,
+    },
+    outcome: { type: "string", enum: [...FINDING_RESOLUTION_OUTCOMES] },
+  },
+  required: ["findingRef", "outcome"],
+  additionalProperties: false,
+};
+
 export function badArgs(e: z.ZodError): Result {
   const issue = e.issues[0];
   const path = issue?.path.join(".") ?? "";
@@ -2308,8 +2358,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
           },
-          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
-          testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
+          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
+          testsAdded: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: TestsAddedSchema },
         },
         required: ["note"],
         additionalProperties: false,
@@ -2408,9 +2458,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
               additionalProperties: false,
             },
           },
-          checked: { type: "array", maxItems: REVIEW_CHECK_IDS.length, items: { type: "object" } },
-          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
-          resolutions: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: { type: "object" } },
+          checked: {
+            type: "array",
+            maxItems: REVIEW_CHECK_IDS.length,
+            items: ReviewCheckSchema,
+          },
+          tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },
+          resolutions: {
+            type: "array",
+            maxItems: REVIEW_FINDINGS_MAX,
+            items: FindingResolutionSchema,
+          },
         },
         required: ["verdict", "summary", "findings"],
         additionalProperties: false,
