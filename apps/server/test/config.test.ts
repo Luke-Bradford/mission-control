@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   BUILTIN_ROLES,
   CREW_EFFORTS,
@@ -22,6 +22,7 @@ import {
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  applySeatAccount,
   type CcConfig,
   ConfigError,
   crewAllowed,
@@ -36,7 +37,7 @@ import {
   portFromEnv,
   seatUnavailable,
 } from "../src/config.ts";
-import { CodexModels, codexModels } from "../src/runtime/codex-models.ts";
+import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
 import { configView } from "../src/views.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
@@ -440,6 +441,20 @@ ${seats.join("\n")}
   }
   const load = (t: string) => parseConfig(t, "test", guard);
   const fails = (t: string) => errorOf(() => load(t));
+
+  it("applies an account's catalog binding with the account id", () => {
+    const config = load(crewText({}));
+    const seat = config.crew?.sessions[0]?.seats[0];
+    const account = config.accounts.find((a) => a.id === "codex-main");
+    if (!seat || !account) throw new Error("missing test seat or account");
+    account.cliProfile = "/profiles/codex-profile";
+    applySeatAccount(seat, account);
+    expect(seat).toMatchObject({
+      accountId: "codex-main",
+      modelVendor: "codex",
+      modelAccount: { vendor: "codex", cliProfile: "/profiles/codex-profile" },
+    });
+  });
 
   it("refuses a relative crew.worktrees", () => {
     const e = fails(crewText({ worktrees: "../mc-crew" }));
@@ -1042,6 +1057,65 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     expect(
       fails(crewText({ seats: [seat("retro-1", "RETRO", ", light_model: gpt-6-astra")] })).path,
     ).toBe("crew.sessions[0].seats[0].lightModel");
+  });
+
+  it("uses the configured Codex profile's model catalog", async () => {
+    const profileCatalog = fakeModels({
+      pages: [
+        {
+          data: [
+            {
+              model: "gpt-profile-only",
+              supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+            },
+          ],
+          nextCursor: null,
+        },
+      ],
+    });
+    const profile = dirname(profileCatalog.deps.authPath);
+    writeFileSync(profileCatalog.deps.authPath, '{"tokens":{"account_id":"profile-only"}}');
+    const machineProfile = join(homedir(), ".codex");
+    mkdirSync(machineProfile, { recursive: true });
+    writeFileSync(join(machineProfile, "auth.json"), '{"tokens":{"account_id":"machine"}}');
+    await codexModelsFor({ vendor: "codex", cliProfile: profile }).load(profileCatalog.deps);
+
+    const withProfile = (text: string) =>
+      text
+        .replace("    stop_at: 80\n", `    stop_at: 80\n    cli_profile: ${machineProfile}\n`)
+        .replace(
+          "\nrepos:",
+          `\n  - id: codex-profile\n    vendor: codex\n    alert_at: 70\n    stop_at: 80\n    cli_profile: ${profile}\n\nrepos:`,
+        );
+    const profileSeat = (model: string, extra = "") =>
+      withProfile(
+        crewText({
+          seats: [seat("guido-1", "GUIDO", extra, "codex-profile").replace("sonnet", model)],
+        }),
+      );
+
+    const configured = load(profileSeat("gpt-profile-only", ", effort: high")).crew?.sessions[0]
+      ?.seats[0];
+    if (!configured) throw new Error("missing profile seat");
+    expect(seatUnavailable(configured)).toBeNull();
+    expect(seatUnavailable({ ...configured, model: "gpt-6-astra" })).toContain(
+      'model "gpt-6-astra" is not listed',
+    );
+    expect(fails(profileSeat("gpt-6-astra")).path).toBe("crew.sessions[0].seats[0].model");
+    expect(fails(profileSeat("gpt-profile-only", ", effort: ultra")).path).toBe(
+      "crew.sessions[0].seats[0].effort",
+    );
+    expect(
+      fails(
+        withProfile(
+          crewText({
+            seats: [
+              seat("guido-1", "GUIDO", "", "codex-main").replace("sonnet", "gpt-profile-only"),
+            ],
+          }),
+        ),
+      ).path,
+    ).toBe("crew.sessions[0].seats[0].model");
   });
 
   it("refuses Codex seats when the catalog is unavailable, leaving Claude seats usable", () => {

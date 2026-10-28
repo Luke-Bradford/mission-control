@@ -50,13 +50,13 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { accountBindingProblem } from "./account-bindings.ts";
+import { accountBindingProblem, type CliBinding } from "./account-bindings.ts";
 import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { seatFocus } from "./focus.ts";
 import { areaGlob, protectedGlob } from "./globs.ts";
-import { type CodexModels, codexModels } from "./runtime/codex-models.ts";
+import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 
 export { areaGlob } from "./globs.ts";
@@ -91,6 +91,8 @@ export const displayCallSign = z
 export interface CrewSeatConfig {
   /** Resolved account vendor. Loaded configs always set it; hand-built fixtures may omit it. */
   modelVendor?: CrewVendor;
+  /** Resolved CLI binding for model discovery. Loaded configs always set it. */
+  modelAccount?: CliBinding;
   displayCallSign?: string;
   focus?: string | null;
   id: AgentId;
@@ -109,6 +111,19 @@ export interface CrewSeatConfig {
   area: string[];
   /** Set only by the crew reloader: removed from the file, kept until free. */
   retiring?: true;
+}
+
+/** Apply the account whose CLI catalog validates this seat's Codex model. */
+export function applySeatAccount(
+  seat: CrewSeatConfig,
+  account: CcConfig["accounts"][number],
+): void {
+  seat.accountId = account.id;
+  seat.modelVendor = account.vendor;
+  seat.modelAccount = {
+    vendor: account.vendor,
+    ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+  };
 }
 
 export interface CrewSessionConfig {
@@ -851,20 +866,25 @@ function isPromptFile(hubRoot: string, prompt: string, rolesDirReal: string): bo
 function seatModelProblem(
   seat: CrewSeatConfig,
   loading = false,
-  models: CodexModels = codexModels,
+  models?: CodexModels,
 ): { key: "model" | "lightModel" | "effort"; reason: string } | null {
+  const catalog =
+    models ??
+    (seat.modelVendor === "codex"
+      ? codexModelsFor(seat.modelAccount ?? { vendor: "codex" })
+      : codexModels);
   for (const key of ["model", "lightModel"] as const) {
     const model = seat[key];
     if (model === undefined) continue;
     if (
       seat.modelVendor !== "codex" &&
       !loading &&
-      (/^gpt-/.test(model) || models.efforts(model) !== undefined)
+      (/^gpt-/.test(model) || catalog.efforts(model) !== undefined)
     ) {
       return { key, reason: `model "${model}" is not a claude model` };
     }
-    if (seat.modelVendor === "codex" && !models.available) return { key, reason: models.reason };
-    const efforts = seat.modelVendor === "codex" ? models.efforts(model) : CREW_EFFORTS;
+    if (seat.modelVendor === "codex" && !catalog.available) return { key, reason: catalog.reason };
+    const efforts = seat.modelVendor === "codex" ? catalog.efforts(model) : CREW_EFFORTS;
     if (efforts === undefined)
       return { key, reason: `model "${model}" is not listed by Codex model/list` };
     if (seat.effort !== undefined && !efforts.includes(seat.effort)) {
@@ -893,8 +913,7 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
   const crew = cfg.crew;
   if (!crew) return;
   const repoIds = new Set(cfg.repos.map((r) => r.id));
-  const accountVendors = new Map(cfg.accounts.map((a) => [a.id, a.vendor]));
-  const accountIds = new Set(cfg.accounts.map((a) => a.id));
+  const accountsById = new Map(cfg.accounts.map((a) => [a.id, a]));
   if (hubRootPath === null) {
     throw new ConfigError("crew", "cannot locate the hub's own checkout");
   }
@@ -1038,7 +1057,8 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
         throw new ConfigError(`${sp}.displayCallSign`, "call signs must be unique");
       }
       callSigns.add(call);
-      if (!accountIds.has(seat.accountId)) {
+      const account = accountsById.get(seat.accountId);
+      if (account === undefined) {
         throw new ConfigError(`${sp}.accountId`, `unknown account "${seat.accountId}"`);
       }
       const role = roles[seat.role];
@@ -1060,8 +1080,8 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, deferModels: boole
       }
       seat.def = def;
       seat.model ||= role.model;
-      const vendor = accountVendors.get(seat.accountId);
-      seat.modelVendor = vendor;
+      const vendor = account.vendor;
+      applySeatAccount(seat, account);
       const problem = seatModelProblem(seat, deferModels);
       if (problem && !(deferModels && vendor === "codex")) {
         throw new ConfigError(`${sp}.${problem.key}`, problem.reason);

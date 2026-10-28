@@ -117,6 +117,7 @@ import type { CliHold } from "../cli-update.ts";
 import { probeClaudeVersion } from "../cli-version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
+  applySeatAccount,
   type CcConfig,
   type CrewSeatConfig,
   type CrewSessionConfig,
@@ -663,6 +664,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const crew = config.crew;
 
+  function seatForAccount(seat: CrewSeatConfig, accountId: string): CrewSeatConfig {
+    const account = config.accounts.find((a) => a.id === accountId);
+    const bound = { ...seat };
+    // Direct supervisor fixtures may omit the loader's resolved model metadata.
+    if (account === undefined || bound.modelVendor === undefined) bound.accountId = accountId;
+    else applySeatAccount(bound, account);
+    return bound;
+  }
+
   /** Read per call: the crew reloader changes the config's seats while the hub runs. */
   function findSeat(seatId: string): SeatInfo | undefined {
     for (const session of crew?.sessions ?? []) {
@@ -672,7 +682,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const runId = store.seatSession(seatId)?.runId;
       const binding =
         runId == null || store.run(runId)?.endedAt !== null ? null : transferState(runId);
-      const bound = binding === null ? seat : { ...seat, accountId: binding.target };
+      const bound = binding === null ? seat : seatForAccount(seat, binding.target);
       return repo === undefined ? undefined : { seat: bound, session, repo }; // the loader refuses a missing repo
     }
     return undefined;
@@ -1265,7 +1275,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info =
       binding === null
         ? configured
-        : { ...configured, seat: { ...configured.seat, accountId: binding.target } };
+        : { ...configured, seat: seatForAccount(configured.seat, binding.target) };
     if (runBindingProblem(run, info.seat.accountId))
       throw new SupervisorError(
         409,
@@ -2582,7 +2592,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     };
     let launched: Live | undefined;
     const attempt = async (accountId: string, resume: boolean): Promise<Live | null> => {
-      const bound = { ...info, seat: { ...info.seat, accountId } };
+      const bound = { ...info, seat: seatForAccount(info.seat, accountId) };
       try {
         mergeOutbox(!resume);
         launched = await checkedLaunch(
