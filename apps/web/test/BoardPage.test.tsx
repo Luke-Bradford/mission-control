@@ -317,6 +317,31 @@ describe("cards", () => {
     expect(await screen.findByText("Ticket 1")).toBeTruthy();
   });
 
+  it("waits for timezone configuration before mounting Done card content", async () => {
+    const normal = stub({
+      shopApp: [todo(1, { status: "Done", state: "done", updatedAt: NOW - 3 * DAY })],
+    });
+    let resolveConfig: ((response: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/config"
+          ? new Promise<Response>((resolve) => {
+              resolveConfig = resolve;
+            })
+          : normal(input, init),
+      ),
+    );
+
+    const { container } = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(resolveConfig).toBeTypeOf("function"));
+    expect(container.querySelector(".kcard")).toBeNull();
+
+    act(() => resolveConfig?.(Response.json(CONFIG)));
+    const card = (await screen.findByText("Ticket 1")).closest(".kcard") as HTMLElement;
+    expect(card.textContent).toContain("3d ago");
+  });
+
   it("shows #n in a repo lane and repo#n in All repos; null size shows nothing", async () => {
     stub({
       shopApp: [todo(1, { size: "M", milestone: "MVP — launch", labels: ["a", "b", "c", "d"] })],

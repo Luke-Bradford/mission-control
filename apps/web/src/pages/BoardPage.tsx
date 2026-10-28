@@ -86,7 +86,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const attention = attentionRes.data;
   // The GitHub login the hub acts as.`operator.id` is the hub's own
   // operator id, not a GitHub login, so All mine waits for this and is not offered until it is known.
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const config = configRes.data;
   const githubLogin = config?.githubLogin ?? null;
   const tz = useTz();
   const now = useNow();
@@ -203,6 +204,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     prRes.every((res) => Boolean(res.data || res.error)) &&
     Boolean(crewRes.data || crewRes.error) &&
     Boolean(attentionRes.data || attentionRes.error) &&
+    Boolean(configRes.data || configRes.error) &&
     loopRes.every((res) => Boolean(res.data || res.error));
   const loading = !boardDataReady;
   const detailItem =
