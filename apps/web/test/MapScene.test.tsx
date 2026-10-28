@@ -110,6 +110,21 @@ it("provides a searchable-file fallback when WebGL is unavailable", () => {
   expect(screen.getByRole("status").textContent).toContain("Use file search");
 });
 
+it("uses compact GPU points at distance and shows a file label only when selected", () => {
+  const { rerender } = render(<MapScene {...props} selected="src/main.ts" />);
+  act(() => vi.advanceTimersByTime(100));
+  expect(screen.getByText("src/main.ts")).toBeTruthy();
+  const camera = renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
+  camera.position.set(10_000, 10_000, 10_000);
+  rerender(<MapScene {...props} selected="src/main.ts" home={1} />);
+  act(() => vi.advanceTimersByTime(100));
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  expect(scene.children.some((child) => child instanceof THREE.Points && child.visible)).toBe(true);
+  expect(
+    scene.children.some((child) => child instanceof THREE.InstancedMesh && !child.visible),
+  ).toBe(true);
+});
+
 it("animates fixture deltas at at most 30 fps, opens the arc pair, and stops after settling", () => {
   const onArc = vi.fn();
   const { rerender, unmount } = render(<MapScene {...props} onArc={onArc} />);

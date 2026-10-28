@@ -136,6 +136,20 @@ function mountStage(
       new THREE.MeshBasicMaterial(),
       spheres.length,
     );
+    // At overview distance files become GPU points; zooming restores their individual spheres.
+    const pointGeometry = new THREE.BufferGeometry();
+    pointGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        spheres.flatMap((node) => node.position),
+        3,
+      ),
+    );
+    pointGeometry.setAttribute("color", new THREE.Float32BufferAttribute(spheres.length * 3, 3));
+    const points = new THREE.Points(
+      pointGeometry,
+      new THREE.PointsMaterial({ size: 2.5, sizeAttenuation: false, vertexColors: true }),
+    );
     const positions = new Map(nodes.map((n) => [n.path, new THREE.Vector3(...n.position)]));
     const linked = nodes.filter((n) => n.parent !== null);
     const edges = linked.flatMap((n) => [
@@ -171,7 +185,7 @@ function mountStage(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: SIGNAL, transparent: true, opacity: 0.9 }),
     );
-    scene.add(mesh, branches, imports, highlighted);
+    scene.add(mesh, points, branches, imports, highlighted);
     // each main area's name at the middle of its files, in its colour
     const areaCentres = areas.flatMap((name) => {
       const files = nodes.filter((n) => n.count > 0 && n.area === name);
@@ -195,6 +209,7 @@ function mountStage(
       nodes,
       spheres,
       mesh,
+      points,
       branches,
       imports,
       highlighted,
@@ -207,10 +222,12 @@ function mountStage(
       activity: activityLayer(scene, activityLabels, nodes, motion, css),
       importsFor: null as MapSnapshot["imports"] | null,
       dispose: () => {
-        scene.remove(mesh, branches, imports, highlighted);
+        scene.remove(mesh, points, branches, imports, highlighted);
         mesh.dispose();
         mesh.geometry.dispose();
         mesh.material.dispose();
+        points.geometry.dispose();
+        (points.material as THREE.Material).dispose();
         for (const line of [branches, imports, highlighted]) {
           line.geometry.dispose();
           line.material.dispose();
@@ -344,9 +361,13 @@ function mountStage(
   const draw = () => {
     frame = undefined;
     if (document.hidden || !g) return;
-    const { activity, mesh } = g;
+    const { activity, mesh, points } = g;
     lastDraw = performance.now();
     if (current?.rotate && !reduced.matches) controls.update();
+    const distant =
+      camera.position.distanceTo(controls.target) > Math.max(90, g.extent.length() * 0.9);
+    mesh.visible = !distant;
+    points.visible = distant;
     const now = Date.now();
     const moving = activity.draw(
       now,
@@ -438,7 +459,7 @@ function mountStage(
   const update = (next: Props) => {
     current = next;
     if (!g) return;
-    const { activity, mesh, spheres, positions, filePositions, areas } = g;
+    const { activity, mesh, points, spheres, positions, filePositions, areas } = g;
     tokens.clear();
     activity.update(next, reduced.matches);
     controls.autoRotate = next.rotate && !reduced.matches;
@@ -564,10 +585,18 @@ function mountStage(
       if (agentFiles && !node.files.some((f) => agentFiles.has(f))) color.multiplyScalar(0.25);
       if (node.path === next.selected) color.lerp(signal, 0.65);
       mesh.setColorAt(i, color);
+      (points.geometry.getAttribute("color") as THREE.BufferAttribute).setXYZ(
+        i,
+        color.r,
+        color.g,
+        color.b,
+      );
       const p = new THREE.Vector3(...node.position);
       visuals.push({ color, size, path: node.path, position: p, glow: 0, burst: 0 });
       if (node.path === next.selected)
         addLabel("○", p, "map-ring map-picked", undefined, "selected");
+      if (node.path === next.selected)
+        addLabel(node.path, p.clone().add(new THREE.Vector3(0, size + 2, 0)), "map-orb-label");
       if (s.accessing || s.recent)
         addLabel(
           "○",
@@ -638,6 +667,7 @@ function mountStage(
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    (points.geometry.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
     const lineOf = (pairs: MapSnapshot["imports"]) =>
       pairs.flatMap((link) => {
         const a = filePositions.get(link.from),

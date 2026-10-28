@@ -193,7 +193,11 @@ export function forceLayout(
   const cell = (v: number) => Math.floor(v / REACH);
   // cells within ±512 of the root, packed into one number (the layout spans a few dozen cells)
   const key = (x: number, y: number, z: number) => (x + 512) * 1048576 + (y + 512) * 1024 + z + 512;
-  for (let step = 0; moving && step < steps; step++) {
+  // Large trees retain every file, but deterministic initial placement is already well-spread.
+  // Relaxing tens of thousands of nearby points is quadratic in the densest cells, so reserve it
+  // for trees small enough to benefit. This function normally runs in layout.worker.ts.
+  const relaxationSteps = n > 2500 ? 0 : steps;
+  for (let step = 0; moving && step < relaxationSteps; step++) {
     force.fill(0);
     const grid = new Map<number, number[]>();
     for (let i = 0; i < n; i++) {

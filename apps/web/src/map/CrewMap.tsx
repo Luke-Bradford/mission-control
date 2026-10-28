@@ -7,7 +7,8 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { AgentCards } from "./AgentCards.tsx";
 import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
 import { type BadgeKind, isWorking, uncheckedNotes } from "./cards.ts";
-import { areaColor, mainAreas, repoLayout } from "./layout.ts";
+import { areaColor, mainAreas } from "./layout.ts";
+import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pinToken } from "./model.ts";
 import type { MessageArc, MotionEvent } from "./motion.ts";
@@ -92,9 +93,6 @@ function errorText(error: Error): string {
   return /reconnect|retry/i.test(sentence) ? `${sentence}…` : `${sentence}. Retrying every 5 s.`;
 }
 
-const collapsed = (tree: MapSnapshot["tree"]) =>
-  tree.length > 2000 ? layoutTree(tree, [], true) : null;
-
 export function CrewMapView({
   snapshot,
   indices = {},
@@ -116,6 +114,10 @@ export function CrewMapView({
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
   const [overview, setOverview] = useState(0);
+  const [nodes, setNodes] = useState<ReturnType<typeof layoutTree>>([]);
+  const previousLayout = useRef<{ repo: string; nodes: ReturnType<typeof layoutTree> } | null>(
+    null,
+  );
   const now = useNow();
   // the stage draws working agents only; the rest are a folded line in the rail
   // (keyed on who is working, so the clock's tick doesn't redraw the scene)
@@ -152,12 +154,20 @@ export function CrewMapView({
   useEffect(() => {
     if (badge && !badgeSeat && !badge.conversation) closeBadge();
   }, [badge, badgeSeat, closeBadge]);
-  // the layout is cached per repo and set of paths (layout.ts), so the same array comes back for
-  // a refetch that changed no path, and the scene keeps its geometry
-  const nodes = useMemo(
-    () => repoLayout(snapshot.repoId, snapshot.tree, snapshot.imports, collapsed),
-    [snapshot.repoId, snapshot.tree, snapshot.imports],
-  );
+  // Layout stays out of React's render path, so a large tree cannot block orbiting or the live feed.
+  useEffect(() => {
+    let current = true;
+    const previous =
+      previousLayout.current?.repo === snapshot.repoId ? previousLayout.current.nodes : undefined;
+    void mapLayoutWorker.layout(snapshot.tree, snapshot.imports, previous).then((next) => {
+      if (!current) return;
+      previousLayout.current = { repo: snapshot.repoId, nodes: next };
+      setNodes(next);
+    });
+    return () => {
+      current = false;
+    };
+  }, [snapshot.repoId, snapshot.tree, snapshot.imports]);
   const areas = useMemo(() => mainAreas(snapshot.tree), [snapshot.tree]);
   const treePaths = useMemo(() => new Set(snapshot.tree.map((f) => f.path)), [snapshot.tree]);
   // files a seat touched that origin/HEAD doesn't have yet (new on a branch)
@@ -176,10 +186,10 @@ export function CrewMapView({
         ? layoutTree(
             extras.map((path) => ({ path, lines: 0 })),
             nodes,
-            treePaths.size > 2000,
+            false,
           )
         : nodes,
-    [extras, nodes, treePaths],
+    [extras, nodes],
   );
   const searchable = useMemo(
     () => [...new Set([...displayNodes.map((n) => n.path), ...treePaths, ...extras])],
@@ -486,7 +496,8 @@ function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"]
           <p>
             Crew seats only, one repo at a time; history stays in each agent's own view.{" "}
             {tree.length.toLocaleString()} files at origin/HEAD.
-            {tree.length > 2000 && " Files are collapsed into folders (more than 2,000 files)."}{" "}
+            {tree.length > 2000 &&
+              " Every file remains an individual point; distant files use compact detail."}{" "}
             Findings are the current review's; the hub keeps no fixed state for one. No recorded
             playback: the hub keeps each seat's last 15 minutes of calls in memory only.
           </p>

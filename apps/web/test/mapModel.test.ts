@@ -24,7 +24,7 @@ describe("map rules", () => {
     expect([0, 10, 11, 50, 51, 200, 201, 500, 501].map(level)).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4]);
     expect([0, 99, 100, 999, 1000, 3999, 4000].map(tokenBand)).toEqual([0, 0, 1, 1, 2, 2, 3]);
   });
-  it("keeps existing positions when branch files are added and bounds large trees", () => {
+  it("keeps existing positions when branch files are added and keeps large trees as individual files", () => {
     const tree = [
       { path: "src/a.ts", lines: 5 },
       { path: "src/b.ts", lines: 500000 },
@@ -41,8 +41,9 @@ describe("map rules", () => {
     const large = layoutTree(
       Array.from({ length: 2001 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 })),
     );
-    expect(large.filter((n) => n.count > 0)).toHaveLength(1);
-    expect(large.find((n) => n.path === "src")?.count).toBe(2001);
+    const files = large.filter((n) => n.count > 0);
+    expect(files).toHaveLength(2001);
+    expect(files.every((node) => node.files[0] === node.path && node.count === 1)).toBe(true);
   });
   it("lays out every file as its own node, apart from its neighbours, each area its own way", () => {
     const tree = [
