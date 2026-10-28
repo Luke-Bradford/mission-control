@@ -11,6 +11,8 @@ export interface LabelBox {
 }
 
 export interface LabelPlacement {
+  /** Slid sideways, for a label that may move, so it stays wholly on the stage. */
+  x: number;
   y: number;
   hidden: boolean;
   /** How far the label moved up from its anchor, for the leader line. */
@@ -22,13 +24,15 @@ const KINDS: [className: string, rank: number, nudge: boolean][] = [
   ["map-orb-label", 0, true],
   ["map-marker", 1, false],
   ["map-arc", 1, false],
-  // area names hold their place; pins and change labels lift around them
+  // area names hold their place; a selected file's change label lifts around them
   ["map-area", 2, false],
-  ["map-pin", 3, true],
   ["map-change", 4, true],
 ];
 
-/** null: a mark drawn on its node (rings), never moved or hidden for a label. */
+/**
+ * null: a mark drawn on its node (rings, and the ▲/◆ finding and conflict marks), never moved or
+ * hidden for a label.
+ */
 export function labelKind(className: string): { rank: number; nudge: boolean } | null {
   const classes = className.split(/\s+/);
   const kind = KINDS.find(([name]) => classes.includes(name));
@@ -54,9 +58,17 @@ export function declutter(
     return p.rank - q.rank || p.y - q.y || p.x - q.x;
   });
   const placed: { l: number; t: number; r: number; b: number }[] = [];
-  const out: LabelPlacement[] = boxes.map((b) => ({ y: b.y, hidden: true, lift: 0 }));
+  const out: LabelPlacement[] = boxes.map((b) => ({ x: b.x, y: b.y, hidden: true, lift: 0 }));
   for (const i of order) {
-    const box = boxes[i] as LabelBox;
+    const anchored = boxes[i] as LabelBox;
+    // a label that may move slides in from the stage's edge rather than being cut off by it
+    const box =
+      anchored.nudge && anchored.w + 8 < width
+        ? {
+            ...anchored,
+            x: Math.min(Math.max(anchored.x, anchored.w / 2 + 4), width - anchored.w / 2 - 4),
+          }
+        : anchored;
     for (let k = 0; k <= (box.nudge ? rows : 0); k++) {
       const lift = k * (box.h + gap);
       const y = box.y - lift;
@@ -75,7 +87,7 @@ export function declutter(
       )
         continue;
       placed.push(rect);
-      out[i] = { y, hidden: false, lift };
+      out[i] = { x: box.x, y, hidden: false, lift };
       break;
     }
   }

@@ -11,6 +11,9 @@
   --void-muted: #8391ad;
   --void-faint: #4a5675;
   --void-scrim: rgba(4, 6, 12, 0.84);
+  --void-panel: rgba(10, 15, 29, 0.96);
+  /* the dark theme's amber, so a mark on the void reads the same in both themes */
+  --void-warn: #f2b53a;
   --signal: #9fe8ff;
   --add: #4fdc8a;
   --rem: #ff6b6b;
@@ -63,12 +66,6 @@
   text-transform: none;
   min-width: 260px;
   background: var(--surface-2);
-}
-.map-scope {
-  margin-left: auto;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
 }
 .map-wait {
   flex: 1;
@@ -142,45 +139,54 @@
   place-items: center;
   color: var(--void-muted);
 }
-.map-hint {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--void-faint);
-  pointer-events: none;
-  z-index: 1;
-}
-.map-quiet {
-  position: absolute;
-  top: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, calc(100% - 24px));
-  padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--void-ink);
-  background: var(--void-scrim);
-  border: 1px solid var(--void-line);
-  border-radius: var(--r-s);
-  z-index: 1;
-}
 .map-legend {
   position: absolute;
   left: 12px;
-  right: 12px;
   bottom: 10px;
+  max-width: calc(100% - 24px);
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 14px;
   font-size: 11px;
   line-height: 1.5;
   color: var(--void-muted);
   text-shadow: 0 0 6px var(--void);
-  pointer-events: none;
   z-index: 1;
+}
+.map-key-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--void-muted);
+  background: var(--void-scrim);
+  border: 1px solid var(--void-line);
+}
+.map-key-toggle[aria-expanded="true"],
+.map-key-toggle:hover {
+  color: var(--void-ink);
+  border-color: var(--void-muted);
+}
+/* the full key: opened on demand, above the legend line */
+.map-key {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(560px, calc(100vw - 80px));
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--void-ink);
+  text-shadow: none;
+  background: var(--void-panel);
+  border: 1px solid var(--void-line);
+  border-radius: var(--r);
 }
 .map-legend i {
   display: inline-block;
@@ -188,13 +194,6 @@
   height: 8px;
   border-radius: 50%;
   margin-right: 6px;
-}
-.map-legend i.ring {
-  box-sizing: border-box;
-  border: 2px solid #fff;
-}
-.map-legend .wide {
-  flex-basis: 100%;
 }
 .map-page .add {
   color: var(--add);
@@ -249,13 +248,37 @@
 .map-change b {
   font-weight: 500;
 }
-.map-pin {
+/* a finding or conflict: a small glyph on its file, its words in the tooltip */
+.map-mark {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  text-shadow:
+    0 0 4px var(--void),
+    0 0 2px var(--void);
+}
+.map-mark:hover {
+  transform: translate(-50%, -50%) scale(1.4);
+}
+.map-tip {
+  position: absolute;
+  z-index: 2;
+  max-width: 340px;
+  padding: 6px 9px;
+  pointer-events: none;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
   font-family: var(--mono);
-  font-size: 10px;
-  padding: 1px 4px;
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  background: var(--void-scrim);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--void-ink);
+  background: var(--void-panel);
+  border: 1px solid var(--void-line);
+  border-radius: var(--r-s);
 }
 .map-ring {
   font-size: 26px;
@@ -292,7 +315,7 @@
 .map-orb-label,
 .map-arc {
   pointer-events: auto;
-  max-width: 300px;
+  max-width: 640px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -524,15 +547,116 @@
 }
 .map-agent-state {
   flex-basis: 100%;
-  color: var(--fg-2);
+  color: var(--muted);
 }
 .map-agent-state.stuck {
   color: var(--warn);
 }
+.map-agent-ticket {
+  color: var(--fg-2);
+}
+.map-agent-changes {
+  color: var(--fg-2);
+  margin-left: auto;
+}
+.map-agent-changes b {
+  font-weight: 500;
+}
+/* acting now: a call in flight or a running turn */
+.map-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--agent);
+  box-shadow: 0 0 6px var(--agent);
+}
+/* waits on the operator: a small amber dot before an agent's name on the stage */
+.map-waits-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--void-warn);
+}
+/* waits on the operator: the one amber on a row */
+.map-waits {
+  color: var(--warn);
+  font-weight: 500;
+}
+.map-conflicts {
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.map-conflicts > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.map-conflicts > summary:hover {
+  color: var(--fg-2);
+}
+.map-conflict-glyph {
+  color: var(--crit);
+  font-weight: 400;
+}
+.map-conflicts ul {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.map-conflicts li {
+  display: grid;
+  gap: 2px;
+}
+.map-conflicts li button {
+  justify-self: start;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.map-empty {
+  color: var(--fg-2);
+  font-size: 12px;
+  margin-block: 4px 8px;
+}
+/* idle and stopped seats: one muted line, opened on demand */
+.map-resting {
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.map-resting > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-resting > summary:hover {
+  color: var(--fg-2);
+}
+.map-agent-more {
+  margin-top: 4px;
+}
 .map-agent-title {
   font-size: 12px;
-  margin-block: 4px 6px;
+  margin-block: 2px 4px;
   color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .map-badges {
   display: flex;
@@ -655,12 +779,6 @@
   align-items: center;
   gap: 6px;
 }
-.map-foot {
-  flex-basis: 100%;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--muted);
-}
 
 @media (prefers-reduced-motion: reduce) {
   .map-edited,
@@ -682,9 +800,6 @@
   }
   .map-card-agents {
     max-height: none;
-  }
-  .map-scope {
-    margin-left: 0;
   }
   .map-field {
     flex: 1 1 auto;

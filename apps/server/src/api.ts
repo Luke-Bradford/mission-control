@@ -17,6 +17,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_LABELS,
+  COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
@@ -1265,10 +1266,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       // Reader: apps/web/src/App.tsx#App (pinned Comms)
       api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
-      // Reader: apps/web/src/App.tsx#App (Comms link activity)
-      api.get("/comms/links", () => ({
-        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
-      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (Comms link activity and newest-message preview)
+      api.get("/comms/links", () => {
+        // The preview only where both ends are ones the Comms routes already serve; a removed
+        // seat's link keeps its count but not its words.
+        const served = (id: string) => knownCommsAgent(id) || id === COMMS_CREW || id === COMMS_MC;
+        return {
+          links: store
+            .commsLinkCounts(now() - 24 * 60 * 60 * 1000)
+            .map((link) =>
+              served(link.from) && served(link.to)
+                ? link
+                : { from: link.from, to: link.to, count: link.count },
+            ),
+        };
+      });
       // Reader: apps/web/src/comms/CommsGraph.tsx (24 hour Comms Traffic bars)
       api.get("/comms/traffic", () => ({
         hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),

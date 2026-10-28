@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { orbPlacement } from "../src/map/agents.ts";
 import { renderer } from "./mapRendererMock.ts";
 
-const { MapScene } = await import("../src/map/MapScene.tsx");
+const { MapScene, fileTip } = await import("../src/map/MapScene.tsx");
 
 import { applyDelta, layoutTree } from "../src/map/model.ts";
 import type { MotionEvent } from "../src/map/motion.ts";
@@ -84,8 +84,23 @@ it("keeps rotation static for reduced motion and renders named severity pins", (
   const { unmount } = render(<MapScene {...props} snapshot={snapshot} rotate />);
   act(() => vi.advanceTimersByTime(1000));
   expect(renderer.render).toHaveBeenCalledOnce();
+  // one small mark per file, its words in the tooltip; a click opens the file
+  const mark = screen.getByRole("button", { name: /^3 review findings on src\/main\.ts/ });
+  expect(mark.textContent).toBe("▲");
   for (const severity of ["Critical", "Important", "Minor"])
-    expect(screen.getByText(`▲ ${severity}`)).toBeTruthy();
+    expect(mark.getAttribute("title")).toContain(`${severity} · line 12 · Empty input throws`);
+  fireEvent.click(mark);
+  expect(props.onSelect).toHaveBeenCalledWith("src/main.ts");
+  // the agent's one fact line; its live state is the tooltip
+  const label = screen.getByRole("button", {
+    name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
+  });
+  // on the stage: facts only, churn as "~", waiting on you as an amber dot; the words are its
+  // accessible name and tooltip
+  expect(label.textContent).toBe("GUIDO-1 · #7 · 1 file · ~+12 −3");
+  expect(label.querySelector(".map-waits-dot")).not.toBeNull();
+  expect(label.getAttribute("title")).toContain("reading src/util.ts");
+  expect(label.getAttribute("title")).toContain("~ edit churn");
   unmount();
 });
 
@@ -136,7 +151,11 @@ it("selects an orb without moving the camera, zooms explicitly, and resets Home"
   act(() => vi.advanceTimersByTime(100));
   const camera = renderer.render.mock.lastCall?.[1] as import("three").Camera;
   const home = camera.position.clone();
-  fireEvent.click(screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
+    }),
+  );
   expect(onAgentSelect).toHaveBeenCalledWith("GUIDO-1");
   rerender(<MapScene {...props} agent="GUIDO-1" />);
   act(() => vi.advanceTimersByTime(100));
@@ -276,7 +295,9 @@ it("releases labels, instance resources and geometries on seat removal and unmou
     });
     return disposed;
   };
-  const oldLabel = screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  const oldLabel = screen.getByRole("button", {
+    name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
+  });
   const oldResources = watch();
   rerender(
     <MapScene {...props} snapshot={{ ...props.snapshot, seats: props.snapshot.seats.slice(1) }} />,
@@ -350,7 +371,10 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   act(() => vi.advanceTimersByTime(40));
   const canvas = document.querySelector("canvas") as HTMLCanvasElement;
   const without = { ...props.snapshot, seats: props.snapshot.seats.slice(1) };
-  const label = () => screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  const label = () =>
+    screen.getByRole("button", {
+      name: /^GUIDO-1 · #7 · 1 file · \+12 −3 \(churn\) · waiting on you$/,
+    });
   act(() => label().focus());
   rerender(<MapScene {...props} snapshot={without} />);
   await act(async () => {
@@ -372,5 +396,85 @@ it("hands focus to the stage when a focused overlay label leaves, never when foc
   });
   expect(document.activeElement).toBe(outside);
   outside.remove();
+  unmount();
+});
+
+it("says in a file's tooltip what it is, who changed or read it, and its findings and conflicts", () => {
+  const node = nodes.find((n) => n.path === "src/main.ts");
+  if (!node) throw new Error("fixture node missing");
+  const snapshot: MapSnapshot = {
+    ...structuredClone(mapSnapshotFixture),
+    conflicts: [
+      { file: "src/main.ts", branches: ["a", "b"], shas: ["1".repeat(40), "2".repeat(40)] },
+    ],
+  };
+  expect(fileTip(node, { snapshot, names: { "GUIDO-1": "GUIDO-1" } }).split("\n")).toEqual([
+    "src/main.ts",
+    "GUIDO-1 +12 −3 (edit churn)",
+    "▲ 1 review finding",
+    "◆ conflict: a / b",
+  ]);
+  const util = nodes.find((n) => n.path === "src/util.ts");
+  if (!util) throw new Error("fixture node missing");
+  expect(fileTip(util, { snapshot }).split("\n")).toEqual([
+    "src/util.ts",
+    "GUIDO-1 read it",
+    "GUIDO-1 is on it now",
+  ]);
+});
+
+it("opens on the changed files, follows them until an arrow key moves it, and frames the whole repo", () => {
+  const tree = [
+    ...mapSnapshotFixture.tree,
+    ...Array.from({ length: 30 }, (_, i) => ({ path: `apps/web/src/w${i}.tsx`, lines: 40 })),
+    ...Array.from({ length: 30 }, (_, i) => ({ path: `apps/server/src/s${i}.ts`, lines: 40 })),
+  ];
+  const big = layoutTree(tree);
+  const at = (path: string) =>
+    new THREE.Vector3(...(big.find((n) => n.path === path)?.position ?? [0, 0, 0]));
+  const camera = () => renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
+  const snapshot = (file: string): MapSnapshot => {
+    const s: MapSnapshot = structuredClone(mapSnapshotFixture);
+    // idle with an unmerged change: its orb sits over that change
+    Object.assign(s.seats[0], { calls: [], recent: [], state: "idle", since: 0 });
+    s.seats[0].scope.modified = [{ file, add: 5, rem: 1, source: "diff" }];
+    return s;
+  };
+  const base = { ...props, nodes: big, dockSeats: 1 };
+  // a stage with a size, so the camera has an aspect to frame with
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+  // how far from the middle of the view a file is (0 is dead centre)
+  const offCentre = (path: string) => {
+    camera().updateMatrixWorld();
+    const p = at(path).project(camera());
+    return Math.hypot(p.x, p.y);
+  };
+  const far = "apps/web/src/w29.tsx";
+  const { rerender, unmount } = render(<MapScene {...base} snapshot={snapshot("src/main.ts")} />);
+  act(() => vi.advanceTimersByTime(40));
+  const work = camera().position.distanceTo(at("src/main.ts"));
+  // the work (the file and its orb just above it) fills the view
+  expect(offCentre("src/main.ts")).toBeLessThan(0.3);
+  rerender(<MapScene {...base} snapshot={snapshot("src/main.ts")} overview={1} />);
+  act(() => vi.advanceTimersByTime(40));
+  expect(camera().position.distanceTo(at("src/main.ts"))).toBeGreaterThan(work);
+  // Home view: back to the work, which then follows the changed files
+  rerender(<MapScene {...base} snapshot={snapshot("src/main.ts")} overview={1} home={1} />);
+  act(() => vi.advanceTimersByTime(40));
+  const away = offCentre(far);
+  rerender(<MapScene {...base} snapshot={snapshot(far)} overview={1} home={1} />);
+  act(() => vi.advanceTimersByTime(40));
+  expect(offCentre(far)).toBeLessThan(0.3);
+  expect(offCentre(far)).toBeLessThan(away);
+  // an arrow key is the operator moving the camera: the work no longer drags it back
+  fireEvent.keyDown(document.querySelector("canvas") as HTMLCanvasElement, { key: "ArrowLeft" });
+  act(() => vi.advanceTimersByTime(40));
+  const moved = camera().position.clone();
+  rerender(
+    <MapScene {...base} snapshot={snapshot("apps/server/src/s3.ts")} overview={1} home={1} />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  expect(camera().position.toArray()).toEqual(moved.toArray());
   unmount();
 });
