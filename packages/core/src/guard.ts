@@ -649,6 +649,45 @@ const PACKAGE_VALUED_OPTIONS = new Set([
   "--cwd",
 ]);
 
+/** pnpm and yarn options known to take no value: skipping them can't swallow a command word. */
+const PACKAGE_BOOLEAN_OPTIONS = new Set([
+  "-s",
+  "--silent",
+  "-w",
+  "--workspace-root",
+  "-r",
+  "--recursive",
+  "-g",
+  "--global",
+  "-D",
+  "--save-dev",
+  "-P",
+  "--save-prod",
+  "-O",
+  "--save-optional",
+  "-E",
+  "--save-exact",
+  "--frozen-lockfile",
+  "--no-frozen-lockfile",
+  "--prefer-offline",
+  "--offline",
+  "--ignore-scripts",
+  "--stream",
+  "--parallel",
+  "--if-present",
+  "--no-bail",
+  "--aggregate-output",
+  "--color",
+  "--no-color",
+  "--reverse",
+  "--json",
+  "--dev",
+  "--prod",
+  "--production",
+  "-y",
+  "--yes",
+]);
+
 /**
  * Where `pnpm <word>` / `yarn <word>` may run a binary (pnpm 11 ran `/usr/bin/open` for
  * `pnpm open .`), or -1. Every word from there is judged as a command. Yarn's behaviour is not
@@ -657,13 +696,19 @@ const PACKAGE_VALUED_OPTIONS = new Set([
  */
 function packageBinStart(name: string, rest: readonly string[]): number {
   if (name !== "pnpm" && name !== "yarn") return -1;
-  // leading options, and the value of one known to take a value (`--filter @mc/web add open`)
+  // Leading options, and the value of one known to take a value (`--filter @mc/web add open`). An
+  // option known to neither set may have taken the next word as its value (`--store-dir add open .`
+  // runs `open`), so then every word from the first plain one is judged (fail closed).
   let first = 0;
+  let unknown = false;
   while (first < rest.length && (rest[first] ?? "").startsWith("-")) {
-    if (PACKAGE_VALUED_OPTIONS.has(rest[first] ?? "")) first++;
+    const option = rest[first] ?? "";
+    if (PACKAGE_VALUED_OPTIONS.has(option)) first++;
+    else if (!option.includes("=") && !PACKAGE_BOOLEAN_OPTIONS.has(option)) unknown = true;
     first++;
   }
   if (first >= rest.length) return -1;
+  if (unknown) return first;
   const word = rest[first] ?? "";
   if (name === "yarn") {
     if (word === "run") return first + 1;

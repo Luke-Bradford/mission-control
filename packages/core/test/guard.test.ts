@@ -2455,6 +2455,28 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
       expect(ruleOf(bash(c)), c).toBe("allow");
   });
 
+  // An option known neither to take a value nor to take none may have swallowed the next word
+  // (`--store-dir add` leaves `open .` as the command pnpm runs), so the words after it are judged.
+  it.each([
+    "pnpm --store-dir add open .",
+    "pnpm --lockfile-dir add open .",
+    "pnpm --config.foo add open .",
+    "pnpm --virtual-store-dir install open .",
+  ])("refuses a launcher behind an option whose value is unknown: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("background");
+  });
+  it("still allows known options before a package command", () => {
+    for (const c of [
+      "pnpm -s add open",
+      "pnpm --frozen-lockfile install",
+      "pnpm install --frozen-lockfile",
+      "pnpm -r build",
+      "pnpm --filter=@mc/server test",
+      "yarn --frozen-lockfile install",
+    ])
+      expect(ruleOf(bash(c)), c).toBe("allow");
+  });
+
   it("allows a launcher word a multiplexer only types into a session", () => {
     expect(ruleOf(bash("tmux send-keys -t x open Enter"))).toBe("allow");
   });
