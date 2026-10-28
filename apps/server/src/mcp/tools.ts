@@ -1143,7 +1143,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (liveRun(ctx) === null) return ENDED;
     const pinned = new Set(store.commsPins().map((row) => row.id));
     const rows = new Map(
-      [...store.commsForCrew(), ...store.commsForAgent(ctx.seatId), ...store.commsInbox(ctx.seatId)]
+      [
+        ...store.commsForCrewRun(ctx.runId),
+        ...store.commsForAgentRun(ctx.seatId, ctx.runId),
+        ...store.commsInboxRun(ctx.seatId, ctx.runId),
+      ]
         .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
         .map((row) => [row.id, row] as const),
     );

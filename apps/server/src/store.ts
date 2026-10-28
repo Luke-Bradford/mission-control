@@ -3277,13 +3277,37 @@ export class Store {
   commsForCrew(): CommsRow[] {
     return this.commsForWhere("to_id = 'crew'");
   }
+  /** Seat-side reads include only general Comms and rows targeted at its live run. */
+  commsForCrewRun(runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "to_id = 'crew'");
+  }
   commsForAgent(id: string, contact?: string): CommsRow[] {
     return contact === undefined
       ? this.commsForWhere("from_id=? OR to_id=?", id, id)
       : this.commsForPair(id, contact);
   }
+  commsForAgentRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "from_id=? OR to_id=?", id, id);
+  }
   commsInbox(id: string): CommsRow[] {
     return this.commsForWhere(
+      `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      id,
+      id,
+      id,
+    );
+  }
+  commsInboxRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(
+      runId,
       `id IN (
         SELECT id FROM comms WHERE to_id=?
         UNION
@@ -3428,6 +3452,13 @@ export class Store {
     return (
       this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
     ).map((r) => this.commsRow(r));
+  }
+  private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
+    return this.commsForWhere(
+      `(${where}) AND (target_run_id IS NULL OR target_run_id = ?)`,
+      ...args,
+      runId,
+    );
   }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
