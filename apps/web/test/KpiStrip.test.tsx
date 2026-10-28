@@ -3,9 +3,9 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
-import { setSession } from "../src/shell/session.ts";
+import { SESSION_ALL, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { METRICS_VIEW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
+import { HOUR, item, METRICS_VIEW, NOW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
 
 const kpis = OVERVIEW.kpis;
 
@@ -68,6 +68,13 @@ describe("KpiStrip", () => {
         at: OVERVIEW.at,
         kpis: { ...kpis, inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 } },
       },
+      // the tile counts the header's Needs-you set: one per key, the operator's, never by session
+      "/api/attention": [
+        item({ key: "a", at: NOW - 2 * HOUR }),
+        item({ key: "a", at: NOW - 2 * HOUR }),
+        item({ key: "b", at: NOW - 60_000 }),
+        item({ key: "c", owner: "flight" }),
+      ],
     });
     render(<KpiStrip />);
     await screen.findByText("41.2k");
@@ -90,8 +97,14 @@ describe("KpiStrip", () => {
       "/board",
       "/board",
       "/telemetry",
-      "/comms",
+      // Needs you's home (FLIGHT › Plan › Operator actions until #766)
+      "/flight#askP",
     ];
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Needs you/ }).querySelector(".v")?.textContent).toBe(
+        "2",
+      ),
+    );
     labels.forEach((label, i) => {
       const tile = screen.getByRole("link", { name: new RegExp(label) });
       expect(tile.getAttribute("href")).toBe(paths[i]);
@@ -216,5 +229,26 @@ describe("KpiStrip", () => {
     act(() => hub.refetchTopic("agents"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByText("41.2k")).toBeTruthy();
+  });
+
+  it("under a session, Needs you stays the whole inbox and keeps its history", async () => {
+    // The server's Needs-you history is the whole inbox in every scope (#762), so it agrees with
+    // the count under a session and the trace stays.
+    const withHistory = {
+      ...OVERVIEW,
+      kpis: { ...kpis, needsYou: { count: 0, overHour: 0, series: [4, 0, 2] } },
+    };
+    stubFetch({
+      "/api/overview": withHistory,
+      "/api/overview?session=s1": withHistory,
+      "/api/attention": [item({ key: "a", at: NOW - 2 * HOUR }), item({ key: "b", at: NOW })],
+    });
+    render(<KpiStrip />);
+    const tile = () => screen.getByRole("link", { name: /Needs you/ });
+    await waitFor(() => expect(within(tile()).queryByRole("img")).not.toBeNull());
+    act(() => setSession("s1"));
+    await waitFor(() => expect(tile().querySelector(".v")?.textContent).toBe("2"));
+    expect(within(tile()).queryByRole("img")).not.toBeNull();
+    act(() => setSession(SESSION_ALL));
   });
 });

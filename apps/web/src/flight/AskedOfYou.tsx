@@ -1,8 +1,8 @@
 import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/core";
-import { isOperatorItem } from "../attention.ts";
+import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
-import { NEED_TEXT_MAX, needText, sortNeeds } from "../comms/NeedsList.tsx";
+import { NEED_TEXT_MAX, needText } from "../comms/NeedsList.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -22,8 +22,10 @@ const DASH = "—";
 export const NOBODY_WAITING = "Nobody is waiting on you.";
 
 /**
- * Asked of you (catalogue §2.2.2): a card for each GitHub thread waiting on the operator, then the
- * operator's other Needs-you items, with FLIGHT's take where it briefed one.
+ * Asked of you (catalogue §2.2.2): the whole Needs-you set, as the header counts it (never narrowed
+ * by the session filter). A GitHub thread waiting on the operator is a card; the other items are
+ * rows, with FLIGHT's take where it briefed one. Until #766 builds FLIGHT › Needs you, this is
+ * Needs you's home.
  */
 export function AskedOfYou() {
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -34,16 +36,15 @@ export function AskedOfYou() {
   // A failed load counts as no threads, so the rest of the list still shows.
   if (attention === undefined || (notes.data === undefined && notes.error === null))
     return <p className="pb note">{DASH}</p>;
-  const threads = (notes.data?.open ?? []).filter(
-    (t) => inRepo(t.repoId) && !attention.some((i) => i.key === t.key && !isOperatorItem(i)),
-  );
+  const needsYou = sortNeeds(needsYouItems(attention));
+  const open = new Map((notes.data?.open ?? []).map((t) => [t.key, t]));
+  // A person item whose thread the notifications view holds is a card; any other item is a row.
+  const threads = needsYou.flatMap((item) => {
+    const t = item.kind === "person" ? open.get(item.key) : undefined;
+    return t ? [{ t, item }] : [];
+  });
+  const items = needsYou.filter((i) => !(i.kind === "person" && open.has(i.key)));
   const handled = (notes.data?.handledToday ?? []).filter((h) => inRepo(h.repoId));
-  // An item with no repo belongs to no session, so it stays in view (as in Situation).
-  const items = sortNeeds(
-    attention.filter(
-      (i) => i.kind !== "person" && isOperatorItem(i) && (i.repoId === null || inRepo(i.repoId)),
-    ),
-  );
   const footer = handled.length > 0 && (
     <p className="s note" data-testid="handled-today">
       {handledLine(handled)}
@@ -59,9 +60,8 @@ export function AskedOfYou() {
   return (
     <div>
       <div className="askcards">
-        {threads.map((t) => {
-          const item = attention.find((i) => i.key === t.key);
-          const take = item?.brief;
+        {threads.map(({ t, item }) => {
+          const take = item.brief;
           return (
             <div className="askcard" key={t.key} data-testid="person-card">
               <div className="row">
@@ -82,7 +82,7 @@ export function AskedOfYou() {
                   <MentionText text={t.snippet} />
                 </blockquote>
               )}
-              {item?.flightTriage === "missed" && (
+              {item.flightTriage === "missed" && (
                 <p className="s note">{FLIGHT_TRIAGE_LABEL.missed}</p>
               )}
               {take && (

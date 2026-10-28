@@ -4,7 +4,7 @@ import { kTokens } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
-import { followLink, PAGE_PATHS } from "../router.ts";
+import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 const duration = (ms: number | null | undefined): string => {
@@ -72,6 +72,8 @@ interface Tile {
   label: string;
   title: string;
   page: keyof typeof PAGE_PATHS;
+  /** A link more exact than the page's root (Needs you's panel). */
+  to?: string;
   value: string;
   pending: boolean;
   delta: string;
@@ -92,7 +94,7 @@ export function KpiStrip() {
   const registry = (
     id: MetricId,
     page: Tile["page"],
-    rest: Pick<Tile, "delta" | "series" | "fmt"> & Partial<Pick<Tile, "color">>,
+    rest: Pick<Tile, "delta" | "series" | "fmt"> & Partial<Pick<Tile, "color" | "to">>,
   ): Tile => ({
     metric: id,
     label: metricText(id).label,
@@ -165,7 +167,8 @@ export function KpiStrip() {
       series: undefined,
       fmt: String,
     }),
-    registry("needsYou", "comms", {
+    registry("needsYou", "flight", {
+      to: NEEDS_YOU_PATH,
       delta: change(k?.needsYou?.series),
       series: k?.needsYou?.series,
       fmt: String,
@@ -194,7 +197,7 @@ export function KpiStrip() {
       )}
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
         {tiles.map((tile) => {
-          const path = PAGE_PATHS[tile.page];
+          const path = tile.to ?? PAGE_PATHS[tile.page];
           const series = tile.series;
           // A figure with no history shows its context where the trace would be.
           const contextOnly = series === undefined;

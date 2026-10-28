@@ -196,14 +196,7 @@ body,
 }
 body {
   margin: 0;
-  /* Flight deck (docs/design/flight-deck.md): a faint 24px plotting grid under the panels. */
-  background:
-    var(--glow),
-    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0 0 /
-    24px 24px,
-    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0
-    0 / 24px 24px,
-    var(--bg);
+  background: var(--glow), var(--bg);
   color: var(--fg);
   font: 400 var(--fs) / 1.45 var(--sans);
   font-variant-numeric: tabular-nums;
@@ -1149,6 +1142,21 @@ th {
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+}
+/* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
+.ph .act .ph-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ph .act .ph-link:hover,
+.ph .act .ph-link:focus-visible {
+  text-decoration: underline;
 }
 .pb {
   padding: 2px 14px 12px;
@@ -2378,6 +2386,23 @@ th {
 .kcard:hover {
   border-color: var(--line-2);
 }
+/* The "You:" chip is a pill that opens its Needs-you item's brief; it sits above the cover. */
+.kcard .overlay button.kyou {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  line-height: inherit;
+  padding: 1px 8px 1px 7px;
+  color: var(--warn);
+}
+.kcard .overlay button.kyou:hover,
+.kcard .overlay button.kyou:focus-visible {
+  text-decoration: underline;
+}
+.kyou-more {
+  color: var(--muted);
+}
+
 /* A card waiting on the operator (or just worked) carries an edge, not a full outline. */
 .kcard.you,
 .kcard.pulse-warn {
@@ -3016,6 +3041,18 @@ pre.diff .h {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+}
+/* The Needs-you count beside Decisions: the whole inbox, linked to its home on FLIGHT. */
+.comms-section-head .comms-needs-link {
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  text-decoration: none;
+}
+.comms-section-head .comms-needs-link:hover {
+  text-decoration: underline;
 }
 .comms-decision-list {
   min-height: 0;

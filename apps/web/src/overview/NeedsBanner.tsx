@@ -1,10 +1,9 @@
 import type { AttentionItem, AwaySettings } from "@mc/core";
-import { needsYouItems } from "../attention.ts";
+import { needsYouItems, openNeedsYou } from "../attention.ts";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { untilLabel } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { navigate, PAGE_PATHS } from "../router.ts";
 import { openAway } from "../shell/overlays.ts";
 
 /** Count bits in the mockup's order: label, kinds counted, and whether the label pluralises. */
@@ -55,7 +54,7 @@ export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
         </div>
       )}
       {!awayOnly && items && items.length > 0 && (
-        <button type="button" className="nbanner" onClick={() => navigate(PAGE_PATHS.comms)}>
+        <button type="button" className="nbanner" onClick={openNeedsYou}>
           {lamp && <Lamp {...lamp} />}
           <b className="num">{items.length}</b>
           <span>things need you</span>
@@ -71,7 +70,7 @@ export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
             {notAcked > 0 && <span>· {notAcked} not acknowledged</span>}
           </span>
           <span className="spacer" />
-          <span className="s accent">Open Comms →</span>
+          <span className="s accent">Open in FLIGHT →</span>
         </button>
       )}
     </div>

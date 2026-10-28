@@ -1,4 +1,5 @@
 import {
+  type AttentionItem,
   type CrewRow,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
@@ -7,14 +8,16 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
+import { needsYouItems } from "../src/attention.ts";
 import {
   cardAgent,
   cardColumn,
+  cardNeeds,
   cardPr,
   cardQueue,
   cardReviewer,
   cardStep,
-  cardYouWait,
+  cardYou,
   checksText,
   daysAgo,
   doneOutcome,
@@ -28,7 +31,7 @@ import {
   ticketRef,
   waitingText,
 } from "../src/board/cards.ts";
-import { boardItem, crewRow, HOUR, item, NOW } from "./fixtures.ts";
+import { boardItem, crewRow, HOUR, item, itemWithoutOwner, NOW } from "./fixtures.ts";
 
 const DAY = 86_400_000;
 const RUN = crewRow().run as NonNullable<CrewRow["run"]>;
@@ -98,21 +101,43 @@ describe("doneOutcome", () => {
   });
 });
 
+/** The Board is handed the canonical set, so what Needs you leaves out never marks a card. */
+const canon = (raw: AttentionItem[]) => needsYouItems(raw);
+
 describe("cardAgent and needsMe", () => {
   const i = boardItem();
-  it.each([OWNER_FLIGHT, OWNER_CONTROLLER, undefined] as const)(
+  it.each([OWNER_FLIGHT, OWNER_CONTROLLER] as const)(
     "ignores attention owned by %s, whether linked to the ticket or its agent",
     (owner) => {
-      expect(needsMe(i, [item({ owner, ticket: ticketRef(i) })], [crewRow()])).toBe(false);
-      expect(needsMe(i, [item({ owner, ticket: null })], [crewRow()])).toBe(false);
+      expect(needsMe(i, canon([item({ owner, ticket: ticketRef(i) })]), [crewRow()])).toBe(false);
+      expect(needsMe(i, canon([item({ owner, ticket: null })]), [crewRow()])).toBe(false);
     },
   );
+  it("an item with no owner is the operator's, as Needs you counts it", () => {
+    expect(needsMe(i, canon([itemWithoutOwner({ ticket: ticketRef(i) })]), [])).toBe(true);
+  });
   it.each(["Ready", "In review", "Ready for QA", "Done"])(
     "an agent's need does not follow its card into %s",
     (status) => {
-      expect(needsMe(boardItem({ status }), [item({ ticket: null })], [crewRow()])).toBe(false);
+      expect(needsMe(boardItem({ status }), canon([item({ ticket: null })]), [crewRow()])).toBe(
+        false,
+      );
     },
   );
+  it("an agent's item about another ticket chips that ticket's card, not the agent's card", () => {
+    // the agent runs #3349 (In progress); its item is about #698
+    const other = boardItem({ issueNumber: 698 });
+    const about698 = item({ key: "q:698", kind: "question", ticket: "shop-app#698" });
+    const needs = canon([about698]);
+    expect(cardNeeds(i, needs, [crewRow()])).toEqual([]);
+    expect(needsMe(i, needs, [crewRow()])).toBe(false);
+    expect(cardNeeds(other, needs, [crewRow()]).map((a) => a.key)).toEqual(["q:698"]);
+  });
+  it("an escalation names its own ticket, not the loop's running card", () => {
+    // escalations carry agentId = the loop id, whatever ticket they are about
+    const esc = item({ key: "esc:shop-app#9", escalationId: "shop-app#9", ticket: "shop-app#9" });
+    expect(needsMe(i, canon([esc]), [crewRow()])).toBe(false);
+  });
   it("only a running run on the ticket marks the card", () => {
     const done = crewRow({ run: { ...RUN, status: "ok", endedAt: NOW } });
     expect(cardAgent(i, [done])).toBeNull();
@@ -120,16 +145,18 @@ describe("cardAgent and needsMe", () => {
     expect(cardAgent(i, [crewRow({ ticket: "shop-app#1" })])).toBeNull();
   });
   it("needs me: an escalation on the card, or its worked-by agent has an attention item", () => {
-    expect(needsMe(i, [], [crewRow()])).toBe(false);
-    expect(needsMe(i, [item({ escalationId: "shop-app#3349", ticket: "shop-app#3349" })], [])).toBe(
-      true,
-    );
-    expect(needsMe(i, [item({ escalationId: "shop-app#9", ticket: "shop-app#9" })], [])).toBe(
+    expect(needsMe(i, canon([]), [crewRow()])).toBe(false);
+    expect(
+      needsMe(i, canon([item({ escalationId: "shop-app#3349", ticket: "shop-app#3349" })]), []),
+    ).toBe(true);
+    expect(
+      needsMe(i, canon([item({ escalationId: "shop-app#9", ticket: "shop-app#9" })]), []),
+    ).toBe(false);
+    const stalled = item({ key: "stall:r-12", kind: "stalled", escalationId: null, ticket: null });
+    expect(needsMe(i, canon([stalled]), [crewRow({ hudState: "stalled" })])).toBe(true);
+    expect(needsMe(i, canon([stalled]), [crewRow({ id: "other", ticket: "shop-app#1" })])).toBe(
       false,
     );
-    const stalled = item({ key: "stall:r-12", kind: "stalled", escalationId: null, ticket: null });
-    expect(needsMe(i, [stalled], [crewRow({ hudState: "stalled" })])).toBe(true);
-    expect(needsMe(i, [stalled], [crewRow({ id: "other", ticket: "shop-app#1" })])).toBe(false);
   });
 });
 
@@ -160,31 +187,65 @@ describe("sorting and ages", () => {
   });
 });
 
-describe("cardYouWait", () => {
+describe("cardYou", () => {
   const i = boardItem();
-  const old = (over: Partial<PullRequestView> = {}) =>
-    pr({ isDraft: true, updatedAt: NOW - 9 * DAY, ...over });
-  it("names the action and how long it has waited", () => {
-    expect(cardYouWait(i, [old()], [], NOW)).toEqual({
-      action: "decide on the draft",
-      waiting: "9 days",
+  const prItem = (over: Parameters<typeof item>[0] = {}) =>
+    item({
+      key: "pr:shop-app#40:1",
+      kind: "pr",
+      text: "PR #40 · You: decide on the draft",
+      agentId: null,
+      escalationId: null,
+      ticket: "shop-app#3349",
+      at: NOW - 9 * DAY,
+      ...over,
+    });
+  it("names what the item asks and how long it has waited, and opens that item", () => {
+    expect(cardYou(cardNeeds(i, canon([prItem()]), []), NOW)).toEqual({
+      key: "pr:shop-app#40:1",
+      text: "You: decide on the draft · waiting 9 days",
+      title: "PR #40 · You: decide on the draft",
+      more: 0,
     });
   });
-  it("nothing while an agent runs on the ticket, with no PR, or when recent", () => {
-    expect(cardYouWait(i, [old()], [crewRow()], NOW)).toBeNull();
-    expect(cardYouWait(i, [], [], NOW)).toBeNull();
-    expect(cardYouWait(i, [pr()], [], NOW)).toBeNull();
+  it("only a Needs-you item makes a chip: a waiting PR alone does not", () => {
+    expect(cardYou(cardNeeds(i, canon([]), []), NOW)).toBeNull();
   });
-  it("nothing on a Done card, whatever its PR", () => {
-    // Done by its closed flag, and Done by its Status while GitHub still has it open
-    for (const closed of [true, false]) {
-      const done = boardItem({ status: "Done", state: "done", closed });
-      expect(cardColumn(done)).toBe("Done");
-      expect(cardYouWait(done, [old()], [], NOW)).toBeNull();
-    }
+  it.each([
+    ["question", "answer"],
+    ["decision", "decide"],
+    ["message", "read"],
+    ["tag", "read"],
+    ["blocked", "unblock"],
+    ["parked", "unblock"],
+    ["stalled", "check"],
+    ["error", "check"],
+    ["flag", "check before merging"],
+  ] as const)("a %s item asks you to %s", (kind, verb) => {
+    const one = item({ key: kind, kind, ticket: "shop-app#3349", at: 0 });
+    expect(cardYou(cardNeeds(i, canon([one]), []), NOW)?.text).toBe(`You: ${verb}`);
+  });
+  it("a PR item whose text has no action still names a verb, never the kind", () => {
+    expect(cardYou(cardNeeds(i, canon([prItem({ text: "PR #40", at: 0 })]), []), NOW)?.text).toBe(
+      "You: check the PR",
+    );
+  });
+  it("another kind is named by its verb; the most urgent leads and the rest are counted", () => {
+    const decision = item({ key: "esc:shop-app#3349", ticket: "shop-app#3349", at: NOW - HOUR });
+    const you = cardYou(cardNeeds(i, canon([prItem(), decision]), []), NOW);
+    expect(you?.key).toBe("esc:shop-app#3349");
+    expect(you?.text).toBe("You: decide · waiting 1 hour");
+    expect(you?.more).toBe(1);
+  });
+  it("an undated item does not say how long", () => {
+    expect(cardYou(cardNeeds(i, canon([prItem({ at: 0 })]), []), NOW)?.text).toBe(
+      "You: decide on the draft",
+    );
   });
   it("waitingText", () => {
-    expect([HOUR, 5 * HOUR, DAY, 2 * DAY + HOUR].map(waitingText)).toEqual([
+    expect([30_000, 5 * 60_000, HOUR, 5 * HOUR, DAY, 2 * DAY + HOUR].map(waitingText)).toEqual([
+      "under a minute",
+      "5 minutes",
       "1 hour",
       "5 hours",
       "1 day",
@@ -192,14 +253,7 @@ describe("cardYouWait", () => {
     ]);
   });
   it("a PR item on the ticket keeps the card in needs-me", () => {
-    const prItem = item({
-      key: "pr:shop-app#40:1",
-      kind: "pr",
-      agentId: null,
-      escalationId: null,
-      ticket: "shop-app#3349",
-    });
-    expect(needsMe(i, [prItem], [])).toBe(true);
+    expect(needsMe(i, canon([prItem()]), [])).toBe(true);
   });
 });
 

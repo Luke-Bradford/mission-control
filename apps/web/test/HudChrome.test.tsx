@@ -289,19 +289,10 @@ describe("HUD chrome", () => {
     expect(screen.getByText("Ticket 1")).toBeTruthy();
   });
 
-  it("lights the Board tab for an operator PR without an escalation", async () => {
+  it("never lights the Board tab: Needs you is the one lamp", async () => {
     stub({ "/api/attention": [item({ kind: "pr", escalationId: null })] });
     render(<Header page="board" />);
-    const board = within(screen.getByRole("navigation", { name: "Pages" })).getByRole("link", {
-      name: /^Board/,
-    });
-    expect((await within(board).findByRole("img")).className).toBe("lamp warn");
-  });
-
-  it("does not light the Board tab for a PR owned by FLIGHT", async () => {
-    stub({ "/api/attention": [item({ kind: "pr", escalationId: null, owner: "flight" })] });
-    render(<Header page="board" />);
-    await screen.findByRole("option", { name: "s/alpha" });
+    await screen.findByRole("button", { name: /^Needs you 1:/ });
     const board = within(screen.getByRole("navigation", { name: "Pages" })).getByRole("link", {
       name: /^Board/,
     });

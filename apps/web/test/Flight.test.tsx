@@ -1326,7 +1326,7 @@ describe("FLIGHT's brief", () => {
     expect(screen.queryByTestId("person-card")).toBeNull();
   });
 
-  it("Asked of you shows a person card for each open GitHub thread, with FLIGHT's take when briefed", async () => {
+  it("Asked of you shows a person card for each GitHub thread in Needs you, with FLIGHT's take when briefed", async () => {
     function Probe() {
       return <span data-testid="item">{useItem() ?? "none"}</span>;
     }
@@ -1337,11 +1337,14 @@ describe("FLIGHT's brief", () => {
       number: 7,
       catchUp: "follow-up",
     });
+    // An open thread Needs you does not hold (a digested one) is not asked of you.
+    const digested = thread({ key: "person:303:1", id: "303", title: "Digested" });
     stubFetch({
       "/api/attention": [
         { ...personItem, brief: brief({ recommendation: "Reply that the fix is in review." }) },
+        { ...personItem, key: t2.key, text: "Someone: thread 7" },
       ],
-      "/api/notifications": { open: [thread(), t2], handledToday: [] },
+      "/api/notifications": { open: [thread(), t2, digested], handledToday: [] },
       "/api/config": CONFIG,
     });
     render(
@@ -1353,6 +1356,7 @@ describe("FLIGHT's brief", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     const cards = await screen.findAllByTestId("person-card");
     expect(cards).toHaveLength(2);
+    expect(screen.queryByText(/Digested/)).toBeNull();
     const first = cards[0]?.textContent ?? "";
     for (const part of [
       "alice",

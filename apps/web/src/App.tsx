@@ -6,6 +6,7 @@ import type { FlightView } from "./flight/flightTypes.ts";
 
 import {
   agentPath,
+  FULL_WIDTH_PAGES,
   isPopout,
   itemParam,
   legacyRedirect,
@@ -43,6 +44,7 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
+const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
 const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.Setup })));
@@ -80,9 +82,10 @@ export function App() {
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
-  // Comms has its own FLIGHT conversation and Setup needs the approved full-width configuration
-  // frame. The dock remains available on the operational pages.
-  const showDock = shown.page !== "comms" && shown.page !== "setup";
+  // Comms has its own FLIGHT conversation, and Setup and the Map need the full width (Setup's
+  // approved configuration frame; the Map's stage beside its agent rail). The dock remains
+  // available on the other operational pages.
+  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(shown.page);
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -176,6 +179,8 @@ function PageView({ route: r }: { route: Route }) {
       return <BoardPage repoId={r.repoId} ticket={r.ticket} />;
     case "agent":
       return <Agent id={r.id} />;
+    case "map":
+      return <MapPage repoId={r.repoId} />;
     case "comms":
       return <Comms item={r.item} view={r.view} />;
     case "telemetry":
@@ -225,10 +230,11 @@ function useShellKeys(current: Route, popout: boolean) {
       },
       toggleDock: () => {
         const { current: on, popout: isPopout } = latest.current;
-        // Setup opens FLIGHT in its full Comms view. Comms is already that view, and neither
-        // Comms, Setup nor a pop-out mounts the dock, so never change its stored state there.
+        // Setup and the Map open FLIGHT in its full Comms view. Comms is already that view, and
+        // neither Comms, Setup, the Map nor a pop-out mounts the dock, so never change its
+        // stored state there.
         if (isPopout || on.page === "comms") return;
-        if (on.page === "setup") navigate(PAGE_PATHS.comms);
+        if (FULL_WIDTH_PAGES.has(on.page)) navigate(PAGE_PATHS.comms);
         else toggleDock();
       },
       help: openHelp,

@@ -74,7 +74,7 @@ export function crewOrder(rows: CrewRow[], items: AttentionItem[], now = Date.no
  * error, else amber; named by their kinds in Needs-you order. null for none (render nothing).
  */
 export function needsLamp(
-  items: AttentionItem[],
+  items: readonly AttentionItem[],
   pulse: boolean,
 ): { kind: HudLampKind; pulse: boolean; label: string } | null {
   if (items.length === 0) return null;

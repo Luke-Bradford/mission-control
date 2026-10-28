@@ -1,5 +1,6 @@
 import type { CrewRow, PullRequestView } from "@mc/core";
 import { describe, expect, it } from "vitest";
+import { needsYouItems } from "../src/attention.ts";
 import { type BriefCtx, standup, weekly } from "../src/board/brief.ts";
 import { boardItem, crewRow, item, NOW } from "./fixtures.ts";
 
@@ -29,7 +30,7 @@ const ctx = (over: Partial<BriefCtx> = {}): BriefCtx => ({
   laneName: "shop-app",
   prs: [],
   crew: [],
-  attention: [],
+  needsYou: needsYouItems([]),
   ...over,
 });
 
@@ -80,7 +81,9 @@ describe("standup", () => {
           loop: { phase: "ci", step: null, text: "CI", prNumber: null, parked: null },
         }),
       ],
-      attention: [item({ escalationId: "shop-app#11", ticket: "shop-app#11", agentId: null })],
+      needsYou: needsYouItems([
+        item({ escalationId: "shop-app#11", ticket: "shop-app#11", agentId: null }),
+      ]),
     });
     expect(standup(items, c, NOW, TZ)).toBe(
       [
@@ -104,12 +107,33 @@ describe("weekly", () => {
     { isDraft: true, review: null, action: "decide on the draft" },
     { isDraft: false, review: null, action: "review" },
     { isDraft: false, review: "approved" as const, action: "merge" },
-  ])("names the In review action: $action", ({ isDraft, review, action }) => {
+  ])(
+    "names the In review action from its Needs-you item: $action",
+    ({ isDraft, review, action }) => {
+      const c = ctx({
+        prs: [{ ...pr(51, "shop-app#10", "open"), isDraft, review, updatedAt: NOW - 9 * DAY }],
+        needsYou: needsYouItems([
+          item({
+            key: "pr:shop-app#51:1",
+            kind: "pr",
+            text: `PR #51 · You: ${action}`,
+            agentId: null,
+            escalationId: null,
+            ticket: "shop-app#10",
+          }),
+        ]),
+      });
+      expect(weekly([mk(10, "In review")], c, 14, NOW, TZ)).toContain(
+        `In review\n- shop-app#10 (PR #51): Ticket 10 (waiting for me to ${action})`,
+      );
+    },
+  );
+  it("a PR the Needs-you set does not hold waits on nobody", () => {
     const c = ctx({
-      prs: [{ ...pr(51, "shop-app#10", "open"), isDraft, review, updatedAt: NOW - 9 * DAY }],
+      prs: [{ ...pr(51, "shop-app#10", "open"), isDraft: true, updatedAt: NOW - 9 * DAY }],
     });
     expect(weekly([mk(10, "In review")], c, 14, NOW, TZ)).toContain(
-      `In review\n- shop-app#10 (PR #51): Ticket 10 (waiting for me to ${action})`,
+      "In review\n- shop-app#10 (PR #51): Ticket 10 (PR open)",
     );
   });
   it("golden string", () => {
@@ -127,7 +151,9 @@ describe("weekly", () => {
     ];
     const c = ctx({
       prs: [pr(60, "shop-app#2", "merged")],
-      attention: [item({ escalationId: "shop-app#6", ticket: "shop-app#6", agentId: null })],
+      needsYou: needsYouItems([
+        item({ escalationId: "shop-app#6", ticket: "shop-app#6", agentId: null }),
+      ]),
     });
     expect(weekly(items, c, 14, NOW, TZ)).toBe(
       [
@@ -149,15 +175,16 @@ describe("standup: a PR waiting on me", () => {
     const draft = { ...pr(51, "shop-app#10", "open"), isDraft: true, updatedAt: NOW - 9 * DAY };
     const c = ctx({
       prs: [draft],
-      attention: [
+      needsYou: needsYouItems([
         item({
           key: "pr:shop-app#51:1",
           kind: "pr",
+          text: "PR #51 · You: decide on the draft",
           agentId: null,
           escalationId: null,
           ticket: "shop-app#10",
         }),
-      ],
+      ]),
     });
     const out = standup(items, c, NOW, TZ);
     expect(out).toContain(

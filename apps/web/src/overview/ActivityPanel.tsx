@@ -9,7 +9,7 @@ import {
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
 import { useLayoutEffect, useRef, useState } from "react";
-import { operatorItems } from "../attention.ts";
+import { needsYouItems } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { Expandable } from "../components/Expandable.tsx";
@@ -210,14 +210,8 @@ export function ActivityPanel() {
   const repoOf = (who: string): string | null =>
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
-  const needs: LogRow[] = [
-    ...new Map(
-      operatorItems(attention.data ?? []).map((i) => [
-        i.escalationId && i.ticket ? `escalation:${i.ticket}` : `attention:${i.key}`,
-        i,
-      ]),
-    ).values(),
-  ].map((i) => ({
+  // The Needs-you set, as the header counts it: one row per item, and no session filter below.
+  const needs: LogRow[] = needsYouItems(attention.data).map((i) => ({
     attentionKey: i.key,
     escalationRef: i.escalationId ? i.ticket : null,
     at: i.messageAt ?? i.at,
@@ -273,6 +267,8 @@ export function ActivityPanel() {
       );
     })
     .filter((e) => {
+      // Needs you is the operator's whole inbox: the session filter never hides it.
+      if (e.attentionKey !== undefined) return true;
       if (isComms(e)) {
         const ends = [e.who, e.to].flatMap((id) => agents.get(id) ?? []);
         return ends.length === 0 || ends.some(inView);

@@ -3,8 +3,8 @@ import {
   CI_PASSED_EVENT_PREFIX,
   hudColumnOf,
   isCiFailureEvent,
+  needsYouItems,
   type OverviewSummary,
-  OWNER_OPERATOR,
   type PipelineCard,
   type PipelineStage,
   type PullRequestView,
@@ -83,15 +83,9 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     (e) => e.at >= now - DAY_MS && e.text.startsWith(CI_PASSED_EVENT_PREFIX),
   ).length;
   const failed = ci.filter((e) => e.at >= now - DAY_MS && isCiFailureEvent(e.text)).length;
-  // The registry's Needs you is the operator's whole inbox (web `needsYouItems`): one per key, and
-  // no session filter narrows it, so its history is one series whatever the scope.
-  const seen = new Set<string>();
-  const needs = scope.attention.filter((i) => {
-    if ((i.owner ?? OWNER_OPERATOR) !== OWNER_OPERATOR || i.at > now || seen.has(i.key))
-      return false;
-    seen.add(i.key);
-    return true;
-  });
+  // The registry's Needs you is the operator's whole inbox (`needsYouItems`): one per key, and no
+  // session filter narrows it, so its history is one series whatever the scope.
+  const needs = needsYouItems(scope.attention).filter((i) => i.at <= now);
   const minuteEnds = Array.from({ length: MINUTES }, (_, i) => since + (i + 1) * MINUTE_MS);
   const moves = store.boardMoves(0).filter((m) => m.state === "done");
   const boards = [...pipelineRepos].flatMap((repoId) => store.board(repoId));
