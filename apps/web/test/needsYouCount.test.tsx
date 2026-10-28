@@ -182,7 +182,7 @@ describe("one Needs-you count", () => {
       const banner = container.querySelector("#nbanner .num")?.textContent;
       const kpi = container.querySelector('.overview-kpi[href="/flight#askP"] .v')?.textContent;
       const pulse = screen
-        .getByRole("button", { name: /^Needs you: \d+ decisions or replies/ })
+        .getByRole("button", { name: /^\d+ Needs you decisions or replies/ })
         .querySelector(".flight-pulse-value")?.textContent;
       const clearNow = container.querySelector("#flight-clear-now + span > span")?.textContent;
       const asks = container.querySelectorAll('#askP [data-testid="ask-row"]');

@@ -120,6 +120,7 @@ export function Flight() {
   };
   return (
     <section id="page-flight">
+      <h1 className="sr-only">Flight</h1>
       <div className="flight-tabs" role="tablist" aria-label="Flight views">
         {FLIGHT_TABS.map((item) => (
           <button
