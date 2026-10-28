@@ -4476,6 +4476,7 @@ describe("telemetry", () => {
     const byDefault = (await get("/api/telemetry")).json() as Telemetry;
     expect(tokensIn(byDefault)).toBeGreaterThan(0);
     expect(byDefault.today.agents).toBe(2);
+    expect(byDefault.series).toEqual({ stateSpans: [], quota: [], tickets: [], annotations: [] });
     const lastHour = (await get("/api/telemetry?range=1h")).json() as Telemetry;
     expect(tokensIn(lastHour)).toBe(0);
     for (const range of ["1h", "6h", "24h", "7d"]) {

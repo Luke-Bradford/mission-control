@@ -4,8 +4,8 @@
  */
 import {
   type AgentSeries,
+  CYCLE_TIME_DAYS,
   cacheHitPct,
-  FLOW_DAYS,
   percentile as interpolatedPercentile,
   LIVE_MINUTES,
   NO_SIZE,
@@ -34,8 +34,10 @@ import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts"
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+const CHART_STATES = new Set(["running", "waiting", "parked", "idle"] as const);
 
 type Interval = [number, number];
+type TelemetrySeries = NonNullable<Telemetry["series"]>;
 
 /**
  * The share of a run's wall time inside [since, now): 0..1. A run with no wall time (an `unknown`
@@ -228,7 +230,7 @@ export function telemetry(
 
   // ── flow of work ──
   const dayOf = dayFormatter(tz);
-  const days = lastDays(dayOf(now), FLOW_DAYS);
+  const days = lastDays(dayOf(now), CYCLE_TIME_DAYS);
   const perDay = new Map(days.map((d) => [d, 0]));
   for (const m of merged) {
     const d = dayOf(m);
@@ -237,7 +239,7 @@ export function telemetry(
   }
   const throughput = days.map((day) => ({ day, merged: perDay.get(day) ?? 0 }));
 
-  const flowSince = now - FLOW_DAYS * DAY_MS;
+  const flowSince = now - CYCLE_TIME_DAYS * DAY_MS;
   const bySize = new Map<string, number[]>();
   let excluded = 0;
   for (const i of store.flowIssues(flowSince)) {
@@ -522,6 +524,110 @@ export function telemetry(
     }),
   );
 
+  // ── Instrument chart series ──
+  // `timelineSources` includes the final observation before the left edge, which makes a span
+  // that crosses into the range truthful without extending an open state to the request time.
+  const chartEvents = store.timelineSources(since, now).events;
+  const stateSpans: TelemetrySeries["stateSpans"] = [];
+  for (const agentId of ids) {
+    const events = chartEvents.filter((event) => event.agentId === agentId);
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (!event || !CHART_STATES.has(event.to as never)) continue;
+      const next = events[i + 1];
+      const startedAt = Math.max(since, event.at);
+      // The final observed state has no asserted end. Its last observation is the transition
+      // itself, rather than an invented extension to `now`.
+      const endedAt = Math.min(now, next?.at ?? event.at);
+      if (endedAt < since || startedAt > now) continue;
+      stateSpans.push({
+        agentId,
+        state: event.to as TelemetrySeries["stateSpans"][number]["state"],
+        startedAt,
+        endedAt: Math.max(startedAt, endedAt),
+      });
+    }
+  }
+
+  const chartQuota: TelemetrySeries["quota"] = config.accounts.flatMap((account) =>
+    WINDOWS.flatMap((window) => {
+      const samples = store.usage(account.id, window, 0);
+      const points = samples
+        .filter((sample) => sample.at >= since && sample.at <= now)
+        .map((sample) => ({ at: sample.at, pct: sample.pct }));
+      if (points.length === 0) return [];
+      const resets = samples.flatMap((sample, index) => {
+        const previous = samples[index - 1];
+        if (
+          sample.at < since ||
+          sample.at > now ||
+          previous === undefined ||
+          previous.resetAt === sample.resetAt
+        )
+          return [];
+        return [{ at: sample.at, resetAt: sample.resetAt, cause: sample.source }];
+      });
+      return [
+        {
+          accountId: account.id,
+          window,
+          alertAt: account.alertAt,
+          stopAt: account.stopAt,
+          points,
+          resets,
+        },
+      ];
+    }),
+  );
+
+  const starts = new Map<string, number>();
+  for (const run of store.runsOverlapping(since, now + 1)) {
+    if (run.ticket === null || run.startedAt < since || run.startedAt > now) continue;
+    const prior = starts.get(run.ticket);
+    if (prior === undefined || run.startedAt < prior) starts.set(run.ticket, run.startedAt);
+  }
+  const tickets: TelemetrySeries["tickets"] = store
+    .flowIssues(since)
+    .filter(
+      (issue): issue is typeof issue & { doneAt: number } =>
+        issue.doneAt !== null && issue.doneAt <= now,
+    )
+    .map((issue) => {
+      const ticket = `${issue.repoId}#${issue.number}`;
+      const mergedAt =
+        store
+          .pullRequests(issue.repoId)
+          .filter((pr) => pr.ticket === ticket && pr.mergedAt !== null)
+          .map((pr) => pr.mergedAt as number)
+          .sort((a, b) => a - b)[0] ?? null;
+      return {
+        ticket,
+        readyAt: issue.startAt !== null && issue.startAt >= since ? issue.startAt : null,
+        startedAt: starts.get(ticket) ?? null,
+        mergedAt: mergedAt !== null && mergedAt >= since && mergedAt <= now ? mergedAt : null,
+        doneAt: issue.doneAt,
+      };
+    });
+  const annotations: TelemetrySeries["annotations"] = [
+    ...store.hubEvents(since).flatMap<TelemetrySeries["annotations"][number]>((event) => {
+      if (/^Updated to\b/.test(event.text))
+        return [{ at: event.at, kind: "hub-update" as const, cause: event.text }];
+      if (/^Crew paused\b/.test(event.text))
+        return [{ at: event.at, kind: "crew-paused" as const, cause: event.text }];
+      if (/^Crew resumed\b/.test(event.text))
+        return [{ at: event.at, kind: "crew-resumed" as const, cause: event.text }];
+      return [];
+    }),
+    ...chartQuota.flatMap((row) =>
+      row.resets.map((reset) => ({
+        at: reset.at,
+        kind: "quota-reset" as const,
+        cause: reset.cause,
+      })),
+    ),
+  ].sort((a, b) => a.at - b.at || a.kind.localeCompare(b.kind));
+  const series: TelemetrySeries = { stateSpans, quota: chartQuota, tickets, annotations };
+
   // Averaged per bucket in SQL: at most TELEMETRY_POINTS rows, however many samples the range holds.
   const machine: Telemetry["machine"] = store.machineBuckets(
     since,
@@ -640,6 +746,7 @@ export function telemetry(
     );
 
   return {
+    series,
     today,
     throughput,
     cycleTime,
