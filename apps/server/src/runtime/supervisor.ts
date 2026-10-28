@@ -52,6 +52,7 @@ import {
   CREW_GIT_ENV,
   carriedFrom,
   clockHm,
+  codexSeatEffectiveConfig,
   compactUtc,
   conflictKey,
   conflictText,
@@ -637,6 +638,10 @@ interface Live {
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
   awaitingAtAttach: boolean;
+  /** The floor refusal can arrive before track subscribes; never write its guard hit twice. */
+  floorRefusalRecorded: boolean;
+  /** Codex emits init only after both its thread floor and effective configuration read back. */
+  codexFloorConfirmed: boolean;
 }
 
 /** `get_context_usage`'s answer, or null when it is not the shape the CLI sends (spike). */
@@ -926,10 +931,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  function onExit(
-    l: Live,
-    e: { code: number | null; signal: string | null; reason?: string },
-  ): void {
+  function onExit(l: Live, e: Extract<SessionEvent, { kind: "exit" }>): void {
+    if (e.guardRefusal !== undefined) recordFloorRefusal(l, e.guardRefusal);
+    else if (l.run.vendor === "codex" && !l.codexFloorConfirmed)
+      // An immediate handshake can end before its driver reaches track. Its fixed reason means
+      // no floor was confirmed, so persist the same guard event even without the buffered event.
+      recordFloorRefusal(l, {
+        rule: "codex-seat-floor",
+        text: "effective Codex seat settings differ",
+      });
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
@@ -999,6 +1009,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     switch (e.kind) {
       case "init":
         if (l.run.vendor === "codex") {
+          l.codexFloorConfirmed = true;
           l.run = { ...l.run, sessionId: e.sessionId };
           store.upsertRun(l.run);
           setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
@@ -1064,14 +1075,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         log(`${l.info.seat.id}: ${e.text}`);
         break;
       case "guard-refusal":
-        store.addGuardHit({
-          agentId: l.info.seat.id,
-          runId: l.run.id,
-          rule: e.rule,
-          text: e.text,
-          at: now(),
-        });
-        bus.emit("guard");
+        recordFloorRefusal(l, e);
         break;
       case "exit":
         onExit(l, e);
@@ -1079,6 +1083,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       default:
         break;
     }
+  }
+
+  function recordFloorRefusal(l: Live, refusal: { rule: "codex-seat-floor"; text: string }): void {
+    if (l.floorRefusalRecorded) return;
+    l.floorRefusalRecorded = true;
+    store.addGuardHit({
+      agentId: l.info.seat.id,
+      runId: l.run.id,
+      rule: refusal.rule,
+      text: refusal.text,
+      at: now(),
+    });
+    bus.emit("guard");
   }
 
   /** Runs `fn` after everything queued for the seat; a failure does not block what follows. */
@@ -1557,6 +1574,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           resumeThreadId: resume ? cliSessionId : null,
           outboxPath: join(runDir, CODEX_OUTBOX_FILE),
           approve: codexApprover(info, run, cwd),
+          effectiveConfig: codexSeatEffectiveConfig(`${hub}${MCP_PATH}`),
           log,
           controlTimeoutMs: deps.controlTimeoutMs,
           stopGraceMs: deps.stopGraceMs,
@@ -1828,9 +1846,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       attaching: false,
       replayedBelow: 0,
       awaitingAtAttach: false,
+      floorRefusalRecorded: false,
+      codexFloorConfirmed: false,
       ...init,
     };
     live.set(info.seat.id, l);
+    if (session.floorRefusal !== undefined) recordFloorRefusal(l, session.floorRefusal);
     l.off = session.on((e) => onEvent(l, e));
     return l;
   }
@@ -2336,6 +2357,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 approve: codexApprover(info, run, row.worktree ?? ""),
                 controlTimeoutMs: deps.controlTimeoutMs,
                 log,
+                effectiveConfig: codexSeatEffectiveConfig(
+                  `http://${LOOPBACK_HOST}:${deps.hubPort}${MCP_PATH}`,
+                ),
               },
               session,
             )
@@ -3063,6 +3087,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // comes before a start is claimed.
       await session.ready;
       if (!session.alive) {
+        if (run.vendor === "codex")
+          recordFloorRefusal(l, {
+            rule: "codex-seat-floor",
+            text: "effective Codex seat settings differ",
+          });
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }

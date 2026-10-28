@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   CANNOT_START,
   codexCommand,
+  codexSeatEffectiveConfig,
   MC_MCP_SERVER,
   MC_TOOL_NAMES,
   type SessionEvent,
@@ -70,6 +71,7 @@ function start(scenario: Record<string, unknown> = {}, over: Partial<CodexSessio
     approve,
     stopGraceMs: 100,
     controlTimeoutMs: 1000,
+    effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     ...over,
   });
   sessions.push(session);
@@ -96,6 +98,7 @@ async function reattach(over: Partial<CodexAttachInput> = {}) {
       approve: async () => "decline",
       outboxPath: join(dir, CODEX_OUTBOX_FILE),
       controlTimeoutMs: 1000,
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
       ...over,
     },
     found.session,
@@ -128,6 +131,7 @@ describe("Codex session", () => {
       "initialized",
       "thread/start",
       "config/read",
+      "hooks/list",
       "turn/start",
     ]);
     expect(messages[2].params).toEqual({
@@ -145,7 +149,7 @@ describe("Codex session", () => {
       .map((line) => JSON.parse(line))
       .find((m) => m.method === "thread/tokenUsage/updated");
     expect(Number.isFinite(Date.parse(usage.timestamp))).toBe(true);
-    expect(messages[4].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
+    expect(messages[5].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
     expect(events.filter((e) => ["init", "turn-start", "result"].includes(e.kind))).toEqual([
       { kind: "init", sessionId: "codex-thread-1", model: "gpt-5.4" },
       { kind: "turn-start" },
@@ -181,18 +185,27 @@ describe("Codex session", () => {
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
   });
 
-  it.each(["mcp", "hooks", "execPolicy", "shell"])(
-    "closes before the first turn when effective %s settings differ",
+  it.each(["mcp", "sameNameMcp", "hooks", "effectiveHooks", "execPolicy", "shell", "shellExtra"])(
+    "closes before the first turn when effective %s settings differ on start and resume",
     async (badConfig) => {
-      const { session, events } = start({ badConfig });
-      session.send("must never run");
-      await session.ready;
-      await until(() =>
-        expect(events).toContainEqual(
-          expect.objectContaining({ kind: "guard-refusal", rule: "codex-seat-floor" }),
-        ),
-      );
-      expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
+      for (const resumeThreadId of [null, "codex-thread-1"]) {
+        const { session, events } = start({ badConfig }, { resumeThreadId });
+        session.send("must never run");
+        await session.ready;
+        await until(() =>
+          expect(events).toContainEqual(
+            expect.objectContaining({ kind: "guard-refusal", rule: "codex-seat-floor" }),
+          ),
+        );
+        expect(
+          recorded().some(
+            (m) => m.method === (resumeThreadId === null ? "thread/start" : "thread/resume"),
+          ),
+        ).toBe(true);
+        expect(recorded().some((m) => m.method === "config/read")).toBe(true);
+        expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
+        await session.close();
+      }
     },
   );
 
@@ -614,6 +627,7 @@ it("reattaches to the running Codex turn and steers without a second handshake",
       model: "gpt-5.4",
       effort: "high",
       approve: async () => "decline",
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     },
     found.session,
   );
@@ -656,6 +670,7 @@ it.each([
       effort: "high",
       approve: async () => "decline",
       controlTimeoutMs: 1000,
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     },
     found.session,
   );

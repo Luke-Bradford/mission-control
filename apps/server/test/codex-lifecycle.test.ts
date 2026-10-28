@@ -1,7 +1,13 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CANNOT_START, MC_MCP_SERVER, MC_TOOL_NAMES, type SessionEvent } from "@mc/core";
+import {
+  CANNOT_START,
+  codexSeatEffectiveConfig,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+  type SessionEvent,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachCodexSession,
@@ -69,6 +75,7 @@ function attached(approve = vi.fn<CodexSessionInput["approve"]>(async () => "acc
       developerInstructions: "Hub instructions",
       approve,
       controlTimeoutMs: 100,
+      effectiveConfig: codexSeatEffectiveConfig("http://hub/mcp"),
     },
     transport,
   );
@@ -87,14 +94,21 @@ function attached(approve = vi.fn<CodexSessionInput["approve"]>(async () => "acc
             id: config.id,
             result: {
               config: {
-                mcp_servers: { mc: {} },
+                mcp_servers: {
+                  mc: { url: "http://hub/mcp", bearer_token_env_var: "MC_SEAT_TOKEN" },
+                },
                 hooks: {},
-                tools: {},
+                rules: {},
                 shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
               },
             },
           }),
         );
+      setTimeout(() => {
+        const hooks = write.mock.calls.findLast(([m]) => m.method === "hooks/list")?.[0];
+        if (!hooks) return;
+        for (const fn of lines) fn(JSON.stringify({ id: hooks.id, result: { hooks: [] } }));
+      }, 0);
     }, 0);
   };
   return {
@@ -269,7 +283,7 @@ describe("Codex lifecycle without a socket", () => {
     expect(h.write).not.toHaveBeenCalled();
     h.caughtUp();
     await h.session.ready;
-    await vi.waitFor(() => expect(h.write).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(h.approve).toHaveBeenCalledTimes(1));
     expect(h.approve).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ id: "open" }),
       ["apps/a.ts", "outside.ts"],
@@ -326,7 +340,7 @@ describe("Codex lifecycle without a socket", () => {
     expect(approve.mock.calls[0]?.[2].aborted).toBe(true);
     decide("accept");
     await settled();
-    expect(h.write).toHaveBeenCalledTimes(2);
+    expect(h.write).toHaveBeenCalledTimes(3);
     expect(approve).toHaveBeenCalledTimes(1);
   });
 
@@ -365,7 +379,7 @@ describe("Codex lifecycle without a socket", () => {
     h.line(started);
     h.line(request("open"));
     h.caughtUp();
-    await vi.waitFor(() => expect(h.write).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(h.write).toHaveBeenCalledTimes(4));
     h.line({
       method: "item/completed",
       params: { item: { id: "item", type: "commandExecution" } },
@@ -586,13 +600,18 @@ describe("Codex pending work across reattachment", () => {
     const interrupted = vi.fn();
     const interrupt = h.session.control("interrupt").then(interrupted);
     await settled();
-    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual(["thread/resume", "config/read"]);
+    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual([
+      "thread/resume",
+      "config/read",
+      "hooks/list",
+    ]);
     expect(interrupted).not.toHaveBeenCalled();
     h.line(started);
     await vi.waitFor(() =>
       expect(h.write.mock.calls.map(([m]) => m.method)).toEqual([
         "thread/resume",
         "config/read",
+        "hooks/list",
         "turn/steer",
         "turn/interrupt",
       ]),
@@ -614,7 +633,11 @@ describe("Codex pending work across reattachment", () => {
     await expect(h.session.control("interrupt")).rejects.toMatchObject({ kind: "ended" });
     expect(h.session.alive).toBe(false);
     expect(h.events).toContainEqual({ kind: "stderr", text: "turn/started timeout" });
-    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual(["thread/resume", "config/read"]);
+    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual([
+      "thread/resume",
+      "config/read",
+      "hooks/list",
+    ]);
   });
 
   it("persists queued messages before returning, replays receipts and delivers only the unsent text", async () => {
@@ -635,7 +658,11 @@ describe("Codex pending work across reattachment", () => {
     next.line({ id: start.id, result: {} });
     next.caughtUp(true, true);
     await next.session.ready;
-    expect(next.write.mock.calls.map(([m]) => m.method)).toEqual(["thread/resume", "config/read"]);
+    expect(next.write.mock.calls.map(([m]) => m.method)).toEqual([
+      "thread/resume",
+      "config/read",
+      "hooks/list",
+    ]);
     next.line(started);
     await vi.waitFor(() => expect(next.write.mock.calls.at(-1)?.[0].method).toBe("turn/steer"));
     const steer = next.write.mock.calls.at(-1)?.[0];
@@ -651,7 +678,11 @@ describe("Codex pending work across reattachment", () => {
     again.line(started);
     again.caughtUp();
     await again.session.ready;
-    expect(again.write.mock.calls.map(([m]) => m.method)).toEqual(["thread/resume", "config/read"]);
+    expect(again.write.mock.calls.map(([m]) => m.method)).toEqual([
+      "thread/resume",
+      "config/read",
+      "hooks/list",
+    ]);
     again.session.detach();
   });
 
@@ -675,7 +706,11 @@ describe("Codex pending work across reattachment", () => {
     await h.session.ready;
     rmSync(dir, { recursive: true });
     expect(() => h.session.send("must not be acknowledged")).toThrow();
-    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual(["thread/resume", "config/read"]);
+    expect(h.write.mock.calls.map(([m]) => m.method)).toEqual([
+      "thread/resume",
+      "config/read",
+      "hooks/list",
+    ]);
     h.session.detach();
   });
 

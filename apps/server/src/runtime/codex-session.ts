@@ -6,9 +6,9 @@ import {
   CANNOT_START,
   CODEX_COMMAND,
   CODEX_PROJECT_DOC_CONFIG,
-  CODEX_SEAT_EFFECTIVE_CONFIG,
   CODEX_SEAT_PROFILE,
   CONTROL_TIMEOUT_MS,
+  type CodexSeatEffectiveConfig,
   isObj,
   type SessionEvent,
 } from "@mc/core";
@@ -56,6 +56,7 @@ export interface CodexSessionInput {
   log?: (line: string) => void;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
+  effectiveConfig: CodexSeatEffectiveConfig;
 }
 
 export const CODEX_OUTBOX_FILE = "outbox.json";
@@ -131,22 +132,30 @@ const tokens = (value: unknown): number | null =>
 
 class CodexSeatFloorError extends Error {}
 
-function seatConfigMatches(value: unknown): boolean {
-  if (!isObj(value)) return false;
-  const servers = value.mcp_servers;
-  if (
-    !isObj(servers) ||
-    Object.keys(servers).sort().join("\n") !== CODEX_SEAT_EFFECTIVE_CONFIG.mcpServers.join("\n")
-  )
-    return false;
-  const empty = (v: unknown) => v === undefined || (isObj(v) && Object.keys(v).length === 0);
-  if (!empty(value.hooks) || !empty(value.tools)) return false;
-  const shell = value.shell_environment_policy;
+function sameConfig(actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (Array.isArray(actual) && Array.isArray(expected))
+    return (
+      actual.length === expected.length && actual.every((item, n) => sameConfig(item, expected[n]))
+    );
+  if (!isObj(actual) || !isObj(expected)) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
   return (
-    isObj(shell) &&
-    Array.isArray(shell.exclude) &&
-    shell.exclude.length === CODEX_SEAT_EFFECTIVE_CONFIG.shellEnvironment.exclude.length &&
-    shell.exclude.every((v, n) => v === CODEX_SEAT_EFFECTIVE_CONFIG.shellEnvironment.exclude[n])
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, n) => key === expectedKeys[n] && sameConfig(actual[key], expected[key]))
+  );
+}
+
+function seatConfigMatches(value: unknown, expected: CodexSeatEffectiveConfig): boolean {
+  if (!isObj(value)) return false;
+  const emptyOr = (actual: unknown, empty: object) =>
+    actual === undefined || sameConfig(actual, empty);
+  return (
+    sameConfig(value.mcp_servers, expected.mcpServers) &&
+    emptyOr(value.hooks, expected.hooks) &&
+    emptyOr(value.rules, expected.execPolicy) &&
+    sameConfig(value.shell_environment_policy, expected.shellEnvironment)
   );
 }
 
@@ -173,6 +182,7 @@ export interface CodexAttachInput {
   approve: CodexSessionInput["approve"];
   controlTimeoutMs?: number;
   log?: (line: string) => void;
+  effectiveConfig: CodexSeatEffectiveConfig;
 }
 
 export function attachCodexSession(i: CodexAttachInput, transport: KeeperSession): CrewSession {
@@ -189,6 +199,9 @@ function codexSession(
   let checked = false;
   const report = () => !replaying || ("from" in i && transport.lines > i.from);
   const listeners = new Set<(e: SessionEvent) => void>();
+  // The handshake can fail before supervisor.track subscribes. Keep this security event available
+  // for later listeners; the exit carries it too for the normal supervisor exit path.
+  const pendingGuardRefusals: { rule: "codex-seat-floor"; text: string }[] = [];
   const pending = new Map<RpcId, Pending>();
   const seenRequests = new Set<RpcId>();
   const approvals = new Map<RpcId, OpenApproval>();
@@ -204,6 +217,7 @@ function codexSession(
   let started: ReturnType<typeof waitForEvent> | null = null;
   const completions = new Map<string, Set<ReturnType<typeof waitForEvent>>>();
   let failed = false;
+  let guardRefusal: { rule: "codex-seat-floor"; text: string } | undefined;
   let totalTokens: number | null = null;
   let maxTokens: number | null = null;
   let resolveReady: () => void = () => {};
@@ -419,9 +433,17 @@ function codexSession(
 
   transport.on((e) => {
     if (e.kind === "exit") {
-      if (!closing && !checked) failed = true;
+      if (!closing && !checked) {
+        failed = true;
+        guardRefusal ??= {
+          rule: "codex-seat-floor",
+          text: "effective Codex seat settings differ",
+        };
+        pendingGuardRefusals.push(guardRefusal);
+        emit({ kind: "guard-refusal", ...guardRefusal });
+      }
       finish();
-      emit(failed ? { ...e, reason: CANNOT_START } : e);
+      emit(failed ? { ...e, reason: CANNOT_START, ...(guardRefusal ? { guardRefusal } : {}) } : e);
     } else if (e.kind === "attached") {
       if (closing) return;
       replaying = false;
@@ -632,12 +654,17 @@ function codexSession(
     failed = true;
     const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
     i.log?.(why);
-    if (e instanceof CodexSeatFloorError)
-      emit({
-        kind: "guard-refusal",
+    // Before `checked` no session is permitted to run: an RPC error or early close cannot
+    // distinguish a malformed floor from a failed read-back, so record it as a floor refusal.
+    if (e instanceof CodexSeatFloorError || !checked)
+      guardRefusal = {
         rule: "codex-seat-floor",
         text: "effective Codex seat settings differ",
-      });
+      };
+    if (guardRefusal) {
+      pendingGuardRefusals.push(guardRefusal);
+      emit({ kind: "guard-refusal", ...guardRefusal });
+    }
     emit({ kind: "stderr", text: why });
     finish();
     void transport.close();
@@ -673,7 +700,10 @@ function codexSession(
     )
       throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
     const effective = await request("config/read", { cwd: i.cwd });
-    if (!isObj(effective) || !seatConfigMatches(effective.config))
+    if (!isObj(effective) || !seatConfigMatches(effective.config, i.effectiveConfig))
+      throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
+    const hooks = await request("hooks/list", { cwd: i.cwd });
+    if (!isObj(hooks) || !Array.isArray(hooks.hooks) || hooks.hooks.length !== 0)
       throw new CodexSeatFloorError("Codex thread did not confirm the seat floor");
     init(result.thread.id);
   };
@@ -749,6 +779,7 @@ function codexSession(
     },
     on(listener) {
       listeners.add(listener);
+      for (const refusal of pendingGuardRefusals) listener({ kind: "guard-refusal", ...refusal });
       return () => {
         listeners.delete(listener);
       };
@@ -765,6 +796,9 @@ function codexSession(
     },
     get closeSent() {
       return transport.closeSent;
+    },
+    get floorRefusal() {
+      return guardRefusal;
     },
   };
 }

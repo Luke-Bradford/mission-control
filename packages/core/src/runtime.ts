@@ -850,12 +850,24 @@ export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
 export const CODEX_PROJECT_DOC_CONFIG = Object.freeze({ project_doc_max_bytes: 0 });
 
 /** Security-sensitive settings which must be owned exclusively by the hub. */
-export const CODEX_SEAT_EFFECTIVE_CONFIG = Object.freeze({
-  mcpServers: [MC_MCP_SERVER],
-  hooks: Object.freeze({}),
-  execPolicy: Object.freeze({}),
-  shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
-});
+export interface CodexSeatEffectiveConfig {
+  mcpServers: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  hooks: Readonly<Record<string, never>>;
+  execPolicy: Readonly<Record<string, never>>;
+  shellEnvironment: Readonly<Record<string, readonly string[]>>;
+}
+
+/** The config/read values a Codex seat must report for this particular hub endpoint. */
+export function codexSeatEffectiveConfig(mcpUrl: string): CodexSeatEffectiveConfig {
+  return Object.freeze({
+    mcpServers: Object.freeze({
+      [MC_MCP_SERVER]: Object.freeze({ url: mcpUrl, bearer_token_env_var: CODEX_SEAT_TOKEN_ENV }),
+    }),
+    hooks: Object.freeze({}),
+    execPolicy: Object.freeze({}),
+    shellEnvironment: Object.freeze({ exclude: [CODEX_SEAT_TOKEN_ENV] }),
+  });
+}
 
 /** TOML strings in a seat config never need escaping; refuse input that would. */
 export function tomlString(value: string): string {
@@ -1113,7 +1125,14 @@ export type SessionEvent =
   | { kind: "stderr"; text: string }
   /** The Codex app-server reported a seat configuration which the hub did not create. */
   | { kind: "guard-refusal"; rule: "codex-seat-floor"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
+  | {
+      kind: "exit";
+      code: number | null;
+      signal: string | null;
+      reason?: string;
+      /** Replayed on exit so a refusal before session subscription cannot be lost. */
+      guardRefusal?: { rule: "codex-seat-floor"; text: string };
+    }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 

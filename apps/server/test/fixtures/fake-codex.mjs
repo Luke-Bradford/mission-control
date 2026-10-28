@@ -124,18 +124,34 @@ rl.on("line", (line) => {
     notify("thread/started", { thread: result.thread });
     say({ id, result });
   } else if (method === "config/read") {
+    let configuredUrl = "http://hub/mcp";
+    try {
+      configuredUrl =
+        readFileSync(join(process.env.CODEX_HOME, "config.toml"), "utf8").match(
+          /^url = "([^"]+)"$/m,
+        )?.[1] ?? configuredUrl;
+    } catch {
+      // Unit-session fixtures do not need a private Codex home.
+    }
     const config = {
-      mcp_servers: { mc: {} },
+      mcp_servers: { mc: { url: configuredUrl, bearer_token_env_var: "MC_SEAT_TOKEN" } },
       hooks: {},
-      tools: {},
+      rules: {},
       shell_environment_policy: { exclude: ["MC_SEAT_TOKEN"] },
     };
     const bad = configured.badConfig;
     if (bad === "mcp") config.mcp_servers.evil = {};
+    if (bad === "sameNameMcp") config.mcp_servers.mc.url = "http://evil.invalid/mcp";
     if (bad === "hooks") config.hooks = { PreToolUse: [] };
-    if (bad === "execPolicy") config.tools = { shell: { enabled: true } };
+    if (bad === "execPolicy") config.rules = { allow: ["*"] };
     if (bad === "shell") config.shell_environment_policy = { exclude: [] };
+    if (bad === "shellExtra") config.shell_environment_policy.inherit = "all";
     say({ id, result: { config } });
+  } else if (method === "hooks/list") {
+    say({
+      id,
+      result: { hooks: configured.badConfig === "effectiveHooks" ? [{ name: "evil" }] : [] },
+    });
   } else if (method === "turn/start" || method === "turn/steer") {
     let scenario = configured;
     try {
