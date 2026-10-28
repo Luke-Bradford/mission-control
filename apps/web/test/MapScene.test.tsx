@@ -97,6 +97,58 @@ it("uses point LOD for a 5,000-file 1440×900 overview without aggregating file 
   expect(spheres.visible).toBe(false);
 });
 
+it("selects and describes a file point in the large-repo overview", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
+  const tree = Array.from({ length: 5_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
+  const nodes = layoutTree(tree);
+  const onSelect = vi.fn();
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(
+    <MapScene {...props} nodes={nodes} snapshot={snapshot} overview={1} onSelect={onSelect} />,
+  );
+  act(() => vi.advanceTimersByTime(100));
+
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const camera = renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const target = new THREE.Vector3().fromBufferAttribute(
+    points.geometry.getAttribute("position") as THREE.BufferAttribute,
+    0,
+  );
+  const projected = target.project(camera);
+  const clientX = ((projected.x + 1) / 2) * 1440;
+  const clientY = ((1 - projected.y) / 2) * 900;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  const pointRaycast = vi.spyOn(points, "raycast");
+  const meshRaycast = vi.spyOn(spheres, "raycast");
+  const canvas = screen.getByRole("application");
+  Object.assign(canvas, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() });
+  vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+    bottom: 900,
+    height: 900,
+    left: 0,
+    right: 1440,
+    toJSON() {},
+    top: 0,
+    width: 1440,
+    x: 0,
+    y: 0,
+  });
+
+  fireEvent.pointerDown(canvas, { clientX, clientY });
+  fireEvent.pointerUp(canvas, { clientX, clientY });
+  expect(pointRaycast).toHaveBeenCalled();
+  expect(meshRaycast).not.toHaveBeenCalled();
+  const selected = onSelect.mock.calls[0]?.[0];
+  expect(selected).toMatch(/^src\/f\d+\.ts$/);
+  fireEvent.pointerMove(canvas, { clientX, clientY });
+  act(() => vi.advanceTimersByTime(40));
+  expect(screen.getByRole("tooltip").textContent).toContain(selected);
+});
+
 /* Superseded by the seat-light architecture merged from main.
 it("animates fixture deltas at at most 30 fps, opens the arc pair, and stops after settling", () => {
   const onArc = vi.fn();

@@ -600,14 +600,23 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     );
     return ray;
   };
+  const fileHit = (ray: THREE.Raycaster) => {
+    if (!g) return undefined;
+    if (g.points.visible) {
+      // Points are screen-sized, so match their hit target to the file node radius.
+      ray.params.Points.threshold = 0.4;
+      return ray.intersectObject(g.points)[0];
+    }
+    return ray.intersectObject(g.mesh)[0];
+  };
   const pick = (e: PointerEvent) => {
     if (!g || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
     const ray = rayAt(e.clientX, e.clientY);
     const seat = g.lights.pick(ray);
-    const hit = ray.intersectObject(g.mesh)[0];
+    const hit = fileHit(ray);
     if (seat) current?.onSeatSelect?.(current.seat === seat ? null : seat);
-    else if (hit?.instanceId !== undefined) {
-      const node = g.spheres[hit.instanceId];
+    else if (hit) {
+      const node = g.spheres[hit.instanceId ?? hit.index ?? -1];
       if (node) current?.onSelect(node.path);
     }
   };
@@ -630,8 +639,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     hoverTimer = setTimeout(() => {
       if (!g || !current) return;
       const rect = canvas.getBoundingClientRect();
-      const hit = rayAt(clientX, clientY).intersectObject(g.mesh)[0];
-      const node = hit?.instanceId === undefined ? undefined : g.spheres[hit.instanceId];
+      const hit = fileHit(rayAt(clientX, clientY));
+      const node = hit ? g.spheres[hit.instanceId ?? hit.index ?? -1] : undefined;
       if (!node) {
         tip.hidden = true;
         return;
