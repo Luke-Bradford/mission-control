@@ -55,6 +55,7 @@ describe("route()", () => {
       { page: "comms", item: "stall:shop-app-ta:r-12", view: { kind: "flight" } },
     ],
     ["/telemetry", { page: "telemetry" }],
+    ["/audit", { page: "audit" }],
     ["/setup", { page: "setup", tab: "accounts" }],
     ["/setup/repos", { page: "setup", tab: "repos" }],
     ["/setup/sources", { page: "setup", tab: "sources" }],
@@ -178,6 +179,7 @@ describe("path helpers", () => {
       map: "/map",
       comms: "/comms",
       telemetry: "/telemetry",
+      audit: "/audit",
       setup: "/setup",
     });
   });

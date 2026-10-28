@@ -65,6 +65,7 @@ export type Page =
   | "map"
   | "comms"
   | "telemetry"
+  | "audit"
   | "setup";
 
 export type CommsView =
@@ -84,6 +85,7 @@ export type Route =
   | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
   | { page: "telemetry" }
+  | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
 /** Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. */
@@ -98,6 +100,7 @@ export const PAGE_PATHS: Record<Page, string> = {
   map: "/map",
   comms: "/comms",
   telemetry: "/telemetry",
+  audit: "/audit",
   setup: "/setup",
 };
 
@@ -201,6 +204,7 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/") return { page: "overview" };
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
+  if (p === "/audit") return { page: "audit" };
   const board = withId(path, "board");
   if (board) return { page: "board", repoId: board.id, ticket: null };
   const ticket = boardTicket(path);

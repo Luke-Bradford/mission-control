@@ -103,6 +103,7 @@ describe("Header", () => {
       "Map",
       "Comms",
       "Telemetry",
+      "Audit",
     ]);
     expect(links.map((a) => a.getAttribute("href"))).toEqual([
       "/",
@@ -112,6 +113,7 @@ describe("Header", () => {
       "/map",
       "/comms",
       "/telemetry",
+      "/audit",
     ]);
     expect(tab(/^Board/).getAttribute("aria-current")).toBe("page");
     expect(tab(/^Board/).className).toBe("on");

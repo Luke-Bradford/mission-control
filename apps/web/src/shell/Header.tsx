@@ -33,6 +33,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "map", label: "Map", to: PAGE_PATHS.map },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
+  { page: "audit", label: "Audit", to: PAGE_PATHS.audit },
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
