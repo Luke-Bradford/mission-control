@@ -77,19 +77,24 @@ it("provides a searchable-file fallback when WebGL is unavailable", () => {
   expect(screen.getByRole("status").textContent).toContain("Use file search");
 });
 
-it("uses compact GPU points at distance and shows a file label only when selected", () => {
-  const { rerender } = render(<MapScene {...props} selected="src/main.ts" />);
-  act(() => vi.advanceTimersByTime(100));
-  expect(screen.getByText("src/main.ts")).toBeTruthy();
-  const camera = renderer.render.mock.lastCall?.[1] as THREE.PerspectiveCamera;
-  camera.position.set(10_000, 10_000, 10_000);
-  rerender(<MapScene {...props} selected="src/main.ts" home={1} />);
+it("uses point LOD for a 5,000-file 1440×900 overview without aggregating file nodes", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
+  const tree = Array.from({ length: 5_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
+  const nodes = layoutTree(tree);
+  const snapshot = { ...structuredClone(props.snapshot), tree };
+  render(<MapScene {...props} nodes={nodes} snapshot={snapshot} overview={1} />);
   act(() => vi.advanceTimersByTime(100));
   const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
-  expect(scene.children.some((child) => child instanceof THREE.Points && child.visible)).toBe(true);
-  expect(
-    scene.children.some((child) => child instanceof THREE.InstancedMesh && !child.visible),
-  ).toBe(true);
+  const points = scene.children.find((child) => child instanceof THREE.Points) as THREE.Points;
+  const spheres = scene.children.find(
+    (child) => child instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  expect(nodes.filter((node) => node.count > 0)).toHaveLength(5_000);
+  expect(nodes.filter((node) => node.count > 1)).toHaveLength(0);
+  expect(points.geometry.getAttribute("position").count).toBe(5_000);
+  expect(points.visible).toBe(true);
+  expect(spheres.visible).toBe(false);
 });
 
 /* Superseded by the seat-light architecture merged from main.

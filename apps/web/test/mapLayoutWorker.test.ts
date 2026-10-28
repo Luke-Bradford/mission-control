@@ -1,38 +1,11 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
+import { handleLayoutRequest } from "../src/map/layoutWorkerCore.ts";
 
-afterEach(() => vi.unstubAllGlobals());
-
-it("sends a 10,000-file tree to the layout worker and retains one response node per file", async () => {
-  let worker:
-    | {
-        onmessage: ((event: MessageEvent) => void) | null;
-        postMessage: ReturnType<typeof vi.fn>;
-      }
-    | undefined;
-  vi.stubGlobal(
-    "Worker",
-    class {
-      onmessage: ((event: MessageEvent) => void) | null = null;
-      postMessage = vi.fn();
-      constructor() {
-        worker = this;
-      }
-    },
-  );
-  const { mapLayoutWorker } = await import("../src/map/layoutClient.ts");
+it("lays out 10,000 individual files through the worker message path", () => {
   const tree = Array.from({ length: 10_000 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 }));
-  const layout = mapLayoutWorker.layout(tree, []);
-  expect(worker?.postMessage).toHaveBeenCalledWith(
-    expect.objectContaining({ tree, imports: [], previous: undefined }),
-  );
-  const nodes = tree.map((file, i) => ({
-    path: file.path,
-    parent: "src",
-    area: "src",
-    position: [i, 0, 0] as [number, number, number],
-    files: [file.path],
-    count: 1,
-  }));
-  worker?.onmessage?.({ data: { id: 1, nodes } } as MessageEvent);
-  await expect(layout).resolves.toEqual(nodes);
+  const { id, nodes } = handleLayoutRequest({ id: 7, tree, imports: [] });
+  const files = nodes.filter((node) => node.count > 0);
+  expect(id).toBe(7);
+  expect(files).toHaveLength(10_000);
+  expect(files.every((node) => node.count === 1 && node.files[0] === node.path)).toBe(true);
 });

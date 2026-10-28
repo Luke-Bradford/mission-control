@@ -385,8 +385,13 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     if (document.hidden || !g) return;
     lastDraw = performance.now();
     if (current?.rotate && !reduced.matches) controls.update();
+    const distance = camera.position.distanceTo(controls.target);
+    // A large tree becomes visually denser long before it reaches the former fixed 90-unit
+    // threshold. At the normal overview framing, use points for >2,000 individual files; zooming
+    // inside 20 units restores the individually pickable sphere instances.
     const distant =
-      camera.position.distanceTo(controls.target) > Math.max(90, g.extent.length() * 0.9);
+      (g.spheres.length > 2000 && distance > 20) ||
+      distance > Math.max(90, g.extent.length() * 0.9);
     g.mesh.visible = !distant;
     g.points.visible = distant;
     const now = Date.now();
@@ -506,7 +511,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     const picked = new THREE.Color(SIGNAL);
     spheres.forEach((node, i) => {
       const chosen = node.path === next.selected;
-      // a collapsed folder is a little larger with more files, never a blob
+      // every file is an individual node; selection is the only reason to enlarge one
       const size = (node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4) * (chosen ? 1.8 : 1);
       matrix.makeScale(size, size, size).setPosition(...node.position);
       mesh.setMatrixAt(i, matrix);
