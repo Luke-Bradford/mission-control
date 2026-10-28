@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
+import { DEFAULT_SIZE, frameFor } from "../src/comms/spider.ts";
 import { TrafficChart } from "../src/comms/TrafficChart.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -18,16 +19,16 @@ afterEach(() => {
 });
 
 it.each([3, 6, 10])(
-  "keeps FLIGHT centred, racks quiet seats and leaves observed loops off the graph for %i seats",
+  "keeps FLIGHT centred and puts every seat and observed loop on its role's spoke for %i seats",
   async (seats) => {
     const live = Array.from({ length: seats }, (_, index) =>
       seatRow({
         id: index === 0 ? "flight-1" : `seat-${index}`,
         index,
-        role: index === 0 ? "FLIGHT" : "GUIDO",
+        role: index === 0 ? "FLIGHT" : index % 2 ? "GUIDO" : "RETRO",
       }),
     );
-    live.push(crewRow({ id: "ebull-ta" }));
+    live.push(crewRow({ id: "ebull-ta", index: seats }));
     stubFetch({
       "/api/comms/links": { links: [] },
       "/api/comms/traffic": { hours: [] },
@@ -35,14 +36,20 @@ it.each([3, 6, 10])(
     });
     render(<CommsGraph rows={live} flightId="flight-1" view={{ kind: "crew" }} />);
     const flight = await screen.findByRole("button", { name: /Open FLIGHT/ });
-    // CAPCOM, FLIGHT and #crew are hubs; every other live seat is a node.
-    expect(document.querySelectorAll(".comms-node")).toHaveLength(seats + 2);
+    // CAPCOM, FLIGHT and #crew are hubs; every other seat and the loop is a node, quiet or not.
+    expect(document.querySelectorAll(".comms-node")).toHaveLength(seats + 3);
     expect(document.querySelectorAll(".comms-node.hub")).toHaveLength(3);
-    expect(flight.getAttribute("style")).toContain("left: 50%");
-    expect(flight.getAttribute("style")).toContain("top: 50%");
-    // With no traffic in the window, every seat waits on the quiet rack, not on the graph.
-    expect(document.querySelectorAll(".comms-standby .comms-node.idle")).toHaveLength(seats - 1);
-    expect(screen.queryByRole("button", { name: /Open ebull-ta/ })).toBeNull();
+    const f = frameFor(DEFAULT_SIZE);
+    expect(flight.getAttribute("transform")).toBe(
+      `translate(${f.cx.toFixed(2)} ${f.cy.toFixed(2)})`,
+    );
+    expect(screen.getByRole("button", { name: /Open ebull-ta/ })).toBeTruthy();
+    const spokes = [...document.querySelectorAll(".comms-spoke text")].map((t) => t.textContent);
+    expect(spokes).toEqual([
+      `GUIDO ${Math.ceil((seats - 1) / 2)}`,
+      `RETRO ${Math.floor((seats - 1) / 2)}`,
+      "LOOPS 1",
+    ]);
   },
 );
 
@@ -66,7 +73,7 @@ it("lays out every live seat, draws static link totals, and changes scope with t
   expect(document.querySelectorAll(".comms-edge-count")).toHaveLength(2);
   expect(document.querySelectorAll(".comms-edge-dot")).toHaveLength(0);
   expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("10");
-  // Seats with traffic sit on the graph, sized by it; none waits on the quiet rack.
+  // Every seat sits on its spoke; there is no quiet rack.
   expect(document.querySelector(".comms-standby")).toBeNull();
 
   graph.rerender(
@@ -142,38 +149,58 @@ it("clears a lit edge after 1.8s even when the crew rows change identity meanwhi
   expect(document.querySelector(".comms-edge-pulse")).toBeNull();
 });
 
-it("replays the pulse and restarts the light when the same edge rises again", async () => {
+it("sends a particle per new message along its link, and again when the link rises again", async () => {
   let count = 1;
   stubRisingLinks(() => count);
-  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  count = 2;
-  act(() => hub.refetchTopic("agents"));
-  await vi.waitFor(() => expect(document.querySelector(".comms-edge-pulse")).not.toBeNull(), {
-    interval: 1,
-  });
-  await act(async () => {}); // run the effects that start the light's timer
-  const first = document.querySelector(".comms-edge-pulse");
-  act(() => vi.advanceTimersByTime(1_000));
+  // The first read draws the totals; nothing travels for messages that were already there.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(document.querySelector(".comms-particle")).toBeNull();
   count = 3;
   act(() => hub.refetchTopic("agents"));
-  await vi.waitFor(
-    () => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("3"),
-    {
-      interval: 1,
-    },
-  );
-  await act(async () => {});
-  // A new pulse element, so its one-shot animation plays again.
-  const second = document.querySelector(".comms-edge-pulse");
-  expect(second).not.toBeNull();
-  expect(second).not.toBe(first);
-  // The light now runs 1.8s from the second rise, not the first.
-  act(() => vi.advanceTimersByTime(1_000));
+  // Two new messages: two particles, the second a beat behind the first.
+  await waitFor(() => expect(document.querySelectorAll(".comms-particle")).toHaveLength(2), {
+    timeout: 1_000,
+  });
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
-  act(() => vi.advanceTimersByTime(800));
-  expect(document.querySelector(".comms-edge.live")).toBeNull();
+  await waitFor(() => expect(document.querySelector(".comms-particle")).toBeNull(), {
+    timeout: 3_000,
+  });
+  count = 4;
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(document.querySelectorAll(".comms-particle")).toHaveLength(1));
+  // A crew refetch while it flies hands over the same read: no second particle.
+  graph.rerender(
+    <CommsGraph
+      rows={rows.map((row) => ({ ...row }))}
+      flightId="flight-1"
+      view={{ kind: "crew" }}
+    />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  expect(document.querySelectorAll(".comms-particle").length).toBeLessThanOrEqual(1);
+});
+
+it("sends a particle when a link's newest message changes though its 24h count holds", async () => {
+  let lastId = "comms:1";
+  stubFetch({
+    "/api/comms/links": () => ({
+      status: 200,
+      body: {
+        links: [
+          { from: "guido-1", to: "retro-1", count: 2, lastId, lastAt: 1, lastText: "Review it" },
+        ],
+      },
+    }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("2"));
+  lastId = "comms:9";
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(document.querySelectorAll(".comms-particle")).toHaveLength(1));
 });
 
 it("claims LIVE only while the links are loaded and their last read succeeded", async () => {
@@ -321,7 +348,7 @@ it("resolves the configured FLIGHT seat and MC hub traffic in the open conversat
   const traffic = await screen.findByLabelText("Comms activity");
   await waitFor(() =>
     expect(
-      within(traffic).getByRole("img", { name: /5 messages in view \(FLIGHT ↔ CAPCOM\)/ }),
+      within(traffic).getByRole("figure", { name: /5 messages in view \(FLIGHT ↔ CAPCOM\)/ }),
     ).toBeTruthy(),
   );
   const stats = traffic.querySelectorAll(".comms-traffic-stats strong");
@@ -361,4 +388,164 @@ it("labels traffic buckets by their start in the operator's timezone", async () 
     "08:30 · 4 messages · 0 with capcom",
   );
   expect(document.querySelector(".comms-chart-now.live")).not.toBeNull();
+});
+
+/** Answers `prefers-reduced-motion: reduce` with `reduce`; restores matchMedia afterwards. */
+function preferMotion(reduce: boolean) {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: reduce && query.includes("reduce"),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })) as unknown as typeof window.matchMedia;
+  return () => {
+    window.matchMedia = original;
+  };
+}
+
+const transforms = () =>
+  Object.fromEntries(
+    [...document.querySelectorAll(".comms-spider-nodes > .comms-node:not(.leaving)")].map((g) => [
+      g.getAttribute("aria-label")?.split(",")[0],
+      g.getAttribute("transform"),
+    ]),
+  );
+
+it("keeps every node where it is when a refetch brings the same crew and links", async () => {
+  const restore = preferMotion(true);
+  try {
+    stubRisingLinks(() => 2);
+    const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+    await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("2"));
+    const before = transforms();
+    expect(Object.keys(before)).toHaveLength(5);
+    act(() => hub.refetchTopic("agents"));
+    graph.rerender(
+      <CommsGraph
+        rows={rows.map((row) => ({ ...row }))}
+        flightId="flight-1"
+        view={{ kind: "crew" }}
+      />,
+    );
+    await act(async () => {});
+    expect(transforms()).toEqual(before);
+  } finally {
+    restore();
+  }
+});
+
+it("shows presence by state and fades a seat out when it leaves, back in when it returns", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  const crew = (retro: Partial<(typeof rows)[number]> | null) => [
+    ...rows.slice(0, 2),
+    ...(retro === null ? [] : [seatRow({ id: "retro-1", index: 2, role: "RETRO", ...retro })]),
+  ];
+  const graph = render(
+    <CommsGraph rows={crew({ hudState: "running" })} flightId="flight-1" view={{ kind: "crew" }} />,
+  );
+  const node = () => screen.queryByRole("button", { name: /Open retro-1/ });
+  await waitFor(() => expect(node()?.classList).toContain("presence-running"));
+  graph.rerender(
+    <CommsGraph rows={crew({ hudState: "idle" })} flightId="flight-1" view={{ kind: "crew" }} />,
+  );
+  expect(node()?.classList).toContain("presence-idle");
+  graph.rerender(
+    <CommsGraph rows={crew({ hudState: "stopped" })} flightId="flight-1" view={{ kind: "crew" }} />,
+  );
+  expect(node()?.classList).toContain("presence-stopped");
+  expect(node()?.classList).toContain("inactive");
+  expect(node()?.getAttribute("aria-label")).toMatch(/, Stopped$/);
+
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  graph.rerender(<CommsGraph rows={crew(null)} flightId="flight-1" view={{ kind: "crew" }} />);
+  // Gone from the crew: no longer a button, but a fading ghost where it stood.
+  expect(node()).toBeNull();
+  expect(document.querySelectorAll(".comms-node.leaving")).toHaveLength(1);
+  act(() => vi.advanceTimersByTime(700));
+  expect(document.querySelectorAll(".comms-node.leaving")).toHaveLength(0);
+
+  graph.rerender(
+    <CommsGraph rows={crew({ hudState: "running" })} flightId="flight-1" view={{ kind: "crew" }} />,
+  );
+  expect(node()?.classList).toContain("presence-running");
+  expect(document.querySelectorAll(".comms-node.leaving")).toHaveLength(0);
+});
+
+it("under reduced motion: no drift loop, no particles, no fade; the new link still lights", async () => {
+  const restore = preferMotion(true);
+  const frames = vi.spyOn(window, "requestAnimationFrame");
+  try {
+    let count = 1;
+    stubRisingLinks(() => count);
+    const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+    await waitFor(() => expect(document.querySelector(".comms-edge-count")?.textContent).toBe("1"));
+    count = 2;
+    act(() => hub.refetchTopic("agents"));
+    await waitFor(() => expect(document.querySelector(".comms-edge.live")).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(document.querySelector(".comms-particle")).toBeNull();
+    expect(frames).not.toHaveBeenCalled();
+    expect(document.querySelector(".comms-spider-legend .particle")).toBeNull();
+    graph.rerender(
+      <CommsGraph rows={rows.slice(0, 2)} flightId="flight-1" view={{ kind: "crew" }} />,
+    );
+    expect(document.querySelector(".comms-node.leaving")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open retro-1/ })).toBeNull();
+  } finally {
+    frames.mockRestore();
+    restore();
+  }
+});
+
+it("hovers a node or link for its counts and newest message; clicks and keys open the conversation", async () => {
+  stubFetch({
+    "/api/comms/links": {
+      links: [
+        {
+          from: "guido-1",
+          to: "retro-1",
+          count: 3,
+          lastId: "comms:4",
+          lastAt: 1,
+          lastText: "Fixed",
+        },
+        {
+          from: "retro-1",
+          to: "guido-1",
+          count: 2,
+          lastId: "comms:7",
+          lastAt: 2,
+          lastText: "One blocking finding left",
+        },
+      ],
+    },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const guido = await screen.findByRole("button", { name: /Open guido-1, 5 messages/ });
+  expect(guido.getAttribute("tabindex")).toBe("0");
+  fireEvent.mouseEnter(guido);
+  const tip = await screen.findByRole("tooltip");
+  expect(within(tip).getByText("Sent").nextElementSibling?.textContent).toBe("3");
+  expect(within(tip).getByText("Received").nextElementSibling?.textContent).toBe("2");
+  expect(within(tip).getByText("One blocking finding left")).toBeTruthy();
+  fireEvent.mouseLeave(guido);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+
+  const edge = document.querySelector(".comms-edge") as Element;
+  fireEvent.mouseEnter(edge);
+  expect(within(screen.getByRole("tooltip")).getByText("guido-1 ↔ retro-1")).toBeTruthy();
+  fireEvent.click(edge);
+  expect(window.location.pathname).toBe("/comms/agents/guido-1/contacts/retro-1");
+
+  fireEvent.keyDown(screen.getByRole("button", { name: /Open retro-1/ }), { key: "Enter" });
+  expect(window.location.pathname).toBe("/comms/agents/retro-1");
+  fireEvent.focus(screen.getByRole("button", { name: /Open CAPCOM/ }));
+  expect(within(screen.getByRole("tooltip")).getByText("No messages in 24h")).toBeTruthy();
 });

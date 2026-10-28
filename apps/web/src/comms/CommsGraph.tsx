@@ -1,20 +1,47 @@
-import { COMMS_CREW, type CrewRow } from "@mc/core";
-import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { COMMS_CREW, type CrewRow, HUD_STATE_LABEL } from "@mc/core";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { callSign, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import {
   type CommsView,
   commsAgentPath,
+  commsContactPath,
   commsCrewPath,
   commsFlightPath,
   navigate,
 } from "../router.ts";
+import {
+  CommsSpider,
+  type Flow,
+  type LastMessage,
+  type SpiderEdge,
+  type SpiderNode,
+  useReducedMotion,
+} from "./CommsSpider.tsx";
+import {
+  DEFAULT_SIZE,
+  frameFor,
+  hubPoint,
+  LOOPS_SPOKE,
+  presenceOf,
+  spokeAnchors,
+  spokesFor,
+} from "./spider.ts";
 import { TrafficChart, type TrafficHour } from "./TrafficChart.tsx";
 
-type Link = { from: string; to: string; count: number };
-type Hour = Link & { hour: number };
-type Edge = { a: string; b: string; aToB: number; bToA: number };
+/** One direction of a link over the window, with its newest message (absent on older hubs). */
+type Link = {
+  from: string;
+  to: string;
+  count: number;
+  lastId?: string;
+  lastAt?: number;
+  lastText?: string;
+};
+type Hour = { from: string; to: string; count: number; hour: number };
+type Edge = { a: string; b: string; aToB: number; bToA: number; last: LastMessage | null };
 type ChatterPair = {
   from: string;
   to: string;
@@ -28,31 +55,8 @@ const CAPCOM = "CAPCOM";
 const MC = "MC";
 /** Chatter watch lists a pair once it passes this many rounds on one thing. */
 const CHATTER_ROUNDS = 6;
-/** How long a link stays lit after its count rises. */
+/** How long a link stays lit after a new message on it. */
 const LIVE_MS = 1_800;
-
-/** The graph's size before it is measured (and in tests, where nothing is laid out). */
-const DEFAULT_SIZE = { w: 340, h: 300 };
-
-/**
- * The graph's coordinate space is its measured box, so it fills whatever the panel gives it.
- * CAPCOM, FLIGHT and #crew sit on the vertical spine; seats with traffic sit on an ellipse round it.
- */
-type Frame = { w: number; h: number; cx: number; cy: number; rx: number; ry: number };
-type Point = { x: number; y: number };
-
-function frameFor(size: { w: number; h: number }): Frame {
-  const w = Math.max(240, size.w);
-  const h = Math.max(220, size.h);
-  return {
-    w,
-    h,
-    cx: w / 2,
-    cy: h / 2,
-    rx: Math.min(w / 2 - 40, 200),
-    ry: h / 2 - 34,
-  };
-}
 
 function pair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
@@ -90,67 +94,27 @@ function scopeLabel(view: CommsView): string {
   return `${view.agentId}, all contacts`;
 }
 
-/** Seats on an ellipse round FLIGHT, alternating right and left, clear of the spine's hubs. */
-function seatPositions(count: number, f: Frame): Point[] {
-  const right = Math.ceil(count / 2);
-  const left = count - right;
-  const side = (n: number, mirror: boolean) =>
-    Array.from({ length: n }, (_, index) => {
-      const degrees = n === 1 ? 0 : -52 + (104 * index) / (n - 1);
-      const angle = ((mirror ? 180 - degrees : degrees) * Math.PI) / 180;
-      return { x: f.cx + f.rx * Math.cos(angle), y: f.cy + f.ry * Math.sin(angle) };
-    });
-  const r = side(right, false);
-  const l = side(left, true);
-  return Array.from({ length: count }, (_, index) =>
-    index % 2 === 0
-      ? (r[index / 2] as { x: number; y: number })
-      : (l[(index - 1) / 2] as { x: number; y: number }),
-  );
-}
-
-/** A spoke from FLIGHT is straight; every other link bows away from the centre. */
-function edgeGeometry(a: Point, b: Point, straight: boolean, avoid: Point[], f: Frame) {
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const length = Math.hypot(dx, dy) || 1;
-  let nx = -dy / length;
-  let ny = dx / length;
-  if (nx * (mx - f.cx) + ny * (my - f.cy) < 0) {
-    nx = -nx;
-    ny = -ny;
-  }
-  const bend = straight ? 0 : length * 0.16;
-  const cx = mx + nx * bend;
-  const cy = my + ny * bend;
-  const at = (t: number) => ({
-    x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * cx + t ** 2 * b.x,
-    y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * cy + t ** 2 * b.y,
-  });
-  // The count sits mid-link unless a node or its label is there; then it slides along the link.
-  const clear = (p: Point) =>
-    avoid.every((node) => Math.abs(p.x - node.x) > 44 || p.y < node.y - 16 || p.y > node.y + 26);
-  // Along the link first, then just off it on the outer side for a short, crowded link.
-  const candidates = [0, 12].flatMap((off) =>
-    [0.5, 0.4, 0.6, 0.32, 0.68].map((t) => {
-      const p = at(t);
-      return { x: p.x + nx * off, y: p.y + ny * off };
-    }),
-  );
-  const room = (p: Point) =>
-    Math.min(...avoid.map((node) => Math.hypot(p.x - node.x, p.y - (node.y + 8))));
-  const label =
-    candidates.find(clear) ??
-    candidates.reduce((best, p) => (room(p) > room(best) ? p : best), at(0.5));
-  return {
-    d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
-    label,
-  };
-}
-
 const pct = (value: number, of: number) => `${Number(((value / of) * 100).toFixed(3))}%`;
+
+/** What a seat is called on its spoke: the id without its role's prefix (`guido-cx` is `cx`). */
+function spokeLabel(row: CrewRow): string {
+  if (row.kind === "loop") return callSign(row);
+  const prefix = `${(row.role ?? "").toLowerCase()}-`;
+  return row.id.startsWith(prefix) && row.id.length > prefix.length
+    ? row.id.slice(prefix.length)
+    : row.id;
+}
+
+/** `Idle`, `Paused`, `Crew paused`, ...: the HUD's word for a seat's state. */
+function stateLabel(row: CrewRow): string {
+  if (row.crewPause != null) return "Crew paused";
+  if (row.paused) return "Paused";
+  return HUD_STATE_LABEL[row.hudState];
+}
+
+/** The newer of two messages. */
+const newer = (a: LastMessage | null, b: LastMessage | null) =>
+  a === null ? b : b === null ? a : b.at > a.at ? b : a;
 
 /** The live crew's communication map. Token telemetry is intentionally optional until #T3 lands. */
 export function CommsGraph({
@@ -170,13 +134,13 @@ export function CommsGraph({
   const hours = trafficResource.data?.hours;
   const chatter = useResource<{ pairs: ChatterPair[] }>(RESOURCES.commsChatter).data?.pairs;
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
-  // The raw from/to pairs whose count rose on the last read, and a generation per rise so the
-  // pulse replays when the same link rises again.
-  const [pulse, setPulse] = useState<{ pairs: Set<string>; generation: number }>(() => ({
-    pairs: new Set(),
-    generation: 0,
-  }));
-  const previousCounts = useRef<Map<string, number> | null>(null);
+  const reduced = useReducedMotion();
+  // The raw from/to pairs that gained a message on the last read, the canonical flows they make
+  // (one particle per new message), and a generation per read that had any.
+  const [pulse, setPulse] = useState<{ pairs: Set<string>; flows: Flow[]; generation: number }>(
+    () => ({ pairs: new Set(), flows: [], generation: 0 }),
+  );
+  const previousLinks = useRef<Map<string, { count: number; lastId?: string }> | null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(DEFAULT_SIZE);
   useLayoutEffect(() => {
@@ -204,36 +168,56 @@ export function CommsGraph({
       const to = canonicalEndpoint(link.to, flight);
       if (!known.has(from) || !known.has(to) || from === to) continue;
       const [a, b] = pair(from, to);
-      const value = combined.get(`${a}\0${b}`) ?? { a, b, aToB: 0, bToA: 0 };
+      const value = combined.get(`${a}\0${b}`) ?? { a, b, aToB: 0, bToA: 0, last: null };
       if (from === a) value.aToB += link.count;
       else value.bToA += link.count;
+      if (link.lastAt !== undefined && link.lastText !== undefined)
+        value.last = newer(value.last, { from, to, text: link.lastText, at: link.lastAt });
       combined.set(`${a}\0${b}`, value);
     }
     return [...combined.values()];
   }, [flight, known, links]);
-  // Rises are read from the links alone (raw endpoints), so crew rows or the FLIGHT seat resolving
-  // later neither re-run this nor make an edge that just became visible look like a rise.
+  // New messages are read from the links alone (raw endpoints), so crew rows or the FLIGHT seat
+  // resolving later neither re-run this nor make an edge that just became visible look new. A
+  // link has new messages when its count rises or its newest message changes (the 24h window can
+  // drop an old one as a new one lands, leaving the count where it was).
   useEffect(() => {
     if (links === undefined) return;
-    const current = new Map<string, number>();
+    const current = new Map<string, { count: number; lastId?: string }>();
     for (const link of links) {
       const key = `${link.from}\0${link.to}`;
-      current.set(key, (current.get(key) ?? 0) + link.count);
+      const seen = current.get(key);
+      current.set(key, {
+        count: (seen?.count ?? 0) + link.count,
+        lastId: link.lastId ?? seen?.lastId,
+      });
     }
-    const previous = previousCounts.current;
-    previousCounts.current = current;
+    const previous = previousLinks.current;
+    previousLinks.current = current;
     if (previous === null) return;
-    const increased = new Set(
-      [...current].flatMap(([key, count]) => (count > (previous.get(key) ?? 0) ? [key] : [])),
-    );
-    if (increased.size === 0) return;
-    setPulse((last) => ({ pairs: increased, generation: last.generation + 1 }));
+    const fresh = new Map<string, number>();
+    for (const [key, now] of current) {
+      const before = previous.get(key);
+      const rise = now.count - (before?.count ?? 0);
+      const moved = now.lastId !== undefined && before?.lastId !== now.lastId;
+      const n = Math.max(rise, moved ? 1 : 0);
+      if (n > 0) fresh.set(key, n);
+    }
+    if (fresh.size === 0) return;
+    setPulse((last) => ({
+      pairs: new Set(fresh.keys()),
+      flows: [...fresh].map(([key, n]) => {
+        const [from = "", to = ""] = key.split("\0");
+        return { from, to, n };
+      }),
+      generation: last.generation + 1,
+    }));
   }, [links]);
-  // Each rise lights its links for LIVE_MS; this timer is the only one that clears them.
+  // Each new message lights its link for LIVE_MS; this timer is the only one that clears it.
   useEffect(() => {
     if (pulse.pairs.size === 0) return;
     const timer = window.setTimeout(
-      () => setPulse((last) => ({ pairs: new Set(), generation: last.generation })),
+      () => setPulse((last) => ({ pairs: new Set(), flows: [], generation: last.generation })),
       LIVE_MS,
     );
     return () => window.clearTimeout(timer);
@@ -250,6 +234,18 @@ export function CommsGraph({
     }
     return keys;
   }, [flight, pulse]);
+  // Particles for this read's new messages, between endpoints the graph draws.
+  const flows = useMemo(
+    () => ({
+      generation: pulse.generation,
+      list: pulse.flows.flatMap((flow) => {
+        const from = canonicalEndpoint(flow.from, flight);
+        const to = canonicalEndpoint(flow.to, flight);
+        return from !== to && known.has(from) && known.has(to) ? [{ ...flow, from, to }] : [];
+      }),
+    }),
+    [flight, known, pulse],
+  );
   const scoped = edges.filter((edge) => inView(view, flight, edge.a, edge.b));
   const total = scoped.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
   const focusedView = view.kind !== "crew" && view.kind !== "ticket";
@@ -265,49 +261,89 @@ export function CommsGraph({
             : [view.agentId],
   );
   const active = new Set([...selected, ...scoped.flatMap((edge) => [edge.a, edge.b])]);
-  const countOf = (id: string) =>
-    edges
-      .filter((edge) => edge.a === id || edge.b === id)
-      .reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
-  const seats = crewRows.filter((row) => row.id !== flight);
-  // A seat with no traffic in the window waits on the standby rack unless the page is about it.
-  const onGraph = seats.filter((row) => countOf(row.id) > 0 || selected.has(row.id));
-  const standby = seats.filter((row) => !onGraph.includes(row));
+  const touching = (id: string) => edges.filter((edge) => edge.a === id || edge.b === id);
+  const sentBy = (id: string) =>
+    touching(id).reduce((sum, edge) => sum + (edge.a === id ? edge.aToB : edge.bToA), 0);
+  const receivedBy = (id: string) =>
+    touching(id).reduce((sum, edge) => sum + (edge.a === id ? edge.bToA : edge.aToB), 0);
+  const countOf = (id: string) => sentBy(id) + receivedBy(id);
+  const lastOf = (id: string) =>
+    touching(id).reduce<LastMessage | null>((last, edge) => newer(last, edge.last), null);
+
+  // Every seat and observed loop sits on its role's spoke; FLIGHT, CAPCOM and #crew on the axis.
   const f = frameFor(size);
-  const seatPoints = seatPositions(onGraph.length, f);
-  const busiest = Math.max(1, ...onGraph.map((row) => countOf(row.id)));
+  const spokes = spokesFor(rows, flight);
+  const anchors = spokeAnchors(spokes, f);
+  const flightRow = crewRows.find((row) => row.id === flight);
+  const seatRows = rows.filter((row) => row.id !== flight);
+  const busiest = Math.max(1, ...seatRows.map((row) => countOf(row.id)));
   const liveIds = new Set(
     edges
       .filter((edge) => liveEdges.has(`${edge.a}\0${edge.b}`))
       .flatMap((edge) => [edge.a, edge.b]),
   );
-  const rowOf = (id: string) => crewRows.find((candidate) => candidate.id === id);
-  const inactive = (row: CrewRow | undefined) =>
-    row !== undefined && (row.paused || row.crewPause != null || row.hudState === "stopped");
-  type GraphNode = {
-    id: string;
-    label: string;
-    x: number;
-    y: number;
-    hub: boolean;
-    count: number;
-    color: string;
-  };
-  const nodes: GraphNode[] = [
-    { id: CAPCOM, label: CAPCOM, x: f.cx, y: f.cy - f.ry, hub: true, color: "var(--fg)" },
-    { id: flight, label: "FLIGHT", x: f.cx, y: f.cy, hub: true, color: "var(--accent)" },
-    { id: COMMS_CREW, label: "#crew", x: f.cx, y: f.cy + f.ry, hub: true, color: "var(--fg-2)" },
-    ...onGraph.map((row, index) => ({
-      id: row.id,
-      label: row.id,
-      x: seatPoints[index]?.x ?? f.cx,
-      y: seatPoints[index]?.y ?? f.cy,
-      hub: false,
-      color: agentColor(row.index),
-    })),
-  ].map((node) => ({ ...node, count: countOf(node.id) }));
-  const point = new Map(nodes.map((node) => [node.id, node]));
-  const heaviest = Math.max(1, ...edges.map((edge) => edge.aToB + edge.bToA));
+  const dimmed = (id: string) => focusedView && active.size > 0 && !active.has(id);
+  const common = (id: string) => ({
+    count: countOf(id),
+    sent: sentBy(id),
+    received: receivedBy(id),
+    selected: selected.has(id),
+    dim: dimmed(id),
+    live: liveIds.has(id),
+    last: lastOf(id),
+  });
+  const hub = (
+    id: string,
+    label: string,
+    color: string,
+    at: "centre" | "above" | "below",
+    r: number,
+    row?: CrewRow,
+  ): SpiderNode => ({
+    id,
+    label,
+    name: label,
+    hub: true,
+    role: row ? (seatRoleTitle(row.id, rows, undefined) ?? row.role) : null,
+    color,
+    presence: row ? presenceOf(row) : "idle",
+    state: row ? stateLabel(row) : null,
+    since: row?.stateSince ?? null,
+    alert: row ? row.hudState === "error" || row.hudState === "stalled" : false,
+    r,
+    anchor: hubPoint(f, at),
+    pinned: true,
+    ...common(id),
+  });
+  const nodes: SpiderNode[] = [
+    hub(CAPCOM, CAPCOM, "var(--fg)", "above", 8),
+    hub(flight, "FLIGHT", "var(--accent)", "centre", 12, flightRow),
+    hub(COMMS_CREW, "#crew", "var(--fg-2)", "below", 7.5),
+    ...seatRows.map((row): SpiderNode => {
+      const presence = presenceOf(row);
+      const count = countOf(row.id);
+      const base = presence === "running" ? 6 : presence === "idle" ? 5 : 4;
+      return {
+        id: row.id,
+        label: spokeLabel(row),
+        name: row.kind === "loop" ? callSign(row) : row.id,
+        hub: false,
+        role:
+          row.kind === "loop"
+            ? `${LOOPS_SPOKE.toLowerCase()} · observed`
+            : (seatRoleTitle(row.id, rows, undefined) ?? row.role),
+        color: agentColor(row.index),
+        presence,
+        state: stateLabel(row),
+        since: row.stateSince,
+        alert: row.hudState === "error" || row.hudState === "stalled",
+        r: Math.round((base + 5 * Math.sqrt(count / busiest)) * 2) / 2,
+        anchor: anchors.get(row.id) ?? hubPoint(f, "centre"),
+        pinned: false,
+        ...common(row.id),
+      };
+    }),
+  ];
   const hasData = links !== undefined;
   const agentScope = view.kind === "agent" || view.kind === "inbox" || view.kind === "contact";
   const chartHours = useMemo<TrafficHour[]>(() => {
@@ -360,7 +396,27 @@ export function CommsGraph({
     [chatter, flight, known],
   );
   const mostRounds = Math.max(CHATTER_ROUNDS * 2, ...watched.map((entry) => entry.rounds));
-  const graphLabel = `Comms graph, ${crewRows.length} live seats, ${total} messages in view (${scopeLabel(view)})`;
+  const heaviest = Math.max(1, ...edges.map((edge) => edge.aToB + edge.bToA));
+  const spiderEdges: SpiderEdge[] = edges.map((edge) => ({
+    key: `${edge.a}\0${edge.b}`,
+    a: edge.a,
+    b: edge.b,
+    aToB: edge.aToB,
+    bToA: edge.bToA,
+    weight: Math.sqrt((edge.aToB + edge.bToA) / heaviest),
+    straight: edge.a === flight || edge.b === flight,
+    lit: scoped.includes(edge),
+    focus: focusedView && scoped.includes(edge),
+    watching: watched.some(
+      (entry) =>
+        (entry.from === edge.a && entry.to === edge.b) ||
+        (entry.from === edge.b && entry.to === edge.a),
+    ),
+    live: liveEdges.has(`${edge.a}\0${edge.b}`),
+    last: edge.last,
+  }));
+  const seatCount = rows.length;
+  const graphLabel = `Comms graph, ${seatCount} seats, ${total} messages in view (${scopeLabel(view)})`;
   const open = (id: string) =>
     navigate(
       id === CAPCOM || id === flight
@@ -369,8 +425,13 @@ export function CommsGraph({
           ? commsCrewPath()
           : commsAgentPath(id),
     );
-  const nodeClass = (id: string, extra: string) =>
-    `comms-node${extra}${active.size === 0 || active.has(id) ? "" : " dim"}${inactive(rowOf(id)) ? " inactive" : ""}${selected.has(id) ? " selected" : ""}${liveIds.has(id) ? " live" : ""}`;
+  /** A link opens its conversation: FLIGHT ↔ CAPCOM, #crew, or the pair from the seat's side. */
+  const openEdge = (a: string, b: string) => {
+    if (new Set([a, b, flight, CAPCOM]).size === 2) return navigate(commsFlightPath());
+    if (a === COMMS_CREW || b === COMMS_CREW) return navigate(commsCrewPath());
+    const [agent, contact] = a === CAPCOM ? [b, a] : [a, b];
+    navigate(commsContactPath(agent, contact));
+  };
 
   return (
     <aside className="comms-right" aria-label="Comms activity">
@@ -415,143 +476,29 @@ export function CommsGraph({
             <b>{edges.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0)}</b> msg
           </span>
           <span>
-            <b>{onGraph.length}</b>/{seats.length} seats talking
+            <b>{spokes.length}</b> roles
           </span>
         </div>
         <div className="comms-graph-stage" ref={stage}>
-          <div
-            className={`comms-graph${metric === "tokens" ? " tokens" : ""}`}
-            role="img"
-            aria-label={graphLabel}
-          >
-            <svg className="comms-graph-links" viewBox={`0 0 ${f.w} ${f.h}`} aria-hidden="true">
-              <ellipse className="comms-graph-orbit" cx={f.cx} cy={f.cy} rx={f.rx} ry={f.ry} />
-              <line
-                className="comms-graph-spine"
-                x1={f.cx}
-                x2={f.cx}
-                y1={f.cy - f.ry}
-                y2={f.cy + f.ry}
-              />
-              {edges.map((edge) => {
-                const a = point.get(edge.a);
-                const b = point.get(edge.b);
-                if (!a || !b) return null;
-                const count = edge.aToB + edge.bToA;
-                const weight = Math.sqrt(count / heaviest);
-                const lit = scoped.includes(edge);
-                const watching = watched.some(
-                  (entry) =>
-                    (entry.from === edge.a && entry.to === edge.b) ||
-                    (entry.from === edge.b && entry.to === edge.a),
-                );
-                const live = liveEdges.has(`${edge.a}\0${edge.b}`);
-                const geometry = edgeGeometry(
-                  a,
-                  b,
-                  edge.a === flight || edge.b === flight,
-                  nodes,
-                  f,
-                );
-                return (
-                  <g
-                    key={`${edge.a}-${edge.b}`}
-                    className={`comms-edge${lit ? (focusedView ? " active focus" : " active") : " dim"}${watching ? " watching" : ""}${live ? " live" : ""}`}
-                    style={{ "--w": weight.toFixed(3) } as CSSProperties}
-                  >
-                    <title>{`${a.label} → ${b.label}: ${edge.aToB} · ${b.label} → ${a.label}: ${edge.bToA}`}</title>
-                    <path
-                      className="comms-edge-line"
-                      d={geometry.d}
-                      strokeWidth={metric === "tokens" ? 1 : 1 + 3 * weight}
-                    />
-                    {live && (
-                      <path
-                        key={pulse.generation}
-                        className="comms-edge-pulse"
-                        d={geometry.d}
-                        pathLength={100}
-                      />
-                    )}
-                    {metric === "messages" && (
-                      <text
-                        className="comms-edge-count"
-                        x={geometry.label.x}
-                        y={geometry.label.y}
-                        dy="0.34em"
-                        textAnchor="middle"
-                      >
-                        {count}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-            {nodes.map((node) => {
-              const heat = node.count === 0 ? 0 : Math.sqrt(node.count / busiest);
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  className={nodeClass(
-                    node.id,
-                    `${node.hub ? " hub" : ""}${node.count === 0 ? " quiet" : ""}`,
-                  )}
-                  style={
-                    {
-                      left: pct(node.x, f.w),
-                      top: pct(node.y, f.h),
-                      "--node-color": node.color,
-                      "--heat": heat.toFixed(3),
-                    } as CSSProperties
-                  }
-                  onClick={() => open(node.id)}
-                  aria-label={`Open ${node.label}, ${node.count} messages in 24h`}
-                >
-                  <span
-                    key={liveIds.has(node.id) ? `live-${pulse.generation}` : "dot"}
-                    className="comms-node-dot"
-                    aria-hidden="true"
-                  />
-                  <span className="comms-node-label" aria-hidden="true">
-                    <b className="comms-node-name">{node.label}</b>
-                    <em className="comms-node-count">{node.count}</em>
-                  </span>
-                </button>
-              );
-            })}
-            {hasData && edges.length === 0 && (
-              <p className="comms-empty">No direct messages in the last 24h.</p>
-            )}
-            {metric === "tokens" && (
-              <p className="comms-token-empty">Token totals are not available yet.</p>
-            )}
-          </div>
+          <CommsSpider
+            frame={f}
+            spokes={spokes}
+            nodes={nodes}
+            edges={spiderEdges}
+            metric={metric}
+            flows={flows}
+            reduced={reduced}
+            label={graphLabel}
+            onOpenNode={open}
+            onOpenEdge={openEdge}
+          />
+          {hasData && edges.length === 0 && (
+            <p className="comms-empty">No direct messages in the last 24h.</p>
+          )}
+          {metric === "tokens" && (
+            <p className="comms-token-empty">Token totals are not available yet.</p>
+          )}
         </div>
-        {standby.length > 0 && (
-          <div className="comms-standby">
-            <span className="comms-standby-head">
-              Quiet 24h <b>{standby.length}</b>
-            </span>
-            <div className="comms-standby-seats">
-              {standby.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  className={nodeClass(row.id, " idle")}
-                  style={{ "--node-color": agentColor(row.index) } as CSSProperties}
-                  onClick={() => open(row.id)}
-                  aria-label={`Open ${row.id}, 0 messages in 24h`}
-                  title={inactive(row) ? `${row.id} · paused` : row.id}
-                >
-                  <span className="comms-node-dot" aria-hidden="true" />
-                  <span aria-hidden="true">{row.id}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         <div className="comms-watch">
           <div className="comms-watch-head">
             Chatter watch <span>· over {CHATTER_ROUNDS} rounds on one thing</span>

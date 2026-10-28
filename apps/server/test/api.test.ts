@@ -609,6 +609,32 @@ describe("Comms API", () => {
     expect(store.commsPins()).toEqual([]);
   });
 
+  it("serves each link's count with its newest message for the Comms graph", async () => {
+    commsRow("alpha", "beta", "first");
+    const newest = commsRow("alpha", "beta", `second ${"x".repeat(400)}`);
+    commsRow("beta", "alpha", "back");
+    // Outside the 24h window: neither counted nor the newest.
+    commsRow("beta", "crew", "old", clock - 25 * 60 * 60 * 1000);
+    await withCommsApp(async (comms) => {
+      const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
+      expect(links).toHaveLength(2);
+      const forward = links.find((l: { from: string }) => l.from === "alpha");
+      expect(forward).toMatchObject({
+        from: "alpha",
+        to: "beta",
+        count: 2,
+        lastId: newest.id,
+        lastAt: newest.at,
+      });
+      expect(forward.lastText).toBe(newest.text.slice(0, 200));
+      expect(links.find((l: { from: string }) => l.from === "beta")).toMatchObject({
+        to: "alpha",
+        count: 1,
+        lastText: "back",
+      });
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");

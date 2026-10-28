@@ -787,7 +787,10 @@ describe("Comms routes", () => {
     expect(fetch.mock.calls.some(([path]) => path === "/api/comms/agents/studio-builder")).toBe(
       false,
     );
-    expect(screen.queryByText("studio-builder")).toBeNull();
+    // The loop sits on the graph's loops spoke (#790), but has no conversation of its own.
+    expect(
+      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-spider")),
+    ).toEqual([]);
   });
 
   it("shows the stored-Comms empty state for crew", async () => {

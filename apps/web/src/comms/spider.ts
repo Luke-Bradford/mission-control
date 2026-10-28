@@ -1,0 +1,269 @@
+import { BUILTIN_ROLES, type CrewRow } from "@mc/core";
+
+/**
+ * The Comms graph's layout and physics, kept free of React and the DOM so both can be tested.
+ *
+ * FLIGHT sits at the centre with CAPCOM above it and the #crew channel below; every other seat sits
+ * on its role's spoke (observed loops share one), anchored at a fixed point along it. A small
+ * spring simulation holds each node near its anchor, so a node that appears springs out along its
+ * spoke, a node whose anchor moves eases there, and in motion mode every seat drifts a few pixels
+ * round its anchor. Positions live in the simulation, not in React state, so a data refetch that
+ * changes nothing moves nothing.
+ */
+
+/** How present a seat is: running seats glow, idle ones dim, stopped or paused ones fade back. */
+export type Presence = "running" | "idle" | "stopped";
+
+export function presenceOf(row: CrewRow): Presence {
+  if (row.paused || row.crewPause != null || row.hudState === "stopped") return "stopped";
+  return row.hudState === "running" ? "running" : "idle";
+}
+
+/** Observed loops share one spoke. */
+export const LOOPS_SPOKE = "LOOPS";
+
+export type Point = { x: number; y: number };
+/** The graph's coordinate space: its measured box, the centre and the spokes' reach. */
+export type Frame = { w: number; h: number; cx: number; cy: number; rx: number; ry: number };
+
+/** The graph's size before it is measured (and in tests, where nothing is laid out). */
+export const DEFAULT_SIZE = { w: 340, h: 360 };
+
+/** The strip under the plot that holds the legend. */
+const LEGEND_PX = 20;
+
+export function frameFor(size: { w: number; h: number }): Frame {
+  const w = Math.max(240, size.w);
+  const h = Math.max(240, size.h);
+  const plot = h - LEGEND_PX;
+  // Room outside the web for the spokes' labels.
+  const rx = Math.min(w / 2 - 46, plot / 2 - 26);
+  // A tall panel stretches the web a little, never so far that the spokes read as skewed.
+  const ry = Math.min(plot / 2 - 26, rx * 1.12);
+  return { w, h, cx: w / 2, cy: plot / 2, rx, ry };
+}
+
+export type Spoke = { key: string; angle: number; ids: string[] };
+
+/** Built-in roles first in their own order, then configured roles A–Z, then the loops. */
+function spokeOrder(keys: string[]): string[] {
+  const builtin = Object.keys(BUILTIN_ROLES);
+  const rank = (key: string) =>
+    key === LOOPS_SPOKE ? Number.POSITIVE_INFINITY : builtin.indexOf(key) + 1 || builtin.length + 1;
+  return [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/** Angles (degrees, y down) for `k` spokes on one side, centred on the horizontal. */
+function sideAngles(k: number): number[] {
+  if (k <= 1) return [0];
+  const span = Math.min(100, 36 * (k - 1));
+  return Array.from({ length: k }, (_, i) => -span / 2 + (span * i) / (k - 1));
+}
+
+/**
+ * One spoke per role (and one for the loops), alternating right and left of FLIGHT so the top and
+ * bottom stay clear for CAPCOM and #crew. Seats on a spoke keep config order.
+ */
+export function spokesFor(rows: readonly CrewRow[], flight: string): Spoke[] {
+  const groups = new Map<string, CrewRow[]>();
+  for (const row of rows) {
+    if (row.id === flight) continue;
+    const key = row.kind === "loop" ? LOOPS_SPOKE : (row.role ?? "CREW");
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const keys = spokeOrder([...groups.keys()]);
+  const right = keys.filter((_, i) => i % 2 === 0);
+  const left = keys.filter((_, i) => i % 2 === 1);
+  const rightAngles = sideAngles(right.length);
+  const leftAngles = sideAngles(left.length).map((a) => 180 - a);
+  return keys.map((key, i) => ({
+    key,
+    angle: (i % 2 === 0 ? rightAngles[i / 2] : leftAngles[(i - 1) / 2]) ?? 0,
+    ids: (groups.get(key) ?? []).sort((a, b) => a.index - b.index).map((row) => row.id),
+  }));
+}
+
+/** Where seat `i` of `n` sits along a spoke, as a fraction of the spoke's reach. */
+export function spokeFraction(i: number, n: number): number {
+  if (n <= 1) return 0.6;
+  return 0.36 + (0.48 * i) / (n - 1);
+}
+
+export function onSpoke(f: Frame, angle: number, fraction: number): Point {
+  const a = (angle * Math.PI) / 180;
+  return { x: f.cx + f.rx * fraction * Math.cos(a), y: f.cy + f.ry * fraction * Math.sin(a) };
+}
+
+/**
+ * CAPCOM above FLIGHT and the #crew channel below it, on the vertical axis just outside the web:
+ * neither is a seat, so neither sits on the crew's rings.
+ */
+export const hubPoint = (f: Frame, where: "centre" | "above" | "below"): Point =>
+  where === "centre"
+    ? { x: f.cx, y: f.cy }
+    : { x: f.cx, y: f.cy + (where === "above" ? -1 : 1) * Math.min(f.ry + 30, f.cy - 16) };
+
+/** Every seat's anchor on its spoke. */
+export function spokeAnchors(spokes: readonly Spoke[], f: Frame): Map<string, Point> {
+  const anchors = new Map<string, Point>();
+  for (const spoke of spokes)
+    for (const [i, id] of spoke.ids.entries())
+      anchors.set(id, onSpoke(f, spoke.angle, spokeFraction(i, spoke.ids.length)));
+  return anchors;
+}
+
+/**
+ * A link's curve: straight when it is a spoke from FLIGHT, otherwise bowed away from the centre so
+ * links between seats do not cross FLIGHT.
+ */
+export function curve(a: Point, b: Point, straight: boolean, centre: Point) {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy) || 1;
+  let nx = -dy / length;
+  let ny = dx / length;
+  if (nx * (mx - centre.x) + ny * (my - centre.y) < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const bend = straight ? 0 : length * 0.14;
+  const c = { x: mx + nx * bend, y: my + ny * bend };
+  const at = (t: number): Point => ({
+    x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * c.x + t ** 2 * b.x,
+    y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * c.y + t ** 2 * b.y,
+  });
+  return {
+    d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${c.x.toFixed(1)} ${c.y.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`,
+    at,
+  };
+}
+
+/** What the simulation is asked to hold: a node's anchor, its radius, and whether it is fixed. */
+export type SimTarget = { id: string; x: number; y: number; r: number; pinned: boolean };
+
+type SimNode = SimTarget & { px: number; py: number; vx: number; vy: number; phase: number };
+
+/** A stable per-id phase so each seat drifts on its own path, the same every visit. */
+function phaseOf(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return ((h >>> 0) / 2 ** 32) * Math.PI * 2;
+}
+
+/** Spring stiffness (1/s²) and damping (1/s): a little under critical, so a move settles softly. */
+const STIFFNESS = 14;
+const DAMPING = 6;
+/** Drift: a few pixels round the anchor, a lap every ten to fifteen seconds. */
+const DRIFT_PX = 3;
+/** The clear gap kept between two nodes' edges. */
+const GAP = 9;
+/** Where a node that appears after the first layout starts: this far out along its spoke. */
+const ENTRY_FRACTION = 0.45;
+
+/** Damped springs to each anchor, plus pairwise separation; deterministic for a given step list. */
+export class SpiderSim {
+  private readonly nodes = new Map<string, SimNode>();
+  private started = false;
+
+  /**
+   * Holds `targets` from now on. A node already held keeps its position (only its anchor moves),
+   * a new one starts at its anchor on the first sync and partway in from it afterwards, and a node
+   * no longer listed is dropped. `instant` puts every node on its anchor (reduced motion).
+   */
+  sync(targets: readonly SimTarget[], centre: Point, instant: boolean): void {
+    const ids = new Set(targets.map((t) => t.id));
+    for (const id of this.nodes.keys()) if (!ids.has(id)) this.nodes.delete(id);
+    for (const t of targets) {
+      const node = this.nodes.get(t.id);
+      if (node) {
+        Object.assign(node, { x: t.x, y: t.y, r: t.r, pinned: t.pinned });
+        continue;
+      }
+      const fresh = !this.started || instant || t.pinned;
+      this.nodes.set(t.id, {
+        ...t,
+        px: fresh ? t.x : centre.x + (t.x - centre.x) * ENTRY_FRACTION,
+        py: fresh ? t.y : centre.y + (t.y - centre.y) * ENTRY_FRACTION,
+        vx: 0,
+        vy: 0,
+        phase: phaseOf(t.id),
+      });
+    }
+    this.started = true;
+    if (instant) this.settle();
+  }
+
+  /** Advances `dt` seconds (capped, so a backgrounded tab does not jump) at clock `t` seconds. */
+  step(dt: number, t: number, drift: boolean): void {
+    const h = Math.min(Math.max(dt, 0), 1 / 20);
+    for (const n of this.nodes.values()) {
+      if (n.pinned) {
+        n.px = n.x;
+        n.py = n.y;
+        n.vx = 0;
+        n.vy = 0;
+        continue;
+      }
+      const tx = n.x + (drift ? DRIFT_PX * Math.sin(t * (0.42 + n.phase / 30) + n.phase) : 0);
+      const ty = n.y + (drift ? DRIFT_PX * Math.cos(t * (0.55 - n.phase / 40) + n.phase * 1.7) : 0);
+      n.vx += (STIFFNESS * (tx - n.px) - DAMPING * n.vx) * h;
+      n.vy += (STIFFNESS * (ty - n.py) - DAMPING * n.vy) * h;
+      n.px += n.vx * h;
+      n.py += n.vy * h;
+    }
+    this.separate();
+  }
+
+  /** Puts every node on its anchor at rest, then clears any overlap. */
+  settle(): void {
+    for (const n of this.nodes.values()) {
+      n.px = n.x;
+      n.py = n.y;
+      n.vx = 0;
+      n.vy = 0;
+    }
+    for (let i = 0; i < 12; i++) this.separate();
+  }
+
+  private separate(): void {
+    const list = [...this.nodes.values()];
+    for (let i = 0; i < list.length; i++)
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i] as SimNode;
+        const b = list[j] as SimNode;
+        if (a.pinned && b.pinned) continue;
+        const min = a.r + b.r + GAP;
+        let dx = b.px - a.px;
+        let dy = b.py - a.py;
+        let d = Math.hypot(dx, dy);
+        if (d >= min) continue;
+        if (d < 0.01) {
+          dx = Math.cos(a.phase);
+          dy = Math.sin(a.phase);
+          d = 1;
+        }
+        const push = min - d;
+        const ux = dx / d;
+        const uy = dy / d;
+        const share = a.pinned ? 0 : b.pinned ? 1 : 0.5;
+        a.px -= ux * push * share;
+        a.py -= uy * push * share;
+        b.px += ux * push * (1 - share);
+        b.py += uy * push * (1 - share);
+      }
+  }
+
+  position(id: string): Point | undefined {
+    const n = this.nodes.get(id);
+    return n ? { x: n.px, y: n.py } : undefined;
+  }
+
+  /** Total speed across nodes (px/s): near zero once the picture has settled. */
+  energy(): number {
+    let sum = 0;
+    for (const n of this.nodes.values()) sum += Math.hypot(n.vx, n.vy);
+    return sum;
+  }
+}
