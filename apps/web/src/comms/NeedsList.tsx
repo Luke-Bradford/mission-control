@@ -12,10 +12,12 @@ import {
   type GuardHitsView,
   guardAckKey,
   guardSummary,
+  type RunLoop,
   type TestLockState,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
+import { reviewPark } from "../agent/reviewPark.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
 import { isOperatorItem, itemOwner, needsYouItems, ownerLabel, sortNeeds } from "../attention.ts";
@@ -121,6 +123,28 @@ function holdsLock(i: AttentionItem, lock: TestLockState | undefined): boolean {
 
 /** The text FLIGHT is asked about a stray file (the mockup's "… outside every area. Whose is it?"). */
 const strayQuestion = (text: string): string => `${text.replace(/[.\s]+$/, "")}. Whose is it?`;
+
+/** A review park's Needs-you route opens the rework composer, never a silent waiver. */
+function ReviewParkNeedAction({
+  item,
+  row,
+  fallback,
+}: {
+  item: AttentionItem;
+  row: CrewRow | undefined;
+  fallback: string;
+}) {
+  const aside = row?.asideRuns?.find(
+    (run) => run.ticket === item.ticket && run.loop.phase === "parked",
+  );
+  const runId =
+    row?.loop?.phase === "parked" && row.ticket === item.ticket
+      ? (row.run?.id ?? null)
+      : (aside?.runId ?? null);
+  const loop = useResource<{ loop: RunLoop | null }>(runId ? RESOURCES.runLoop(runId) : null).data
+    ?.loop;
+  return reviewPark(loop) ? "Open rework message" : fallback;
+}
 
 /**
  * Comms › Needs you (catalogue 2.5.1): the attention list, with its row actions, Ack and
@@ -292,11 +316,17 @@ export function NeedsList({
                 )}
                 {i.escalationId === null && !isChannelItem(i) && (
                   <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
-                    {ANSWERED_HERE.includes(i.kind)
-                      ? "Answer"
-                      : i.brief || i.kind === "person"
-                        ? "Read the brief"
-                        : "Discuss"}
+                    <ReviewParkNeedAction
+                      item={i}
+                      row={row}
+                      fallback={
+                        ANSWERED_HERE.includes(i.kind)
+                          ? "Answer"
+                          : i.brief || i.kind === "person"
+                            ? "Read the brief"
+                            : "Discuss"
+                      }
+                    />
                   </button>
                 )}
                 {agentId !== null && holdsLock(i, lock) && (

@@ -6,6 +6,7 @@ import {
   type CrewRow,
   type GuardHitsView,
   HUD_STATE_LABEL,
+  type RunLoop,
   STALL_MS,
   type StreamEvent,
   type StreamKind,
@@ -22,6 +23,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { useSeatName } from "../seatName.ts";
 import { toast } from "../shell/Toast.tsx";
+import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
 import { messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
 
@@ -231,6 +233,9 @@ export function SeatComposer({
   const [error, setError] = useState<string | null>(null);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
+  const loop = useResource<{ loop: RunLoop | null }>(row.run ? RESOURCES.runLoop(row.run.id) : null)
+    .data?.loop;
+  const parkedReview = reviewPark(loop);
   const crew = row.kind === "crew";
   const call = callSign(row);
   useEffect(() => {
@@ -272,13 +277,15 @@ export function SeatComposer({
         autoComplete="off"
         aria-label="Message this agent"
         aria-describedby={HINT_ID}
-        placeholder={placeholder ?? `Message ${call}…`}
+        placeholder={
+          placeholder ?? (parkedReview ? "Send findings back for rework…" : `Message ${call}…`)
+        }
         disabled={!crew}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
       <button type="submit" className="primary" disabled={!crew || busy}>
-        Send
+        {parkedReview ? "Send rework message" : "Send"}
       </button>
       <button
         type="button"
@@ -295,9 +302,11 @@ export function SeatComposer({
         </span>
       )}
       <span className="hint" id={HINT_ID}>
-        {crew
-          ? seatHint(row, vendor)
-          : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
+        {parkedReview
+          ? `This sends RETRO's findings on ${reviewParkSha(parkedReview)} back for rework. It does not waive them.`
+          : crew
+            ? seatHint(row, vendor)
+            : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
       </span>
     </form>
   );

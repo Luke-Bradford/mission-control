@@ -21,6 +21,7 @@ import { navigate, useSearch } from "../router.ts";
 import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
 import { LoopTimeline } from "./LoopTimeline.tsx";
 import { type LoopLimits, runLimits } from "./loopView.ts";
+import { reviewPark, WaiveReviewFindings } from "./reviewPark.tsx";
 
 const DASH = "—";
 
@@ -179,6 +180,7 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
           const pill = runPill(r, row);
           const tokens = r.tokens ? kTokens(r.tokens.input + r.tokens.output) : DASH;
           const prs = runPrs(r, row.kind === "crew" ? repoPrs : undefined);
+          const parkedReview = reviewPark(r.loop);
           return (
             // biome-ignore lint/a11y/useKeyWithClickEvents: the summary is the keyboard route
             // biome-ignore lint/a11y/noStaticElementInteractions: as above; the row is a container
@@ -204,6 +206,14 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
                 // biome-ignore lint/a11y/noStaticElementInteractions: as above; this only stops bubbling
                 <span onClick={(e) => e.stopPropagation()}>
                   <EndAsideButton row={row} runId={r.id} />
+                </span>
+              )}
+              {r.endedAt === null && r.id !== row.run?.id && parkedReview && (
+                // The button inside is keyboard-accessible; this wrapper only prevents the run row toggle.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: as above
+                // biome-ignore lint/a11y/noStaticElementInteractions: as above
+                <span onClick={(e) => e.stopPropagation()}>
+                  <WaiveReviewFindings runId={r.id} park={parkedReview} />
                 </span>
               )}
               {(r.ticket || prs.length > 0) && (

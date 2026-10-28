@@ -2075,6 +2075,54 @@ describe("Agent page: loop steps", () => {
       expect(panel.querySelector(".vhold")).toBeNull();
     });
 
+    it.each(["review", "review-ruling"])(
+      "makes a %s park an explicit, confirmed waiver and labels messages as rework",
+      async (kind) => {
+        const sha = "abc1234def5678";
+        const loop = loopOf({
+          phase: "parked",
+          text: "Blocked: RETRO found a missing regression test",
+          parked: "RETRO found a missing regression test",
+          prNumber: 77,
+        });
+        const f = stub({
+          rows: [seat(loop)],
+          runs: [],
+          extra: {
+            [LOOP_ROUTE]: {
+              ...viewOf("parked", []),
+              loop: {
+                ...viewOf("parked", []).loop,
+                parked: { kind, reason: "RETRO found a missing regression test", ended: false },
+                pushFor: sha,
+              },
+            },
+            "POST /api/runs/r-12/resume": { ok: true },
+          },
+        });
+        const { container } = render(<Agent id="shop-app-ta" />);
+        await loaded();
+
+        const panel = $(container, "#loopP") as HTMLElement;
+        const waive = await within(panel).findByRole("button", {
+          name: "Waive findings on abc1234 and resume",
+        });
+        expect(panel.textContent).toContain("RETRO found a missing regression test");
+        expect(screen.getByRole("button", { name: "Send rework message" })).toBeTruthy();
+        expect(screen.getByText(/does not waive them/)).toBeTruthy();
+
+        const confirm = vi
+          .spyOn(window, "confirm")
+          .mockReturnValueOnce(false)
+          .mockReturnValueOnce(true);
+        fireEvent.click(waive);
+        expect(bodyOf(f, "/api/runs/r-12/resume")).toBeUndefined();
+        fireEvent.click(waive);
+        await waitFor(() => expect(bodyOf(f, "/api/runs/r-12/resume")).toBe("{}"));
+        confirm.mockRestore();
+      },
+    );
+
     it("the run's limits", async () => {
       const profile = DEFAULT_PROFILES.find((p) => p.name === "small-change");
       expect(profile).toBeDefined();

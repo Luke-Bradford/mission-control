@@ -23,6 +23,7 @@ import {
   tryMinutes,
   tryText,
 } from "./loopView.ts";
+import { reviewPark, WaiveReviewFindings } from "./reviewPark.tsx";
 import { endAsideConfirm, endAsideRun, seatError } from "./seat.ts";
 
 /** End run for a run already known to be set aside; the server still refuses if it is not. */
@@ -92,6 +93,7 @@ export function LoopSteps({
   if (!loop) return <p className="s muted">{NO_LOOP}</p>;
   const steps = loopSteps(loop);
   const runLoop = view?.loop;
+  const reviewParked = reviewPark(runLoop);
   const tries = view?.tries ?? [];
   const endAside = row.run && row.run.endedAt === null && (
     <EndAsideRun row={row} runId={row.run.id} />
@@ -117,6 +119,7 @@ export function LoopSteps({
           </div>
         )}
         {endAside}
+        {reviewParked && row.run && <WaiveReviewFindings runId={row.run.id} park={reviewParked} />}
         <div className="vsteps">
           {steps.map((step, i) => {
             const mark = marks[i] as StepMark;
@@ -159,6 +162,7 @@ export function LoopSteps({
   return (
     <>
       {endAside}
+      {reviewParked && row.run && <WaiveReviewFindings runId={row.run.id} park={reviewParked} />}
       <div className="vsteps">
         {steps.map((step, i) => {
           const mark = marks[i] as StepMark;
