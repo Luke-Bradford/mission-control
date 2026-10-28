@@ -1,14 +1,23 @@
 import { existsSync, globSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { CrewVendor, MapCall, MapChange, MapDelta, MapTests } from "@mc/core";
+import {
+  type CrewVendor,
+  MAP_RECENT_MS,
+  type MapCall,
+  type MapChange,
+  type MapDelta,
+  type MapTests,
+  namesOnly,
+} from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
 import { SeatDiff } from "./diff.ts";
 
-const KEEP_MS = 15 * 60_000;
+/** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
+const KEEP_MS = MAP_RECENT_MS;
 type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
@@ -453,7 +462,9 @@ export class CallRing {
     };
     this.runScopes.set(source.id, scope);
     if (!error && !refused) {
-      if (call.writeTok === undefined) scope.read = [...new Set([...scope.read, ...call.files])];
+      // a name-only listing (Glob) opened none of its files: they aren't read
+      if (call.writeTok === undefined && !namesOnly(call.tool))
+        scope.read = [...new Set([...scope.read, ...call.files])];
       for (const change of call.churn) {
         const previous = scope.modified.find((c) => c.file === change.file);
         if (previous) {

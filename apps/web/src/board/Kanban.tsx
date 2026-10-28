@@ -28,6 +28,13 @@ import {
 import { usePhone } from "./phone.ts";
 
 const NO_PRS: PullRequestView[] = [];
+export interface KanbanColumnMetric {
+  label: string;
+  count: string;
+  title: string;
+}
+/** Keep the Board's historical Done column light until the operator asks for its full history. */
+export const DONE_CARD_WINDOW = 10;
 
 /** What every card on this render shares. */
 interface CardCtx {
@@ -88,6 +95,7 @@ export function Kanban({
   todayStart,
   columns = HUD_COLUMNS,
   notIn,
+  metrics = {},
   id = "kanban",
 }: {
   items: BoardItem[];
@@ -103,6 +111,8 @@ export function Kanban({
   columns?: readonly HudColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
   notIn?: ReadonlyMap<HudColumn, string[]>;
+  /** Registry figures shown in place of a Status-column's local card count. */
+  metrics?: Partial<Record<HudColumn, KanbanColumnMetric>>;
   id?: string;
 }) {
   const prsByTicket = useMemo(() => {
@@ -127,6 +137,7 @@ export function Kanban({
   const phone = usePhone();
   const uid = useId();
   const [picked, setPicked] = useState<HudColumn | null>(null);
+  const [doneExpanded, setDoneExpanded] = useState(false);
   const lists = new Map(
     columns.map((col) => [col, sortCards(items.filter((i) => cardColumn(i) === col))]),
   );
@@ -139,11 +150,23 @@ export function Kanban({
   return (
     <div className="kanban" id={id}>
       {columns.map((col) => {
+        const metric = metrics[col];
         const lacking = notIn?.get(col);
         const note = lacking?.length ? (
           <div className="xs muted knot">not in {lacking.join(", ")}</div>
         ) : null;
         const list = lists.get(col) ?? [];
+        const label = metric?.label ?? col;
+        const count = metric?.count ?? String(list.length);
+        const title = metric?.title;
+        const cards = col === "Done" && !doneExpanded ? list.slice(0, DONE_CARD_WINDOW) : list;
+        const hiddenDone = col === "Done" ? list.length - cards.length : 0;
+        const moreDone =
+          hiddenDone > 0 ? (
+            <button type="button" className="done-more" onClick={() => setDoneExpanded(true)}>
+              Show {hiddenDone} more completed card{hiddenDone === 1 ? "" : "s"}
+            </button>
+          ) : null;
         if (phone && list.length > 0) {
           const on = col === openCol;
           return (
@@ -155,14 +178,17 @@ export function Kanban({
                 aria-controls={panelId(col)}
                 onClick={() => setPicked(col)}
               >
-                {col} <span className="n">{list.length}</span>
+                <span title={title}>
+                  {label} <span className="n">{count}</span>
+                </span>
               </button>
               {note}
               {on && (
                 <div className="kb" id={panelId(col)}>
-                  {list.map((i) => (
+                  {cards.map((i) => (
                     <Card key={ticketRef(i)} {...cardProps(i, col, ctx)} />
                   ))}
+                  {moreDone}
                 </div>
               )}
             </div>
@@ -170,9 +196,11 @@ export function Kanban({
         }
         if (list.length === 0) {
           return (
-            <div key={col} className="kcol empty" title={`${col}: nothing here`}>
+            <div key={col} className="kcol empty" title={title ?? `${col}: nothing here`}>
               <div className="kh">
-                {col} <span className="n">0</span>
+                <span title={title}>
+                  {label} <span className="n">{count}</span>
+                </span>
               </div>
               {note}
             </div>
@@ -181,13 +209,16 @@ export function Kanban({
         return (
           <div key={col} className="kcol">
             <div className="kh">
-              {col} <span className="n">{list.length}</span>
+              <span title={title}>
+                {label} <span className="n">{count}</span>
+              </span>
             </div>
             {note}
             <div className="kb">
-              {list.map((i) => (
+              {cards.map((i) => (
                 <Card key={ticketRef(i)} {...cardProps(i, col, ctx)} />
               ))}
+              {moreDone}
             </div>
           </div>
         );

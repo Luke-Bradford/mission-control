@@ -31,10 +31,8 @@ import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { transcriptMtime } from "../hud.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
-import { lastOutputAt } from "../stream.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
@@ -357,9 +355,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     // Unknown facts (just after a hub restart) say nothing either way.
     if (facts !== null && run != null) {
       const digest = store.digest(run.id);
-      const output =
-        lastOutputAt(digest?.lastEventAt ?? null, transcriptMtime(run.transcriptPath)) ??
-        run.startedAt;
+      // Context reads touch the transcript without adding a turn, so only its folded event time
+      // can show FLIGHT made progress here.
+      const output = digest?.lastEventAt ?? run.startedAt;
       // the same allowance a loop gets while a background task of its own writes nothing
       const limit =
         (digest?.background.length ?? 0) > 0

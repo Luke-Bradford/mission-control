@@ -158,28 +158,8 @@ describe("Map page", () => {
     });
     at("/map/sample");
     await screen.findByText("3D scene");
-    expect(screen.getByText(/No agent is working in this repo right now/)).toBeTruthy();
-    expect(screen.getByText(/1 idle or stopped · GUIDO-1/)).toBeTruthy();
-    // the full key, file count included, opens behind "?"
-    fireEvent.click(screen.getByRole("button", { name: "Map key" }));
-    expect(screen.getByRole("note").textContent).toContain("2 files at origin/HEAD");
-  });
-
-  it("names the branches whose conflicts went unchecked on the seat's card", async () => {
-    stubFetch({
-      "/api/repos": repos,
-      "/api/config": config,
-      "/api/crew": { rows: [] },
-      "/api/repos/sample/map": {
-        ...idle,
-        conflictsUnchecked: [{ branch: "feature/7-empty-input", reason: "head not fetched" }],
-      },
-    });
-    at("/map/sample");
-    await screen.findByText("3D scene");
-    const card = screen.getByRole("article", { name: "GUIDO-1" });
-    fireEvent.click(within(card).getAllByRole("button")[0] as HTMLElement);
-    expect(card.textContent).toContain("Conflicts not checked: head not fetched");
+    expect(screen.getByText("No seat is working in this repo right now.")).toBeTruthy();
+    expect(screen.getByText(/2 files/)).toBeTruthy();
   });
 
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {

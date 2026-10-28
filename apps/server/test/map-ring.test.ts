@@ -203,6 +203,38 @@ describe("crew call ring", () => {
     ]);
   });
 
+  it("counts a file opened as read, never the names a Glob listed", () => {
+    const { ring, transcriptPath, cwd } = setup("claude");
+    mkdirSync(join(cwd, "src"));
+    writeFileSync(join(cwd, "src", "a.ts"), "");
+    writeFileSync(join(cwd, "src", "b.ts"), "");
+    const frames = [
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: "list", name: "Glob", input: { pattern: "**/*.ts" } },
+            { type: "tool_use", id: "open", name: "Read", input: { file_path: "src/a.ts" } },
+          ],
+        },
+      },
+      {
+        type: "user",
+        message: {
+          content: ["list", "open"].map((id) => ({
+            type: "tool_result",
+            tool_use_id: id,
+            content: [{ type: "text", text: "ok" }],
+          })),
+        },
+      },
+    ];
+    appendFileSync(transcriptPath, `${frames.map((f) => JSON.stringify(f)).join("\n")}\n`);
+    ring.poll();
+    expect(ring.calls("seat")[0]?.files.length).toBeGreaterThan(1);
+    expect(ring.scope("run").read).toEqual(["src/a.ts"]);
+  });
+
   it("measures the full NotebookEdit new_source payload before cleaning", () => {
     const { ring, transcriptPath } = setup("claude");
     const new_source = `${"cell\n".repeat(STREAM_TEXT_MAX)}last`;
