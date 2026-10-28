@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { codexModelsFor } from "../src/runtime/codex-models.ts";
 import { crewCodexDir } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { fakeModels } from "./config-codex.ts";
 import {
   dbPath,
   dir,
@@ -170,6 +172,52 @@ it("recovers the source session if both destination attempts fail", async () => 
   expect(store.seatSession("guido-1")?.state).toBe("idle");
   expect(readFileSync(join(destination, "auth.json"), "utf8")).toContain("fictional-destination");
   await sup.message("guido-1", "after recovery", { interrupt: false });
+});
+
+it("validates a transfer against the target catalog, then the source catalog on fallback", async () => {
+  const { sup, cfg, source, destination } = setup();
+  const seat = cfg.crew?.sessions[0]?.seats[0];
+  if (!seat) throw new Error("missing seat");
+  seat.modelVendor = "codex";
+  seat.modelAccount = { vendor: "codex", cliProfile: source };
+  const sourceCatalog = fakeModels({
+    pages: [
+      {
+        data: [
+          {
+            model: "gpt-5.4",
+            supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+  });
+  const destinationCatalog = fakeModels({
+    pages: [
+      {
+        data: [
+          {
+            model: "gpt-target-only",
+            supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+  });
+  await Promise.all([
+    codexModelsFor({ vendor: "codex", cliProfile: source }).load(sourceCatalog.deps),
+    codexModelsFor({ vendor: "codex", cliProfile: destination }).load(destinationCatalog.deps),
+  ]);
+
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await expect(sup.transferAccount("guido-1", "destination")).resolves.toMatchObject({
+    outcome: "refused",
+    reason: expect.stringContaining("source session recovered"),
+  });
+  expect(store.seatSession("guido-1")?.state).toBe("idle");
 });
 
 it("recovers a pending transfer after hub restart with its original checkout and run", async () => {

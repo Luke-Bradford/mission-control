@@ -1,6 +1,6 @@
 import { codexProfile } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
-import { type CcConfig, seatUnavailable } from "../config.ts";
+import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { codexModels, codexModelsFor, type ModelDeps } from "./codex-models.ts";
 import type { Supervisor } from "./supervisor.ts";
@@ -30,16 +30,7 @@ export function startCodexDiscovery(deps: {
 
   const resumeAvailableRuns = async () => {
     for (const row of deps.store.liveSeatRuns()) {
-      const seat = deps.config.crew?.sessions
-        .flatMap((s) => s.seats)
-        .find((s) => s.id === row.seatId);
-      if (
-        seat &&
-        row.run.vendor === "codex" &&
-        !seatUnavailable(seat, row.run.model ?? undefined, row.run.vendor)
-      ) {
-        await deps.supervisor.resumeRun(row.run.id);
-      }
+      if (row.run.vendor === "codex") await deps.supervisor.resumeRun(row.run.id);
     }
   };
 
