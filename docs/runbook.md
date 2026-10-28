@@ -889,6 +889,10 @@ inherits. An explicit hard-rule list in either source,
 including `[]`, sets `hardRulesSet`. Without a list in either source the hub never auto-merges and
 posts a Needs you note pointing to `repos[].rules.hard_rules` in user config.
 
+Set `tech_debt_issue` to an open issue number to collect merged PR minor findings as one headed
+comment per PR. Without it, the hub uses the one open issue whose title starts `Tech debt: the
+rolling list`; when neither is available, it files the existing per-PR Backlog issue instead.
+
 An unknown key or invalid value is refused with the key named. `pick_from: []` and an area with no
 globs are refused, and area globs must be repo-relative with `**` only as a trailing `/**`. No
 `CLAUDE.md` or no Mission Control heading is fine. A heading with a missing, unclosed or empty yaml

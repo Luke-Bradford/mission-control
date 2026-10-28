@@ -1961,6 +1961,7 @@ describe("fileMinorFindings", () => {
           labels: [{ name: "area:server" }, { name: "bug" }],
         }),
       }),
+      () => ({ code: 0, stdout: "[]" }),
       (args) => {
         expect(args).toContain("--title=Tech debt: minor findings from #12");
         expect(args).toContain("--label=area:server,chore");
@@ -2002,7 +2003,82 @@ describe("fileMinorFindings", () => {
       ok: true,
       issueNumber: 81,
     });
-    expect(ghCalls).toHaveLength(4);
+    expect(ghCalls).toHaveLength(5);
+  });
+  it("appends findings to the configured open rolling tech-debt issue", async () => {
+    const r = setup();
+    let file = "";
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      (args) => {
+        expect(args).toEqual(["issue", "view", "656", "--repo=o/mc", "--json=state,comments"]);
+        return { code: 0, stdout: JSON.stringify({ state: "OPEN", comments: [] }) };
+      },
+      (args) => {
+        expect(args.slice(0, 3)).toEqual(["issue", "comment", "656"]);
+        file = args.find((a) => a.startsWith("--body-file="))?.slice(12) ?? "";
+        expect(readFileSync(file, "utf8")).toBe("Minor findings from #12.\n\n- Finding\n");
+        return { code: 0, stdout: "" };
+      },
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toEqual({ ok: true });
+    expect(existsSync(file)).toBe(false);
+  });
+  it("falls back to a per-PR issue when no rolling issue is open", async () => {
+    const r = setup();
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      (args) => {
+        expect(args.slice(0, 2)).toEqual(["issue", "list"]);
+        return { code: 0, stdout: "[]" };
+      },
+      () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
+      () => ({ code: 0, stdout: "" }),
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12)).toMatchObject({
+      ok: true,
+      issueNumber: 81,
+    });
+  });
+  it("does not append duplicate findings when the merge event repeats", async () => {
+    const r = setup();
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          comments: [{ body: "Minor findings from #12.\n\n- Finding\n" }],
+        }),
+      }),
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toEqual({ ok: true });
+    expect(ghCalls).toHaveLength(2);
+  });
+  it("falls back when the configured rolling tech-debt issue is closed", async () => {
+    const r = setup();
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n\n- Finding`, labels: [] }),
+      }),
+      () => ({ code: 0, stdout: JSON.stringify({ state: "CLOSED", comments: [] }) }),
+      () => ({ code: 0, stdout: "https://github.com/o/mc/issues/81\n" }),
+      () => ({ code: 0, stdout: "" }),
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12, 656)).toMatchObject({
+      ok: true,
+      issueNumber: 81,
+    });
   });
   it("refuses RETRO's fallback instead of silently dropping findings", async () => {
     ghAnswers.push(() => ({
@@ -2026,6 +2102,7 @@ describe("fileMinorFindings", () => {
           code: 0,
           stdout: JSON.stringify({ body: `${MINOR_HEADING}\n- Finding`, labels: [] }),
         }),
+        () => ({ code: 0, stdout: "[]" }),
         () => {
           expect(store.run(r.id)?.loop).toHaveProperty("minorIssueCreation", { prNumber: 12 });
           throw new Error("connection lost after issue creation");
@@ -2080,6 +2157,7 @@ describe("fileMinorFindings", () => {
         code: 0,
         stdout: JSON.stringify({ body: `${MINOR_HEADING}\n- Finding`, labels: [] }),
       }),
+      () => ({ code: 0, stdout: "[]" }),
       (args) => {
         file = args.find((a) => a.startsWith("--body-file="))?.slice(12) ?? "";
         return { code: 1, stdout: "", stderr: "denied" };

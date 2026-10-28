@@ -240,7 +240,11 @@ export interface Publisher {
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
   closeIssue(run: Run): Promise<PublishResult>;
-  fileMinorFindings(run: Run, prNumber: number): Promise<PublishResult & { issueNumber?: number }>;
+  fileMinorFindings(
+    run: Run,
+    prNumber: number,
+    techDebtIssue?: number,
+  ): Promise<PublishResult & { issueNumber?: number }>;
   /** Deletes origin's copy of the run's branch, only if its tip is `sha`. */
   deleteRemoteBranch(run: Run, sha: string): Promise<PublishResult>;
   /** Deletes the run's local branch, when its tip is the merged sha or already in main. */
@@ -1259,7 +1263,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       });
     },
 
-    async fileMinorFindings(run, prNumber) {
+    async fileMinorFindings(run, prNumber, techDebtIssue) {
       const repo = deps.config.repos.find((r) => r.id === run.repoId);
       if (
         repo?.autonomy !== "merge" ||
@@ -1351,6 +1355,84 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               "RETRO logged minor findings in Mission Control without listing them in the PR body",
             );
           return { ok: true };
+        }
+        const appendRolling = async (issueNumber: number): Promise<PublishResult | null> => {
+          const issue = await ghJson(
+            [
+              "issue",
+              "view",
+              String(issueNumber),
+              `--repo=${repo.github}`,
+              "--json=state,comments",
+            ],
+            "rolling tech-debt issue view",
+          );
+          if (isRefusal(issue)) return issue;
+          if (issue.state !== "OPEN") return null;
+          const intro = `Minor findings from #${prNumber}.`;
+          if (
+            Array.isArray(issue.comments) &&
+            issue.comments.some(
+              (comment) =>
+                typeof comment === "object" &&
+                comment !== null &&
+                "body" in comment &&
+                typeof comment.body === "string" &&
+                comment.body.split(/\r?\n/)[0] === intro,
+            )
+          )
+            return { ok: true };
+          await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+          wrote = true;
+          return await ghDo(
+            [
+              "issue",
+              "comment",
+              String(issueNumber),
+              `--repo=${repo.github}`,
+              `--body-file=${file}`,
+            ],
+            "rolling tech-debt issue comment",
+          );
+        };
+        let rolling = techDebtIssue;
+        if (rolling === undefined) {
+          const listed = await deps.gh(
+            [
+              "issue",
+              "list",
+              `--repo=${repo.github}`,
+              "--state=open",
+              "--search=Tech debt: the rolling list in:title",
+              "--limit=100",
+              "--json=number,title",
+            ],
+            { cwd: cwd() },
+          );
+          if (listed.code !== 0) return ghFailed("rolling tech-debt issue list", listed.stderr);
+          try {
+            const issues: unknown = JSON.parse(listed.stdout);
+            if (Array.isArray(issues)) {
+              const matches = issues.filter(
+                (issue): issue is { number: number } =>
+                  typeof issue === "object" &&
+                  issue !== null &&
+                  "number" in issue &&
+                  Number.isSafeInteger(issue.number) &&
+                  issue.number > 0 &&
+                  "title" in issue &&
+                  typeof issue.title === "string" &&
+                  issue.title.startsWith("Tech debt: the rolling list"),
+              );
+              if (matches.length === 1) rolling = matches[0]?.number;
+            }
+          } catch {
+            return transient("gh rolling tech-debt issue list gave no JSON");
+          }
+        }
+        if (rolling !== undefined) {
+          const appended = await appendRolling(rolling);
+          if (appended !== null) return appended;
         }
         const areas = (labels: unknown): string[] =>
           Array.isArray(labels)

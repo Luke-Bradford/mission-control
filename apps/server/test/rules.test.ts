@@ -87,6 +87,11 @@ describe("parseRepoRules", () => {
     expect(base?.hardRules).toEqual(["policy/**"]);
   });
 
+  it("reads a rolling tech-debt issue number from the repo block", () => {
+    expect(parseRepoRules(block("mc: {tech_debt_issue: 656}\n")).techDebtIssue).toBe(656);
+    expect(() => parseRepoRules(block("mc: {tech_debt_issue: 0}\n"))).toThrow(/tech_debt_issue/);
+  });
+
   it("unions hard rules and always-ask labels and keeps operator authority", () => {
     const base = userRules({
       hard_rules: ["policy/**"],
