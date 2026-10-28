@@ -737,6 +737,45 @@ describe("Store", () => {
     expect(store.prHistory("r1")).toEqual([merged]);
   });
 
+  it("fills missing merged PR sizes after migrating a legacy database", () => {
+    const old = join(dir, "old-merged-pr.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(`CREATE TABLE pull_requests (
+      repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
+      branch TEXT NOT NULL, ticket TEXT, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
+      review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      merged_at INTEGER, PRIMARY KEY (repo_id, number))`);
+    db.exec(`INSERT INTO pull_requests VALUES
+      ('r1', 7, 'merged', 'u', 'fix/7', 'r1#7', 'merged', 0, 'approved', 'passing', 1, 2, 3)`);
+    db.close();
+
+    const migrated = new Store(old);
+    const observed = {
+      ...migrated.pullRequests("r1")[0],
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    };
+    migrated.upsertPullRequests("r1", [observed], 4);
+    expect(migrated.prHistory("r1")[0]).toMatchObject({
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    });
+    migrated.upsertPullRequests(
+      "r1",
+      [{ ...observed, additions: 99, deletions: 98, changedFiles: 97 }],
+      5,
+    );
+    migrated.replacePullRequests("r1", [], 6);
+    expect(migrated.prHistory("r1")[0]).toMatchObject({
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    });
+    migrated.close();
+  });
+
   it("keeps each daily retrospective", () => {
     store.recordRetrospective("r1", "2026-10-27", 1, { merged: 2 });
     store.recordRetrospective("r1", "2026-10-28", 2, { merged: 3 });
@@ -755,6 +794,82 @@ describe("Store", () => {
     expect(audit.refusalsByRule).toEqual([{ rule: "read-only", count: 1 }]);
     expect(audit.questions).toEqual({ asked: 1, answered: 1, answerMs: 60 });
     expect(store.audit(201, 300).questions).toEqual({ asked: 0, answered: 0, answerMs: null });
+  });
+
+  it("aggregates death loops and immutable model/prompt launch metadata", () => {
+    store.upsertRun(
+      run({
+        id: "timeline",
+        startedAt: 110,
+        model: "opus",
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-a",
+      }),
+    );
+    store.upsertRun(run({ id: "outside", startedAt: 99, model: "old", promptHash: "old" }));
+    store.setRunLoop(
+      "timeline",
+      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "one", ended: false } },
+      120,
+    );
+    store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 130);
+    store.setRunLoop(
+      "timeline",
+      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "two", ended: false } },
+      140,
+    );
+    store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 210);
+
+    const audit = store.audit(100, 200);
+    expect(audit.deathLoops).toEqual([{ runId: "timeline", parks: 2 }]);
+    expect(audit.modelPromptTimeline).toEqual([
+      {
+        at: 110,
+        model: "opus",
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-a",
+      },
+    ]);
+  });
+
+  it("counts completed rework rounds without inflating retries", () => {
+    const review = (
+      authorRunId: string,
+      round: number,
+      attempt: number,
+      state: "reported" | "failed",
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId,
+        repoId: "repo",
+        seatId: "retro",
+        prNumber: 7,
+        sha: `${authorRunId}-${round}`,
+        epoch: 0,
+        attempt,
+        round,
+        at: at - 1,
+      });
+      expect(id).not.toBeNull();
+      store.setReviewState(id as number, ["queued"], state, {
+        at,
+        ...(state === "failed" ? { failure: "retry" } : {}),
+      });
+    };
+    review("first-pass", 1, 1, "reported", 110);
+    review("reworked", 1, 1, "failed", 120);
+    review("reworked", 1, 2, "reported", 130);
+    review("reworked", 2, 1, "reported", 140);
+    review("reworked", 2, 2, "reported", 150);
+    review("reworked", 3, 1, "failed", 160);
+
+    expect(store.audit(100, 200).reworkRounds).toEqual([
+      { runId: "reworked", rounds: 1, maxRound: 2 },
+      { runId: "first-pass", rounds: 0, maxRound: 1 },
+    ]);
   });
 
   it("counts a merged ticket's cost once when it has multiple PRs", () => {

@@ -2125,6 +2125,19 @@ export class Store {
          additions = excluded.additions, deletions = excluded.deletions,
          changed_files = excluded.changed_files, stale = 0`,
     );
+    const addHistory = this.db.prepare(
+      "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
+    );
+    const fillHistorySizes = this.db.prepare(
+      `UPDATE pr_history SET record = json_set(record,
+         '$.additions', COALESCE(json_extract(record, '$.additions'), ?),
+         '$.deletions', COALESCE(json_extract(record, '$.deletions'), ?),
+         '$.changedFiles', COALESCE(json_extract(record, '$.changedFiles'), ?))
+       WHERE repo_id = ? AND number = ? AND (
+         (json_extract(record, '$.additions') IS NULL AND ? IS NOT NULL) OR
+         (json_extract(record, '$.deletions') IS NULL AND ? IS NOT NULL) OR
+         (json_extract(record, '$.changedFiles') IS NULL AND ? IS NOT NULL))`,
+    );
     for (const p of prs) {
       const runs = this.db
         .prepare(
@@ -2169,16 +2182,26 @@ export class Store {
         p.deletions ?? null,
         p.changedFiles ?? null,
       );
-      if (p.mergedAt !== null)
-        this.db
-          .prepare(
-            "INSERT OR IGNORE INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
-          )
-          .run(repoId, p.number, p.mergedAt, JSON.stringify(p));
+      if (p.mergedAt !== null) {
+        addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(p));
+        const additions = p.additions ?? null;
+        const deletions = p.deletions ?? null;
+        const changedFiles = p.changedFiles ?? null;
+        fillHistorySizes.run(
+          additions,
+          deletions,
+          changedFiles,
+          repoId,
+          p.number,
+          additions,
+          deletions,
+          changedFiles,
+        );
+      }
     }
   }
 
-  /** Merged PR snapshots are immutable, unlike the 30-day live PR cache. */
+  /** Merged PR snapshots are immutable once any size fields missing at migration are filled. */
   prHistory(repoId: RepoId, since = 0, until = Number.MAX_SAFE_INTEGER): PullRequestView[] {
     return (
       this.db
@@ -2230,8 +2253,10 @@ export class Store {
         until,
       ),
       reworkRounds: rows(
-        `SELECT author_run_id AS runId, COUNT(*) AS rounds, MAX(round) AS maxRound FROM reviews
-         WHERE created_at >= ? AND created_at <= ? GROUP BY author_run_id ORDER BY rounds DESC`,
+        `SELECT author_run_id AS runId, MAX(0, MAX(round) - 1) AS rounds,
+          MAX(round) AS maxRound FROM reviews
+         WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
+         GROUP BY author_run_id ORDER BY rounds DESC, runId`,
         since,
         until,
       ),

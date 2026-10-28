@@ -1293,6 +1293,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     references = "",
     keepPrompt = false,
     beforeLaunch?: () => Run | undefined,
+    beforeSpawn?: () => void,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1323,7 +1324,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (bindingProblem) throw new SupervisorError(409, bindingProblem);
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
-    return launch(info, run, cliSessionId, checkout, resume, repoDocs, references, keepPrompt);
+    return launch(
+      info,
+      run,
+      cliSessionId,
+      checkout,
+      resume,
+      repoDocs,
+      references,
+      keepPrompt,
+      beforeSpawn,
+    );
   }
 
   function launch(
@@ -1335,6 +1346,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     repoDocs: RepoDocs | null,
     references = "",
     keepPrompt = false,
+    beforeSpawn?: () => void,
   ): Live {
     const pause = pausedSeat(store, info.seat.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
@@ -1406,6 +1418,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         },
       );
     }
+    beforeSpawn?.();
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
@@ -3007,9 +3020,46 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         return result;
       });
+      let brief = ticketBrief({
+        call: call(info),
+        role: info.seat.role,
+        mode: def.mode,
+        loop: def.loop,
+        here: def.here,
+        repo: info.repo.github,
+        issue,
+        title,
+        body: ticket.body,
+        bodyTruncated: ticket.bodyTruncated,
+        bodyLength: ticket.bodyLength ?? ticket.body.length,
+        branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
+        area: info.seat.area,
+        commands:
+          def.mode === "writer"
+            ? (info.repo.commands?.writer ?? [])
+            : (info.repo.commands?.review ?? []),
+        fullSuite: info.repo.fullSuite ?? [],
+        leftoverChanges: checkout.leftoverChanges,
+        ...(run.profile ? { profile: run.profile } : {}),
+        ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
+        ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
+      });
+      if (installNote) brief += `\n\n${installNote}`;
+      if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, cliSessionId, checkout, false, repoDocs, references);
+        l = await checkedLaunch(
+          info,
+          run,
+          cliSessionId,
+          checkout,
+          false,
+          repoDocs,
+          references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, brief),
+        );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -3051,33 +3101,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      let brief = ticketBrief({
-        call: call(info),
-        role: info.seat.role,
-        mode: def.mode,
-        loop: def.loop,
-        here: def.here,
-        repo: info.repo.github,
-        issue,
-        title,
-        body: ticket.body,
-        bodyTruncated: ticket.bodyTruncated,
-        bodyLength: ticket.bodyLength ?? ticket.body.length,
-        branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
-        area: info.seat.area,
-        commands:
-          def.mode === "writer"
-            ? (info.repo.commands?.writer ?? [])
-            : (info.repo.commands?.review ?? []),
-        fullSuite: info.repo.fullSuite ?? [],
-        leftoverChanges: checkout.leftoverChanges,
-        ...(run.profile ? { profile: run.profile } : {}),
-        ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
-        ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
-      });
-      if (installNote) brief += `\n\n${installNote}`;
-      if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
-      recordPromptVersion(run, def.prompt, brief);
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
       // answered: wait for that, so the exit that marks the run failed and the seat in error
@@ -3156,6 +3179,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         summary: null,
       };
       store.upsertRun(run);
+      const first = opts?.first;
+      const brief = watchBrief({
+        call: call(info),
+        repo: info.repo.github,
+        seats: info.session.seats
+          .filter((s) => seatDef(s).mode === "writer")
+          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+        fullSuite: info.repo.fullSuite ?? [],
+      });
+      const firstBrief =
+        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief;
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3166,6 +3200,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           false,
           repoDocs,
           references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, firstBrief),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3207,23 +3244,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: checkout.path,
       });
-      const first = opts?.first;
-      const brief = watchBrief({
-        call: call(info),
-        repo: info.repo.github,
-        seats: info.session.seats
-          .filter((s) => seatDef(s).mode === "writer")
-          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
-        fullSuite: info.repo.fullSuite ?? [],
-      });
-      recordPromptVersion(
-        run,
-        def.prompt,
-        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief,
-      );
-      await enqueue(l, () =>
-        writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
-      ).catch(() => {});
+      await enqueue(l, () => writeLine(l, firstBrief)).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
@@ -3364,6 +3385,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      const touches = author.loop?.touches;
+      const evidence = store.evidenceNotes(author.id);
+      const prevReply =
+        prev === null
+          ? null
+          : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
+      const brief = reviewBrief({
+        call: call(info),
+        repo: info.repo.github,
+        issue,
+        title: ticket.title,
+        prNumber: review.prNumber,
+        sha: review.sha,
+        mergeBase: scratch.mergeBase,
+        round: review.round,
+        body: ticket.body,
+        bodyTruncated: ticket.bodyTruncated,
+        bodyLength: ticket.bodyLength ?? ticket.body.length,
+        notes: evidence.map((e) => e.note),
+        prevSha: prev?.sha ?? null,
+        prevFindings: prev
+          ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+          : [],
+        prevReply,
+        diffCut: inputs.diffCut,
+        since: inputs.since,
+        touches: touches?.sha === review.sha ? touches.paths : [],
+        commands: info.repo.commands?.review ?? [],
+        fullSuite: info.repo.fullSuite ?? [],
+      });
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3374,6 +3425,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           false,
           repoDocs,
           references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, brief),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3416,37 +3470,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: scratch.path,
       });
-      const touches = author.loop?.touches;
-      const evidence = store.evidenceNotes(author.id);
-      const prevReply =
-        prev === null
-          ? null
-          : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
-      const brief = reviewBrief({
-        call: call(info),
-        repo: info.repo.github,
-        issue,
-        title: ticket.title,
-        prNumber: review.prNumber,
-        sha: review.sha,
-        mergeBase: scratch.mergeBase,
-        round: review.round,
-        body: ticket.body,
-        bodyTruncated: ticket.bodyTruncated,
-        bodyLength: ticket.bodyLength ?? ticket.body.length,
-        notes: evidence.map((e) => e.note),
-        prevSha: prev?.sha ?? null,
-        prevFindings: prev
-          ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
-          : [],
-        prevReply,
-        diffCut: inputs.diffCut,
-        since: inputs.since,
-        touches: touches?.sha === review.sha ? touches.paths : [],
-        commands: info.repo.commands?.review ?? [],
-        fullSuite: info.repo.fullSuite ?? [],
-      });
-      recordPromptVersion(run, def.prompt, brief);
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       await session.ready;
       if (!session.alive) {
