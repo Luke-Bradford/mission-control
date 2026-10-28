@@ -2349,12 +2349,8 @@ describe("triage and quiet wakes", () => {
       );
     messages(["Tests are running. https://example.test/?q=1 `?`"]);
     expect(signalState().items).toEqual([]);
-    expect(attentionItems(config, store, nowMs).find((i) => i.kind === "message")).toMatchObject({
-      owner: "operator",
-    });
-    expect(
-      attentionItems(config, store, nowMs).find((i) => i.kind === "message")?.flightTriage,
-    ).toBeUndefined();
+    // narration on the direct line is no item at all: its unread count lives on the Comms thread
+    expect(attentionItems(config, store, nowMs).find((i) => i.kind === "message")).toBeUndefined();
     messages(["Tests are running.", "Please confirm the target branch."]);
     const question = signalState();
     const hudQuestion = attentionItems(config, store, nowMs).find((i) => i.kind === "message");

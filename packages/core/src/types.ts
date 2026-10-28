@@ -1046,7 +1046,7 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
-  flightTriage?: "waiting" | "handling" | "missed";
+  flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
   acked: boolean;
 }

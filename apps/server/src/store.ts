@@ -4025,6 +4025,14 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
+  /** When the seat asked its questions, answered or not (ask_operator mirrors each to Comms). */
+  questionTimes(agentId: AgentId): Set<number> {
+    const rows = this.db
+      .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
+      .all(agentId) as { at: number }[];
+    return new Set(rows.map((r) => r.at));
+  }
+
   /** Questions not yet answered, oldest first. */
   openQuestions(): SeatQuestion[] {
     const rows = this.db

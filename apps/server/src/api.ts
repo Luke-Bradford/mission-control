@@ -1186,6 +1186,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
           inboxCursor: store.commsScopeCursor(`inbox:${id}`),
           inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
+          // Needs you no longer counts direct-line replies; the thread does (#757)
+          directUnread:
+            id === COMMS_CAPCOM
+              ? 0
+              : threadMessages(store, id, true, "attention").filter((m) => !m.seen && m.direct)
+                  .length,
         };
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)

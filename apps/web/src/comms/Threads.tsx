@@ -7,7 +7,7 @@ import type {
   FlightView,
 } from "@mc/core";
 import { useMemo } from "react";
-import { needsYouItems } from "../attention.ts";
+import { isOperatorItem, needsYouItems } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { crewOrder, doingLine, needsLamp, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
@@ -138,7 +138,8 @@ function Thread({
 }) {
   const nameOf = useSeatName();
   const mine = items.filter((i) => i.agentId === r.id);
-  const tagged = mine.some((i) => i.kind === "tag");
+  // only a tag the operator owns tags them; a seat's @CAPCOM goes to FLIGHT first
+  const tagged = mine.some((i) => i.kind === "tag" && isOperatorItem(i));
   const lamp = needsLamp(
     mine,
     mine.some((i) => !i.acked),

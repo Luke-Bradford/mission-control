@@ -3436,14 +3436,14 @@ describe("brief_item", () => {
     seen.length = 0;
   });
 
-  it("refuses to triage FLIGHT's own direct reply and tag", async () => {
+  it("refuses to triage FLIGHT's own question tag", async () => {
     store.addComms({ at: NOW, from: "CAPCOM", to: "flight-1", ticket: null, text: "Status?" });
     store.addComms({
       at: NOW + 1,
       from: "flight-1",
       to: "CAPCOM",
       ticket: null,
-      text: "Waiting @CAPCOM",
+      text: "Which branch, @CAPCOM?",
     });
     const items = operatorItems(config(), store, NOW + 2, null).filter(
       (i) => i.agentId === "flight-1" && ["message", "tag"].includes(i.kind),

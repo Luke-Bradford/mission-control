@@ -519,6 +519,32 @@ describe("Comms routes", () => {
     ).toBeTruthy();
   });
 
+  it("counts an agent's unread replies to CAPCOM on its nav row", async () => {
+    const seat = crewRow({ id: "alpha", kind: "crew", index: 2 });
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: [seat], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [], unread: 0 },
+      "/api/comms/flight": { messages: [], unread: 0 },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/alpha": {
+        messages: [],
+        inbox: [],
+        contacts: [],
+        unread: 0,
+        inboxUnread: 0,
+        directUnread: 2,
+      },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    const badge = await within(nav).findByTitle("2 unread replies to you");
+    expect(badge.querySelector("[aria-hidden]")?.textContent).toBe("↩2");
+  });
+
   it("returns CAPCOM to its contact after sending from an agent-to-agent conversation", async () => {
     const message = {
       id: "comms:peer",
@@ -1039,6 +1065,22 @@ describe("Needs you", () => {
     expect(screen.getByTestId("item").textContent).toBe("stall:shop-app-ta:r-12");
     fireEvent.click(within(byText("Which port?")).getByRole("button", { name: "Answer" }));
     expect(screen.getByTestId("item").textContent).toBe("ask:7");
+  });
+
+  it("lists FLIGHT's items as waiting on FLIGHT, not being handled, while FLIGHT is down", async () => {
+    stub([
+      item({ key: "a", text: "Mine" }),
+      item({ key: "t", kind: "tag", text: "@CAPCOM key?", owner: "flight", flightTriage: "down" }),
+      item({ key: "c", text: "C item", owner: "controller" }),
+    ]);
+    render(<Comms item={null} />);
+    await screen.findByText("Mine");
+    const down = document.querySelector<HTMLDetailsElement>("#cFlightDown") as HTMLDetailsElement;
+    expect(within(down).getByText("Waiting on FLIGHT — FLIGHT is down · 1")).toBeTruthy();
+    expect(within(down).getByText("@CAPCOM key?")).toBeTruthy();
+    const handled = document.querySelector<HTMLDetailsElement>("#cHandled") as HTMLDetailsElement;
+    expect(within(handled).getByText("Being handled · 1")).toBeTruthy();
+    expect(within(handled).queryByText("@CAPCOM key?")).toBeNull();
   });
 
   it("has no Being handled section when every item is the operator's", async () => {

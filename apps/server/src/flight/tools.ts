@@ -293,7 +293,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { canReadComms, pinComms, sendComms, threadMessages } from "../comms.ts";
+import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -1800,10 +1800,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if ((item.kind === "message" || item.kind === "tag") && item.agentId !== null) {
       const isCrew = !config.loops.some((l) => l.id === item.agentId);
+      const own = item.agentId === flightSeat(config)?.seat.id;
       return (
-        threadMessages(store, item.agentId, isCrew, "attention")
-          .filter((m) => !m.seen && (item.kind === "tag" ? m.tagged : m.direct))
-          .map((m) => m.text)
+        attentionChatter(store, item.agentId, isCrew, own)
+          [item.kind].map((m) => m.text)
           .join("\n\n") || item.text
       );
     }
