@@ -145,7 +145,7 @@ describe("Codex session", () => {
       .map((line) => JSON.parse(line))
       .find((m) => m.method === "thread/tokenUsage/updated");
     expect(Number.isFinite(Date.parse(usage.timestamp))).toBe(true);
-    expect(messages[3].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
+    expect(messages[4].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
     expect(events.filter((e) => ["init", "turn-start", "result"].includes(e.kind))).toEqual([
       { kind: "init", sessionId: "codex-thread-1", model: "gpt-5.4" },
       { kind: "turn-start" },
