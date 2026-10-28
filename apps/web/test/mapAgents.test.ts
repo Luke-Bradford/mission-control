@@ -71,4 +71,21 @@ describe("map agent meaning", () => {
     s.scope.read.push("invented.ts");
     expect(orbPlacement(s, nodes, 0, 3000).position).toEqual(p.position);
   });
+  it("puts a docked seat with an unmerged branch over the files it changed, not in the dock", () => {
+    const s = seat();
+    Object.assign(s, { state: "idle", calls: [], recent: [], since: 0 });
+    const nodes = layoutTree(mapSnapshotFixture.tree);
+    const file = nodes.find((n) => n.path === "src/main.ts")?.position ?? [0, 0, 0];
+    const over = orbPlacement(s, nodes, 0, 1_000_000);
+    expect(over.docked).toBe(true);
+    expect(over.links).toEqual([]);
+    for (const [axis, value] of [
+      over.position[0],
+      over.position[1] - 9,
+      over.position[2],
+    ].entries())
+      expect(value).toBeCloseTo(file[axis] as number, 6);
+    s.scope.modified = [];
+    expect(orbPlacement(s, nodes, 0, 1_000_000).position).not.toEqual(over.position);
+  });
 });

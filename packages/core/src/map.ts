@@ -55,6 +55,15 @@ export interface MapSeat {
    * runs set aside), which name the seat in conflicts and conflictsUnchecked.
    */
   branches: string[];
+  /**
+   * The ticket the seat's current run is on, when `ticket` is another: the ticket its changes are
+   * on, while its current run has none yet. null otherwise.
+   */
+  nowTicket: number | null;
+  /** The branches in `branches` whose changes are in `scope.modified`. */
+  changedOn: string[];
+  /** The ticket of each branch in `branches`, from the newest run on it, where it has one. */
+  tickets: Record<string, number>;
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };

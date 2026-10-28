@@ -1,10 +1,12 @@
 import type { Crew, FileDiff, MapSnapshot } from "@mc/core";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
+import { useNow } from "../clock.ts";
+import { callSign } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { AgentCards } from "./AgentCards.tsx";
 import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
-import { type BadgeKind, uncheckedNotes } from "./cards.ts";
+import { type BadgeKind, isWorking, uncheckedNotes } from "./cards.ts";
 import { areaColor, mainAreas, repoLayout } from "./layout.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pinToken } from "./model.ts";
@@ -53,6 +55,10 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     () => Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index])),
     [crew?.rows],
   );
+  const names = useMemo(
+    () => Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, callSign(r)])),
+    [crew?.rows],
+  );
   const status: MapStatus = error
     ? { live: false, text: errorText(error) }
     : { live: true, text: `Live · real time${skipped ? ` · ${skipped}` : ""}` };
@@ -69,6 +75,7 @@ export function LiveCrewMap({ repo }: { repo: string }) {
       events={events}
       epoch={epoch}
       indices={indices}
+      names={names}
       status={status}
     />
   );
@@ -91,12 +98,15 @@ const collapsed = (tree: MapSnapshot["tree"]) =>
 export function CrewMapView({
   snapshot,
   indices = {},
+  names = {},
   events = [],
   epoch = 0,
   status,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
+  /** Each seat's call sign (the crew's display name). */
+  names?: Record<string, string>;
   events?: MotionEvent[];
   epoch?: number;
   status?: MapStatus;
@@ -105,6 +115,18 @@ export function CrewMapView({
   const [selected, setSelected] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
+  const [overview, setOverview] = useState(0);
+  const now = useNow();
+  // the stage draws working agents only; the rest are a folded line in the rail
+  // (keyed on who is working, so the clock's tick doesn't redraw the scene)
+  const working = snapshot.seats
+    .filter((seat) => isWorking(seat, now))
+    .map((seat) => seat.seat)
+    .join("\n");
+  const stage = useMemo(() => {
+    const ids = new Set(working.split("\n"));
+    return { ...snapshot, seats: snapshot.seats.filter((seat) => ids.has(seat.seat)) };
+  }, [snapshot, working]);
   const [rotate, setRotate] = useState(false);
   const [agent, setAgent] = useState<string | null>(null);
   const [agentFocus, setAgentFocus] = useState<{ seat: string; request: number } | null>(null);
@@ -180,11 +202,6 @@ export function CrewMapView({
     setFocus(null);
     queueMicrotask(() => setFocus(path));
   };
-  const active =
-    snapshot.findings.length > 0 ||
-    snapshot.seats.some(
-      (s) => s.calls.length || s.scope.read.length || s.scope.modified.length || s.recent.length,
-    );
   return (
     <div className="map-body">
       <div className="map-main">
@@ -193,16 +210,19 @@ export function CrewMapView({
             <Scene
               nodes={displayNodes}
               areas={areas}
-              snapshot={snapshot}
+              snapshot={stage}
+              names={names}
               focus={focusNode?.path ?? null}
               home={home}
+              overview={overview}
               rotate={rotate}
               selected={selected}
               indices={indices}
               onSelect={select}
               events={events}
               epoch={epoch}
-              agent={agent}
+              agent={agent && stage.seats.some((seat) => seat.seat === agent) ? agent : null}
+              dockSeats={snapshot.seats.length}
               agentFocus={agentFocus}
               onAgentSelect={setAgent}
               onArc={(conversation, button) => {
@@ -218,17 +238,7 @@ export function CrewMapView({
               }}
             />
           </Suspense>
-          <p className="map-hint">
-            drag to orbit · scroll to zoom · click a file, an orb or a message · ⌖ zooms to an agent
-          </p>
-          {!active && (
-            <p className="map-quiet" role="status">
-              {snapshot.seats.length
-                ? `No crew activity recorded on ${snapshot.repoId} right now: no seat has a call in flight, a file in scope or an unmerged change. Files light up as soon as a seat reads or edits them.`
-                : `No crew seats on ${snapshot.repoId}.`}
-            </p>
-          )}
-          <MapLegend areas={areas} />
+          <MapLegend areas={areas} tree={snapshot.tree} />
           <aside
             id={drawerId}
             className="map-drawer"
@@ -252,6 +262,7 @@ export function CrewMapView({
             <AgentCards
               snapshot={snapshot}
               indices={indices}
+              names={names}
               selected={agent}
               onSelect={setAgent}
               onZoom={(seat) => {
@@ -266,6 +277,7 @@ export function CrewMapView({
                 setBadge({ seat, kind });
               }}
             />
+            <ConflictLine snapshot={snapshot} onFile={searchSelect} />
           </div>
           <section className="map-card map-card-selected" aria-label="Selected">
             <h3>Selected</h3>
@@ -337,6 +349,7 @@ export function CrewMapView({
         <span className="map-deck-controls">
           <button
             type="button"
+            title="Frame where the agents are working (the whole repo when nobody is)"
             onClick={() => {
               setHome(home + 1);
               setFocus(null);
@@ -345,32 +358,84 @@ export function CrewMapView({
           >
             Home view
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOverview(overview + 1);
+              setFocus(null);
+              setAgentFocus(null);
+            }}
+          >
+            Whole repo
+          </button>
           <label>
             <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />{" "}
             rotate
           </label>
         </span>
-        <p className="map-foot">
-          {snapshot.tree.length.toLocaleString()} files at origin/HEAD, each its own node ·{" "}
-          {snapshot.imports.length.toLocaleString()} import links. Overlap is not conflict: a
-          conflict is computed between open PRs' heads. Findings are the current review's; the hub
-          keeps no fixed state for a finding. <b className="add">+n</b> <b className="rem">−m</b> is
-          the branch diff, or edit churn where labelled. Recorded playback is not available yet: the
-          hub keeps each seat's last 15 minutes of calls in memory and serves no history.
-          {snapshot.tree.length > 2000 &&
-            " Files are collapsed into folders (more than 2,000 files)."}
-          {snapshot.conflictsUnchecked.length > 0 &&
-            ` Conflicts not checked for ${snapshot.conflictsUnchecked
-              .map((u) => `${u.branch} (${u.reason})`)
-              .join(", ")}.`}
-        </p>
       </div>
     </div>
   );
 }
 
-/** The stage's key: area colours first, then every mark the scene draws. */
-function MapLegend({ areas }: { areas: string[] }) {
+/**
+ * One muted line for merge conflicts and branches whose conflicts went unchecked; it opens to the
+ * list, each conflicted file a button that selects it (the keyboard's way to every conflict).
+ */
+function ConflictLine({
+  snapshot,
+  onFile,
+}: {
+  snapshot: MapSnapshot;
+  onFile: (path: string) => void;
+}) {
+  const files = new Map<string, string[]>();
+  for (const c of snapshot.conflicts)
+    files.set(c.file, [...(files.get(c.file) ?? []), c.branches.join(" / ")]);
+  const unchecked = snapshot.conflictsUnchecked;
+  if (!files.size && !unchecked.length) return null;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return (
+    <details className="map-conflicts">
+      <summary>
+        {files.size > 0 && (
+          <>
+            <b className="map-conflict-glyph">◆</b>{" "}
+            {plural(files.size, "file in conflict", "files in conflict")}
+          </>
+        )}
+        {files.size > 0 && unchecked.length > 0 && " · "}
+        {unchecked.length > 0 && `${plural(unchecked.length, "branch", "branches")} not checked`}
+      </summary>
+      {files.size > 0 && (
+        <ul aria-label="Merge conflicts between open PRs">
+          {[...files].map(([file, pairs]) => (
+            <li key={file}>
+              <button type="button" onClick={() => onFile(file)}>
+                {file}
+              </button>
+              <span>{pairs.join("; ")}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {unchecked.length > 0 && (
+        <ul aria-label="Branches not checked for conflicts">
+          {unchecked.map((u) => (
+            <li key={u.branch}>
+              {u.branch}: {u.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+/** The stage's key: one line of area colours; the full key opens behind "?". */
+function MapLegend({ areas, tree }: { areas: string[]; tree: MapSnapshot["tree"] }) {
+  const [open, setOpen] = useState(false);
+  const keyId = useId();
   return (
     <div className="map-legend">
       {[...areas, "other"].map((area) => (
@@ -379,28 +444,54 @@ function MapLegend({ areas }: { areas: string[] }) {
           {area}
         </span>
       ))}
-      <span>
-        <i className="ring" />
-        being accessed now
-      </span>
-      <span>
-        {(["Critical", "Important", "Minor"] as const).map((s) => (
-          <b key={s} style={{ color: `var(${pinToken(s)})` }} title={s}>
-            ▲
-          </b>
-        ))}{" "}
-        review findings
-      </span>
-      <span className="wide">
-        → particles: a read flows from the file into the agent, a write from the agent into the
-        file, sized by the tokens it carried · <b className="add">✦</b> lines added spark in,{" "}
-        <b className="rem">✦</b> removed spark out · ▲ burst: the change grew a level
-      </span>
-      <span className="wide">
-        bright: modified, sized by lines changed, <b className="add">+n</b>{" "}
-        <b className="rem">−m</b> · dim: in scope (read on the branch) · ◌ shared · ◎ write overlap
-        · ● orb: the agent · ◆ CAPCOM and HUB · arcs: a message
-      </span>
+      <button
+        type="button"
+        className="map-key-toggle"
+        aria-expanded={open}
+        aria-controls={keyId}
+        aria-label="Map key"
+        title="Map key"
+        onClick={() => setOpen(!open)}
+      >
+        ?
+      </button>
+      {open && (
+        <div className="map-key" id={keyId} role="note">
+          <p>
+            Each file is a point, coloured by its area. An agent's colour lights the files its
+            unmerged branch changed (bright, bigger with more lines) and the files it read (dim).
+            Its orb sits over the files it is working on, with one line: call sign · ticket · files
+            changed · <b className="add">+added</b> <b className="rem">−removed</b>: the branch's
+            real diff from its merge base, or edit churn from its Edit and Write calls where it says
+            "(churn)" (a file not committed or added yet, or before the diff has been read). "2
+            branches" when its changes span a set-aside branch too; "waiting on you" when it has a
+            question or is parked for you.
+          </p>
+          <p>
+            ○ a file a call is using now · ◌ shared with another branch · ◎ written by two branches
+            (overlap, not conflict) ·{" "}
+            {(["Critical", "Important", "Minor"] as const).map((s) => (
+              <b key={s} style={{ color: `var(${pinToken(s)})` }} title={s}>
+                ▲
+              </b>
+            ))}{" "}
+            review findings · <b style={{ color: "var(--crit)" }}>◆</b> a merge conflict between
+            open PRs. Hover a file or a mark for detail; click to open it in Selected.
+          </p>
+          <p>
+            Particles: a read flows from the file into the agent, a write the other way, sized by
+            the tokens it carried; <b className="add">✦</b> lines added, <b className="rem">✦</b>{" "}
+            removed. Arcs are messages. Drag to orbit, scroll to zoom, arrow keys to pan.
+          </p>
+          <p>
+            Crew seats only, one repo at a time; history stays in each agent's own view.{" "}
+            {tree.length.toLocaleString()} files at origin/HEAD.
+            {tree.length > 2000 && " Files are collapsed into folders (more than 2,000 files)."}{" "}
+            Findings are the current review's; the hub keeps no fixed state for one. No recorded
+            playback: the hub keeps each seat's last 15 minutes of calls in memory only.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

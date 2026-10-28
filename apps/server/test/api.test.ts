@@ -3719,6 +3719,8 @@ describe("boards, escalations, health", () => {
         agentId: "guido-1",
         transcriptPath,
         branch: "aside-branch",
+        ticket: "shop-app#41",
+        ticketTitle: "Set-aside work",
         loop: { ...NEW_LOOP, aside: { worktree: dir, wake: false } },
       }),
     );
@@ -3730,6 +3732,14 @@ describe("boards, escalations, health", () => {
     expect(response.json().seats[0].scope.read).toEqual([]);
     // the set-aside branch still names the seat in conflicts and their unchecked notes
     expect(response.json().seats[0].branches).toContain("aside-branch");
+    // the only changes are on the set-aside branch: the seat's line leads with its ticket and title
+    expect(response.json().seats[0]).toMatchObject({
+      ticket: 41,
+      title: "Set-aside work",
+      nowTicket: null,
+      tickets: { "aside-branch": 41 },
+      changedOn: ["aside-branch"],
+    });
     store.upsertPullRequests(
       "shop-app",
       [
@@ -3983,6 +3993,9 @@ describe("boards, escalations, health", () => {
       expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
         404,
       );
+      // the snapshot reads the same per-run diff (map/seats.ts runChanges)
+      expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
+      expect(ring.diff("unknown")).toBeNull();
     } finally {
       stop();
       await a.close();

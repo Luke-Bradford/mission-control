@@ -1,5 +1,5 @@
 import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CrewMapView, LiveCrewMap } from "../src/map/CrewMap.tsx";
 import { LiveMap } from "../src/map/live.ts";
@@ -367,10 +367,20 @@ it("says in the file drawer when a seat's branch went unchecked for conflicts, a
     ],
   };
   render(<CrewMapView snapshot={snapshot} />);
-  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
-    target: { value: "main" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));
+  // one muted rail line; its list reaches every conflict from the keyboard
+  const line = screen.getByText(/1 file in conflict · 1 branch not checked/);
+  fireEvent.click(line);
+  expect(
+    within(screen.getByRole("list", { name: "Branches not checked for conflicts" })).getByText(
+      "feature/7-empty-input: merge check failed",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByRole("list", { name: "Merge conflicts between open PRs" })).getByRole(
+      "button",
+      { name: "src/main.ts" },
+    ),
+  );
   const drawer = screen.getByRole("complementary", { name: "Selected file" });
   expect(drawer.textContent).toContain("Conflicts not checked: merge check failed");
   expect(drawer.textContent).toContain("Conflict: a / b");

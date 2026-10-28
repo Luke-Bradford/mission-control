@@ -43,8 +43,10 @@ export function dockPosition(nodes: MapNode[], index: number): Position {
 
 export function orbPlacement(seat: MapSeat, nodes: MapNode[], index: number, now: number) {
   const docked = isDocked(seat, now) || (seat.seat === "FLIGHT" && !seat.calls.length);
+  // a docked seat with an unmerged branch sits over the files it changed, so the stage shows where
+  // its work is; one with nothing changed goes to the dock
   const files = docked
-    ? []
+    ? seat.scope.modified.map((c) => c.file)
     : seat.calls.length
       ? seat.calls.flatMap((c) => c.files)
       : [...seat.recent]
