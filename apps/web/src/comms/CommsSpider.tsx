@@ -13,6 +13,7 @@ import {
   curve,
   type Frame,
   hubPoint,
+  type LabelSide,
   onSpoke,
   type Point,
   type Presence,
@@ -30,6 +31,8 @@ export type SpiderNode = {
   /** The full name: tooltips and the accessible name. */
   name: string;
   hub: boolean;
+  /** Which side of the node its name sits on (placed clear of other names and nodes). */
+  labelSide: LabelSide;
   /** Role title or spoke, for the hover card. */
   role: string | null;
   color: string;
@@ -71,6 +74,8 @@ export type SpiderEdge = {
 /** New messages seen on the last read: one particle each (a few at most per link). */
 export type Flow = { from: string; to: string; n: number };
 export type Flows = { generation: number; list: Flow[] };
+/** A seat that is stopped or paused and quiet in the window: not drawn, listed in the legend. */
+export type AwaySeat = { id: string; name: string; state: string };
 
 const PARTICLE_MS = 1_150;
 const PARTICLE_GAP_MS = 200;
@@ -92,6 +97,15 @@ type Particle = {
 type Ghost = { node: SpiderNode; at: Point };
 
 type Hover = { kind: "node"; id: string } | { kind: "edge"; key: string } | null;
+
+/** Where a node's name sits, relative to the node, for its placed side. */
+function nameAt(node: { r: number; labelSide: LabelSide }) {
+  const gap = node.r + 4;
+  if (node.labelSide === "above") return { y: -gap - 2, textAnchor: "middle" } as const;
+  if (node.labelSide === "right") return { x: gap, dy: "0.34em", textAnchor: "start" } as const;
+  if (node.labelSide === "left") return { x: -gap, dy: "0.34em", textAnchor: "end" } as const;
+  return { y: gap + 8, textAnchor: "middle" } as const;
+}
 
 /** A count chip's width for its digits. */
 const chip = (n: number) => 7 + 5.6 * String(n).length;
@@ -130,6 +144,7 @@ export function CommsSpider({
   edges,
   metric,
   flows,
+  away,
   reduced,
   label,
   onOpenNode,
@@ -141,6 +156,7 @@ export function CommsSpider({
   edges: readonly SpiderEdge[];
   metric: "messages" | "tokens";
   flows: Flows;
+  away: readonly AwaySeat[];
   reduced: boolean;
   label: string;
   onOpenNode: (id: string) => void;
@@ -157,6 +173,7 @@ export function CommsSpider({
   latest.current = { nodes, edges, f };
   const [ghosts, setGhosts] = useState<Map<string, Ghost>>(() => new Map());
   const [hover, setHover] = useState<Hover>(null);
+  const [awayOpen, setAwayOpen] = useState(false);
   const centre = hubPoint(f, "centre");
   const at = (node: SpiderNode): Point => sim.position(node.id) ?? node.anchor;
 
@@ -388,7 +405,7 @@ export function CommsSpider({
           <circle className="comms-node-core" r={node.r} />
           {node.hub && <circle className="comms-node-inner" r={Math.max(2, node.r - 4.5)} />}
           <circle className="comms-node-ring" r={node.r + 3.5} />
-          <text className="comms-node-name" y={node.r + 12} textAnchor="middle">
+          <text className="comms-node-name" {...nameAt(node)}>
             {node.label}
           </text>
         </g>
@@ -436,7 +453,6 @@ export function CommsSpider({
                   textAnchor={Math.abs(cos) < 0.2 ? "middle" : cos > 0 ? "start" : "end"}
                 >
                   {spoke.key}
-                  <tspan className="n"> {spoke.ids.length}</tspan>
                 </text>
               </g>
             );
@@ -455,6 +471,7 @@ export function CommsSpider({
               edge.lit ? (edge.focus ? "active focus" : "active") : "dim",
               edge.watching ? "watching" : "",
               edge.live ? "live" : "",
+              hover?.kind === "node" && (hover.id === edge.a || hover.id === edge.b) ? "near" : "",
             ]
               .filter(Boolean)
               .join(" ");
@@ -515,25 +532,50 @@ export function CommsSpider({
       {hovered && tipAt && (
         <SpiderTip at={tipAt} frame={f} subject={hovered} name={(id) => byId.get(id)?.name ?? id} />
       )}
-      <div className="comms-spider-legend" aria-hidden="true">
-        <span className="running">
+      <div className="comms-spider-legend">
+        <span className="running" aria-hidden="true">
           <i className="key" />
           Running <b>{counts.running}</b>
         </span>
-        <span className="idle">
+        <span className="idle" aria-hidden="true">
           <i className="key" />
           Idle <b>{counts.idle}</b>
         </span>
-        <span className="stopped">
-          <i className="key" />
-          Stopped <b>{counts.stopped}</b>
-        </span>
-        <span className="link">
+        {counts.stopped > 0 && (
+          <span className="stopped" aria-hidden="true">
+            <i className="key" />
+            Stopped <b>{counts.stopped}</b>
+          </span>
+        )}
+        {away.length > 0 && (
+          <button
+            type="button"
+            className="away"
+            aria-expanded={awayOpen}
+            aria-label={`${away.length} away: ${away.map((seat) => `${seat.name}, ${seat.state}`).join("; ")}`}
+            onMouseEnter={() => setAwayOpen(true)}
+            onMouseLeave={() => setAwayOpen(false)}
+            onFocus={() => setAwayOpen(true)}
+            onBlur={() => setAwayOpen(false)}
+          >
+            <b>{away.length}</b> away
+            {awayOpen && (
+              <span className="comms-spider-away" role="tooltip">
+                {away.map((seat) => (
+                  <span key={seat.id} className="away-seat">
+                    <b>{seat.name}</b> {seat.state}
+                  </span>
+                ))}
+              </span>
+            )}
+          </button>
+        )}
+        <span className="link" aria-hidden="true">
           <i className="key" />
           {metric === "messages" ? "Msgs" : "Tokens"}
         </span>
         {!reduced && (
-          <span className="particle">
+          <span className="particle" aria-hidden="true">
             <i className="key" />
             New
           </span>

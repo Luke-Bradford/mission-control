@@ -45,11 +45,11 @@ it.each([3, 6, 10])(
     );
     expect(screen.getByRole("button", { name: /Open ebull-ta/ })).toBeTruthy();
     const spokes = [...document.querySelectorAll(".comms-spoke text")].map((t) => t.textContent);
-    expect(spokes).toEqual([
-      `GUIDO ${Math.ceil((seats - 1) / 2)}`,
-      `RETRO ${Math.floor((seats - 1) / 2)}`,
-      "LOOPS 1",
-    ]);
+    expect(spokes).toEqual(["GUIDO", "RETRO", "LOOPS"]);
+    // Names are full call signs, never a role-stripped suffix.
+    expect([...document.querySelectorAll(".comms-node-name")].map((t) => t.textContent)).toContain(
+      "SEAT-1",
+    );
   },
 );
 
@@ -454,20 +454,23 @@ it("shows presence by state and fades a seat out when it leaves, back in when it
     <CommsGraph rows={crew({ hudState: "idle" })} flightId="flight-1" view={{ kind: "crew" }} />,
   );
   expect(node()?.classList).toContain("presence-idle");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  // Stopped and quiet all window: away. It fades out where it stood and the legend counts it.
   graph.rerender(
     <CommsGraph rows={crew({ hudState: "stopped" })} flightId="flight-1" view={{ kind: "crew" }} />,
   );
-  expect(node()?.classList).toContain("presence-stopped");
-  expect(node()?.classList).toContain("inactive");
-  expect(node()?.getAttribute("aria-label")).toMatch(/, Stopped$/);
-
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  graph.rerender(<CommsGraph rows={crew(null)} flightId="flight-1" view={{ kind: "crew" }} />);
-  // Gone from the crew: no longer a button, but a fading ghost where it stood.
   expect(node()).toBeNull();
   expect(document.querySelectorAll(".comms-node.leaving")).toHaveLength(1);
+  const away = screen.getByRole("button", { name: /^1 away: RETRO-1, Stopped$/i });
+  fireEvent.mouseEnter(away);
+  expect(within(away).getByRole("tooltip").textContent).toMatch(/RETRO-1\s*Stopped/i);
   act(() => vi.advanceTimersByTime(700));
   expect(document.querySelectorAll(".comms-node.leaving")).toHaveLength(0);
+
+  // Gone from the crew altogether: the same fade, and nothing left to count.
+  graph.rerender(<CommsGraph rows={crew(null)} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(node()).toBeNull();
+  expect(screen.queryByRole("button", { name: /away/ })).toBeNull();
 
   graph.rerender(
     <CommsGraph rows={crew({ hudState: "running" })} flightId="flight-1" view={{ kind: "crew" }} />,
@@ -548,4 +551,29 @@ it("hovers a node or link for its counts and newest message; clicks and keys ope
   expect(window.location.pathname).toBe("/comms/agents/retro-1");
   fireEvent.focus(screen.getByRole("button", { name: /Open CAPCOM/ }));
   expect(within(screen.getByRole("tooltip")).getByText("No messages in 24h")).toBeTruthy();
+});
+
+it("keeps a stopped seat that talked in the window, set back; shows link counts only on focus", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 2 }] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(
+    <CommsGraph
+      rows={[rows[0], rows[1], seatRow({ id: "retro-1", index: 2, role: "RETRO", paused: true })]}
+      flightId="flight-1"
+      view={{ kind: "crew" }}
+    />,
+  );
+  const retro = await screen.findByRole("button", {
+    name: /Open retro-1, 2 messages in 24h, Paused/,
+  });
+  expect(retro.classList).toContain("presence-stopped");
+  expect(screen.queryByRole("button", { name: /away/ })).toBeNull();
+  // At rest the chip is not lit; hovering an end lights its links' counts.
+  const edge = document.querySelector(".comms-edge") as Element;
+  expect(edge.classList).not.toContain("near");
+  fireEvent.mouseEnter(retro);
+  expect(edge.classList).toContain("near");
 });

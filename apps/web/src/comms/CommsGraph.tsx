@@ -25,6 +25,7 @@ import {
   frameFor,
   hubPoint,
   LOOPS_SPOKE,
+  placeLabels,
   presenceOf,
   spokeAnchors,
   spokesFor,
@@ -95,15 +96,6 @@ function scopeLabel(view: CommsView): string {
 }
 
 const pct = (value: number, of: number) => `${Number(((value / of) * 100).toFixed(3))}%`;
-
-/** What a seat is called on its spoke: the id without its role's prefix (`guido-cx` is `cx`). */
-function spokeLabel(row: CrewRow): string {
-  if (row.kind === "loop") return callSign(row);
-  const prefix = `${(row.role ?? "").toLowerCase()}-`;
-  return row.id.startsWith(prefix) && row.id.length > prefix.length
-    ? row.id.slice(prefix.length)
-    : row.id;
-}
 
 /** `Idle`, `Paused`, `Crew paused`, ...: the HUD's word for a seat's state. */
 function stateLabel(row: CrewRow): string {
@@ -271,11 +263,18 @@ export function CommsGraph({
     touching(id).reduce<LastMessage | null>((last, edge) => newer(last, edge.last), null);
 
   // Every seat and observed loop sits on its role's spoke; FLIGHT, CAPCOM and #crew on the axis.
+  // A seat that is stopped or paused and has said nothing in the window is away: not drawn (it
+  // fades out, and back in when it returns), counted in the legend. The page's own seat stays.
+  const isAway = (row: CrewRow) =>
+    presenceOf(row) === "stopped" && countOf(row.id) === 0 && !selected.has(row.id);
   const f = frameFor(size);
   const spokes = spokesFor(rows, flight);
-  const anchors = spokeAnchors(spokes, f);
   const flightRow = crewRows.find((row) => row.id === flight);
-  const seatRows = rows.filter((row) => row.id !== flight);
+  const allSeats = rows.filter((row) => row.id !== flight);
+  const awayRows = allSeats.filter(isAway);
+  const seatRows = allSeats.filter((row) => !isAway(row));
+  const presentIds = new Set(seatRows.map((row) => row.id));
+  const anchors = spokeAnchors(spokes, f, (id) => presentIds.has(id));
   const busiest = Math.max(1, ...seatRows.map((row) => countOf(row.id)));
   const liveIds = new Set(
     edges
@@ -299,7 +298,7 @@ export function CommsGraph({
     at: "centre" | "above" | "below",
     r: number,
     row?: CrewRow,
-  ): SpiderNode => ({
+  ): Omit<SpiderNode, "labelSide"> => ({
     id,
     label,
     name: label,
@@ -315,17 +314,17 @@ export function CommsGraph({
     pinned: true,
     ...common(id),
   });
-  const nodes: SpiderNode[] = [
+  const placed: Omit<SpiderNode, "labelSide">[] = [
     hub(CAPCOM, CAPCOM, "var(--fg)", "above", 8),
     hub(flight, "FLIGHT", "var(--accent)", "centre", 12, flightRow),
     hub(COMMS_CREW, "#crew", "var(--fg-2)", "below", 7.5),
-    ...seatRows.map((row): SpiderNode => {
+    ...seatRows.map((row): Omit<SpiderNode, "labelSide"> => {
       const presence = presenceOf(row);
       const count = countOf(row.id);
       const base = presence === "running" ? 6 : presence === "idle" ? 5 : 4;
       return {
         id: row.id,
-        label: spokeLabel(row),
+        label: callSign(row),
         name: row.kind === "loop" ? callSign(row) : row.id,
         hub: false,
         role:
@@ -344,6 +343,19 @@ export function CommsGraph({
       };
     }),
   ];
+  // Full names, each nudged to a clear side of its node.
+  const sides = placeLabels(
+    placed.map((n) => ({
+      id: n.id,
+      at: n.anchor,
+      r: n.r,
+      text: n.label,
+      prefer: n.id === CAPCOM ? ("above" as const) : ("below" as const),
+    })),
+    f,
+  );
+  const nodes: SpiderNode[] = placed.map((n) => ({ ...n, labelSide: sides.get(n.id) ?? "below" }));
+  const away = awayRows.map((row) => ({ id: row.id, name: callSign(row), state: stateLabel(row) }));
   const hasData = links !== undefined;
   const agentScope = view.kind === "agent" || view.kind === "inbox" || view.kind === "contact";
   const chartHours = useMemo<TrafficHour[]>(() => {
@@ -404,7 +416,10 @@ export function CommsGraph({
     aToB: edge.aToB,
     bToA: edge.bToA,
     weight: Math.sqrt((edge.aToB + edge.bToA) / heaviest),
-    straight: edge.a === flight || edge.b === flight,
+    // Links to FLIGHT, CAPCOM or #crew are straight; CAPCOM ↔ #crew bows round FLIGHT.
+    straight:
+      [edge.a, edge.b].some((id) => id === flight || id === CAPCOM || id === COMMS_CREW) &&
+      !(new Set([edge.a, edge.b, CAPCOM, COMMS_CREW]).size === 2),
     lit: scoped.includes(edge),
     focus: focusedView && scoped.includes(edge),
     watching: watched.some(
@@ -487,6 +502,7 @@ export function CommsGraph({
             edges={spiderEdges}
             metric={metric}
             flows={flows}
+            away={away}
             reduced={reduced}
             label={graphLabel}
             onOpenNode={open}

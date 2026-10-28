@@ -85,8 +85,8 @@ export function spokesFor(rows: readonly CrewRow[], flight: string): Spoke[] {
 
 /** Where seat `i` of `n` sits along a spoke, as a fraction of the spoke's reach. */
 export function spokeFraction(i: number, n: number): number {
-  if (n <= 1) return 0.6;
-  return 0.36 + (0.48 * i) / (n - 1);
+  if (n <= 1) return 0.66;
+  return 0.44 + (0.48 * i) / (n - 1);
 }
 
 export function onSpoke(f: Frame, angle: number, fraction: number): Point {
@@ -95,26 +95,99 @@ export function onSpoke(f: Frame, angle: number, fraction: number): Point {
 }
 
 /**
- * CAPCOM above FLIGHT and the #crew channel below it, on the vertical axis just outside the web:
- * neither is a seat, so neither sits on the crew's rings.
+ * CAPCOM just above FLIGHT and the #crew channel just below it, close in on the vertical axis:
+ * both talk to everyone, so their links stay short and inside the web.
  */
 export const hubPoint = (f: Frame, where: "centre" | "above" | "below"): Point =>
   where === "centre"
     ? { x: f.cx, y: f.cy }
-    : { x: f.cx, y: f.cy + (where === "above" ? -1 : 1) * Math.min(f.ry + 30, f.cy - 16) };
+    : { x: f.cx, y: f.cy + (where === "above" ? -1 : 1) * Math.max(44, f.ry * 0.4) };
 
-/** Every seat's anchor on its spoke. */
-export function spokeAnchors(spokes: readonly Spoke[], f: Frame): Map<string, Point> {
+/**
+ * The anchors of the seats on the graph. Spokes come from the whole crew, so a seat coming or
+ * going never turns a spoke; seats on a spoke share it out among those present.
+ */
+export function spokeAnchors(
+  spokes: readonly Spoke[],
+  f: Frame,
+  present: (id: string) => boolean = () => true,
+): Map<string, Point> {
   const anchors = new Map<string, Point>();
-  for (const spoke of spokes)
-    for (const [i, id] of spoke.ids.entries())
-      anchors.set(id, onSpoke(f, spoke.angle, spokeFraction(i, spoke.ids.length)));
+  for (const spoke of spokes) {
+    const ids = spoke.ids.filter(present);
+    for (const [i, id] of ids.entries())
+      anchors.set(id, onSpoke(f, spoke.angle, spokeFraction(i, ids.length)));
+  }
   return anchors;
 }
 
+/** Which side of its node a name sits on. */
+export type LabelSide = "below" | "above" | "right" | "left";
+type Box = { x0: number; y0: number; x1: number; y1: number };
+
+/** A 9px mono upper-case name is about this wide per character. */
+const CHAR_PX = 5.9;
+const LABEL_H = 11;
+
+/** A name's box when it sits on `side` of a node of radius `r` at `p`. */
+export function labelBox(p: Point, r: number, text: string, side: LabelSide): Box {
+  const w = text.length * CHAR_PX + 4;
+  if (side === "below")
+    return { x0: p.x - w / 2, y0: p.y + r + 3, x1: p.x + w / 2, y1: p.y + r + 3 + LABEL_H };
+  if (side === "above")
+    return { x0: p.x - w / 2, y0: p.y - r - 3 - LABEL_H, x1: p.x + w / 2, y1: p.y - r - 3 };
+  if (side === "right")
+    return { x0: p.x + r + 4, y0: p.y - LABEL_H / 2, x1: p.x + r + 4 + w, y1: p.y + LABEL_H / 2 };
+  return { x0: p.x - r - 4 - w, y0: p.y - LABEL_H / 2, x1: p.x - r - 4, y1: p.y + LABEL_H / 2 };
+}
+
+const overlap = (a: Box, b: Box) =>
+  Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) *
+  Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+
 /**
- * A link's curve: straight when it is a spoke from FLIGHT, otherwise bowed away from the centre so
- * links between seats do not cross FLIGHT.
+ * Places every full name: each on its preferred side unless that hits another name, a node or
+ * the edge of the plot, then the first clear side, else the least crowded. Done on the anchors,
+ * not per frame, so names never flicker as the web drifts.
+ */
+export function placeLabels(
+  nodes: readonly { id: string; at: Point; r: number; text: string; prefer: LabelSide }[],
+  f: Frame,
+): Map<string, LabelSide> {
+  const placed: Box[] = [];
+  const sides = new Map<string, LabelSide>();
+  const discs = nodes.map((n) => ({
+    id: n.id,
+    box: { x0: n.at.x - n.r, y0: n.at.y - n.r, x1: n.at.x + n.r, y1: n.at.y + n.r },
+  }));
+  for (const n of nodes) {
+    const order: LabelSide[] = [n.prefer, ...(["below", "above", "right", "left"] as const)];
+    let best: { side: LabelSide; box: Box; cost: number } | null = null;
+    for (const side of order) {
+      const box = labelBox(n.at, n.r, n.text, side);
+      const outside =
+        Math.max(0, -box.x0) +
+        Math.max(0, box.x1 - f.w) +
+        Math.max(0, -box.y0) +
+        Math.max(0, box.y1 - f.h);
+      const cost =
+        placed.reduce((sum, b) => sum + overlap(box, b), 0) +
+        discs.reduce((sum, d) => sum + (d.id === n.id ? 0 : overlap(box, d.box)), 0) +
+        outside * LABEL_H;
+      if (best === null || cost < best.cost) best = { side, box, cost };
+      if (cost === 0) break;
+    }
+    if (best) {
+      sides.set(n.id, best.side);
+      placed.push(best.box);
+    }
+  }
+  return sides;
+}
+
+/**
+ * A link's line: straight when `straight` (a link to FLIGHT, CAPCOM or #crew), otherwise bowed a
+ * little away from the centre so links between seats do not stack on the spokes.
  */
 export function curve(a: Point, b: Point, straight: boolean, centre: Point) {
   const mx = (a.x + b.x) / 2;
@@ -128,7 +201,10 @@ export function curve(a: Point, b: Point, straight: boolean, centre: Point) {
     nx = -nx;
     ny = -ny;
   }
-  const bend = straight ? 0 : length * 0.14;
+  // A gentle bow, never a sweep; more only where a straight line would run through FLIGHT.
+  const t = Math.max(0, Math.min(1, ((centre.x - a.x) * dx + (centre.y - a.y) * dy) / length ** 2));
+  const through = Math.hypot(a.x + dx * t - centre.x, a.y + dy * t - centre.y) < 18;
+  const bend = straight ? 0 : through ? 26 : Math.min(length * 0.1, 16);
   const c = { x: mx + nx * bend, y: my + ny * bend };
   const at = (t: number): Point => ({
     x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * c.x + t ** 2 * b.x,

@@ -118,12 +118,9 @@
 .comms-spoke text {
   fill: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-}
-.comms-spoke .n {
-  fill: var(--fg-2);
-  font-variant-numeric: tabular-nums;
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  opacity: 0.8;
 }
 
 /* Links: weight and brightness both follow the message count (--w, 0..1). */
@@ -165,9 +162,28 @@
 .comms-edge.dim .comms-edge-line {
   opacity: 0.1;
 }
-/* A link's count is a chip, so it never reads as a seat's label. */
+/*
+ * A link's count is a chip, shown only while the link or one of its ends is hovered or focused, or
+ * the page is about it: at rest the web is nodes, lines and names.
+ */
 .comms-edge-count {
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.comms-edge:hover .comms-edge-count,
+.comms-edge:focus-visible .comms-edge-count,
+.comms-edge.near .comms-edge-count,
+.comms-edge.focus .comms-edge-count {
+  opacity: 1;
+}
+.comms-edge:focus-visible {
+  outline: none;
+}
+.comms-edge:focus-visible .comms-edge-line,
+.comms-edge.near .comms-edge-line {
+  stroke: var(--fg);
+  opacity: 0.9;
 }
 .comms-edge-chip {
   fill: var(--surface);
@@ -188,8 +204,8 @@
 .comms-edge.live .comms-edge-chip {
   stroke: var(--accent);
 }
-.comms-edge.dim .comms-edge-count {
-  opacity: 0.25;
+.comms-edge.dim .comms-edge-num {
+  opacity: 0.4;
 }
 
 /* A message in flight: a bright head with a short fading tail, riding its link. */
@@ -275,7 +291,6 @@
 .comms-node.presence-stopped .comms-node-core {
   fill: var(--surface);
   stroke: color-mix(in srgb, var(--node-color) 50%, var(--muted));
-  stroke-dasharray: 2 1.5;
 }
 .comms-node.presence-stopped .comms-node-name {
   fill: var(--muted);
@@ -564,7 +579,8 @@
   text-transform: uppercase;
   pointer-events: none;
 }
-.comms-spider-legend > span {
+.comms-spider-legend > span,
+.comms-spider-legend > .away {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -589,7 +605,7 @@
   border: 1px solid var(--fg-2);
 }
 .comms-spider-legend .stopped .key {
-  border: 1px dashed var(--muted);
+  border: 1px solid var(--muted);
 }
 .comms-spider-legend .link .key {
   width: 14px;
@@ -605,6 +621,50 @@
 }
 .comms-spider-legend .particle {
   margin-left: auto;
+}
+/* Away: seats stopped and quiet, off the web; hover or focus lists them. */
+.comms-spider-legend > .away {
+  position: relative;
+  padding: 0 4px;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dotted var(--muted);
+  border-radius: 0;
+  cursor: default;
+  pointer-events: auto;
+}
+.comms-spider-legend > .away:hover,
+.comms-spider-legend > .away:focus-visible {
+  color: var(--fg-2);
+  outline: none;
+}
+.comms-spider-away {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  gap: 3px;
+  min-width: 190px;
+  padding: 7px 9px;
+  color: var(--muted);
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+}
+.away-seat > b {
+  margin-right: 6px;
+  color: var(--fg-2);
+  font-weight: 500;
+  text-transform: uppercase;
 }
 
 .comms-empty,

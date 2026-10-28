@@ -3,6 +3,8 @@ import {
   frameFor,
   hubPoint,
   LOOPS_SPOKE,
+  labelBox,
+  placeLabels,
   presenceOf,
   SpiderSim,
   spokeAnchors,
@@ -128,4 +130,47 @@ it("holds pinned nodes still and pushes overlapping ones apart", () => {
   expect(sim.position("hub")).toEqual({ x: 100, y: 100 });
   const seat = sim.position("seat") as { x: number; y: number };
   expect(Math.hypot(seat.x - 100, seat.y - 100)).toBeGreaterThanOrEqual(10 + 6 + 9 - 0.01);
+});
+
+it("shares a spoke out among the seats present, keeping the spoke where it was", () => {
+  const all = spokesFor(
+    [seatRow({ id: "guido-1", index: 0 }), seatRow({ id: "guido-2", index: 1 })],
+    "flight-1",
+  );
+  const both = spokeAnchors(all, f);
+  const one = spokeAnchors(all, f, (id) => id === "guido-2");
+  expect(one.has("guido-1")).toBe(false);
+  expect(one.get("guido-2")).not.toEqual(both.get("guido-2"));
+  expect(all[0]?.angle).toBe(
+    spokesFor([seatRow({ id: "guido-2", index: 1 })], "flight-1")[0]?.angle,
+  );
+});
+
+it("nudges a full name to a clear side instead of overlapping another name or node", () => {
+  const nodes = [
+    { id: "a", at: { x: 100, y: 100 }, r: 6, text: "GUIDO-CX", prefer: "below" as const },
+    { id: "b", at: { x: 110, y: 122 }, r: 6, text: "RETRO-CX", prefer: "below" as const },
+  ];
+  const sides = placeLabels(nodes, f);
+  // a's name would land on b's node below it, so it goes elsewhere.
+  expect(sides.get("a")).not.toBe("below");
+  const boxes = nodes.map((n) => labelBox(n.at, n.r, n.text, sides.get(n.id) ?? "below"));
+  const discs = nodes.map((n) => ({
+    x0: n.at.x - n.r,
+    y0: n.at.y - n.r,
+    x1: n.at.x + n.r,
+    y1: n.at.y + n.r,
+  }));
+  const apart = (p: (typeof boxes)[number], q: (typeof boxes)[number]) =>
+    p.x1 <= q.x0 || q.x1 <= p.x0 || p.y1 <= q.y0 || q.y1 <= p.y0;
+  expect(apart(boxes[0] as never, boxes[1] as never)).toBe(true);
+  for (const box of boxes) for (const disc of discs) expect(apart(box, disc)).toBe(true);
+});
+
+it("keeps links short: CAPCOM and #crew sit close above and below FLIGHT, inside the web", () => {
+  for (const where of ["above", "below"] as const) {
+    const p = hubPoint(f, where);
+    expect(p.x).toBe(centre.x);
+    expect(Math.abs(p.y - centre.y)).toBeLessThan(f.ry * 0.5);
+  }
 });
