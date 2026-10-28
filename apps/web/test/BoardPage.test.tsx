@@ -10,6 +10,7 @@ import {
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { needsYouItems } from "../src/attention.ts";
 import { cardRenderProbe } from "../src/board/Card.tsx";
 import {
   NO_PR_YET,
@@ -221,7 +222,7 @@ describe("at phone width", () => {
       showRepo: false,
       prs: [],
       crew: [],
-      needsYou: [],
+      needsYou: needsYouItems([]),
       now: NOW,
       tz: "UTC",
       todayStart: 0,
@@ -613,8 +614,9 @@ describe("cards", () => {
     await open();
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
     const chip = within(c).getByRole("button", {
-      name: "You: decide on the draft · waiting 9 days",
+      name: "You: decide on the draft · waiting 9 days. Opens its brief.",
     });
+    expect(chip.textContent).toBe("You: decide on the draft · waiting 9 days");
     expect(chip.className).toBe("kyou pill warn");
     expect(c.className).toContain("pulse-warn");
     fireEvent.click(chip);
@@ -667,7 +669,7 @@ describe("cards", () => {
         showRepo={false}
         prs={[]}
         crew={[]}
-        needsYou={[]}
+        needsYou={needsYouItems([])}
         now={NOW}
         tz={null}
         todayStart={null}

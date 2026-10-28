@@ -1,5 +1,5 @@
 import type { AgentStream, Crew, FlightSummaryView, FlightView } from "@mc/core";
-import { NEEDS_YOU_PATH, useNeedsYou } from "../attention.ts";
+import { useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { runElapsed } from "../crew.ts";
@@ -7,7 +7,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { navigate, PAGE_PATHS } from "../router.ts";
+import { NEEDS_YOU_PATH, navigate, PAGE_PATHS } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { chatRows, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";

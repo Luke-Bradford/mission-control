@@ -191,7 +191,8 @@ export const Card = memo(function Card({
         key="you"
         type="button"
         className="kyou pill warn"
-        title={`${you.title} · open its brief`}
+        title={you.title}
+        aria-label={`${you.text}${you.more > 0 ? `, and ${you.more} more` : ""}. Opens its brief.`}
         onClick={(e) => {
           // the card's own click would open the ticket instead
           e.stopPropagation();

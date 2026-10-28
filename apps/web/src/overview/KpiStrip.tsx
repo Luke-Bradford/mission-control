@@ -1,10 +1,10 @@
 import type { AttentionItem, OverviewSummary } from "@mc/core";
-import { NEEDS_YOU_PATH, needsYouItems } from "../attention.ts";
+import { needsYouItems } from "../attention.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { kTokens } from "../fmt.ts";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
-import { followLink, PAGE_PATHS } from "../router.ts";
-import { useSession } from "../shell/session.ts";
+import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
+import { SESSION_ALL, useSession } from "../shell/session.ts";
 
 const duration = (ms: number | null | undefined): string => {
   if (ms == null) return "—";
@@ -78,6 +78,9 @@ export function KpiStrip() {
   const needsYou = attention === undefined ? undefined : needsYouItems(attention);
   const at = summary?.at ?? Date.now();
   const needsOverHour = needsYou?.filter((i) => at - i.at > HOUR_MS).length;
+  // The server's Needs-you history is session-scoped; under a session it would disagree with the
+  // count, so the tile shows only canonical figures then (until the metric registry, #762).
+  const needsSeries = session === SESSION_ALL ? k?.needsYou?.series : undefined;
   const tiles = [
     {
       label: "Agents working",
@@ -175,12 +178,12 @@ export function KpiStrip() {
       to: NEEDS_YOU_PATH,
       value: value(needsYou?.length),
       delta:
-        k?.needsYou?.series !== undefined
-          ? change(k.needsYou.series)
+        needsSeries !== undefined
+          ? change(needsSeries)
           : needsOverHour !== undefined
             ? `${needsOverHour} over 1 h`
             : "—",
-      series: k?.needsYou?.series,
+      series: needsSeries,
       fmt: String,
       history: "last 30 minutes",
       // amber only while something waits on the operator

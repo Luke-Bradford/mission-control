@@ -1915,6 +1915,37 @@ describe("Activity panel", () => {
     expect(list.scrollTop).toBe(80);
   });
 
+  it("Needs you lists the header's set: one row per item, whatever the session", async () => {
+    stub({
+      config: SESSION_CONFIG,
+      items: [
+        // an escalation and a PR on the same ticket are two things to do, so two rows
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({
+          key: "pr:site-builder#9:1",
+          kind: "pr",
+          repoId: "site-builder",
+          text: "PR #9 · You: review",
+          escalationId: null,
+          ticket: "site-builder#2",
+          agentId: null,
+        }),
+        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({ key: "flight", text: "FLIGHT's to settle", owner: "flight" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
+    await screen.findByText("Pick a layout");
+    // a session on another repo hides nothing waiting on the operator
+    act(() => setSession("shop-app-session"));
+    const rows = () => container.querySelectorAll("#actList .arow");
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByText("PR #9 · You: review")).toBeTruthy();
+    expect(screen.queryByText("FLIGHT's to settle")).toBeNull();
+    act(() => setSession(SESSION_ALL));
+  });
+
   it("holds new rows while scrolled down and shows N new without moving the reader", async () => {
     const base = {
       at: NOW,

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
-import { setSession } from "../src/shell/session.ts";
+import { SESSION_ALL, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { HOUR, item, NOW, OVERVIEW } from "./fixtures.ts";
 
@@ -212,5 +212,25 @@ describe("KpiStrip", () => {
     act(() => hub.refetchTopic("agents"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByText("41.2k")).toBeTruthy();
+  });
+
+  it("under a session, the Needs-you tile drops the session-scoped history and keeps canonical figures", async () => {
+    const withHistory = {
+      ...OVERVIEW,
+      kpis: { ...kpis, needsYou: { count: 0, overHour: 0, series: [4, 0, 0] } },
+    };
+    stubFetch({
+      "/api/overview": withHistory,
+      "/api/overview?session=s1": withHistory,
+      "/api/attention": [item({ key: "a", at: NOW - 2 * HOUR }), item({ key: "b", at: NOW })],
+    });
+    render(<KpiStrip />);
+    const tile = () => screen.getByRole("link", { name: /Needs you/ });
+    await waitFor(() => expect(within(tile()).queryByRole("img")).not.toBeNull());
+    act(() => setSession("s1"));
+    await waitFor(() => expect(within(tile()).queryByRole("img")).toBeNull());
+    expect(tile().querySelector(".v")?.textContent).toBe("2");
+    expect(tile().querySelector(".kpi-secondary")?.textContent).toBe("1 over 1 h");
+    act(() => setSession(SESSION_ALL));
   });
 });

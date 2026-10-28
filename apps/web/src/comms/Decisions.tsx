@@ -1,11 +1,11 @@
 import type { AttentionHoldCondition, AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
-import { NEEDS_YOU_PATH, needsYouItems } from "../attention.ts";
+import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { ACTIONS } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
-import { followLink } from "../router.ts";
+import { followLink, NEEDS_YOU_PATH } from "../router.ts";
 import { answerTarget, sendAnswer } from "./answer.ts";
 import { HoldForm } from "./NeedsList.tsx";
 

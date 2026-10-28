@@ -1,5 +1,4 @@
 import {
-  type AttentionItem,
   type BoardItem,
   type CrewRow,
   HUD_COLUMNS,
@@ -8,6 +7,7 @@ import {
   statusOutOfDate,
 } from "@mc/core";
 import { useId, useMemo, useState } from "react";
+import type { NeedsYou } from "../attention.ts";
 import { agoDays } from "../fmt.ts";
 import { Card, type CardProps } from "./Card.tsx";
 import {
@@ -35,8 +35,8 @@ interface CardCtx {
   /** The PRs per ticket ref, grouped once per PR fetch. */
   prsByTicket: Map<string, PullRequestView[]>;
   crew: CrewRow[];
-  /** The Needs-you set (`needsYouItems`): a card waits on you only for one of these. */
-  needsYou: AttentionItem[];
+  /** The Needs-you set: a card waits on you only for one of these. */
+  needsYou: NeedsYou;
   now: number;
   tz: string | null;
   todayStart: number | null;
@@ -95,7 +95,7 @@ export function Kanban({
   prs: PullRequestView[];
   crew: CrewRow[];
   /** The Needs-you set (`needsYouItems`). */
-  needsYou: AttentionItem[];
+  needsYou: NeedsYou;
   now: number;
   tz: string | null;
   todayStart: number | null;

@@ -12,7 +12,7 @@ import {
   type RunLoopView,
   startOfLocalDay,
 } from "@mc/core";
-import { sortNeeds, youAction } from "../attention.ts";
+import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
 
 const DAY = 86_400_000;
@@ -81,28 +81,24 @@ export function cardAgent(item: BoardItem, crew: CrewRow[]): CrewRow | null {
 }
 
 /**
- * The Needs-you items on this card, most urgent first. `needsYou` is the canonical set
- * (`needsYouItems`), so a card never waits on you unless Needs you says so: an item about the
- * card's ticket, or, on an In progress card, an item from the agent running it.
+ * The Needs-you items on this card, most urgent first. `needsYou` must be `needsYouItems` output
+ * (the type says so), so a card never waits on you unless Needs you says so. An item about a ticket
+ * belongs to that ticket's card only; an item about no ticket from the agent running an In progress
+ * card (a stall, a question) belongs to that card. An item about another ticket never follows its
+ * agent here, and an escalation (its agent is the loop) stays on its own ticket.
  */
-export function cardNeeds(
-  item: BoardItem,
-  needsYou: readonly AttentionItem[],
-  crew: CrewRow[],
-): AttentionItem[] {
+export function cardNeeds(item: BoardItem, needsYou: NeedsYou, crew: CrewRow[]): AttentionItem[] {
   const ref = ticketRef(item);
   const agent = cardColumn(item) === "In progress" ? cardAgent(item, crew) : null;
   return sortNeeds(
-    needsYou.filter((a) => a.ticket === ref || (agent !== null && a.agentId === agent.id)),
+    needsYou.filter(
+      (a) => a.ticket === ref || (agent !== null && a.ticket === null && a.agentId === agent.id),
+    ),
   );
 }
 
-/** The card carries a Needs-you item (the Board's Needs-me filter). */
-export function needsMe(
-  item: BoardItem,
-  needsYou: readonly AttentionItem[],
-  crew: CrewRow[],
-): boolean {
+/** The card carries a Needs-you item (the Board's Needs-me filter); `needsYou` as in `cardNeeds`. */
+export function needsMe(item: BoardItem, needsYou: NeedsYou, crew: CrewRow[]): boolean {
   return cardNeeds(item, needsYou, crew).length > 0;
 }
 
@@ -129,11 +125,12 @@ export function cardColumn(item: BoardItem): HudColumn {
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
 
-/** `5 minutes`, `1 hour`, `5 hours`, `1 day`, `9 days`: how long something has waited. */
+/** `under a minute`, `5 minutes`, `1 hour`, `5 hours`, `1 day`, `9 days`: how long something has waited. */
 export function waitingText(ms: number): string {
   const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? "" : "s"}`;
   if (ms >= DAY) return n(Math.floor(ms / DAY), "day");
-  return ms >= HOUR ? n(Math.floor(ms / HOUR), "hour") : n(Math.floor(ms / MINUTE), "minute");
+  if (ms >= HOUR) return n(Math.floor(ms / HOUR), "hour");
+  return ms >= MINUTE ? n(Math.floor(ms / MINUTE), "minute") : "under a minute";
 }
 
 /** A card's "You:" chip: its first Needs-you item, what it asks and how long it has waited. */

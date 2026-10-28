@@ -9,7 +9,7 @@ import {
   type MachineSample,
 } from "@mc/core";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
-import { NEEDS_YOU_PATH, useNeedsYou } from "../attention.ts";
+import { openNeedsYou, useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
@@ -24,18 +24,13 @@ import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
-const TABS: readonly {
-  page: Page;
-  label: string;
-  to: string;
-  needs?: (i: AttentionItem) => boolean;
-}[] = [
+/** The page tabs carry no lamps: Needs you is the one lamp, and its home is FLIGHT (roadmap item 2). */
+const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
-  // No lamp on Board: Needs you is the one lamp, and its home is FLIGHT (roadmap item 2).
   { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
-  { page: "comms", label: "Comms", to: PAGE_PATHS.comms, needs: () => true },
+  { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
 ];
 
@@ -49,7 +44,6 @@ export function Header({ page }: { page: Page }) {
         {TABS.map((t) => (
           <Tab key={t.label} to={t.to} on={page === t.page}>
             {t.label}
-            {t.needs && <NeedsLamp items={attention.filter(t.needs)} />}
           </Tab>
         ))}
       </nav>
@@ -147,12 +141,6 @@ function Clock() {
     timeZone: tz,
   }).format(now);
   return <time className="top-clock">{time}</time>;
-}
-
-/** A tab's lamp; tab lamps never pulse (catalogue 1.1): the Needs-you button carries the pulse. */
-function NeedsLamp({ items }: { items: AttentionItem[] }) {
-  const lamp = needsLamp(items, false);
-  return lamp ? <Lamp {...lamp} /> : null;
 }
 
 function SessionSelect() {
@@ -261,7 +249,7 @@ function MachineButton() {
 /** Where the Needs-you button leads, in its accessible name. */
 const NEEDS_YOU_OPENS = "Opens FLIGHT's Operator actions";
 
-function NeedsButton({ items }: { items: AttentionItem[] }) {
+function NeedsButton({ items }: { items: readonly AttentionItem[] }) {
   const notAcked = items.filter((i) => !i.acked).length;
   const unacked = notAcked > 0;
   const lamp = needsLamp(items, unacked);
@@ -275,7 +263,7 @@ function NeedsButton({ items }: { items: AttentionItem[] }) {
       className={`needs-btn${items.length ? " has" : ""}`}
       title={`Everything waiting on you (FLIGHT › Plan › Operator actions)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
       aria-label={label}
-      onClick={() => navigate(NEEDS_YOU_PATH)}
+      onClick={openNeedsYou}
     >
       {lamp ? (
         <Lamp {...lamp} title={false} />

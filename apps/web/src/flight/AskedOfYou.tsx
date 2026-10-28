@@ -39,9 +39,9 @@ export function AskedOfYou() {
   const needsYou = sortNeeds(needsYouItems(attention));
   const open = new Map((notes.data?.open ?? []).map((t) => [t.key, t]));
   // A person item whose thread the notifications view holds is a card; any other item is a row.
-  const threads = needsYou.flatMap((i) => {
-    const t = i.kind === "person" ? open.get(i.key) : undefined;
-    return t ? [t] : [];
+  const threads = needsYou.flatMap((item) => {
+    const t = item.kind === "person" ? open.get(item.key) : undefined;
+    return t ? [{ t, item }] : [];
   });
   const items = needsYou.filter((i) => !(i.kind === "person" && open.has(i.key)));
   const handled = (notes.data?.handledToday ?? []).filter((h) => inRepo(h.repoId));
@@ -60,9 +60,8 @@ export function AskedOfYou() {
   return (
     <div>
       <div className="askcards">
-        {threads.map((t) => {
-          const item = attention.find((i) => i.key === t.key);
-          const take = item?.brief;
+        {threads.map(({ t, item }) => {
+          const take = item.brief;
           return (
             <div className="askcard" key={t.key} data-testid="person-card">
               <div className="row">
@@ -83,7 +82,7 @@ export function AskedOfYou() {
                   <MentionText text={t.snippet} />
                 </blockquote>
               )}
-              {item?.flightTriage === "missed" && (
+              {item.flightTriage === "missed" && (
                 <p className="s note">{FLIGHT_TRIAGE_LABEL.missed}</p>
               )}
               {take && (

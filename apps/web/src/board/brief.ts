@@ -1,11 +1,5 @@
-import {
-  type AttentionItem,
-  type BoardItem,
-  type CrewRow,
-  type PullRequestView,
-  startOfLocalDay,
-} from "@mc/core";
-import { prAction } from "../attention.ts";
+import { type BoardItem, type CrewRow, type PullRequestView, startOfLocalDay } from "@mc/core";
+import { type NeedsYou, prAction } from "../attention.ts";
 import { loopStepLabel } from "../crew.ts";
 import {
   cardAgent,
@@ -25,7 +19,7 @@ export type BriefCtx = {
   prs: PullRequestView[];
   crew: CrewRow[];
   /** The Needs-you set (`needsYouItems`): what waits on me comes only from it. */
-  needsYou: AttentionItem[];
+  needsYou: NeedsYou;
 };
 
 /** What a card's PR waits on me to do, from its Needs-you item; null when none asks. */

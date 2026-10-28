@@ -133,7 +133,7 @@ describe("Header", () => {
     expect(await screen.findByRole("img", { name: "Claude —; Codex 92%" })).toBeTruthy();
   });
 
-  it("puts lamps on the tabs from the attention list", async () => {
+  it("puts no lamps on the page tabs: Needs you is the one lamp", async () => {
     routes({
       attention: [
         item({ key: "esc:1", kind: "decision", escalationId: "shop-app#1" }),
@@ -141,26 +141,25 @@ describe("Header", () => {
       ],
     });
     render(<Header page="overview" />);
-    const comms = await within(tab(/^Comms/)).findByRole("img");
-    expect(comms.className).toBe("lamp crit"); // tab lamps never pulse (cat 1.1)
-    expect(comms.getAttribute("aria-label")).toBe("Error, Decision");
-    // Needs you is the one lamp: the Board has none, whatever waits on its cards.
-    expect(within(tab(/^Board/)).queryByRole("img")).toBeNull();
-    expect(within(tab(/^Overview/)).queryByRole("img")).toBeNull();
+    const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
+    expect(btn.querySelector(".lamp.crit")).not.toBeNull();
+    for (const name of [/^Overview/, /^Flight/, /^Board/, /^Agents/, /^Comms/, /^Telemetry/])
+      expect(within(tab(name)).queryByRole("img")).toBeNull();
   });
 
-  it("Comms shows its attention lamp, the Board none; acked items hold still", async () => {
-    routes({
-      attention: [
-        item({ key: "stall:a:r", kind: "stalled", escalationId: null, acked: true }),
-        item({ key: "esc:2", kind: "question", escalationId: "shop-app#2", acked: true }),
-      ],
-    });
-    render(<Header page="overview" />);
-    const comms = await within(tab(/^Comms/)).findByRole("img");
-    expect(comms.className).toBe("lamp warn");
-    expect(comms.getAttribute("aria-label")).toBe("Stalled, Question");
-    expect(within(tab(/^Board/)).queryByRole("img")).toBeNull();
+  it("clicking Needs you while already there brings Operator actions back into view", async () => {
+    routes({ attention: [item({ key: "a" })] });
+    window.history.replaceState(null, "", "/flight#askP");
+    const panel = document.createElement("section");
+    panel.id = "askP";
+    panel.scrollIntoView = vi.fn();
+    document.body.append(panel);
+    render(<Header page="flight" />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Needs you 1:/ }));
+    expect(panel.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
+    panel.remove();
+    window.history.replaceState(null, "", "/");
   });
 
   it("counts what needs you and says whether any is unacknowledged", async () => {
