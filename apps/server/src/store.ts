@@ -589,6 +589,18 @@ export interface BoardMove {
   at: number;
 }
 
+/** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
+const COMMS_LINK_PREVIEW = 200;
+/** One direction of a Comms link over a window, with its newest message. */
+export interface CommsLinkCount {
+  from: string;
+  to: string;
+  count: number;
+  lastId: string;
+  lastAt: number;
+  lastText: string;
+}
+
 /** Who a seat line is from. */
 /** A hand-off between agents; `from` and `to` are seat ids, COMMS_CAPCOM or COMMS_MC. */
 export interface CommsRow {
@@ -3226,12 +3238,29 @@ export class Store {
       this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
     ).map((r) => this.commsRow(r));
   }
-  commsLinkCounts(since: number): { from: string; to: string; count: number }[] {
-    return this.db
+  /**
+   * Direct-link counts since `since`, each with its newest message (id, time and the first
+   * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
+   */
+  commsLinkCounts(since: number): CommsLinkCount[] {
+    const rows = this.db
       .prepare(
-        "SELECT from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY from_id,to_id",
+        `SELECT c.from_id AS 'from', c.to_id AS 'to', g.count AS count, c.id AS lastId,
+          c.at AS lastAt, substr(c.text, 1, ?) AS lastText
+        FROM (SELECT from_id, to_id, COUNT(*) AS count, MAX(id) AS last FROM comms WHERE at>=?
+          GROUP BY from_id,to_id) g
+        JOIN comms c ON c.id = g.last
+        ORDER BY c.from_id, c.to_id`,
       )
-      .all(since) as { from: string; to: string; count: number }[];
+      .all(COMMS_LINK_PREVIEW, since) as Row[];
+    return rows.map((r) => ({
+      from: r.from as string,
+      to: r.to as string,
+      count: r.count as number,
+      lastId: `comms:${r.lastId as number}`,
+      lastAt: r.lastAt as number,
+      lastText: r.lastText as string,
+    }));
   }
   /** Hourly direct-link counts for the Comms Traffic chart. */
   commsHourlyLinkCounts(
