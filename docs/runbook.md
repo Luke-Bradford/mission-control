@@ -334,9 +334,11 @@ What each seat's process starts with:
   dir, and `git add` / `git commit` are refused by name. A writer seat commits only through the mc commit
   tool (`mcp__mc__commit`), which the hub runs in its own clone. When the work is done and
   committed it reports with `mcp__mc__report_evidence`, and the hub's engine pushes the branch and
-  opens the draft PR (below). Any seat may ask you a question with `mcp__mc__ask_operator`. A
-  read-only seat (RETRO) has the question tool and `report_evidence`, which refuses it (read-only
-  runs have no loop).
+  opens the draft PR (below). A seat asks FLIGHT, never you, with `mcp__mc__ask_flight`; FLIGHT
+  answers it or briefs it for you, and only a briefed question reaches your Needs you. While FLIGHT
+  is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
+  (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
+  loop).
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only

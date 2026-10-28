@@ -4,7 +4,7 @@ import {
   type FlightLedgerView,
   type FlightSummaryView,
 } from "@mc/core";
-import { ownerLabel, useNeedsYou } from "../attention.ts";
+import { openNeedsYou, ownerLabel, useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -88,9 +88,10 @@ export function ControlQueue({ onOpenQueue }: { onOpenQueue: () => void }) {
                 <button
                   type="button"
                   className="sm ghost flight-link"
-                  onClick={() => openItem(item.key)}
+                  // "FLIGHT is not triaging" lists its items on Needs you's home
+                  onClick={() => (item.notTriaging ? openNeedsYou() : openItem(item.key))}
                 >
-                  Open
+                  {item.notTriaging ? "Show them" : "Open"}
                 </button>
               </li>
             ))}

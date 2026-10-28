@@ -20,6 +20,8 @@ export function mapSeats(
   ring: CallRing,
   lock: TestLockState,
   now: number,
+  /** FLIGHT's seat id, if any: a seat's question goes to it, drawn as the map's FLIGHT node. */
+  flightId: string | null = null,
 ): Pick<MapSnapshot, "seats" | "findings"> {
   const findings: MapSnapshot["findings"] = [];
   const seats = rows.map((row): MapSeat => {
@@ -155,7 +157,7 @@ export function mapSeats(
           .map((q) => ({
             id: q.id,
             from: row.id,
-            to: "CAPCOM",
+            to: flightId === null ? "CAPCOM" : "FLIGHT",
             ticket: ticketNumber(run?.ticket) ?? ticket,
             since: q.at,
           })),

@@ -53,6 +53,7 @@ import {
   FLIGHT_MEMORY_SOURCE_MAX,
   FLIGHT_MEMORY_TOPIC_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
+  FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
@@ -70,6 +71,7 @@ import {
   GUARD_ACK_PREFIX,
   GUARD_ALLOW_OUTPUT,
   GUARD_CHECK_PATH,
+  HOLD_NOT_TRIAGING_REFUSED,
   headlineSavedText,
   headlineText,
   LEDGER_FULL_TEXT,
@@ -91,6 +93,7 @@ import {
   OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
   type PullRequestView,
+  passNeedsBriefText,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -772,11 +775,7 @@ describe("answer_question", () => {
     const id = ask();
     expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
     expect(messageCalls).toEqual([
-      [
-        "guido-1",
-        "FLIGHT, answering for the operator: Lane 2",
-        { interrupt: false, questions: "unpassed" },
-      ],
+      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "unpassed" }],
     ]);
     expect(decisions()).toEqual([
       {
@@ -829,7 +828,18 @@ describe("answer_question", () => {
     expect(seen).toContain("agents");
   });
 
-  it("records a question passed on as FLIGHT to CAPCOM, with the question's text", async () => {
+  /** FLIGHT's brief for the operator on a seat's question: the only way it reaches them (#758). */
+  const passUp = (id: number, basis = "spend") =>
+    call("brief_item", {
+      key: `ask:${id}`,
+      for: "operator",
+      assessment: "Spending is the operator's call.",
+      ask: "Which lane?",
+      recommendation: "Lane 2.",
+      basis,
+    });
+
+  it("refuses a bare pass, pointing at brief_item, and changes nothing (#758)", async () => {
     live("guido-1", "r-guido", { ticket: "mc#7" });
     const id = store.addQuestion({
       agentId: "guido-1",
@@ -837,11 +847,13 @@ describe("answer_question", () => {
       text: "Which lane?",
       at: NOW,
     });
-    await call("answer_question", { question_id: id, pass_to_operator: true, basis: "spend" });
-    expect(store.comms(0)).toEqual([
-      { at: NOW, from: "flight-1", to: "CAPCOM", ticket: "mc#7", text: "Which lane?" },
-    ]);
-    expect(seen).toContain("agents");
+    expect(
+      await call("answer_question", { question_id: id, pass_to_operator: true, basis: "spend" }),
+    ).toEqual(refused(passNeedsBriefText(id)));
+    expect(passNeedsBriefText(id)).toContain(`mc brief_item { key: "ask:${id}", for: "operator"`);
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect(store.comms(0)).toEqual([]);
+    expect(decisions()).toEqual([]);
   });
 
   it("returns a send failure and records nothing", async () => {
@@ -854,35 +866,89 @@ describe("answer_question", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
-  it("passes a question to the operator without a message", async () => {
+  it("passes a question to the operator with FLIGHT's brief, without a message", async () => {
     const id = ask();
-    const r = await call("answer_question", {
-      question_id: id,
-      pass_to_operator: true,
-      basis: "spend",
-    });
-    expect(r).toEqual({
-      text: "Passed to the operator. It is in the operator's Needs-you list now; your basis is in Decided without you.",
-    });
+    expect(await passUp(id)).toEqual({ text: BRIEFED_TEXT });
     expect(store.question(id)?.passedAt).toBe(NOW);
+    expect(store.briefs().get(`ask:${id}`)).toMatchObject({ for: "operator", ask: "Which lane?" });
     expect(messageCalls).toEqual([]);
     expect(seen).toContain("attention");
     expect(decisions()).toMatchObject([
       { kind: "pass", seatId: "guido-1", questionId: id, decision: "Passed to the operator" },
     ]);
+    // the operator's now: Needs you holds it with the brief
+    expect(
+      operatorItems(config(), store, NOW, null).find((i) => i.key === `ask:${id}`),
+    ).toMatchObject({ owner: "operator", brief: expect.objectContaining({ ask: "Which lane?" }) });
     // a passed question is no longer open to FLIGHT
     expect((await call("answer_question", A(id))).text).toBe(
       `Not answered: there is no open question ${id}.`,
     );
   });
 
-  it("refuses both fields, or neither", async () => {
+  it("hands a passed question back to FLIGHT when it keeps it, so it can answer it (#758)", async () => {
     const id = ask();
-    for (const bad of [A(id, { pass_to_operator: true }), { question_id: id, basis: "b" }]) {
-      expect(await call("answer_question", bad)).toEqual(
-        refused(`${MC_BAD_ARGS}give answer or pass_to_operator, not both`),
-      );
-    }
+    await passUp(id);
+    expect(store.question(id)?.passedAt).toBe(NOW);
+    // the operator's while briefed for them
+    expect((await call("answer_question", A(id))).text).toBe(
+      `Not answered: there is no open question ${id}.`,
+    );
+    const keep = await call("brief_item", {
+      key: `ask:${id}`,
+      for: "flight",
+      assessment: "I can settle this from the ticket.",
+      recommendation: "Lane 2.",
+      basis: "the ticket",
+    });
+    expect(keep.isError).toBeUndefined();
+    // FLIGHT's again: no longer passed, so the engine does not hold the run for the operator
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(messageCalls).toHaveLength(1);
+  });
+
+  it("answers a question passed without a brief before #758, closing it once delivered", async () => {
+    const id = ask();
+    store.passQuestion(id, NOW);
+    // it is in FLIGHT's digest, being FLIGHT's to answer
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toMatchObject([{ id }]);
+    // a failed delivery leaves it as it was
+    messageImpl = async () => {
+      throw new Error("seat is gone");
+    };
+    expect((await call("answer_question", A(id))).isError).toBe(true);
+    expect(store.question(id)).toMatchObject({ passedAt: NOW, answeredAt: null });
+    messageImpl = async () => {};
+    expect((await call("answer_question", A(id))).isError).toBeUndefined();
+    expect(store.question(id)).toMatchObject({ passedAt: null, answeredAt: NOW });
+  });
+
+  it("keeps a question passed with FLIGHT's brief out of FLIGHT's digest: it is the operator's", async () => {
+    const id = ask();
+    await passUp(id);
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toEqual([]);
+  });
+
+  it("records the pass when a question passed without a brief is briefed for the operator", async () => {
+    const id = ask();
+    store.passQuestion(id, NOW - 1);
+    expect(await passUp(id)).toEqual({ text: BRIEFED_TEXT });
+    expect(store.question(id)?.passedAt).toBe(NOW - 1);
+    expect(decisions()).toMatchObject([{ kind: "pass", questionId: id }]);
+    // a refreshed brief for the operator is not a second pass
+    await passUp(id, "spend, refreshed");
+    expect(decisions()).toHaveLength(1);
+  });
+
+  it("refuses an answer with a pass, or neither", async () => {
+    const id = ask();
+    expect(await call("answer_question", A(id, { pass_to_operator: true }))).toEqual(
+      refused(passNeedsBriefText(id)),
+    );
+    const neither = await call("answer_question", { question_id: id, basis: "b" });
+    expect(neither.isError).toBe(true);
+    expect(neither.text.startsWith(MC_BAD_ARGS)).toBe(true);
   });
 
   it("refuses an unknown or answered question", async () => {
@@ -920,7 +986,7 @@ describe("answer_question", () => {
 
   it("keeps a passed question open through later FLIGHT messages and answers", async () => {
     const passed = ask();
-    await call("answer_question", { question_id: passed, pass_to_operator: true, basis: "spend" });
+    await passUp(passed);
     const other = store.addQuestion({
       agentId: "guido-1",
       runId: "r-guido",
@@ -959,8 +1025,8 @@ describe("answer_question", () => {
       ),
     );
     expect(messageCalls).toEqual([]);
-    const pass = { question_id: id, pass_to_operator: true, basis: "b" };
-    expect((await call("answer_question", pass)).isError).toBeUndefined();
+    expect((await passUp(id, "b")).isError).toBeUndefined();
+    expect(store.question(id)?.passedAt).toBe(NOW);
   });
 });
 
@@ -1755,7 +1821,7 @@ describe("message_seat unpark", () => {
     parked("budget");
     expect(await call("message_seat", U())).toEqual(
       refused(
-        "Not sent: a budget park is the operator's call; pass it to them with mc ask_operator.",
+        'Not sent: a budget park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
       ),
     );
     expect(messageCalls).toEqual([]);
@@ -1781,7 +1847,7 @@ describe("message_seat unpark", () => {
   it("leaves an ended park to the operator", async () => {
     parked("silent", true);
     expect((await call("message_seat", U())).text).toBe(
-      "Not sent: a silent park is the operator's call; pass it to them with mc ask_operator.",
+      'Not sent: a silent park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
     );
   });
 
@@ -1806,7 +1872,7 @@ describe("message_seat unpark", () => {
     }
     expect(await call("message_seat", U())).toEqual(
       refused(
-        "Not sent: you have un-parked this run 2 times; pass it to the operator with mc ask_operator.",
+        'Not sent: you have un-parked this run 2 times; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
       ),
     );
   });
@@ -2578,7 +2644,8 @@ describe("flight_state", () => {
           ticket: null,
           text: "INCO-1 asks: Which lane?",
           ageMin: 5,
-          triageRemainingMs: 15 * 60_000,
+          // asked before this FLIGHT run started: its window runs from the run's start (#758)
+          triageRemainingMs: 20 * 60_000,
         },
         {
           key: "note:ready:r-pr",
@@ -2816,7 +2883,7 @@ describe("promote", () => {
     rulesNow = { ...rulesNow, promoteBacklog: false };
     expect(await call("promote", P())).toEqual(
       refused(
-        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with mc ask_operator.",
+        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.",
       ),
     );
   });
@@ -3780,7 +3847,7 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
   });
 
-  it("returns a kept item to the operator after 24 hours since its brief", async () => {
+  it("returns a kept blocked run to the operator after 24 hours since its brief", async () => {
     expect(FLIGHT_HANDLING_MAX_MS).toBe(24 * 60 * 60_000);
     nowMs += 60 * 60_000;
     expect(
@@ -3792,11 +3859,16 @@ describe("brief_item", () => {
       flightTriage: "handling",
     });
     for (const at of [expiresAt, expiresAt + 1]) {
-      expect(attentionItems(cfg, store, at).find((i) => i.key === KEY)).toMatchObject({
+      const items = attentionItems(cfg, store, at);
+      // a stuck run is never folded into the not-triaging item (#758): it notifies as itself
+      expect(items.find((i) => i.key === KEY)).toMatchObject({
         owner: "operator",
         flightTriage: "missed",
         brief: { for: "flight", at: nowMs },
       });
+      expect(
+        items.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys ?? [],
+      ).not.toContain(KEY);
     }
   });
 
@@ -6374,6 +6446,12 @@ describe("attention hold tools", () => {
     expect(JSON.parse(store.getSetting("attention-holds") ?? "{}")[key].releasedAt).toBe(NOW);
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
+  });
+  it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
+    expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
+      refused(HOLD_NOT_TRIAGING_REFUSED),
+    );
+    expect(store.getSetting("attention-holds")).toBeNull();
   });
   it("refuses other seats without changing holds", async () => {
     live("guido-1", "r-guido");

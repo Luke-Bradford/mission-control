@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS strays (
   key TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, agent_id TEXT NOT NULL,
   kind TEXT NOT NULL, at INTEGER NOT NULL
 );
--- A seat's ask_operator questions; answered_at is set by a message to the seat, or the run's end.
+-- A seat's ask_flight questions; answered_at is set by a message to the seat, or the run's end.
 CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
   text TEXT NOT NULL, at INTEGER NOT NULL, answered_at INTEGER
@@ -439,7 +439,7 @@ export interface Stray {
   at: number;
 }
 
-/** A seat's open `ask_operator` question. */
+/** A seat's open `ask_flight` question. */
 export interface SeatQuestion {
   id: number;
   agentId: AgentId;
@@ -587,6 +587,18 @@ export interface BoardMove {
   state: BoardMoveState;
   detail: string | null;
   at: number;
+}
+
+/** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
+const COMMS_LINK_PREVIEW = 200;
+/** One direction of a Comms link over a window, with its newest message. */
+export interface CommsLinkCount {
+  from: string;
+  to: string;
+  count: number;
+  lastId: string;
+  lastAt: number;
+  lastText: string;
 }
 
 /** Who a seat line is from. */
@@ -3226,12 +3238,29 @@ export class Store {
       this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
     ).map((r) => this.commsRow(r));
   }
-  commsLinkCounts(since: number): { from: string; to: string; count: number }[] {
-    return this.db
+  /**
+   * Direct-link counts since `since`, each with its newest message (id, time and the first
+   * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
+   */
+  commsLinkCounts(since: number): CommsLinkCount[] {
+    const rows = this.db
       .prepare(
-        "SELECT from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY from_id,to_id",
+        `SELECT c.from_id AS 'from', c.to_id AS 'to', g.count AS count, c.id AS lastId,
+          c.at AS lastAt, substr(c.text, 1, ?) AS lastText
+        FROM (SELECT from_id, to_id, COUNT(*) AS count, MAX(id) AS last FROM comms WHERE at>=?
+          GROUP BY from_id,to_id) g
+        JOIN comms c ON c.id = g.last
+        ORDER BY c.from_id, c.to_id`,
       )
-      .all(since) as { from: string; to: string; count: number }[];
+      .all(COMMS_LINK_PREVIEW, since) as Row[];
+    return rows.map((r) => ({
+      from: r.from as string,
+      to: r.to as string,
+      count: r.count as number,
+      lastId: `comms:${r.lastId as number}`,
+      lastAt: r.lastAt as number,
+      lastText: r.lastText as string,
+    }));
   }
   /** Hourly direct-link counts for the Comms Traffic chart. */
   commsHourlyLinkCounts(
@@ -4028,7 +4057,7 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
-  /** When the seat asked its questions, answered or not (ask_operator mirrors each to Comms). */
+  /** When the seat asked its questions, answered or not (ask_flight mirrors each to Comms). */
   questionTimes(agentId: AgentId): Set<number> {
     const rows = this.db
       .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
@@ -4075,6 +4104,26 @@ export class Store {
       )
       .run(at, id);
     return Number(r.changes) > 0;
+  }
+
+  /**
+   * Hands a passed, still open question back to FLIGHT (#758): FLIGHT kept it, or it was passed
+   * without a brief before #758. True only when it was passed.
+   */
+  unpassQuestion(id: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET passed_at = NULL WHERE id = ? AND answered_at IS NULL AND passed_at IS NOT NULL",
+      )
+      .run(id);
+    return Number(r.changes) > 0;
+  }
+
+  /** Marks one open question answered at `at`. */
+  answerQuestion(id: number, at: number): void {
+    this.db
+      .prepare("UPDATE seat_questions SET answered_at = ? WHERE id = ? AND answered_at IS NULL")
+      .run(at, id);
   }
 
   /**

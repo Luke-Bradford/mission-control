@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FLIGHT_DOWN_NOTE_KEY, FLIGHT_NOTE_KEY, type NotificationCategory } from "@mc/core";
+import {
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_NOT_TRIAGING_KEY,
+  FLIGHT_NOTE_KEY,
+  type NotificationCategory,
+} from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -73,6 +78,62 @@ const ask = (key: string, question = "Which lane should the demo take?") => {
     for: "operator",
   });
   bus.emit("attention");
+};
+/**
+ * The app again, with a FLIGHT seat whose run is live: the watch's FLIGHT-down notes then fold
+ * into the one "FLIGHT is not triaging" item (#758), which is what notifies.
+ */
+/** A FLIGHT run, started at `startedAt` and not ended. */
+const flightRun = (id: string, startedAt: number) => ({
+  id,
+  agentId: "flight-1",
+  repoId: "demo",
+  seq: 1,
+  startedAt,
+  endedAt: null,
+  status: "running" as const,
+  sessionId: null,
+  model: "opus",
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+});
+const withLiveFlight = async () => {
+  await app.close();
+  const c: CcConfig = {
+    ...config,
+    crew: {
+      worktrees: dir,
+      maxSeats: 1,
+      sessions: [
+        {
+          id: "s",
+          repoId: "demo",
+          checkout: dir,
+          seats: [
+            { id: "flight-1", role: "FLIGHT", accountId: "demo", model: "opus", area: [] },
+            { id: "guido-1", role: "GUIDO", accountId: "demo", model: "opus", area: [] },
+          ],
+        },
+      ],
+    },
+  };
+  store.upsertRun(flightRun("f1", Date.now() - 3_600_000));
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: "f1",
+    cliSessionId: null,
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now() - 3_600_000,
+  });
+  app = buildApp({ config: c, store, bus });
+  await app.ready();
 };
 /** One of the notes that say FLIGHT is down, as the FLIGHT watch raises it. */
 const flightDown = (key: string, text: string) => {
@@ -364,6 +425,7 @@ it("supports same-day quiet windows: an ask waits for them to end, nothing else 
 });
 
 it("notifies FLIGHT down through quiet hours", async () => {
+  await withLiveFlight();
   const p = await preferences();
   p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
@@ -476,19 +538,6 @@ it("notifies a briefed ask and FLIGHT going down, not stalls, PRs, blocked runs 
   expect(await events()).toHaveLength(1);
   ask("raw", "Ship the demo lane tomorrow instead?");
   expect(await events()).toHaveLength(2);
-  store.raiseNote({
-    key: FLIGHT_NOTE_KEY,
-    kind: "blocked",
-    runId: null,
-    seatId: null,
-    repoId: null,
-    text: "FLIGHT could not be kept running",
-    at: Date.now(),
-  });
-  bus.emit("attention");
-  expect((await events()).slice(2)).toMatchObject([
-    { category: "flightDown", text: "FLIGHT could not be kept running" },
-  ]);
 });
 
 it("keeps an opt-in for stalls, PRs, blocked runs and raw decisions", async () => {
@@ -607,40 +656,166 @@ it("notifies a new or changed ask on an item the operator already read", async (
 });
 
 it("notifies each FLIGHT outage, even after the last one was read", async () => {
-  await app.ready();
-  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: one");
+  await withLiveFlight();
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: one.");
   expect(await events()).toHaveLength(1);
   await app.inject({
     method: "POST",
     url: "/api/attention/ack",
-    payload: { keys: [`note:${FLIGHT_NOTE_KEY}`] },
+    payload: { keys: [FLIGHT_NOT_TRIAGING_KEY] },
   });
   store.clearNote(FLIGHT_NOTE_KEY, Date.now());
   bus.emit("attention");
   await events();
   vi.setSystemTime(new Date("2026-10-23T13:00:00Z"));
-  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: two");
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: two.");
   expect((await events()).map((e: { text: string }) => e.text)).toEqual([
-    "FLIGHT could not be kept running: one",
-    "FLIGHT could not be kept running: two",
+    "FLIGHT is not triaging: nothing waiting yet. FLIGHT could not be kept running: one.",
+    "FLIGHT is not triaging: nothing waiting yet. FLIGHT could not be kept running: two.",
   ]);
 });
 
-it("counts FLIGHT down as FLIGHT down even with a brief on it", async () => {
-  await app.ready();
-  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked");
-  store.addBrief({
-    key: `note:${FLIGHT_DOWN_NOTE_KEY}`,
-    context: "c",
-    ask: "Unpark FLIGHT?",
-    recommendation: "r",
-    options: [],
-    basis: "b",
-    at: Date.now(),
-    for: "operator",
+it("notifies a FLIGHT outage once, however its count, cause and reason text move (#758)", async () => {
+  await withLiveFlight();
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+  // the watch's note is the item's reason, never an item of its own
+  const items = (await app.inject("/api/attention")).json();
+  expect(items.map((i: { key: string }) => i.key)).toEqual([FLIGHT_NOT_TRIAGING_KEY]);
+  // its text moves with the reason (and the count): the same cause, no second notification
+  store.clearNote(FLIGHT_DOWN_NOTE_KEY, Date.now());
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
+  const again = (await app.inject("/api/attention")).json();
+  expect(again[0].text).toContain("no output for 31 min");
+  expect(await events()).toHaveLength(1);
+  // nor a failed start in the same outage: only a Stop and FLIGHT out on its own differ
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: three.");
+  expect(await events()).toHaveLength(1);
+  // cleared, then out again: a new episode
+  store.clearNote(FLIGHT_NOTE_KEY, Date.now());
+  store.clearNote(FLIGHT_DOWN_NOTE_KEY, Date.now());
+  bus.emit("attention");
+  expect((await app.inject("/api/attention")).json()).toEqual([]);
+  await events();
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
+  expect(await events()).toHaveLength(2);
+});
+
+it("does not notify the operator's own Stop with nothing waiting, but a failed start after it (#758)", async () => {
+  await withLiveFlight();
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: null,
+    cliSessionId: null,
+    state: "stopped",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now(),
   });
   bus.emit("attention");
-  expect((await events()).map((e: { category: string }) => e.category)).toEqual(["flightDown"]);
+  const items = (await app.inject("/api/attention")).json();
+  expect(items[0]).toMatchObject({
+    key: FLIGHT_NOT_TRIAGING_KEY,
+    text: "FLIGHT is stopped: nothing waiting yet.",
+  });
+  expect(await events()).toEqual([]);
+  // the operator starts it and it fails: a new cause, so it notifies
+  flightDown(FLIGHT_NOTE_KEY, "FLIGHT could not be kept running: no login.");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+});
+
+it("does not notify again when an outage flips between down and late (#758)", async () => {
+  await withLiveFlight();
+  store.raiseNote({
+    key: "late",
+    kind: "question",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "Choose the demo lane",
+    at: Date.now() - 30 * 60_000,
+  });
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
+  expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("down");
+  expect(await events()).toHaveLength(1);
+  store.clearNote(FLIGHT_DOWN_NOTE_KEY, Date.now());
+  bus.emit("attention");
+  expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
+  expect(await events()).toHaveLength(1);
+  flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
+  expect(await events()).toHaveLength(1);
+});
+
+it("holds the operator's own Stop through quiet hours, even once a question waits (#758)", async () => {
+  await withLiveFlight();
+  const p = await preferences();
+  p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: null,
+    cliSessionId: null,
+    state: "stopped",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now(),
+  });
+  store.upsertRun({ ...flightRun("g1", Date.now()), agentId: "guido-1" });
+  store.addQuestion({ agentId: "guido-1", runId: "g1", text: "Which lane?", at: Date.now() });
+  bus.emit("attention");
+  const items = (await app.inject("/api/attention")).json();
+  expect(items[0].text).toMatch(/^FLIGHT is stopped: 1 waiting since/);
+  expect(await events()).toEqual([]);
+  // quiet hours over: it notifies then
+  vi.setSystemTime(new Date("2026-10-23T14:01:00Z"));
+  bus.emit("attention");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+});
+
+it("does not notify again when FLIGHT rotates while an item is late (#758)", async () => {
+  await withLiveFlight();
+  store.raiseNote({
+    key: "late",
+    kind: "question",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "Choose the demo lane",
+    at: Date.now() - 30 * 60_000,
+  });
+  bus.emit("attention");
+  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+  // the run ends for a fresh session and the watch starts the next a minute later
+  store.upsertRun({
+    ...flightRun("f1", Date.now() - 3_600_000),
+    endedAt: Date.now(),
+    status: "ok",
+  });
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: null,
+    cliSessionId: null,
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now(),
+  });
+  bus.emit("attention");
+  expect(await events()).toHaveLength(1);
+  vi.setSystemTime(new Date("2026-10-23T12:01:00Z"));
+  store.upsertRun(flightRun("f2", Date.now()));
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: "f2",
+    cliSessionId: null,
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: Date.now(),
+  });
+  bus.emit("attention");
+  expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
+  expect(await events()).toHaveLength(1);
 });
 
 it("adopts the new notification versions on Update without replaying open items", async () => {

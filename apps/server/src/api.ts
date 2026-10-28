@@ -17,6 +17,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_LABELS,
+  COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
@@ -1265,10 +1266,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       // Reader: apps/web/src/App.tsx#App (pinned Comms)
       api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
-      // Reader: apps/web/src/App.tsx#App (Comms link activity)
-      api.get("/comms/links", () => ({
-        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
-      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (Comms link activity and newest-message preview)
+      api.get("/comms/links", () => {
+        // The preview only where both ends are ones the Comms routes already serve; a removed
+        // seat's link keeps its count but not its words.
+        const served = (id: string) => knownCommsAgent(id) || id === COMMS_CREW || id === COMMS_MC;
+        return {
+          links: store
+            .commsLinkCounts(now() - 24 * 60 * 60 * 1000)
+            .map((link) =>
+              served(link.from) && served(link.to)
+                ? link
+                : { from: link.from, to: link.to, count: link.count },
+            ),
+        };
+      });
       // Reader: apps/web/src/comms/CommsGraph.tsx (24 hour Comms Traffic bars)
       api.get("/comms/traffic", () => ({
         hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
@@ -2012,6 +2024,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               mapRing,
               deps.lock?.state() ?? NO_LOCK,
               now(),
+              flightSeat(config)?.seat.id ?? null,
             );
             for (const seat of data.seats) {
               const context = store.seatSession(
@@ -2777,7 +2790,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/Dock.tsx#Dock
-      api.get("/flight", async () => flightView(config, store, Date.now()));
+      // `live` is judged from FLIGHT's session, not only its run row (#798)
+      api.get("/flight", async () =>
+        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
+      );
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),

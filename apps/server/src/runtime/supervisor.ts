@@ -199,6 +199,7 @@ import { recordNoReport } from "./no-report.ts";
 import {
   attachSession,
   type CrewSession,
+  endsAtResult,
   type KeeperSession,
   SessionControlError,
   type SessionEvent,
@@ -494,8 +495,14 @@ export interface Supervisor {
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
+   * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
+   * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
+   * or a start, resume or account move for the seat is under way. Never throws.
+   */
+  sessionAlive?(seatId: string): boolean | null;
+  /**
    * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
-   * process, removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
+   * process (with none attached, ends any keeper it left and revokes its token), removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
    * seat idle. An ended or unknown run is left alone, with no event. A run Stop is already ending
    * stays Stop's (endedBy operator, seat stopped, worktree kept). Does nothing on a server that
    * does not run crew (disabled, or without the crew lock).
@@ -1758,20 +1765,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /**
    * Ends a run's keeper and CLI, then removes the folder and the cursor. A folder whose keeper is
    * not alive goes at once; one whose processes will not end is kept (and said), so the next start
-   * finds it. Never throws.
+   * finds it. True when the keeper is gone. Never throws.
    */
-  async function endAndRemoveKeeper(seatId: string, runId: string): Promise<void> {
+  async function endAndRemoveKeeper(seatId: string, runId: string): Promise<boolean> {
     const dir = crewKeeperDir(deps.dbPath, runId);
     try {
       if (keeperAlive(dir) && !(await endKeeper(dir, keeperEndWait(), log))) {
         log(`${seatId}: could not end the keeper of ${runId}; its folder is kept`);
-        return;
+        return false;
       }
     } catch (e) {
       log(`${seatId}: could not end the keeper of ${runId}: ${errText(e)}`);
-      return;
+      return false;
     }
     removeKeeper(seatId, runId);
+    return true;
   }
 
   /** Registers a seat's process: its exit releases the grant, and its events reach `onEvent`. */
@@ -2189,6 +2197,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
       // Codex needs earlier item paths and unresolved requests even before the saved cursor.
       from: (h) => (row.vendor === "codex" ? 0 : cursor?.spawn === h.spawn ? cursor.line : 0),
+      // A Claude keeper from before #798 never saw a `result` (the CLI does not print `type`
+      // first), so it says a turn is open after every turn, and the seat would wait on it forever
+      // (FLIGHT never woken). The transcript says whether the CLI is between turns. One gap: a
+      // keeper whose transcript write failed holds later lines in memory only, so the file can end
+      // at an older result while a turn runs. The seat then looks idle until the turn's next line
+      // starts a turn again (a replayed one does at once).
+      awaiting: (h) =>
+        h.awaiting &&
+        (row.vendor === "codex" ||
+          h.parsedResults === true ||
+          run === null ||
+          !endsAtResult(run.transcriptPath)),
       raw: row.vendor === "codex",
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
@@ -2201,6 +2221,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // whoever ended the run found no process to end, so the run's token and holds are still here
       dropGrant(row.seatId, runId);
       if (found.kind === "attached") await found.session.close();
+      // endRunByEngine may be ending this folder too (no live entry): same pids, forced removal
       await endAndRemoveKeeper(row.seatId, runId);
       return;
     }
@@ -3512,6 +3533,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l.endedBy = "engine";
       l.run = { ...l.run, endedAt: at, status: "ok" };
       closing = l.ending ??= closeLive(l);
+    } else {
+      // No process here (a take-back that left the run with no session, #798): the run's token
+      // is revoked and a keeper that lives on is ended before the seat is freed. A keeper that
+      // will not end is said in a blocked note: its CLI may still be running beside the seat's
+      // next run. (A take-back finishing now may end the same folder too: the same pids, and
+      // the folder's removal is forced, so the second does nothing.)
+      dropGrant(seatId, runId);
+      if (!(await endAndRemoveKeeper(seatId, runId))) {
+        try {
+          store.raiseNote({
+            key: `cleanup:${runId}`,
+            kind: "blocked",
+            runId,
+            seatId,
+            repoId: info.repo.id,
+            text: `${call(info)}'s run #${run.seq} was ended, but its CLI could not be stopped and may still be running; stop it by hand (its keeper folder is ${crewKeeperDir(deps.dbPath, runId)}).`,
+            at: now(),
+          });
+          bus.emit("attention");
+        } catch (e) {
+          log(`${seatId}: could not record the cleanup note: ${errText(e)}`);
+        }
+      }
+      removeRunFiles(runId);
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -3957,7 +4002,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
         writeLine(l, text);
-        // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
+        // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's
+        // reply to FLIGHT's brief)
         try {
           if (opts.questions !== "none") {
             store.answerQuestions(seatId, now(), opts.questions === "unpassed");
@@ -4012,6 +4058,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    sessionAlive(seatId) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
+      const l = live.get(seatId);
+      // a process for another run than the row's (one being ended) is not this run's session
+      return l?.session.alive === true && l.run.id === store.seatSession(seatId)?.runId;
     },
 
     async contextUsage(seatId) {

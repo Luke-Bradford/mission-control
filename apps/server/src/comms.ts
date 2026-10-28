@@ -276,7 +276,7 @@ export function threadMessages(
  * The unread lines an agent's thread raises in Needs you, by item kind: `tag`, its own `@CAPCOM`
  * tags (FLIGHT's only when they ask a question), and `message`, its own direct-line questions
  * (never FLIGHT's: its summaries are not needs). Only lines the agent wrote count, never another
- * agent's line to it. A seat's `ask_operator` question is mirrored to Comms at the instant it is
+ * agent's line to it. A seat's `ask_flight` question is mirrored to Comms at the instant it is
  * asked; that line is its `ask:` item alone. Shared by the attention builder and FLIGHT's brief.
  */
 export function attentionChatter(

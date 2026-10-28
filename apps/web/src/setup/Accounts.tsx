@@ -353,6 +353,7 @@ export function Accounts({ config }: { config: ConfigView }) {
                   account.vendor === "claude"
                     ? "machine login (one per machine)"
                     : (account.cliProfile ?? "profile not configured");
+                const forecast = projection(seven, tz);
                 return (
                   <Fragment key={account.id}>
                     <tr>
@@ -380,7 +381,9 @@ export function Accounts({ config }: { config: ConfigView }) {
                           pct={seven?.used ?? null}
                           projected={seven?.projected ?? null}
                         />
-                        <span className="quota-forecast">{projection(seven, tz)}</span>
+                        <span className="quota-forecast" title={forecast}>
+                          {forecast}
+                        </span>
                       </td>
                       <td className="mono">
                         {(seven ?? five) && tz ? wkdTime((seven ?? five)?.resetAt ?? 0, tz) : "—"}

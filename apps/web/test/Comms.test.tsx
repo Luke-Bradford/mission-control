@@ -890,7 +890,10 @@ describe("Comms routes", () => {
     expect(fetch.mock.calls.some(([path]) => path === "/api/comms/agents/studio-builder")).toBe(
       false,
     );
-    expect(screen.queryByText("studio-builder")).toBeNull();
+    // The loop sits on the graph's loops spoke (#790), but has no conversation of its own.
+    expect(
+      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-spider")),
+    ).toEqual([]);
   });
 
   it("shows the stored-Comms empty state for crew", async () => {
@@ -1153,11 +1156,67 @@ describe("Needs you", () => {
     render(<Comms item={null} />);
     await screen.findByText("Mine");
     const down = document.querySelector<HTMLDetailsElement>("#cFlightDown") as HTMLDetailsElement;
-    expect(within(down).getByText("Waiting on FLIGHT — FLIGHT is down · 1")).toBeTruthy();
+    expect(within(down).getByText("Waiting on FLIGHT — not triaging · 1")).toBeTruthy();
     expect(within(down).getByText("@CAPCOM key?")).toBeTruthy();
     const handled = document.querySelector<HTMLDetailsElement>("#cHandled") as HTMLDetailsElement;
     expect(within(handled).getByText("Being handled · 1")).toBeTruthy();
     expect(within(handled).queryByText("@CAPCOM key?")).toBeNull();
+  });
+
+  it("shows FLIGHT not triaging as one row: Start FLIGHT, and Show them lists its items (#758)", async () => {
+    const posts: string[] = [];
+    stubFetch({
+      "/api/attention": [
+        item({
+          key: "flight:not-triaging",
+          kind: "blocked",
+          agentId: "flight-1",
+          escalationId: null,
+          text: "FLIGHT is stopped: 2 waiting since 12:55. Start it to have them triaged.",
+          notTriaging: { cause: "stopped", keys: ["ask:1", "t"], since: NOW - 5 * 60_000 },
+          acked: false,
+        }),
+        item({
+          key: "ask:1",
+          kind: "question",
+          escalationId: null,
+          text: "GUIDO-1 asks: Which lane?",
+          owner: "flight",
+          flightTriage: "down",
+        }),
+        item({
+          key: "t",
+          kind: "tag",
+          text: "@CAPCOM key?",
+          owner: "flight",
+          flightTriage: "down",
+        }),
+      ],
+      "/api/guard/hits?days=7": NO_HITS,
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": {
+        seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "stopped", live: false },
+        decisions: [],
+      },
+      "POST /api/seats/flight-1/start": () => {
+        posts.push("start");
+        return { status: 200, body: {} };
+      },
+    });
+    render(<Comms item={null} />);
+    const row = await within(needs()).findByTestId("not-triaging");
+    // one item in Needs you; what it stands for is under it, not listed again below
+    expect(needs().querySelectorAll(":scope > .nrow")).toHaveLength(1);
+    expect(screen.getByText("1 · 1 not acknowledged")).toBeTruthy();
+    expect(document.querySelector("#cFlightDown")).toBeNull();
+    expect(within(row).queryByText("GUIDO-1 asks: Which lane?")).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Show them" }));
+    expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
+    expect(within(row).getByText("@CAPCOM key?")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
+    fireEvent.click(await within(row).findByRole("button", { name: "Start FLIGHT" }));
+    await waitFor(() => expect(posts).toEqual(["start"]));
   });
 
   it("has no Being handled section when every item is the operator's", async () => {

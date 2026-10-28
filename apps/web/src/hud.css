@@ -3757,6 +3757,14 @@ pre.diff .h {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* What the one "FLIGHT is not triaging" item stands for, listed under it (#758). */
+.not-triaging-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
 .kind {
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -4304,10 +4312,18 @@ td.wrap {
   flex-direction: column-reverse;
   align-items: stretch;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.account-quota {
+  overflow: hidden;
 }
 .account-quota .meter .track {
   width: 100%;
   flex: none;
+  min-width: 0;
+  max-width: 100%;
 }
 .account-meter.ok .track i {
   background: var(--ok);
@@ -4317,6 +4333,11 @@ td.wrap {
   margin-top: 3px;
   color: var(--muted);
   font-size: var(--fs-xs);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .accounts-github {
   border-top: 1px solid var(--line);

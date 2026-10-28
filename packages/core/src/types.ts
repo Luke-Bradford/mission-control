@@ -1,6 +1,6 @@
 import type { Owner, Stage } from "./board.ts";
 import type { CrewPause } from "./crew-pause.ts";
-import type { CatchUpKind } from "./flight.ts";
+import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
@@ -1052,6 +1052,11 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /**
+   * Only on the one FLIGHT_NOT_TRIAGING_KEY item: why FLIGHT is not triaging, the keys of the items
+   * waiting on it (FLIGHT's, listed under this one, oldest first) and when the oldest was raised.
+   */
+  notTriaging?: { cause: FlightNotTriagingCause; keys: string[]; since: number | null };
   acked: boolean;
 }
 

@@ -122,6 +122,8 @@ let gqlFailField: string | null;
 let refreshed: number;
 /** The stub supervisor's status, the calls it received, and the error its next call throws. */
 let supervisorStatus: { enabled: boolean; note: string | null };
+/** What the stub supervisor's `sessionAlive` answers. */
+let sessionAlive: boolean | null;
 let supervisorCalls: unknown[][];
 let supervisorFail: unknown;
 /** The stub updater's version, what its next update() does, and its calls. */
@@ -206,6 +208,7 @@ const stubSupervisor = (): Supervisor => {
     emitEvidence: () => {},
     emitFindings: () => {},
     seatFacts: () => null,
+    sessionAlive: () => sessionAlive,
     contextUsage: call("context", { categories: [], total: 10, window: 100 }),
     seat: () => null,
     busy: () => [],
@@ -280,6 +283,7 @@ beforeEach(async () => {
   };
   bus = new ChangeBus();
   supervisorStatus = { enabled: true, note: null };
+  sessionAlive = null;
   supervisorCalls = [];
   supervisorFail = null;
   updaterVersion = {
@@ -607,6 +611,40 @@ describe("Comms API", () => {
     });
     expect(store.commsReactions(message.id)).toEqual([]);
     expect(store.commsPins()).toEqual([]);
+  });
+
+  it("serves each link's count with its newest message for the Comms graph", async () => {
+    commsRow("alpha", "beta", "first");
+    const newest = commsRow("alpha", "beta", `second ${"x".repeat(400)}`);
+    commsRow("beta", "alpha", "back");
+    // Outside the 24h window: neither counted nor the newest.
+    commsRow("beta", "crew", "old", clock - 25 * 60 * 60 * 1000);
+    await withCommsApp(async (comms) => {
+      const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
+      expect(links).toHaveLength(2);
+      const forward = links.find((l: { from: string }) => l.from === "alpha");
+      expect(forward).toMatchObject({
+        from: "alpha",
+        to: "beta",
+        count: 2,
+        lastId: newest.id,
+        lastAt: newest.at,
+      });
+      expect(forward.lastText).toBe(newest.text.slice(0, 200));
+      expect(links.find((l: { from: string }) => l.from === "beta")).toMatchObject({
+        to: "alpha",
+        count: 1,
+        lastText: "back",
+      });
+    });
+  });
+
+  it("keeps a link's count but not its words when an end is no Comms agent", async () => {
+    commsRow("alpha", "gone-seat", "private words");
+    await withCommsApp(async (comms) => {
+      const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
+      expect(links).toEqual([{ from: "alpha", to: "gone-seat", count: 1 }]);
+    });
   });
 
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
@@ -5544,6 +5582,35 @@ describe("crew routes", () => {
       claim("flight:note:rf:1", "rf");
       const body = (await get("/api/flight")).json<FlightView>();
       expect(body.seat?.turns).toEqual({ n: 4, max: 41 });
+    });
+
+    it("is live from FLIGHT's session, not its run row (#798)", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "rf", agentId: "flight-1", startedAt: NOW - 3600e3 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "rf",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const live = async () => (await get("/api/flight")).json<FlightView>().seat?.live;
+      sessionAlive = true;
+      expect(await live()).toBe(true);
+      // the run row still says running, but the hub holds no session for it
+      sessionAlive = false;
+      expect(await live()).toBe(false);
+      // the hub cannot tell yet (a restart's take-back): the row decides
+      sessionAlive = null;
+      expect(await live()).toBe(true);
     });
   });
 

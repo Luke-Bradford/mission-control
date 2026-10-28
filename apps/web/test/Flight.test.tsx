@@ -1315,6 +1315,39 @@ describe("FLIGHT's brief", () => {
     expect(screen.getByTestId("item").textContent).toBe("a");
   });
 
+  it("Asked of you shows FLIGHT not triaging as one item with what waits on it listed under it (#758)", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({
+          key: "flight:not-triaging",
+          kind: "blocked",
+          agentId: "flight-1",
+          escalationId: null,
+          text: "FLIGHT is not triaging: 1 waiting since 12:55. FLIGHT has not triaged them within its window.",
+          notTriaging: { cause: "late", keys: ["ask:1"], since: NOW - 5 * 60_000 },
+        }),
+        item({
+          key: "ask:1",
+          kind: "question",
+          escalationId: null,
+          text: "GUIDO-1 asks: Which lane?",
+          owner: "flight",
+          flightTriage: "missed",
+        }),
+      ],
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    const row = await screen.findByTestId("not-triaging");
+    expect(row.textContent).toContain("FLIGHT is not triaging: 1 waiting since 12:55.");
+    // Needs you's home shows them at once; the item stays FLIGHT's, so it is no row of its own
+    expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
+    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
+    expect(screen.queryByText(NOBODY_WAITING)).toBeNull();
+  });
+
   it("keeps person notifications out of Asked of you until FLIGHT passes them up", async () => {
     stubFetch({
       "/api/attention": [{ ...personItem, owner: "flight", flightTriage: "waiting" }],

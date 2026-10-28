@@ -6,6 +6,7 @@ import * as markdown from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import * as conversation from "../src/flight/conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../src/flight/flightTypes.ts";
+import { NEEDS_YOU_PATH } from "../src/router.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { installKeys } from "../src/shell/keys.ts";
@@ -498,6 +499,28 @@ describe("Waiting on you", () => {
     fireEvent.click(rows[2]?.querySelector("button") as HTMLElement);
     expect(screen.getByTestId("item").textContent).toBe("ask:7");
     expect(rows[1]?.textContent).toContain("Which?");
+  });
+
+  it("labels FLIGHT not triaging as FLIGHT and sends Show them to Needs you's home (#758)", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/attention": [
+          ask({
+            key: "flight:not-triaging",
+            kind: "blocked",
+            text: "FLIGHT is not triaging: 1 waiting since 12:55.",
+            notTriaging: { cause: "late", keys: [], since: null },
+          }),
+        ],
+      },
+    );
+    render(<Dock />);
+    const [row] = await screen.findAllByTestId("waiting-ask");
+    expect(row?.textContent).toContain("FLIGHT");
+    expect(row?.textContent).not.toContain("Blocked");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Show them" }));
+    expect(window.location.pathname + window.location.hash).toBe(NEEDS_YOU_PATH);
   });
 
   it("shows what waits on you even with no FLIGHT seat", async () => {

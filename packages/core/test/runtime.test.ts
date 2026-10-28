@@ -10,6 +10,7 @@ import {
   MC_MCP_SERVER,
   MC_MCP_TIMEOUT_MS,
   MC_READ_ONLY_COMMIT,
+  MC_TOOL_NAMES,
   MC_TOOLS,
   READ_ONLY_CANNOT_WRITE,
 } from "../src/mcp.ts";
@@ -192,7 +193,7 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.askOperator,
+      MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
       expect(WRITER_TOOLS).toContain(t);
@@ -208,16 +209,16 @@ describe("the allowlist in phase 2b", () => {
     expect(allowed).not.toContain("mcp__mc__push");
     expect(allowed).not.toContain("mcp__mc__draft_pr");
     expect(allowed).toContain("mcp__mc__report_evidence");
-    expect(allowed).toContain("mcp__mc__ask_operator");
+    expect(allowed).toContain("mcp__mc__ask_flight");
   });
 
-  it("a read-only seat may ask the operator and send Comms, with no git writes", () => {
-    expect(READONLY_TOOLS).toContain(MC_TOOLS.askOperator);
+  it("a read-only seat may ask FLIGHT and send Comms, with no git writes", () => {
+    expect(READONLY_TOOLS).toContain(MC_TOOLS.askFlight);
     for (const t of MC_WRITER_TOOLS) expect(READONLY_TOOLS as readonly string[]).not.toContain(t);
     const a = crewCliArgs({ ...base, mode: "read-only" });
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
     expect(allowed.filter((t) => t.startsWith("mcp__"))).toEqual([
-      "mcp__mc__ask_operator",
+      "mcp__mc__ask_flight",
       "mcp__mc__report_evidence",
       "mcp__mc__comms_read",
       "mcp__mc__comms_send",
@@ -253,7 +254,7 @@ describe("the allowlist in phase 2b", () => {
       recall: "mcp__mc__recall",
       holdItem: "mcp__mc__hold_item",
       releaseHold: "mcp__mc__release_hold",
-      askOperator: "mcp__mc__ask_operator",
+      askFlight: "mcp__mc__ask_flight",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
@@ -652,6 +653,20 @@ describe("mc tool grants", () => {
     }
   });
 
+  it("seats ask FLIGHT, never the operator: ask_flight in writer and read-only, no ask_operator anywhere (#758)", () => {
+    expect(MC_TOOL_GRANTS.writer.base).toContain("ask_flight");
+    expect(MC_TOOL_GRANTS["read-only"].base).toContain("ask_flight");
+    // a scratch review answers with report_findings alone
+    expect(MC_TOOL_GRANTS.scratch.base).not.toContain("ask_flight");
+    expect(Object.values(MC_TOOL_NAMES)).not.toContain("ask_operator");
+    for (const g of Object.values(MC_TOOL_GRANTS)) {
+      expect([...g.base, ...g.grantable] as string[]).not.toContain("ask_operator");
+    }
+    for (const tools of [WRITER_TOOLS, READONLY_TOOLS, SCRATCH_TOOLS]) {
+      expect(tools as readonly string[]).not.toContain("mcp__mc__ask_operator");
+    }
+  });
+
   it("watch is a read-only loop only", () => {
     expect(LOOP_KINDS).toContain("watch");
     for (const [mode, loops] of Object.entries(MODE_LOOPS)) {
@@ -741,7 +756,7 @@ describe("scratch mode", () => {
     expect(allowed).toContain("mcp__mc__report_findings");
     for (const t of [
       "mcp__mc__commit",
-      "mcp__mc__ask_operator",
+      "mcp__mc__ask_flight",
       "mcp__mc__report_evidence",
       "Bash(pnpm -s test:*)",
     ]) {
