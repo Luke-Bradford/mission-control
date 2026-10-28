@@ -580,12 +580,6 @@ export function telemetry(
     }),
   );
 
-  const starts = new Map<string, number>();
-  for (const run of store.runsOverlapping(since, now + 1)) {
-    if (run.ticket === null || run.startedAt < since || run.startedAt > now) continue;
-    const prior = starts.get(run.ticket);
-    if (prior === undefined || run.startedAt < prior) starts.set(run.ticket, run.startedAt);
-  }
   const tickets: TelemetrySeries["tickets"] = store
     .flowIssues(since)
     .filter(
@@ -602,22 +596,25 @@ export function telemetry(
           .sort((a, b) => a - b)[0] ?? null;
       return {
         ticket,
-        readyAt: issue.startAt !== null && issue.startAt >= since ? issue.startAt : null,
-        startedAt: starts.get(ticket) ?? null,
-        mergedAt: mergedAt !== null && mergedAt >= since && mergedAt <= now ? mergedAt : null,
+        readyAt: issue.startAt,
+        startedAt: store.ticketStartedAt(ticket),
+        mergedAt,
         doneAt: issue.doneAt,
       };
     });
   const annotations: TelemetrySeries["annotations"] = [
-    ...store.hubEvents(since).flatMap<TelemetrySeries["annotations"][number]>((event) => {
-      if (/^Updated to\b/.test(event.text))
-        return [{ at: event.at, kind: "hub-update" as const, cause: event.text }];
-      if (/^Crew paused\b/.test(event.text))
-        return [{ at: event.at, kind: "crew-paused" as const, cause: event.text }];
-      if (/^Crew resumed\b/.test(event.text))
-        return [{ at: event.at, kind: "crew-resumed" as const, cause: event.text }];
-      return [];
-    }),
+    ...store
+      .hubEvents(since)
+      .filter((event) => event.at <= now)
+      .flatMap<TelemetrySeries["annotations"][number]>((event) => {
+        if (/^Updated\b/.test(event.text))
+          return [{ at: event.at, kind: "hub-update" as const, cause: event.text }];
+        if (/^Crew paused\b/.test(event.text))
+          return [{ at: event.at, kind: "crew-paused" as const, cause: event.text }];
+        if (/^Crew resumed\b/.test(event.text))
+          return [{ at: event.at, kind: "crew-resumed" as const, cause: event.text }];
+        return [];
+      }),
     ...chartQuota.flatMap((row) =>
       row.resets.map((reset) => ({
         at: reset.at,

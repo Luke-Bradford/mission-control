@@ -652,6 +652,51 @@ describe("capacity", () => {
     });
   });
 
+  it("keeps the complete lifecycle of a ticket done in range and omits future annotations", () => {
+    const since = NOW - 6 * HOUR;
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 43,
+          size: "S",
+          startAt: since - 4 * HOUR,
+          doneAt: NOW - HOUR,
+        },
+      ],
+      [],
+    );
+    store.upsertRun(
+      run({
+        id: "early-ticket-run",
+        ticket: "shop-app#43",
+        startedAt: since - 3 * HOUR,
+        endedAt: since - 2 * HOUR,
+      }),
+    );
+    store.replacePullRequests(
+      "shop-app",
+      [{ ...pr(10, since - 2 * HOUR), ticket: "shop-app#43" }],
+      NOW,
+    );
+    store.addHubEvent("Updated to inside (manual)", NOW - HOUR);
+    store.addHubEvent("Updated to future (manual)", NOW + HOUR);
+
+    expect(tel("6h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#43",
+        readyAt: since - 4 * HOUR,
+        startedAt: since - 3 * HOUR,
+        mergedAt: since - 2 * HOUR,
+        doneAt: NOW - HOUR,
+      },
+    ]);
+    expect(tel("6h", NOW).series?.annotations).toEqual([
+      { at: NOW - HOUR, kind: "hub-update", cause: "Updated to inside (manual)" },
+    ]);
+  });
+
   it("quota points per account window in range", () => {
     const sample = (accountId: string, window: "5h" | "7d", atMs: number, pct: number) =>
       store.addUsage({ accountId, window, at: atMs, pct, resetAt: NOW + DAY, source: "x" });

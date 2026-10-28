@@ -2201,6 +2201,14 @@ export class Store {
     }));
   }
 
+  /** The first recorded crew run for a ticket, including one before a telemetry chart's range. */
+  ticketStartedAt(ticket: string): number | null {
+    const row = this.db
+      .prepare("SELECT MIN(started_at) AS at FROM runs WHERE ticket = ?")
+      .get(ticket) as { at: number | null };
+    return row.at;
+  }
+
   /** Latest successful Ready move before each merge, falling back to the collected flow start. */
   readyToMergedMinutes(repoId: RepoId, since: number): number[] {
     const rows = this.db
