@@ -27,20 +27,44 @@ describe("map rules", () => {
       { path: "src/b.ts", lines: 500000 },
     ];
     const first = layoutTree(tree);
-    const next = layoutTree([...tree, { path: "src/new.ts", lines: 5 }]);
     const extended = layoutTree([{ path: "src/new.ts", lines: 5 }], first);
     expect(extended.find((n) => n.path === "src/a.ts")?.position).toBe(
       first.find((n) => n.path === "src/a.ts")?.position,
     );
-    expect(next.find((n) => n.path === "src/a.ts")).toEqual(
-      first.find((n) => n.path === "src/a.ts"),
-    );
+    expect(extended.find((n) => n.path === "src/new.ts")?.parent).toBe("src");
+    // computed once per tree: the same tree always lays out the same way
+    expect(layoutTree(structuredClone(tree))).toEqual(first);
     expect(first.every((n) => n.position.every(Number.isFinite))).toBe(true);
     const large = layoutTree(
       Array.from({ length: 2001 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 })),
     );
     expect(large.filter((n) => n.count > 0)).toHaveLength(1);
     expect(large.find((n) => n.path === "src")?.count).toBe(2001);
+  });
+  it("lays out every file as its own node, apart from its neighbours, each area its own way", () => {
+    const tree = [
+      ...Array.from({ length: 40 }, (_, i) => ({ path: `apps/server/src/s${i}.ts`, lines: 50 })),
+      ...Array.from({ length: 30 }, (_, i) => ({ path: `apps/web/src/w${i}.tsx`, lines: 80 })),
+      { path: "README.md", lines: 10 },
+    ];
+    const imports = [{ from: "apps/web/src/w0.tsx", to: "apps/server/src/s0.ts" }];
+    const nodes = layoutTree(tree, [], false, imports);
+    const files = nodes.filter((n) => n.count > 0);
+    expect(files).toHaveLength(tree.length);
+    expect(files.every((n) => n.files.length === 1 && n.files[0] === n.path)).toBe(true);
+    expect(nodes.find((n) => n.path === "README.md")?.area).toBe("(root)");
+    const at = (path: string) => nodes.find((n) => n.path === path)?.position ?? [0, 0, 0];
+    // the two biggest areas fan out to opposite sides of the root
+    expect(Math.sign(at("apps/server")[0])).not.toBe(Math.sign(at("apps/web")[0]));
+    let closest = Number.POSITIVE_INFINITY;
+    for (const a of files)
+      for (const b of files)
+        if (a !== b)
+          closest = Math.min(
+            closest,
+            Math.hypot(...a.position.map((v, i) => v - (b.position[i] as number))),
+          );
+    expect(closest).toBeGreaterThan(0.5);
   });
   it("separates findings by shape and HUD severity token from all seven seat colours", () => {
     expect(pinToken("Critical")).toBe("--crit");

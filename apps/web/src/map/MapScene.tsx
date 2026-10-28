@@ -4,11 +4,19 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type ActivityProps, activityLayer } from "./activity.ts";
 import { dockPosition } from "./agents.ts";
-import { areaTone, fileStyle, type MapNode, pinToken } from "./model.ts";
+import { declutter, type LabelBox, labelKind } from "./labels.ts";
+import { areaColor } from "./layout.ts";
+import { BRIGHTNESS, fileStyle, type MapNode, pinToken } from "./model.ts";
 import { emptyMotion, markerPosition } from "./motion.ts";
+
+/** The stage's own palette: it stays the deep void in both themes (the prototype's look). */
+const LINK = "#1c2741";
+const SIGNAL = "#9fe8ff";
 
 type Props = ActivityProps & {
   nodes: MapNode[];
+  /** The main areas, biggest first (layout.ts): their colours tint untouched files and branches. */
+  areas?: string[];
   snapshot: MapSnapshot;
   focus: string | null;
   home: number;
@@ -34,6 +42,7 @@ export function MapScene(props: Props) {
   } | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const { nodes } = props;
+  const areasKey = (props.areas ?? []).join("\n");
   const seatCount = props.snapshot.seats.length;
   useEffect(() => {
     const el = host.current;
@@ -52,54 +61,103 @@ export function MapScene(props: Props) {
     labels.className = "map-labels";
     el.append(labels);
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 10000);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 10000);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = false;
     controls.autoRotateSpeed = 0.5;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const spheres = nodes.filter((n) => n.count > 0);
     const mesh = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 12, 8),
+      new THREE.SphereGeometry(1, 16, 12),
       new THREE.MeshBasicMaterial(),
       spheres.length,
     );
     scene.add(mesh);
+    const areas = areasKey ? areasKey.split("\n") : [];
     const positions = new Map(nodes.map((n) => [n.path, new THREE.Vector3(...n.position)]));
-    const edges = nodes.flatMap((n) =>
-      n.parent !== null
-        ? [...(positions.get(n.parent) ?? new THREE.Vector3()).toArray(), ...n.position]
-        : [],
-    );
+    const linked = nodes.filter((n) => n.parent !== null);
+    const edges = linked.flatMap((n) => [
+      ...(positions.get(n.parent as string) ?? new THREE.Vector3()).toArray(),
+      ...n.position,
+    ]);
+    // the backbone: each branch in its area's colour, a file's twig dimmer than a folder's limb
+    const edgeColors = linked.flatMap((n) => {
+      const c = new THREE.Color(areaColor(n.area, areas)).multiplyScalar(n.count ? 0.7 : 1);
+      return [c.r, c.g, c.b, c.r, c.g, c.b];
+    });
     const branches = new THREE.LineSegments(
-      new THREE.BufferGeometry().setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(edges, 3),
-      ),
-      new THREE.LineBasicMaterial({ transparent: true, opacity: 0.25 }),
+      new THREE.BufferGeometry()
+        .setAttribute("position", new THREE.Float32BufferAttribute(edges, 3))
+        .setAttribute("color", new THREE.Float32BufferAttribute(edgeColors, 3)),
+      new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+      }),
     );
     scene.add(branches);
     const imports = new THREE.LineSegments(
       new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ transparent: true, opacity: 0.15 }),
+      new THREE.LineBasicMaterial({
+        color: LINK,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+      }),
     );
     scene.add(imports);
     const highlighted = new THREE.LineSegments(
       new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ transparent: true, opacity: 0.8 }),
+      new THREE.LineBasicMaterial({ color: SIGNAL, transparent: true, opacity: 0.9 }),
     );
     scene.add(highlighted);
+    // each main area's name at the middle of its files, in its colour
+    const signal = new THREE.Color(SIGNAL);
+    const areaCentres = areas.flatMap((name) => {
+      const files = nodes.filter((n) => n.count > 0 && n.area === name);
+      if (!files.length) return [];
+      const position = new THREE.Vector3();
+      for (const f of files) position.add(new THREE.Vector3(...f.position));
+      return [
+        { name, color: areaColor(name, areas), position: position.divideScalar(files.length) },
+      ];
+    });
     const box = new THREE.Box3().setFromPoints([
       ...positions.values(),
-      new THREE.Vector3(...dockPosition(nodes, seatCount)),
+      new THREE.Vector3(...dockPosition(nodes, 0)),
+      new THREE.Vector3(...dockPosition(nodes, Math.max(0, seatCount - 1))),
       ...["HUB", "CAPCOM"].map((id) => new THREE.Vector3(...markerPosition(id, nodes))),
     ]);
     const centre = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(30, box.getSize(new THREE.Vector3()).length() * 0.8);
+    const extent = box.getSize(new THREE.Vector3());
+    // the prototype's home: from a little right of and above the middle, the whole tree, the dock
+    // and the markers filling the stage
+    const homeDirection = new THREE.Vector3(0.42, 0.2, 0.89).normalize();
+    let atHome = !view.current;
     const reset = () => {
+      const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      const distance =
+        Math.max(30, extent.y / 2 / half, extent.x / 2 / (half * Math.max(0.5, camera.aspect))) *
+          0.96 +
+        extent.z / 2;
       controls.target.copy(centre);
-      camera.position.copy(centre).add(new THREE.Vector3(radius * 0.5, radius * 0.4, radius));
+      camera.position.copy(centre).addScaledVector(homeDirection, distance);
+      controls.update();
+      atHome = true;
+    };
+    // a file or an agent the operator asked for, framed from the current viewing direction
+    const frame3d = (target: THREE.Vector3, share: number) => {
+      const back = camera.position.clone().sub(controls.target).normalize();
+      controls.target.copy(target);
+      camera.position
+        .copy(target)
+        .addScaledVector(back, Math.max(45, Math.max(extent.x, extent.y) * share));
       controls.update();
     };
+    controls.addEventListener("start", () => {
+      atHome = false;
+    });
     if (view.current) {
       camera.position.copy(view.current.position);
       controls.target.copy(view.current.target);
@@ -185,7 +243,41 @@ export function MapScene(props: Props) {
         label.el.style.top = `${((1 - p.y) * h) / 2}px`;
         label.el.hidden = p.z > 1 || p.z < -1;
       }
+      unclutter(w, h);
       if ((current?.rotate && !reduced.matches) || moving || flashing) schedule();
+    };
+    // labels never overlap: measured once per text, then placed, lifted or hidden each frame
+    const sizes = new WeakMap<HTMLElement, { text: string; w: number; h: number }>();
+    const unclutter = (w: number, h: number) => {
+      const shown: { el: HTMLElement; box: LabelBox }[] = [];
+      for (const container of [labels, activityLabels])
+        for (const child of container.children) {
+          const el = child as HTMLElement;
+          const kind = el.hidden ? null : labelKind(el.className);
+          if (!kind) continue;
+          let size = sizes.get(el);
+          if (!size || size.text !== el.textContent) {
+            size = { text: el.textContent ?? "", w: el.offsetWidth, h: el.offsetHeight };
+            if (size.w > 0) sizes.set(el, size);
+          }
+          const x = Number.parseFloat(el.style.left);
+          const y = Number.parseFloat(el.style.top);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          shown.push({ el, box: { x, y, w: size.w, h: size.h, ...kind } });
+        }
+      const placed = declutter(
+        shown.map((s) => s.box),
+        w,
+        h,
+      );
+      shown.forEach(({ el }, i) => {
+        const place = placed[i];
+        if (!place) return;
+        el.hidden = place.hidden;
+        el.style.top = `${place.y}px`;
+        el.classList.toggle("lifted", place.lift > 0);
+        el.style.setProperty("--lift", `${place.lift}px`);
+      });
     };
     const schedule = () => {
       if (frame === undefined && !document.hidden)
@@ -205,18 +297,16 @@ export function MapScene(props: Props) {
       if (next.focus !== previousFocus) {
         const p = next.focus ? positions.get(next.focus) : undefined;
         if (p) {
-          controls.target.copy(p);
-          camera.position.copy(p).add(new THREE.Vector3(20, 15, 35));
-          controls.update();
+          frame3d(p, 0.38);
+          atHome = false;
         }
         previousFocus = next.focus;
       }
       if (next.agentFocus !== previousAgentFocus) {
         const p = next.agentFocus ? activity.focus(next.agentFocus.seat) : undefined;
         if (p) {
-          controls.target.set(...p);
-          camera.position.set(p[0] + 20, p[1] + 15, p[2] + 35);
-          controls.update();
+          frame3d(new THREE.Vector3(...p), 0.42);
+          atHome = false;
         }
         previousAgentFocus = next.agentFocus;
       }
@@ -252,19 +342,30 @@ export function MapScene(props: Props) {
         if (title) label.title = title;
         labels.append(label);
         projected.push({ el: label, position });
+        return label;
       };
       const matrix = new THREE.Matrix4();
       visuals.length = 0;
       spheres.forEach((node, i) => {
         const s = fileStyle(next.snapshot, node.files, node.area, Date.now(), next.indices);
-        const size = (node.count > 1 ? 1 + Math.log2(node.count) * 0.3 : 0.8) * (1 + s.level * 0.4);
+        const untouched = s.brightness === BRIGHTNESS.untouched;
+        const written = s.brightness === BRIGHTNESS.written || s.brightness === BRIGHTNESS.docked;
+        // the prototype's steps, a size smaller: untouched files fine points, in scope a little
+        // larger, modified grown by level, so no file reads as a blob
+        const size =
+          (node.count > 1 ? 1 + Math.log2(node.count) * 0.3 : 1) *
+          (untouched ? 0.6 : written ? 1 + s.level * 0.35 : 0.8);
         matrix.makeScale(size, size, size).setPosition(...node.position);
         mesh.setMatrixAt(i, matrix);
-        const color = new THREE.Color(css(s.token));
-        if (s.brightness === 0.3) {
-          const hsl = color.getHSL({ h: 0, s: 0, l: 0 });
-          color.setHSL(areaTone(node.area), 0.15, hsl.l);
-        } else color.multiplyScalar(s.brightness);
+        const color = untouched
+          ? new THREE.Color(areaColor(node.area, areas)).multiplyScalar(0.7)
+          : new THREE.Color(css(s.token)).multiplyScalar(
+              s.brightness === BRIGHTNESS.written
+                ? 1.15
+                : s.brightness === BRIGHTNESS.docked
+                  ? 0.75
+                  : 0.72,
+            );
         if (next.agent) {
           const seat = next.snapshot.seats.find((seat) => seat.seat === next.agent);
           const files = [
@@ -274,9 +375,12 @@ export function MapScene(props: Props) {
           ];
           if (!node.files.some((f) => files.includes(f))) color.multiplyScalar(0.25);
         }
+        if (node.path === next.selected) color.lerp(signal, 0.65);
         mesh.setColorAt(i, color);
         const p = new THREE.Vector3(...node.position);
         visuals.push({ color, size, path: node.path, position: p, glow: 0, burst: 0 });
+        if (node.path === next.selected)
+          addLabel("○", p, "map-ring map-picked", undefined, "selected");
         if (s.accessing || s.recent)
           addLabel(
             "○",
@@ -299,14 +403,25 @@ export function MapScene(props: Props) {
         const grew = edited && s.level > previous.level;
         if (grew) flashes.set(node.path, now);
         previousChanges.set(node.path, { add: s.add, rem: s.rem, level: s.level });
-        if (s.label)
-          addLabel(
-            `${grew ? "▲ " : ""}+${s.add} −${s.rem}`,
+        if (s.label) {
+          const change = addLabel(
+            grew ? "▲ " : "",
             p.clone().add(new THREE.Vector3(0, size + 2, 0)),
             `map-change${edited ? " map-edited" : ""}${grew ? " map-level" : ""}`,
-            s.token,
+            undefined,
             s.source,
           );
+          change.style.borderColor = css(s.token);
+          for (const [cls, text] of [
+            ["add", `+${s.add}`],
+            ["rem", `−${s.rem}`],
+          ] as const) {
+            const part = document.createElement("b");
+            part.className = cls;
+            part.textContent = text;
+            change.append(part);
+          }
+        }
         for (const [j, finding] of s.findings.entries())
           addLabel(
             `▲ ${finding.severity}`,
@@ -323,8 +438,10 @@ export function MapScene(props: Props) {
             "--crit",
           );
       });
-      for (const node of nodes.filter((n) => n.path === n.area))
-        addLabel(node.area, new THREE.Vector3(...node.position), "map-area", "--muted");
+      for (const area of areaCentres) {
+        const label = addLabel(area.name, area.position, "map-area");
+        label.style.color = area.color;
+      }
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       const filePositions = new Map(
@@ -353,16 +470,13 @@ export function MapScene(props: Props) {
         "position",
         new THREE.Float32BufferAttribute(selectedLinks, 3),
       );
-      highlighted.material.color.set(css("--accent"));
-      imports.material.color.set(css("--accent"));
-      imports.material.opacity = 0.12;
-      branches.material.color.set(css("--muted"));
       schedule();
     };
     const resize = () => {
       renderer.setSize(el.clientWidth, el.clientHeight, false);
       camera.aspect = el.clientWidth / Math.max(1, el.clientHeight);
       camera.updateProjectionMatrix();
+      if (atHome) reset(); // the home view refits the stage until the operator moves the camera
       schedule();
     };
     const observer = new ResizeObserver(resize);
@@ -454,7 +568,7 @@ export function MapScene(props: Props) {
       shell.current?.dispose();
       shell.current = null;
     };
-  }, [nodes, seatCount]);
+  }, [nodes, seatCount, areasKey]);
   useEffect(() => {
     shell.current?.update(props);
   }, [props]);

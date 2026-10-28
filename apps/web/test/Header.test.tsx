@@ -98,6 +98,7 @@ describe("Header", () => {
       "Flight",
       "Board",
       "Agents",
+      "Map",
       "Comms",
       "Telemetry",
     ]);
@@ -106,6 +107,7 @@ describe("Header", () => {
       "/flight",
       "/board",
       "/agent",
+      "/map",
       "/comms",
       "/telemetry",
     ]);

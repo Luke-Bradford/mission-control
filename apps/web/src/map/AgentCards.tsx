@@ -75,7 +75,11 @@ export function AgentCards({
             {expanded && (
               <>
                 {seat.title && <p className="map-agent-title">{seat.title}</p>}
-                {card.folder && <p className="map-note">Branch folder: {card.folder}</p>}
+                {card.folder && (
+                  <p className="map-note">
+                    Branch folder: {card.folder === "." ? "repo root" : card.folder}
+                  </p>
+                )}
                 <p className="map-note">
                   In scope {card.scope} · modified {card.modified} · accessing {card.accessing} now
                 </p>

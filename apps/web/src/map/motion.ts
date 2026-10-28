@@ -1,5 +1,5 @@
 import type { MapCall, MapDelta, MapSnapshot } from "@mc/core";
-import { dockPosition, orbPlacement, type Position } from "./agents.ts";
+import { orbPlacement, type Position } from "./agents.ts";
 import { type MapNode, tokenBand } from "./model.ts";
 
 export interface MotionEvent {
@@ -69,10 +69,20 @@ export function endpoint(
   return markerPosition(id, nodes);
 }
 
+/** The prototype's markers: CAPCOM just above the tree's middle, HUB beside it, others to its left. */
 export function markerPosition(id: string, nodes: MapNode[]): Position {
+  const bounds = [0, 1, 2].map((axis) => {
+    const values = nodes.map((n) => n.position[axis] as number);
+    return [Math.min(0, ...values), Math.max(0, ...values)] as const;
+  });
+  const size = bounds.map(([min, max]) => Math.max(20, max - min));
+  const middle = bounds.map(([min, max]) => (min + max) / 2);
+  const top = (bounds[1]?.[1] ?? 0) + (size[1] ?? 20) * 0.1;
+  const [x, z, width] = [middle[0] ?? 0, middle[2] ?? 0, size[0] ?? 20];
+  if (id === "CAPCOM") return [x, top, z];
+  if (id === "HUB") return [x + width * 0.14, top - (size[1] ?? 20) * 0.02, z];
   const hash = [...id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 0);
-  const p = dockPosition(nodes, -2);
-  return [p[0] - 10 - (hash % 5) * 5, p[1] + (id === "CAPCOM" ? 12 : 0), p[2] + (hash % 7) * 3];
+  return [x - width * 0.14 - (hash % 5) * 5, top, z + (hash % 7) * 3];
 }
 
 export function arcPoint(a: Position, b: Position, u: number, out: Position = [0, 0, 0]): Position {

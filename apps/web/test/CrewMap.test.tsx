@@ -1,10 +1,9 @@
 import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { CrewMapPanel, CrewMapView } from "../src/map/CrewMap.tsx";
+import { CrewMapView, LiveCrewMap } from "../src/map/CrewMap.tsx";
 import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { crewRow } from "./fixtures.ts";
 
 vi.mock("../src/map/MapScene.tsx", () => ({
   MapScene: ({ focus }: { focus: string | null }) => <div data-focus={focus}>3D scene</div>,
@@ -72,36 +71,6 @@ it("loads live data, resyncs a gap and reconnect, and closes its subscription", 
   await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
   live.stop();
   expect(sources[0].close).toHaveBeenCalledOnce();
-});
-
-it("opens lazily and lets the operator choose a repo while another has running seats", async () => {
-  vi.stubGlobal(
-    "EventSource",
-    class {
-      addEventListener() {}
-      close() {}
-    },
-  );
-  const fetch = stubFetch({
-    "/api/repos": [{ id: "sample" }, { id: "second" }],
-    "/api/crew": { rows: [crewRow({ kind: "crew", repoId: "sample", hudState: "running" })] },
-    "/api/config": { crew: { sessions: [] } },
-    "/api/repos/sample/map": mapSnapshotFixture,
-    "/api/repos/second/map": { ...mapSnapshotFixture, repoId: "second" },
-  });
-  render(<CrewMapPanel />);
-  expect(fetch).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
-  await screen.findByRole("option", { name: "second" });
-  fireEvent.change(screen.getByRole("combobox", { name: "Map repo" }), {
-    target: { value: "second" },
-  });
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith("/api/repos/second/map", expect.anything()),
-  );
-  expect((screen.getByRole("combobox", { name: "Map repo" }) as HTMLSelectElement).value).toBe(
-    "second",
-  );
 });
 
 it("treats zero-sequence snapshots as authoritative instead of double-counting edit churn", async () => {
@@ -209,8 +178,7 @@ it("renders live file changes in the open drawer", async () => {
     "/api/config": { crew: { sessions: [] } },
     "/api/repos/sample/map": { ...mapSnapshotFixture, seq: 10 },
   });
-  render(<CrewMapPanel />);
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  render(<LiveCrewMap repo="sample" />);
   const search = await screen.findByRole("searchbox", { name: "Find a file or folder" });
   fireEvent.change(search, { target: { value: "util" } });
   fireEvent.click(screen.getByRole("button", { name: "src/util.ts" }));
@@ -275,8 +243,7 @@ it("refreshes an open checkout diff after a live map delta", async () => {
       body: { text, binary: false, truncated: false },
     }),
   });
-  render(<CrewMapPanel />);
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  render(<LiveCrewMap repo="sample" />);
   fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "util" } });
   fireEvent.click(screen.getByRole("button", { name: "src/util.ts" }));
   fireEvent.click(screen.getByRole("button", { name: "Current checkout diff" }));

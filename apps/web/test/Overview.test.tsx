@@ -210,6 +210,21 @@ describe("Overview panels", () => {
     await screen.findByText("No events yet.");
     expect(container.querySelector("#nbanner")).toBeNull();
   });
+
+  it("keeps the activity map on its own page: no map panel, a link from the Timeline", () => {
+    stub();
+    const { container } = render(<Overview />);
+    expect(container.querySelector("#mapP")).toBeNull();
+    expect(screen.queryByText(/Crew Activity Map/i)).toBeNull();
+    // the grid is the whole page: nothing is stacked below it
+    expect(
+      container.querySelector("#page-overview > .overview-grid")?.nextElementSibling,
+    ).toBeNull();
+    const link = within(container.querySelector("#timelineP") as HTMLElement).getByRole("link", {
+      name: "Activity map →",
+    });
+    expect(link.getAttribute("href")).toBe("/map");
+  });
 });
 
 describe("Agents panel", () => {

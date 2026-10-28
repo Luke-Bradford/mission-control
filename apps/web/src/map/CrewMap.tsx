@@ -1,61 +1,27 @@
-import type { Crew, FileDiff, MapSnapshot, RepoView } from "@mc/core";
+import type { Crew, FileDiff, MapSnapshot } from "@mc/core";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
-import { Panel } from "../hud/Panel.tsx";
-import { useSessionScope } from "../shell/session.ts";
-import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
 import { AgentCards } from "./AgentCards.tsx";
 import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
 import type { BadgeKind } from "./cards.ts";
+import { areaColor, mainAreas } from "./layout.ts";
 import { LiveMap } from "./live.ts";
-import { layoutTree, pickRepo, pinToken } from "./model.ts";
+import { layoutTree, pinToken } from "./model.ts";
 import type { MessageArc, MotionEvent } from "./motion.ts";
 import "./map.css";
 
 const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
 
-export function CrewMapPanel() {
-  const [open, setOpen] = useState(() => window.location.hash === "#mapP");
-  useEffect(() => {
-    const onHash = () => setOpen(window.location.hash === "#mapP");
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-  return (
-    <Panel
-      id="mapP"
-      title="Crew Activity Map"
-      actions={
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? "Collapse" : "Expand"}
-        </button>
-      }
-    >
-      {open && <LiveCrewMap />}
-    </Panel>
-  );
+/** The feed's health, shown in the deck under the stage. */
+export interface MapStatus {
+  live: boolean;
+  text: string;
 }
 
-function LiveCrewMap() {
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data;
+/** One repo's live map: the snapshot, then its deltas, until the page leaves the repo. */
+export function LiveCrewMap({ repo }: { repo: string }) {
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const scope = useSessionScope();
-  const [manual, setManual] = useState<string | null>(null);
-  const [picked, setPicked] = useState(() => readKey(MAP_REPO_KEY) ?? "");
-  const ids = repos?.map((r) => r.id) ?? [];
-  const repo =
-    scope.repo && scope.repo !== "all"
-      ? scope.repo
-      : manual && ids.includes(manual)
-        ? manual
-        : pickRepo(
-            ids,
-            (crew?.rows ?? [])
-              .filter((r) => r.kind === "crew" && r.role !== "FLIGHT" && r.hudState === "running")
-              .map((r) => ({ repoId: r.repoId, started: r.run?.startedAt ?? r.stateSince })),
-            picked,
-          );
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [skipped, setSkipped] = useState("");
   const [error, setError] = useState<Error | null>(null);
@@ -67,7 +33,6 @@ function LiveCrewMap() {
     setError(null);
     setEvents([]);
     setEpoch(0);
-    if (!repo) return;
     const live = new LiveMap(
       repo,
       () => apiGet<MapSnapshot>(RESOURCES.repoMap(repo).path),
@@ -84,43 +49,30 @@ function LiveCrewMap() {
     live.start();
     return () => live.stop();
   }, [repo]);
+  const indices = useMemo(
+    () => Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index])),
+    [crew?.rows],
+  );
+  const status: MapStatus = error
+    ? { live: false, text: `${error.message} Retrying.` }
+    : { live: true, text: `Live · real time${skipped ? ` · ${skipped}` : ""}` };
+  if (snapshot?.repoId !== repo)
+    return (
+      <div className="map-wait">
+        <p role="status">
+          {error ? `Map unavailable: ${error.message} Retrying every 5 s.` : "Loading repo map…"}
+        </p>
+      </div>
+    );
   return (
-    <div className="pb">
-      <label>
-        Repo{" "}
-        <select
-          aria-label="Map repo"
-          value={repo}
-          disabled={scope.repo !== "all"}
-          onChange={(e) => {
-            setManual(e.target.value);
-            setPicked(e.target.value);
-            writeKey(MAP_REPO_KEY, e.target.value);
-          }}
-        >
-          {repos?.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.id}
-            </option>
-          ))}
-        </select>
-      </label>
-      {error && <p role="status">{error.message}</p>}
-      {skipped && <p role="status">{skipped}</p>}
-      {!repo ? (
-        <p>No configured repo.</p>
-      ) : snapshot?.repoId === repo ? (
-        <CrewMapView
-          key={repo}
-          snapshot={snapshot}
-          events={events}
-          epoch={epoch}
-          indices={Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index]))}
-        />
-      ) : (
-        <p>Loading repo map…</p>
-      )}
-    </div>
+    <CrewMapView
+      key={repo}
+      snapshot={snapshot}
+      events={events}
+      epoch={epoch}
+      indices={indices}
+      status={status}
+    />
   );
 }
 
@@ -129,11 +81,13 @@ export function CrewMapView({
   indices = {},
   events = [],
   epoch = 0,
+  status,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
   events?: MotionEvent[];
   epoch?: number;
+  status?: MapStatus;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -165,7 +119,12 @@ export function CrewMapView({
     if (badge && !badgeSeat && !badge.conversation) closeBadge();
   }, [badge, badgeSeat, closeBadge]);
   const treeKey = JSON.stringify(snapshot.tree);
-  const nodes = useMemo(() => layoutTree(JSON.parse(treeKey)), [treeKey]);
+  const importKey = JSON.stringify(snapshot.imports);
+  const nodes = useMemo(
+    () => layoutTree(JSON.parse(treeKey), [], undefined, JSON.parse(importKey)),
+    [treeKey, importKey],
+  );
+  const areas = useMemo(() => mainAreas(JSON.parse(treeKey)), [treeKey]);
   const allFiles = [
     ...new Set(
       snapshot.seats.flatMap((s) => [...s.scope.read, ...s.scope.modified.map((c) => c.file)]),
@@ -204,39 +163,19 @@ export function CrewMapView({
     setFocus(null);
     queueMicrotask(() => setFocus(path));
   };
+  const active =
+    snapshot.findings.length > 0 ||
+    snapshot.seats.some(
+      (s) => s.calls.length || s.scope.read.length || s.scope.modified.length || s.recent.length,
+    );
   return (
-    <>
-      <div className="map-toolbar">
-        <input
-          type="search"
-          aria-label="Find a file or folder"
-          placeholder="Find a file or folder"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && matches[0]) searchSelect(matches[0]);
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            setHome(home + 1);
-            setFocus(null);
-            setAgentFocus(null);
-          }}
-        >
-          Home view
-        </button>
-        <label>
-          <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />{" "}
-          rotate
-        </label>
-      </div>
-      <div className="map-content">
-        <div>
-          <Suspense fallback={<p>Loading 3D map…</p>}>
+    <div className="map-body">
+      <div className="map-main">
+        <div className="map-stage-wrap">
+          <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
             <Scene
               nodes={displayNodes}
+              areas={areas}
               snapshot={snapshot}
               focus={focusNode?.path ?? null}
               home={home}
@@ -262,46 +201,24 @@ export function CrewMapView({
               }}
             />
           </Suspense>
-          <p className="map-note">
-            drag to orbit · scroll to zoom · click an orb or card to select · ⌖ zooms
+          <p className="map-hint">
+            drag to orbit · scroll to zoom · click a file, an orb or a message · ⌖ zooms to an agent
           </p>
-        </div>
-        <div className="map-sidebar">
-          <AgentCards
-            snapshot={snapshot}
-            indices={indices}
-            selected={agent}
-            onSelect={setAgent}
-            onZoom={(seat) => {
-              setFocus(null);
-              setRotate(false);
-              setAgentFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
-            }}
-            drawerId={drawerId}
-            headingRef={agentsHeading}
-            onBadge={(seat, kind, button) => {
-              opener.current = button;
-              setSelected(null);
-              setBadge({ seat, kind });
-            }}
-          />
+          {!active && (
+            <p className="map-quiet" role="status">
+              {snapshot.seats.length
+                ? `No crew activity recorded on ${snapshot.repoId} right now: no seat has a call in flight, a file in scope or an unmerged change. Files light up as soon as a seat reads or edits them.`
+                : `No crew seats on ${snapshot.repoId}.`}
+            </p>
+          )}
+          <MapLegend areas={areas} />
           <aside
             id={drawerId}
-            className="map-detail"
-            aria-label={badge ? "Agent details" : "Selected file"}
+            className="map-drawer"
+            aria-label="Agent details"
+            hidden={!(badge && (badgeSeat || badge.conversation))}
           >
-            {query && (
-              <div className="map-results">
-                {matches.slice(0, 60).map((n) => (
-                  <button type="button" key={n} onClick={() => searchSelect(n)}>
-                    {n}
-                  </button>
-                ))}
-                {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-                {!matches.length && <p>No matching files.</p>}
-              </div>
-            )}
-            {badge && (badgeSeat || badge.conversation) ? (
+            {badge && (badgeSeat || badge.conversation) && (
               <BadgeDrawer
                 key={`${badge.seat}-${badge.kind}-${badge.conversation?.to ?? ""}-${badge.conversation?.ticket ?? ""}`}
                 snapshot={snapshot}
@@ -310,55 +227,160 @@ export function CrewMapView({
                 conversation={badge.conversation}
                 onClose={closeBadge}
               />
-            ) : selected ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFocus(null);
-                    queueMicrotask(() => setFocus(selected));
-                  }}
-                >
-                  ⌖ Zoom to file
-                </button>
-                <button type="button" onClick={() => setSelected(null)}>
-                  Close
-                </button>
-                <FileDrawer
-                  snapshot={snapshot}
-                  path={selected}
-                  files={
-                    displayNodes.find((n) => n.path === selected)?.files.length
-                      ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
-                      : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                          f.startsWith(`${selected}/`),
-                        )
-                  }
-                />
-              </>
-            ) : (
-              <p>Click a node, or find one, to see who read or wrote it.</p>
             )}
           </aside>
         </div>
+        <div className="map-rail">
+          <div className="map-card map-card-agents">
+            <AgentCards
+              snapshot={snapshot}
+              indices={indices}
+              selected={agent}
+              onSelect={setAgent}
+              onZoom={(seat) => {
+                setFocus(null);
+                setRotate(false);
+                setAgentFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
+              }}
+              drawerId={drawerId}
+              headingRef={agentsHeading}
+              onBadge={(seat, kind, button) => {
+                opener.current = button;
+                setBadge({ seat, kind });
+              }}
+            />
+          </div>
+          <section className="map-card map-card-selected" aria-label="Selected">
+            <h3>Selected</h3>
+            <input
+              type="search"
+              className="map-find"
+              aria-label="Find a file or folder"
+              placeholder="Find a file or folder"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && matches[0]) searchSelect(matches[0]);
+              }}
+            />
+            {query && (
+              <div className="map-results">
+                {matches.slice(0, 60).map((n) => (
+                  <button type="button" key={n} onClick={() => searchSelect(n)}>
+                    {n}
+                  </button>
+                ))}
+                {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
+                {!matches.length && <p>No file or folder matches.</p>}
+              </div>
+            )}
+            <aside className="map-detail" aria-label="Selected file">
+              {selected ? (
+                <>
+                  <div className="map-detail-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocus(null);
+                        queueMicrotask(() => setFocus(selected));
+                      }}
+                    >
+                      ⌖ Zoom to file
+                    </button>
+                    <button type="button" onClick={() => setSelected(null)}>
+                      Close
+                    </button>
+                  </div>
+                  <FileDrawer
+                    snapshot={snapshot}
+                    path={selected}
+                    files={
+                      displayNodes.find((n) => n.path === selected)?.files.length
+                        ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
+                        : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
+                            f.startsWith(`${selected}/`),
+                          )
+                    }
+                  />
+                </>
+              ) : (
+                <p className="map-note">Click a node, or find one, to see who read or wrote it.</p>
+              )}
+            </aside>
+          </section>
+        </div>
       </div>
-      <div className="map-legend">
-        <span>dim: in scope (read on the branch)</span>
-        <span>bright: modified · +n −m · size: lines changed</span>
-        <span>◌ shared · ◎ write overlap</span>
-        <span>white ring: being accessed now · faint: recently accessed</span>
-        {(["Critical", "Important", "Minor"] as const).map((s) => (
-          <span key={s} style={{ color: `var(${pinToken(s)})` }}>
-            ▲ {s}
+      <div className="map-deck">
+        {status && (
+          <span className={`map-live${status.live ? "" : " down"}`} role="status">
+            <i aria-hidden="true" />
+            {status.text}
           </span>
-        ))}
+        )}
+        <span className="map-deck-controls">
+          <button
+            type="button"
+            onClick={() => {
+              setHome(home + 1);
+              setFocus(null);
+              setAgentFocus(null);
+            }}
+          >
+            Home view
+          </button>
+          <label>
+            <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />{" "}
+            rotate
+          </label>
+        </span>
+        <p className="map-foot">
+          {snapshot.tree.length.toLocaleString()} files at origin/HEAD, each its own node ·{" "}
+          {snapshot.imports.length.toLocaleString()} import links. Overlap is not conflict: a
+          conflict is computed between open PRs' heads. Findings are the current review's; the hub
+          keeps no fixed state for a finding. <b className="add">+n</b> <b className="rem">−m</b> is
+          the branch diff, or edit churn where labelled. Recorded playback is not available yet: the
+          hub keeps each seat's last 15 minutes of calls in memory and serves no history.
+          {snapshot.tree.length > 2000 &&
+            " Files are collapsed into folders (more than 2,000 files)."}
+        </p>
       </div>
-      <p className="map-note">
-        Overlap is not conflict. Findings are from the current review; they have no inferred fixed
-        state.{" "}
-        {snapshot.tree.length > 2000 && "Files are collapsed into folders (more than 2,000 files)."}
-      </p>
-    </>
+    </div>
+  );
+}
+
+/** The stage's key: area colours first, then every mark the scene draws. */
+function MapLegend({ areas }: { areas: string[] }) {
+  return (
+    <div className="map-legend">
+      {[...areas, "other"].map((area) => (
+        <span key={area}>
+          <i style={{ background: areaColor(area, areas) }} />
+          {area}
+        </span>
+      ))}
+      <span>
+        <i className="ring" />
+        being accessed now
+      </span>
+      <span>
+        {(["Critical", "Important", "Minor"] as const).map((s) => (
+          <b key={s} style={{ color: `var(${pinToken(s)})` }} title={s}>
+            ▲
+          </b>
+        ))}{" "}
+        review findings
+      </span>
+      <span className="wide">
+        → particles: a read flows from the file into the agent, a write from the agent into the
+        file, sized by the tokens it carried · <b className="add">✦</b> lines added spark in,{" "}
+        <b className="rem">✦</b> removed spark out · ▲ burst: the change grew a level
+      </span>
+      <span className="wide">
+        bright: modified, sized by lines changed, <b className="add">+n</b>{" "}
+        <b className="rem">−m</b> · dim: in scope (read on the branch) · ◌ shared · ◎ write overlap
+        · ● orb: the agent · ◆ CAPCOM and HUB · arcs: a message
+      </span>
+    </div>
   );
 }
 
