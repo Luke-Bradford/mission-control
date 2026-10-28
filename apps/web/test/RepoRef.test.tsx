@@ -120,7 +120,7 @@ describe("one repo, one colour", () => {
     comms.unmount();
 
     const flight = render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const list = await screen.findByRole("table", { name: "Crew runs" });
     await within(list).findByRole("link", { name: "site-builder #5" });
     expect(
       flight.container.querySelector<HTMLElement>("#wifP .rchip")?.style.getPropertyValue("--c"),

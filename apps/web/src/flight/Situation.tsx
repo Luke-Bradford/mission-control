@@ -1,5 +1,5 @@
-import type { AgentStream, AttentionItem, Crew, FlightSummaryView, FlightView } from "@mc/core";
-import { isOperatorItem } from "../attention.ts";
+import type { AgentStream, Crew, FlightSummaryView, FlightView } from "@mc/core";
+import { useNeedsYou } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { runElapsed } from "../crew.ts";
@@ -7,7 +7,6 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import type { NotificationsView } from "../notifications.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { chatRows, dockRows } from "./conversation.ts";
@@ -16,8 +15,14 @@ import { SUMMARY_EMPTY } from "./Summary.tsx";
 import { activeCrewRows } from "./WorkInFlight.tsx";
 
 const DASH = "—";
-type CommandTarget = "queue" | "record";
-type PulseTarget = CommandTarget | "comms";
+/** Where a pulse leads: the canonical detail behind that reading. */
+const PULSE_TARGET = {
+  /** Plan's Operator actions: the operator's asks and drafts live there. */
+  needs: `${PAGE_PATHS.flight}#askP`,
+  /** Telemetry's flow of work shows cycle time over time. */
+  cycle: PAGE_PATHS.telemetry,
+} as const;
+type PulseTarget = keyof typeof PULSE_TARGET;
 
 type PulseTone = "crit" | "warn" | "plain";
 
@@ -115,13 +120,12 @@ function LatestContact({ seatId }: { seatId: string | null | undefined }) {
 }
 
 /** The stand-up header: FLIGHT's judgement plus observed health, contact and forward load. */
-export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void }) {
-  const summary = useResource<FlightSummaryView>(RESOURCES.flightSummary).data;
+export function Situation() {
+  const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
+  const summary = summaryResource.data;
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const notifications = useResource<NotificationsView>(RESOURCES.notifications).data;
-  const { inRepo, inView } = useSessionScope();
+  const { inView } = useSessionScope();
   const now = useSecond();
   const active = activeCrewRows(crew, inView);
   const blocked = active.filter(
@@ -129,18 +133,8 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
       ["blocked", "stalled", "parked", "error"].includes(row.hudState) ||
       row.loop?.phase === "parked",
   ).length;
-  const scopedAttention = (attention ?? []).filter(
-    (item) => item.repoId === null || inRepo(item.repoId),
-  );
-  const operatorItems = scopedAttention.filter(
-    (item) => item.kind !== "person" && isOperatorItem(item),
-  );
-  const people = (notifications?.open ?? []).filter(
-    (thread) =>
-      inRepo(thread.repoId) &&
-      !scopedAttention.some((item) => item.key === thread.key && !isOperatorItem(item)),
-  );
-  const needsYou = operatorItems.length + people.length;
+  // The header's count, so the two never disagree.
+  const needsYou = useNeedsYou().length;
   // Two counts, not a sum: a PR in review can also have CI pending, so adding them double-counts.
   const inReview = summary?.metrics.inReview ?? 0;
   const inCi = summary?.metrics.inCi ?? 0;
@@ -185,18 +179,12 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
     );
     // tone-* rather than bare crit/warn: a bare .warn on a button is the global warn button style.
     const cls = `flight-pulse tone-${tone}${idle ? " idle" : ""}`;
-    const action =
-      target === "comms"
-        ? () => navigate(PAGE_PATHS.comms)
-        : target && onOpen
-          ? () => onOpen(target)
-          : null;
-    return action ? (
+    return target ? (
       <button
         type="button"
         className={cls}
-        aria-label={`${label}: ${value} ${detail}`}
-        onClick={action}
+        aria-label={`${label}: ${value} ${detail}, ${window}`}
+        onClick={() => navigate(PULSE_TARGET[target])}
       >
         {content}
       </button>
@@ -221,6 +209,12 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
           <p className="flight-intent-headline sittext">
             {summary ? summary.headline || SUMMARY_EMPTY : DASH}
           </p>
+          {summaryResource.error && (
+            // Live runs below come from the crew, so they stay current without the summary.
+            <p role="alert" className="note err">
+              FLIGHT summary unavailable: {summaryResource.error.message}
+            </p>
+          )}
           <p className="flight-headline-age">
             <span>
               {summary?.session === null
@@ -256,9 +250,8 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
           "PRs in review / CI pending",
           "plain",
           "now",
-          "record",
         )}
-        {pulse("Throughput", summary?.metrics.merged ?? 0, "PRs merged", "plain", "24 h", "record")}
+        {pulse("Throughput", summary?.metrics.merged ?? 0, "PRs merged", "plain", "24 h")}
         {pulse(
           "Cycle time",
           summary?.metrics.readyToMergedMin == null
@@ -267,7 +260,7 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
           "median Ready → merged",
           "plain",
           "24 h",
-          "record",
+          "cycle",
         )}
         {pulse(
           "Needs you",
@@ -275,7 +268,7 @@ export function Situation({ onOpen }: { onOpen?: (target: CommandTarget) => void
           "decisions or replies",
           pulseTone(needsYou, "warn"),
           "now",
-          "comms",
+          "needs",
         )}
       </div>
     </Panel>

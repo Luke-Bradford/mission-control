@@ -6,13 +6,13 @@ import {
   type FlightBriefSectionKey,
   type FlightBriefView,
 } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
-import { Drafts, postedText } from "../src/flight/Drafts.tsx";
+import { Drafts, draftRowId, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { SUMMARY_EMPTY } from "../src/flight/Summary.tsx";
@@ -22,6 +22,7 @@ import { rel } from "../src/fmt.ts";
 import { type PersonThreadView, whereOf } from "../src/notifications.ts";
 import { Flight } from "../src/pages/Flight.tsx";
 import { agentPath, PAGE_PATHS } from "../src/router.ts";
+import { Header } from "../src/shell/Header.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -55,6 +56,7 @@ import {
   NOW,
   prView,
   REPOS,
+  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -257,8 +259,8 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    const rows = list.querySelectorAll("li");
+    const list = await screen.findByRole("table", { name: "Crew runs" });
+    const rows = list.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(1);
     const text = rows[0]?.textContent ?? "";
     expect(text).toContain("guido-1");
@@ -266,6 +268,15 @@ describe("FLIGHT page", () => {
     expect(text).toContain("shop-app #5");
     expect(text).toContain("12m 00s");
     expect(text).toContain("run #12");
+    expect(
+      within(list)
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["Owner", "Workstream", "Delivery path", "Next / checkpoint", "Age"]);
+    expect(within(rows[0] as HTMLElement).getAllByRole("cell")).toHaveLength(5);
+    const branch = rows[0]?.querySelector(".wif-branch") as HTMLElement;
+    expect(branch.textContent).toBe("feature/5-stop-race");
+    expect(branch.title).toBe("feature/5-stop-race");
     expect(container.querySelector("#wifP a")?.getAttribute("href")).toBe("/agent/guido-1");
   });
 
@@ -281,9 +292,9 @@ describe("FLIGHT page", () => {
       ],
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const list = await screen.findByRole("table", { name: "Crew runs" });
     // the ticket's title is an ellipsised span too: the doing line is the grey one
-    const doing = list.querySelector("li .wif-doing") as HTMLElement;
+    const doing = list.querySelector("tbody tr .wif-doing") as HTMLElement;
     const line = "Draft PR #166 · Backfill the quote cache";
     await waitFor(() => expect(doing.textContent).toBe(line));
     expect(doing.title).toBe(line);
@@ -303,7 +314,7 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const list = await screen.findByRole("table", { name: "Crew runs" });
     expect(list.textContent).toContain("guido-2");
     expect(list.textContent).not.toContain("guido-1");
     expect(list.textContent).not.toContain("retro-1");
@@ -323,8 +334,8 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    const rows = list.querySelectorAll("li");
+    const list = await screen.findByRole("table", { name: "Crew runs" });
+    const rows = list.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(1);
     const text = rows[0]?.textContent ?? "";
     expect(text).toContain("guido-1");
@@ -350,8 +361,8 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    expect(list.querySelectorAll("li")).toHaveLength(1);
+    const list = await screen.findByRole("table", { name: "Crew runs" });
+    expect(list.querySelectorAll("tbody tr")).toHaveLength(1);
     expect(list.textContent).toContain("Blocked");
     expect(list.textContent).not.toContain("PR #");
     expect(list.querySelector(".wsteps .w")).not.toBeNull();
@@ -424,7 +435,7 @@ describe("FLIGHT page", () => {
     it("renders the run's five template steps and marks the current step", async () => {
       stubWith([seatRow({ hudState: "running", loop: profileLoop })]);
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       expect(cells(list)).toEqual([
         { text: "plan", cls: "d", title: "" },
         { text: "implement", cls: "d", title: "" },
@@ -450,7 +461,7 @@ describe("FLIGHT page", () => {
           ]),
         );
         render(<Flight />);
-        const list = await screen.findByRole("list", { name: "Crew runs" });
+        const list = await screen.findByRole("table", { name: "Crew runs" });
         const repeated = ownFix ? "fix" : "review";
         await waitFor(() => expect(cells(list).some((c) => c.text === `${repeated}×2`)).toBe(true));
         expect(cells(list)[ownFix ? 1 : 3]?.title).toBe(`${repeated} · 2 tries`);
@@ -463,9 +474,11 @@ describe("FLIGHT page", () => {
       window.history.replaceState(null, "", PAGE_PATHS.flight);
       stubWith([seatRow({ id: "guido-2", loop: profileLoop })]);
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       const link = within(list).getByRole("link", { name: /^guido-2/ });
       const row = link.closest(".row") as HTMLElement;
+      // A table row, not a control: only its links act.
+      expect(row.tagName).toBe("TR");
       expect(row.getAttribute("role")).toBeNull();
       expect(row.getAttribute("aria-label")).toBeNull();
       expect(row.hasAttribute("tabindex")).toBe(false);
@@ -493,7 +506,7 @@ describe("FLIGHT page", () => {
       window.history.replaceState(null, "", PAGE_PATHS.flight);
       stubWith([seatRow({ loop: { ...profileLoop, prNumber: 9 } })]);
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       const links = list.querySelectorAll<HTMLAnchorElement>('a[href^="https://github.com/"]');
       expect(links.length).toBeGreaterThanOrEqual(2);
       for (const link of links) {
@@ -515,7 +528,7 @@ describe("FLIGHT page", () => {
         runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail"), aTry("ci", 2, "pass")]),
       );
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       await waitFor(() => expect(cells(list)[1]?.text).toBe("CI×2"));
       expect(cells(list)).toEqual([
         { text: "Working", cls: "d", title: "Working · 1 try" },
@@ -531,7 +544,7 @@ describe("FLIGHT page", () => {
       const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
       stubWith([seatRow({ hudState: "running", ticket: "shop-app#5", loop })]);
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       expect(cells(list)).toEqual([
         { text: "Working", cls: "d", title: "" },
         { text: "CI", cls: "c", title: "" },
@@ -552,7 +565,7 @@ describe("FLIGHT page", () => {
         runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail")]),
       );
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const list = await screen.findByRole("table", { name: "Crew runs" });
       await waitFor(() => expect(cells(list)[1]?.cls).toBe("w"));
       expect(cells(list).map((c) => c.cls)).toEqual(["d", "w", "", ""]);
     });
@@ -564,8 +577,8 @@ describe("FLIGHT page", () => {
         seatRow({ hudState: "running", ticket: "shop-app#5", loop }),
       ]);
       render(<Flight />);
-      const list = await screen.findByRole("list", { name: "Crew runs" });
-      expect(list.querySelectorAll("li")).toHaveLength(1);
+      const list = await screen.findByRole("table", { name: "Crew runs" });
+      expect(list.querySelectorAll("tbody tr")).toHaveLength(1);
       expect(list.textContent).not.toContain("flight-1");
     });
   });
@@ -591,8 +604,8 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    const rows = list.querySelectorAll("li");
+    const list = await screen.findByRole("table", { name: "Crew runs" });
+    const rows = list.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("guido-1");
     expect(rows[1]?.textContent).toContain("guido-2");
@@ -618,11 +631,11 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
-    await screen.findByRole("list", { name: "Crew runs" });
+    await screen.findByRole("table", { name: "Crew runs" });
     act(() => setSession("site-builder"));
     expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
     act(() => setSession("s1"));
-    expect(await screen.findByRole("list", { name: "Crew runs" })).toBeTruthy();
+    expect(await screen.findByRole("table", { name: "Crew runs" })).toBeTruthy();
   });
 
   it("Work in flight shows the doing text before the timezone has loaded", async () => {
@@ -631,7 +644,7 @@ describe("FLIGHT page", () => {
       "/api/config": () => ({ status: 503, body: { error: "loading" } }),
     });
     render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const list = await screen.findByRole("table", { name: "Crew runs" });
     expect(list.textContent).toContain("run #12");
   });
 
@@ -665,8 +678,8 @@ describe("FLIGHT page", () => {
       next: "Compare the next load run",
     });
     const work = ledgerEntry({
-      key: "work:5",
-      refs: ["#5"],
+      key: "work:3349",
+      refs: ["#3349"],
       next: "Get RETRO's verdict",
       due: NOW + HOUR,
     });
@@ -701,10 +714,249 @@ describe("FLIGHT page", () => {
     expect(container.querySelector("#controlP")?.textContent).toContain("Choose a release window");
     expect(container.querySelector("#controlP")?.textContent).toContain("Prepare the release");
     expect(container.querySelector("#controlP")?.textContent).toContain("Spike cache pressure");
-    fireEvent.click(screen.getByRole("button", { name: "Needs you: 1 decisions or replies" }));
-    expect(window.location.pathname).toBe(PAGE_PATHS.comms);
+    fireEvent.click(screen.getByRole("button", { name: "Needs you: 1 decisions or replies, now" }));
+    expect(window.location.pathname).toBe(PAGE_PATHS.flight);
+    expect(window.location.hash).toBe("#askP");
+    await waitFor(() =>
+      expect((container.querySelector("#flight-queue") as HTMLElement).hidden).toBe(false),
+    );
+  });
+
+  describe("a delivery-board row's next action", () => {
+    const openLedger = (entries: ReturnType<typeof ledgerEntry>[]) => ({
+      session: "s1",
+      entries,
+      more: false,
+      nextOffset: null,
+    });
+    const renderRow = async (
+      row: ReturnType<typeof seatRow>,
+      entries: ReturnType<typeof ledgerEntry>[],
+    ) => {
+      stubFetch({
+        "/api/crew": { rows: [row], firstRunToday: null },
+        "/api/flight/ledger?status=open": openLedger(entries),
+        "/api/config": CONFIG,
+      });
+      const { container } = render(<Flight />);
+      await screen.findByRole("table", { name: "Crew runs" });
+      return container.querySelector("#wifP .wif-next") as HTMLElement;
+    };
+
+    it("is not another ticket's entry that the same seat owns", async () => {
+      const next = await renderRow(seatRow({ hudState: "running", ticket: "shop-app#9" }), [
+        ledgerEntry({
+          key: "work:5",
+          owner: "guido-1",
+          refs: ["#5"],
+          next: "Act on five",
+          due: NOW + HOUR,
+        }),
+      ]);
+      await waitFor(() => expect(next.textContent).toBe("Not recorded"));
+      expect(next.textContent).not.toContain("Act on five");
+      expect(next.textContent).not.toContain("Checkpoint");
+    });
+
+    it("is not an entry for the same number in another repo", async () => {
+      // FLIGHT's `#N` refs name an issue in its session's repo (shop-app), not other-app.
+      const next = await renderRow(seatRow({ hudState: "running", ticket: "other-app#9" }), [
+        ledgerEntry({
+          key: "work:9",
+          owner: "retro-1",
+          refs: ["#9"],
+          next: "Act on shop-app nine",
+        }),
+      ]);
+      await waitFor(() => expect(next.textContent).toBe("Not recorded"));
+    });
+
+    it("is the entry naming its ticket, or the owner's only entry when that names no ticket", async () => {
+      const exact = await renderRow(seatRow({ hudState: "running", ticket: "shop-app#9" }), [
+        ledgerEntry({ key: "work:other", owner: "guido-1", refs: [], next: "Owner's note" }),
+        ledgerEntry({
+          key: "work:9",
+          owner: "retro-1",
+          refs: ["PR #10", "#9"],
+          next: "Act on nine",
+        }),
+      ]);
+      await waitFor(() => expect(exact.textContent).toContain("Act on nine"));
+      cleanup();
+      hub.clear();
+      const owned = await renderRow(seatRow({ hudState: "running", ticket: "shop-app#9" }), [
+        ledgerEntry({
+          key: "work:loose",
+          owner: "guido-1",
+          refs: ["PR #10"],
+          next: "Owner's note",
+        }),
+      ]);
+      await waitFor(() => expect(owned.textContent).toContain("Owner's note"));
+    });
+  });
+
+  describe("the briefing", () => {
+    it("marks a headline over an hour old stale, and a fresh one not", async () => {
+      stubFetch({
+        "/api/flight": flightView(),
+        "/api/flight/summary": flightSummary({ headlineAgeMin: 75 }),
+        "/api/config": CONFIG,
+      });
+      const { container, unmount } = render(<Flight />);
+      await waitFor(() =>
+        expect(container.querySelector("#sitP .flight-headline-age")?.textContent).toContain(
+          "stale · refresh due",
+        ),
+      );
+      unmount();
+      hub.clear();
+      stubFetch({
+        "/api/flight": flightView(),
+        "/api/flight/summary": flightSummary({ headlineAgeMin: 5 }),
+        "/api/config": CONFIG,
+      });
+      const fresh = render(<Flight />).container;
+      await waitFor(() =>
+        expect(fresh.querySelector("#sitP .flight-headline-age")?.textContent).toContain(
+          "Synthesised 5m",
+        ),
+      );
+      expect(fresh.querySelector("#sitP")?.textContent).not.toContain("stale");
+    });
+
+    it.each([
+      [
+        "not live",
+        flightView({
+          seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: false },
+        }),
+      ],
+      ["absent", flightView({ seat: null })],
+    ])("says FLIGHT offline when its seat is %s, and still shows live work", async (_, view) => {
+      stubFetch({
+        "/api/flight": view,
+        "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+        "/api/config": CONFIG,
+      });
+      const { container } = render(<Flight />);
+      await waitFor(() =>
+        expect(container.querySelector("#sitP .flight-intent-kicker")?.textContent).toContain(
+          "FLIGHT offline",
+        ),
+      );
+      expect(await screen.findByRole("table", { name: "Crew runs" })).toBeTruthy();
+    });
+
+    it("reports a failed summary while live work and the pulse rail stay", async () => {
+      stubFetch({
+        "/api/flight": flightView(),
+        "/api/flight/summary": () => ({ status: 500, body: { error: "Summary unavailable" } }),
+        "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+        "/api/config": CONFIG,
+      });
+      const { container } = render(<Flight />);
+      const alert = await within(container.querySelector("#sitP") as HTMLElement).findByRole(
+        "alert",
+      );
+      expect(alert.textContent).toBe("FLIGHT summary unavailable: Summary unavailable");
+      expect(container.querySelector("#sitP .sittext")?.textContent).toBe("—");
+      expect(await screen.findByRole("table", { name: "Crew runs" })).toBeTruthy();
+      expect(pulseValue(container, "WIP")).toBe("1");
+    });
+
+    it("scopes the pulse rail to the selected session", async () => {
+      stubFetch({
+        "/api/config": SESSION_CONFIG,
+        "/api/crew": {
+          rows: [
+            seatRow({ sessionId: "shop-app-session", hudState: "blocked" }),
+            seatRow({
+              id: "guido-2",
+              sessionId: "site-builder-session",
+              repoId: "site-builder",
+              ticket: "site-builder#9",
+              hudState: "running",
+            }),
+          ],
+          firstRunToday: null,
+        },
+        "/api/attention": [
+          item({ key: "a" }),
+          item({ key: "b", repoId: "site-builder" }),
+          item({ key: "c", repoId: "site-builder" }),
+          // no repo: it belongs to no session, so every session counts it
+          item({ key: "e", repoId: null }),
+        ],
+      });
+      const { container } = render(<Flight />);
+      await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("4"));
+      expect(pulseValue(container, "WIP")).toBe("2");
+      expect(pulseValue(container, "Blocked")).toBe("1");
+      act(() => setSession("site-builder-session"));
+      await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("3"));
+      expect(pulseValue(container, "WIP")).toBe("1");
+      expect(pulseValue(container, "Blocked")).toBe("0");
+      act(() => setSession("shop-app-session"));
+      await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("2"));
+      expect(pulseValue(container, "WIP")).toBe("1");
+      expect(pulseValue(container, "Blocked")).toBe("1");
+    });
+
+    it("labels each pulse button with its window and sends cycle time to Telemetry", async () => {
+      window.history.replaceState(null, "", PAGE_PATHS.flight);
+      stubFetch({ "/api/flight/summary": flightSummary(), "/api/config": CONFIG });
+      render(<Flight />);
+      const cycle = await screen.findByRole("button", {
+        name: "Cycle time: — median Ready → merged, 24 h",
+      });
+      expect(
+        screen.getByRole("button", { name: /^Needs you: 0 decisions or replies, now$/ }),
+      ).toBeTruthy();
+      // Throughput and Review / CI are read here only: they lead nowhere.
+      expect(screen.queryByRole("button", { name: /^Throughput/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Review \/ CI/ })).toBeNull();
+      fireEvent.click(cycle);
+      expect(window.location.pathname).toBe(PAGE_PATHS.telemetry);
+    });
+  });
+
+  it("counts Needs you once: the header, the pulse and Stand-up focus agree, one per key", async () => {
+    stubFetch({
+      "/api/config": CONFIG,
+      "/api/test-lock": { holder: null, waiting: [] },
+      "/api/settings/away": { on: false },
+      "/api/machine": { latest: null },
+      "/api/limits": [],
+      "/api/attention": [
+        item({ key: "a", text: "Same words" }),
+        item({ key: "a", text: "Same words" }),
+        item({ key: "b", text: "Same words" }),
+        item({ key: "c", text: "FLIGHT's to clear", owner: "flight" }),
+      ],
+    });
+    const { container } = render(
+      <>
+        <Header page="flight" />
+        <Flight />
+      </>,
+    );
+    expect(await screen.findByRole("button", { name: /^Needs you 2:/ })).toBeTruthy();
+    await waitFor(() => expect(pulseValue(container, "Needs you")).toBe("2"));
+    const heading = container.querySelector("#controlP .flight-control-heading") as HTMLElement;
+    expect(heading.textContent).toContain("2 need you");
+    // The list also holds what FLIGHT is clearing, so its own count is named apart.
+    expect(heading.textContent).toContain("3 in this list");
+    expect(container.querySelectorAll("#controlP .flight-control-list li")).toHaveLength(3);
   });
 });
+
+/** A pulse's reading by its label. */
+function pulseValue(container: HTMLElement, label: string): string | null | undefined {
+  return [...container.querySelectorAll(".flight-pulse")]
+    .find((pulse) => pulse.querySelector(".flight-pulse-label")?.textContent === label)
+    ?.querySelector(".flight-pulse-value")?.textContent;
+}
 
 const briefView = (
   over: Partial<Record<FlightBriefSectionKey, { text?: string; updatedAt?: number }>> = {},
@@ -866,6 +1118,106 @@ describe("FLIGHT's brief", () => {
     expect(container.querySelector("#flight-note-project")?.textContent).toContain(
       "Linked context.",
     );
+  });
+
+  it("opens Plan with the draft in view for an away digest's draft link", async () => {
+    const id = draftRowId(7, "shop-app#12");
+    window.history.replaceState(null, "", `/flight#${id}`);
+    stubFetch({
+      "/api/drafts": [
+        {
+          id: 7,
+          target: "shop-app#12",
+          kind: "issue",
+          text: "Linked reply",
+          state: "pending",
+          createdAt: NOW,
+        },
+      ],
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    expect((container.querySelector("#flight-queue") as HTMLElement).hidden).toBe(false);
+    expect(screen.getByRole("tab", { name: "Plan" }).getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => expect(document.getElementById(id)?.textContent).toContain("Linked reply"));
+    expect((document.getElementById(id) as HTMLElement).closest("[hidden]")).toBeNull();
+  });
+
+  it.each([
+    ["#askP", "flight-queue"],
+    ["#decidedP", "flight-record"],
+    ["#logP", "flight-record"],
+    ["#memoryP", "flight-notebook"],
+    ["#elsewhere", "flight-command"],
+  ])("a %s link opens its tab, on load and on hashchange", async (hash, panel) => {
+    window.history.replaceState(null, "", `/flight${hash}`);
+    stubFetch({ "/api/config": CONFIG });
+    const { container, unmount } = render(<Flight />);
+    expect((container.querySelector(`#${panel}`) as HTMLElement).hidden).toBe(false);
+    unmount();
+    window.history.replaceState(null, "", "/flight#flight-note-crew");
+    const live = render(<Flight />).container;
+    expect((live.querySelector("#flight-notebook") as HTMLElement).hidden).toBe(false);
+    act(() => {
+      window.history.replaceState(null, "", `/flight${hash}`);
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect((live.querySelector(`#${panel}`) as HTMLElement).hidden).toBe(false);
+  });
+
+  it("moves between tabs from the keyboard with one tab stop, and each panel takes focus", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(<Flight />);
+    const tabs = screen.getAllByRole("tab");
+    const selected = () => tabs.find((t) => t.getAttribute("aria-selected") === "true");
+    const stops = () => tabs.map((t) => t.tabIndex);
+    expect(selected()?.id).toBe("flight-tab-command");
+    expect(stops()).toEqual([0, -1, -1, -1]);
+    for (const [key, id, roving] of [
+      ["ArrowRight", "flight-tab-queue", [-1, 0, -1, -1]],
+      ["End", "flight-tab-record", [-1, -1, -1, 0]],
+      ["ArrowRight", "flight-tab-command", [0, -1, -1, -1]],
+      ["ArrowLeft", "flight-tab-record", [-1, -1, -1, 0]],
+      ["ArrowLeft", "flight-tab-notebook", [-1, -1, 0, -1]],
+      ["Home", "flight-tab-command", [0, -1, -1, -1]],
+    ] as const) {
+      fireEvent.keyDown(
+        document.activeElement === document.body
+          ? (selected() as HTMLElement)
+          : (document.activeElement as HTMLElement),
+        { key },
+      );
+      expect(selected()?.id, key).toBe(id);
+      expect(document.activeElement?.id, key).toBe(id);
+      expect(stops(), key).toEqual(roving);
+    }
+    for (const panel of screen.getAllByRole("tabpanel", { hidden: true })) {
+      expect(panel.tabIndex).toBe(0);
+      expect(
+        document
+          .getElementById(panel.getAttribute("aria-labelledby") as string)
+          ?.getAttribute("aria-controls"),
+      ).toBe(panel.id);
+    }
+  });
+
+  it("the system log leaves out every decision: yesterday's answers and other kinds too", async () => {
+    stubDecided(
+      flightView({
+        decisions: [
+          decided("d3", NOW - 26 * HOUR),
+          decided("d4", NOW - MIN, { kind: "start", about: "Started guido-1", decision: "on #5" }),
+        ],
+      }),
+      { "/api/agents/flight-1/stream": { ...STREAM, events: [] } },
+    );
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#workLog")?.textContent).toContain(NOTHING_LOGGED),
+    );
+    expect(container.querySelector("#logP .ph")?.textContent).toContain("0 entries");
+    expect(container.querySelector("#workLog")?.textContent).not.toContain("question d3");
+    expect(container.querySelector("#workLog")?.textContent).not.toContain("Started guido-1");
   });
 
   it("lists items FLIGHT is handling with its note", async () => {
