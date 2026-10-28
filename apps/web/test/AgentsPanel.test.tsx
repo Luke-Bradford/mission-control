@@ -32,7 +32,7 @@ function stub(
   limits: LimitRow[] = [limit5h({ used: 14 })],
   overrides: Record<string, unknown> = {},
 ) {
-  stubFetch({
+  return stubFetch({
     "/api/crew": { rows, firstRunToday: null },
     "/api/config": {
       ...CONFIG,
@@ -134,6 +134,35 @@ it("shows FLIGHT, four crew and two observed loops in eight columns with a live 
   expect(screen.queryByText("Run details")).toBeNull();
   expect(screen.queryByText(/^Crew ·/)).toBeNull();
   expect(container.querySelector("#agentsP .ph .meter")).toBeNull();
+});
+
+it("names and confirms the waiver for a review-parked seat", async () => {
+  const loop = {
+    phase: "parked" as const,
+    text: "Blocked: RETRO finding",
+    prNumber: 9,
+    parked: "RETRO finding",
+  };
+  const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
+  const f = stub([row], true, [], "CI", undefined, {
+    "/api/runs/r-12/loop": {
+      loop: {
+        parked: { kind: "review", reason: "RETRO finding", ended: false },
+        pushFor: "abc1234def",
+      },
+    },
+    "POST /api/runs/r-12/resume": { ok: true },
+  });
+  render(<AgentsPanel />);
+  const waive = await screen.findByRole("button", { name: "Waive findings on abc1234 and resume" });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  fireEvent.click(waive);
+  expect(f.mock.calls.some(([path]) => path === "/api/runs/r-12/resume")).toBe(false);
+  fireEvent.click(waive);
+  await waitFor(() =>
+    expect(f.mock.calls.some(([path]) => path === "/api/runs/r-12/resume")).toBe(true),
+  );
+  confirm.mockRestore();
 });
 
 it("shows a need and its action inline, leaves a quiet row clear, and keeps row navigation", async () => {

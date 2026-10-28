@@ -6,10 +6,12 @@ import {
   FLIGHT_TICK_MS,
   type FlightBriefView,
   type HudState,
+  type RunLoop,
   type TestLockState,
 } from "@mc/core";
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
+import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -472,6 +474,7 @@ function AgentRow({
             {DASH}
           </span>
         )}
+        <ReviewParkSeatActions row={row} />
       </span>
       <AgentActivity row={row} now={now} max={max} />
       <AgentCost row={row} />
@@ -480,6 +483,27 @@ function AgentRow({
       </span>
     </div>
   );
+}
+
+/** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
+function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
+  const current = row.loop?.phase === "parked" && row.run ? [{ id: row.run.id }] : [];
+  const aside = (row.asideRuns ?? [])
+    .filter((run) => run.loop.phase === "parked")
+    .map((run) => ({ id: run.runId }));
+  return (
+    <span className="acts">
+      {[...current, ...aside].map(({ id }) => (
+        <ReviewParkSeatAction key={id} runId={id} />
+      ))}
+    </span>
+  );
+}
+
+function ReviewParkSeatAction({ runId }: { runId: string }) {
+  const loop = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop;
+  const park = reviewPark(loop);
+  return park ? <WaiveReviewFindings runId={runId} park={park} /> : null;
 }
 
 /** FLIGHT heads the crew, observed loops and stopped seats. */

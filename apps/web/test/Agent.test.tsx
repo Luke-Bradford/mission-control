@@ -2278,6 +2278,41 @@ describe("Agent page: loop steps", () => {
       ask.mockRestore();
     });
 
+    it("names and confirms a historical review waiver from the Runs trace", async () => {
+      const parked = {
+        ...loopOf({ phase: "parked", parked: "RETRO finding", text: "Blocked: RETRO finding" }),
+        pushFor: "abc1234def5678",
+        parked: { kind: "review", reason: "RETRO finding", ended: false },
+        aside: { worktree: "/w/r-12", wake: false },
+      } as unknown as RunLoop;
+      const f = stub({
+        rows: [
+          {
+            ...seat(loopOf({ phase: "working" })),
+            run: { ...crewRow().run, id: "r-13", seq: 13 },
+          } as CrewRow,
+        ],
+        runs: [rv({ id: "r-12", loop: parked })],
+        extra: { "POST /api/runs/r-12/resume": { ok: true } },
+      });
+      const { container } = render(<Agent id="shop-app-ta" />);
+      await loaded();
+      const panel = $(container, "#loopP") as HTMLElement;
+      fireEvent.click(within(panel).getByRole("button", { name: "Runs" }));
+      const waive = await within(panel).findByRole("button", {
+        name: "Waive findings on abc1234 and resume",
+      });
+      const confirm = vi
+        .spyOn(window, "confirm")
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      fireEvent.click(waive);
+      expect(bodyOf(f, "/api/runs/r-12/resume")).toBeUndefined();
+      fireEvent.click(waive);
+      await waitFor(() => expect(bodyOf(f, "/api/runs/r-12/resume")).toBe("{}"));
+      confirm.mockRestore();
+    });
+
     it("is in the Runs list only for an unended run that is not the seat's current one", async () => {
       const loop = { phase: "review", aside: { worktree: "/w/x", wake: false } } as RunLoop;
       stub({
