@@ -16,6 +16,7 @@ import { refillQueues } from "../src/engine/queue.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
+  reorderQueue,
   resolveQueueReorder,
 } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
@@ -160,6 +161,13 @@ it("proposes an approval with stable refs and catalogue options, with no board w
   );
   expect(result.item.brief?.options.map((o) => o.label)).toEqual(["Approve", "Deny"]);
   expect(deps.edit).not.toHaveBeenCalled();
+});
+
+it("applies FLIGHT's reorder directly without leaving an approval item", async () => {
+  const result = await reorderQueue(deps, "guido-1", "demo#2", "demo#1");
+  expect(result).toMatchObject({ ok: true });
+  expect(deps.edit).toHaveBeenCalledTimes(2);
+  expect(store.notes().filter((item) => item.key.startsWith("queue-reorder:"))).toEqual([]);
 });
 it("deny and replay never write, including after reopening the store", async () => {
   const { item } = await propose();

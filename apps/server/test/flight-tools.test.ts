@@ -328,9 +328,7 @@ beforeEach(() => {
       if (!seat) throw new Error("Missing seat");
       seat.focus = focus;
     },
-    queueReorder: async (seatId, move, above) => ({
-      item: { key: "note:queue-reorder:fixture", seatId, move, above },
-    }),
+    queueReorder: async () => ({ ok: true, text: "Changed Priority on the board." }),
     seen: stateSeen,
     config: cfg,
     store,
@@ -581,6 +579,7 @@ describe("tool list", () => {
       "sync_main",
       "create_ticket",
       "comment_ticket",
+      "close_ticket",
       "brief_item",
       "read_pr",
       "read_ci_log",
@@ -6400,7 +6399,7 @@ it("FLIGHT reads and changes focus through message_seat without sending a seat m
   expect(JSON.parse(read.text).focus).toBe("label:catalog");
   expect(messageCalls).toEqual([]);
 });
-it("FLIGHT can propose queue promotion but cannot approve the board write", async () => {
+it("FLIGHT applies a queue reorder and records its basis", async () => {
   live("flight-1", "r-flight");
   const result = await call("promote", {
     action: "queue-reorder",
@@ -6410,13 +6409,62 @@ it("FLIGHT can propose queue promotion but cannot approve the board write", asyn
     basis: "Operator asked",
   });
   expect(result.isError).not.toBe(true);
-  expect(JSON.parse(result.text).item.key).toBe("note:queue-reorder:fixture");
-  expect(
-    (await call("promote", { action: "approve", key: "note:queue-reorder:fixture", basis: "Try" }))
-      .isError,
-  ).toBe(true);
-  expect(editCalls).toEqual([]);
+  expect(JSON.parse(result.text)).toMatchObject({ ok: true });
+  expect(decisions()).toContainEqual(
+    expect.objectContaining({ kind: "promote", basis: "Operator asked" }),
+  );
   expect(ghCalls).toEqual([]);
+});
+
+describe("close_ticket", () => {
+  const args = { issue: 7, replacement: 8, reason: "duplicate", basis: "#8 replaces it" };
+
+  beforeEach(() => {
+    board(card(7), card(8));
+    fetchImpl = async (n) => ticket(n);
+    engineOn = true;
+  });
+
+  it("comments with the replacement, closes the issue, and records the decision", async () => {
+    const result = await call("close_ticket", args);
+    expect(result.isError).not.toBe(true);
+    expect(ghCalls).toEqual([
+      ["issue", "comment", "7", "--repo=o/mc", "--body=Superseded by #8."],
+      ["issue", "close", "7", "--repo=o/mc", "--reason=duplicate"],
+    ]);
+    expect(decisions()).toContainEqual(
+      expect.objectContaining({ kind: "close", ref: "mc#7", basis: "#8 replaces it" }),
+    );
+  });
+
+  it.each([
+    ["itself", () => ({ ...args, replacement: 7 })],
+    ["closed replacement", () => ({ ...args })],
+  ])("refuses %s without writing", async (label, make) => {
+    if (label === "closed replacement")
+      fetchImpl = async (n) => ticket(n, { state: n === 8 ? "closed" : "open" });
+    expect((await call("close_ticket", make())).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses live work and always_ask tickets without writing", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    expect((await call("close_ticket", args)).isError).toBe(true);
+    rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+    board(card(7, { labels: ["approval:operator"] }), card(8));
+    expect((await call("close_ticket", args)).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses an issue with an open PR without writing", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        pullRequests:
+          n === 7 ? [{ number: 9, title: "PR", url: "u", state: "open", repoId: "mc" }] : [],
+      });
+    expect((await call("close_ticket", args)).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
 });
 describe("attention hold tools", () => {
   const key = "note:blocked:hold-test";

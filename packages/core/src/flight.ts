@@ -39,6 +39,7 @@ export const FLIGHT_DECISION_KINDS = [
   "end",
   "ticket",
   "comment",
+  "close",
   "rerun",
   "ruling",
   "sync",

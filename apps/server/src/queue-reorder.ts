@@ -267,6 +267,17 @@ export async function proposeQueueReorder(
   return { item };
 }
 
+/** Applies FLIGHT's own queue judgement through the same guarded write and recovery path. */
+export async function reorderQueue(
+  deps: QueueReorderDeps,
+  seatId: string,
+  moveRef: string,
+  aboveRef: string,
+) {
+  const { item } = await proposeQueueReorder(deps, seatId, moveRef, aboveRef);
+  return resolveQueueReorder(deps, item.key, "approve");
+}
+
 const approvals = new WeakMap<Store, Promise<unknown>>();
 /** Serializes approvals across proposals too: two overlapping snapshots cannot write concurrently. */
 export function resolveQueueReorder(
