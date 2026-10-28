@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { DEFAULT_SIZE, frameFor } from "../src/comms/spider.ts";
 import { TrafficChart } from "../src/comms/TrafficChart.tsx";
@@ -150,6 +150,9 @@ it("clears a lit edge after 1.8s even when the crew rows change identity meanwhi
 });
 
 it("sends a particle per new message along its link, and again when the link rises again", async () => {
+  // Particles skip a hidden tab; pin a visible one so the result doesn't depend on the runner's jsdom.
+  const visible = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  onTestFinished(() => visible.mockRestore());
   let count = 1;
   stubRisingLinks(() => count);
   const graph = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
@@ -183,6 +186,9 @@ it("sends a particle per new message along its link, and again when the link ris
 });
 
 it("sends a particle when a link's newest message changes though its 24h count holds", async () => {
+  // Particles skip a hidden tab; pin a visible one so the result doesn't depend on the runner's jsdom.
+  const visible = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  onTestFinished(() => visible.mockRestore());
   let lastId = "comms:1";
   stubFetch({
     "/api/comms/links": () => ({
