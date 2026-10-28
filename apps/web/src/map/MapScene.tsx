@@ -337,7 +337,15 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   let workKey = "";
   let previousFocus: string | null = null;
   let focusLinkKey = "";
-  let focusLines: THREE.LineSegments | null = null;
+  let focusLines: THREE.LineSegments[] = [];
+  const clearFocusLines = () => {
+    for (const line of focusLines) {
+      scene.remove(line);
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    }
+    focusLines = [];
+  };
   let previousSeatFocus: Props["seatFocus"];
   /** The followed light's position at the last frame: the camera moves with it from there. */
   let followed: { seat: string; at: THREE.Vector3 } | null = null;
@@ -506,31 +514,33 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       .map((edge) => `${edge.from}\t${edge.to}`)
       .join("\n");
     if (nextLinkKey !== focusLinkKey) {
-      if (focusLines) {
-        scene.remove(focusLines);
-        focusLines.geometry.dispose();
-        (focusLines.material as THREE.Material).dispose();
-        focusLines = null;
-      }
-      const vertices = (next.focusLinks ?? []).flatMap(({ from, to }) => {
-        const start = filePositions.get(from);
-        const end = filePositions.get(to);
-        return start && end ? [...start.toArray(), ...end.toArray()] : [];
-      });
-      if (vertices.length) {
-        focusLines = new THREE.LineSegments(
+      clearFocusLines();
+      for (const [unlinked, color] of [
+        [false, SIGNAL],
+        [true, "#ff826f"],
+      ] as const) {
+        const vertices = (next.focusLinks ?? [])
+          .filter((edge) => Boolean(edge.unlinked) === unlinked)
+          .flatMap(({ from, to }) => {
+            const start = filePositions.get(from);
+            const end = filePositions.get(to);
+            return start && end ? [...start.toArray(), ...end.toArray()] : [];
+          });
+        if (!vertices.length) continue;
+        const line = new THREE.LineSegments(
           new THREE.BufferGeometry().setAttribute(
             "position",
             new THREE.Float32BufferAttribute(vertices, 3),
           ),
           new THREE.LineBasicMaterial({
-            color: next.focusLinks?.some((edge) => edge.unlinked) ? "#ff826f" : SIGNAL,
+            color,
             transparent: true,
             opacity: 0.9,
             depthWrite: false,
           }),
         );
-        scene.add(focusLines);
+        scene.add(line);
+        focusLines.push(line);
       }
       focusLinkKey = nextLinkKey;
     }
@@ -615,13 +625,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   };
 
   const rebuild = (nodes: MapNode[], seatCount: number, areas: string[]) => {
-    if (focusLines) {
-      scene.remove(focusLines);
-      focusLines.geometry.dispose();
-      (focusLines.material as THREE.Material).dispose();
-      focusLines = null;
-      focusLinkKey = "";
-    }
+    clearFocusLines();
+    focusLinkKey = "";
     if (g) {
       g.lights.dispose();
       g.dispose();
@@ -764,11 +769,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
         g.dispose();
         g = null;
       }
-      if (focusLines) {
-        scene.remove(focusLines);
-        focusLines.geometry.dispose();
-        (focusLines.material as THREE.Material).dispose();
-      }
+      clearFocusLines();
       el.removeEventListener("focusin", focusIn);
       el.removeEventListener("focusout", focusOut);
       document.removeEventListener("visibilitychange", visibility);

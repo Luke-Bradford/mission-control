@@ -92,6 +92,39 @@ export function downstream(path: string, reverse: Map<string, Set<string>>) {
   distances.delete(path);
   return distances;
 }
+function downstreamFrom(paths: string[], reverse: Graph["reverse"]) {
+  const distances = new Map(paths.map((path) => [path, 0]));
+  const queue = [...paths];
+  while (queue.length) {
+    const current = queue.shift() as string;
+    const distance = distances.get(current) ?? 0;
+    for (const next of reverse.get(current) ?? []) {
+      if (distances.has(next)) continue;
+      distances.set(next, distance + 1);
+      queue.push(next);
+    }
+  }
+  for (const path of paths) distances.delete(path);
+  return distances;
+}
+function importChain(from: string, targets: Set<string>, forward: Graph["forward"]) {
+  const previous = new Map<string, string>();
+  const queue = [from];
+  while (queue.length) {
+    const current = queue.shift() as string;
+    if (current !== from && targets.has(current)) {
+      const chain = [current];
+      while (chain[0] !== from) chain.unshift(previous.get(chain[0] as string) as string);
+      return chain;
+    }
+    for (const next of forward.get(current) ?? [])
+      if (!previous.has(next) && next !== from) {
+        previous.set(next, current);
+        queue.push(next);
+      }
+  }
+  return null;
+}
 
 const isBarrel = (path: string) => /(^|\/)index\.[cm]?[jt]sx?$/.test(path);
 function linked(a: string, b: string, forward: Graph["forward"], reverse: Graph["reverse"]) {
@@ -228,11 +261,10 @@ export function ImpactLens({
     allChanged
       .filter((other) => other.seat.seat !== owner.seat.seat)
       .flatMap((other) =>
-        other.files
-          .filter((path) =>
-            owner.files.some((changedPath) => downstream(changedPath, reverse).has(path)),
-          )
-          .map((path) => ({ owner: owner.seat.seat, other: other.seat.seat, path })),
+        other.files.flatMap((path) => {
+          const chain = importChain(path, new Set(owner.files), forward);
+          return chain ? [{ owner: owner.seat.seat, other: other.seat.seat, path, chain }] : [];
+        }),
       ),
   );
   return (
@@ -243,14 +275,14 @@ export function ImpactLens({
       </header>
       {allChanged.map(({ seat, files }) => {
         const code = files.filter((path) => forward.has(path));
-        const direct = new Set(code.flatMap((path) => [...(reverse.get(path) ?? [])]));
-        const reached = new Set(code.flatMap((path) => [...downstream(path, reverse).keys()]));
+        const reached = downstreamFrom(code, reverse);
+        const direct = [...reached.values()].filter((distance) => distance === 1).length;
         return (
           <div className="map-lens-section" key={seat.seat}>
             <h3>{seat.seat}</h3>
             <p>
-              {files.length} files changed → <b>{direct.size}</b> import them ·{" "}
-              <b>{reached.size}</b> depend on them
+              {files.length} files changed → <b>{direct}</b> import them · <b>{reached.size}</b>{" "}
+              depend on them
             </p>
             {code.map((path) => (
               <div className="map-lens-row" key={path}>
@@ -274,7 +306,8 @@ export function ImpactLens({
           overlap.map((row) => (
             <p key={`${row.owner}:${row.other}:${row.path}`}>
               <b>{row.other}</b> changed <FileButton path={row.path} onFocus={onFocus} /> which
-              depends on <b>{row.owner}</b>’s changes.
+              depends on <b>{row.owner}</b>’s changes · {row.chain.length - 1} steps:{" "}
+              {row.chain.map(name).join(" → ")}.
             </p>
           ))
         ) : (
