@@ -280,6 +280,8 @@ beforeEach(() => {
   git(clone, "init", "-q", "-b", "main");
   git(clone, "config", "user.name", "Test Operator");
   git(clone, "config", "user.email", "you@example.com");
+  git(clone, "config", "maintenance.auto", "false");
+  git(clone, "config", "gc.auto", "0");
   for (const [rel, text] of Object.entries({
     "apps/a.ts": "a\n",
     "web/b.ts": "b\n",
@@ -4544,6 +4546,7 @@ describe("restore_file", () => {
       for (const item of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, item.name);
         if (item.isDirectory()) scan(path);
+        else if (item.name.endsWith(".lock")) continue;
         else files[path] = { body: readFileSync(path), mtime: statSync(path).mtimeMs };
       }
     };
@@ -4608,6 +4611,13 @@ describe("restore_file", () => {
     expect((await restore("README.md")).isError).toBeUndefined();
     expect(statSync(join(wt, "README.md")).mode & 0o777).toBe(0o644);
     expect(gitState()).toEqual(before);
+  });
+
+  it("ignores transient Git lock files while capturing state", () => {
+    const lock = join(clone, ".git", "objects", "maintenance.lock");
+    writeFileSync(lock, "lock");
+
+    expect(gitState().files[lock]).toBeUndefined();
   });
 
   it("restores a deleted file and its missing parent", async () => {
