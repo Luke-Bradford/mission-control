@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { MapSnapshot } from "@mc/core";
+import type { MapSnapshot, PullRequestView } from "@mc/core";
 import { afterEach, expect, it } from "vitest";
-import { mapTree } from "../src/map/snapshot.ts";
+import { MAP_HISTORY_WINDOW_MS, mapTree } from "../src/map/snapshot.ts";
 
 import { mapCheckout } from "./map-checkout.ts";
 
@@ -12,12 +13,64 @@ afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+const NOW = Date.parse("2026-10-28T12:00:00Z");
+const git = (checkout: string, ...args: string[]) =>
+  execFileSync(
+    "git",
+    [
+      "-C",
+      checkout,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      ...args,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+
+function mergedFixture(checkout: string, number: number, files: string[]): string {
+  git(checkout, "checkout", "-qb", `feature/${number}`);
+  for (const path of files) writeFileSync(join(checkout, path), `// ${number}\n`);
+  git(checkout, "add", ".");
+  git(checkout, "commit", "-qm", `change ${number}`);
+  git(checkout, "checkout", "main");
+  git(checkout, "merge", "--no-ff", `feature/${number}`, "-m", `merge ${number}`);
+  return git(checkout, "rev-parse", "HEAD");
+}
+
+function storedPr(
+  number: number,
+  mergeCommitSha: string,
+  branch = `feature/${number}`,
+): PullRequestView {
+  return {
+    repoId: "sample",
+    number,
+    title: `PR ${number}`,
+    url: "",
+    branch,
+    ticket: `sample#${number}`,
+    state: "merged",
+    isDraft: false,
+    review: null,
+    ci: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    mergedAt: NOW - number,
+    headSha: null,
+    mergeCommitSha,
+    mergeable: null,
+  };
+}
+
 it("reads a fixture repo's committed tree and imports within the snapshot budget", async () => {
   dir = mkdtempSync(join(tmpdir(), "mc-map-snapshot-"));
   const data = await mapTree(mapCheckout(dir));
   const snapshot: MapSnapshot = {
     repoId: "sample",
     ...data,
+    hist: { since: 0, prCount: 0, fixCount: 0, files: {}, coupling: [] },
     seats: [],
     findings: [],
     conflicts: [],
@@ -33,8 +86,37 @@ it("reads a fixture repo's committed tree and imports within the snapshot budget
   });
   expect(snapshot.imports).toContainEqual({
     from: "apps/server/src/map/ring.ts",
-    to: "packages/core/src/index.ts",
+    to: "packages/core/src/types.ts",
   });
   expect(snapshot.tree.every((f) => !f.path.startsWith("/") && f.lines >= 0)).toBe(true);
   expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeLessThan(300_000);
+});
+
+it("derives first-parent merged history, bug fixes, and bounded change partners", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-history-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  const merges = [1, 2, 3, 4].map((number) =>
+    mergedFixture(checkout, number, ["packages/core/src/map.ts", "packages/core/src/types.ts"]),
+  );
+  const many = Array.from({ length: 26 }, (_, i) => `large-${i}.ts`);
+  const large = mergedFixture(checkout, 5, ["packages/core/src/map.ts", ...many]);
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const prs = [
+    ...merges.map((sha, i) => storedPr(i + 1, sha, i === 0 ? "fix/one" : `feature/${i + 1}`)),
+    storedPr(5, large),
+  ];
+  const data = await mapTree(
+    checkout,
+    "origin/HEAD",
+    prs,
+    [{ repoId: "sample", issueNumber: 2, labels: ["bug"] } as never],
+    NOW,
+  );
+  const map = data.tree.findIndex((file) => file.path === "packages/core/src/map.ts");
+  const types = data.tree.findIndex((file) => file.path === "packages/core/src/types.ts");
+  expect(data.hist).toMatchObject({ since: NOW - MAP_HISTORY_WINDOW_MS, prCount: 5, fixCount: 2 });
+  expect(data.hist.files[String(map)]).toEqual([5, 2, NOW - 1, [1, 2, 3, 4, 5]]);
+  expect(data.hist.coupling).toContainEqual([Math.min(map, types), Math.max(map, types), 4, 1]);
+  expect(data.hist.coupling.every((pair) => pair[2] >= 4 && pair[3] >= 0.5)).toBe(true);
 });

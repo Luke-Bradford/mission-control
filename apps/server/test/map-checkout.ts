@@ -12,7 +12,7 @@ export function mapCheckout(root: string): string {
     "packages/core/src/map.ts":
       'import type { Fixture } from "./types.ts";\nexport type Map = Fixture;\n',
     "packages/core/src/types.ts": "export type Fixture = string;\n",
-    "packages/core/src/index.ts": 'export type { Fixture } from "./types.ts";\n',
+    "packages/core/src/index.ts": 'export * from "./types.ts";\n',
     "apps/server/src/map/ring.ts":
       'import type { Fixture } from "@mc/core";\nexport type Ring = Fixture;\n',
   };
