@@ -26,7 +26,6 @@ import { z } from "zod";
 import type { CcConfig } from "../config.ts";
 import { crew, NO_LOCK } from "../hud.ts";
 import type { Store } from "../store.ts";
-import { median } from "../telemetry.ts";
 import { flightBriefView, flightHeadline, flightSeat, flightTriageItems } from "./state.ts";
 import { cut } from "./tools.ts";
 
@@ -59,7 +58,6 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
   const since = now - FLIGHT_METRICS_DAY_MS;
   const metrics: FlightMetrics = {
     since,
-    merged: 0,
     opened: 0,
     inReview: 0,
     inCi: 0,
@@ -68,17 +66,12 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
     parks: { day: 0, live: [] },
     seats: [],
     flight: { wakes: 0, costUsd: 0 },
-    readyToMergedMin: null,
     forTheController: 0,
   };
   const found = flightSeat(config);
   if (!found) return metrics;
   const { session, seat } = found;
   const prs = store.pullRequests(session.repoId);
-  const merged = prs.filter(
-    (p) => p.state === "merged" && p.mergedAt !== null && p.mergedAt >= since,
-  );
-  metrics.merged = merged.length;
   metrics.opened = prs.filter((p) => p.createdAt >= since).length;
   metrics.inReview = prs.filter((p) => p.state === "open" && !p.isDraft).length;
   metrics.inCi = prs.filter((p) => p.state === "open" && p.ci === "pending").length;
@@ -124,8 +117,6 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
         ).length,
       0,
     );
-  const readyToMerged = median(store.readyToMergedMinutes(session.repoId, since));
-  metrics.readyToMergedMin = readyToMerged === null ? null : Math.round(readyToMerged);
   metrics.forTheController = store
     .flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT)
     .filter(

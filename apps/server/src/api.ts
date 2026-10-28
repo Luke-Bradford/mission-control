@@ -2018,7 +2018,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            const tree = await mapTree(checkout);
+            const tree = await mapTree(
+              checkout,
+              "origin/HEAD",
+              store.pullRequests(repo.id),
+              store.board(repo.id),
+              now(),
+            );
             if (!stopMapRing) stopMapRing = mapRing.start();
             mapRing.poll();
             const data = mapSeats(
@@ -2220,6 +2226,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
 
       api.get("/health", async () => store.status());
+      // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
+      api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
+        const range = req.query.range ?? "30d";
+        const match = /^(7|30|90|365)d$/.exec(range);
+        if (!match) return reply.code(400).send({ error: "range must be 7d, 30d, 90d, or 365d" });
+        const until = now();
+        return store.audit(until - Number(match[1]) * 86_400_000, until);
+      });
       api.get("/machine", async (): Promise<MachineView> => {
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);

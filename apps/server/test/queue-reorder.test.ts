@@ -16,6 +16,7 @@ import { refillQueues } from "../src/engine/queue.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
+  reorderQueue,
   resolveQueueReorder,
 } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
@@ -160,6 +161,63 @@ it("proposes an approval with stable refs and catalogue options, with no board w
   );
   expect(result.item.brief?.options.map((o) => o.label)).toEqual(["Approve", "Deny"]);
   expect(deps.edit).not.toHaveBeenCalled();
+});
+
+it("applies FLIGHT's reorder directly without leaving an approval item", async () => {
+  const result = await reorderQueue(deps, "guido-1", "demo#2", "demo#1");
+  expect(result).toMatchObject({ ok: true });
+  expect(deps.edit).toHaveBeenCalledTimes(2);
+  expect(store.notes().filter((item) => item.key.startsWith("queue-reorder:"))).toEqual([]);
+});
+
+it("leaves no approval note or pending record when the direct reorder is refused after saving", async () => {
+  let fetches = 0;
+  deps.fetchTicket = async (repo, n) => {
+    if (++fetches > 2) throw new Error("GitHub down");
+    return ticket(repo, n);
+  };
+  await expect(reorderQueue(deps, "guido-1", "demo#2", "demo#1")).rejects.toThrow("GitHub down");
+  expect(deps.edit).not.toHaveBeenCalled();
+  expect(store.notes().filter((item) => item.key.includes("queue-reorder:"))).toEqual([]);
+  const rows = (store as unknown as { db: { prepare: (q: string) => { all: () => unknown[] } } }).db
+    .prepare("SELECT key FROM settings WHERE key LIKE 'queue-reorder:%'")
+    .all();
+  expect(rows).toEqual([]);
+});
+
+it.each(["reorder", "propose"] as const)("refuses an always_ask card (%s)", async (how) => {
+  deps.rules = async () => ({ ...rules, alwaysAsk: ["approval:*"] });
+  board = [card(1, "P1"), { ...card(2, "P2"), labels: ["area:server", "lane:work", "approval:x"] }];
+  store.replaceBoard("demo", board);
+  const act = how === "reorder" ? reorderQueue : proposeQueueReorder;
+  await expect(act(deps, "guido-1", "demo#2", "demo#1")).rejects.toThrow(/always_ask/);
+  expect(deps.edit).not.toHaveBeenCalled();
+});
+
+it("never exposes an operator approval while a direct reorder waits for the writer", async () => {
+  const { item } = await propose();
+  let release: () => void = () => {};
+  let entered: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const writing = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  vi.mocked(deps.edit).mockImplementationOnce(async (_repo, issue, fields) => {
+    entered();
+    await blocked;
+    board = board.map((c) => (c.issueNumber === issue ? { ...c, priority: fields.priority } : c));
+    return { ok: true, changed: true };
+  });
+  const first = resolveQueueReorder(deps, item.key, "approve");
+  await writing;
+  const direct = reorderQueue(deps, "guido-1", "demo#2", "demo#1");
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(store.notes().filter((note) => note.key.startsWith("queue-reorder:"))).toHaveLength(1);
+  release();
+  await first;
+  await expect(direct).rejects.toThrow(/stale|changed/i);
 });
 it("deny and replay never write, including after reopening the store", async () => {
   const { item } = await propose();

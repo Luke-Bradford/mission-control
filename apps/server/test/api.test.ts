@@ -419,6 +419,38 @@ const post = (url: string, headers: Record<string, string> = json, body: object 
     headers,
     ...(headers["content-type"] === "application/json" ? { payload: body } : {}),
   });
+
+describe("audit", () => {
+  const emptyAudit = (days: number) => ({
+    range: { since: NOW - days * DAY, until: NOW },
+    longRunners: [],
+    deathLoops: [],
+    reworkRounds: [],
+    refusalsByRule: [],
+    questions: { asked: 0, answered: 0, answerMs: null },
+    costPerMergedTicket: [],
+    modelPromptTimeline: [],
+  });
+
+  it("defaults to 30d and returns the audit response shape", async () => {
+    const response = await get("/api/audit");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(emptyAudit(30));
+  });
+
+  it.each([7, 30, 90, 365])("accepts the %dd range", async (days) => {
+    const response = await get(`/api/audit?range=${days}d`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(emptyAudit(days));
+  });
+
+  it("rejects an invalid range", async () => {
+    const response = await get("/api/audit?range=14d");
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "range must be 7d, 30d, 90d, or 365d" });
+  });
+});
+
 const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
@@ -994,6 +1026,7 @@ const NEW_REPO = {
 
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
+  ["GET", "/api/audit"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
@@ -3492,6 +3525,7 @@ describe("ticket detail", () => {
       title: "Quote cache",
       url: "https://github.com/o/shop-app/issues/7",
       state: "open",
+      closedAt: null,
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
@@ -3640,6 +3674,13 @@ describe("boards, escalations, health", () => {
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
+      hist: expect.objectContaining({
+        since: expect.any(Number),
+        prCount: 0,
+        fixCount: 0,
+        files: {},
+        coupling: [],
+      }),
       findings: [],
       seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
     });
@@ -3650,6 +3691,11 @@ describe("boards, escalations, health", () => {
       from: "packages/core/src/map.ts",
       to: "packages/core/src/types.ts",
     });
+    expect(response.json().imports).toContainEqual({
+      from: "apps/server/src/map/ring.ts",
+      to: "packages/core/src/types.ts",
+    });
+    expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
   });
 

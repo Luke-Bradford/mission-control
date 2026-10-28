@@ -30,14 +30,17 @@ export const overturnText = (
 ): string =>
   `I am overturning your decision ${d.id} (${d.about}: ${d.decision}).${call === null ? "" : ` Tell ${call} to hold that point.`} Then ask me what I prefer.`;
 
-/** FLIGHT's `answer` decisions since the start of the local day. */
-export const answersToday = (
+/** The decisions "Decided without you" lists: FLIGHT's answers, and the tickets it closed or reordered. */
+export const DECIDED_KINDS: readonly FlightDecision["kind"][] = ["answer", "close", "reorder"];
+
+/** FLIGHT's decisions of those kinds since the start of the local day. */
+export const decidedToday = (
   decisions: readonly FlightDecision[],
   now: number,
   tz: string,
 ): FlightDecision[] => {
   const from = startOfLocalDay(now, tz);
-  return decisions.filter((d) => d.kind === "answer" && d.at >= from);
+  return decisions.filter((d) => DECIDED_KINDS.includes(d.kind) && d.at >= from);
 };
 
 /** The dock's rows: only what the operator and FLIGHT said to each other. */

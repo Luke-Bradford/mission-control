@@ -19,4 +19,8 @@ Lenses: Changes, Impact, History, Ownership, Review, Conflicts. Impact and Histo
 - **History**: every PR merged since 22 Oct. Hotspots (PR count), files fixed most often (bug-labelled
   ticket or `fix/` branch), and files that change together with no import between them (hidden coupling).
 
+The map API supplies this as a compact `hist` payload, calculated from first-parent merges on the
+default branch and cached for that branch tree. The production window is 90 days; coupling ignores
+PRs touching more than 25 files and is capped at 600 qualifying pairs.
+
 The header comment in `map-v3.html` lists the data sources and which parts are synthesised.

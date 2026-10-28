@@ -37,6 +37,7 @@ export const MC_TOOL_NAMES = {
 
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
+  closeTicket: "close_ticket",
   briefItem: "brief_item",
   readPr: "read_pr",
   readCiLog: "read_ci_log",
@@ -91,6 +92,7 @@ export const MC_TOOLS = {
 
   createTicket: mcTool(MC_TOOL_NAMES.createTicket),
   commentTicket: mcTool(MC_TOOL_NAMES.commentTicket),
+  closeTicket: mcTool(MC_TOOL_NAMES.closeTicket),
   briefItem: mcTool(MC_TOOL_NAMES.briefItem),
   readPr: mcTool(MC_TOOL_NAMES.readPr),
   readCiLog: mcTool(MC_TOOL_NAMES.readCiLog),

@@ -187,6 +187,7 @@ export function Setup({ tab }: { tab: SetupTab }) {
     );
   return (
     <section id="page-setup" aria-label="Setup">
+      <h1 className="sr-only">Setup</h1>
       <aside className="panel setup-sidebar">
         <div className="ph">
           <h2>Setup</h2>
@@ -211,7 +212,7 @@ export function Setup({ tab }: { tab: SetupTab }) {
       <div className="panel setup-main">
         <div className="setup-content scroll">
           <div className="setup-title toolbar">
-            <h1>{SECTIONS.find((item) => item.tab === section)?.label ?? TAB_LABEL[tab]}</h1>
+            <h2>{SECTIONS.find((item) => item.tab === section)?.label ?? TAB_LABEL[tab]}</h2>
             <BuildChips panel={`setup-${tab}`} />
             <span className="spacer" />
             <CrewPauseControl />

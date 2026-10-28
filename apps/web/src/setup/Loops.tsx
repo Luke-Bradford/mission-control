@@ -215,6 +215,221 @@ const NO_OBSERVED_LOOPS = "No observed loops.";
 const TEMPLATES_NOTE =
   "Mission Control decides every move from its own checks; an agent saying it is done can only hold work back, never push it forward. cmd = Mission Control runs it · rule = read from the diff or the board · review = a fresh reviewer · gate = you or FLIGHT · agent = the agent's own evidence.";
 
+type ChainStep = {
+  name: string;
+  runner: string;
+  gate: string;
+  failure: string;
+  cap: string;
+  atCap: string;
+  conditional?: string;
+  command: string;
+  prompt: string | null;
+};
+
+// Temporary display source until the loop-config API supplies this same shape.
+const TODAY_CHAIN: readonly ChainStep[] = [
+  {
+    name: "Plan",
+    runner: "Planner seat (FAO)",
+    gate: "has a ## Plan",
+    failure: "Plan again; a missing decision asks CAPCOM with a default",
+    cap: "—",
+    atCap: "—",
+    conditional: "Size M+ unless planRequired is false",
+    command: "gpt-5.6-sol · high",
+    prompt: "Turn {ticket} into a plan a developer can build from the ticket alone.",
+  },
+  {
+    name: "Build",
+    runner: "Developer seat",
+    gate: "evidence reported",
+    failure: "Stays in Build until evidence is reported",
+    cap: "turn and time limits",
+    atCap: "FLIGHT",
+    command: "gpt-5.6-terra · medium",
+    prompt: "Implement {plan} for {ticket}; test first, then report evidence.",
+  },
+  {
+    name: "CI checks",
+    runner: "GitHub Actions",
+    gate: "all checks green",
+    failure: "Back to Build: CI failed, fix it",
+    cap: "3 tries",
+    atCap: "Parked for FLIGHT",
+    command: "lint · typecheck · test · build",
+    prompt: null,
+  },
+  {
+    name: "Review",
+    runner: "RETRO · fresh seat",
+    gate: "approved",
+    failure: "Back to Build with findings",
+    cap: "3 rounds",
+    atCap: "Parked for FLIGHT",
+    command: "retro-cx · gpt-5.6-sol · high",
+    prompt: "Review {diff} against {done_when}; approve or give exact findings.",
+  },
+  {
+    name: "Merge",
+    runner: "Hub engine",
+    gate: "mergeable",
+    failure: "Parks for FLIGHT; sync then returns to CI checks or Build",
+    cap: "—",
+    atCap: "FLIGHT",
+    command: "hard-rule clearance",
+    prompt: null,
+  },
+  {
+    name: "Done",
+    runner: "Board → Done",
+    gate: "merged",
+    failure: "—",
+    cap: "—",
+    atCap: "—",
+    command: "ticket closed",
+    prompt: null,
+  },
+];
+
+function LoopChain() {
+  const [selected, setSelected] = useState(2);
+  const [withRun, setWithRun] = useState(true);
+  const step = TODAY_CHAIN[selected] ?? TODAY_CHAIN[0];
+  return (
+    <>
+      <Panel
+        title="Feature loop chain"
+        sub="fixed today; loop config API will replace this source"
+        actions={
+          <fieldset className="loop-show" aria-label="Loop display">
+            <button type="button" aria-pressed={!withRun} onClick={() => setWithRun(false)}>
+              Loop only
+            </button>
+            <button type="button" aria-pressed={withRun} onClick={() => setWithRun(true)}>
+              With run #681
+            </button>
+          </fieldset>
+        }
+      >
+        <div className="loop-chain-scroll">
+          <section className="loop-chain" aria-label="Approved loop chain">
+            <svg className="loop-routes" viewBox="0 0 1280 320" aria-label="Return routes">
+              <defs>
+                <marker
+                  id="loop-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
+                >
+                  <path d="M0,0L8,4L0,8Z" />
+                </marker>
+              </defs>
+              <path
+                className={`loop-route ci-return${withRun ? " active" : ""}`}
+                aria-label="CI checks returns to Build"
+                d="M 510 108 V 150 H 330 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className={`loop-route review-return${withRun ? " active" : ""}`}
+                aria-label="Review returns to Build"
+                d="M 714 108 V 198 H 300 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route conflict-route"
+                aria-label="Merge conflict parks for FLIGHT"
+                d="M 918 108 V 248 H 1110"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route flight-return"
+                aria-label="FLIGHT sync returns to CI checks"
+                d="M 1110 248 H 1040 V 228 H 510 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+              <path
+                className="loop-route flight-return"
+                aria-label="FLIGHT sync returns to Build"
+                d="M 1110 248 H 1040 V 276 H 300 V 108"
+                markerEnd="url(#loop-arrow)"
+              />
+            </svg>
+            {TODAY_CHAIN.map((item, index) => (
+              <button
+                key={item.name}
+                type="button"
+                className={`loop-chain-step${index === selected ? " selected" : ""}${withRun && index === 2 ? " now" : ""}`}
+                onClick={() => setSelected(index)}
+                aria-pressed={index === selected}
+                aria-label={`${item.name}: gate: ${item.gate}`}
+              >
+                <b>{item.name}</b>
+                <span>{item.runner}</span>
+                <small>gate: {item.gate}</small>
+              </button>
+            ))}
+            <span className="loop-route-label ci-label">
+              CI fail ≤3{withRun ? " · used 1/3" : ""}
+            </span>
+            <span className="loop-route-label review-label">
+              changes ≤3{withRun ? " · used 1/3" : ""}
+            </span>
+            <div className="loop-flight">
+              <b>FLIGHT at cap</b>
+              <span>re-plan · reassign · split</span>
+              <span>or ask CAPCOM (default)</span>
+              <small>sync → CI checks or Build</small>
+            </div>
+          </section>
+        </div>
+      </Panel>
+      <div className="loop-details">
+        <Panel title="Step inspector" sub={`${step.name} step`}>
+          <dl className="loop-inspector">
+            <dt>Who runs it</dt>
+            <dd>{step.runner}</dd>
+            <dt>Gate to move on</dt>
+            <dd>{step.gate}</dd>
+            <dt>If it fails</dt>
+            <dd>{step.failure}</dd>
+            <dt>Cap</dt>
+            <dd>{step.cap}</dd>
+            <dt>At the cap</dt>
+            <dd>{step.atCap}</dd>
+            {step.conditional && (
+              <>
+                <dt>Conditional</dt>
+                <dd>{step.conditional}</dd>
+              </>
+            )}
+            <dt>Model / command</dt>
+            <dd>
+              <code>{step.command}</code>
+            </dd>
+            <dt>Step prompt</dt>
+            <dd>{step.prompt ?? "No prompt: no agent runs this step."}</dd>
+          </dl>
+        </Panel>
+        {withRun && (
+          <Panel title="Run overlay" sub="chosen ticket">
+            <div className="loop-run">
+              <b>Ticket #681 · inco-cx</b>
+              <span>Now: CI checks · try 2 of 3</span>
+              <span>CI failure → Build · 1 of 3</span>
+              <span>Review findings → Build · 1 of 3</span>
+            </div>
+          </Panel>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** Setup › Loops (catalogue 2.7.2), the observed loops, and the template profiles. */
 export function Loops({ config }: { config: ConfigView }) {
   const { inRepo } = useSessionScope(config);
@@ -253,6 +468,7 @@ export function Loops({ config }: { config: ConfigView }) {
           </div>
         )}
       </Panel>
+      <LoopChain />
       {config.profiles === undefined ? (
         <Panel title="Templates" sub="loops/*.yaml" actions={<NewTemplate />}>
           <div className="pb">

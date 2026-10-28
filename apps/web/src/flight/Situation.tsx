@@ -183,7 +183,7 @@ export function Situation() {
         type="button"
         className={cls}
         title={title}
-        aria-label={`${label}: ${value} ${detail}, ${window}`}
+        aria-label={`${value} ${label} ${detail}, ${window}`}
         onClick={() => navigate(PULSE_TARGET[target])}
       >
         {content}

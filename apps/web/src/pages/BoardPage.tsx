@@ -225,6 +225,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
 
   return (
     <section id="page-board">
+      <h1 className="sr-only">Board</h1>
       {stage && (
         <p className="s fg2">
           Pipeline · {PIPELINE_STAGES[stage]} ·{" "}
@@ -257,6 +258,9 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         </p>
       ))}
       <div className={`boardsplit${ticketRoute ? " withdetail" : ""}`}>
+        <h2 id="board-content" className="sr-only" tabIndex={-1}>
+          Work board
+        </h2>
         {!boardDataReady ? (
           <div className="board-placeholder" />
         ) : layoutOn && layout === "apart" ? (
