@@ -71,7 +71,6 @@ import {
   readyMarkedText,
   readyRuledText,
   readyText,
-  readyWaivedText,
   reviewCarriedText,
   reviewDroppedText,
   reviewFailedText,
@@ -1851,6 +1850,15 @@ describe("The operator's message", () => {
     await h.engine.onOperatorMessage(RUN);
     expect(loopOf()).toMatchObject({ phase: "working", budgetExtra: 1000 });
   });
+
+  it.each(["ruling", "review-failed"] as const)(
+    "a %s park resumes without a review waiver",
+    async (kind) => {
+      setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+      await h.engine.onOperatorMessage(RUN);
+      expect(loopOf()).toMatchObject({ phase: "review", reviewWaivedSha: null });
+    },
+  );
 
   it("does nothing to a run that is not parked, has ended, or whose PR was closed", async () => {
     const before = JSON.stringify(loopOf());
@@ -5007,25 +5015,38 @@ describe("the engine runs reviews", () => {
     await vi.waitFor(() => expect(h.ended).toContain(need(rv.runId)));
   });
 
-  it("The operator's message after a review park waives the findings", async () => {
-    await toReview();
-    for (const n of [901, 902]) {
-      store.claimLine(`fix:${RUN}:0:${n}`, {
-        runId: RUN,
-        seatId: SEAT,
-        origin: "engine",
-        text: "x",
-        at: clock,
-      });
-    }
-    reported(first().id, [finding("Critical")]);
-    await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
-    expect(loopOf().parked?.kind).toBe("review");
-    await h.engine.onOperatorMessage(RUN);
-    expect(loopOf()).toMatchObject({ phase: "review", reviewWaivedSha: SHA });
-    const ready = store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`);
-    expect(ready?.text).toBe(readyWaivedText(`${REPO}#7`, 12, SHA));
-  });
+  it.each(["review", "review-ruling"] as const)(
+    "The operator's message after a %s park sends the findings back for rework",
+    async (kind) => {
+      await toReview();
+      for (const n of [901, 902]) {
+        store.claimLine(`fix:${RUN}:0:${n}`, {
+          runId: RUN,
+          seatId: SEAT,
+          origin: "engine",
+          text: "x",
+          at: clock,
+        });
+      }
+      reported(first().id, [finding("Critical")]);
+      await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
+      setLoop({ parked: { kind, reason: "Blocked review", ended: false } });
+      await h.engine.onOperatorMessage(RUN);
+      expect(loopOf()).toMatchObject({ phase: "working", reviewWaivedSha: null });
+      expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)).toBeUndefined();
+    },
+  );
+
+  it.each(["review", "review-ruling"] as const)(
+    "The explicit accept action after a %s park waives its findings",
+    async (kind) => {
+      await toReview();
+      reported(first().id, [finding("Critical")]);
+      setLoop({ phase: "parked", parked: { kind, reason: "Blocked review", ended: false } });
+      await h.engine.onOperatorMessage(RUN, "CAPCOM", { action: "accept" });
+      expect(loopOf()).toMatchObject({ phase: "review", reviewWaivedSha: SHA });
+    },
+  );
 
   describe("the mc/review commit status", () => {
     const status = (state: string, description: string) => ({ sha: SHA, state, description });
@@ -5068,7 +5089,8 @@ describe("the engine runs reviews", () => {
       }
       reported(first().id, [finding("Critical")]);
       await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
-      await h.engine.onOperatorMessage(RUN);
+      need(config.repos[0]).flightPowers = "superuser";
+      await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "accept" });
       expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_WAIVED));
     });
 
@@ -5283,9 +5305,9 @@ describe("the engine runs reviews", () => {
       await h.engine.onOperatorMessage(RUN);
       await h.engine.reconcileRun(RUN);
       expect(loopOf()).toMatchObject({
-        phase: "review",
+        phase: "working",
         parked: null,
-        reviewWaivedSha: SHA,
+        reviewWaivedSha: null,
         aside: { worktree: WT, wake: true },
       });
       expect(store.seatSession(SEAT)?.runId).toBe(other);
