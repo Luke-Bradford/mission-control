@@ -67,15 +67,19 @@ export class SeatDiff {
       if (this.due && Date.now() < this.due) return;
       const revision = this.revision;
       const branch = head.trim().split("\n").at(-1)?.trim() ?? "";
-      this.value = await mapChanges(cwd, git);
-      this.onBranch = branch && branch !== "HEAD" ? branch : null;
+      const value = await mapChanges(cwd, git);
+      let others: string[] | null;
       try {
-        this.others = (await git([...args, "ls-files", "--others", "--exclude-standard", "-z"]))
+        others = (await git([...args, "ls-files", "--others", "--exclude-standard", "-z"]))
           .split("\0")
           .filter(Boolean);
       } catch {
-        this.others = null; // unknown: no churn stands in for the diff
+        others = null; // unknown: no churn stands in for the diff
       }
+      // Publish together: a reader between awaits must never see a diff without its untracked files.
+      this.value = value;
+      this.onBranch = branch && branch !== "HEAD" ? branch : null;
+      this.others = others;
       this.key = key;
       if (this.revision === revision) this.due = 0;
     } catch {
