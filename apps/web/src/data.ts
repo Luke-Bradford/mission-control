@@ -332,6 +332,8 @@ interface Entry {
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  settled: number;
+  settledListeners: Set<() => void>;
 }
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
@@ -344,7 +346,16 @@ class Hub {
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
     if (!e) {
-      e = { path, topic, snap: IDLE, listeners: new Set(), inflight: false, again: false };
+      e = {
+        path,
+        topic,
+        snap: IDLE,
+        listeners: new Set(),
+        inflight: false,
+        again: false,
+        settled: 0,
+        settledListeners: new Set(),
+      };
       this.entries.set(path, e);
     }
     return e;
@@ -363,6 +374,25 @@ class Hub {
   /** Read-only coordination for consumers that must wait for two related snapshots to settle. */
   isFetching(path: string): boolean {
     return this.entries.get(path)?.inflight ?? false;
+  }
+
+  settled(path: string, topic: Topic | readonly Topic[] | null): number {
+    return this.entry(path, topic).settled;
+  }
+
+  subscribeSettled(
+    path: string,
+    topic: Topic | readonly Topic[] | null,
+    fn: () => void,
+  ): () => void {
+    const e = this.entry(path, topic);
+    e.settledListeners.add(fn);
+    return () => e.settledListeners.delete(fn);
+  }
+
+  private settle(e: Entry): void {
+    e.settled++;
+    for (const fn of [...e.settledListeners]) fn();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -480,6 +510,7 @@ class Hub {
     if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
     e.inflight = false;
     this.set(e, next);
+    this.settle(e);
     if (e.again) {
       e.again = false;
       const fullAgain = e.fullAgain;
@@ -583,6 +614,18 @@ export function useResource<T>(ref: ResourceRef | null): Resource<T> {
   );
   const get = useCallback(() => (path ? hub.snapshot(path, topic) : IDLE), [path, topic]);
   return useSyncExternalStore(subscribe, get) as Resource<T>;
+}
+
+/** A fetch-completion revision for the rare consumers that coordinate separate resource responses. */
+export function useResourceSettled(ref: ResourceRef | null): number {
+  const path = ref?.path ?? null;
+  const topic = ref?.topic ?? null;
+  const subscribe = useCallback(
+    (fn: () => void) => (path ? hub.subscribeSettled(path, topic, fn) : () => {}),
+    [path, topic],
+  );
+  const get = useCallback(() => (path ? hub.settled(path, topic) : 0), [path, topic]);
+  return useSyncExternalStore(subscribe, get);
 }
 
 /**

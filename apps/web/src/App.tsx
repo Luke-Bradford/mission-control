@@ -59,7 +59,8 @@ const TITLE = "Mission Control";
  * popped-out window (`?popout=1`) shows the Agent page alone. An old path is redirected to where
  * it now lives; any other unknown path goes to Overview.
  */
-export function App() {
+export function App({ onRender }: { onRender?: () => void } = {}) {
+  onRender?.();
   const path = usePath();
   const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.

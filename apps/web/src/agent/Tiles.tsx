@@ -7,7 +7,7 @@ import {
   type LimitRow,
   type RunLoopView,
 } from "@mc/core";
-import { Children, isValidElement, type ReactNode, useEffect, useRef } from "react";
+import { Children, isValidElement, type ReactNode, useEffect } from "react";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import {
@@ -91,18 +91,17 @@ const compactionsText = (d: CrewRow["digest"]): string =>
 function SeatContext({ row }: { row: CrewRow }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
-  const ref = RESOURCES.seatContext(row.id);
-  const usage = useResource<ContextUsage | null>(ref).data ?? null;
   const running = seatTurn(row) === "running";
-  const wasRunning = useRef(running);
-  // The last reading stays up in between; ask again every interval while running, once at turn end.
+  const contextRef = RESOURCES.seatContext(row.id);
+  const ref = running ? contextRef : null;
+  const usage = useResource<ContextUsage | null>(ref).data ?? null;
+  // Context asks the live CLI, which refuses without an active session. The crew-row summary is
+  // the truthful fallback for stopped, parked, and review seats.
   useEffect(() => {
-    if (wasRunning.current && !running) hub.refetch(ref.path);
-    wasRunning.current = running;
     if (!running) return;
-    const timer = setInterval(() => hub.refetch(ref.path), SEAT_CONTEXT_REFRESH_MS);
+    const timer = setInterval(() => hub.refetch(contextRef.path), SEAT_CONTEXT_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [running, ref.path]);
+  }, [running, contextRef.path]);
   const tail = compactionsText(row.digest);
   const window = usage?.window ?? row.contextWindow;
   if (codex || !usage || window === null || window <= 0) {

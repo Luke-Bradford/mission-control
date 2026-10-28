@@ -26,6 +26,20 @@ const at = (path: string) => {
 };
 
 describe("App", () => {
+  it("does not re-render the application on a clock tick", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const renders = vi.fn();
+    window.history.replaceState(null, "", "/");
+    render(<App onRender={renders} />);
+    await vi.runOnlyPendingTimersAsync();
+    const initial = renders.mock.calls.length;
+
+    await act(async () => vi.advanceTimersByTime(1000));
+
+    expect(renders).toHaveBeenCalledTimes(initial);
+    vi.useRealTimers();
+  });
+
   it.each([
     ["/", "page-overview", "Overview"],
     ["/flight", "page-flight", "Flight"],

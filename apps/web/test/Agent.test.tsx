@@ -23,6 +23,7 @@ import {
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RunRow } from "../src/agent/RunsPanel.tsx";
 import { NO_LOOP } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
@@ -196,6 +197,30 @@ describe("Agent page: header before the timezone loads", () => {
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     expect($(container, "#ahead .doing")?.textContent).toContain("run #12");
+  });
+});
+
+describe("Agent page: static run rows", () => {
+  it("does not re-render a completed row on a clock tick", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const renders = vi.fn();
+    render(
+      <RunRow
+        row={crewRow()}
+        run={rv({ id: "completed", endedAt: NOW - HOUR, status: "ok" })}
+        tz="UTC"
+        prs={[]}
+        open={false}
+        onToggle={() => {}}
+        onRender={renders}
+      />,
+    );
+    const initial = renders.mock.calls.length;
+
+    await act(async () => vi.advanceTimersByTime(1000));
+
+    expect(renders).toHaveBeenCalledTimes(initial);
+    vi.useRealTimers();
   });
 });
 
