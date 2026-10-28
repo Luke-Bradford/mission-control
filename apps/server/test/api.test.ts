@@ -3589,6 +3589,7 @@ describe("boards, escalations, health", () => {
       repoId: "shop-app",
       seq: 0,
       conflicts: [],
+      conflictsUnchecked: [],
       findings: [],
       seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
     });

@@ -53,6 +53,7 @@ export const mapSnapshotFixture = {
     },
   ],
   conflicts: [],
+  conflictsUnchecked: [],
   seq: 0,
 } satisfies MapSnapshot;
 

@@ -128,3 +128,10 @@ it("skips a pair whose head the checkout has not fetched, keeping the rest of th
     { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
   ]);
 });
+
+it("fails rather than reporting unchecked when the checkout itself is broken", async () => {
+  const gone = join(dir, "not-a-checkout");
+  await expect(
+    new MapConflicts().check(gone, [pr("left", left), pr("right", right)]),
+  ).rejects.toThrow();
+});

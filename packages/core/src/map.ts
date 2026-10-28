@@ -67,8 +67,8 @@ export interface MapSnapshot {
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */
   conflicts: { file: string; branches: [string, string]; shas: [string, string] }[];
-  /** Open PR branches whose head the checkout hasn't fetched, so their pairs went unchecked. */
-  conflictsUnchecked?: string[];
+  /** Open PR branches whose head the checkout hasn't fetched: their pairs are unknown, not clean. */
+  conflictsUnchecked: string[];
   seq: number;
 }
 

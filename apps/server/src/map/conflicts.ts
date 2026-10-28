@@ -42,11 +42,16 @@ export class MapConflicts {
       const tips = prs.filter((p) => p.state === "open" && p.headSha && SHA.test(p.headSha));
       const conflicts: MapSnapshot["conflicts"] = [];
       const unchecked = new Set<string>();
-      const present = new Map<string, boolean>();
-      for (const t of tips) {
-        const sha = t.headSha as string;
-        if (!present.has(sha)) present.set(sha, await hasCommit(worktree, sha));
-      }
+      // Checked only on a cache miss: a cached pair needs no object reads.
+      const present = new Map<string, Promise<boolean>>();
+      const holds = (sha: string) => {
+        let known = present.get(sha);
+        if (known === undefined) {
+          known = hasCommit(worktree, sha);
+          present.set(sha, known);
+        }
+        return known;
+      };
       for (let i = 0; i < tips.length; i++) {
         const a = tips[i] as Tip & { headSha: string };
         for (const b of tips.slice(i + 1) as (Tip & { headSha: string })[]) {
@@ -57,7 +62,8 @@ export class MapConflicts {
           if (files === undefined) {
             // A PR head the checkout hasn't fetched yet has no objects to merge: record it as
             // unchecked (uncached, so it is checked once fetched) rather than fail the snapshot.
-            const missing = [a, b].filter((t) => !present.get(t.headSha));
+            const missing: Tip[] = [];
+            for (const t of [a, b]) if (!(await holds(t.headSha))) missing.push(t);
             if (missing.length > 0) {
               for (const t of missing) unchecked.add(t.branch);
               continue;
@@ -76,7 +82,21 @@ export class MapConflicts {
   }
 }
 
-/** Whether the checkout holds `sha` as a commit; any other git failure still throws. */
+/** Git's environment for map reads: no system or global config, no lazy fetch, no prompts. */
+function isolatedEnv(): NodeJS.ProcessEnv {
+  return {
+    ...gitEnv(process.env),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
+
+/**
+ * Whether the checkout holds `sha` as a commit. `rev-parse -q --verify` exits 1 only when the name
+ * does not resolve; a broken or missing checkout exits 128 and throws, failing the snapshot.
+ */
 async function hasCommit(worktree: string, sha: string): Promise<boolean> {
   try {
     await execFileP(
@@ -85,34 +105,28 @@ async function hasCommit(worktree: string, sha: string): Promise<boolean> {
         "--no-optional-locks",
         "-c",
         "core.fsmonitor=false",
+        "-c",
+        "core.attributesFile=/dev/null",
         "-C",
         worktree,
-        "cat-file",
-        "-e",
+        "rev-parse",
+        "-q",
+        "--verify",
         `${sha}^{commit}`,
       ],
-      {
-        env: { ...gitEnv(process.env), GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" },
-        timeout: GIT_TIMEOUT_MS,
-      },
+      { env: isolatedEnv(), timeout: GIT_TIMEOUT_MS },
     );
     return true;
   } catch (e) {
     const failure = e as { code?: number; killed?: boolean; signal?: string };
-    if (failure.code === 128 || failure.code === 1) return false;
+    if (failure.code === 1 && !failure.killed && !failure.signal) return false;
     throw e;
   }
 }
 
 async function mergeFiles(worktree: string, left: string, right: string): Promise<string[]> {
   const scratch = await mkdtemp(join(tmpdir(), "mc-map-merge-"));
-  const env = {
-    ...gitEnv(process.env),
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_NO_LAZY_FETCH: "1",
-    GIT_TERMINAL_PROMPT: "0",
-  };
+  const env = isolatedEnv();
   const git = async (args: string[], extra: NodeJS.ProcessEnv = {}) =>
     (
       await execFileP(
