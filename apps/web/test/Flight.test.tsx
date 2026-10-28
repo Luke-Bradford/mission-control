@@ -157,6 +157,35 @@ describe("Decided without you", () => {
     expect(rows[1]?.textContent).toContain("question d1");
   });
 
+  it("lists closed and reordered tickets, with the ref linked to its issue", async () => {
+    stubDecided(
+      flightView({
+        decisions: [
+          decided("d1", NOW - HOUR, {
+            kind: "close",
+            ref: "shop-app#7",
+            about: "shop-app#7: Old (replaced by shop-app#8)",
+            decision: "Closed as duplicate: https://github.com/octo-org/shop-app/issues/7",
+          }),
+          decided("d2", NOW - 2 * HOUR, {
+            kind: "reorder",
+            ref: "shop-app#2",
+            about: "shop-app#2 above shop-app#1",
+            decision: "Reordered queue",
+          }),
+        ],
+      }),
+    );
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("decided-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("Closed as duplicate");
+    const link = rows[0]?.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/7");
+    expect(link?.textContent).toBe("shop-app#7");
+    expect(rows[1]?.textContent).toContain("Reordered queue");
+  });
+
   it("says so when nothing was decided without you today", async () => {
     stubDecided(flightView({ decisions: [decided("d1", NOW - 2 * HOUR, { kind: "pass" })] }));
     const { container } = render(<Flight />);

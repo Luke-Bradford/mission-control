@@ -3518,6 +3518,7 @@ describe("ticket detail", () => {
       title: "Quote cache",
       url: "https://github.com/o/shop-app/issues/7",
       state: "open",
+      closedAt: null,
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,

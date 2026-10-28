@@ -127,7 +127,7 @@ const ISSUE_QUERY = `query Ticket($owner: String!, $name: String!, $number: Int!
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      number title url state body
+      number title url state closedAt body
       author { login }
       labels(first: 20) { nodes { name } }
       milestone { title }
@@ -772,6 +772,7 @@ export async function fetchTicket(
     title: str(issue.title, ""),
     url: str(issue.url, ""),
     state: openClosed(issue.state),
+    closedAt: typeof issue.closedAt === "string" ? Date.parse(issue.closedAt) || null : null,
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
     bodyLength: chars.length,
