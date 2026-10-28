@@ -170,14 +170,28 @@ export function MachinePanel() {
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
 
+  if (view === undefined && !machine.error) {
+    return (
+      <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
+        <div className="pb">
+          <Skeleton />
+        </div>
+      </Panel>
+    );
+  }
+  if (m === null && !machine.error && !summary?.machine?.cpu?.length) {
+    return (
+      <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
+        <div className="pb">
+          <EmptyState>No machine sample yet.</EmptyState>
+        </div>
+      </Panel>
+    );
+  }
+
   return (
     <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
       <div className="pb">
-        {machine.loading ? (
-          <Skeleton />
-        ) : m === null && !machine.error ? (
-          <EmptyState>No machine sample yet.</EmptyState>
-        ) : null}
         <div
           className="res"
           title={`Claude/Codex processes (${m?.agents ? m.agents.count : DASH}) · other apps`}

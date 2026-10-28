@@ -46,6 +46,9 @@ export function QuotaPanel() {
     );
   };
   const warnings = tz ? quotaWarnings(rows, now, tz) : [];
+  const pending =
+    (limits === undefined && !limitsResource.error) ||
+    (config === undefined && !configResource.error);
 
   return (
     <Panel
@@ -59,7 +62,7 @@ export function QuotaPanel() {
       }
     >
       <div className="pb">
-        {limitsResource.loading || configResource.loading ? (
+        {pending ? (
           <Skeleton />
         ) : accounts.length === 0 && !limitsResource.error && !configResource.error ? (
           <EmptyState>No quota accounts configured.</EmptyState>
