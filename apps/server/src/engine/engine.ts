@@ -199,6 +199,7 @@ export interface Engine {
   reconcileRepo(repoId: RepoId): Promise<void>;
   /**
    * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
+   * A message after review findings sends the author back to working; only an explicit `accept` waives them.
    * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
    * never lifts a budget park. Resolves true only when it un-parked the run.
    */
@@ -2155,7 +2156,11 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (by === "FLIGHT" && flightHeld(run)) return;
         if (opts?.action !== undefined) {
-          if (by !== "FLIGHT" || flightPowersOf(config, run.repoId) !== "superuser") return;
+          if (
+            (by === "CAPCOM" && opts.action !== "accept") ||
+            (by === "FLIGHT" && flightPowersOf(config, run.repoId) !== "superuser")
+          )
+            return;
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (
@@ -2208,8 +2213,11 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
         if (kind === "review" || kind === "review-ruling") {
-          next.phase = "review";
-          next.reviewWaivedSha = store.runPush(run.id)?.sha ?? null;
+          next.phase = opts?.action === "accept" ? "review" : "working";
+          if (opts?.action !== "accept") {
+            next.reviewWaivedSha = null;
+            next.flightClearedSha = null;
+          }
         } else if (kind === "ruling" || kind === "review-failed") {
           next.phase = "review";
         } else if (head !== null && pushed?.sha === head && (pr === null || pr.state === "open")) {
