@@ -95,8 +95,6 @@ mc:
     - "CLAUDE.md"
     - ".github/**"
     - "config.example.yaml"
-    - ".codex/**"
-    - ".claude/**"
   ci: null
   always_ask: []
 ```
