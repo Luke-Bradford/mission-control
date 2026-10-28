@@ -898,6 +898,7 @@ describe("prepareCheckout", () => {
         "pnpm-lock.yaml": workspaceLock,
         "pnpm-workspace.yaml": workspace,
         "apps/relay/package.json": PKG,
+        "examples/standalone/package.json": PKG,
       });
       git(seed, "push", "-q", "origin", "main");
     });
@@ -925,6 +926,21 @@ describe("prepareCheckout", () => {
       expect(e.message).toBe(
         `branch ${BRANCH} has apps/relay/node_modules/dep/index.js; Mission Control won't install from it`,
       );
+    });
+
+    it("refuses and preserves node_modules from a project outside the workspace", async () => {
+      const first = await prepareCheckout(input());
+      const modules = join(first.path, "examples", "standalone", "node_modules");
+      mkdirSync(modules);
+      const preserved = join(modules, "separate-project-dependency");
+      writeFileSync(preserved, "keep\n");
+
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(
+        `branch ${BRANCH} has examples/standalone/node_modules; Mission Control won't install from it`,
+      );
+      expect(readFileSync(preserved, "utf8")).toBe("keep\n");
     });
 
     it("refuses a symlinked package node_modules", async () => {
