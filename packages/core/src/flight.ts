@@ -632,7 +632,7 @@ export const commentFailedText = (issue: number): string =>
 
 /** Superseded tickets FLIGHT may close in an hour; a close is reversible by reopening. */
 export const FLIGHT_CLOSES_PER_HOUR = 5;
-export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call; reopen it with a plain GitHub reopen if you were wrong. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call; if you were wrong, call it again with action "reopen" (only for a ticket you closed). Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
 export const closeComment = (replacement: number): string =>
   `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
 export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
