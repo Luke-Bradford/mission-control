@@ -192,10 +192,10 @@ export interface FlightSummaryOutcome extends FlightSummaryItem {
 /**
  * Daily and live hub metrics. A run's whole cost and tokens are attributed when it was
  * active in the window (still open or ended at or after `since`); the hub has no per-turn cost.
+ * Merged PRs and cycle time are not here: the metric registry (`METRICS`) is their one definition.
  */
 export interface FlightMetrics {
   since: number;
-  merged: number;
   opened: number;
   inReview: number;
   inCi: number;
@@ -205,8 +205,6 @@ export interface FlightMetrics {
   parks: { day: number; live: { kind: string; n: number }[] };
   seats: { seat: string; tokens: number; costUsd: number }[];
   flight: { wakes: number; costUsd: number };
-  /** Latest successful Ready move at or before merge, falling back to the flow issue start. */
-  readyToMergedMin: number | null;
   forTheController: number;
 }
 export interface FlightSummaryView {

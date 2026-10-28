@@ -2201,23 +2201,6 @@ export class Store {
     }));
   }
 
-  /** Latest successful Ready move before each merge, falling back to the collected flow start. */
-  readyToMergedMinutes(repoId: RepoId, since: number): number[] {
-    const rows = this.db
-      .prepare(`
-      SELECT p.merged_at, COALESCE(MAX(m.at), f.start_at) AS ready_at
-      FROM pull_requests p
-      LEFT JOIN board_moves m ON p.ticket = m.repo_id || '#' || m.issue
-        AND m.board_column = 'Ready' AND m.state = 'done' AND m.at <= p.merged_at
-      LEFT JOIN flow_issues f ON p.ticket = f.repo_id || '#' || f.number
-      WHERE p.repo_id = ? AND p.state = 'merged' AND p.merged_at >= ?
-      GROUP BY p.number, p.merged_at, f.start_at
-      HAVING ready_at IS NOT NULL AND ready_at <= p.merged_at
-    `)
-      .all(repoId, since) as { merged_at: number; ready_at: number }[];
-    return rows.map((r) => (r.merged_at - r.ready_at) / 60_000);
-  }
-
   /** PRs merged at or after `sinceMs`, across repos, oldest first. */
   flowPrs(sinceMs: number): FlowPr[] {
     const rows = this.db
