@@ -477,6 +477,9 @@ function reopenStore(): void {
 
 const live = () => new AbortController().signal;
 
+/** A run's private directories are removed asynchronously; under CI load that can take seconds (#689). */
+export const CLEANUP_WAIT_MS = 10_000;
+
 export {
   anyTicket,
   BRANCH,
