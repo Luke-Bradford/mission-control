@@ -16,6 +16,19 @@ const COLORS = {
   review: "var(--think)",
 };
 
+/** The axis labels and where they sit on the track (%), matching its 15-minute gridlines. */
+const AXIS: [string, number][] = [
+  ["-60m", 0],
+  ["-45m", 25],
+  ["-30m", 50],
+  ["-15m", 75],
+  ["now", 100],
+];
+
+/**
+ * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
+ * activity stays visible, tool calls as ticks, 5- and 15-minute gridlines and a "now" cursor.
+ */
 export function TimelinePanel() {
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -48,7 +61,7 @@ export function TimelinePanel() {
       return (
         <i
           key={`${span.kind}:${span.from}:${span.to}`}
-          className="overview-span"
+          className={`overview-span k-${span.kind}`}
           title={span.kind}
           style={{
             left: `${segment.left}%`,
@@ -97,8 +110,10 @@ export function TimelinePanel() {
           {rows}
         </div>
         <div className="overview-axis num muted">
-          {["-60m", "-45m", "-30m", "-15m", "now"].map((label) => (
-            <span key={label}>{label}</span>
+          {AXIS.map(([label, left]) => (
+            <span key={label} style={{ left: `${left}%` }}>
+              {label}
+            </span>
           ))}
         </div>
         {timeline.error && timeline.data && (

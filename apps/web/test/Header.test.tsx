@@ -95,21 +95,19 @@ describe("Header", () => {
     const links = within(screen.getByRole("navigation", { name: "Pages" })).getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual([
       "Overview",
+      "Flight",
       "Board",
       "Agents",
       "Comms",
       "Telemetry",
-      "Map",
-      "Setup",
     ]);
     expect(links.map((a) => a.getAttribute("href"))).toEqual([
       "/",
+      "/flight",
       "/board",
       "/agent",
       "/comms",
       "/telemetry",
-      "/#mapP",
-      "/setup",
     ]);
     expect(tab(/^Board/).getAttribute("aria-current")).toBe("page");
     expect(tab(/^Board/).className).toBe("on");
@@ -421,11 +419,15 @@ describe("Header", () => {
     expect(seen).toBe("s1");
   });
 
-  it("the FLIGHT button opens Comms from Setup and is already pressed on Comms", () => {
+  it("keeps Setup in the top-right settings button and opens FLIGHT from it", () => {
     routes();
     const { unmount } = render(<Header page="setup" />);
-    const setup = tab(/^Setup$/);
-    expect(setup.className).toBe("on");
+    expect(
+      within(screen.getByRole("navigation", { name: "Pages" })).queryByText("Setup"),
+    ).toBeNull();
+    const setup = screen.getByRole("button", { name: "Setup" });
+    expect(setup.className).toContain("on");
+    expect(setup.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(setup);
     expect(window.location.pathname).toBe("/setup");
     const chat = screen.getByRole("button", { name: "FLIGHT chat" });

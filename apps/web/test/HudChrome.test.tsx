@@ -117,7 +117,7 @@ describe("HUD chrome", () => {
   it("filters Work in flight crew runs by session", async () => {
     stub();
     render(<WorkInFlight />);
-    const runs = await screen.findByRole("list", { name: "Crew runs" });
+    const runs = await screen.findByRole("table", { name: "Crew runs" });
     await within(runs).findByText("inco-1");
     act(() => setSession("alpha"));
     expect(within(runs).getByText("guido-1")).toBeTruthy();

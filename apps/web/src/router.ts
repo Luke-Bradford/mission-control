@@ -33,6 +33,19 @@ export const usePath = (): string =>
 export const useSearch = (): string =>
   useSyncExternalStore(subscribe, () => window.location.search);
 
+function subscribeHash(fn: () => void): () => void {
+  const off = subscribe(fn);
+  window.addEventListener("hashchange", fn);
+  return () => {
+    off();
+    window.removeEventListener("hashchange", fn);
+  };
+}
+
+/** The location's fragment (`#id`, or ""), following in-app navigation and fragment links. */
+export const useHash = (): string =>
+  useSyncExternalStore(subscribeHash, () => window.location.hash);
+
 export const SETUP_TABS = [
   "sessions",
   "repos",

@@ -17,17 +17,17 @@
  */
 :root {
   color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #151a21;
-  --surface-2: #1c222b;
-  --line: #252c37;
-  --line-2: #354050;
+  --bg: #070a0e;
+  --surface: #0c1117;
+  --surface-2: #131a23;
+  --line: #1b2430;
+  --line-2: #2a3646;
   --fg: #e7eaef;
   --fg-2: #aab2bf;
   --muted: #808999;
-  --accent: #8db0ff;
-  --accent-ink: #0b1020;
-  --accent-soft: rgba(141, 176, 255, 0.14);
+  --accent: #56d8e6;
+  --accent-ink: #021417;
+  --accent-soft: rgba(86, 216, 230, 0.14);
   --ok: #45c486;
   --ok-soft: rgba(69, 196, 134, 0.16);
   --warn: #f2b53a;
@@ -53,15 +53,15 @@
   --r7: #a8f0d0;
   --r8: #9cc8f5;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(141, 176, 255, 0.08), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%);
   --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --display: "Barlow Semi Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
   --fs: 13px;
   --fs-s: 12px;
   --fs-xs: 11px;
-  --r: 8px;
-  --r-s: 6px;
+  --r: 3px;
+  --r-s: 2px;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
@@ -74,9 +74,9 @@
     --fg: #121720;
     --fg-2: #4a5465;
     --muted: #646e81;
-    --accent: #2456d3;
+    --accent: #0a6b7d;
     --accent-ink: #ffffff;
-    --accent-soft: rgba(36, 86, 211, 0.1);
+    --accent-soft: rgba(10, 107, 125, 0.1);
     --ok: #157246;
     --ok-soft: rgba(23, 128, 78, 0.12);
     --warn: #8d5b00;
@@ -102,7 +102,7 @@
     --r7: #115e59;
     --r8: #9f1239;
     --shadow: 0 10px 28px rgba(20, 30, 50, 0.16);
-    --glow: radial-gradient(1200px 300px at 20% -120px, rgba(36, 86, 211, 0.06), transparent 70%);
+    --glow: radial-gradient(1200px 300px at 20% -120px, rgba(10, 107, 125, 0.06), transparent 70%);
   }
 }
 :root[data-theme="light"] {
@@ -115,9 +115,9 @@
   --fg: #121720;
   --fg-2: #4a5465;
   --muted: #646e81;
-  --accent: #2456d3;
+  --accent: #0a6b7d;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(36, 86, 211, 0.1);
+  --accent-soft: rgba(10, 107, 125, 0.1);
   --ok: #157246;
   --ok-soft: rgba(23, 128, 78, 0.12);
   --warn: #8d5b00;
@@ -143,21 +143,21 @@
   --r7: #115e59;
   --r8: #9f1239;
   --shadow: 0 10px 28px rgba(20, 30, 50, 0.16);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(36, 86, 211, 0.06), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(10, 107, 125, 0.06), transparent 70%);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0e1116;
-  --surface: #151a21;
-  --surface-2: #1c222b;
-  --line: #252c37;
-  --line-2: #354050;
+  --bg: #070a0e;
+  --surface: #0c1117;
+  --surface-2: #131a23;
+  --line: #1b2430;
+  --line-2: #2a3646;
   --fg: #e7eaef;
   --fg-2: #aab2bf;
   --muted: #808999;
-  --accent: #8db0ff;
-  --accent-ink: #0b1020;
-  --accent-soft: rgba(141, 176, 255, 0.14);
+  --accent: #56d8e6;
+  --accent-ink: #021417;
+  --accent-soft: rgba(86, 216, 230, 0.14);
   --ok: #45c486;
   --ok-soft: rgba(69, 196, 134, 0.16);
   --warn: #f2b53a;
@@ -183,7 +183,7 @@
   --r7: #a8f0d0;
   --r8: #9cc8f5;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(141, 176, 255, 0.08), transparent 70%);
+  --glow: radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%);
 }
 
 * {
@@ -196,9 +196,17 @@ body,
 }
 body {
   margin: 0;
-  background: var(--bg);
+  /* Flight deck (docs/design/flight-deck.md): a faint 24px plotting grid under the panels. */
+  background:
+    var(--glow),
+    linear-gradient(color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0 0 /
+    24px 24px,
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px) 0
+    0 / 24px 24px,
+    var(--bg);
   color: var(--fg);
   font: 400 var(--fs) / 1.45 var(--sans);
+  font-variant-numeric: tabular-nums;
 }
 .app {
   height: 100%;
@@ -240,8 +248,17 @@ button {
   line-height: 1.3;
   white-space: nowrap;
 }
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition:
+      border-color 150ms ease,
+      color 150ms ease,
+      background-color 150ms ease;
+  }
+}
 button:hover {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line-2));
+  color: var(--fg);
 }
 button:disabled {
   cursor: not-allowed;
@@ -281,9 +298,10 @@ button.sm {
   padding: 2px 8px;
   font-size: var(--fs-s);
 }
+/* Selection is an edge, not a box (flight-deck.md). */
 button.on {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--fg);
 }
 :focus-visible {
@@ -372,7 +390,7 @@ textarea {
   font-size: 10px;
   color: var(--muted);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 0 4px;
   margin-left: 6px;
   font-weight: 500;
@@ -390,8 +408,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 1px 9px 1px 8px;
-  border-radius: 999px;
+  padding: 1px 8px 1px 7px;
+  border-radius: 2px;
   font-size: var(--fs-xs);
   font-weight: 500;
   background: var(--surface-2);
@@ -400,10 +418,11 @@ textarea {
 }
 .pill::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
+  box-shadow: 0 0 6px currentColor;
 }
 .pill.ok {
   color: var(--ok);
@@ -497,7 +516,7 @@ textarea {
 .vhead:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 .vname {
   font-weight: 500;
@@ -572,7 +591,7 @@ textarea {
   position: relative;
   height: 14px;
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: 2px;
 }
 .tlbars i {
   position: absolute;
@@ -702,17 +721,20 @@ textarea {
 }
 .rchip {
   color: var(--c, var(--fg-2));
-  background: var(--surface-2);
-  border: 1px solid currentColor;
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);
+  border: 0;
+  border-radius: 2px;
   padding: 0 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
 }
 .chipref {
   font-family: var(--mono);
   font-size: var(--fs-xs);
   color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: 2px;
   padding: 0 5px;
   white-space: nowrap;
 }
@@ -763,12 +785,12 @@ textarea {
   @keyframes pw {
     0%,
     100% {
-      box-shadow: 0 0 0 0 transparent;
+      box-shadow: inset 2px 0 0 var(--warn-mark);
     }
     50% {
       box-shadow:
-        0 0 0 4px var(--warn-soft),
-        0 0 18px var(--warn-soft);
+        inset 2px 0 0 var(--warn-mark),
+        0 0 14px var(--warn-soft);
     }
   }
   .pulse-ok {
@@ -790,6 +812,13 @@ textarea {
   .lamp.pulse {
     box-shadow: 0 0 0 3px var(--warn-soft);
   }
+  /* No hover or selection transitions anywhere (flight-deck.md, Motion). */
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat every component's transition rule */
+    transition-duration: 0s !important;
+  }
   .lamp.ok.pulse {
     box-shadow: 0 0 0 3px var(--ok-soft);
   }
@@ -807,7 +836,15 @@ textarea {
   flex: none;
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 35%, transparent) 50%,
+      transparent
+    )
+    bottom / 100% 1px no-repeat,
+    var(--surface);
 }
 @media (min-width: 1200px) {
   .top {
@@ -843,20 +880,30 @@ textarea {
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 6px 12px;
+  border-radius: 0;
   color: var(--fg-2);
   text-decoration: none;
-  font-weight: 400;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tabs a {
+    transition:
+      color 150ms ease,
+      box-shadow 150ms ease;
+  }
 }
 .tabs a:hover {
   color: var(--fg);
-  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--line-2);
 }
 .tabs a.on {
   color: var(--fg);
-  background: var(--surface-2);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 .top-status {
@@ -931,7 +978,7 @@ textarea {
   white-space: normal;
   background: var(--surface-2);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: 2px;
   box-shadow: 0 4px 12px #0004;
   opacity: 0;
   visibility: hidden;
@@ -967,24 +1014,30 @@ textarea {
 }
 .seg {
   display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--surface-2);
-  border-radius: 7px;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
   flex-wrap: wrap;
 }
 .seg button {
   border: 0;
   background: transparent;
-  padding: 2px 9px;
-  font-size: var(--fs-s);
+  padding: 2px 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
   color: var(--fg-2);
-  border-radius: 5px;
+  border-radius: 0;
+}
+.seg button + button {
+  box-shadow: inset 1px 0 0 var(--line);
 }
 .seg button.on {
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--fg);
-  box-shadow: 0 0 0 1px var(--line-2);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .iconbtn {
   position: relative;
@@ -1007,8 +1060,6 @@ textarea {
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 1600px;
-  margin: 0 auto;
   padding: 14px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
@@ -1054,14 +1105,35 @@ main > section {
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   color: var(--fg-2);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--surface-2) 60%, transparent),
+    transparent
+  );
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .ph h2 {
   font: inherit;
+}
+/* Controls in a panel head keep the body face; only the title is set as a console label. */
+.ph button,
+.ph select,
+.ph input {
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Column heads read as instrument labels everywhere (sizes and colours stay with the table rules). */
+th {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .ph .sub {
   color: var(--muted);
@@ -1226,10 +1298,39 @@ main > section {
   overflow: auto;
 }
 .overview-axis {
+  position: relative;
+  height: 14px;
   margin-left: 100px;
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
+  border-top: 1px solid var(--line-2);
+  font: 10px / 1 var(--mono);
+}
+.overview-axis > span {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.overview-axis > span::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  height: 4px;
+  border-left: 1px solid var(--line-2);
+}
+.overview-axis > span:first-child {
+  transform: none;
+}
+.overview-axis > span:first-child::before {
+  left: 0;
+}
+.overview-axis > span:last-child {
+  transform: translateX(-100%);
+  color: var(--accent);
+}
+.overview-axis > span:last-child::before {
+  left: auto;
+  right: 0;
 }
 .timeline-body {
   display: flex;
@@ -1239,14 +1340,32 @@ main > section {
   flex: none;
 }
 .overview-lanes {
-  --lane-min: 14px;
+  /* the shortest lane that still holds all four sub-tracks: review sits 9.5px above the centre */
+  --lane-min: 19px;
   --lane-max: 28px;
+  position: relative;
   display: grid;
   grid-template-rows: repeat(var(--lane-count), minmax(var(--lane-min), 1fr));
   flex: 1 1 auto;
   height: calc(var(--lane-count) * var(--lane-max));
   min-height: calc(var(--lane-count) * var(--lane-min));
   max-height: calc(var(--lane-count) * var(--lane-max));
+}
+/* now: a thin cursor down the right edge of every track */
+.overview-lanes::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  border-right: 1px solid var(--accent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .overview-lanes::after {
+    animation: now-pulse 2.4s ease-in-out infinite;
+  }
 }
 .overview-lanes:empty {
   display: none;
@@ -1259,42 +1378,63 @@ main > section {
   height: 100%;
   min-height: var(--lane-min);
   max-height: var(--lane-max);
-  padding-block: 2px;
   color: var(--fg-2);
   text-decoration: none;
   font-size: 12px;
 }
 .overview-lane:hover {
-  background: var(--line);
+  background: var(--accent-soft);
 }
+/*
+ * The track: a centre hairline ruled every 5 minutes and 15-minute gridlines matching the axis, so an
+ * idle lane still reads as a track. Each kind keeps its own 3px sub-track, so overlaps stay visible.
+ */
 .overview-track {
+  --sub: 3px;
+  --sub-gap: 1px;
   position: relative;
   height: 100%;
   overflow: hidden;
-  border-radius: 0;
-  border-right: 2px solid var(--ok);
-  background: var(--bg);
+  background:
+    linear-gradient(var(--line-2), var(--line-2)) center / 100% 1px no-repeat,
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 50% / calc(100% / 12) 5px
+    repeat-x,
+    linear-gradient(to right, var(--line) 1px, transparent 1px) 0 0 / 25% 100%;
 }
 .overview-span {
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  min-width: 1px;
+  height: var(--sub);
+  min-width: 2px;
   border-radius: 0;
+}
+/* turn rides the centre line; checks and review above it, lock below */
+.overview-span.k-turn {
+  top: calc(50% - var(--sub) / 2);
+}
+.overview-span.k-checks {
+  top: calc(50% - 1.5 * var(--sub) - var(--sub-gap));
+}
+.overview-span.k-review {
+  top: calc(50% - 2.5 * var(--sub) - 2 * var(--sub-gap));
+}
+.overview-span.k-lock {
+  top: calc(50% + var(--sub) / 2 + var(--sub-gap));
 }
 .overview-tick {
   position: absolute;
-  top: 1px;
+  top: calc(50% - 8px);
+  height: 16px;
   width: 1px;
-  bottom: 1px;
   background: var(--fg-2);
+  opacity: 0.7;
 }
 .overview-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font-size: 11px;
+  font: 10px var(--mono);
+  text-transform: lowercase;
 }
 .overview-legend > span {
   display: inline-flex;
@@ -1302,13 +1442,13 @@ main > section {
   gap: 5px;
 }
 .overview-legend i {
-  width: 12px;
-  height: 6px;
-  border-radius: 1px;
+  width: 14px;
+  height: 3px;
+  border-radius: 0;
 }
 .overview-legend .tool-tick {
   width: 1px;
-  height: 12px;
+  height: 10px;
   background: var(--fg-2);
 }
 #agentsList {
@@ -1807,6 +1947,36 @@ main > section {
 .spark {
   width: 56px;
   height: 18px;
+  overflow: visible;
+}
+.spark line {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1;
+}
+.spark-base {
+  stroke: var(--line-2);
+}
+.spark-grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+.spark-now {
+  stroke: var(--accent);
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spark-now.live {
+    animation: now-pulse 2.4s ease-in-out infinite;
+  }
+}
+@keyframes now-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
 .res {
   display: grid;
@@ -1918,10 +2088,46 @@ main > section {
   width: 100%;
   height: 24px;
 }
-#machP .machine-gridline {
+#machP .machine-chart {
+  overflow: visible;
+}
+#machP .machine-gridline,
+#machP .machine-grid,
+#machP .machine-now {
   stroke: var(--line-2);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
+}
+#machP .machine-grid {
+  stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+#machP .machine-now {
+  stroke: var(--accent);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: no-preference) {
+  #machP .machine-now.live {
+    animation: now-pulse 2.4s ease-in-out infinite;
+  }
+}
+/* quota: thin square meters on a quarter-ruled track; the projection tick marks the reset */
+#quotaP .meter .track {
+  /* the meter is a column here: flex: 1 would collapse the track to no height */
+  flex: none;
+  height: 4px;
+  border-radius: 0;
+  overflow: visible;
+  background:
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 0 / 25% 100%,
+    var(--line);
+}
+#quotaP .meter .track i {
+  border-radius: 0;
+}
+#quotaP .meter .num {
+  font-family: var(--mono);
+  font-size: 10px;
 }
 #machP .resrow .num {
   font-size: var(--fs-xs);
@@ -2172,12 +2378,15 @@ main > section {
 .kcard:hover {
   border-color: var(--line-2);
 }
+/* A card waiting on the operator (or just worked) carries an edge, not a full outline. */
 .kcard.you,
 .kcard.pulse-warn {
-  border-color: var(--warn-mark);
+  border-color: var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 45%), var(--surface);
 }
 .kcard.pulse-ok {
-  border-color: color-mix(in srgb, var(--ok) 60%, var(--line));
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
 }
 .kref {
   display: flex;
@@ -2207,10 +2416,12 @@ main > section {
   flex-wrap: wrap;
 }
 .lb {
-  font-size: 10.5px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  padding: 0 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 0;
+  border-radius: 2px;
+  padding: 0 6px;
+  background: var(--surface-2);
   color: var(--fg-2);
   white-space: nowrap;
 }
@@ -2250,6 +2461,8 @@ main > section {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  background: var(--surface);
+  border-color: var(--line);
 }
 .banner {
   display: flex;
@@ -2257,8 +2470,9 @@ main > section {
   align-items: center;
   flex-wrap: wrap;
   padding: 8px 12px;
-  border: 1px solid var(--warn-mark);
-  background: var(--warn-soft);
+  border: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 70%), var(--surface);
   color: var(--warn);
   border-radius: var(--r);
 }
@@ -2307,11 +2521,12 @@ main > section {
 }
 /* a long chip (a branch, an area) is cut at the row's width rather than widening the page */
 .idrow .chips span {
-  font-size: var(--fs-s);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 999px;
-  padding: 1px 9px;
+  border-radius: 2px;
+  padding: 1px 7px;
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -2380,7 +2595,7 @@ main > section {
   display: flex;
   height: 8px;
   gap: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
   overflow: hidden;
   background: var(--surface);
   margin: 2px 0;
@@ -2744,18 +2959,19 @@ pre.diff .h {
 .comms-grid,
 .comms-left,
 .comms-agent,
-.comms-agent #chatP,
-.comms-agent #chatP .panel-body {
+.comms-agent #chatP {
   min-height: 0;
 }
 .comms-page {
   height: 100%;
+  overflow: hidden;
 }
 .comms-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px);
   gap: 12px;
   height: 100%;
+  overflow: hidden;
 }
 .comms-left,
 .comms-nav,
@@ -2763,6 +2979,10 @@ pre.diff .h {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.comms-left,
+.comms-right {
+  overflow-y: auto;
 }
 .comms-decisions {
   display: flex;
@@ -2810,12 +3030,24 @@ pre.diff .h {
 }
 .comms-nav button,
 .comms-contacts button {
-  padding: 10px 12px;
+  padding: 9px 12px 9px 14px;
   color: var(--fg);
   text-align: left;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.comms-nav button:hover,
+.comms-contacts button:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.comms-nav button:focus-visible,
+.comms-contacts button:focus-visible {
+  outline-offset: -2px;
 }
 .comms-nav > .comms-section-head {
   border-bottom: 1px solid var(--line);
@@ -2829,13 +3061,25 @@ pre.diff .h {
 }
 .comms-nav-top > i,
 .comms-nav-row > i {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
 }
 .comms-nav-top > i {
-  border-radius: 2px;
+  border-radius: 1px;
+}
+.comms-nav-top > i.crew {
+  background: var(--fg-2);
+}
+.comms-nav-agent b {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.comms-nav-row .comms-nav-agent b {
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  letter-spacing: 0.04em;
 }
 .comms-nav-agent {
   min-width: 0;
@@ -2849,23 +3093,51 @@ pre.diff .h {
 }
 .comms-nav-counts {
   display: inline-flex;
-  gap: 5px;
+  gap: 4px;
   align-items: center;
 }
-.comms-nav em,
-.comms-nav-counts em {
-  min-width: 18px;
-  padding: 0 5px;
-  color: var(--bg);
-  font: 600 var(--fs-xs) var(--mono);
-  font-style: normal;
-  text-align: center;
-  background: var(--accent);
-  border-radius: 999px;
+.comms-nav-counts > small {
+  min-width: 2ch;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
+/* Full-opacity --muted clears 4.5:1 on --surface in both themes (5.4 dark, 5.1 light); on a
+   selected row's accent tint it would not (4.1 / 4.4), so a zero there reads in --fg-2. */
+.comms-nav-counts > small.zero {
+  color: var(--muted);
+}
+.comms-nav button.on .comms-nav-counts > small.zero {
+  color: var(--fg-2);
+}
+/* Unread and mention counts: compact filled chips, mono numerals. */
+.comms-nav .comms-unread-count,
+.comms-nav .comms-mention-count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  color: var(--accent);
+  font: 600 10px / 16px var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 2px;
+}
+.comms-nav .comms-mention-count {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+/* Selection is an edge, not a box: a 2px accent bar on the left over a soft tint. */
 .comms-nav button.on,
 .comms-contacts button.on {
   background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.comms-nav button.on .comms-nav-agent b,
+.comms-contacts button.on {
+  color: var(--fg);
 }
 .comms-nav-row small,
 .comms-contacts small {
@@ -2878,26 +3150,35 @@ pre.diff .h {
 .comms-agent {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
+  height: 100%;
+  overflow: hidden;
 }
-.comms-agent #chatP,
-.comms-agent #chatP .panel-body {
+#page-comms #chatP {
   display: flex;
-  flex: 1;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 .comms-messages {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .comms-message-stack {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   min-height: 100%;
+}
+.comms-message-stack > :first-child {
+  /* Bottom-align short chats without flex-end trapping the start of long chats above the scroller. */
+  margin-top: auto;
 }
 .comms-breadcrumb {
   display: flex;
@@ -2931,17 +3212,27 @@ pre.diff .h {
 }
 
 /* Stored Comms: conversation-first, with the composer permanently below the scrollback. */
-#page-comms .comms-grid > #chatP {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+#page-comms .comms-grid > #chatP,
+#page-comms .comms-agent > #chatP {
+  height: 100%;
 }
 .comms-chat-title {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr) 40px;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
   width: 100%;
   align-items: center;
   gap: 12px;
+}
+#page-comms #chatP > .ph {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+#page-comms #chatP > .ph > h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#page-comms #chatP > .ph > .act {
+  flex: 0 0 auto;
 }
 .comms-chat-hint {
   overflow: hidden;
@@ -2969,10 +3260,17 @@ pre.diff .h {
   width: 40px;
   height: 32px;
   place-items: center;
-  color: var(--warn);
+  color: var(--fg-2);
   background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.comms-bell:hover {
+  color: var(--fg);
+  border-color: var(--line-2);
+}
+.comms-bell:has(b) {
+  color: var(--warn);
 }
 .comms-bell svg {
   width: 18px;
@@ -2987,8 +3285,8 @@ pre.diff .h {
   right: -7px;
   min-width: 17px;
   padding: 0 4px;
-  color: #171108;
-  font-size: 10px;
+  color: var(--bg);
+  font: 600 10px / 16px var(--mono);
   background: var(--warn);
   border-radius: 999px;
 }
@@ -3000,8 +3298,10 @@ pre.diff .h {
   display: flex;
   flex-direction: column;
   width: min(380px, calc(100vw - 34px));
-  max-height: 440px;
+  /* --mentions-room: the room below the bell inside #chatP, measured when the list opens */
+  max-height: min(440px, var(--mentions-room, 440px));
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
@@ -3028,6 +3328,8 @@ pre.diff .h {
   gap: 2px 7px;
   padding: 9px 12px;
   text-align: left;
+  /* buttons do not wrap by default; the mention's text clamps to two lines instead */
+  white-space: normal;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -3085,7 +3387,8 @@ pre.diff .h {
   justify-content: flex-end;
 }
 .comms-bubble.highlighted .comms-bubble-body {
-  box-shadow: 0 0 0 2px var(--warn);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .comms-message-stack {
   gap: 12px;
@@ -3099,53 +3402,95 @@ pre.diff .h {
   color: var(--muted);
   font-size: var(--fs-xs);
 }
+/* Bubbles: hairlines only. Who spoke is told by side and tint, never by a coloured outline. */
 .comms-bubble-body {
   padding: 9px 12px;
   overflow-wrap: anywhere;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: 2px 8px 8px;
+  border-radius: 2px;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
 }
 .comms-bubble.capcom .comms-bubble-body {
   color: var(--fg);
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  border-radius: 8px 8px 2px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
+.comms-message-meta > span:first-child {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+/* Message actions float on the bubble's bottom edge on hover or focus, so they never take a line. */
 .comms-actions {
+  position: absolute;
+  z-index: 3;
+  bottom: -13px;
+  left: 10px;
   display: inline-flex;
-  gap: 4px;
-  margin-left: 2px;
+  gap: 1px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.comms-bubble.capcom .comms-actions {
+  right: 10px;
+  left: auto;
 }
 .comms-bubble:hover .comms-actions,
 .comms-bubble:focus-within .comms-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 .comms-actions button,
 .comms-react-set button {
-  padding: 2px 5px;
+  min-height: 20px;
+  padding: 1px 6px;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  font-size: 10px;
   background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border: 0;
+  border-radius: 2px;
+}
+.comms-actions button:hover,
+.comms-react-set button:hover {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+.comms-react-set {
+  margin: 0;
+  padding: 0 0 0 2px;
+  border: 0;
+  border-left: 1px solid var(--line);
 }
 .comms-react-set {
   display: inline-flex;
-  gap: 3px;
+  gap: 1px;
 }
 .comms-quote {
   max-width: 100%;
-  padding: 4px 8px;
+  padding: 3px 8px;
   overflow: hidden;
   color: var(--fg-2);
+  font-size: var(--fs-s);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg);
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--line-2);
+  border-radius: 0;
+}
+.comms-quote:hover {
+  color: var(--fg);
+  border-left-color: var(--accent);
 }
 .decision-meta {
   display: flex;
@@ -3155,16 +3500,16 @@ pre.diff .h {
   font: var(--fs-xs) var(--mono);
 }
 .decision-from {
-  padding: 1px 5px;
+  padding: 1px 6px;
   color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 2px;
 }
 .decision-ticket {
   padding: 1px 6px;
-  color: var(--muted);
+  color: var(--fg-2);
   background: var(--surface-2);
-  border-radius: 999px;
+  border-radius: 2px;
 }
 .decision-clock {
   margin-left: auto;
@@ -3194,14 +3539,25 @@ pre.diff .h {
   padding: 1px 6px;
   color: var(--fg-2);
   font-size: var(--fs-xs);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border: 0;
+  border-radius: 2px;
 }
+/* Ticket and PR refs: filled chips, tinted, no outline. */
 .comms-ref {
   margin: 0 1px;
+  padding: 0 4px;
   color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  vertical-align: baseline;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.comms-ref:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .comms-composer {
   flex: 0 0 auto;
@@ -3223,9 +3579,20 @@ pre.diff .h {
   flex: 1;
   min-width: 0;
 }
+.comms-composer input {
+  min-height: 40px;
+  border-color: var(--line-2);
+  border-radius: 2px;
+}
+.comms-composer input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .comms-composer input + button {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 18px;
+  border-radius: 2px;
   color: var(--accent-ink);
   font-weight: 600;
   background: var(--accent);
@@ -3241,8 +3608,10 @@ pre.diff .h {
   color: var(--fg-2);
   white-space: nowrap;
   text-overflow: ellipsis;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r);
+  background: var(--accent-soft);
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
   font-size: var(--fs-s);
 }
 .comms-replying button {
@@ -3318,7 +3687,7 @@ pre.diff .h {
 }
 @media (max-width: 700px) {
   .comms-chat-title {
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .comms-chat-hint {
     display: none;
@@ -3420,6 +3789,13 @@ button.nrow.thread.tagged {
   overflow: auto;
   padding: 4px 0;
 }
+/* Under the asks the log's top edge fades, so a line scrolled half out of view reads as the edge
+   of the scroll, not as text running behind the asks. */
+.dwait + .dmsgs {
+  padding-top: 20px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+  mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+}
 .dmsg {
   padding: 5px 14px;
   display: grid;
@@ -3453,26 +3829,41 @@ button.nrow.thread.tagged {
 .dmsg.flight .md-txt .md strong {
   color: var(--accent);
 }
+/* What waits on the operator: an opaque block with the screen's one coloured edge. */
 .dwait {
   flex: none;
   max-height: 40%;
   overflow: auto;
-  padding: 8px 14px;
+  overscroll-behavior: contain;
+  padding: 0 12px 8px;
   border-bottom: 1px solid var(--line);
-  background: var(--warn-soft);
+  border-left: 2px solid var(--warn-mark);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
   display: grid;
-  gap: 4px;
+  align-content: start;
+  gap: 2px;
 }
 .dwait .dwh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0 4px;
   color: var(--warn);
-  font-size: var(--fs-xs);
-  font-weight: 600;
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: inherit;
 }
 .dask {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 26px;
+  font-size: var(--fs-s);
+}
+.dask > button.sm {
+  padding: 1px 8px;
 }
 .briefgrid {
   display: grid;
@@ -3526,10 +3917,23 @@ button.nrow.thread.tagged {
   gap: 10px;
   overflow: auto;
 }
+/* Telemetry's readouts sit in one instrument band, divided by hairlines rather than boxed apart. */
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  flex: none;
+}
+.kpis > .kpi {
+  border: 0;
+  border-radius: 0;
+  box-shadow:
+    1px 0 0 var(--line),
+    0 1px 0 var(--line);
 }
 .kpi {
   background: var(--surface);
@@ -3586,12 +3990,22 @@ button.nrow.thread.tagged {
   font-weight: 500;
 }
 .grp {
-  font-family: var(--display);
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--fg-2);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
   margin-top: 6px;
+}
+.grp::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-2), transparent);
 }
 .tgrid {
   display: grid;
@@ -3604,15 +4018,34 @@ button.nrow.thread.tagged {
 .chart {
   position: relative;
 }
+/* instruments: mono ticks, dashed grid, a solid axis and a "now" cursor (hud/charts) */
 .ct {
   fill: var(--muted);
-  font: 11px var(--sans);
+  font: 10px var(--mono);
+}
+.ct.now {
+  fill: var(--accent);
 }
 .ctl-dark {
   fill: var(--fg-2);
 }
 .gl {
   stroke: var(--line);
+  stroke-dasharray: 2 3;
+}
+.xaxis line {
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+.nowc {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nowc.live {
+    animation: now-pulse 2.4s ease-in-out infinite;
+  }
 }
 .tip {
   position: absolute;
@@ -3673,13 +4106,28 @@ button.nrow.thread.tagged {
   padding: 3px 0;
   font-size: var(--fs-s);
 }
+/* a bar row's track: thin, square, ruled in quarters so the length reads against a scale */
+.hrow .track {
+  height: 4px;
+  border-radius: 0;
+  background:
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 0 / 25% 100%,
+    var(--line);
+}
+.hrow .track i {
+  border-radius: 0;
+  background: var(--fg-2);
+}
+.hrow:hover .track i {
+  background: var(--accent);
+}
 .ubar {
   display: flex;
-  height: 10px;
-  border-radius: 5px;
+  height: 6px;
+  border-radius: 0;
   overflow: hidden;
   gap: 2px;
-  background: var(--surface-2);
+  background: var(--line);
 }
 .ubar i {
   display: block;
@@ -3687,6 +4135,13 @@ button.nrow.thread.tagged {
 }
 .hrow.util {
   grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 48px;
+}
+/* a long agent tag is cut at its column instead of running under the bar */
+.hrow.util > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .tnote {
   margin-top: 6px;
@@ -3869,7 +4324,7 @@ td.wrap {
 }
 .setup-nav button {
   border: 0;
-  border-radius: 6px;
+  border-radius: 2px;
   background: transparent;
   box-shadow: none;
   color: var(--fg-2);
@@ -4242,120 +4697,1147 @@ div.opt {
 }
 
 /* FLIGHT page */
+/* A flight director's console (docs/design/flight-deck.md): hairlines, mono readouts, colour only
+   for state. Selection is an accent edge; the one coloured border is the dock's "Waiting on you". */
 #page-flight {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  /* The tabs lay out by the page's own width: the dock takes a share of the window. */
+  container: flight / inline-size;
+}
+/* The tabs scroll sideways rather than wrap; the rule is an inset line so the scroller's
+   clipping keeps the selected tab's edge. */
+.flight-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px var(--line);
+  scrollbar-width: thin;
+}
+.flight-tabs button {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 16px 9px;
+  color: var(--muted);
+  font: 600 var(--fs-s) / 1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.flight-tabs button::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+.flight-tabs button:hover {
+  color: var(--fg-2);
+  border-color: transparent;
+}
+.flight-tabs button:hover::after {
+  background: var(--line-2);
+}
+.flight-tabs button[aria-selected="true"] {
+  color: var(--fg);
+}
+.flight-tabs button[aria-selected="true"]::after {
+  background: var(--accent);
+}
+.flight-tab-index {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.flight-tabs button[aria-selected="true"] .flight-tab-index {
+  color: var(--accent);
+}
+/* Each tab fits the window where it can; where its panels' minimum heights do not fit, the tab
+   body scrolls rather than cutting the lower panels off. */
+.flight-tab-body {
+  min-height: 0;
+}
+.flight-command,
+.flight-queue,
+.flight-notebook,
+.flight-record {
+  overflow: auto;
+}
+.flight-tab-body[hidden] {
+  display: none;
+}
+/* Panel headers stay one line: the sub-label is cut rather than pushing the body down. */
+#page-flight .ph {
+  flex-wrap: nowrap;
+  min-height: 40px;
+}
+#page-flight .ph h2 {
+  flex: none;
+}
+#page-flight .ph .sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Repo chips are filled, not outlined. */
+#page-flight .rchip {
+  color: var(--c, var(--fg-2));
+  background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);
+  border-color: transparent;
+  border-radius: 3px;
+}
+.flight-panel-scroll,
+.flight-knowledge-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.flight-panel-scroll[hidden] {
+  display: none;
+}
+
+/* shared readouts */
+.flight-source {
+  margin: 0;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.flight-source.think {
+  color: var(--think);
+}
+.flight-count {
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.flight-mono,
+.flight-count {
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-subhead {
+  margin: 0;
+  padding: 12px 14px 6px;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+/* A gap in FLIGHT's records (no next action, no checkpoint): quiet, never an alarm colour. */
+.flight-gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.flight-gap::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+}
+button.flight-link {
+  padding: 2px 6px;
+  color: var(--accent);
+  font: 600 10.5px / 1.4 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+button.flight-link:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+/* Command */
+.flight-command {
+  display: grid;
+  grid-template-rows: max-content minmax(min-content, 1fr);
+  gap: 12px;
+}
+/* The briefing keeps its full height; the panels below it give way and scroll inside. */
+.flight-command > #sitP {
+  overflow: visible;
+}
+.flight-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-briefing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
+  border-bottom: 1px solid var(--line);
+}
+.flight-intent-copy {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  padding: 14px 16px 12px;
+}
+.flight-intent-kicker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+#sitP .flight-intent-headline {
+  max-width: 96ch;
+  margin: 0;
+  color: var(--fg);
+  font: 600 clamp(17px, 1.35vw, 21px) / 1.35 var(--display);
+  letter-spacing: 0.005em;
+  text-wrap: pretty;
+}
+.flight-headline-age {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 0;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-contact {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px 10px;
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+  border-left: 1px solid var(--line);
 }
-#page-flight > * {
+.flight-contact-head,
+.flight-contact-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.flight-contact-line {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.flight-contact-who {
+  color: var(--fg);
+  font-weight: 600;
+}
+.flight-contact-foot {
+  margin-top: auto;
+}
+/* the telemetry strip: one instrument per flow measure, label and window above the reading */
+.flight-pulse-rail {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.flight-pulse {
+  display: grid;
+  grid-template-areas:
+    "label window"
+    "value value"
+    "detail detail";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 6px;
+  min-width: 0;
+  padding: 10px 14px 11px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+}
+button.flight-pulse {
+  transition: background-color 150ms ease;
+}
+button.flight-pulse:hover {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+.flight-pulse:last-child {
+  border-right: 0;
+}
+.flight-pulse-label {
+  grid-area: label;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.flight-pulse-window {
+  grid-area: window;
+  color: var(--muted);
+  font: 500 10px / 1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.flight-pulse-value {
+  grid-area: value;
+  overflow: hidden;
+  color: var(--fg);
+  font: 600 clamp(18px, 1.5vw, 24px) / 1.1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flight-unit {
+  margin-left: 0.06em;
+  color: var(--muted);
+  font-size: 0.6em;
+  font-weight: 500;
+}
+.flight-pulse.idle .flight-pulse-value {
+  color: var(--muted);
+}
+.flight-pulse.tone-crit .flight-pulse-value {
+  color: var(--crit);
+}
+.flight-pulse.tone-warn .flight-pulse-value {
+  color: var(--warn);
+}
+.flight-pulse-detail {
+  grid-area: detail;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* FLIGHT's tables are real tables laid out as grids: each row is a grid, its cells the items. */
+.wif-table,
+.flight-plan-table,
+.flight-outcome-table,
+.wif-table > :is(thead, tbody),
+.flight-plan-table > :is(thead, tbody),
+.flight-outcome-table > :is(thead, tbody) {
+  display: block;
+}
+.wif-table > thead,
+.flight-plan-table > thead,
+.flight-outcome-table > thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+/* Undo the global th/td look; element-level specificity, so each column's class still wins. */
+:where(.wif-table, .flight-plan-table, .flight-outcome-table) :is(th, td) {
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  border: 0;
+}
+/* Delivery board: the delivery path is a step track on one line */
+.wif-table {
+  min-width: 640px;
+}
+.wif-table-head,
+.wif-row {
+  display: grid;
+  grid-template-columns:
+    minmax(92px, 0.5fr) minmax(150px, 1.1fr) minmax(240px, 1.5fr)
+    minmax(120px, 0.8fr) 60px;
+  column-gap: 12px;
+  align-items: start;
+}
+.wif-table-head {
+  padding: 8px 14px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.wif-table-head > :last-child {
+  text-align: right;
+}
+#wifP .wif-row {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  transition: background-color 150ms ease;
+}
+#wifP .wif-row:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  border-radius: 0;
+}
+.wif-seat {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+.wif-work {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.wif-title {
+  display: block;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wif-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.wif-meta > .rref {
   flex: none;
+}
+.wif-doing {
+  display: block;
+}
+.wif-branch {
+  display: block;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+.wif-stage {
+  display: grid;
+  gap: 5px;
+  justify-items: start;
+  min-width: 0;
+}
+.wif-stage > .rref {
+  font-size: 10.5px;
+}
+.wif-next {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--fs-s);
+}
+.wif-next-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.wif-checkpoint {
+  color: var(--fg-2);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.wif-elapsed {
+  color: var(--fg-2);
+  font: 500 var(--fs-s) / 1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+#wifP .wsteps {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+#wifP .wstep {
+  position: relative;
+  display: block;
+  flex: 0 1 auto;
+  min-width: 2.5em;
+  padding: 7px 1px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+#wifP .wstep::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--line-2);
+}
+#wifP .wstep.d {
+  color: var(--fg-2);
+}
+#wifP .wstep.d::before {
+  background: color-mix(in srgb, var(--fg-2) 55%, transparent);
+}
+#wifP .wstep.c,
+#wifP .wstep.w {
+  flex-shrink: 0;
+}
+#wifP .wstep.c {
+  color: var(--fg);
+  font-weight: 600;
+}
+#wifP .wstep.c::before {
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+#wifP .wstep.w {
+  color: var(--warn);
+  font-weight: 600;
+}
+#wifP .wstep.w::before {
+  background: var(--warn-mark);
+}
+#wifP .wstep .titer {
+  padding: 0 0 0 1px;
+  color: var(--accent);
+  font: 600 9px / 0 var(--mono);
+  vertical-align: super;
+  background: none;
+}
+
+/* Stand-up focus */
+.flight-control-group {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.flight-control-group:last-child {
+  border-bottom: 0;
+}
+.flight-control-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.flight-control-heading h3 {
+  margin: 0;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.flight-control-heading > span {
+  color: var(--muted);
+  font: var(--fs-xs) / 1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-control-heading > span.warn-t {
+  color: var(--warn);
+}
+.flight-control-group > .note {
+  margin: 0;
+}
+.flight-control-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flight-control-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.flight-control-list li:first-child {
+  padding-top: 2px;
+  border-top: 0;
+}
+.flight-control-list.numbered {
+  padding-left: 0;
+  list-style: none;
+  counter-reset: flight-next;
+}
+.flight-control-list.numbered li {
+  justify-content: flex-start;
+}
+.flight-control-list.numbered li::before {
+  flex: none;
+  padding-top: 2px;
+  color: var(--accent);
+  font: 600 10.5px / 1.2 var(--mono);
+  content: counter(flight-next, decimal-leading-zero);
+  counter-increment: flight-next;
+}
+.flight-control-list li > div {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-width: 0;
+}
+.flight-control-list li > div > b,
+.flight-control-list li > div > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flight-control-list li > div > b {
+  font-size: var(--fs-s);
+}
+.flight-control-list li > div > span.s {
+  color: var(--muted);
+}
+.flight-control-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--fs-s);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.flight-control-list li > div > .flight-control-text {
+  white-space: normal;
+}
+.flight-control-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.2 var(--mono);
+}
+.flight-owner {
+  color: var(--fg-2);
+  font: 600 10px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flight-owner.warn {
+  color: var(--warn);
+}
+.flight-owner.crit {
+  color: var(--crit);
+}
+
+/* Plan */
+.flight-queue {
+  display: grid;
+  grid-template-rows: minmax(240px, 1.1fr) minmax(240px, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-queue-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-queue-signals {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+.flight-summary,
+.flight-summary section {
+  min-width: 0;
+  list-style: none;
+}
+.flight-summary {
+  overflow-wrap: anywhere;
+}
+.flight-summary > .note {
+  margin: 0;
+  padding: 10px 14px;
+}
+.flight-plan-intro {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.flight-plan-intro h3 {
+  flex: none;
+  margin: 0;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.flight-plan-intro p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flight-plan-count {
+  flex: none;
+  color: var(--fg-2);
+  font: var(--fs-xs) / 1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-plan-table {
+  /* the rows' grid minimum: 850px of tracks, six 14px gaps and 28px of padding */
+  min-width: 962px;
+}
+.flight-plan-head,
+.flight-plan-row,
+.flight-outcome-head,
+.flight-outcome-row {
+  display: grid;
+  column-gap: 14px;
+  align-items: start;
+}
+.flight-plan-head,
+.flight-plan-row {
+  grid-template-columns:
+    76px minmax(170px, 1.3fr) 96px 104px minmax(180px, 1.3fr)
+    minmax(160px, 1fr) 64px;
+}
+.flight-plan-head,
+.flight-outcome-head {
+  padding: 8px 14px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.flight-plan-head > :last-child,
+.flight-outcome-head > :last-child {
+  text-align: right;
+}
+.flight-plan-row,
+.flight-outcome-row {
+  padding: 11px 14px;
+  font-size: var(--fs-s);
+  border-bottom: 1px solid var(--line);
+  transition: background-color 150ms ease;
+}
+.flight-plan-row:hover,
+.flight-outcome-row:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.flight-plan-row > td,
+.flight-outcome-row > td {
+  min-width: 0;
+}
+.flight-plan-horizon {
+  color: var(--fg-2);
+  font: 600 10.5px / 1.7 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flight-plan-work,
+.flight-plan-checkpoint,
+.flight-outcome-row > td:first-child {
+  display: grid;
+  gap: 4px;
+}
+.flight-plan-work > b,
+.flight-outcome-row b {
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.flight-plan-next {
+  color: var(--fg);
+  line-height: 1.4;
+}
+.flight-plan-checkpoint {
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+.flight-plan-refs,
+.flight-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--muted);
+}
+.flight-plan-age,
+.flight-outcome-at {
+  color: var(--fg-2);
+  font: 500 var(--fs-xs) / 1.6 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+#page-flight .askcards,
+#page-flight .tlist {
+  gap: 0;
+}
+#page-flight .askcards:empty {
+  display: none;
+}
+/* the dock already carries the one coloured edge for what waits on the operator */
+#page-flight .askcard {
+  padding: 8px 10px;
+  border-color: var(--line);
+  border-radius: 2px;
+}
+#askP .drow {
+  gap: 6px;
+  padding: 10px 14px;
+}
+#askP .drow:first-child {
+  border-top: 0;
+}
+#askP .drow .row {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+#askP .drow .row > .min0 {
+  flex: 1 1 auto;
+  font-size: var(--fs-s);
+  line-height: 1.45;
+}
+#askP .drow .row > .spacer {
+  display: none;
+}
+#askP .drow > .s {
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+#page-flight .incoming-row,
+#page-flight .watch-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+#page-flight .incoming-row:first-child,
+#page-flight .watch-row:first-child {
+  border-top: 0;
+}
+
+/* Notebook */
+.flight-notebook {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-notes .flight-knowledge-scroll > p.note:first-child {
+  max-width: none;
+  margin: 0;
+  padding: 9px 16px;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+  border-bottom: 1px solid var(--line);
+}
+.flight-notebook-index {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.flight-notebook-index a {
+  position: relative;
+  padding: 9px 10px;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+.flight-notebook-index a:hover {
+  color: var(--accent);
+}
+.flight-notebook .briefgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+.flight-notebook .briefsec {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 16px 16px;
+  scroll-margin-top: 40px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.flight-notebook .briefsec:target {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 var(--accent);
+}
+.flight-note-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.flight-note-heading h3 {
+  margin: 0;
+  font: 600 11px / 1.3 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.flight-note-heading h3 a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.flight-note-heading h3 a::before {
+  color: var(--accent);
+  content: "§ ";
+}
+.flight-note-heading .s {
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+.flight-notebook .briefsec .md-txt {
+  max-width: 80ch;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.flight-markdown-source summary {
+  padding-top: 4px;
+  color: var(--muted);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.flight-markdown-source summary:hover {
+  color: var(--accent);
+}
+.flight-markdown-source pre {
+  max-height: 15rem;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font: 12px / 1.5 var(--mono);
+  white-space: pre-wrap;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.flight-memory .flight-knowledge-scroll > .pb {
+  padding: 10px 16px 14px;
+}
+.flight-memory .flight-knowledge-scroll > .pb > .note:first-child {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+#page-flight .memory-repo {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#page-flight .memory-repo select {
+  font: 13px var(--sans, inherit);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.flight-memory section > h3 {
+  margin: 14px 0 0;
+  color: var(--fg-2);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Record */
+.flight-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+.flight-record-side {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+}
+.flight-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+.flight-tiles > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.flight-tiles dt {
+  color: var(--fg-2);
+}
+.flight-tiles dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 22px;
+}
+#outcomesP .flight-tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+#outcomesP .flight-tiles > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px 11px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+}
+#outcomesP .flight-tiles > div:last-child {
+  border-right: 0;
+}
+#outcomesP .flight-tiles dt {
+  overflow: hidden;
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#outcomesP .flight-tiles dd {
+  color: var(--fg);
+  font: 600 clamp(18px, 1.5vw, 22px) / 1.1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.flight-outcome-table {
+  min-width: 620px;
+}
+.flight-outcome-head,
+.flight-outcome-row {
+  grid-template-columns: minmax(170px, 1.2fr) minmax(170px, 1.2fr) minmax(150px, 1fr) 96px;
+}
+.flight-outcome-row .fg2 {
+  color: var(--muted);
+}
+#decidedP .drow {
+  padding: 10px 14px;
+}
+#decidedP .drow:first-child {
+  border-top: 0;
+}
+.flight-log .dmsg {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.flight-log .dmsg .who {
+  font: var(--fs-xs) / 1.3 var(--mono);
+}
+
+@media (max-width: 1439px) {
+  .flight-command-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 1.4fr) minmax(200px, 1fr);
+  }
+  .flight-pulse {
+    grid-template-areas:
+      "label label"
+      "value value"
+      "detail window";
+    align-items: baseline;
+    padding: 9px 10px 10px;
+  }
+  .flight-pulse-label {
+    letter-spacing: 0.06em;
+  }
+}
+@media (max-width: 999px), (max-height: 559px) {
+  .flight-record-side {
+    display: flex;
+    flex-direction: column;
+  }
+  .flight-command-grid {
+    grid-template-rows: none;
+  }
+}
+/* A page narrower than three working columns (the dock open on a laptop): Plan's lower panels,
+   Notebook and Record stack, each panel keeping a usable height, and the tab body scrolls. */
+@container flight (width < 900px) {
+  .flight-queue {
+    grid-template-rows: minmax(240px, 1fr) auto;
+  }
+  .flight-queue-lower,
+  .flight-record-side {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(240px, auto);
+  }
+  /* Arrivals and revisit triggers share the last row side by side. */
+  .flight-queue-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .flight-notebook,
+  .flight-record {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(320px, auto);
+  }
 }
 .sittext {
   font-size: 15px;
   line-height: 1.55;
   max-width: 110ch;
-}
-.sitstats {
-  display: flex;
-  gap: 6px 16px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 10px;
-  font-size: var(--fs-s);
-  color: var(--fg-2);
-}
-.sitstats b {
-  font-family: var(--display);
-  font-size: 17px;
-  color: var(--fg);
-}
-.sitstats .warn b {
-  color: var(--warn);
-}
-.tl {
-  position: relative;
-  height: 78px;
-  margin: 16px 10px 2px;
-}
-.tlline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 36px;
-  height: 2px;
-  background: var(--line-2);
-  border-radius: 1px;
-}
-.tlnow {
-  position: absolute;
-  left: 0;
-  top: 26px;
-  width: 2px;
-  height: 22px;
-  background: var(--ok);
-}
-.tlnow span {
-  position: absolute;
-  top: -15px;
-  left: -4px;
-  font-size: 10px;
-  color: var(--ok);
-  font-weight: 600;
-}
-.tlev {
-  position: absolute;
-  top: 30px;
-  width: 14px;
-  margin-left: -7px;
-}
-.tlev i {
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid var(--accent);
-}
-.tlev span {
-  position: absolute;
-  left: -10px;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tlev.up span {
-  bottom: 20px;
-}
-.tlev.dn span {
-  top: 20px;
-}
-.tlev.r span {
-  left: auto;
-  right: -10px;
-}
-.tllater,
-.tlnext {
-  margin-top: 4px;
-}
-.tlnext.narrow {
-  display: none;
-}
-.tlev.bare span {
-  display: none;
-}
-.fgrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  align-items: start;
-}
-.fgrid .scroll {
-  max-height: 470px;
 }
 
 /* away mode */
@@ -4750,6 +6232,68 @@ kbd {
   main > section {
     height: auto;
   }
+  #page-flight {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+  .flight-command,
+  .flight-command-grid,
+  .flight-queue,
+  .flight-queue-lower,
+  .flight-queue-signals,
+  .flight-notebook,
+  .flight-record {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+  .flight-briefing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flight-contact {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  .flight-pulse-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .flight-pulse:nth-child(2n) {
+    border-right: 0;
+  }
+  .flight-command > #sitP {
+    overflow: visible;
+  }
+  /* Panels take their content's height here, so a body sized from zero would overlap the next. */
+  .flight-knowledge-scroll {
+    flex: none;
+    overflow: visible;
+  }
+  /* The page scrolls down; a table wider than its panel still scrolls sideways inside it. */
+  .flight-panel-scroll {
+    flex: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #outcomesP .flight-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
+  }
+  .flight-notebook .briefgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .comms-page,
+  .comms-grid {
+    height: auto;
+    overflow: visible;
+  }
+  #page-comms .comms-agent,
+  #page-comms .comms-agent > #chatP {
+    height: auto;
+    overflow: visible;
+  }
+  .comms-right {
+    overflow: visible;
+  }
   .col {
     overflow: visible;
   }
@@ -4779,7 +6323,6 @@ kbd {
   .agrid,
   .cgrid,
   .tgrid,
-  .fgrid,
   .awaygrid,
   .boardsplit,
   .boardsplit.withdetail {
@@ -4929,18 +6472,6 @@ kbd {
   }
   .gloss {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .tl {
-    height: 52px;
-  }
-  .tlev span {
-    display: none;
-  }
-  .tlnext.narrow {
-    display: block;
-  }
-  .tlnext.wide {
-    display: none;
   }
 }
 
@@ -5289,83 +6820,6 @@ button.nrow.thread.tagged {
   overflow: visible;
 }
 
-.flight-summary,
-.flight-summary section,
-.flight-summary-list > li {
-  list-style: none;
-  min-width: 0;
-}
-.flight-summary {
-  overflow-wrap: anywhere;
-}
-.flight-summary h3 {
-  margin: 12px 0 6px;
-}
-.flight-summary .sittext {
-  margin-top: 0;
-}
-.flight-summary-list {
-  margin: 6px 0;
-  padding-left: 24px;
-}
-.flight-summary-list > li {
-  list-style: none;
-  padding: 5px 0;
-}
-.flight-summary-line {
-  display: inline;
-  white-space: normal;
-}
-.flight-summary-line > * + * {
-  margin-left: 8px;
-}
-.flight-summary-line .pill {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.flight-details {
-  margin: 8px 0;
-  font-size: var(--fs-s);
-}
-.flight-details > div {
-  display: grid;
-  grid-template-columns: 5em minmax(0, 1fr);
-  gap: 8px;
-  margin: 4px 0;
-}
-.flight-details dt,
-.flight-tiles dt {
-  color: var(--fg-2);
-}
-.flight-details dd,
-.flight-tiles dd {
-  margin: 0;
-  min-width: 0;
-}
-.flight-refs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-.flight-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr));
-  gap: 8px;
-  margin: 14px 0;
-}
-.flight-tiles > div {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.flight-tiles dd {
-  font-family: var(--display);
-  font-size: 22px;
-}
-.flight-ledger > summary {
-  cursor: pointer;
-}
 .flight-notes > .disclosure > summary,
 .flight-memory > .disclosure > summary {
   padding: 12px 14px;
@@ -5624,9 +7078,9 @@ button.nrow.thread.tagged {
 .overview-kpi {
   display: grid;
   min-width: 0;
-  grid-template-rows: 22px 26px 14px 26px;
-  gap: 4px;
-  padding: 10px 12px;
+  grid-template-rows: 22px 26px 14px 34px;
+  gap: 3px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -5655,16 +7109,48 @@ button.nrow.thread.tagged {
 }
 .overview-kpi .v {
   grid-row: 2;
-  font-size: 22px;
-  line-height: 1.2;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
 }
 .overview-kpi .d {
   grid-row: 3;
 }
-.overview-kpi .spark {
+/* the KPI's 30-minute trace: peak label on the dashed top gridline, a -30m … now axis below */
+.kpi-trace {
   grid-row: 4;
+  position: relative;
+  display: grid;
+  grid-template-rows: 24px 9px;
+  gap: 1px;
+  min-width: 0;
+}
+.overview-kpi .spark {
   width: 100%;
-  height: 26px;
+  height: 24px;
+}
+.kpi-peak,
+.kpi-quiet {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  padding-right: 4px;
+  background: var(--surface);
+  font: 9px / 9px var(--mono);
+  color: var(--muted);
+}
+.kpi-quiet {
+  top: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.kpi-axis {
+  display: flex;
+  justify-content: space-between;
+  font: 9px / 9px var(--mono);
+  color: var(--muted);
 }
 .kpi-secondary {
   grid-row: 3 / 5;
@@ -5699,6 +7185,20 @@ button.nrow.thread.tagged {
   }
 }
 @media (max-width: 760px) {
+  .wif-table-head {
+    display: none;
+  }
+  .wif-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .wif-work,
+  .wif-stage {
+    grid-column: 1 / -1;
+  }
+  .wif-elapsed {
+    grid-column: 2;
+    grid-row: 1;
+  }
   #actList .arow {
     grid-template-columns: 40px 12px 75px minmax(0, 1fr);
   }

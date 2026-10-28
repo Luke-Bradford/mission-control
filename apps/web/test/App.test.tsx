@@ -28,12 +28,12 @@ const at = (path: string) => {
 describe("App", () => {
   it.each([
     ["/", "page-overview", "Overview"],
-    ["/flight", "page-flight", null],
+    ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],
     ["/agent", "page-agent", "Agents"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
-    ["/setup/loops", "page-setup", "Setup"],
+    ["/setup/loops", "page-setup", null],
   ])("%s renders its page and marks its tab", async (path, id, tabName) => {
     const { container } = at(path);
     await waitFor(() => expect(container.querySelector(`main > section#${id}`)).not.toBeNull());

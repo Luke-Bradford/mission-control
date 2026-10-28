@@ -241,6 +241,27 @@ async function loaded(data?: TelemetryData, config?: ConfigView) {
 }
 
 describe("Telemetry refetch", () => {
+  it("claims live only while the telemetry on screen is this range's and fresh", async () => {
+    const { fetch } = await loaded();
+    expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0);
+    const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fetch.mockImplementation(async (...a: unknown[]) => {
+      if (a[0] === "/api/telemetry?range=24h") await gate;
+      return answer(...a);
+    });
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "24h" }),
+    );
+    await waitFor(() => expect(document.querySelectorAll(".kpi.live")).toHaveLength(0));
+    expect(document.querySelectorAll(".nowc.live")).toHaveLength(0);
+    await act(async () => release());
+    await waitFor(() => expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0));
+  });
+
   it("keeps the last range on screen, dimmed, while a new one loads", async () => {
     const { fetch } = await loaded();
     const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;

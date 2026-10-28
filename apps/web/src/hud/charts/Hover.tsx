@@ -9,6 +9,7 @@ import {
   type PointerEvent,
   type RefObject,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -169,4 +170,69 @@ export function Legend({ items }: { items: { key: string; name: string; color: s
       ))}
     </div>
   );
+}
+
+/** An id prefix safe inside `url(#…)` for a chart's gradients. */
+export function useGradientId(): string {
+  return `g${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+}
+
+/**
+ * A vertical gradient for a trace's fill: `color` at `opacity` at the top, fading to transparent.
+ * `box` fits it to each filled shape (stacked layers); otherwise it spans y1..y2 of the plot.
+ */
+export function FadeGradient({
+  id,
+  color,
+  opacity = 0.28,
+  box,
+}: {
+  id: string;
+  color: string;
+  opacity?: number;
+  box?: { y1: number; y2: number };
+}) {
+  return (
+    <linearGradient
+      id={id}
+      x1={0}
+      x2={0}
+      {...(box ? { gradientUnits: "userSpaceOnUse", y1: box.y1, y2: box.y2 } : { y1: 0, y2: 1 })}
+    >
+      <stop offset="0" stopColor={color} stopOpacity={opacity} />
+      <stop offset="1" stopColor={color} stopOpacity={0} />
+    </linearGradient>
+  );
+}
+
+/** The x axis: a solid baseline from x0 to x1 at `y`, with a short tick at each of `at` (px). */
+export function XAxis({ y, x0, x1, at }: { y: number; x0: number; x1: number; at: number[] }) {
+  return (
+    <g className="xaxis">
+      <line x1={x0} x2={x1} y1={y} y2={y} />
+      {at.map((x) => (
+        <line key={x} x1={x} x2={x} y1={y} y2={y + 4} />
+      ))}
+    </g>
+  );
+}
+
+/** Evenly spaced positions from x0 to x1 inclusive, `parts` intervals. */
+export function spread(x0: number, x1: number, parts: number): number[] {
+  return Array.from({ length: parts + 1 }, (_, i) => x0 + (i / parts) * (x1 - x0));
+}
+
+/** The "now" cursor: a thin accent line at `x`, pulsing (motion allowing) while `live`. */
+export function NowCursor({
+  x,
+  y1,
+  y2,
+  live = false,
+}: {
+  x: number;
+  y1: number;
+  y2: number;
+  live?: boolean;
+}) {
+  return <line className={`nowc${live ? " live" : ""}`} x1={x} x2={x} y1={y1} y2={y2} />;
 }

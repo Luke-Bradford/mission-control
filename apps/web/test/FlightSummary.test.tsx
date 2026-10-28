@@ -1,12 +1,18 @@
 import type { FlightScheduleView } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { Summary } from "../src/flight/Summary.tsx";
 import { dayMonth, hhmm } from "../src/fmt.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CREW_CONFIG, MIN, NOW } from "./fixtures.ts";
-import { flightLedger, flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
+import {
+  flightLedger,
+  flightSummary,
+  ledgerEntry,
+  summaryItem,
+  summaryOutcome,
+} from "./flightSummaryFixture.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,8 +32,15 @@ const incoming = ledgerEntry({
   key: "incoming:1",
   kind: "incoming",
   title: "New request",
+});
+const completed = ledgerEntry({
+  key: "work:done",
+  title: "Shipped work",
   status: "done",
-  outcome: "Handled",
+  next: "Stale next action",
+  outcome: "Merged",
+  basis: "PR #523 merged",
+  updatedAt: NOW - 5 * MIN,
 });
 const schedule: FlightScheduleView = {
   session: "s1",
@@ -64,74 +77,74 @@ const summary = flightSummary({
       ageMin: 0,
     },
   ],
+  // The hub leaves closed arrivals out of done.
+  done: [summaryOutcome(completed)],
 });
+/** The plan's body rows, without its header row. */
+const planRows = (table: HTMLElement): HTMLElement[] =>
+  within(table)
+    .getAllByRole("row")
+    .filter((row) => row.closest("tbody") !== null);
+
 function stub(extra: Record<string, unknown> = {}) {
   return stubFetch({
     [RESOURCES.config.path]: CREW_CONFIG,
     [RESOURCES.flightSummary.path]: summary,
-    [RESOURCES.flightLedgerOpen.path]: flightLedger([...entries, ...watch, commitment]),
-    [RESOURCES.flightLedger.path]: flightLedger([...entries, ...watch, commitment, incoming]),
+    [RESOURCES.flightLedgerOpen.path]: flightLedger([...entries, ...watch, commitment, incoming]),
     [RESOURCES.flightSchedule.path]: schedule,
     ...extra,
   });
 }
 
-it("renders the headline, capped lists in served order, status counts, due times and tiles", async () => {
+it("renders the whole forward plan as visible operational columns", async () => {
   stub();
-  render(<Summary />);
-  expect(await screen.findByText(summary.headline)).toBeTruthy();
-  const now = screen.getByRole("list", { name: "Now" });
-  const rows = within(now).getAllByRole("listitem");
-  expect(rows.map((row) => row.querySelector(".flight-summary-title")?.textContent)).toEqual([
-    "Work 6",
-    "Work 2",
-    "Work 4",
-    "Work 1",
-    "Work 5",
-  ]);
-  expect(rows[0]?.querySelector("summary .ag")?.textContent).toBe("guido-1");
-  expect(rows[0]?.querySelector("summary")?.textContent).toContain("active");
-  expect(rows[0]?.querySelector("summary")?.textContent).toContain("waiting on RETRO");
+  render(<Summary mode="queue" />);
+  const plan = await screen.findByRole("table", { name: "FLIGHT forward plan" });
+  expect(screen.queryByText(summary.headline)).toBeNull();
+  expect(screen.queryByRole("list", { name: "In flight" })).toBeNull();
+  const rows = planRows(plan);
   expect(
-    within(screen.getByRole("list", { name: "Watching" })).getAllByRole("listitem"),
-  ).toHaveLength(5);
-  expect(screen.getByText("3 active · 1 blocked · 2 waiting")).toBeTruthy();
-  const next = screen.getByRole("list", { name: "Next" });
-  expect(next.tagName).toBe("OL");
-  expect(
-    within(next)
-      .getAllByRole("listitem")
-      .map((row) => row.querySelector("summary")?.textContent),
+    within(plan)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent),
   ).toEqual([
-    `guido-1Send the reportactivewaiting on RETRODue ${dayMonth(NOW + MIN, "Europe/London")} ${hhmm(NOW + MIN, "Europe/London")}`,
-    `Check the PRpendingDue ${dayMonth(NOW + 2 * MIN, "Europe/London")} ${hhmm(NOW + 2 * MIN, "Europe/London")}`,
+    "Horizon",
+    "Workstream",
+    "Health",
+    "Owner",
+    "Next action",
+    "Dependency / checkpoint",
+    "Age",
   ]);
-  const tiles = screen.getByLabelText("Last 24 hours");
-  expect([...tiles.querySelectorAll("dt")].map((el) => el.textContent)).toEqual([
-    "Merged (24 h)",
-    "In review",
-    "CI failures",
-    "Parks",
-    "Spend (24 h)",
+  expect(rows.map((row) => row.querySelector(".flight-plan-work b")?.textContent)).toEqual([
+    "Watch 1",
+    "Watch 2",
+    "Watch 3",
+    "Watch 4",
+    "Watch 5",
+    "Watch 6",
+    "Send the report",
+    "Check the PR",
   ]);
-  expect([...tiles.querySelectorAll("dd")].map((el) => el.textContent)).toEqual([
-    "7",
-    "4",
-    "3",
-    "2",
-    "~$3.75",
-  ]);
+  expect(rows[0]?.querySelector(".flight-plan-owner .ag")?.textContent).toBe("guido-1");
+  expect(rows[0]?.querySelector(".flight-plan-health")?.textContent).toBe("Blocked");
+  expect(rows[0]?.querySelector(".flight-plan-checkpoint")?.textContent).toContain(
+    "Waiting on RETRO",
+  );
+  expect(screen.getByText("8 tracked · 6 waiting")).toBeTruthy();
+  expect(rows[6]?.querySelector(".flight-plan-checkpoint")?.textContent).toContain(
+    `Checkpoint ${dayMonth(NOW + MIN, "Europe/London")} ${hhmm(NOW + MIN, "Europe/London")}`,
+  );
+  expect(screen.queryByRole("table", { name: "Recently done" })).toBeNull();
+  expect(screen.queryByLabelText("Last 24 hours")).toBeNull();
 });
 
-it("opens a whole summary line in place to reveal next, linked refs and its update time", async () => {
+it("keeps the primary plan fields and references visible without a disclosure", async () => {
   stub();
-  render(<Summary />);
-  const list = await screen.findByRole("list", { name: "Now" });
-  const row = within(list).getAllByRole("listitem")[0] as HTMLElement;
-  const details = row.querySelector("details") as HTMLDetailsElement;
-  expect(details.open).toBe(false);
-  fireEvent.click(within(row).getByText("Work 6"));
-  expect(details.open).toBe(true);
+  render(<Summary mode="queue" />);
+  const list = await screen.findByRole("table", { name: "FLIGHT forward plan" });
+  const row = planRows(list)[0] as HTMLElement;
+  expect(row.querySelector("details")).toBeNull();
   expect(within(row).getByText("Review the change")).toBeTruthy();
   expect(within(row).getByRole("link", { name: "shop-app #522" }).getAttribute("href")).toBe(
     "https://github.com/octo-org/shop-app/issues/522",
@@ -139,33 +152,19 @@ it("opens a whole summary line in place to reveal next, linked refs and its upda
   expect(within(row).getByRole("link", { name: "shop-app PR #523" }).getAttribute("href")).toBe(
     "https://github.com/octo-org/shop-app/pull/523",
   );
-  expect(row.querySelector("time")?.dateTime).toBe(new Date(NOW - MIN).toISOString());
-  fireEvent.click(within(row).getByText("Work 6"));
-  expect(details.open).toBe(false);
+  expect(row.querySelector(".flight-plan-age")?.textContent).not.toBe("");
 });
 
-it("opens full lists grouped by kind, including entries beyond the summary and closed work", async () => {
+it("shows complete commitments and watches without copying active work, arrivals or outcomes", async () => {
   stub();
-  render(<Summary />);
-  fireEvent.click(await screen.findByRole("button", { name: "Ledger" }));
-  const ledger = document.getElementById("flight-ledger") as HTMLDetailsElement;
-  expect(ledger.open).toBe(true);
-  await within(ledger).findByRole("heading", { name: "Work" });
-  expect(document.activeElement).toBe(ledger.querySelector("summary"));
-  expect(screen.getByRole("button", { name: "Ledger" }).getAttribute("aria-controls")).toBe(
-    "flight-ledger",
-  );
-  expect(
-    within(ledger)
-      .getAllByRole("heading")
-      .map((el) => el.textContent),
-  ).toEqual(["Work", "Watch", "Commitments", "Incoming", "Scheduled"]);
-  expect(
-    within(within(ledger).getByRole("region", { name: "Work" })).getAllByRole("listitem"),
-  ).toHaveLength(6);
-  expect(within(ledger).getByText("Work 3")).toBeTruthy();
-  expect(await within(ledger).findByText("New request")).toBeTruthy();
-  expect(within(ledger).getByText("Check the PR")).toBeTruthy();
+  render(<Summary mode="queue" />);
+  const plan = await screen.findByRole("table", { name: "FLIGHT forward plan" });
+  expect(planRows(plan)).toHaveLength(8);
+  expect(within(plan).getByText("Watch 6")).toBeTruthy();
+  expect(within(plan).queryByText("New request")).toBeNull();
+  expect(within(plan).queryByText("Work 3")).toBeNull();
+  expect(within(plan).getByText("Check the PR")).toBeTruthy();
+  expect(screen.queryByText("All commitments and watches")).toBeNull();
 });
 
 it("uses schedule details for plans without confusing them with ledger keys", async () => {
@@ -174,15 +173,13 @@ it("uses schedule details for plans without confusing them with ledger keys", as
       ledgerEntry({ key: "plan:1", title: "Unrelated" }),
     ]),
   });
-  render(<Summary />);
-  const list = await screen.findByRole("list", { name: "Next" });
-  const row = within(list).getAllByRole("listitem")[1] as HTMLElement;
-  fireEvent.click(within(row).getByText("Check the PR"));
+  render(<Summary mode="queue" />);
+  const list = await screen.findByRole("table", { name: "FLIGHT forward plan" });
+  const row = within(list).getByText("Check the PR").closest("tr") as HTMLElement;
   expect(within(row).getByRole("link", { name: "shop-app PR #25" }).getAttribute("href")).toBe(
     "https://github.com/octo-org/shop-app/pull/25",
   );
-  // A plan's detail is its recorded outcome, not its next step.
-  expect(row.textContent).not.toContain("Check CI");
+  expect(row.textContent).toContain("Check CI");
   expect(row.querySelector("time")?.dateTime).toBe(new Date(NOW + 2 * MIN).toISOString());
   expect(row.textContent).not.toContain("Ticket agreed");
 });
@@ -194,16 +191,15 @@ it("keeps the summary when ledger details fail and reports the error", async () 
       body: { error: "Details unavailable" },
     }),
   });
-  render(<Summary />);
-  expect(await screen.findByText(summary.headline)).toBeTruthy();
+  render(<Summary mode="queue" />);
   expect((await screen.findByRole("alert")).textContent).toBe("Ledger: Details unavailable");
-  expect(screen.getByRole("list", { name: "Now" })).toBeTruthy();
+  expect(screen.getByRole("table", { name: "FLIGHT forward plan" })).toBeTruthy();
 });
 
 it("refreshes summary metrics on run and board changes and ledger details on flight changes", async () => {
   const fetch = stub();
-  render(<Summary />);
-  await screen.findByText(summary.headline);
+  render(<Summary mode="queue" />);
+  await screen.findByRole("table", { name: "FLIGHT forward plan" });
   for (const topic of ["agents", "boards", "flight"] as const) {
     fetch.mockClear();
     act(() => hub.refetchTopic(topic));
@@ -218,22 +214,86 @@ it("refreshes summary metrics on run and board changes and ledger details on fli
 
 it("shows the no-seat state", async () => {
   stub({ [RESOURCES.flightSummary.path]: flightSummary({ session: null }) });
-  render(<Summary />);
+  render(<Summary mode="queue" />);
   expect(await screen.findByText("No FLIGHT seat is configured.")).toBeTruthy();
 });
+
+it("shows no outcomes, without fetching the ledger, from a pre-update server without done", async () => {
+  const legacy = { ...flightSummary() } as Partial<ReturnType<typeof flightSummary>>;
+  delete legacy.done;
+  const fetch = stub({ [RESOURCES.flightSummary.path]: legacy });
+  render(<Summary mode="record" />);
+  expect(await screen.findByText("No recent outcomes recorded.")).toBeTruthy();
+  expect(fetch.mock.calls.some(([p]) => String(p).startsWith("/api/flight/ledger"))).toBe(false);
+});
+
+it("renders each outcome from the summary, and never stands next in for a missing result", async () => {
+  const unrecorded = ledgerEntry({
+    key: "work:quiet",
+    title: "Closed quietly",
+    status: "done",
+    next: "Should not show",
+    outcome: null,
+    refs: [],
+    basis: "",
+  });
+  stub({
+    [RESOURCES.flightSummary.path]: flightSummary({
+      done: [summaryOutcome(completed), summaryOutcome(unrecorded)],
+    }),
+  });
+  render(<Summary mode="record" />);
+  const table = await screen.findByRole("table", { name: "Recently done" });
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent),
+  ).toEqual(["Outcome", "Result", "Basis", "Closed"]);
+  const [shipped, quiet] = planRows(table);
+  const cells = within(shipped as HTMLElement).getAllByRole("cell");
+  expect(cells[1]?.textContent).toBe("Merged");
+  expect(cells[2]?.textContent).toBe("PR #523 merged");
+  expect(cells[3]?.querySelector("time")?.dateTime).toBe(new Date(NOW - 5 * MIN).toISOString());
+  expect(within(shipped as HTMLElement).getByRole("link", { name: "shop-app #522" })).toBeTruthy();
+  expect(shipped?.textContent).not.toContain("Stale next action");
+  expect(quiet?.textContent).toContain("Outcome not recorded");
+  expect(quiet?.textContent).not.toContain("Should not show");
+});
+
+it("keeps outcomes and the 24-hour scorecard together in Record only", async () => {
+  stub();
+  render(<Summary mode="record" />);
+  expect(await screen.findByRole("table", { name: "Recently done" })).toBeTruthy();
+  expect(screen.getByText("Shipped work")).toBeTruthy();
+  expect(screen.queryByText("New request")).toBeNull();
+  const tiles = screen.getByLabelText("Last 24 hours");
+  expect([...tiles.querySelectorAll("dt")].map((el) => el.textContent)).toEqual([
+    "CI failures",
+    "Parks",
+    "Spend (24 h)",
+  ]);
+  expect([...tiles.querySelectorAll("dd")].map((el) => el.textContent)).toEqual([
+    "3",
+    "2",
+    "~$3.75",
+  ]);
+  expect(screen.queryByText(summary.headline)).toBeNull();
+  expect(screen.queryByRole("table", { name: "FLIGHT forward plan" })).toBeNull();
+});
+
 it("shows a loading dash and a summary error", async () => {
   stub({
     [RESOURCES.flightSummary.path]: () => ({ status: 500, body: { error: "Summary unavailable" } }),
   });
-  render(<Summary />);
+  render(<Summary mode="queue" />);
   expect(screen.getByText("—")).toBeTruthy();
   expect((await screen.findByRole("alert")).textContent).toBe("Summary unavailable");
 });
 
 it("refreshes the summary when config changes", async () => {
   const fetch = stub();
-  render(<Summary />);
-  await screen.findByText(summary.headline);
+  render(<Summary mode="queue" />);
+  await screen.findByRole("table", { name: "FLIGHT forward plan" });
   fetch.mockClear();
   act(() => hub.refetchTopic("config"));
   await waitFor(() =>
@@ -242,8 +302,8 @@ it("refreshes the summary when config changes", async () => {
 });
 it("coalesces bursts of agent events for the summary", async () => {
   const fetch = stub();
-  render(<Summary />);
-  await screen.findByText(summary.headline);
+  render(<Summary mode="queue" />);
+  await screen.findByRole("table", { name: "FLIGHT forward plan" });
   fetch.mockClear();
   act(() => {
     for (let i = 0; i < 10; i++) hub.refetchTopic("agents");
@@ -253,13 +313,10 @@ it("coalesces bursts of agent events for the summary", async () => {
   );
 });
 
-it("does not fetch the full ledger until opened", async () => {
+it("does not fetch the historical ledger or render a nested ledger disclosure in Plan", async () => {
   const fetch = stub();
-  render(<Summary />);
-  await screen.findByText(summary.headline);
+  render(<Summary mode="queue" />);
+  await screen.findByRole("table", { name: "FLIGHT forward plan" });
   expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightLedger.path)).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Ledger" }));
-  await waitFor(() =>
-    expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightLedger.path)).toBe(true),
-  );
+  expect(screen.queryByText("All commitments and watches")).toBeNull();
 });

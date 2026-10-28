@@ -13,6 +13,7 @@ import { apiDelete, apiPut } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { Panel } from "../hud/Panel.tsx";
 import { briefUpdated } from "./Brief.tsx";
 
 const KIND_LABEL: Record<FlightMemoryKind, string> = {
@@ -251,41 +252,51 @@ function RepoMemory({ repoId }: { repoId: string }) {
   );
 }
 
-export function MemoryPanel() {
+export function MemoryPanel({ expanded = false }: { expanded?: boolean }) {
   const { data: repos, error } = useResource<RepoView[]>(RESOURCES.repos);
   const [selected, setSelected] = useState("");
   const repoId = repos?.find((repo) => repo.id === selected)?.id ?? repos?.[0]?.id;
-  return (
+  const content = (
+    <div className="pb">
+      <p className="note">{FLIGHT_MEMORY_HEADING}</p>
+      {error && (
+        <p className="note err" role="alert">
+          {error.message}
+        </p>
+      )}
+      {repos === undefined ? (
+        !error && <p className="note">Loading repos…</p>
+      ) : !repos.length ? (
+        <p className="note">No repos configured.</p>
+      ) : (
+        <>
+          <label className="memory-repo">
+            Repo
+            <select value={repoId} onChange={(e) => setSelected(e.target.value)}>
+              {repos.map((repo) => (
+                <option key={repo.id} value={repo.id}>
+                  {repo.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          {repoId && <RepoMemory key={repoId} repoId={repoId} />}
+        </>
+      )}
+    </div>
+  );
+  return expanded ? (
+    <Panel
+      id="memoryP"
+      className="flight-memory"
+      title="Durable knowledge"
+      sub="repo facts, lessons, crew knowledge and playbooks"
+    >
+      <div className="flight-knowledge-scroll">{content}</div>
+    </Panel>
+  ) : (
     <section className="panel flight-memory" id="memoryP" aria-label="Memory">
-      <Expandable summary={<h2>Memory</h2>}>
-        <div className="pb">
-          <p className="note">{FLIGHT_MEMORY_HEADING}</p>
-          {error && (
-            <p className="note err" role="alert">
-              {error.message}
-            </p>
-          )}
-          {repos === undefined ? (
-            !error && <p className="note">Loading repos…</p>
-          ) : !repos.length ? (
-            <p className="note">No repos configured.</p>
-          ) : (
-            <>
-              <label className="memory-repo">
-                Repo
-                <select value={repoId} onChange={(e) => setSelected(e.target.value)}>
-                  {repos.map((repo) => (
-                    <option key={repo.id} value={repo.id}>
-                      {repo.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {repoId && <RepoMemory key={repoId} repoId={repoId} />}
-            </>
-          )}
-        </div>
-      </Expandable>
+      <Expandable summary={<h2>Memory</h2>}>{content}</Expandable>
     </section>
   );
 }

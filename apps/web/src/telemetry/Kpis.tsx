@@ -74,8 +74,11 @@ function Kpi({ tile: k }: { tile: Tile }) {
   );
 }
 
-/** Today's KPI row (catalogue 2.6.2). */
-export function Kpis({ t }: { t: Telemetry | undefined }) {
+/**
+ * Today's KPI row (catalogue 2.6.2). `live` (default true): the telemetry is fresh, so the tiles
+ * that move with the crew today carry the live marker.
+ */
+export function Kpis({ t, live = true }: { t: Telemetry | undefined; live?: boolean }) {
   const nameOf = useSeatName();
   const d = t?.today;
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
@@ -112,27 +115,27 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
       label: "Tokens",
       value: num((x) => kTokens(x.tokens)),
       detail: `today, in + out · ${num((x) => kTokens(x.cacheRead))} cache read`,
-      live: true,
+      live,
     },
     {
       key: "cost",
       label: "~Cost",
       value: num((x) => cost(x.costUsd)),
       detail: "today, API-equivalent",
-      live: true,
+      live,
     },
     {
       key: "tools",
       label: "Tool calls",
       value: num((x) => kTokens(x.toolCalls)),
       detail: `today · ${num((x) => kTokens(x.turns))} turns`,
-      live: true,
+      live,
     },
     {
       key: "commits",
       label: "Commits",
       detail: "today",
-      live: true,
+      live,
       ...commits,
     },
     {
@@ -140,7 +143,7 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
       label: "Working",
       value: num((x) => String(x.working)),
       detail: `now, of ${num((x) => String(x.agents))} agents`,
-      live: true,
+      live,
     },
     {
       key: "merged",
