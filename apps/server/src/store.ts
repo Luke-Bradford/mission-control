@@ -121,6 +121,11 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
 -- Kept apart from runs so run queries stay small; written on its own change check.
 CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
+-- Map snapshot parts that never change for their key (a commit's tree and imports, a merge's files).
+CREATE TABLE IF NOT EXISTS map_cache (
+  kind TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+  PRIMARY KEY (kind, scope, key)
+);
 -- HUD state changes that matter (#26 B14): into or out of a notable state.
 CREATE TABLE IF NOT EXISTS agent_events (
   agent_id TEXT NOT NULL, at INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
@@ -1807,6 +1812,29 @@ export class Store {
          ON CONFLICT(run_id) DO UPDATE SET digest = excluded.digest`,
       )
       .run(runId, JSON.stringify(d));
+  }
+
+  mapCacheGet(kind: string, scope: string, key: string): string | null {
+    const row = this.db
+      .prepare("SELECT value FROM map_cache WHERE kind = ? AND scope = ? AND key = ?")
+      .get(kind, scope, key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  /** Stores a map cache row; `exclusive` drops the kind and scope's other rows (superseded keys). */
+  mapCachePut(kind: string, scope: string, key: string, value: string, exclusive: boolean): void {
+    this.transaction(() => {
+      if (exclusive)
+        this.db
+          .prepare("DELETE FROM map_cache WHERE kind = ? AND scope = ? AND key <> ?")
+          .run(kind, scope, key);
+      this.db
+        .prepare(
+          `INSERT INTO map_cache (kind, scope, key, value) VALUES (?, ?, ?, ?)
+           ON CONFLICT(kind, scope, key) DO UPDATE SET value = excluded.value`,
+        )
+        .run(kind, scope, key, value);
+    });
   }
 
   digest(runId: string): RunDigest | null {

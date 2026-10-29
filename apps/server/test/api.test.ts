@@ -3992,6 +3992,59 @@ describe("boards, escalations, health", () => {
     }
   });
 
+  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    const transcriptPath = join(dir, "warm.jsonl");
+    writeFileSync(transcriptPath, "");
+    store.upsertRun(run({ id: "warm-run", agentId: "guido-1", transcriptPath }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "warm-run",
+      cliSessionId: null,
+      vendor: "claude",
+      state: "running",
+      reason: null,
+      worktree: dir,
+      updatedAt: NOW,
+    });
+    const builds = () => supervisorCalls.filter((c) => c[0] === "context").length;
+    const start = () =>
+      buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        supervisor: stubSupervisor(),
+        warmMap: true,
+      });
+    // built before anyone asks
+    const warmed = start();
+    try {
+      await warmed.ready();
+      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(
+        (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
+      ).toBe(200);
+      expect(builds()).toBe(1);
+    } finally {
+      await warmed.close();
+    }
+    // asked for while the warm-up is still building: the same build, not a second
+    supervisorCalls = [];
+    const racing = start();
+    try {
+      await racing.ready();
+      const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+      expect(response.statusCode).toBe(200);
+      expect(builds()).toBe(1);
+    } finally {
+      await racing.close();
+    }
+  });
+
   it("carries the repo's resolved area and hard-rule globs in the map snapshot", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
