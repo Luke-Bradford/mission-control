@@ -1086,6 +1086,24 @@ The record of the first real run against the live loops (2026-10-17) is kept out
 Screenshots are not kept in the repo, because they would show a real board. Run a preview on a
 copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=1`) to see the HUD.
 
+### Checking the write floors
+
+The floors (what a Codex or Claude seat can write) are otherwise tested by reading generated config.
+`apps/server/test/seat-floors.test.ts` launches the installed `codex` and `claude` CLIs through the
+production config (`codexSeatConfig`, `crewSandboxSettings`) with a temp HOME and fake auth, runs a
+write probe inside each, and checks the disk. For a writer and a read-only seat it covers the pnpm
+store (Codex: read-only to both modes; Claude's store is the seat's own temp root, writable and
+nowhere else), the worktree itself (writable for a writer, refused for a read-only seat), the
+worktree's `.git` pointer, the clone's git dir, the worktree's git dir, `.codex` and the hub's data
+dir. Claude runs against a local fake Messages API, so no login or network is used. Codex runs the
+profile with `codex sandbox`, not the app-server.
+
+It runs only on macOS with `sandbox-exec` that can apply a profile (not from inside another
+sandbox) and the `codex` / `claude` CLI on PATH; elsewhere, including Linux CI, it skips. Before
+merging any change to a floor (`codex-floor.ts`, `crewSandboxSettings`, the pnpm store paths), run
+`pnpm -s vitest run apps/server/test/seat-floors.test.ts` on a Mac outside a sandbox and confirm
+the tests ran rather than skipped.
+
 ## Agent comms relay
 
 The relay stores signed ciphertext, public membership records and wrapped key grants. It never
