@@ -2,7 +2,7 @@ import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/co
 import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
-import { NEED_TEXT_MAX, needText } from "../comms/NeedsList.tsx";
+import { NEED_TEXT_MAX, needText } from "../comms/needText.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
