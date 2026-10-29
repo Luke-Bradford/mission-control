@@ -100,6 +100,17 @@ export interface MapSnapshot {
   repoId: string;
   tree: { path: string; lines: number }[];
   imports: { from: string; to: string }[];
+  /** Merged-PR file history, keyed by the index of the file in `tree` to keep the snapshot small. */
+  hist: {
+    /** Start of the fixed history window, in milliseconds since the epoch. */
+    since: number;
+    prCount: number;
+    fixCount: number;
+    /** [merged PR count, bug-fix PR count, latest merged timestamp, recent PR numbers]. */
+    files: Record<string, [number, number, number, number[]]>;
+    /** [file index, file index, shared PR count, share of the less-frequently changed file]. */
+    coupling: [number, number, number, number][];
+  };
   seats: MapSeat[];
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */

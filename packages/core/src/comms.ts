@@ -24,6 +24,8 @@ export interface CommsSendInput {
   label?: CommsLabel;
   ref?: string;
   replyTo?: string;
+  /** A run-specific delivery stays pending for this run when its seat takes other work. */
+  targetRunId?: string;
 }
 export interface CommsReaction {
   messageId: string;

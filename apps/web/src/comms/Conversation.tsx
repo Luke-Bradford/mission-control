@@ -325,11 +325,7 @@ function MessageActions({ message, onReply }: { message: CommsMessage; onReply: 
       <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
         Reply
       </button>
-      <button
-        type="button"
-        onClick={() => react("seen")}
-        aria-label={`Acknowledge ${message.from}`}
-      >
+      <button type="button" onClick={() => react("seen")} aria-label={`Ack ${message.from}`}>
         Ack
       </button>
       <button type="button" onClick={pin}>

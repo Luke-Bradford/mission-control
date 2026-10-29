@@ -67,7 +67,13 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_OPEN_NOTE } from "../src/api.ts";
+import {
+  buildApp,
+  CHECK_FAILED,
+  CONFIG_WRITES_UNAVAILABLE,
+  LOOP_WRITES_DISABLED,
+  NO_OPEN_NOTE,
+} from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import {
@@ -413,6 +419,38 @@ const post = (url: string, headers: Record<string, string> = json, body: object 
     headers,
     ...(headers["content-type"] === "application/json" ? { payload: body } : {}),
   });
+
+describe("audit", () => {
+  const emptyAudit = (days: number) => ({
+    range: { since: NOW - days * DAY, until: NOW },
+    longRunners: [],
+    deathLoops: [],
+    reworkRounds: [],
+    refusalsByRule: [],
+    questions: { asked: 0, answered: 0, answerMs: null },
+    costPerMergedTicket: [],
+    modelPromptTimeline: [],
+  });
+
+  it("defaults to 30d and returns the audit response shape", async () => {
+    const response = await get("/api/audit");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(emptyAudit(30));
+  });
+
+  it.each([7, 30, 90, 365])("accepts the %dd range", async (days) => {
+    const response = await get(`/api/audit?range=${days}d`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(emptyAudit(days));
+  });
+
+  it("rejects an invalid range", async () => {
+    const response = await get("/api/audit?range=14d");
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "range must be 7d, 30d, 90d, or 365d" });
+  });
+});
+
 const postBody = (url: string, body: unknown) =>
   app.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
 
@@ -988,6 +1026,7 @@ const NEW_REPO = {
 
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
+  ["GET", "/api/audit"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
@@ -1113,6 +1152,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
+  ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -3485,6 +3525,7 @@ describe("ticket detail", () => {
       title: "Quote cache",
       url: "https://github.com/o/shop-app/issues/7",
       state: "open",
+      closedAt: null,
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
@@ -3633,6 +3674,13 @@ describe("boards, escalations, health", () => {
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
+      hist: expect.objectContaining({
+        since: expect.any(Number),
+        prCount: 0,
+        fixCount: 0,
+        files: {},
+        coupling: [],
+      }),
       findings: [],
       seats: [{ seat: "guido-1", context: null, scope: { read: [], modified: [] } }],
     });
@@ -3643,6 +3691,11 @@ describe("boards, escalations, health", () => {
       from: "packages/core/src/map.ts",
       to: "packages/core/src/types.ts",
     });
+    expect(response.json().imports).toContainEqual({
+      from: "apps/server/src/map/ring.ts",
+      to: "packages/core/src/types.ts",
+    });
+    expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
   });
 
@@ -6232,8 +6285,15 @@ describe("the first loop's engine", () => {
     touches: null,
     cardFor: null,
   } as const;
-  const engineApp = (seatRunId: string | null, knownSecrets?: () => Promise<readonly string[]>) => {
+  const engineApp = (
+    seatRunId: string | null,
+    knownSecrets?: () => Promise<readonly string[]>,
+    lifts = false,
+  ) => {
     const told: string[] = [];
+    const calls: Parameters<
+      NonNullable<Parameters<typeof buildApp>[0]["engine"]>["onOperatorMessage"]
+    >[] = [];
     const sup = stubSupervisor();
     sup.seat = () =>
       seatRunId === null
@@ -6254,14 +6314,18 @@ describe("the first loop's engine", () => {
       supervisor: sup,
       knownSecrets,
       engine: {
-        onOperatorMessage: async (runId) => {
+        onOperatorMessage: async (...args) => {
+          const [runId] = args;
           told.push(runId);
-          return false;
+          calls.push(args);
+          if (lifts && args[2]?.beforeLift !== undefined && !(await args[2].beforeLift()))
+            return false;
+          return lifts;
         },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
       },
     });
-    return { a, told };
+    return { a, told, calls };
   };
   const message = (a: FastifyInstance) =>
     a.inject({
@@ -6273,9 +6337,10 @@ describe("the first loop's engine", () => {
 
   it("tells the engine of a message to a seat whose run is looped", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
-    const { a, told } = engineApp("looped");
+    const { a, told, calls } = engineApp("looped");
     expect((await message(a)).statusCode).toBe(200);
     expect(told).toEqual(["looped"]);
+    expect(calls).toEqual([["looped"]]);
     await a.close();
   });
 
@@ -6293,7 +6358,7 @@ describe("the first loop's engine", () => {
 
   it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
     store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
-    const { a, told } = engineApp(null);
+    const { a, told, calls } = engineApp(null);
     const r = await a.inject({
       method: "POST",
       url: "/api/runs/aside/resume",
@@ -6301,6 +6366,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(told).toEqual(["aside"]);
+    expect(calls).toEqual([["aside", "CAPCOM"]]);
     expect(r.statusCode).toBe(409);
     expect(
       (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
@@ -6308,6 +6374,52 @@ describe("the first loop's engine", () => {
     ).toBe(404);
     await a.close();
   });
+
+  it.each(["ruling", "review-failed"] as const)(
+    "resumes a %s park without accepting a review waiver",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/resume",
+        headers: json,
+        payload: {},
+      });
+      expect(calls).toEqual([["aside", "CAPCOM"]]);
+      expect(r.statusCode).toBe(409);
+      await a.close();
+    },
+  );
+
+  it.each(["review", "review-ruling"] as const)(
+    "resumes a %s park by explicitly accepting its review waiver",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/resume",
+        headers: json,
+        payload: {},
+      });
+      expect(calls).toEqual([["aside", "CAPCOM", { action: "accept" }]]);
+      expect(r.statusCode).toBe(409);
+      await a.close();
+    },
+  );
 
   it.each([
     ["a body", { x: 1 }, true, "aside", 400],
@@ -6355,6 +6467,147 @@ describe("the first loop's engine", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ ok: true });
     await a.close();
+  });
+
+  it.each(["review", "review-ruling"] as const)(
+    "queues rework for a set-aside %s park and uses the non-waiving engine resume path",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          ticket: "shop-app#9",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null, undefined, true);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/message",
+        headers: json,
+        payload: { text: "Please address the findings." },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(calls).toEqual([
+        [
+          "aside",
+          "CAPCOM",
+          expect.objectContaining({ kinds: [kind], beforeLift: expect.any(Function) }),
+        ],
+      ]);
+      expect(store.comms(0)).toEqual([
+        expect.objectContaining({
+          from: "CAPCOM",
+          to: "guido-1",
+          ticket: "shop-app#9",
+          text: "Please address the findings.",
+        }),
+      ]);
+      await a.close();
+    },
+  );
+
+  it.each(["blocked", "ci", "ruling"] as const)(
+    "refuses rework for a %s park without queuing a message",
+    async (kind) => {
+      store.upsertRun(
+        run({
+          id: "aside",
+          agentId: "guido-1",
+          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+        }),
+      );
+      const { a, calls } = engineApp(null);
+      const r = await a.inject({
+        method: "POST",
+        url: "/api/runs/aside/message",
+        headers: json,
+        payload: { text: "Please address the findings." },
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toEqual({ error: "rework is only available for review parks" });
+      expect(calls).toEqual([]);
+      expect(store.comms(0)).toEqual([]);
+      await a.close();
+    },
+  );
+
+  it("does not queue rework when the engine cannot lift the parked run", async () => {
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        loop: {
+          ...loop,
+          phase: "parked",
+          parked: { kind: "review", reason: "held", ended: false },
+        },
+      }),
+    );
+    const { a, calls } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: "Please address the findings." },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(calls).toEqual([
+      [
+        "aside",
+        "CAPCOM",
+        expect.objectContaining({ kinds: ["review"], beforeLift: expect.any(Function) }),
+      ],
+    ]);
+    expect(store.comms(0)).toEqual([]);
+    await a.close();
+  });
+
+  it("enforces rework text bounds and refuses loop writes in a preview", async () => {
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        loop: {
+          ...loop,
+          phase: "parked",
+          parked: { kind: "review", reason: "held", ended: false },
+        },
+      }),
+    );
+    const bounded = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const invalid = await bounded.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: " " },
+    });
+    expect(invalid.statusCode).toBe(400);
+    await bounded.close();
+
+    const preview = buildApp({
+      config,
+      store,
+      bus,
+      noLoopWrites: true,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const refused = await preview.inject({
+      method: "POST",
+      url: "/api/runs/aside/message",
+      headers: json,
+      payload: { text: "Please address the findings." },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({ error: LOOP_WRITES_DISABLED });
+    await preview.close();
   });
 
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
@@ -6875,6 +7128,7 @@ describe("operator token", () => {
     expect(bare.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
     expect(existsSync(join(stateDir, "PAUSE"))).toBe(false);
     expect((await guardedPost(pause, { [OPERATOR_HEADER]: "wrong" })).statusCode).toBe(401);
+    expect((await guardedPost("/api/runs/nope/message", {})).statusCode).toBe(401);
     const away = await guardedPost("/api/settings/away", {}, { ...DEFAULT_AWAY, on: true });
     expect(away.statusCode).toBe(401);
     const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });

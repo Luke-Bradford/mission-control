@@ -43,7 +43,6 @@ Retention values:
 | PR size (lines/files) | **not in PR_FIELDS.** Only on demand: FLIGHT's `read_pr` asks `gh pr view --json additions,deletions,changedFiles,files` (flight/tools.ts:1995-2030) and doesn't store the result | — | — | PR length is not stored |
 | `commit_lines` | store.ts:243; filled lazily by `GET /api/telemetry` from the seat's worktree (api.ts:2531-2560, setCommitLines store.ts:3876) | sha → additions, deletions | Kept, but only 90 of 588 crew commits are measured (only when Telemetry was opened over their range) | Lines per crew commit, partially |
 | `run_commits` | store.ts:239 | run_id, repo, branch, sha, at | Kept (588) | Commits per run (telemetry.ts:313) |
-| Ready→merged minutes | `Store.readyToMergedMinutes` store.ts:2194 | joins pull_requests + board_moves + flow_issues | bounded by pull_requests' 30d | Lead time |
 | Hard-rule/stray paths in a PR | `runs.loop.touches.paths`, `loop.gate.strays` (types.ts:157-186) | path lists for the pushed sha | Latest on run; history in run_attempts `loop` | Hard-rule PR tracking |
 
 ### 1d. RETRO reviews and findings
@@ -59,7 +58,7 @@ Retention values:
 | Fix rounds sent | `seat_lines` keys counted by `fixesSent` (review.ts:333); `RunLoopView.round` (api.ts:3083) | claim keys | Engine-origin lines kept; others 7d (store.ts:1761) | Rework rounds per run |
 | Minor findings filed | `loop.prBody {reviewId, minor}`, `loop.minorIssueNumber` (types.ts:170,188) | per run | Kept on run | Minor findings that went to the PR body or a tech-debt issue |
 | Telemetry quality | telemetry.ts:265-318; type views.ts:350 | retroFindingsPerPr, sentBackPrs, reviewRoundsPerPr, firstPassReviewPct, reviewedPrs, ciGreenFirstPushPct, humanReviewWaitMs, commitsPerRun | Computed over `FLOW_DAYS`=14 (core/hud.ts:61) | Review success rates, already served by `GET /api/telemetry` |
-| FLIGHT retrospective | flight/retrospective.ts:207; type core/flight.ts:296 | daily at 03:00: FlightMetrics (24h: merged, opened, ciFailures, reruns, parks, per-seat tokens/cost, readyToMergedMin), reviews reported/failed/failRate, top park reasons, red-main episodes, costliest runs | **Latest only**: one JSON per repo in `settings` (`flight-retrospective:<repo>`), delivered to FLIGHT via `flight_state` (flight/state.ts:760) | A day's audit summary; no history |
+| FLIGHT retrospective | flight/retrospective.ts:207; type core/flight.ts:296 | daily at 03:00: FlightMetrics (24h: opened, ciFailures, reruns, parks, per-seat tokens/cost), reviews reported/failed/failRate, top park reasons, red-main episodes, costliest runs | **Latest only**: one JSON per repo in `settings` (`flight-retrospective:<repo>`), delivered to FLIGHT via `flight_state` (flight/state.ts:760) | A day's audit summary; no history |
 
 ### 1e. CI, flakes, tests
 

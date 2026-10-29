@@ -1,12 +1,14 @@
-import { type Crew, clockHm, seatCallSign } from "@mc/core";
+import { type ConfigView, type Crew, clockHm, seatCallSign } from "@mc/core";
 import { useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
+import { ExternalLink } from "../components/ExternalLink.tsx";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { githubItemHref } from "../links.ts";
 import { useSeatName } from "../seatName.ts";
-import { answersToday, overturnText } from "./conversation.ts";
+import { decidedToday, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 
 const DASH = "—";
@@ -26,6 +28,16 @@ function DecidedRow({
   tz: string | null;
 }) {
   const nameOf = useSeatName();
+  const repos = useResource<ConfigView>(RESOURCES.config).data?.repos ?? [];
+  const [refRepo, refNumber] = d.ref?.split("#") ?? [];
+  const refUrl =
+    refRepo === undefined || refNumber === undefined
+      ? null
+      : githubItemHref(
+          repos.find((r) => r.id === refRepo)?.github ?? "",
+          "issue",
+          Number(refNumber),
+        );
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -64,7 +76,16 @@ function DecidedRow({
             Overturn
           </button>
         )}
-        <span className="min0">{d.about}</span>
+        <span className="min0">
+          {refUrl !== null && d.ref !== null ? (
+            <>
+              <ExternalLink url={refUrl}>{d.ref}</ExternalLink>
+              {d.about.startsWith(d.ref) ? d.about.slice(d.ref.length) : ` ${d.about}`}
+            </>
+          ) : (
+            d.about
+          )}
+        </span>
       </div>
       <div className="s">
         <b>{d.decision}</b> · {d.basis}
@@ -78,7 +99,7 @@ function DecidedRow({
   );
 }
 
-/** "Decided without you" (catalogue §2.2.7): the questions FLIGHT answered today, newest first. */
+/** "Decided without you" (catalogue §2.2.7): the questions FLIGHT answered and the tickets it closed or reordered today, newest first. */
 export function Decided() {
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -86,7 +107,7 @@ export function Decided() {
   const now = useNow();
   if (view === undefined) return <p className="pb note">{DASH}</p>;
   if (!view.seat) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
-  const answers = tz === null ? [] : answersToday(view.decisions, now, tz);
+  const answers = tz === null ? [] : decidedToday(view.decisions, now, tz);
   if (answers.length === 0) return <p className="pb note">{NO_DECISIONS}</p>;
   const { seat } = view;
   return (

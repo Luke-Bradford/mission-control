@@ -171,17 +171,18 @@ export function Kanban({
           const on = col === openCol;
           return (
             <div key={col} className="kcol">
-              <button
-                type="button"
-                className="kh"
-                aria-expanded={on}
-                aria-controls={panelId(col)}
-                onClick={() => setPicked(col)}
-              >
-                <span title={title}>
-                  {label} <span className="n">{count}</span>
-                </span>
-              </button>
+              <h2 className="kh">
+                <button
+                  type="button"
+                  aria-expanded={on}
+                  aria-controls={panelId(col)}
+                  onClick={() => setPicked(col)}
+                >
+                  <span title={title}>
+                    {label} <span className="n">{count}</span>
+                  </span>
+                </button>
+              </h2>
               {note}
               {on && (
                 <div className="kb" id={panelId(col)}>
@@ -197,22 +198,22 @@ export function Kanban({
         if (list.length === 0) {
           return (
             <div key={col} className="kcol empty" title={title ?? `${col}: nothing here`}>
-              <div className="kh">
+              <h2 className="kh">
                 <span title={title}>
                   {label} <span className="n">{count}</span>
                 </span>
-              </div>
+              </h2>
               {note}
             </div>
           );
         }
         return (
           <div key={col} className="kcol">
-            <div className="kh">
+            <h2 className="kh">
               <span title={title}>
                 {label} <span className="n">{count}</span>
               </span>
-            </div>
+            </h2>
             {note}
             <div className="kb">
               {cards.map((i) => (

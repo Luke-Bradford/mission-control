@@ -53,6 +53,83 @@ const steps = (region: HTMLElement): (string | null)[] =>
     .map((li) => li.textContent);
 
 describe("Setup › Loops templates", () => {
+  it("shows the approved loop chain, selected-step inspector and a ticket run overlay", () => {
+    render(<Loops config={cfg} />);
+
+    const chain = screen.getByRole("region", { name: "Feature loop chain" });
+    expect(
+      within(chain)
+        .getAllByRole("button", { name: /gate:/ })
+        .map((button) => button.textContent),
+    ).toEqual([
+      "PlanPlanner seat (FAO)gate: has a ## Plan",
+      "BuildDeveloper seatgate: evidence reported",
+      "CI checksGitHub Actionsgate: all checks green",
+      "ReviewRETRO · fresh seatgate: approved",
+      "MergeHub enginegate: mergeable",
+      "DoneBoard → Donegate: merged",
+    ]);
+    const ciReturn = within(chain).getByLabelText("CI checks returns to Build");
+    expect(ciReturn.getAttribute("class")).toContain("active");
+    expect(ciReturn.getAttribute("d")).toBe("M 510 108 V 150 H 330 V 108");
+    expect(within(chain).getByText("CI fail ≤3 · used 1/3")).toBeTruthy();
+    expect(within(chain).getByLabelText("Review returns to Build").getAttribute("class")).toContain(
+      "active",
+    );
+    expect(within(chain).getByLabelText("Review returns to Build").getAttribute("d")).toBe(
+      "M 714 108 V 198 H 300 V 108",
+    );
+    expect(within(chain).getByText("changes ≤3 · used 1/3")).toBeTruthy();
+    expect(within(chain).getByLabelText("Merge conflict parks for FLIGHT")).toBeTruthy();
+    expect(within(chain).getByLabelText("FLIGHT sync returns to CI checks")).toBeTruthy();
+    expect(within(chain).getByLabelText("FLIGHT sync returns to Build")).toBeTruthy();
+    expect(within(chain).getByText("FLIGHT at cap")).toBeTruthy();
+    expect(within(chain).getByText("or ask CAPCOM (default)")).toBeTruthy();
+
+    fireEvent.click(within(chain).getByRole("button", { name: /Plan: gate/ }));
+    const planInspector = screen.getByRole("region", { name: "Step inspector" });
+    expect(planInspector.textContent).toContain("ConditionalSize M+");
+    expect(planInspector.textContent).toContain("Cap—");
+    expect(planInspector.textContent).toContain("At the cap—");
+
+    fireEvent.click(within(chain).getByRole("button", { name: /Review: gate: approved/ }));
+    expect(
+      within(chain).getByRole("button", { name: /CI checks: gate: all checks green/ }).className,
+    ).toContain("now");
+    const inspector = screen.getByRole("region", { name: "Step inspector" });
+    expect(inspector.textContent).toContain("Gate to move onapproved");
+    expect(inspector.textContent).toContain("If it failsBack to Build with findings");
+    expect(inspector.textContent).toContain("Cap3 rounds");
+    expect(inspector.textContent).toContain("At the capParked for FLIGHT");
+    expect(inspector.textContent).toContain("Model / commandretro-cx · gpt-5.6-sol · high");
+    expect(inspector.textContent).toContain("Review {diff} against {done_when}");
+
+    const overlay = screen.getByRole("region", { name: "Run overlay" });
+    expect(overlay.textContent).toContain("Ticket #681 · inco-cx");
+    expect(overlay.textContent).toContain("Now: CI checks · try 2 of 3");
+    expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
+    expect(overlay.textContent).toContain("Review findings → Build · 1 of 3");
+
+    fireEvent.click(within(chain).getByRole("button", { name: "Loop only" }));
+    expect(within(chain).getByRole("button", { name: /CI checks: gate/ }).className).not.toContain(
+      "now",
+    );
+    expect(
+      within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
+    ).not.toContain("active");
+    expect(within(chain).getByText("CI fail ≤3")).toBeTruthy();
+    expect(within(chain).queryByText("CI fail ≤3 · used 1/3")).toBeNull();
+  });
+
+  it("keeps phone-width horizontal scrolling inside the chain drawing (hud.css)", () => {
+    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const rule = (selector: string) =>
+      css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(String.raw`\.loop-chain-scroll`)).toContain("overflow-x: auto;");
+    expect(rule(String.raw`\.loop-chain`)).toContain("min-width: 1200px;");
+    expect(rule(String.raw`\.loop-chain`)).not.toContain("overflow-x:");
+  });
+
   it("template rows wrap within their width (hud.css)", () => {
     const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
     const rule = (selector: string) =>

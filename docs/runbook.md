@@ -788,11 +788,29 @@ A run can stay parked after its seat has moved on. This happens when it was set 
 curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'
 ```
 
-This lifts the park, as your message to a live seat would:
+On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
+and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
+action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
+the configured review-round cap for a head, optionally adding a short fix list; a second grant for
+that head is left to the controller.
+
+This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
 The route answers 409 when the engine is off, or when nothing was lifted.
+
+### Rework a parked run
+
+To send rework text to a set-aside run that is parked on review findings, use:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/message -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"text":"Please address the findings."}'
+```
+
+The text waits for that run (it is not sent to a newer run on the same seat). The route resumes only
+`review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
+refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
 ## What it observes
 
@@ -883,6 +901,10 @@ empty lists and `false`; the block may fill omitted keys. The block may replace 
 inherits. An explicit hard-rule list in either source,
 including `[]`, sets `hardRulesSet`. Without a list in either source the hub never auto-merges and
 posts a Needs you note pointing to `repos[].rules.hard_rules` in user config.
+
+Set `tech_debt_issue` to an open issue number to collect merged PR minor findings as one headed
+comment per PR. Without it, the hub uses the one open issue whose title starts `Tech debt: the
+rolling list`; when neither is available, it files the existing per-PR Backlog issue instead.
 
 An unknown key or invalid value is refused with the key named. `pick_from: []` and an area with no
 globs are refused, and area globs must be repo-relative with `**` only as a trailing `/**`. No
