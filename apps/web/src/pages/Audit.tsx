@@ -29,6 +29,8 @@ const duration = (ms: number | null | undefined): string => {
 const cost = (n: number | null | undefined): string =>
   n === null || n === undefined ? "—" : `$${n.toFixed(2)}`;
 const changes = (s: AuditPrSize): number => s.additions + s.deletions;
+const logPercentOfMax = (value: number, max: number): number =>
+  (Math.log1p(value) / Math.log1p(max)) * 100;
 const percent = (n: number | null): string => (n === null ? "—" : `${Math.round(n * 100)}%`);
 
 /** Operator audit: durable evidence over one shared server-bounded period. */
@@ -169,7 +171,7 @@ function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
   return (
     <Panel
       title="PR size"
-      sub={`${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`}
+      sub={`Log scale · ${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`}
       className="audit-panel"
     >
       <div className="pb audit-list">
@@ -183,7 +185,10 @@ function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
                 {prLabel(s.number)}
               </a>
               <span className="audit-bar-track">
-                <span className="audit-bar" style={{ width: `${(changes(s) / max) * 100}%` }} />
+                <span
+                  className="audit-bar"
+                  style={{ width: `${logPercentOfMax(changes(s), max)}%` }}
+                />
               </span>
               <span>
                 {changes(s).toLocaleString()} lines
