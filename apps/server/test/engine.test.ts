@@ -3370,6 +3370,41 @@ describe("the engine runs reviews", () => {
     expect(noteKeys().filter((k) => k.startsWith("review:"))).toEqual([]);
   });
 
+  it("holds a queued review on constrained capacity", async () => {
+    store.addMachineSample({
+      at: clock,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 14 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+    await toReview();
+    expect(first()).toMatchObject({ state: "queued", runId: null });
+    expect(h.starts).toEqual([]);
+    expect(store.run(RUN)?.endedAt).toBeNull();
+  });
+
+  it("leaves an already-running review alone when capacity becomes constrained", async () => {
+    await toReview();
+    const before = first();
+    store.addMachineSample({
+      at: clock,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 14 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+    await h.engine.tick();
+    expect(first()).toMatchObject({ state: "running", runId: before.runId });
+    expect(h.starts).toHaveLength(1);
+  });
+
   it("no scratch seat: 7a unchanged", async () => {
     seats().splice(
       seats().findIndex((s) => s.id === RETRO),

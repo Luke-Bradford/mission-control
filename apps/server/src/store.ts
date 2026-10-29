@@ -4577,6 +4577,19 @@ export class Store {
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
   }
 
+  /** Updates one open operator item in place, keeping its key and history. */
+  refreshNote(n: NoteInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
+           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
+           at = excluded.at, cleared_at = NULL, dismissed_at = NULL`,
+      )
+      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+  }
+
   clearNote(key: string, at: number): void {
     this.db
       .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
