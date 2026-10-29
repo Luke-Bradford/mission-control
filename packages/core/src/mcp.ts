@@ -360,7 +360,7 @@ export const MC_PUSH_CHECKS =
 /** What `mc push` found for one configured check on the pushed head. */
 export type CheckState = "missing" | "failed";
 const CHECKS_ADVICE =
-  "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), in a clean worktree at this commit, then push again.";
+  "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again.";
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,

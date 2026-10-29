@@ -50,6 +50,7 @@ import {
   mergeStepFailedText,
   minorNotPostedText,
   NEW_LOOP,
+  NO_CI_AFTER_MS,
   originMovedText,
   type Profile,
   type PullRequestView,
@@ -1430,6 +1431,25 @@ describe("refusals", () => {
     expect(store.comms(0).map((c) => c.text)).toEqual([text]);
     expect(store.notes()).toEqual([]);
     expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
+  });
+
+  it("a checks hand-off restarts the push clock; with no progress after a full window the park names the checks", async () => {
+    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    const refusal = { ok: false, text, transient: false } as const;
+    h.pushResults = Array.from({ length: 8 }, () => refusal);
+    report();
+    h.noSession = true; // the seat cannot be told yet: ci was entered, the message not sent
+    await h.engine.reconcileRun(RUN);
+    h.noSession = false;
+    clock += NO_CI_AFTER_MS - 1000;
+    await h.engine.reconcileRun(RUN); // hand-off: the window restarts here
+    clock += NO_CI_AFTER_MS - 1000; // over NO_CI_AFTER_MS since entering ci, under it since the message
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).not.toBe("parked");
+    clock += 2000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf().parked?.reason).toContain(text);
   });
 
   describe("the note's text is written for the operator", () => {

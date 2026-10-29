@@ -951,7 +951,13 @@ export function createEngine(deps: EngineDeps): Engine {
           // and listing, and stay in this phase (the push is tried again when the seat has run them)
           const text = r.text;
           const sent = await send(run.id, `checks:${run.id}:${text}`, text);
-          if (sent === "sent") handOff(COMMS_MC, text);
+          // a park for no progress then explains itself
+          cur.lastRefusal = text;
+          if (sent === "sent") {
+            handOff(COMMS_MC, text);
+            // running checks makes no commit, so the push clock starts over: a full window from the message
+            cur.pushStartedAt = at;
+          }
           return;
         }
         if (!r.ok) return refused(r);
