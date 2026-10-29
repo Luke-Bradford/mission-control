@@ -9,6 +9,8 @@ export const COMMS_CANT_REASON_MAX = 80;
 export const COMMS_FLIGHT_ESCALATION_MS = 15 * 60_000;
 /** FLIGHT has this additional time to settle an escalated Comms item before CAPCOM decides. */
 export const COMMS_CAPCOM_ESCALATION_MS = 30 * 60_000;
+/** Ignore old unanswered messages when first rolling out Comms-to-FLIGHT escalation. */
+export const COMMS_OPEN_ITEM_MAX_AGE_MS = 2 * 60 * 60_000;
 /** One ticket conversation is chatter once both participants have exceeded this many rounds. */
 export const COMMS_CHATTER_ROUNDS = 6;
 /** The rolling conversation window used to spot a pair stuck in a ticket discussion. */

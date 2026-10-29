@@ -703,6 +703,14 @@ export interface NewCommsRow {
   mentions?: readonly string[];
 }
 
+/** A FLIGHT settlement of a stale Comms question or blocker. */
+export interface CommsSettlement {
+  messageId: string;
+  settledBy: string;
+  reason: string;
+  at: number;
+}
+
 function cutCommsText(text: string): string {
   const chars = Array.from(text);
   return chars.length > COMMS_TEXT_MAX
@@ -1296,6 +1304,9 @@ export class Store {
         PRIMARY KEY (message_id, actor_id)
       );
       CREATE INDEX IF NOT EXISTS comms_reactions_message ON comms_reactions(message_id);
+      CREATE TABLE IF NOT EXISTS comms_settlements (
+        message_id INTEGER PRIMARY KEY, settled_by TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS comms_pins (
         message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
       );
@@ -1992,6 +2003,9 @@ export class Store {
               .run(...values);
             this.db
               .prepare(`DELETE FROM comms_reactions WHERE message_id IN (${marks})`)
+              .run(...values);
+            this.db
+              .prepare(`DELETE FROM comms_settlements WHERE message_id IN (${marks})`)
               .run(...values);
             this.db.prepare(`DELETE FROM comms_pins WHERE message_id IN (${marks})`).run(...values);
           }
@@ -3804,6 +3818,31 @@ export class Store {
         at: r.at as number,
       }));
   }
+  commsSettlement(messageId: string): CommsSettlement | null {
+    const id = commsMessageNumber(messageId);
+    if (id === null) return null;
+    const row = this.db
+      .prepare("SELECT settled_by, reason, at FROM comms_settlements WHERE message_id=?")
+      .get(id) as Row | undefined;
+    return row === undefined
+      ? null
+      : {
+          messageId,
+          settledBy: row.settled_by as string,
+          reason: row.reason as string,
+          at: row.at as number,
+        };
+  }
+  settleCommsItem(messageId: string, settledBy: string, reason: string, at: number): boolean {
+    const id = commsMessageNumber(messageId);
+    if (id === null || this.commsMessageByNumber(id) === null) return false;
+    this.db
+      .prepare(
+        "INSERT INTO comms_settlements (message_id, settled_by, reason, at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id) DO NOTHING",
+      )
+      .run(id, settledBy, reason, at);
+    return true;
+  }
   commsMentions(target: string): CommsRow[] {
     return (
       this.db
@@ -4189,6 +4228,7 @@ export class Store {
              SELECT 1 FROM comms reply
              WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
            )
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ORDER BY c.at ASC, c.id ASC`,
       )
       .all(COMMS_CREW) as Row[];

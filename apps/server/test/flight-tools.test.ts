@@ -5814,6 +5814,31 @@ describe("superuser housekeeping", () => {
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
   });
+  it("settles a stale Comms item with its reason and keeps it out of FLIGHT triage", async () => {
+    elevated();
+    const message = store.addComms({
+      at: NOW - 20 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "mc#909",
+      text: "The already-merged PR needs review",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(attentionItems(cfg, store, NOW).some((item) => item.key === key)).toBe(true);
+    expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(store.commsSettlement(message.id)).toMatchObject({
+      settledBy: "flight-1",
+      reason: "The PR has merged.",
+    });
+    expect(attentionItems(cfg, store, NOW + 60 * 60_000).some((item) => item.key === key)).toBe(
+      false,
+    );
+  });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();
     need(cfg.crew).lane = "home";

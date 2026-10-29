@@ -8,6 +8,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_OPEN_ITEM_MAX_AGE_MS,
   DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
@@ -2786,6 +2787,20 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(late)?.notTriaging?.keys).toEqual([key]);
     store.addCommsReaction(message.id, "flight-1", "on_it", undefined, late);
     expect(all(late).find((item) => item.key === key)).toBeUndefined();
+  });
+
+  it("does not raise a Comms item that predates the rollout cutoff", () => {
+    flight();
+    const message = store.addComms({
+      at: NOW - COMMS_OPEN_ITEM_MAX_AGE_MS - 1,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#909",
+      text: "An old question",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    expect(all().find((item) => item.key === `comms-open:${message.id}`)).toBeUndefined();
   });
 
   it("appears when FLIGHT misses the window, counts the items, and clears once FLIGHT triages them", () => {

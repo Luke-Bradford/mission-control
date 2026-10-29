@@ -3010,10 +3010,28 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.dismissItem,
-      "Dismiss a non-operator note, or a note whose PR, run or issue resolved. Guard, budget, account, approval and Update holds remain protected.",
+      "Dismiss a non-operator note, or settle a stale comms-open question or blocker with a reason. Guard, budget, account, approval and Update holds remain protected.",
       z.strictObject({ key: text(200), basis: basisArg }),
       "dismiss",
-      async (a, repo) => {
+      async (a, repo, ctx) => {
+        if (a.key.startsWith("comms-open:")) {
+          const messageId = a.key.slice("comms-open:".length);
+          const message = store.openCommsItems().find((item) => item.id === messageId);
+          const rows = crew(config, store, now(), NO_LOCK, () => null).rows;
+          const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
+            (candidate) => candidate.key === a.key && candidate.owner === "flight",
+          );
+          if (
+            message === undefined ||
+            message.ticket?.split("#")[0] !== repo.id ||
+            item === undefined
+          )
+            return fail("This item is protected or unavailable.");
+          if (!store.settleCommsItem(messageId, ctx.seatId, a.basis, now()))
+            return fail("This item is protected or unavailable.");
+          bus.emit("attention");
+          return { text: `Settled ${a.key}.` };
+        }
         if (!a.key.startsWith(NOTE_KEY)) return fail("This item cannot be dismissed by FLIGHT.");
         const key = a.key.slice(NOTE_KEY.length);
         const note = store
