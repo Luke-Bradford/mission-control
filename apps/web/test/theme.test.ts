@@ -216,6 +216,17 @@ describe("theme tokens", () => {
   });
 });
 
+describe("shell styles", () => {
+  // The header's usage meter is on every page, so its rules live in hud.css, not in a page's own
+  // stylesheet (#839's split once moved them into ConfigYaml.css, which only Setup loads).
+  it("styles the header usage meter from hud.css", () => {
+    const css = read("../src/hud.css");
+    expect(ruleValue(css, ".usage", "font")).toBe("11px var(--mono)");
+    expect(ruleValue(css, ".usage", "color")).toBe("var(--fg-2)");
+    expect(ruleValue(css, ".usage b", "font-weight")).toBe("500");
+  });
+});
+
 describe("ruleValue", () => {
   it("reads `color`, not `background-color` or `border-color`, whatever order they come in", () => {
     const css = "\n.a {\n  background-color: red;\n  border-color: green;\n  color: blue;\n}\n";
