@@ -869,6 +869,23 @@ describe("crew sandbox and scoped edits", () => {
     }
   });
 
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "lets a %s seat read but never write the hub-owned pnpm store",
+    (mode) => {
+      const store = "/mc/crew/.mc-pnpm-store/shared";
+      const f = JSON.parse(
+        crewSandboxSettings(
+          { ...base.sandbox, tempRoot: "/tmp/mc-runs/seat-test", pnpmStoreDir: store },
+          mode,
+          base.hook,
+        ),
+      ).sandbox.filesystem;
+      expect(f.allowRead).toContain(store);
+      expect(f.allowWrite).not.toContain(store);
+      expect(f.denyWrite).toContain(store);
+    },
+  );
+
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
     expect(j.sandbox).toMatchObject({

@@ -71,7 +71,7 @@ export function codexSeatConfig(
     grant(":root", "read"),
     ...denied.map((path) => grant(path, "deny")),
     grant(tmpDir, "write"),
-    grant(pnpmStore, "read"),
+    grant(i.pnpmStoreDir ?? pnpmStore, "read"),
     ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
     grant(".", mode === "read-only" ? "read" : "write"),

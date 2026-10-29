@@ -65,6 +65,13 @@ const git = (cwd: string, ...args: string[]) =>
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 
+/** Disk blocks added by pnpm beyond the checked-out source, measured on the host volume. */
+const installedKb = (worktree: string) =>
+  Number.parseInt(
+    execFileSync("du", ["-sk", join(worktree, "node_modules")], { encoding: "utf8" }),
+    10,
+  );
+
 /** Commits `files` in `repo` (paths may be nested) and returns the new SHA. */
 function commit(repo: string, files: Record<string, string>, msg = "c"): string {
   for (const [f, body] of Object.entries(files)) {
@@ -500,7 +507,7 @@ describe("prepareCheckout", () => {
         const next = await prepare();
         expect((await syncReusedWorktree(clone, next, { syncMain: true }))?.kind).toBe("merged");
         rmSync(join(dir, "uv-argv"));
-        expect(await installAfterSync(clone, next, before)).toBe(
+        expect(await installAfterSync(clone, next, before, root)).toBe(
           "dependencies changed; uv reinstall is not supported in a reused worktree",
         );
         expect(uvArgv()).toBeNull();
@@ -644,7 +651,7 @@ describe("prepareCheckout", () => {
       const checkout = await syncCheckout();
       expect(checkout.synced?.kind).toBe("merged");
       if (checkout.synced?.kind !== "merged") throw new Error("expected merge");
-      const note = await installAfterSync(clone, checkout, checkout.synced.before);
+      const note = await installAfterSync(clone, checkout, checkout.synced.before, root);
       if (outcome === "installed") {
         expect(note).toBeUndefined();
         expect(existsSync(join(checkout.path, "node_modules"))).toBe(true);
@@ -825,7 +832,22 @@ describe("prepareCheckout", () => {
     git(seed, "push", "-q", "origin", "main");
     await prepareCheckout(input());
     expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
+    expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
+    expect(installedKb(wtPath())).toBeLessThan(20 * 1024);
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
+  });
+
+  it("refuses a shared-store symlink below crew.worktrees", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const outside = join(dir, "outside-store");
+    mkdirSync(outside);
+    mkdirSync(root, { recursive: true });
+    symlinkSync(outside, join(root, CODEX_PNPM_STORES_DIR));
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("install");
+    expect(e.message).toContain("shared store unavailable");
+    expect(existsSync(wtPath())).toBe(false);
   });
 
   it("relinks a reused worktree from its old pnpm store before its scripts run", async () => {
@@ -1077,7 +1099,7 @@ describe("prepareCheckout", () => {
     ]);
   });
 
-  it("installs without inherited CI, npm or git settings, using Codex's stable worktree store", () => {
+  it("installs without inherited CI, npm or git settings, using the hub-owned shared store", () => {
     const keys = [
       "CI",
       "CONTINUOUS_INTEGRATION",
@@ -1089,13 +1111,13 @@ describe("prepareCheckout", () => {
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     for (const k of keys) process.env[k] = "1";
     try {
-      const env = installEnv("/w/guido-42");
+      const env = installEnv("/w/guido-42", "/w/.mc-pnpm-store/shared");
       for (const k of keys.filter((k) => k !== "CI")) expect(env[k]).toBeUndefined();
       // ci-info reads CI=false as "not CI" whatever the vendor variables say
       expect(env.CI).toBe("false");
       // pnpm never walks up to an ancestor's workspace
       expect(env.NPM_CONFIG_WORKSPACE_DIR).toBe("/w/guido-42");
-      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/guido-42");
+      expect(env.pnpm_config_store_dir).toBe("/w/.mc-pnpm-store/shared");
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     } finally {
       for (const [k, v] of Object.entries(saved)) {
@@ -1715,6 +1737,8 @@ describe("review scratch checkouts", () => {
     git(seed, "push", "-q", "origin", "main");
     await prepareScratch(scratchInput(head));
     expect(existsSync(join(scratchPath(), "node_modules"))).toBe(true);
+    expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
+    expect(installedKb(scratchPath())).toBeLessThan(20 * 1024);
   });
 
   it("a PR head that changes an install input is refused and removed", async () => {

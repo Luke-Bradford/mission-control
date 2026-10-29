@@ -25,6 +25,7 @@ import {
   REVIEW_INPUT_DIR,
   REVIEW_SINCE_FILE,
   type SessionCheckoutOutcome,
+  SHARED_PNPM_STORE_NAME,
   scratchName,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
@@ -100,6 +101,10 @@ const CHECKOUT_TEXT = "the crew checkout is missing or has uncommitted changes";
 /** A Codex worktree's stable store, beside (not inside) the seat-writable worktree. */
 export const codexPnpmStoreDir = (worktree: string): string =>
   join(dirname(worktree), CODEX_PNPM_STORES_DIR, basename(worktree));
+
+/** The sole hub-owned pnpm store for all checkouts and review scratch copies. */
+export const sharedPnpmStoreDir = (worktreesRoot: string): string =>
+  join(worktreesRoot, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME);
 
 /** Removes one store folder; a link (the folder or the entry) is left alone, never followed. */
 async function removeStoreEntry(storeRoot: string, name: string): Promise<void> {
@@ -230,11 +235,8 @@ async function addMcTmpExclude(gitCommonDir: string): Promise<void> {
   });
 }
 
-/**
- * Create the stable Codex pnpm store before pnpm does. Checking each component before creating
- * the next prevents an untrusted worktree from redirecting the host install through a link.
- */
-async function prepareCodexPnpmStore(worktree: string, name: string): Promise<void> {
+/** Create the shared store only through real directories below crew.worktrees. */
+async function prepareSharedPnpmStore(worktreesRoot: string, name: string): Promise<string> {
   const privateDirectory = async (path: string, expected: string) => {
     try {
       await mkdir(path, { mode: 0o700 });
@@ -244,23 +246,28 @@ async function prepareCodexPnpmStore(worktree: string, name: string): Promise<vo
     const stat = await lstat(path);
     if (
       !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
       stat.uid !== process.getuid?.() ||
       (stat.mode & 0o777) !== 0o700 ||
       (await realpath(path)) !== expected
     )
-      throw new Error("Codex pnpm store must be a private directory owned by the server");
+      throw new Error("shared pnpm store must be a private directory owned by the server");
   };
   try {
-    const root = await realpath(worktree);
-    const store = codexPnpmStoreDir(root);
-    const storeRoot = dirname(store);
+    const root = await realpath(worktreesRoot);
+    if (root !== resolve(worktreesRoot)) throw new Error("crew.worktrees must not be a symlink");
+    const storeRoot = join(root, CODEX_PNPM_STORES_DIR);
+    const store = join(storeRoot, SHARED_PNPM_STORE_NAME);
     await privateDirectory(storeRoot, storeRoot);
     await privateDirectory(store, store);
+    return store;
   } catch (e) {
     throw new CheckoutError(
       "install",
-      `pnpm install failed for ${name} (private store unavailable)`,
-      { cause: e },
+      `pnpm install failed for ${name} (shared store unavailable)`,
+      {
+        cause: e,
+      },
     );
   }
 }
@@ -788,14 +795,17 @@ async function refuseChangedInputs(
  * stable store (pnpm otherwise detects the store mismatch and aborts before a script in a non-TTY),
  * and the worktree as the workspace root (pnpm never walks up to an ancestor's workspace).
  */
-export function installEnv(worktree: string): NodeJS.ProcessEnv {
+export function installEnv(
+  worktree: string,
+  pnpmStore = codexPnpmStoreDir(worktree),
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: "0" };
   for (const [k, v] of Object.entries(gitEnv(process.env))) {
     if (!k.toLowerCase().startsWith("npm_") && !CI_MARKERS.has(k)) env[k] = v;
   }
   env.CI = "false";
   env.NPM_CONFIG_WORKSPACE_DIR = worktree;
-  env[PNPM_STORE_ENV] = codexPnpmStoreDir(worktree);
+  env[PNPM_STORE_ENV] = pnpmStore;
   return env;
 }
 
@@ -837,7 +847,7 @@ interface InstallTool {
   required: readonly string[];
   installDir: string;
   args: readonly string[];
-  env: (worktree: string) => NodeJS.ProcessEnv;
+  env: (worktree: string, pnpmStore?: string) => NodeJS.ProcessEnv;
   reason: (out: string) => string | null;
 }
 
@@ -876,6 +886,7 @@ type InstallVerification = {
   base: string;
   compare: boolean;
   subject: string;
+  worktreesRoot: string;
 };
 
 /** Injectable process runner: tests never invoke a real uv. */
@@ -897,6 +908,7 @@ async function install(
   path: string,
   name: string,
   run: InstallRunner = execFileP,
+  pnpmStore?: string,
 ): Promise<void> {
   try {
     await run(tool.command, [...tool.args], {
@@ -904,7 +916,7 @@ async function install(
       timeout: INSTALL_TIMEOUT_MS,
       maxBuffer: INSTALL_MAX_BUFFER,
       encoding: "utf8",
-      env: tool.env(path),
+      env: tool.env(path, pnpmStore),
     });
   } catch (e) {
     const x = e as { killed?: boolean; code?: unknown; stdout?: unknown; stderr?: unknown };
@@ -1033,12 +1045,14 @@ async function installAll(
     if (await succeeds(lstat(join(s.path, tool.lockfile)))) picked.push(tool);
   }
   for (const tool of picked) await verifyInstall(s, tool);
+  const pnpmStore = picked.includes(PNPM_TOOL)
+    ? await prepareSharedPnpmStore(s.worktreesRoot, s.name)
+    : undefined;
   for (const tool of picked) {
     if (tool === PNPM_TOOL) {
-      await prepareCodexPnpmStore(s.path, s.name);
       await addMcTmpExclude(s.common);
     }
-    await install(tool, s.path, s.name, run);
+    await install(tool, s.path, s.name, run, tool === PNPM_TOOL ? pnpmStore : undefined);
   }
 }
 
@@ -1084,9 +1098,9 @@ async function installReusedPnpm(
       },
     );
   }
-  await prepareCodexPnpmStore(s.path, s.name);
+  const pnpmStore = await prepareSharedPnpmStore(s.worktreesRoot, s.name);
   await addMcTmpExclude(s.common);
-  await install(PNPM_TOOL, s.path, s.name, run);
+  await install(PNPM_TOOL, s.path, s.name, run, pnpmStore);
 }
 
 /**
@@ -1251,6 +1265,7 @@ export async function prepareReadOnlyCheckout(
         compare: branch !== null,
         subject: branch ? `branch ${branch}` : "origin's default branch",
         name: branch ?? name,
+        worktreesRoot: i.worktreesRoot,
       },
       execFileP,
     );
@@ -1422,6 +1437,7 @@ export async function installAfterSync(
   checkout: string,
   worktree: Pick<Checkout, "path" | "gitDir" | "branch" | "baseSha">,
   before: string,
+  worktreesRoot: string,
 ): Promise<string | undefined> {
   try {
     const common = await realpath(join(checkout, ".git"));
@@ -1449,9 +1465,9 @@ export async function installAfterSync(
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
     await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, worktree.baseSha, subject);
-    await prepareCodexPnpmStore(worktree.path, worktree.branch);
+    const pnpmStore = await prepareSharedPnpmStore(worktreesRoot, worktree.branch);
     await addMcTmpExclude(common);
-    await install(PNPM_TOOL, worktree.path, worktree.branch);
+    await install(PNPM_TOOL, worktree.path, worktree.branch, undefined, pnpmStore);
     return uvNote;
   } catch (e) {
     return `dependencies changed; install refused: ${e instanceof Error ? e.message : String(e)}`;
@@ -1524,6 +1540,7 @@ export async function prepareCheckout(
         compare: true,
         subject,
         name: branch,
+        worktreesRoot: i.worktreesRoot,
       },
       runInstall,
     );
@@ -1586,6 +1603,7 @@ export async function prepareCheckout(
         compare: local !== null || remote !== null,
         subject,
         name: branch,
+        worktreesRoot: i.worktreesRoot,
       },
       runInstall,
     );
@@ -1750,6 +1768,7 @@ export async function prepareScratch(
         compare: true,
         subject,
         name: subject,
+        worktreesRoot: i.worktreesRoot,
       },
       runInstall,
     );

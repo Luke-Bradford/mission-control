@@ -24,6 +24,7 @@ import {
   AWAY_SETTING,
   type BoardItem,
   CANNOT_START,
+  CODEX_PNPM_STORES_DIR,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
   CREW_DISABLED,
@@ -704,20 +705,20 @@ describe("startRun", () => {
     for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
   });
 
-  it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
+  it("points pnpm at the hub-owned store outside the seat worktree", async () => {
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
+    expect(store).toBe(join(root, CODEX_PNPM_STORES_DIR, "shared"));
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
     const rel = relative(start.cwd as string, store);
     expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
-    expect(relative(realpathSync(root), store).startsWith("..")).toBe(true);
+    expect(relative(realpathSync(root), store).startsWith("..")).toBe(false);
   });
 
   it("points uv's cache and Python's tool caches at the seat's own folders in the sandbox's temp root", async () => {

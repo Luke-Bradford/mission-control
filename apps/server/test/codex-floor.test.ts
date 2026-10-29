@@ -139,8 +139,8 @@ describe("codexSeatConfig", () => {
   it.each(["writer", "read-only"] as const)(
     "refuses writes to Codex's pnpm store for %s seats",
     (mode) => {
-      const store = codexPnpmStoreDir(sandboxInput.cwd);
-      const config = codexSeatConfig(sandboxInput, mode, url, tmp);
+      const store = "/mc/crew/.mc-pnpm-store/shared";
+      const config = codexSeatConfig({ ...sandboxInput, pnpmStoreDir: store }, mode, url, tmp);
       expect(config).toContain('":root"="read"');
       expect(config).toContain(`"${tmp}"="write"`);
       expect(config).toContain(`"${store}"="read"`);
