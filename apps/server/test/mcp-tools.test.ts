@@ -3958,6 +3958,43 @@ describe("report_findings", () => {
     });
   });
 
+  it("binds a positional resolution to the latest reported review of the same epoch", async () => {
+    const mk = (epoch: number, round: number, at: number) =>
+      store.requestReview({
+        authorRunId: RUN,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: String(at).padEnd(40, "c"),
+        epoch,
+        attempt: 2,
+        round,
+        at,
+      }) as number;
+    // the epoch-0 round-1 review is the one `reviewId` already holds; a later epoch repeats round 1
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const later = mk(1, 1, NOW + 1);
+    store.setReviewState(later, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
+    expect(await report(args(), reviewRun("retro:e1r1", later))).toEqual({
+      text: FINDINGS_RECORDED,
+    });
+    const second = mk(1, 2, NOW + 2);
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 2, runId: "retro:e1r2" });
+    expect(
+      await report(
+        args({
+          verdict: passing,
+          findings: [],
+          resolutions: [{ findingRef: { pos: 0 }, outcome: "fixed" }],
+        }),
+        reviewRun("retro:e1r2", second),
+      ),
+    ).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.reviewResolutions(second)).toEqual([
+      { reviewId: later, pos: 0, outcome: "fixed" },
+    ]);
+  });
+
   it("rejects a positional and an explicit reference to the same prior finding", async () => {
     expect(await report()).toEqual({ text: FINDINGS_RECORDED });
     const second = store.requestReview({
