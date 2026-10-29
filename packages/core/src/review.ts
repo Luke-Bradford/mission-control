@@ -109,6 +109,10 @@ export interface ReviewFinding {
 export interface StoredFinding extends ReviewFinding {
   pos: number;
   state: "open" | "logged";
+  /** How it ended: set when a later round reports, by RETRO's resolutions or by the engine. */
+  resolution?: FindingResolutionOutcome;
+  /** The later review that resolved it. */
+  resolvedReviewId?: number;
 }
 
 export interface ReviewRow {

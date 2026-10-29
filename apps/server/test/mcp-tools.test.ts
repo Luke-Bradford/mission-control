@@ -3847,6 +3847,10 @@ describe("report_findings", () => {
     ]);
     expect(store.findingsOf(reviewId)[0]).toMatchObject({ category: "correctness" });
     expect(store.reviewResolutions(second)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({
+      resolution: "fixed",
+      resolvedReviewId: second,
+    });
   });
 
   it("validates structured report fields and only accepts prior-round resolutions", async () => {

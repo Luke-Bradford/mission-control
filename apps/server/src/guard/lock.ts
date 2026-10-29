@@ -22,7 +22,7 @@ export interface LockKey {
 /** Where the lock's holds are kept across a restart (the Store). */
 export interface LockHolds {
   addLockHold(h: LockHoldRow): void;
-  deleteLockHold(runId: string, toolUseId: string, at?: number): void;
+  deleteLockHold(runId: string, toolUseId: string, at?: number, failed?: boolean): void;
   deleteLockHolds(runId: string, at?: number): void;
 }
 
@@ -141,11 +141,14 @@ export class TestLock {
     });
   }
 
-  /** The call `key` ended: frees the lock when it was the run's last holding call. */
-  release(key: LockKey): void {
+  /**
+   * The call `key` ended: frees the lock when it was the run's last holding call. `failed` is the
+   * Post hook event (PostToolUseFailure); left out when the call's end is not an event.
+   */
+  release(key: LockKey, failed?: boolean): void {
     const h = this.holder;
     if (h === null || h.runId !== key.runId || !h.calls.delete(key.toolUseId)) return;
-    this.store((s) => s.deleteLockHold(key.runId, key.toolUseId, this.now()));
+    this.store((s) => s.deleteLockHold(key.runId, key.toolUseId, this.now(), failed));
     if (h.calls.size === 0) {
       this.grantNext();
       this.onChange();

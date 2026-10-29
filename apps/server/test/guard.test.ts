@@ -604,6 +604,20 @@ describe("POST /api/guard/check", () => {
     expect(lock.state().holder).toBeNull();
   });
 
+  it("records the suite's pass or fail from the Post hook event", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    app = await build();
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, post("a1", "PostToolUse"));
+    await check(tokB, bash("b1", "pnpm -s test"));
+    await check(tokB, post("b1", "PostToolUseFailure"));
+    expect(store.lockRuns(0).map((r) => [r.runId, r.outcome])).toEqual([
+      ["run-b", "fail"],
+      ["run-a", "pass"],
+    ]);
+  });
+
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
     const b = check(tokB, bash("b1", "pnpm -s test"));

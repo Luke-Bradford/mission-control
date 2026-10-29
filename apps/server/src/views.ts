@@ -290,7 +290,12 @@ export function activity(
     if (l.startedAt >= since)
       events.push({ ...row, at: l.startedAt, text: `Took the test lock: ${label}` });
     if (l.endedAt !== null && l.endedAt >= since) {
-      const text = l.outcome === "done" ? "Done with the test lock" : "Test lock freed";
+      const text =
+        l.outcome === "fail"
+          ? "Test lock released after a failed run"
+          : l.outcome === "freed"
+            ? "Test lock freed"
+            : "Done with the test lock";
       events.push({ ...row, at: l.endedAt, text: `${text}: ${label}` });
     }
   }

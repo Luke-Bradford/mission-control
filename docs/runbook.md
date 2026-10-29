@@ -252,8 +252,9 @@ the launchd job; do not install it for a manually started hub. Check the expande
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
 
 The hourly maintenance sweep retains seat lines for seven days after their run ends, and
-loop events and run evidence for 30 days after their run ends. Findings stay for 30 days
-after both their review and author run end. Unfinished reviews, open runs, parked and
+loop events and run evidence for 30 days after their run ends. Findings stay for 90 days
+after both their review and author run end; test-lock holds and CI runs stay 90 days too
+(see [QA board data](#qa-board-data)). Unfinished reviews, open runs, parked and
 set-aside runs, unanswered questions, pending drafts and open attention notes protect
 their associated rows. Deletions use transactions of at most 500 rows, yield between
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
@@ -992,6 +993,29 @@ is no projection: the Quota panel shows used % with no "full in … at this rate
   Mission Control write.
 - When an earlier usage source fails and a later one succeeds, the account stays `ok` and the
   earlier failure's message is kept as a note in the collector's `error` field.
+
+## QA board data
+
+The hub records what the QA board needs as it goes; nothing here writes to GitHub. Test-lock holds,
+CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
+
+- **Full-suite pass/fail.** The guard hook's `PostToolUse` / `PostToolUseFailure` event ends a hold
+  of the test lock. `GET /api/test-lock/history?days=` (1..90, default 7) lists holds with `outcome`:
+  `pass`, `fail` (any call of the hold failed), `freed` (the run ended before the event) or `done`
+  (holds recorded before this was captured). Single-file runs do not take the lock, so they are not
+  counted.
+- **CI runs.** Every check run read on a PR's head commit is kept in `ci_runs`, one row per
+  (repo, sha, name, attempt), updated in place as it concludes; `firstSeenAt` and `at` bracket the
+  polls that saw it. `GET /api/qa/ci-runs?days=` (1..90, default 7), newest first. A re-run is a new
+  attempt, so a flaky check shows as a failing attempt followed by a passing one.
+- **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
+  date, state, open and closed issue counts. `GET /api/qa/milestones`. Milestones the repo does not
+  use give an empty list.
+- **Findings.** `GET /api/qa/findings?days=` (1..90, default 30) lists review findings with their
+  RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or `waived`; null while
+  unresolved). RETRO sets the resolution of the findings it names when it reports round 2 or later;
+  when a round reports nothing to fix, the engine marks the earlier blocking findings it left
+  unnamed `fixed`. Minor findings are logged, not resolved.
 
 ## The HUD
 

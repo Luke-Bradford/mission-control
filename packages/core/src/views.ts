@@ -5,6 +5,7 @@ import type {
   AgentId,
   CliAccountStatus,
   NotificationPreferences,
+  RepoGoal,
   RepoId,
   RunDigest,
   RunPr,
@@ -454,7 +455,8 @@ export interface TestLockRun {
   startedAt: number;
   /** Null while held. */
   endedAt: number | null;
-  outcome: "done" | "freed" | null;
+  /** pass/fail: the full suite's Post hook event; done: a release with no event; freed: the run ended. */
+  outcome: "pass" | "fail" | "done" | "freed" | null;
   ticket: string | null;
 }
 
@@ -474,10 +476,60 @@ export interface TestLockView {
 }
 
 export interface TestLockHistory {
-  /** Holds started in the last 7 days (TELEMETRY_RANGES["7d"]), newest first. */
+  /** Holds started in the requested days (7 by default, up to QA_RETENTION_DAYS), newest first. */
   runs: TestLockRun[];
   /** Holds started since local midnight (operator timezone) and their time in line. */
   today: { runs: number; waitMs: number };
   /** Median length per command, once it has three done holds. */
   usualMs: Record<string, number>;
+}
+
+/** One check run of a PR head, as the hub polled it. */
+export interface CiRunView {
+  repoId: string;
+  prNumber: number;
+  sha: string;
+  workflow: string | null;
+  name: string;
+  /** The Actions run attempt; 0 for a status or a non-Actions run. */
+  attempt: number;
+  state: "passing" | "failing" | "pending";
+  conclusion: string;
+  url: string | null;
+  /** When the hub first read it, and when it last read it. */
+  firstSeenAt: number;
+  at: number;
+}
+
+/** `GET /api/qa/ci-runs`. */
+export interface CiRunsView {
+  runs: CiRunView[];
+}
+
+/** A review finding with its category and how it ended, for the QA board. */
+export interface QaFindingView {
+  reviewId: number;
+  authorRunId: string;
+  repoId: string;
+  prNumber: number;
+  round: number;
+  reviewEndedAt: number | null;
+  pos: number;
+  severity: string;
+  category: string | null;
+  file: string;
+  line: number;
+  summary: string;
+  resolution: string | null;
+  resolvedReviewId: number | null;
+}
+
+/** `GET /api/qa/findings`. */
+export interface QaFindingsView {
+  findings: QaFindingView[];
+}
+
+/** `GET /api/qa/milestones`. */
+export interface MilestonesView {
+  milestones: RepoGoal[];
 }
