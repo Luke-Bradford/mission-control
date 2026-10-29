@@ -675,8 +675,41 @@ function toContextUsage(v: unknown): ContextUsage | null {
   return { categories, total, window: num(r.maxTokens) };
 }
 
+/**
+ * A seat's last context usage. The CLI is asked once per turn, after it ends, never per request:
+ * every answer is a 30 KB line in the CLI's output (#934).
+ */
+interface ContextCache {
+  usage: ContextUsage | null;
+  /** A turn has ended since `usage` was asked for (or it never was): the next read asks once. */
+  stale: boolean;
+  inflight: Promise<void> | null;
+}
+
 export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const { config, store, bus } = deps;
+  const contextCaches = new WeakMap<Live, ContextCache>();
+  /** Asks the seat's CLI for its context usage and caches the answer; at most one ask at a time. */
+  const refreshContext = (l: Live): Promise<void> => {
+    let cache = contextCaches.get(l);
+    if (!cache) {
+      cache = { usage: null, stale: true, inflight: null };
+      contextCaches.set(l, cache);
+    }
+    if (cache.inflight) return cache.inflight;
+    const c = cache;
+    c.stale = false;
+    c.inflight = (async () => {
+      try {
+        c.usage = toContextUsage(await l.session.control("get_context_usage"));
+      } catch {
+        // keep the last answer: it is old, not wrong
+      } finally {
+        c.inflight = null;
+      }
+    })();
+    return c.inflight;
+  };
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
@@ -1059,6 +1092,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const interrupted = l.interrupted;
         l.inTurn = false;
         l.interrupted = false;
+        const cache = contextCaches.get(l);
+        if (cache) cache.stale = true;
         fold(l);
         if (l.parkedTurn) {
           l.parkedTurn = false; // parked stays until the next line starts a turn
@@ -4179,11 +4214,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       need(seatId);
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
-      try {
-        return toContextUsage(await l.session.control("get_context_usage"));
-      } catch {
-        return null;
-      }
+      // from the cache; the CLI is asked only when a turn has ended since it last was (or never)
+      const cache = contextCaches.get(l);
+      if (!cache || (cache.stale && !l.inTurn)) await refreshContext(l);
+      else if (cache.inflight) await cache.inflight;
+      return contextCaches.get(l)?.usage ?? null;
     },
 
     seat(seatId) {

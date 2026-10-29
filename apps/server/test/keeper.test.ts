@@ -745,3 +745,63 @@ describe("Codex keeper turns and old specs", () => {
     },
   );
 });
+
+describe("the compact transcript (#934)", () => {
+  /** A Codex-style CLI that says one line of each kind once it is told to. */
+  const noisy = `
+    const big = "x".repeat(2 * 1024 * 1024);
+    const say = (m) => console.log(JSON.stringify(m));
+    process.stdin.once("data", () => {
+      say({ method: "item/started", params: { item: { id: "c", type: "commandExecution" } } });
+      say({ method: "item/commandExecution/outputDelta", params: { itemId: "c", delta: big.slice(0, 5000) } });
+      say({ type: "control_response", response: { subtype: "success", request_id: "r", response: {
+        categories: [{ name: "Messages", tokens: 5 }], totalTokens: 5, maxTokens: 100, gridRows: [[1]] } } });
+      say({ method: "item/completed", params: { item: { id: "c", type: "commandExecution", aggregatedOutput: big } } });
+      say({ method: "turn/completed" });
+    });
+    process.stdin.on("end", () => process.exit(0));
+  `;
+  const methods = (ls: (string | null)[]) =>
+    ls.map((l) => (l === "" || l === null ? null : (JSON.parse(l) as { method?: string }).method));
+
+  it("persists the compact form, delivers whole lines live, and replays the compact form", async () => {
+    const folder = folderFor(noisy, { turnEnd: "codex" });
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "go", user: false });
+    await until(() => expect(c.outs()).toHaveLength(5));
+    // the attached hub hears the delta, the usage answer and the whole 2 MB output
+    const live = c.outs().map(([, line]) => line as string);
+    expect(live[1]).toContain("outputDelta");
+    expect(live[2]).toContain("gridRows");
+    expect((JSON.parse(live[3] as string).params.item.aggregatedOutput as string).length).toBe(
+      2 * 1024 * 1024,
+    );
+    // the file holds neither the delta nor the usage answer, and the output is cut and marked
+    const kept = lines();
+    expect(methods(kept)).toEqual(["item/started", "item/completed", "turn/completed"]);
+    expect(readFileSync(transcript).length).toBeLessThan(20 * 1024);
+    const item = JSON.parse(kept[1] as string).params.item;
+    expect(item.outputTruncated).toEqual({ bytes: 2 * 1024 * 1024 });
+    // a hub that comes back is numbered through the dropped lines and gets the compact form
+    const again = await client(folder);
+    again.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(again.outs()).toHaveLength(5));
+    expect(again.outs().map(([n]) => n)).toEqual([0, 1, 2, 3, 4]);
+    expect(methods(again.outs().map(([, l]) => l as string))).toEqual([
+      "item/started",
+      null,
+      null,
+      "item/completed",
+      "turn/completed",
+    ]);
+    // and one that had lines 0 to 2 asks from 3
+    const resumed = await client(folder);
+    resumed.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 3 });
+    await until(() => expect(resumed.outs()).toHaveLength(2));
+    expect(resumed.outs().map(([n]) => n)).toEqual([3, 4]);
+    resumed.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+});

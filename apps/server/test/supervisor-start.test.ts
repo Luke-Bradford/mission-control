@@ -1628,6 +1628,28 @@ describe("contextUsage", () => {
     });
     expect(await sup.contextUsage("retro")).toBeNull();
   });
+
+  it("asks the CLI once per turn and serves the cache in between (#934)", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    await until(() => expect(seatState("guido-1")).toBe("idle")); // the first turn has ended
+    const first = await sup.contextUsage("guido-1");
+    expect(first?.total).toBe(3340);
+    await Promise.all([sup.contextUsage("guido-1"), sup.contextUsage("guido-1")]);
+    expect(await sup.contextUsage("guido-1")).toEqual(first);
+    expect(asks()).toBe(1);
+    await sup.message("guido-1", "next", { interrupt: false });
+    // reads during the turn are the cache's; the one after it ends asks again, once
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(2);
+    });
+    await sup.contextUsage("guido-1");
+    await sup.contextUsage("guido-1");
+    expect(asks()).toBe(2);
+  });
 });
 
 describe("the crew lock", () => {
