@@ -32,7 +32,7 @@ import {
   githubToken,
   makeGql,
 } from "./collectors/github.ts";
-import { commsInboxPrompt } from "./comms.ts";
+import { commsInboxContext } from "./comms.ts";
 import {
   ConfigError,
   configuredAgents,
@@ -179,7 +179,7 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
-    inbox: (seatId, runId) => commsInboxPrompt(store, seatId, runId),
+    inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
   });
   // a seat that frees up is about to take new work: read the boards first
   refreshOnSeatFree(

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   COMMS_INBOX_PROMPT_MAX,
   COMMS_INBOX_PROMPT_ROWS,
+  commsInboxContext,
   commsInboxPrompt,
   reactComms,
   sendComms,
@@ -221,12 +222,14 @@ it("caps a turn inbox at 40 messages or 8k characters, keeping the newest", () =
         targetRunId: "r",
       })?.id ?? "",
     );
-  const prompt = commsInboxPrompt(store, "seat", "r");
+  const inbox = commsInboxContext(store, "seat", "r");
+  const prompt = inbox.text;
   expect(prompt.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
   expect(prompt).toContain("older: use comms_inbox");
   expect(prompt).toContain('"text":"47 ');
   expect(prompt).not.toContain('"text":"0 ');
   expect(store.commsInboxRead("seat", ids[0] ?? "")).toBe(false);
+  store.markCommsInboxRead("seat", inbox.messageIds);
   expect(store.commsInboxRead("seat", ids.at(-1) ?? "")).toBe(true);
 });
 
@@ -263,11 +266,13 @@ it("keeps the newest oversized inbox row and marks delivered rows read", () => {
   });
   if (first === null || newest === null) throw new Error("expected stored Comms rows");
 
-  const delivered = commsInboxPrompt(store, "seat", "r");
+  const inbox = commsInboxContext(store, "seat", "r");
+  const delivered = inbox.text;
   expect(delivered.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
   expect(delivered).toContain(newest.id);
   expect(delivered).toContain("stored text cut");
   expect(delivered).toContain('"unread":true');
+  store.markCommsInboxRead("seat", inbox.messageIds);
 
   const later = commsInboxPrompt(store, "seat", "r");
   expect(later).toContain('"unread":false');

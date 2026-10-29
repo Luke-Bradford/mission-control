@@ -311,6 +311,7 @@ function make(
     rules?: SupervisorDeps["rules"];
     login?: string | null;
     profiles?: SupervisorDeps["profiles"];
+    inbox?: SupervisorDeps["inbox"];
     processStart?: SupervisorDeps["processStart"];
     controlTimeoutMs?: number;
     now?: () => number;
@@ -362,6 +363,7 @@ function make(
     fetchTicket,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
+    ...(over.inbox === undefined ? {} : { inbox: over.inbox }),
     ...(over.cliHold === undefined ? {} : { cliHold: over.cliHold }),
     cliVersion: over.cliVersion ?? (async () => null),
     enabled: over.enabled ?? true,

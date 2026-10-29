@@ -111,7 +111,11 @@ export async function sendComms(
 }
 
 /** The bounded Comms context supplied when a seat starts a turn. */
-export function commsInboxPrompt(store: Store, seatId: string, runId: string): string {
+export function commsInboxContext(
+  store: Store,
+  seatId: string,
+  runId: string,
+): { text: string; messageIds: readonly string[] } {
   const pins = new Set(store.commsPins().map((row) => row.id));
   const rows = store
     .commsInboxRun(seatId, runId)
@@ -159,11 +163,12 @@ export function commsInboxPrompt(store: Store, seatId: string, runId: string): s
     lines.shift();
     omitted++;
   }
-  store.markCommsInboxRead(
-    seatId,
-    lines.map((line) => line.id),
-  );
-  return render();
+  return { text: render(), messageIds: lines.map((line) => line.id) };
+}
+
+/** The bounded Comms text supplied when a seat starts a turn. */
+export function commsInboxPrompt(store: Store, seatId: string, runId: string): string {
+  return commsInboxContext(store, seatId, runId).text;
 }
 
 export function canReadComms(
