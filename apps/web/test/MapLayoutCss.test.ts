@@ -33,7 +33,13 @@ it("reserves auto rows for the lens toolbar and deck around the flexible map row
 /** The declarations of the rule whose selector list holds exactly this selector. */
 const listed = (selector: string) => {
   for (const [, list, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g))
-    if ((list as string).split(",").some((item) => item.trim() === selector)) return body as string;
+    if (
+      (list as string)
+        .replace(/\/\*[^]*?\*\//g, "")
+        .split(",")
+        .some((item) => item.trim() === selector)
+    )
+      return body as string;
   return "";
 };
 
