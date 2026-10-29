@@ -281,13 +281,18 @@ it("W5: a fake relay replay at a different sequence is stored once and advances 
   const sealed = await seal(msg, f.a.agent, f.key, 0, f.a.delegation);
   transport.sockets[1].peer.send({ t: "msg", seq: 1, sealed });
   transport.sockets[1].peer.send({ t: "msg", seq: 2, sealed });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  expect(f.bDaemon.read("test-room").filter((row) => row.msg?.id === "same")).toHaveLength(1);
-  expect(transport.sent.filter((m) => m.t === "post")).toHaveLength(1);
+  const stored = () => f.bDaemon.read("test-room").filter((row) => row.msg?.id === "same");
+  const posts = () => transport.sent.filter((m) => m.t === "post");
+  // wait for the reply rather than a fixed sleep, which raced under CI load
+  await expect.poll(() => stored().length, { timeout: 3000 }).toBe(1);
+  await expect.poll(() => posts().length, { timeout: 3000 }).toBe(1);
   transport.sockets[1].terminate();
   await expect
     .poll(() => transport.sent.filter((m) => m.t === "since").at(-1), { timeout: 3000 })
     .toEqual({ t: "since", seq: 2 });
+  // the cursor is past the replay, so a duplicate would have landed by now
+  expect(stored()).toHaveLength(1);
+  expect(posts()).toHaveLength(1);
 });
 it.each(["reason", "refs", "source", "name", "thread", "inReplyTo"])(
   "W6: scans and caps %s on direct daemon sends",
