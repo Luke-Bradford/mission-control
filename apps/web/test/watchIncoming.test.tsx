@@ -141,7 +141,8 @@ it("shows loading, empty and failed responses", async () => {
       <WatchList />
     </>,
   );
-  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  expect(screen.getByText("Loading arrivals…")).toBeTruthy();
+  expect(screen.getByText("Loading revisit triggers…")).toBeTruthy();
   await screen.findByText("Nothing has arrived yet.");
   await screen.findByText("FLIGHT is not watching anything yet.");
   view.unmount();

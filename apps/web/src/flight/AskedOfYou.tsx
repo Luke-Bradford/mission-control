@@ -21,6 +21,7 @@ import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { HeldNeeds } from "./HeldNeeds.tsx";
 import { isNotTriaging, NotTriagingRow } from "./NotTriaging.tsx";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 
@@ -59,14 +60,19 @@ export function AskedOfYou({
   /** False leaves out the Held group (the Needs you tab places it itself). */
   withHeld?: boolean;
 } = {}) {
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
+  const attention = attentionRes.data;
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const now = useSecond();
   const tz = useTz();
   const { inRepo } = useSessionScope();
   // A failed load counts as no threads, so the rest of the list still shows.
-  if (attention === undefined || (notes.data === undefined && notes.error === null))
-    return <p className="pb note">{DASH}</p>;
+  if (attention === undefined)
+    return (
+      <Pending what="what needs you" error={attentionRes.error} resource={RESOURCES.attention} />
+    );
+  if (notes.data === undefined && notes.error === null)
+    return <Pending what="your GitHub threads" error={null} resource={RESOURCES.notifications} />;
   const needsYou = sortNeeds(needsYouItems(attention)).filter(
     (i) => withDefaults || i.defaultDueAt === undefined,
   );

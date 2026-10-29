@@ -17,6 +17,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { CATCH_UP_LABEL } from "../notifications.ts";
 import { draftRowId } from "./Drafts.tsx";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const BRIEF_EMPTY = "Nothing here yet.";
@@ -35,6 +36,7 @@ export const useBrief = (): FlightBriefView | undefined =>
 /** FLIGHT's writable working-context notes, as rendered Markdown and exact stored source. */
 export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
   const view = useBrief();
+  const briefError = useResource<FlightBriefView>(RESOURCES.flightBrief).error;
   const now = useSecond();
   const tz = useTz();
   const writable: readonly string[] = FLIGHT_NOTE_SECTIONS;
@@ -50,7 +52,7 @@ export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
         Live Markdown from the hub · the same working context FLIGHT reads and updates
       </p>
       {view === undefined ? (
-        <p className="pb note">{DASH}</p>
+        <Pending what="working context" error={briefError} resource={RESOURCES.flightBrief} />
       ) : view.session === null ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
@@ -212,7 +214,8 @@ export function WatchList() {
         {error.message}
       </p>
     );
-  if (view === undefined) return <p className="pb note">{DASH}</p>;
+  if (view === undefined)
+    return <Pending what="revisit triggers" error={null} resource={RESOURCES.flightBrief} />;
   if (view.session === null) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
   const holder = lock?.holder;
   const blocked =

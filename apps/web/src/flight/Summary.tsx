@@ -20,6 +20,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const SUMMARY_EMPTY = "FLIGHT has not written a commander's intent yet.";
@@ -263,7 +264,7 @@ export function Summary({ mode }: { mode: SummaryMode }) {
         </p>
       )}
       {!view ? (
-        <p className="sittext note">{DASH}</p>
+        <Pending what="the queue" error={null} resource={RESOURCES.flightSummary} />
       ) : view.session === null ? (
         <p className="sittext note">{FLIGHT_NO_SEAT}</p>
       ) : (

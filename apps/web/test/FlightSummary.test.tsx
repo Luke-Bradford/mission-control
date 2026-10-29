@@ -283,12 +283,12 @@ it("keeps outcomes and the scorecard together in Record only; cost is the regist
   expect(screen.queryByRole("table", { name: "FLIGHT forward plan" })).toBeNull();
 });
 
-it("shows a loading dash and a summary error", async () => {
+it("names what is loading, then shows a summary error", async () => {
   stub({
     [RESOURCES.flightSummary.path]: () => ({ status: 500, body: { error: "Summary unavailable" } }),
   });
   render(<Summary mode="queue" />);
-  expect(screen.getByText("—")).toBeTruthy();
+  expect(screen.getByText("Loading the queue…")).toBeTruthy();
   expect((await screen.findByRole("alert")).textContent).toBe("Summary unavailable");
 });
 

@@ -1,14 +1,17 @@
 import {
   type AttentionItem,
   type CrewPause,
+  clockHm,
   FLIGHT_VIEW_LIMIT,
   type FlightSummaryView,
+  type FlightWakeStatus,
   type MetricId,
   seatIsPaused,
 } from "@mc/core";
+import { useNow, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { dur } from "../fmt.ts";
+import { dur, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { useMetrics } from "../metrics.ts";
 import { stateWord } from "../shell/Dock.tsx";
@@ -18,8 +21,18 @@ import { SUMMARY_EMPTY } from "./Summary.tsx";
 import type { FlightTab } from "./tabs.ts";
 
 const DASH = "—";
-/** Not served on `/api/flight` yet: shown as a dash rather than guessed. */
-export const WAKE_NOT_SERVED = "The hub does not report FLIGHT's wake times yet";
+
+/** One wake time as `14:02 · 3 min ago`; a dash while it or the timezone is unknown. */
+const wakeAt = (at: number | null | undefined, now: number, tz: string | null): string =>
+  at === null || at === undefined || tz === null
+    ? DASH
+    : `${clockHm(at, tz)} · ${at <= now ? rel(at, now, tz) : `in ${dur(at - now)}`}`;
+
+/** The strip's wake line: last and next wake and what woke FLIGHT, a dash only for what is unknown. */
+export function wakeLine(wake: FlightWakeStatus | undefined, now: number, tz: string | null) {
+  const woke = wake?.wokeOn?.length ? wake.wokeOn.join(", ") : DASH;
+  return `Last wake ${wakeAt(wake?.lastWakeAt, now, tz)} · next ${wakeAt(wake?.nextWakeAt, now, tz)} · woken on ${woke}`;
+}
 /** FLIGHT refreshes a headline at least hourly (central-mind spec), so an older one is stale. */
 export const HEADLINE_STALE_MIN = 60;
 
@@ -90,6 +103,8 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   // The registry figure, so the strip agrees with the header, Overview and Comms.
   const needsYou = useMetrics().readings.needsYou?.n ?? null;
+  const now = useNow();
+  const tz = useTz();
   const run = flightRun(flight.data, pause);
   const handling = attention === undefined ? null : needsGroups(attention).handling.length;
   const decidedN = flight.data?.decisions.length ?? null;
@@ -115,9 +130,7 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
           <Pill tone="warn">Crew paused</Pill>
         </span>
       )}
-      <span className="flight-strip-wake s" title={WAKE_NOT_SERVED}>
-        Last wake {DASH} · next {DASH} · woken by {DASH}
-      </span>
+      <span className="flight-strip-wake s">{wakeLine(flight.data?.wake, now, tz)}</span>
       <span className="flight-strip-headline min0">
         {flight.error && !flight.data ? (
           <span role="alert" className="crit-t">

@@ -63,12 +63,36 @@ describe("Needs you tab", () => {
     expect(panel("heldP").textContent).toContain(NOTHING_HELD);
   });
 
-  it("shows a dash in each group until the attention list loads", () => {
+  it("names what is loading in each group, rather than a bare dash", () => {
     stubFetch({ "/api/attention": [] });
     render(<NeedsYouTab />);
     for (const id of ["defaultsP", "handlingP", "waitingP"]) {
-      expect(panel(id).textContent).toContain("—");
+      expect(panel(id).textContent).toContain("Loading what needs you…");
+      expect(panel(id).querySelector("[aria-busy='true']")).not.toBeNull();
     }
+    expect(panel("heldP").textContent).toContain("Loading held items…");
+  });
+
+  it("says what failed, and retries, when the attention list or held list cannot load", async () => {
+    let attentionOk = false;
+    stubFetch({
+      "/api/attention": () =>
+        attentionOk
+          ? { status: 200, body: [] }
+          : { status: 500, body: { error: "attention down" } },
+      "/api/attention/held": () => ({ status: 500, body: { error: "held down" } }),
+    });
+    render(<NeedsYouTab />);
+    await waitFor(() =>
+      expect(panel("handlingP").textContent).toContain(
+        "Could not load what needs you: attention down",
+      ),
+    );
+    expect(panel("heldP").textContent).toContain("Could not load held items: held down");
+    expect(within(panel("handlingP")).getByRole("alert")).toBeTruthy();
+    attentionOk = true;
+    fireEvent.click(within(panel("handlingP")).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING));
   });
 
   it("lists the asks with their full brief open, which Hide folds, never an ask with a default", async () => {

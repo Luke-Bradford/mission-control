@@ -13,6 +13,7 @@ import { AskedOfYou } from "./AskedOfYou.tsx";
 import { Drafts } from "./Drafts.tsx";
 import { HeldNeeds } from "./HeldNeeds.tsx";
 import { needsGroups } from "./needsGroups.ts";
+import { Pending } from "./Pending.tsx";
 
 export const NOTHING_DEFAULTED = "FLIGHT has no default waiting on your objection.";
 export const NOTHING_HANDLING = "FLIGHT is not handling anything for you right now.";
@@ -54,8 +55,10 @@ function defaultNote(item: AttentionItem, now: number): string {
  * what it is handling, what is held, and what waits on others. Each item is in one group only.
  */
 export function NeedsYouTab() {
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const held = useResource<AttentionItem[]>(RESOURCES.heldAttention).data;
+  const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
+  const attention = attentionRes.data;
+  const heldRes = useResource<AttentionItem[]>(RESOURCES.heldAttention);
+  const held = heldRes.data;
   const now = useSecond();
   const { inRepo } = useSessionScope();
   const { defaulted, handling, waiting } = needsGroups(
@@ -77,7 +80,11 @@ export function NeedsYouTab() {
         >
           <div className="flight-panel-scroll">
             {attention === undefined ? (
-              <p className="pb note">—</p>
+              <Pending
+                what="what needs you"
+                error={attentionRes.error}
+                resource={RESOURCES.attention}
+              />
             ) : defaulted.length === 0 ? (
               <p className="pb note">{NOTHING_DEFAULTED}</p>
             ) : (
@@ -88,7 +95,11 @@ export function NeedsYouTab() {
         <Panel id="handlingP" title="FLIGHT is handling" sub={`${handling.length} owned`}>
           <div className="flight-panel-scroll">
             {attention === undefined ? (
-              <p className="pb note">—</p>
+              <Pending
+                what="what needs you"
+                error={attentionRes.error}
+                resource={RESOURCES.attention}
+              />
             ) : handling.length === 0 ? (
               <p className="pb note">{NOTHING_HANDLING}</p>
             ) : (
@@ -109,7 +120,7 @@ export function NeedsYouTab() {
         <Panel id="heldP" title="Held" sub={`${held?.length ?? 0} on a condition`}>
           <div className="flight-panel-scroll">
             {held === undefined ? (
-              <p className="pb note">—</p>
+              <Pending what="held items" error={heldRes.error} resource={RESOURCES.heldAttention} />
             ) : held.length === 0 ? (
               <p className="pb note">{NOTHING_HELD}</p>
             ) : (
@@ -120,7 +131,11 @@ export function NeedsYouTab() {
         <Panel id="waitingP" title="Waiting on others" sub={`${waiting.length} not yours`}>
           <div className="flight-panel-scroll">
             {attention === undefined ? (
-              <p className="pb note">—</p>
+              <Pending
+                what="what needs you"
+                error={attentionRes.error}
+                resource={RESOURCES.attention}
+              />
             ) : waiting.length === 0 ? (
               <p className="pb note">{NOBODY_ELSE}</p>
             ) : (

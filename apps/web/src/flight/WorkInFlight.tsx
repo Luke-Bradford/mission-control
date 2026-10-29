@@ -29,6 +29,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const NO_SEATS = "No seats are configured.";
@@ -264,7 +265,8 @@ function WorkRow({
  * instruction to the seat.
  */
 export function WorkInFlight() {
-  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const crewRes = useResource<Crew>(RESOURCES.crew);
+  const crew = crewRes.data;
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedgerOpen).data;
   const lock = useResource<TestLockState>(RESOURCES.testLock).data;
@@ -272,7 +274,9 @@ export function WorkInFlight() {
   const tz = useTz();
   const { inView: matchesSession } = useSessionScope();
   const rows = (crew?.rows ?? []).filter(matchesSession);
-  if (rows.length === 0) return <p className="pb note">{crew ? NO_SEATS : DASH}</p>;
+  if (crew === undefined)
+    return <Pending what="seats" error={crewRes.error} resource={RESOURCES.crew} />;
+  if (rows.length === 0) return <p className="pb note">{NO_SEATS}</p>;
   return (
     <table className="wif-table" aria-label="Seats">
       <thead>

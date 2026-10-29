@@ -33,7 +33,8 @@ function moveTab(
 }
 
 /**
- * A tab's panel. It takes focus itself (WAI-ARIA tabs pattern) so a keyboard user reaches a panel
+ * A tab's panel. Only the selected tab's content is mounted, so a hidden tab fetches nothing and
+ * keeps no timer running; the panel stays in the page for the tabs' ARIA relationship. It takes focus itself (WAI-ARIA tabs pattern) so a keyboard user reaches a panel
  * that opens with no focusable content, and its `flight-<tab>` class carries the tab's layout.
  */
 function TabPanel({
@@ -111,16 +112,16 @@ export function Flight() {
         ))}
       </div>
       <TabPanel tab="needs" current={tab}>
-        <NeedsYouTab />
+        {tab === "needs" && <NeedsYouTab />}
       </TabPanel>
       <TabPanel tab="did" current={tab}>
-        <DidTab />
+        {tab === "did" && <DidTab />}
       </TabPanel>
       <TabPanel tab="crew" current={tab}>
-        <CrewBoardTab />
+        {tab === "crew" && <CrewBoardTab />}
       </TabPanel>
       <TabPanel tab="knows" current={tab}>
-        <KnowsTab />
+        {tab === "knows" && <KnowsTab />}
       </TabPanel>
     </section>
   );

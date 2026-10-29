@@ -44,6 +44,11 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/flight/schedule": { session: null, entries: [] },
     // The status strip reads it on every render of the page.
     "/api/flight": { seat: null, decisions: [] },
+    "/api/attention": [],
+    "/api/attention/held": [],
+    "/api/notifications": { open: [], handledToday: [] },
+    "/api/crew": { rows: [], firstRunToday: null },
+    "/api/settings/crew-pause": null,
     ...routes,
   });
 
@@ -164,7 +169,7 @@ describe("What FLIGHT did: decisions", () => {
     expect(rows[2]?.textContent).toContain("question d1");
   });
 
-  it("groups decisions by wake: a gap over ten minutes starts a new group", async () => {
+  it("lists decisions newest first, without calling timestamp bursts wakes, and says wake grouping is unavailable", async () => {
     stubDecided(
       flightView({
         decisions: [
@@ -176,13 +181,17 @@ describe("What FLIGHT did: decisions", () => {
     );
     render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
-    const groups = await screen.findAllByTestId("wake-group");
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.textContent).toContain("1 decision");
-    expect(groups[0]?.textContent).toContain("question d3");
-    expect(groups[1]?.textContent).toContain("2 decisions");
-    expect(groups[1]?.textContent).toContain("question d2");
-    expect(groups[1]?.textContent).toContain("question d1");
+    const rows = await screen.findAllByTestId("decided-row");
+    expect(rows.map((r) => /question (d\d)/.exec(r.textContent ?? "")?.[1])).toEqual([
+      "d3",
+      "d2",
+      "d1",
+    ]);
+    expect(screen.queryByTestId("wake-group")).toBeNull();
+    expect(screen.queryByText(/Wake at/)).toBeNull();
+    expect(
+      screen.getByText(/^Wake grouping unavailable: the hub does not serve a wake id/),
+    ).toBeTruthy();
   });
 
   it("filters decisions by kind, seat and text", async () => {
@@ -258,7 +267,7 @@ describe("What FLIGHT did: decisions", () => {
     stubDecided({ seat: null, decisions: [] });
     const { container } = render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
-    expect(container.querySelector("#decidedP .pb")?.textContent).toBe("—");
+    expect(container.querySelector("#decidedP .pb")?.textContent).toBe("Loading decisions…");
     await waitFor(() =>
       expect(container.querySelector("#decidedP")?.textContent).toContain(FLIGHT_NO_SEAT),
     );
@@ -312,12 +321,16 @@ describe("FLIGHT page", () => {
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
     for (const selector of [".flight-strip-headline", "#watchP"]) {
       await waitFor(() =>
         expect(container.querySelector(selector)?.textContent, selector).toContain(FLIGHT_NO_SEAT),
       );
     }
-    expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
+    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    await waitFor(() =>
+      expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send."),
+    );
   });
 
   it("Seats says no seats are configured when the crew has none", async () => {
@@ -976,7 +989,39 @@ describe("FLIGHT page", () => {
       render(<Flight />);
       await waitFor(async () => expect((await strip()).textContent).toContain("Running"));
       expect((await strip()).textContent).toContain("waiting for a wake");
-      expect((await strip()).textContent).toContain("Last wake — · next — · woken by —");
+      expect((await strip()).textContent).toContain("Last wake — · next — · woken on —");
+    });
+
+    it("shows when FLIGHT last woke, what woke it and when it next wakes", async () => {
+      stubFetch({
+        "/api/flight": flightView({
+          wake: {
+            lastWakeAt: NOW - 3 * HOUR,
+            wokeOn: ["q (1)", "pr (2)"],
+            nextWakeAt: NOW + 30 * MIN,
+          },
+        }),
+        "/api/config": CONFIG,
+      });
+      render(<Flight />);
+      await waitFor(async () =>
+        expect((await strip()).textContent).toContain("woken on q (1), pr (2)"),
+      );
+      const text = (await strip()).textContent ?? "";
+      expect(text).toMatch(/Last wake \d\d:\d\d · 3 h ago/);
+      expect(text).toMatch(/next \d\d:\d\d · in 30m 00s/);
+    });
+
+    it("dashes only the wake fields the hub left null", async () => {
+      stubFetch({
+        "/api/flight": flightView({
+          wake: { lastWakeAt: NOW - 3 * HOUR, wokeOn: null, nextWakeAt: null },
+        }),
+        "/api/config": CONFIG,
+      });
+      render(<Flight />);
+      await waitFor(async () => expect((await strip()).textContent).toMatch(/Last wake \d\d:\d\d/));
+      expect((await strip()).textContent).toContain("next — · woken on —");
     });
 
     it.each([
@@ -1167,6 +1212,8 @@ describe("FLIGHT's brief", () => {
       "/api/config": CONFIG,
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
+    fireEvent.click(await screen.findByText("FLIGHT's notes"));
     const secs = await screen.findAllByTestId("brief-section");
     expect(secs).toHaveLength(4);
     expect(secs.map((e) => e.querySelector("h3")?.textContent)).toEqual(
@@ -1185,6 +1232,7 @@ describe("FLIGHT's brief", () => {
   it("the brief panel says FLIGHT is not running with no session", async () => {
     stubFetch({ "/api/flight/brief": briefView({}, null), "/api/config": CONFIG });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
     await waitFor(() =>
       expect(container.querySelector("#briefP")?.textContent).toContain(FLIGHT_NO_SEAT),
     );
@@ -1194,6 +1242,7 @@ describe("FLIGHT's brief", () => {
   it("the system log excludes decisions because Record presents them once", async () => {
     stubDecided(flightView(), { "/api/agents/flight-1/stream": STREAM });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(1));
     const log = container.querySelector("#workLog") as HTMLElement;
     expect(container.querySelector("#logP .ph")?.textContent).toContain("1 entry");
@@ -1206,6 +1255,7 @@ describe("FLIGHT's brief", () => {
   it("the working log is absent with no seat", async () => {
     stubDecided({ seat: null, decisions: [] });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() =>
       expect(container.querySelector("#logP")?.textContent).toContain(FLIGHT_NO_SEAT),
     );
@@ -1217,6 +1267,7 @@ describe("FLIGHT's brief", () => {
       "/api/agents/flight-1/stream": { ...STREAM, events: [] },
     });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() =>
       expect(container.querySelector("#workLog")?.textContent).toContain(NOTHING_LOGGED),
     );
@@ -1252,8 +1303,10 @@ describe("FLIGHT's brief", () => {
     const details = notes.querySelector(":scope > details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
     // dated while collapsed: the newest section's update time is in the summary
-    expect(details.querySelector("summary")?.textContent).toContain(
-      `updated ${rel(updatedAt, NOW, "UTC")}`,
+    await waitFor(() =>
+      expect(details.querySelector("summary")?.textContent).toContain(
+        `updated ${rel(updatedAt, NOW, "UTC")}`,
+      ),
     );
     expect(notes.textContent).toContain("Ship the brief.");
     expect(notes.textContent).toContain("Wiring the page.");
@@ -1401,6 +1454,74 @@ describe("FLIGHT's brief", () => {
     }
   });
 
+  it("fetches nothing for a tab until it opens: Did, Crew and Knows endpoints wait", async () => {
+    const fn = stubFetch({
+      "/api/flight": flightView(),
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+    });
+    const requested = () => fn.mock.calls.map(([path]) => String(path));
+    const only = [
+      "/api/flight/incoming",
+      "/api/flight/ledger?status=open",
+      "/api/flight/schedule",
+      "/api/flight/brief",
+      "/api/flight/memory",
+      "/api/agents/flight-1/stream",
+    ];
+    const seen = (paths: string[]) =>
+      only.filter((o) => paths.some((p) => p === o || p.startsWith(`${o}?`)));
+    render(<Flight />);
+    await screen.findByRole("button", { name: "decided 24 h: 2" });
+    expect(requested()).toContain("/api/attention");
+    expect(seen(requested())).toEqual([]);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    await waitFor(() => expect(requested()).toContain("/api/flight/incoming"));
+    expect(requested()).not.toContain("/api/flight/brief");
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
+    await waitFor(() => expect(requested()).toContain("/api/flight/brief"));
+    expect(requested().some((p) => p.startsWith("/api/flight/memory"))).toBe(true);
+  });
+
+  it("renders only the open tab's content, leaving the other panels empty", async () => {
+    stubFetch({ "/api/flight": flightView(), "/api/config": CONFIG });
+    const { container } = render(<Flight />);
+    await screen.findByRole("button", { name: "decided 24 h: 2" });
+    expect(container.querySelector("#flight-needs #askP")).not.toBeNull();
+    for (const id of ["did", "crew", "knows"]) {
+      expect((container.querySelector(`#flight-${id}`) as HTMLElement).children, id).toHaveLength(
+        0,
+      );
+    }
+  });
+
+  it("names a loading and a failed request on each of the other tabs", async () => {
+    stubFetch({
+      "/api/flight": () => ({ status: 500, body: { error: "flight down" } }),
+      "/api/crew": () => ({ status: 500, body: { error: "crew down" } }),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    await waitFor(() =>
+      expect(container.querySelector("#decidedP")?.textContent).toContain(
+        "Could not load decisions: flight down",
+      ),
+    );
+    expect(container.querySelector("#logP")?.textContent).toContain("Could not load the log");
+    fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
+    await waitFor(() =>
+      expect(container.querySelector("#wifP")?.textContent).toContain(
+        "Could not load seats: crew down",
+      ),
+    );
+    expect(
+      within(container.querySelector("#wifP") as HTMLElement).getByRole("button", {
+        name: "Retry",
+      }),
+    ).toBeTruthy();
+  });
+
   it("keeps the selected tab when live data refreshes", async () => {
     stubFetch({ "/api/flight": flightView(), "/api/config": CONFIG });
     render(<Flight />);
@@ -1424,6 +1545,7 @@ describe("FLIGHT's brief", () => {
       { "/api/agents/flight-1/stream": { ...STREAM, events: [] } },
     );
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() =>
       expect(container.querySelector("#workLog")?.textContent).toContain(NOTHING_LOGGED),
     );
@@ -1769,6 +1891,7 @@ describe("FLIGHT's brief", () => {
       "/api/flight/incoming": { entries },
     });
     render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     const rows = await screen.findAllByTestId("incoming-row");
     expect(rows).toHaveLength(2);
     const first = rows[0]?.textContent ?? "";
@@ -1841,6 +1964,7 @@ describe("FLIGHT's brief", () => {
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     const rows = await screen.findAllByTestId("incoming-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("#10");
@@ -1848,11 +1972,18 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).toContain("Refinement");
     expect(rows[0]?.textContent).toContain("Queued");
     expect(rows[1]?.textContent).toContain("No action");
+    fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
     await waitFor(() =>
       expect(container.querySelector("#watchP")?.textContent).toContain("Cache performance"),
     );
-    expect(container.querySelector("#briefP")?.textContent).toContain("The cache may thrash.");
-    expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT knows" }));
+    await waitFor(() =>
+      expect(container.querySelector("#briefP")?.textContent).toContain("The cache may thrash."),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    await waitFor(() =>
+      expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send."),
+    );
   });
 
   it("Incoming and Watch list say so when empty", async () => {
@@ -1864,9 +1995,11 @@ describe("FLIGHT's brief", () => {
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() =>
       expect(container.querySelector("#incP")?.textContent).toContain(NO_INCOMING),
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
     await waitFor(() =>
       expect(container.querySelector("#watchP")?.textContent).toContain(WATCH_EMPTY),
     );
@@ -1895,7 +2028,7 @@ describe("Draft replies", () => {
       ),
     );
     render(<Drafts />);
-    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByText("Loading drafts…")).toBeTruthy();
     expect(screen.queryByText("No drafts to send.")).toBeNull();
     await act(async () => resolveHistory(new Response("[]")));
     expect(await screen.findByText("No drafts to send.")).toBeTruthy();
