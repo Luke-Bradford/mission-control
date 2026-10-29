@@ -49,6 +49,16 @@ export async function messageSeat(
   }
 }
 
+/** Send rework to a parked run, including one set aside while its seat has moved on. */
+export async function messageRun(runId: string, text: string): Promise<void> {
+  try {
+    await apiPost(ACTIONS.runMessage(runId), { text });
+  } finally {
+    done();
+    hub.refetch(RESOURCES.runLoop(runId).path);
+  }
+}
+
 export const endAsideConfirm = (row: Pick<CrewRow, "id" | "kind">): string =>
   `End ${callSign(row)}'s set-aside run? Its CLI is not woken; the checkout and branch stay.`;
 

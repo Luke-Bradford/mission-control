@@ -7,6 +7,7 @@ import {
   COMMS_MC,
   type CommsEvent,
   type CommsThreadMessage,
+  type CrewRow,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardSummary,
@@ -2105,16 +2106,21 @@ describe("Needs you: row actions", () => {
       return { status, body };
     },
   });
-  const stubNeeds = (items: AttentionItem[], flight: unknown = { seat: live, decisions: [] }) => {
+  const stubNeeds = (
+    items: AttentionItem[],
+    flight: unknown = { seat: live, decisions: [] },
+    extra: Record<string, unknown> = {},
+    rows: CrewRow[] = [
+      seatRow({ id: "guido-1", hudState: "stalled" }),
+      seatRow({ id: "guido-2", index: 1, hudState: "stalled" }),
+      seatRow({ id: "flight-1", index: 2 }),
+    ],
+  ) => {
     posts.length = 0;
     return stubFetch({
       "/api/attention": items,
       "/api/crew": {
-        rows: [
-          seatRow({ id: "guido-1", hudState: "stalled" }),
-          seatRow({ id: "guido-2", index: 1, hudState: "stalled" }),
-          seatRow({ id: "flight-1", index: 2 }),
-        ],
+        rows,
         firstRunToday: null,
       },
       "/api/config": CONFIG,
@@ -2123,6 +2129,7 @@ describe("Needs you: row actions", () => {
       ...route("/api/seats/guido-1/interrupt"),
       ...route("/api/seats/guido-2/interrupt"),
       ...route("/api/seats/flight-1/message"),
+      ...extra,
     });
   };
   const rowOf = async (text: string | RegExp) =>
@@ -2235,6 +2242,133 @@ describe("Needs you: row actions", () => {
     const b = within(row).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
     await waitFor(() => expect(b.title).toBe("FLIGHT is stopped."));
     expect(b.disabled).toBe(true);
+  });
+
+  it("sends a set-aside review park's rework message without waiving its findings", async () => {
+    const currentRun = seatRow().run as NonNullable<CrewRow["run"]>;
+    const row = seatRow({
+      id: "guido-1",
+      ticket: "shop-app#1",
+      run: { ...currentRun, id: "r-b" },
+      asideRuns: [
+        {
+          runId: "r-a",
+          ticket: "shop-app#2",
+          ticketTitle: "Parked work",
+          loop: {
+            phase: "parked",
+            text: "Blocked: RETRO finding",
+            prNumber: 2,
+            parked: "RETRO finding",
+          },
+        },
+      ],
+    });
+    stubNeeds(
+      [
+        item({
+          key: "park:a",
+          kind: "parked",
+          agentId: "guido-1",
+          escalationId: null,
+          ticket: "shop-app#2",
+          url: null,
+          text: "RETRO finding",
+        }),
+      ],
+      undefined,
+      {
+        "/api/runs/r-a/loop": {
+          loop: {
+            parked: { kind: "review", reason: "RETRO finding", ended: false },
+            pushFor: "abc1234def",
+          },
+        },
+        ...route("/api/runs/r-a/resume"),
+        ...route("/api/runs/r-a/message"),
+      },
+      [row, seatRow({ id: "flight-1", index: 2 })],
+    );
+    render(<Comms item={null} />);
+    const need = await rowOf("RETRO finding");
+    const waive = await within(need).findByRole("button", {
+      name: "Waive findings on abc1234 and resume",
+    });
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework message" }));
+    fireEvent.change(within(need).getByRole("textbox", { name: "Rework message" }), {
+      target: { value: "Please fix RETRO's finding." },
+    });
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework" }));
+    await waitFor(() =>
+      expect(posts).toContainEqual({
+        path: "/api/runs/r-a/message",
+        body: { text: "Please fix RETRO's finding." },
+      }),
+    );
+    expect(posts).not.toContainEqual({ path: "/api/runs/r-a/resume", body: {} });
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    fireEvent.click(waive);
+    expect(posts).not.toContainEqual({ path: "/api/runs/r-a/resume", body: {} });
+    fireEvent.click(waive);
+    await waitFor(() => expect(posts).toContainEqual({ path: "/api/runs/r-a/resume", body: {} }));
+    confirm.mockRestore();
+  });
+
+  it("shows a review rework route's refusal", async () => {
+    const currentRun = seatRow().run as NonNullable<CrewRow["run"]>;
+    const row = seatRow({
+      id: "guido-1",
+      ticket: "shop-app#1",
+      run: { ...currentRun, id: "r-b" },
+      asideRuns: [
+        {
+          runId: "r-a",
+          ticket: "shop-app#2",
+          ticketTitle: "Parked work",
+          loop: {
+            phase: "parked",
+            text: "Blocked: RETRO finding",
+            prNumber: 2,
+            parked: "RETRO finding",
+          },
+        },
+      ],
+    });
+    stubNeeds(
+      [
+        item({
+          key: "park:a",
+          kind: "parked",
+          agentId: "guido-1",
+          escalationId: null,
+          ticket: "shop-app#2",
+          url: null,
+          text: "RETRO finding",
+        }),
+      ],
+      undefined,
+      {
+        "/api/runs/r-a/loop": {
+          loop: {
+            parked: { kind: "review", reason: "RETRO finding", ended: false },
+            pushFor: "abc1234def",
+          },
+        },
+        "POST /api/runs/r-a/message": () => ({ status: 409, body: { error: "review park moved" } }),
+      },
+      [row, seatRow({ id: "flight-1", index: 2 })],
+    );
+    render(<Comms item={null} />);
+    const need = await rowOf("RETRO finding");
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework message" }));
+    fireEvent.change(within(need).getByRole("textbox", { name: "Rework message" }), {
+      target: { value: "Fix it." },
+    });
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework" }));
+    expect((await within(need).findByRole("alert")).textContent).toContain("review park moved");
   });
 });
 
