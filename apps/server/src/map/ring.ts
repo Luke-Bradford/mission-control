@@ -260,44 +260,48 @@ export class CallRing {
     };
   }
 
+  private readTail(source: RingSource, now: number): void {
+    let tail = this.tails.get(source.id);
+    if (!tail || tail.path !== source.transcriptPath) {
+      // after a restart only the window the map shows is read, not the transcript from its start
+      tail = {
+        offset: offsetSince(source.transcriptPath, now - KEEP_MS),
+        path: source.transcriptPath,
+      };
+      this.tails.set(source.id, tail);
+    }
+    if (source.current === false) this.settled.add(source.id);
+    else this.settled.delete(source.id);
+    for (;;) {
+      const next = readNewLines(source.transcriptPath, tail.offset);
+      if (next.reset) {
+        this.touch(source.repoId);
+        this.runScopes.delete(source.id);
+        this.rows.set(
+          source.seat,
+          (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
+        );
+      }
+      for (const line of next.lines) {
+        try {
+          const ev: unknown = JSON.parse(line);
+          if (isObj(ev)) this.fold(source, ev, now);
+        } catch {
+          // Partial and non-JSON frames carry no calls.
+        }
+      }
+      if (next.nextOffset === tail.offset) break;
+      tail.offset = next.nextOffset;
+    }
+  }
+
   poll(): void {
     const now = Date.now();
     this.stats.clear();
     const sources = this.sources();
     for (const source of sources) {
-      if (source.current === false && this.settled.has(source.id)) continue;
-      let tail = this.tails.get(source.id);
-      if (!tail || tail.path !== source.transcriptPath) {
-        // after a restart only the window the map shows is read, not the transcript from its start
-        tail = {
-          offset: offsetSince(source.transcriptPath, now - KEEP_MS),
-          path: source.transcriptPath,
-        };
-        this.tails.set(source.id, tail);
-      }
-      if (source.current === false) this.settled.add(source.id);
-      else this.settled.delete(source.id);
-      for (;;) {
-        const next = readNewLines(source.transcriptPath, tail.offset);
-        if (next.reset) {
-          this.touch(source.repoId);
-          this.runScopes.delete(source.id);
-          this.rows.set(
-            source.seat,
-            (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
-          );
-        }
-        for (const line of next.lines) {
-          try {
-            const ev: unknown = JSON.parse(line);
-            if (isObj(ev)) this.fold(source, ev, now);
-          } catch {
-            // Partial and non-JSON frames carry no calls.
-          }
-        }
-        if (next.nextOffset === tail.offset) break;
-        tail.offset = next.nextOffset;
-      }
+      // a finished run is read once more, then only its diff is kept fresh
+      if (!(source.current === false && this.settled.has(source.id))) this.readTail(source, now);
       let entry = this.diffs.get(source.id);
       if (!entry || entry.source.cwd !== source.cwd) {
         entry = { source, diff: new SeatDiff() };

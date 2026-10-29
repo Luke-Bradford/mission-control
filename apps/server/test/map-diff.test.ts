@@ -152,3 +152,33 @@ it("retains the current checkout collector with an aside run on the same seat", 
     stop();
   }
 }, 12000);
+
+it("keeps reading a run's diff after it stops being current within the debounce", async () => {
+  const { cwd } = fixture();
+  const transcriptPath = join(cwd, "transcript.jsonl");
+  writeFileSync(transcriptPath, "");
+  const source = { id: "run", seat: "seat", repoId: "repo", cwd, transcriptPath, current: true };
+  const ring = new CallRing(() => [source]);
+  ring.poll();
+  writeFileSync(join(cwd, "file.ts"), "after\nextra\n");
+  const frames = readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url), "utf8")
+    .trim()
+    .split("\n");
+  appendFileSync(
+    transcriptPath,
+    `${frames
+      .slice(0, 2)
+      .map((line) => JSON.stringify({ ...JSON.parse(line), timestamp: new Date().toISOString() }))
+      .join("\n")}\n`,
+  );
+  source.current = false;
+  ring.poll(); // the last transcript read, inside the diff's debounce
+  const stop = setInterval(() => ring.poll(), 1000);
+  try {
+    await expect
+      .poll(() => ring.diff("run"), { timeout: 5000 })
+      .toEqual([{ file: "file.ts", add: 2, rem: 3, source: "diff" }]);
+  } finally {
+    clearInterval(stop);
+  }
+}, 12000);
