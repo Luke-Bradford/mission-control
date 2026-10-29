@@ -126,6 +126,18 @@ export function protectedDecisionItem(store: Store, item: AttentionItem): boolea
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const run = note?.runId ? store.run(note.runId) : null;
   if (item.kind === "decision" && run?.loop && flightFloorBlocked(run.loop)) return true;
+  const pr = /^pr:([^#]+)#(\d+):/.exec(item.key);
+  if (
+    item.kind === "pr" &&
+    pr !== null &&
+    store
+      .loopRuns(0)
+      .some(
+        (r) =>
+          r.repoId === pr[1] && r.loop?.prNumber === Number(pr[2]) && flightFloorBlocked(r.loop),
+      )
+  )
+    return true;
   if (item.kind !== "blocked") return false;
   const parked = run?.loop?.parked?.kind;
   // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked

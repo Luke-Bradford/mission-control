@@ -83,6 +83,7 @@ describe("decision defaults", () => {
     ["the Update hold", `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`, "ready"],
     ["an approval", "approval:1", "approval"],
     ["a budget park", "note:budget", "blocked"],
+    ["a hard-rule flag", "flag:run:hard-rule", "flag"],
     ["an observed-loop escalation", "esc:other#1", "decision"],
   ] as const)("never defaults %s", (_name, key, kind) => {
     if (key === "note:budget") {
@@ -98,6 +99,13 @@ describe("decision defaults", () => {
     }
     expect(decisionDefault(store, item(key, kind))).toBeNull();
     expect(store.acks().has(key)).toBe(false);
+  });
+
+  it("never defaults an operator decision on a confinement-floor PR", () => {
+    vi.spyOn(store, "loopRuns").mockReturnValue([
+      { repoId: "repo", loop: { prNumber: 9, touches: { paths: ["CLAUDE.md"] } } },
+    ] as never);
+    expect(decisionDefault(store, item("pr:repo#9:1", "pr"))).toBeNull();
   });
 
   it("does not default a brief stored before defaultAt existed", () => {
