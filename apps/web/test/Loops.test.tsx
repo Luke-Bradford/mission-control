@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ConfigProfile, type Crew, type CrewLoop, RETRY_NOTE, type RunView } from "@mc/core";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  type ConfigProfile,
+  type ConfigView,
+  type Crew,
+  type CrewLoop,
+  RETRY_NOTE,
+  type RunLoop,
+  type RunView,
+} from "@mc/core";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Loops } from "../src/setup/Loops.tsx";
 import { setSession } from "../src/shell/session.ts";
@@ -53,7 +61,7 @@ const steps = (region: HTMLElement): (string | null)[] =>
     .map((li) => li.textContent);
 
 describe("Setup › Loops templates", () => {
-  it("shows the approved loop chain without inventing a run when no ticket is picked", () => {
+  it("shows the approved loop chain without inventing a run when no ticket is picked", async () => {
     render(<Loops config={cfg} />);
 
     const chain = screen.getByRole("region", { name: "Feature loop chain" });
@@ -108,7 +116,9 @@ describe("Setup › Loops templates", () => {
     expect(within(chain).getByRole("button", { name: "With run" }).hasAttribute("disabled")).toBe(
       true,
     );
-    expect(screen.getByText("No open tickets with runs to show.")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText("No open tickets with runs to show.")).toBeTruthy(),
+    );
 
     fireEvent.click(within(chain).getByRole("button", { name: "Loop only" }));
     expect(within(chain).getByRole("button", { name: /CI checks: gate/ }).className).not.toContain(
@@ -126,6 +136,7 @@ describe("Setup › Loops templates", () => {
       agentId: "guido-1",
       ticket: "shop-app#3349",
       ticketTitle: "Quote cache",
+      loop: {} as RunLoop,
       profile: {
         hash: "profile",
         route: { by: "label", label: "type:feature" },
@@ -159,12 +170,23 @@ describe("Setup › Loops templates", () => {
             endedAt: 4,
             outcome: "fail",
             reason: "CI failed",
+            failures: 1,
+          },
+          {
+            step: "ci",
+            fix: false,
+            n: 2,
+            startedAt: 4,
+            endedAt: 5,
+            outcome: "fail",
+            reason: "CI failed again",
+            failures: 2,
           },
           {
             step: "working",
             fix: false,
             n: 2,
-            startedAt: 5,
+            startedAt: 6,
             endedAt: null,
             outcome: "running",
             reason: null,
@@ -177,18 +199,159 @@ describe("Setup › Loops templates", () => {
     });
     render(<Loops config={{ ...CREW_CONFIG, profiles: cfg.profiles }} />);
     await settled(fetchFn, "/api/agents/guido-1/runs?limit=50");
+    expect(screen.getByText("Pick an open ticket with a run to show its overlay.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Ticket with run"), { target: { value: "run-real" } });
     await settled(fetchFn, "/api/runs/run-real/loop");
 
     const chain = screen.getByRole("region", { name: "Feature loop chain" });
-    expect(within(chain).getByText("CI fail ≤3 · used 1/3")).toBeTruthy();
+    expect(within(chain).getByText("CI fail ≤3 · used 2/3")).toBeTruthy();
     const overlay = screen.getByRole("region", { name: "Run overlay" });
     expect(overlay.textContent).toContain("Ticket #3349 · Quote cache");
     expect(overlay.textContent).toContain("Now: Build · try 2 of 3");
-    expect(overlay.textContent).toContain("CI failure → Build · 1 of 3");
+    expect(overlay.textContent).toContain("CI failure → Build · 2 of 3");
     fireEvent.click(within(chain).getByRole("button", { name: /Build: gate/ }));
     expect(screen.getByRole("region", { name: "Step inspector" }).textContent).toContain(
       "Model / commandsonnet",
+    );
+  });
+
+  it("uses the picked repository's planner and reviewer seats, and shows parked runs as parked", async () => {
+    if (!CREW_CONFIG.crew) throw new Error("missing crew fixture");
+    const sourceRepo = CREW_CONFIG.repos[0];
+    if (!sourceRepo) throw new Error("missing repo fixture");
+    const crewConfig: ConfigView = {
+      ...CREW_CONFIG,
+      repos: [...CREW_CONFIG.repos, { ...sourceRepo, id: "other-app" }],
+      crew: {
+        ...CREW_CONFIG.crew,
+        roles: [
+          ...(CREW_CONFIG.crew.roles ?? []),
+          {
+            name: "FAO",
+            prompt: "",
+            model: "role-plan",
+            mode: "writer",
+            loop: "build",
+            tools: [],
+            here: "",
+          },
+        ],
+        sessions: [
+          ...CREW_CONFIG.crew.sessions,
+          {
+            id: "s2",
+            repoId: "other-app",
+            checkout: "/mc/other",
+            seats: [
+              {
+                id: "guido-2",
+                role: "GUIDO",
+                mode: "writer",
+                accountId: "claude-main",
+                model: "build-two",
+                area: [],
+              },
+              {
+                id: "retro-2",
+                role: "RETRO",
+                mode: "read-only",
+                accountId: "claude-main",
+                model: "review-two",
+                area: [],
+              },
+              {
+                id: "fao-2",
+                role: "FAO",
+                mode: "writer",
+                accountId: "claude-main",
+                model: "plan-two",
+                area: [],
+              },
+            ],
+          },
+        ],
+      },
+      profiles: cfg.profiles,
+    };
+    const looped = run({
+      id: "looped",
+      agentId: "guido-2",
+      repoId: "other-app",
+      ticket: "other-app#3349",
+      loop: {} as RunLoop,
+    }) as unknown as RunView;
+    const nonLoop = run({
+      id: "planner-only",
+      agentId: "fao-2",
+      repoId: "other-app",
+      ticket: "other-app#3349",
+      loop: null,
+    }) as unknown as RunView;
+    const fetchFn = stubFetch({
+      "/api/crew": {
+        rows: [
+          seatRow({
+            id: "retro-2",
+            repoId: "other-app",
+            role: "RETRO",
+            cli: { version: null, effort: "high" },
+          }),
+          seatRow({
+            id: "fao-2",
+            repoId: "other-app",
+            role: "FAO",
+            cli: { version: null, effort: "medium" },
+          }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/boards/shop-app": [],
+      "/api/boards/other-app": [boardItem({ repoId: "other-app" })],
+      "/api/agents/guido-1/runs?limit=50": [],
+      "/api/agents/retro-1/runs?limit=50": [],
+      "/api/agents/guido-2/runs?limit=50": [nonLoop, looped],
+      "/api/agents/retro-2/runs?limit=50": [],
+      "/api/agents/fao-2/runs?limit=50": [],
+      "/api/runs/looped/loop": {
+        runId: "looped",
+        loop: { phase: "parked" },
+        events: [],
+        tries: [
+          {
+            step: "ci",
+            fix: false,
+            n: 3,
+            startedAt: 1,
+            endedAt: 2,
+            outcome: "parked",
+            reason: "cap",
+          },
+        ],
+        round: 1,
+        budget: null,
+        review: null,
+      },
+    });
+    render(<Loops config={crewConfig} />);
+    await settled(fetchFn, "/api/agents/guido-2/runs?limit=50");
+    const picker = screen.getByLabelText("Ticket with run") as HTMLSelectElement;
+    expect([...picker.options].map((option) => option.value)).toEqual(["", "looped"]);
+    fireEvent.change(picker, { target: { value: "looped" } });
+    await settled(fetchFn, "/api/runs/looped/loop");
+    const chain = screen.getByRole("region", { name: "Feature loop chain" });
+    expect(screen.getByRole("region", { name: "Run overlay" }).textContent).toContain(
+      "Now: Parked",
+    );
+    expect(within(chain).getByRole("button", { name: /CI checks: gate/ }).className).not.toContain(
+      "now",
+    );
+    fireEvent.click(within(chain).getByRole("button", { name: /Plan: gate/ }));
+    expect(screen.getByRole("region", { name: "Step inspector" }).textContent).toContain(
+      "plan-two · medium",
+    );
+    fireEvent.click(within(chain).getByRole("button", { name: /Review: gate/ }));
+    expect(screen.getByRole("region", { name: "Step inspector" }).textContent).toContain(
+      "review-two · high",
     );
   });
 

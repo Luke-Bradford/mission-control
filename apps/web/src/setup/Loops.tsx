@@ -310,15 +310,11 @@ const CHAIN_INDEX: Record<LoopPhase, number> = {
   done: 5,
 };
 
-type TicketRun = { run: RunView; title: string };
-
-const returnUses = (view: RunLoopView | undefined, step: "ci" | "review") =>
-  view?.tries
-    .filter(
-      (attempt) =>
-        attempt.step === step && (step === "ci" ? attempt.outcome === "fail" : attempt.fix),
-    )
-    .reduce((total, attempt) => total + (attempt.failures ?? 1), 0) ?? 0;
+const returnUses = (view: RunLoopView | undefined, step: "ci" | "review") => {
+  const attempts = view?.tries.filter((attempt) => attempt.step === step) ?? [];
+  if (step === "ci") return attempts.at(-1)?.failures ?? 0;
+  return attempts.filter((attempt) => attempt.fix).length;
+};
 
 function LoopChain({ config }: { config: ConfigView }) {
   const [selected, setSelected] = useState(2);
@@ -334,13 +330,18 @@ function LoopChain({ config }: { config: ConfigView }) {
       .filter((ticket) => !ticket.closed && ticket.state !== "done")
       .map((ticket) => [`${ticket.repoId}#${ticket.issueNumber}`, ticket]),
   );
-  const ticketRuns: TicketRun[] = runs
+  const ticketRuns = runs
     .flatMap((resource) => resource.data ?? [])
     .flatMap((run) => {
-      if (run.ticket === null) return [];
+      if (run.ticket === null || run.loop === null || run.loop === undefined) return [];
       const ticket = openTickets.get(run.ticket);
       return ticket ? [{ run, title: ticket.title }] : [];
-    });
+    })
+    .sort((a, b) => b.run.startedAt - a.run.startedAt)
+    .filter(
+      ({ run }, index, all) =>
+        all.findIndex(({ run: other }) => other.ticket === run.ticket) === index,
+    );
   const picked = ticketRuns.find(({ run }) => run.id === runId) ?? null;
   const runLoop = useResource<RunLoopView>(picked ? RESOURCES.runLoop(picked.run.id) : null);
   const runProfile = picked?.run.profile?.profile;
@@ -349,25 +350,41 @@ function LoopChain({ config }: { config: ConfigView }) {
   const triesLimit = profile?.tries ?? 3;
   const reviewLimit = profile?.rounds ?? 3;
   const currentTry = runLoop.data?.tries.at(-1);
-  const nowIndex = currentTry ? CHAIN_INDEX[currentTry.step] : null;
+  const phase = runLoop.data?.loop?.phase ?? currentTry?.step ?? null;
+  const nowIndex = phase === null || phase === "parked" ? null : CHAIN_INDEX[phase];
   const ciUses = returnUses(runLoop.data, "ci");
   const reviewUses = returnUses(runLoop.data, "review");
+  const session = picked
+    ? config.crew?.sessions.find((candidate) => candidate.repoId === picked.run.repoId)
+    : undefined;
+  const seatForRole = (role: string) =>
+    session?.seats.find((seat) => seat.role.toLowerCase() === role.toLowerCase()) ?? null;
   const modelForRole = (role: string) =>
-    seatDefs.find((seat) => seat.role === role)?.model ??
-    config.crew?.roles?.find((candidate) => candidate.name === role)?.model ??
+    seatForRole(role)?.model ??
+    config.crew?.roles?.find((candidate) => candidate.name.toLowerCase() === role.toLowerCase())
+      ?.model ??
     null;
+  const effortForSeat = (id: string | undefined) =>
+    crew?.rows.find((candidate) => candidate.id === id)?.cli.effort;
   const modelText = (model: string | null, effort: string | null | undefined) =>
     model ? `${model}${effort ? ` · ${effort}` : ""}` : "No configured model applies.";
   const modelFor = (stepName: ChainStep["name"]) => {
     if (stepName === "Build") {
       const seat = seatDefs.find((candidate) => candidate.id === picked?.run.agentId);
-      const effort = crew?.rows.find((candidate) => candidate.id === seat?.id)?.cli.effort;
+      const effort = effortForSeat(seat?.id);
       return modelText(seat?.model ?? modelForRole("INCO"), effort);
+    }
+    if (stepName === "Plan") {
+      const planner = seatForRole("FAO") ?? seatForRole("planner");
+      return modelText(
+        planner?.model ?? modelForRole("FAO") ?? modelForRole("planner"),
+        effortForSeat(planner?.id),
+      );
     }
     if (stepName === "Review") {
       const role = profile?.reviewer.role ?? "RETRO";
-      const effort = crew?.rows.find((candidate) => candidate.role === role)?.cli.effort;
-      return modelText(modelForRole(role), effort);
+      const seat = seatForRole(role);
+      return modelText(modelForRole(role), effortForSeat(seat?.id));
     }
     if (stepName === "CI checks") return "No configured model applies.";
     return "No configured model applies.";
@@ -516,12 +533,21 @@ function LoopChain({ config }: { config: ConfigView }) {
             <dd>{step.prompt ?? "No prompt: no agent runs this step."}</dd>
           </dl>
         </Panel>
-        {!picked && <p className="pb s muted">No open tickets with runs to show.</p>}
+        {!picked && (
+          <p className="pb s muted">
+            {runs.some((resource) => resource.loading) ||
+            boards.some((resource) => resource.loading)
+              ? "Loading open tickets with runs…"
+              : ticketRuns.length > 0
+                ? "Pick an open ticket with a run to show its overlay."
+                : "No open tickets with runs to show."}
+          </p>
+        )}
         {withRun && picked && (
           <Panel title="Run overlay" sub="chosen ticket">
             <div className="loop-run">
               <b>{`Ticket #${picked.run.ticket?.split("#")[1]} · ${picked.title}`}</b>
-              <span>{`Now: ${currentTry ? TODAY_CHAIN[CHAIN_INDEX[currentTry.step]]?.name : "No recorded step"}${currentTry ? ` · try ${currentTry.n} of ${currentTry.step === "ci" ? triesLimit : currentTry.step === "review" ? reviewLimit : triesLimit}` : ""}`}</span>
+              <span>{`Now: ${phase === "parked" ? "Parked" : phase ? TODAY_CHAIN[CHAIN_INDEX[phase]]?.name : "No recorded step"}${currentTry ? ` · try ${currentTry.n} of ${currentTry.step === "ci" ? triesLimit : currentTry.step === "review" ? reviewLimit : triesLimit}` : ""}`}</span>
               <span>{`CI failure → Build · ${ciUses} of ${triesLimit}`}</span>
               <span>{`Review findings → Build · ${reviewUses} of ${reviewLimit}`}</span>
             </div>
