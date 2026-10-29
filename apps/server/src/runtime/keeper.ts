@@ -45,6 +45,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
+import { compactTranscriptLine, deltaHeartbeats } from "./transcript-compact.ts";
 
 /** Bumped when the wire changes; a hub that finds another version ends that keeper and resumes. */
 export const KEEPER_PROTOCOL_VERSION = 1;
@@ -485,6 +486,13 @@ export function runKeeper(
   const offsets: number[] = [statSync(spec.transcriptPath).size];
   /** Lines after a failed transcript write are only here (line number to text). */
   const held = new Map<number, string>();
+  /**
+   * Lines the transcript holds in a shorter form than the CLI said them (or not at all), kept in
+   * full for the attached hub until it has them: live delivery is not compacted, only the file is.
+   */
+  const live = new Map<number, string>();
+  /** Which output deltas leave a heartbeat in the transcript (one per item per minute). */
+  const heartbeats = deltaHeartbeats();
   /** The first of them: every line below it is in the transcript. */
   let firstHeld = Number.POSITIVE_INFINITY;
   let lineCount = 0;
@@ -524,8 +532,11 @@ export function runKeeper(
     else if (!everReady && earlyErrs.length < EARLY_ERR_MAX) earlyErrs.push(text);
   };
 
-  /** Lines `a` to `b` (exclusive), all of them in the transcript, in one read. */
-  const readLines = (a: number, b: number): string[] => {
+  /**
+   * Lines `a` to `b` (exclusive), all of them in the transcript, in one read; null for a line the
+   * transcript does not keep (it takes no bytes there).
+   */
+  const readLines = (a: number, b: number): (string | null)[] => {
     const from = offsets[a] as number;
     const to = offsets[b] as number;
     const buf = Buffer.alloc(to - from);
@@ -539,7 +550,13 @@ export function runKeeper(
     } finally {
       closeSync(rfd);
     }
-    return buf.toString("utf8").slice(0, -1).split("\n");
+    const out: (string | null)[] = [];
+    for (let n = a; n < b; n++) {
+      const start = (offsets[n] as number) - from;
+      const end = (offsets[n + 1] as number) - from;
+      out.push(end === start ? null : buf.toString("utf8", start, end - 1));
+    }
+    return out;
   };
 
   /** Sends the client its lines from `next`, `REPLAY_BATCH` per turn of the loop; then `exit` if the CLI has gone. */
@@ -557,7 +574,9 @@ export function runKeeper(
         const inFile = Math.min(stop, firstHeld);
         const texts = c.next < inFile ? readLines(c.next, inFile) : [];
         for (let n = c.next, i = 0; n < stop; n++, i++) {
-          const line = n < inFile ? (texts[i] as string) : (held.get(n) as string);
+          // a line the file does not keep still has its number, sent empty, so the hub's cursor passes it
+          const line = live.get(n) ?? (n < inFile ? (texts[i] ?? "") : (held.get(n) ?? ""));
+          live.delete(n);
           send(c, { t: "out", n, line });
         }
         c.next = stop;
@@ -589,12 +608,15 @@ export function runKeeper(
       }
     }
     const n = lineCount;
-    const ok = record(line);
+    // the transcript keeps a compact form (#934); the hub, attached now, still hears the whole line
+    const kept = compactTranscriptLine(line, heartbeats);
+    if (kept !== line && client?.ready) live.set(n, line);
+    const ok = kept === null ? !transcriptFailed : record(kept);
     if (ok) {
-      offsets.push((offsets[n] as number) + Buffer.byteLength(line) + 1);
+      offsets.push((offsets[n] as number) + (kept === null ? 0 : Buffer.byteLength(kept) + 1));
     } else {
       if (firstHeld === Number.POSITIVE_INFINITY) firstHeld = n;
-      held.set(n, line);
+      if (kept !== null) held.set(n, kept);
     }
     lineCount = n + 1;
     if (spec.turnEnd === "codex") {
@@ -793,6 +815,7 @@ export function runKeeper(
     c.authed = true;
     if (client !== null) client.sock.destroy();
     client = c;
+    live.clear();
     clearTimeout(absentTimer);
     return true;
   };
@@ -809,6 +832,7 @@ export function runKeeper(
       clearTimeout(authTimer);
       if (client !== c) return;
       client = null;
+      live.clear();
       armHubAbsent();
       // the CLI has gone and the hub with it, before it had everything: exit.json tells the next one
       if (closed !== null) finish();
