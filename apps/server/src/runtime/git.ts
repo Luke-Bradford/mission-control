@@ -104,8 +104,11 @@ async function assertOwnGitDirs(
   expectedCommonDir: string,
   o: CrewGitOptions,
 ): Promise<void> {
+  // only the timeout: the caller's env (GIT_DIR, GIT_COMMON_DIR) must not steer the check
   const [common = "", own = ""] = (
-    await run(cwd, ["rev-parse", "--git-common-dir", "--absolute-git-dir"], o)
+    await run(cwd, ["rev-parse", "--git-common-dir", "--absolute-git-dir"], {
+      timeoutMs: o.timeoutMs,
+    })
   ).split("\n");
   const redirected =
     (await abs(cwd, common)) !== (await realpath(expectedCommonDir)) ||
