@@ -478,6 +478,7 @@ describe("reviewBrief", () => {
     bodyLength: 27,
     notes: ["Fixed it."],
     prevSha: null,
+    prevReviewId: null,
     prevFindings: [],
     prevReply: null,
     diffCut: false,
@@ -550,9 +551,28 @@ describe("reviewBrief", () => {
       since: true,
       diffCut: true,
       touches: ["CLAUDE.md", ".github/**"],
+      prevReviewId: 31,
       prevFindings: [
-        { severity: "Critical", file: "a.ts", line: 0, summary: "s1", scenario: "w", fix: "f1" },
-        { severity: "Important", file: "b.ts", line: 4, summary: "s2", scenario: "w", fix: "f2" },
+        {
+          pos: 0,
+          state: "open",
+          severity: "Critical",
+          file: "a.ts",
+          line: 0,
+          summary: "s1",
+          scenario: "w",
+          fix: "f1",
+        },
+        {
+          pos: 2,
+          state: "open",
+          severity: "Important",
+          file: "b.ts",
+          line: 4,
+          summary: "s2",
+          scenario: "w",
+          fix: "f2",
+        },
       ],
       prevReply: "I checked this case; the suggested change would break it.",
     });
@@ -570,7 +590,7 @@ describe("reviewBrief", () => {
     );
     expect(t).toContain("report notes, and the findings and reply from the last review.");
     expect(t).toContain(
-      "## Findings and the developer's reply from the last review\n\n1. [Critical] a.ts — s1\n   Why: w\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\n2. [Important] b.ts:4 — s2\n   Why: w\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
+      "## Findings and the developer's reply from the last review (review id 31)\n\nmc report_findings resolutions take each finding's position below as findingRef.pos; findingRef.reviewId may be left out.\n\npos 0. [Critical] a.ts — s1\n   Why: w\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\npos 2. [Important] b.ts:4 — s2\n   Why: w\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
     );
   });
 

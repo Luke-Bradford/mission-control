@@ -57,6 +57,7 @@ import {
   FINDINGS_FAIL_NEEDS_BLOCKING,
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
+  type FindingResolution,
   findingFileOk,
   findingFileText,
   firstCommitNotifier,
@@ -333,7 +334,10 @@ const FindingsArgs = z.strictObject({
   resolutions: z
     .array(
       z.strictObject({
-        findingRef: z.strictObject({ reviewId: z.int().positive(), pos: z.int().min(0) }),
+        findingRef: z.strictObject({
+          reviewId: z.int().positive().optional(),
+          pos: z.int().min(0),
+        }),
         outcome: z.enum(FINDING_RESOLUTION_OUTCOMES),
       }),
     )
@@ -387,10 +391,15 @@ const FindingResolutionSchema = {
     findingRef: {
       type: "object",
       properties: {
-        reviewId: { type: "integer", minimum: 1 },
+        reviewId: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Optional: the previous round's review id, which Mission Control supplies when it is left out.",
+        },
         pos: { type: "integer", minimum: 0 },
       },
-      required: ["reviewId", "pos"],
+      required: ["pos"],
       additionalProperties: false,
     },
     outcome: { type: "string", enum: [...FINDING_RESOLUTION_OUTCOMES] },
@@ -2067,27 +2076,37 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (new Set((checked ?? []).map((check) => check.check)).size !== (checked ?? []).length) {
       return { text: `${MC_BAD_ARGS}checked: each check may appear once`, isError: true };
     }
+    let resolved: FindingResolution[] | undefined;
     if (resolutions !== undefined) {
+      if (review.round < 2)
+        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
+      const previous = store
+        .reviewsOfRun(review.authorRunId)
+        .filter((r) => r.id < review.id && r.epoch === review.epoch && r.state === "reported")
+        .at(-1);
+      // a reference without a review id is the previous round's finding at that position
+      resolved = resolutions.map((resolution) => ({
+        ...resolution,
+        findingRef: {
+          reviewId: resolution.findingRef.reviewId ?? previous?.id ?? 0,
+          pos: resolution.findingRef.pos,
+        },
+      }));
       if (
         new Set(
-          resolutions.map((resolution) =>
+          resolved.map((resolution) =>
             [resolution.findingRef.reviewId, resolution.findingRef.pos].join(":"),
           ),
-        ).size !== resolutions.length
+        ).size !== resolved.length
       ) {
         return {
           text: `${MC_BAD_ARGS}resolutions: each prior finding may appear once`,
           isError: true,
         };
       }
-      if (review.round < 2)
-        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
-      const previous = store
-        .reviewsOfRun(review.authorRunId)
-        .find((r) => r.round === review.round - 1);
       if (
         previous === undefined ||
-        resolutions.some(
+        resolved.some(
           (resolution) =>
             resolution.findingRef.reviewId !== previous.id ||
             !store
@@ -2118,7 +2137,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         findings,
         checked,
         tests,
-        resolutions,
+        resolutions: resolved,
         at,
       })
     ) {

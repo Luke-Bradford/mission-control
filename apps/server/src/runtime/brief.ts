@@ -16,8 +16,8 @@ import {
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
   REVIEW_SINCE_FILE,
-  type ReviewFinding,
   type RunProfile,
+  type StoredFinding,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -196,8 +196,10 @@ export interface ReviewBriefInput {
   /** The author's report notes, oldest first. */
   notes: readonly string[];
   prevSha: string | null;
+  /** The last review's id, which `report_findings` resolutions refer to when they name no id. */
+  prevReviewId: number | null;
   /** The blocking findings the author was asked to fix after the last review. */
-  prevFindings: readonly ReviewFinding[];
+  prevFindings: readonly StoredFinding[];
   /** The author's evidence note responding to the previous blocking findings, if any. */
   prevReply: string | null;
   diffCut: boolean;
@@ -274,12 +276,14 @@ export function reviewBrief(i: ReviewBriefInput): string {
   if (i.prevFindings.length > 0) {
     lines.push(
       "",
-      "## Findings and the developer's reply from the last review",
+      `## Findings and the developer's reply from the last review${i.prevReviewId === null ? "" : ` (review id ${i.prevReviewId})`}`,
+      "",
+      "mc report_findings resolutions take each finding's position below as findingRef.pos; findingRef.reviewId may be left out.",
       "",
       i.prevFindings
         .map(
-          (f, k) =>
-            `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}\n   Developer's reply: ${i.prevReply ?? "(no separate reply recorded)"}`,
+          (f) =>
+            `pos ${f.pos}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}\n   Developer's reply: ${i.prevReply ?? "(no separate reply recorded)"}`,
         )
         .join("\n\n"),
     );

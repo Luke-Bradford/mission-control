@@ -3433,6 +3433,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         notes: evidence.map((e) => e.note),
         prevSha: prev?.sha ?? null,
+        prevReviewId: prev?.id ?? null,
         prevFindings: prev
           ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
           : [],
