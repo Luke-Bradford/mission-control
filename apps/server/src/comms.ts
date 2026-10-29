@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
@@ -14,6 +13,7 @@ import {
   commsCutMarker,
   scanSecrets,
 } from "@mc/core";
+import { statNoted } from "./file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
 
@@ -234,7 +234,7 @@ const transcripts = new Map<
 
 function transcript(path: string): ReturnType<typeof readStream> {
   try {
-    const { size, mtimeMs } = statSync(path);
+    const { size, mtimeMs } = statNoted(path);
     const cached = transcripts.get(path);
     const stream =
       cached?.size === size && cached.mtimeMs === mtimeMs

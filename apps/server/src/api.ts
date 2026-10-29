@@ -207,6 +207,7 @@ import {
   attentionVersion,
   CREW_ERROR_KEY,
   crew,
+  forgetViews,
   NO_LOCK,
   NOTE_KEY,
 } from "./hud.ts";
@@ -887,6 +888,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseCache.clear();
       attentionMemo = undefined;
       crewMemo = undefined;
+      forgetViews(store);
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();

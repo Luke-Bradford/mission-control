@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
@@ -102,6 +102,7 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import { cloneData } from "./clone.ts";
 
 export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
@@ -975,8 +976,197 @@ function compactFlightWake(text: string): string {
   return header + suffix;
 }
 
+/** What a view read, and how often each table it read had been written when it was built. */
+export interface ReadStamp {
+  tables: Map<string, number>;
+  /** DDL, rollbacks and anything not attributed to a table. */
+  other: number;
+  /** Writes by other connections (`PRAGMA data_version`). */
+  external: number;
+}
+
+const WRITE_TARGET =
+  /^\s*(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?|DELETE\s+FROM)\s+"?(\w+)/i;
+const READ_SOURCES = /\b(?:FROM|JOIN)\s+"?(\w+)/gi;
+/** A trigger writes another table when this one is written. */
+const TRIGGERED: Record<string, string[]> = { attention_notes: ["attention_episodes"] };
+
+interface Parsed {
+  /** Tables the statement writes, or null when it is not a table write. */
+  writes: string[] | null;
+  reads: string[];
+}
+const parsed = new Map<string, Parsed>();
+function parse(sql: string): Parsed {
+  let p = parsed.get(sql);
+  if (!p) {
+    const target = WRITE_TARGET.exec(sql)?.[1];
+    p = {
+      writes: target === undefined ? null : [target, ...(TRIGGERED[target] ?? [])],
+      reads: [...sql.matchAll(READ_SOURCES)].map((m) => m[1] as string),
+    };
+    if (parsed.size > 2000) parsed.clear();
+    parsed.set(sql, p);
+  }
+  return p;
+}
+
+/**
+ * The one door to the database: every statement the store runs goes through here, so every write
+ * is seen and counted per table, and every read can be noted for the view being built. A write
+ * the parse cannot attribute to a table counts as `other`, which invalidates every view.
+ */
+class TrackedDb {
+  private readonly raw: DatabaseSync;
+  private readonly written = new Map<string, number>();
+  /** Prepared statements by text: the store builds the same few hundred over and over. */
+  private readonly statements = new Map<string, StatementSync>();
+  private other = 0;
+  private total = 0;
+  private reading: Set<string> | null = null;
+  private readonly dataVersion: StatementSync;
+
+  constructor(path: string, timeout: number) {
+    this.raw = new DatabaseSync(path, { timeout });
+    this.dataVersion = this.raw.prepare("PRAGMA data_version");
+  }
+
+  private get external(): number {
+    return (this.dataVersion.get() as { data_version: number }).data_version;
+  }
+
+  private bump(sql: string): void {
+    this.total++;
+    const writes = parse(sql).writes;
+    if (writes === null) this.other++;
+    else for (const t of writes) this.written.set(t, (this.written.get(t) ?? 0) + 1);
+  }
+
+  /** The counts as they stand, to put back when a transaction turned out to change nothing. */
+  mark(): { written: Map<string, number>; other: number } {
+    return { written: new Map(this.written), other: this.other };
+  }
+
+  restore(mark: { written: Map<string, number>; other: number }): void {
+    this.written.clear();
+    for (const [t, n] of mark.written) this.written.set(t, n);
+    this.other = mark.other;
+  }
+
+  /** Runs `build`, noting every table it reads. `clean`: nothing was written while it ran. */
+  track<T>(build: () => T): { value: T; stamp: ReadStamp; clean: boolean } {
+    const outer = this.reading;
+    const reading = new Set<string>();
+    this.reading = reading;
+    const before = this.total;
+    try {
+      const value = build();
+      return { value, stamp: this.stampOf(reading), clean: this.total === before };
+    } finally {
+      this.reading = outer;
+      if (outer) for (const t of reading) outer.add(t);
+    }
+  }
+
+  private stampOf(tables: Iterable<string>): ReadStamp {
+    return {
+      tables: new Map([...tables].map((t) => [t, this.written.get(t) ?? 0])),
+      other: this.other,
+      external: this.external,
+    };
+  }
+
+  /** Notes tables a reused answer stands on, for the view being built. */
+  noteReads(tables: Iterable<string>): void {
+    if (this.reading) for (const t of tables) this.reading.add(t);
+  }
+
+  holds(stamp: ReadStamp): boolean {
+    if (stamp.other !== this.other || stamp.external !== this.external) return false;
+    for (const [t, n] of stamp.tables) if ((this.written.get(t) ?? 0) !== n) return false;
+    return true;
+  }
+
+  exec(sql: string): void {
+    // statements inside a transaction were counted as they ran; a rollback undoes what they did
+    if (sql === "ROLLBACK") this.other++;
+    else if (sql !== "BEGIN" && sql !== "BEGIN IMMEDIATE" && sql !== "COMMIT") this.bump(sql);
+    this.raw.exec(sql);
+  }
+
+  prepare(sql: string): {
+    run: (...a: SQLInputValue[]) => ReturnType<StatementSync["run"]>;
+    get: (...a: SQLInputValue[]) => ReturnType<StatementSync["get"]>;
+    all: (...a: SQLInputValue[]) => ReturnType<StatementSync["all"]>;
+  } {
+    let stmt = this.statements.get(sql);
+    if (!stmt) {
+      stmt = this.raw.prepare(sql);
+      if (this.statements.size >= 512) this.statements.clear();
+      this.statements.set(sql, stmt);
+    }
+    const note = () => {
+      if (this.reading) for (const t of parse(sql).reads) this.reading.add(t);
+    };
+    return {
+      run: (...a) => {
+        this.bump(sql);
+        return stmt.run(...a);
+      },
+      get: (...a) => {
+        note();
+        return stmt.get(...a);
+      },
+      all: (...a) => {
+        note();
+        return stmt.all(...a);
+      },
+    };
+  }
+
+  close(): void {
+    this.raw.close();
+  }
+}
+
+const READ_CACHE_ENTRIES = 512;
+
 export class Store {
-  private readonly db: DatabaseSync;
+  private readonly db: TrackedDb;
+
+  /**
+   * Runs `build` and notes which tables it read. The result may be reused while `holds(stamp)`
+   * (no write to those tables, none unattributed, none by another connection); `clean` is false
+   * when `build` itself wrote, and then it may not be reused.
+   */
+  tracked<T>(build: () => T): { value: T; stamp: ReadStamp; clean: boolean } {
+    return this.db.track(build);
+  }
+
+  private readonly reads = new Map<string, { value: unknown; stamp: ReadStamp }>();
+
+  /**
+   * A whole-table read, kept until a table it read is written: the same answer, without asking
+   * SQLite and rebuilding every row again. Every caller gets its own copy.
+   */
+  private cached<T>(key: string, load: () => T): T {
+    const hit = this.reads.get(key);
+    if (hit && this.db.holds(hit.stamp)) {
+      this.db.noteReads(hit.stamp.tables.keys());
+      return cloneData(hit.value as T);
+    }
+    const { value, stamp, clean } = this.db.track(load);
+    if (clean) {
+      if (this.reads.size >= READ_CACHE_ENTRIES) this.reads.clear();
+      this.reads.set(key, { value: cloneData(value), stamp });
+    }
+    return value;
+  }
+
+  /** Whether none of the tables behind `stamp` has been written since it was taken. */
+  holds(stamp: ReadStamp): boolean {
+    return this.db.holds(stamp);
+  }
 
   /** `busyTimeoutMs` is shortened only by tests that hold a lock on purpose. */
   /** The database file. */
@@ -985,7 +1175,7 @@ export class Store {
   constructor(path: string, busyTimeoutMs = BUSY_TIMEOUT_MS) {
     this.path = path;
     // Wait up to the timeout for another writer's lock instead of failing at once.
-    this.db = new DatabaseSync(path, { timeout: busyTimeoutMs });
+    this.db = new TrackedDb(path, busyTimeoutMs);
     this.db.exec("PRAGMA journal_mode = WAL");
     const hasEpisodes = this.db
       .prepare("SELECT 1 FROM sqlite_master WHERE name = 'attention_episodes'")
@@ -1373,11 +1563,14 @@ export class Store {
   /** Runs `write` in one transaction; true when it changed any of the repo's rows in `table`. */
   private changed(table: RepoTable, repoId: RepoId, write: () => void): boolean {
     let changed = false;
+    const mark = this.db.mark();
     this.transaction(() => {
       const before = this.repoRows(table, repoId);
       write();
       changed = this.repoRows(table, repoId) !== before;
     });
+    // a rewrite that left every row as it was is no change to anything built from them
+    if (!changed) this.db.restore(mark);
     return changed;
   }
 
@@ -1529,6 +1722,10 @@ export class Store {
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
+    return this.cached(`runs:${agentId}:${limit}`, () => this.loadRuns(agentId, limit));
+  }
+
+  private loadRuns(agentId: AgentId, limit: number): Run[] {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?")
       .all(agentId, limit) as Row[];
@@ -1817,6 +2014,10 @@ export class Store {
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
+    return this.cached(`digests:${runIds.join(",")}`, () => this.loadDigests(runIds));
+  }
+
+  private loadDigests(runIds: string[]): Map<string, RunDigest> {
     const out = new Map<string, RunDigest>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
@@ -2170,6 +2371,10 @@ export class Store {
   }
 
   board(repoId: RepoId): BoardItem[] {
+    return this.cached(`board:${repoId}`, () => this.loadBoard(repoId));
+  }
+
+  private loadBoard(repoId: RepoId): BoardItem[] {
     const rows = this.db
       .prepare("SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number ASC")
       .all(repoId) as Row[];
@@ -2644,6 +2849,10 @@ export class Store {
   }
 
   pullRequests(repoId: RepoId): PullRequestView[] {
+    return this.cached(`pullRequests:${repoId}`, () => this.loadPullRequests(repoId));
+  }
+
+  private loadPullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.db
       .prepare("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC")
       .all(repoId) as Row[];
@@ -3666,6 +3875,12 @@ export class Store {
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
   planLanded(run: Run): boolean {
+    return this.cached(`planLanded:${run.id}:${run.repoId}:${run.ticket}`, () =>
+      this.loadPlanLanded(run),
+    );
+  }
+
+  private loadPlanLanded(run: Run): boolean {
     return (
       this.db
         .prepare(
