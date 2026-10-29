@@ -5620,7 +5620,9 @@ export class Store {
       delete structured.defaultAt;
       if (defaultEligible && structured.for !== "flight" && structured.recommendedOptionId) {
         const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
-        structured.defaultAt = kept ?? (structured.askAt ?? at) + DECISION_DEFAULT_WAIT_MS;
+        // The wait starts when a default is first stamped, never at an older ask's time: an ask
+        // briefed before defaults existed must not come due the moment it is briefed again.
+        structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
       }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)

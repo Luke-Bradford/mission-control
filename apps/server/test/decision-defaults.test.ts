@@ -178,6 +178,17 @@ describe("decision defaults", () => {
     expect(decisionDefault(store, legacy)).toBeNull();
   });
 
+  it("starts the wait when a default is first stamped, not at an older ask's time", () => {
+    const key = "ask:old";
+    const asked = NOW - 5 * 86_400_000;
+    // briefed before defaults existed: the same ask, stored with no defaultAt
+    store.addBrief({ key, ...brief(), at: asked, defaultEligible: false });
+    store.addBrief({ key, ...brief(), at: NOW });
+    const stored = store.briefs().get(key);
+    expect(stored?.askAt).toBe(asked);
+    expect(stored?.defaultAt).toBe(NOW + DECISION_DEFAULT_WAIT_MS);
+  });
+
   it("stores a recommendation on a protected brief without a deadline", () => {
     store.addBrief({
       key: `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`,
