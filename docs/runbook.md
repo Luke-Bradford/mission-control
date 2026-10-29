@@ -231,7 +231,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.serve
 ### Log rotation and retention
 
 Routine requests produce no request log lines. Responses with status 4xx or 5xx and requests
-taking over one second produce a summary. Every 5xx includes its error message and stack
+taking over one second produce a summary carrying the method and URL path (never the query
+string; the operator token travels as a header). Every 5xx includes its error message and stack
 through the existing redacting logger. Other hub warnings remain logged.
 
 For a launchd hub, add this entry to `/etc/newsyslog.d/mission-control.conf`, replacing
@@ -241,15 +242,27 @@ Use absolute paths (newsyslog does not expand `~`). If `MC_DB` is set, the pid f
 
 ```text
 # logfilename                                  owner:group     mode count size when flags pid_file                                                signal
-<home>/Library/Logs/mission-control/server.log  <user>:<group>  600  7     *    @T00 B     <home>/.local/share/mission-control/server.pid           15
+<home>/Library/Logs/mission-control/server.log  <user>:<group>  600  7     20480 @T00 B     <home>/.local/share/mission-control/server.pid           15
 ```
 
-The system's newsyslog job rotates daily at midnight and keeps seven daily archives. The
+The system's newsyslog job rotates at 20 MB (the size column is in KB) or daily at midnight,
+whichever comes first, and keeps seven archives. The
 `B` flag avoids inserting plain text into the JSON log. Signal 15 requests the hub's existing
 graceful shutdown; launchd's `KeepAlive` starts it again and reopens the new log. Rotation
 therefore includes a hub restart and the crew's normal shutdown and resume. This entry requires
 the launchd job; do not install it for a manually started hub. Check the expanded entry with
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
+
+### Map payload cache and polling
+
+`/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
+branch's commit, the call ring's revision (deltas, aged-out calls, branch diff reads), the seats
+(crew rows and test-lock state), or the repo's PRs and board. Fields that age on their own
+(context usage, ages) are refreshed at most every 15 seconds. The call ring polls only seats with a
+live run (a finished run is read once more, then left), every second while a map client is
+connected and every five seconds otherwise. After a hub restart each transcript is read from the
+byte offset that covers the last `MAP_RECENT_MS` (15 minutes, scanning back at most 16 MB), not
+from the start, so the first map request after an Update no longer re-reads whole transcripts.
 
 The hourly maintenance sweep retains seat lines for seven days after their run ends, and
 loop events and run evidence for 30 days after their run ends. Findings stay for 90 days

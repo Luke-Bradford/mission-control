@@ -485,6 +485,7 @@ export async function main(): Promise<void> {
     hudShots,
     queueReorder,
     mapRing,
+    warmMap: true,
     operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,

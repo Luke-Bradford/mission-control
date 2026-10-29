@@ -98,6 +98,21 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
 });
 
 describe("Store", () => {
+  it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
+    const s = new Store(":memory:");
+    s.mapCachePut("tree", "checkout", "a", "1", true);
+    s.mapCachePut("tree", "other", "z", "9", true);
+    s.mapCachePut("merge", "", "m", "[]", false);
+    expect(s.mapCacheGet("tree", "checkout", "a")).toBe("1");
+    s.mapCachePut("tree", "checkout", "b", "2", true);
+    expect(s.mapCacheGet("tree", "checkout", "a")).toBeNull();
+    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("2");
+    expect(s.mapCacheGet("tree", "other", "z")).toBe("9");
+    expect(s.mapCacheGet("merge", "", "m")).toBe("[]");
+    s.mapCachePut("tree", "checkout", "b", "3", true);
+    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("3");
+  });
+
   it("close releases the database: the store cannot be used after", () => {
     const s = new Store(":memory:");
     s.upsertRun(run());

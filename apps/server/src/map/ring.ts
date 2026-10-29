@@ -13,12 +13,14 @@ import {
 import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
-import { readNewLines } from "../tail.ts";
+import { offsetSince, readNewLines } from "../tail.ts";
 import { originalBytes } from "../util.ts";
 import { SeatDiff } from "./diff.ts";
 
 /** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
 const KEEP_MS = MAP_RECENT_MS;
+const POLL_MS = 1000;
+const IDLE_POLL_MS = 5000;
 type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
@@ -105,6 +107,11 @@ export class CallRing {
   private sequences = new Map<string, number>();
   private listeners = new Map<string, Set<(delta: MapDelta) => void>>();
   private diffs = new Map<string, { source: RingSource; diff: SeatDiff }>();
+  /** Runs no longer current whose transcript has been read to its end: not polled again. */
+  private settled = new Set<string>();
+  /** Per repo: deltas published and calls aged out; with the diffs' reads, what `revision` counts. */
+  private changes = new Map<string, number>();
+  private wake: (() => void) | null = null;
 
   constructor(sources: () => RingSource[]) {
     this.sources = sources;
@@ -114,19 +121,41 @@ export class CallRing {
     return this.sequences.get(repoId) ?? 0;
   }
 
+  /**
+   * Moves whenever something the map shows from this ring changes: a delta published, a call aged
+   * out, a branch diff read. A cache keyed on it is valid until it moves.
+   */
+  revision(repoId: string): number {
+    let reads = 0;
+    for (const e of this.diffs.values()) if (e.source.repoId === repoId) reads += e.diff.reads();
+    return (this.changes.get(repoId) ?? 0) + reads;
+  }
+
+  /** True while any map client listens for deltas. */
+  hasClients(): boolean {
+    return this.listeners.size > 0;
+  }
+
   subscribe(repoId: string, fn: (delta: MapDelta) => void): () => void {
     const listeners = this.listeners.get(repoId) ?? new Set();
+    const first = !this.hasClients();
     this.listeners.set(repoId, listeners);
     listeners.add(fn);
+    if (first) this.wake?.();
     return () => {
       listeners.delete(fn);
       if (!listeners.size) this.listeners.delete(repoId);
     };
   }
 
+  private touch(repoId: string): void {
+    this.changes.set(repoId, (this.changes.get(repoId) ?? 0) + 1);
+  }
+
   private publish(repoId: string, delta: DeltaPayload): void {
     const seq = this.sequence(repoId) + 1;
     this.sequences.set(repoId, seq);
+    this.touch(repoId);
     for (const listener of [...(this.listeners.get(repoId) ?? [])]) {
       try {
         listener({ ...delta, seq });
@@ -205,11 +234,65 @@ export class CallRing {
     return [...seats].map((seat) => ({ seat, scope: { modified: this.modified(seat, repoId) } }));
   }
 
+  /** Polls every second while a map client is connected, every five seconds otherwise. */
   start(): () => void {
     this.poll();
-    const timer = setInterval(() => this.poll(), 1000);
-    timer.unref();
-    return () => clearInterval(timer);
+    let timer: NodeJS.Timeout | undefined;
+    let stopped = false;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (stopped) return;
+      timer = setTimeout(
+        () => {
+          this.poll();
+          schedule();
+        },
+        this.hasClients() ? POLL_MS : IDLE_POLL_MS,
+      );
+      timer.unref();
+    };
+    this.wake = schedule;
+    schedule();
+    return () => {
+      stopped = true;
+      this.wake = null;
+      clearTimeout(timer);
+    };
+  }
+
+  private readTail(source: RingSource, now: number): void {
+    let tail = this.tails.get(source.id);
+    if (!tail || tail.path !== source.transcriptPath) {
+      // after a restart only the window the map shows is read, not the transcript from its start
+      tail = {
+        offset: offsetSince(source.transcriptPath, now - KEEP_MS),
+        path: source.transcriptPath,
+      };
+      this.tails.set(source.id, tail);
+    }
+    if (source.current === false) this.settled.add(source.id);
+    else this.settled.delete(source.id);
+    for (;;) {
+      const next = readNewLines(source.transcriptPath, tail.offset);
+      if (next.reset) {
+        this.touch(source.repoId);
+        this.runScopes.delete(source.id);
+        this.rows.set(
+          source.seat,
+          (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
+        );
+      }
+      for (const line of next.lines) {
+        try {
+          const ev: unknown = JSON.parse(line);
+          if (isObj(ev)) this.fold(source, ev, now);
+        } catch {
+          // Partial and non-JSON frames carry no calls.
+        }
+      }
+      if (next.nextOffset === tail.offset) break;
+      tail.offset = next.nextOffset;
+    }
   }
 
   poll(): void {
@@ -217,31 +300,8 @@ export class CallRing {
     this.stats.clear();
     const sources = this.sources();
     for (const source of sources) {
-      let tail = this.tails.get(source.id);
-      if (!tail || tail.path !== source.transcriptPath) {
-        tail = { offset: 0, path: source.transcriptPath };
-        this.tails.set(source.id, tail);
-      }
-      for (;;) {
-        const next = readNewLines(source.transcriptPath, tail.offset);
-        if (next.reset) {
-          this.runScopes.delete(source.id);
-          this.rows.set(
-            source.seat,
-            (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
-          );
-        }
-        for (const line of next.lines) {
-          try {
-            const ev: unknown = JSON.parse(line);
-            if (isObj(ev)) this.fold(source, ev, now);
-          } catch {
-            // Partial and non-JSON frames carry no calls.
-          }
-        }
-        if (next.nextOffset === tail.offset) break;
-        tail.offset = next.nextOffset;
-      }
+      // a finished run is read once more, then only its diff is kept fresh
+      if (!(source.current === false && this.settled.has(source.id))) this.readTail(source, now);
       let entry = this.diffs.get(source.id);
       if (!entry || entry.source.cwd !== source.cwd) {
         entry = { source, diff: new SeatDiff() };
@@ -256,6 +316,8 @@ export class CallRing {
     }
     for (const [seat, calls] of this.rows) {
       const kept = calls.filter((c) => c.end === null || c.end >= now - KEEP_MS);
+      if (kept.length < calls.length)
+        for (const repoId of new Set(calls.map((c) => c.repoId))) this.touch(repoId);
       if (kept.length) this.rows.set(seat, kept);
       else this.rows.delete(seat);
     }
@@ -263,6 +325,7 @@ export class CallRing {
     for (const id of this.tails.keys()) {
       if (!active.has(id)) {
         this.tails.delete(id);
+        this.settled.delete(id);
         this.runScopes.delete(id);
       }
     }
@@ -524,6 +587,7 @@ export class CallRing {
       source.turnScoped &&
       (ev.type === "result" || ev.method === "turn/completed" || ev.method === "turn/started")
     ) {
+      this.touch(source.repoId);
       this.runScopes.delete(source.id);
       this.rows.set(
         source.seat,

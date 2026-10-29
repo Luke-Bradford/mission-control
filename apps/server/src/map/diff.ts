@@ -20,6 +20,12 @@ export class SeatDiff {
   private value: MapChange[] | null = null;
   private onBranch: string | null = null;
   private others: string[] | null = null;
+  private count = 0;
+
+  /** How many reads have landed: a cache over `changes` is stale once this moves. */
+  reads(): number {
+    return this.count;
+  }
 
   changes(): MapChange[] | null {
     return this.value === null ? null : structuredClone(this.value);
@@ -81,6 +87,7 @@ export class SeatDiff {
       this.onBranch = branch && branch !== "HEAD" ? branch : null;
       this.others = others;
       this.key = key;
+      this.count++;
       if (this.revision === revision) this.due = 0;
     } catch {
       // Unavailable bases, binary counts and filters must never become invented zeroes.

@@ -192,3 +192,47 @@ it("recomputes history when an empty default-branch merge keeps the same tree", 
     (await mapTree(checkout, "origin/HEAD", [firstPr, storedPr(2, second)], [], NOW)).hist,
   ).toMatchObject({ prCount: 2, files: expect.any(Object) });
 });
+
+it("persists the tree, imports and each merge's files, and reuses them without recomputing", async () => {
+  dir = mkdtempSync(join(tmpdir(), "mc-map-persist-"));
+  const checkout = mapCheckout(dir);
+  git(checkout, "branch", "-M", "main");
+  const merge = mergedFixture(checkout, 1, ["packages/core/src/map.ts"]);
+  git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const rows = new Map<string, string>();
+  const persist = {
+    get: (kind: string, scope: string, key: string) => rows.get(`${kind}|${scope}|${key}`) ?? null,
+    put: (kind: string, scope: string, key: string, value: string) => {
+      rows.set(`${kind}|${scope}|${key}`, value);
+    },
+  };
+  const head = git(checkout, "rev-parse", "origin/HEAD");
+  const first = await mapTree(checkout, "origin/HEAD", [storedPr(1, merge)], [], NOW, persist);
+  expect(JSON.parse(rows.get(`tree|${checkout}|${head}`) as string).tree).toEqual(first.tree);
+  expect(JSON.parse(rows.get(`merge||${merge}`) as string)).toEqual(["packages/core/src/map.ts"]);
+
+  // a second checkout of the same history, as after a restart (the in-memory cache is empty for it)
+  const other = mkdtempSync(join(tmpdir(), "mc-map-persist-other-"));
+  try {
+    const checkout2 = mapCheckout(other);
+    git(checkout2, "branch", "-M", "main");
+    const head2 = git(checkout2, "rev-parse", "origin/HEAD");
+    const marker = { tree: [{ path: "stored.ts", lines: 3 }], imports: [] };
+    rows.set(`tree|${checkout2}|${head2}`, JSON.stringify(marker));
+    const again = await mapTree(checkout2, "origin/HEAD", [], [], NOW, persist);
+    expect(again.tree).toEqual(marker.tree);
+    // an unreadable stored row is recomputed, not trusted
+    const third = mkdtempSync(join(tmpdir(), "mc-map-persist-third-"));
+    try {
+      const checkout3 = mapCheckout(third);
+      git(checkout3, "branch", "-M", "main");
+      rows.set(`tree|${checkout3}|${git(checkout3, "rev-parse", "origin/HEAD")}`, "{not json");
+      const cold = await mapTree(checkout3, "origin/HEAD", [], [], NOW, persist);
+      expect(cold.tree.length).toBeGreaterThan(1);
+    } finally {
+      rmSync(third, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+});
