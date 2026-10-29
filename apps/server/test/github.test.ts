@@ -14,6 +14,7 @@ import {
   isTransient,
   makeGql,
   missingScopeLine,
+  parseChecks,
   projectUrlOf,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
@@ -343,6 +344,9 @@ function stub(opts: {
   searchError?: Error;
   prPages?: unknown[];
   prError?: Error;
+  /** The repo's milestones, as the Milestones query answers them. */
+  milestones?: unknown[];
+  milestoneError?: Error;
 }) {
   const calls: Call[] = [];
   let p = 0;
@@ -350,6 +354,10 @@ function stub(opts: {
   let ip = 0;
   const gql: Gql = async (q, v) => {
     calls.push({ q, v });
+    if (q.includes("Milestones")) {
+      if (opts.milestoneError) throw opts.milestoneError;
+      return { repository: { milestones: { nodes: opts.milestones ?? [] } } };
+    }
     if (q.includes("pullRequests")) {
       if (opts.prError) throw opts.prError;
       return opts.prPages?.[pr++] ?? prPage([]);
@@ -892,11 +900,78 @@ describe("collectGithub board fields", () => {
 });
 
 describe("collectGithub queries", () => {
-  it("sends no Milestones query", async () => {
+  it("sends one read-only Milestones query", async () => {
     const { gql, calls } = stub({ pages: [page([item(1, "Todo")])] });
     await collectGithub(repo, store, gql, NOW);
-    expect(calls.length).toBeGreaterThan(0);
-    expect(calls.map((c) => queryName(c.q))).not.toContain("Milestones");
+    const sent = calls.filter((c) => queryName(c.q) === "Milestones");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.q).not.toContain("mutation");
+  });
+
+  it("stores each milestone's due date and progress, and replaces them on the next read", async () => {
+    const node = (number: number, o: Record<string, unknown> = {}) => ({
+      number,
+      title: `M${number}`,
+      state: "OPEN",
+      dueOn: "2026-11-01T00:00:00Z",
+      openIssues: { totalCount: 3 },
+      closedIssues: { totalCount: 9 },
+      ...o,
+    });
+    const first = stub({
+      pages: [page([item(1, "Todo")])],
+      milestones: [node(1), node(2, { dueOn: null, state: "CLOSED" })],
+    });
+    await collectGithub(repo, store, first.gql, NOW);
+    expect(store.milestones("shop-app")).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        title: "M1",
+        state: "open",
+        dueOn: Date.parse("2026-11-01T00:00:00Z"),
+        open: 3,
+        closed: 9,
+      },
+      expect.objectContaining({ number: 2, state: "closed", dueOn: null }),
+    ]);
+    await collectGithub(
+      repo,
+      store,
+      stub({ pages: [page([item(1, "Todo")])], milestones: [node(3)] }).gql,
+      NOW,
+    );
+    expect(store.milestones("shop-app").map((m) => m.number)).toEqual([3]);
+  });
+
+  it("keeps the last milestones and reports the failure when the read fails", async () => {
+    await collectGithub(
+      repo,
+      store,
+      stub({
+        pages: [page([item(1, "Todo")])],
+        milestones: [
+          {
+            number: 1,
+            title: "M1",
+            state: "OPEN",
+            dueOn: null,
+            openIssues: { totalCount: 1 },
+            closedIssues: { totalCount: 0 },
+          },
+        ],
+      }).gql,
+      NOW,
+    );
+    await collectGithub(
+      repo,
+      store,
+      stub({ pages: [page([item(1, "Todo")])], milestoneError: new Error("boom") }).gql,
+      NOW + 60_000,
+    );
+    expect(store.milestones("shop-app")).toHaveLength(1);
+    expect(statusOf()?.ok).toBe(false);
+    expect(statusOf()?.error).toContain("milestones: boom");
   });
 });
 
@@ -1315,6 +1390,17 @@ describe("collectGithub size", () => {
     });
     await collectGithub(repo, store, gql, NOW);
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+  });
+});
+
+describe("parseChecks", () => {
+  it("carries a check run's node id, and none for a status", () => {
+    const rollup = {
+      contexts: {
+        nodes: [{ ...checkRun("test", "SUCCESS"), id: "CR_1" }, statusContext("ci/x", "SUCCESS")],
+      },
+    };
+    expect(parseChecks(rollup).map((c) => c.id)).toEqual(["CR_1", undefined]);
   });
 });
 

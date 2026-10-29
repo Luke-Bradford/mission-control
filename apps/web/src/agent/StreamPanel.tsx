@@ -6,6 +6,7 @@ import {
   type CrewRow,
   type GuardHitsView,
   HUD_STATE_LABEL,
+  type RunLoop,
   STALL_MS,
   type StreamEvent,
   type StreamKind,
@@ -23,7 +24,8 @@ import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { useSeatName } from "../seatName.ts";
 import { toast } from "../shell/Toast.tsx";
-import { messageSeat, seatError } from "./seat.ts";
+import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
+import { messageRun, messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
 
 const DASH = "—";
@@ -243,7 +245,17 @@ export function SeatComposer({
   const [error, setError] = useState<string | null>(null);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
+  const loopResource = useResource<{ loop: RunLoop | null }>(
+    row.run ? RESOURCES.runLoop(row.run.id) : null,
+  );
+  const loop = loopResource.data?.loop;
+  const parkedReview = reviewPark(loop);
   const crew = row.kind === "crew";
+  // The crew summary only says that a run is parked. Wait for its authoritative park kind before
+  // allowing a message: a review park must use its run route rather than the ordinary seat route.
+  const parkKindUnknown =
+    row.loop?.phase === "parked" && row.run !== null && loopResource.data === undefined;
+  const composerDisabled = !crew || busy || parkKindUnknown;
   const call = callSign(row);
   useEffect(() => {
     if (!prefill || used.current === prefill.token) return;
@@ -261,7 +273,8 @@ export function SeatComposer({
     setBusy(true);
     setError(null);
     try {
-      await messageSeat(row, text, interrupt);
+      if (parkedReview && row.run) await messageRun(row.run.id, text);
+      else await messageSeat(row, text, interrupt);
       setText("");
       toast(`Delivered to ${call}.`);
       onSent?.();
@@ -273,7 +286,7 @@ export function SeatComposer({
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (crew && !busy) void send(false);
+    if (crew && !busy && !parkKindUnknown) void send(false);
   };
 
   return (
@@ -284,32 +297,44 @@ export function SeatComposer({
         autoComplete="off"
         aria-label="Message this agent"
         aria-describedby={HINT_ID}
-        placeholder={placeholder ?? `Message ${call}…`}
-        disabled={!crew}
+        placeholder={
+          placeholder ?? (parkedReview ? "Send findings back for rework…" : `Message ${call}…`)
+        }
+        disabled={composerDisabled}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <button type="submit" className="primary" disabled={!crew || busy}>
-        Send
+      <button type="submit" className="primary" disabled={composerDisabled}>
+        {parkKindUnknown
+          ? "Loading review findings…"
+          : parkedReview
+            ? "Send rework message"
+            : "Send"}
       </button>
-      <button
-        type="button"
-        className="sm ghost"
-        title="Stop the current turn, then send"
-        disabled={!crew || busy}
-        onClick={() => void send(true)}
-      >
-        Interrupt and send
-      </button>
+      {!parkedReview && !parkKindUnknown && (
+        <button
+          type="button"
+          className="sm ghost"
+          title="Stop the current turn, then send"
+          disabled={composerDisabled}
+          onClick={() => void send(true)}
+        >
+          Interrupt and send
+        </button>
+      )}
       {error && (
         <span className="crit-t s" role="alert">
           {error}
         </span>
       )}
       <span className="hint" id={HINT_ID}>
-        {crew
-          ? seatHint(row, vendor)
-          : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
+        {parkKindUnknown
+          ? "Loading the park details before a message can be sent."
+          : parkedReview
+            ? `This sends RETRO's findings on ${reviewParkSha(parkedReview)} back for rework. It does not waive them.`
+            : crew
+              ? seatHint(row, vendor)
+              : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
       </span>
     </form>
   );

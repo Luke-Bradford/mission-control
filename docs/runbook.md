@@ -252,8 +252,9 @@ the launchd job; do not install it for a manually started hub. Check the expande
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
 
 The hourly maintenance sweep retains seat lines for seven days after their run ends, and
-loop events and run evidence for 30 days after their run ends. Findings stay for 30 days
-after both their review and author run end. Unfinished reviews, open runs, parked and
+loop events and run evidence for 30 days after their run ends. Findings stay for 90 days
+after both their review and author run end; test-lock holds and CI runs stay 90 days too
+(see [QA board data](#qa-board-data)). Unfinished reviews, open runs, parked and
 set-aside runs, unanswered questions, pending drafts and open attention notes protect
 their associated rows. Deletions use transactions of at most 500 rows, yield between
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
@@ -993,6 +994,29 @@ is no projection: the Quota panel shows used % with no "full in … at this rate
 - When an earlier usage source fails and a later one succeeds, the account stays `ok` and the
   earlier failure's message is kept as a note in the collector's `error` field.
 
+## QA board data
+
+The hub records what the QA board needs as it goes; nothing here writes to GitHub. Test-lock holds,
+CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
+
+- **Full-suite pass/fail.** The guard hook's `PostToolUse` / `PostToolUseFailure` event ends a hold
+  of the test lock. `GET /api/test-lock/history?days=` (1..90, default 7) lists holds with `outcome`:
+  `pass`, `fail` (any call of the hold failed), `freed` (the run ended before the event) or `done`
+  (holds recorded before this was captured). Single-file runs do not take the lock, so they are not
+  counted.
+- **CI runs.** Every check run read on a PR's head commit is kept in `ci_runs`, one row per
+  (repo, sha, name, attempt), updated in place as it concludes; `firstSeenAt` and `at` bracket the
+  polls that saw it. `GET /api/qa/ci-runs?days=` (1..90, default 7), newest first. A re-run is a new
+  attempt, so a flaky check shows as a failing attempt followed by a passing one.
+- **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
+  date, state, open and closed issue counts. `GET /api/qa/milestones`. Milestones the repo does not
+  use give an empty list.
+- **Findings.** `GET /api/qa/findings?days=` (1..90, default 30) lists review findings with their
+  RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or `waived`; null while
+  unresolved). RETRO sets the resolution of the findings it names when it reports round 2 or later;
+  when a round reports nothing to fix, the engine marks the earlier blocking findings it left
+  unnamed `fixed`. Minor findings are logged, not resolved.
+
 ## The HUD
 
 One window: a header, the page, and FLIGHT's dock on the right. Numbers that today's data cannot
@@ -1106,6 +1130,24 @@ The record of the first real run against the live loops (2026-10-17) is kept out
 
 Screenshots are not kept in the repo, because they would show a real board. Run a preview on a
 copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=1`) to see the HUD.
+
+### Checking the write floors
+
+The floors (what a Codex or Claude seat can write) are otherwise tested by reading generated config.
+`apps/server/test/seat-floors.test.ts` launches the installed `codex` and `claude` CLIs through the
+production config (`codexSeatConfig`, `crewSandboxSettings`) with a temp HOME and fake auth, runs a
+write probe inside each, and checks the disk. For a writer and a read-only seat it covers the pnpm
+store (Codex: read-only to both modes; Claude's store is the seat's own temp root, writable and
+nowhere else), the worktree itself (writable for a writer, refused for a read-only seat), the
+worktree's `.git` pointer, the clone's git dir, the worktree's git dir, `.codex` and the hub's data
+dir. Claude runs against a local fake Messages API, so no login or network is used. Codex runs the
+profile with `codex sandbox`, not the app-server.
+
+It runs only on macOS with `sandbox-exec` that can apply a profile (not from inside another
+sandbox) and the `codex` / `claude` CLI on PATH; elsewhere, including Linux CI, it skips. Before
+merging any change to a floor (`codex-floor.ts`, `crewSandboxSettings`, the pnpm store paths), run
+`pnpm -s vitest run apps/server/test/seat-floors.test.ts` on a Mac outside a sandbox and confirm
+the tests ran rather than skipped.
 
 ## Agent comms relay
 

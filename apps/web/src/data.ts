@@ -272,6 +272,10 @@ export const ACTIONS = {
   seatEnd: (seatId: string) => `/api/seats/${enc(seatId)}/end`,
   /** Body `{}`: ends a run set aside in review, without waking it; a 409 if it is not aside. */
   runEnd: (runId: string) => `/api/runs/${enc(runId)}/end`,
+  /** Body `{}`: explicitly accepts a parked review's findings and resumes its run. */
+  runResume: (runId: string) => `/api/runs/${enc(runId)}/resume`,
+  /** Body `{ text }`: sends a review park's findings back for rework without waiving them. */
+  runMessage: (runId: string) => `/api/runs/${enc(runId)}/message`,
   /** Body `{ base, seats }`; answers `{ backup, changes }` after writing config.yaml. */
   addSession: "/api/crew/sessions",
   closeSession: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/close`,

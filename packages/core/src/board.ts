@@ -16,6 +16,9 @@ export const PR_KEEP_DAYS = 30;
 export const PR_KEEP_MS = PR_KEEP_DAYS * DAY_MS;
 export const PR_MAX_PAGES = 10;
 
+/** The QA board's history (test-lock holds, CI runs, review findings) is kept at least this long. */
+export const QA_RETENTION_DAYS = 90;
+
 /** Aliased issue or PR lookups per flow query. */
 export const FLOW_BATCH = 20;
 
