@@ -877,7 +877,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         recordStatus(CLI_COLLECTOR, problems.length === 0, notes.join("; "));
         store.clearNote(CLI_NOTE_KEY, now());
         if (r.brewProblem?.startsWith(CLI_UPGRADE_FAILED)) {
-          store.raiseNote({
+          store.refreshNote({
             key: CLI_UPGRADE_NOTE_KEY,
             kind: "blocked",
             runId: null,
@@ -1066,7 +1066,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
-          store.raiseNote({
+          store.refreshNote({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,
