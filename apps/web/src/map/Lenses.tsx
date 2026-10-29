@@ -73,17 +73,16 @@ export function graph(snapshot: MapSnapshot): Graph {
   return { forward, reverse, cycles };
 }
 
-/** Direct import edges around a focused file, drawn over the 3D map in Impact mode. */
+/** Complete reverse reach and direct imports around a focused file. */
 export function impactFocusLinks(
   snapshot: MapSnapshot,
   path: string | null,
 ): { from: string; to: string }[] {
   if (path === null) return [];
   const { forward, reverse } = graph(snapshot);
-  return [
-    ...[...(forward.get(path) ?? [])].map((to) => ({ from: path, to })),
-    ...[...(reverse.get(path) ?? [])].map((from) => ({ from, to: path })),
-  ];
+  const related = new Set([...downstream(path, reverse).keys(), ...(forward.get(path) ?? [])]);
+  related.delete(path);
+  return [...related].map((to) => ({ from: path, to }));
 }
 
 export function downstream(path: string, reverse: Map<string, Set<string>>) {
@@ -194,11 +193,20 @@ export function lensVisuals(
       }
     });
     if (focus !== null) {
-      const related = new Set([
-        focus,
-        ...downstream(focus, reverse).keys(),
-        ...(forward.get(focus) ?? []),
-      ]);
+      const reaches = downstream(focus, reverse);
+      const imports = forward.get(focus) ?? new Set<string>();
+      const related = new Set([focus, ...reaches.keys(), ...imports]);
+      for (const path of related) {
+        const prior = out[path];
+        const focusDistance = path === focus ? 0 : (reaches.get(path) ?? 1);
+        out[path] = {
+          ...prior,
+          seat: prior?.seat ?? 0,
+          distance: Math.min(prior?.distance ?? Infinity, focusDistance),
+          focused: path === focus,
+          dim: false,
+        };
+      }
       for (const { path } of snapshot.tree)
         out[path] = { ...(out[path] ?? {}), focused: path === focus, dim: !related.has(path) };
     }
@@ -344,7 +352,9 @@ export function ImpactLens({
         />
         <FileList
           title="Further downstream"
-          paths={[...reaches.keys()].filter((path) => (reaches.get(path) ?? 0) > 1).sort()}
+          paths={[...reaches.keys()]
+            .filter((path) => (reaches.get(path) ?? 0) > 1 && !isTest(path))
+            .sort()}
           onFocus={onFocus}
         />
       </section>

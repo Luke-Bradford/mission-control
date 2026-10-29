@@ -327,7 +327,7 @@ export function CrewMapView({
               onSelect={selectFromScene}
             />
           )}
-          {lens === "changes" && <MapKey tree={snapshot.tree} />}
+          {lens === "changes" ? <MapKey tree={snapshot.tree} /> : <AnalyticalMapKey lens={lens} />}
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -484,5 +484,20 @@ function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
         {tree.length > 2000 && ", every file shown as an individual point"}
       </span>
     </p>
+  );
+}
+
+function AnalyticalMapKey({ lens }: { lens: Exclude<MapLens, "changes"> }) {
+  return lens === "impact" ? (
+    <div className="map-legend" role="note" aria-label="Impact colour scale">
+      <span className="map-key-item">changed → importers → dependents</span>
+      <span className="map-key-item">brighter = closer import reach</span>
+      <span className="map-key-item">outline = overlapping changes</span>
+    </div>
+  ) : (
+    <div className="map-legend" role="note" aria-label="History PR heat scale">
+      <span className="map-key-item">PR heat: 1–2 PRs · 3–9 PRs · 10–29 PRs · 30+ PRs</span>
+      <span className="map-key-item">corner = fix-heavy</span>
+    </div>
   );
 }

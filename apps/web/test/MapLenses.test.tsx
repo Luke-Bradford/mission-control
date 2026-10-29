@@ -2,7 +2,7 @@ import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { graph, lensVisuals } from "../src/map/Lenses.tsx";
+import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
 import { historyHeat, treemapLayout } from "../src/map/MapTreemap.tsx";
 
 const scenes = vi.hoisted(
@@ -63,6 +63,34 @@ it("marks only changed code files that import another seat's changed code as Imp
     },
   };
   expect(lensVisuals(sameFile, "impact", null)["src/contract.ts"]?.overlap).toBeFalsy();
+});
+
+it("traces and colours an indirect test when focused outside the changed reach", () => {
+  const value = snapshot();
+  value.tree.push(
+    { path: "src/isolated.ts", lines: 12 },
+    { path: "src/isolated-consumer.ts", lines: 12 },
+    { path: "test/isolated.test.ts", lines: 12 },
+  );
+  value.imports.push(
+    { from: "src/isolated-consumer.ts", to: "src/isolated.ts" },
+    { from: "test/isolated.test.ts", to: "src/isolated-consumer.ts" },
+  );
+
+  const visuals = lensVisuals(value, "impact", "src/isolated.ts");
+  expect(visuals["src/isolated.ts"]).toMatchObject({ seat: 0, distance: 0, dim: false });
+  expect(visuals["test/isolated.test.ts"]).toMatchObject({ seat: 0, distance: 2, dim: false });
+  expect(impactFocusLinks(value, "src/isolated.ts")).toContainEqual({
+    from: "src/isolated.ts",
+    to: "test/isolated.test.ts",
+  });
+
+  render(<CrewMapView snapshot={value} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  fireEvent.click(document.querySelector(".map-treemap-tile[title='src/isolated.ts']") as Element);
+  const lens = screen.getByRole("region", { name: "Impact lens" });
+  expect(within(lens).getAllByRole("button", { name: "test/isolated.test.ts" })).toHaveLength(1);
+  expect(document.querySelectorAll(".map-treemap-links line")).toHaveLength(2);
 });
 
 it("keeps non-code changes out of Impact code rows and untested findings", () => {
@@ -249,6 +277,7 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   expect(screen.getByRole("img", { name: "Impact reach treemap" })).toBeTruthy();
+  expect(document.body.textContent).toContain("changed → importers → dependents");
   const impact = screen.getByRole("region", { name: "Impact lens" });
   expect(impact.textContent).toContain("tests · import · depend");
   expect(impact.textContent).toContain("Test files changed separately");
@@ -272,6 +301,8 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
 
   fireEvent.click(screen.getByRole("button", { name: "History" }));
   expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
+  expect(document.body.textContent).toContain("1–2 PRs");
+  expect(document.body.textContent).toContain("30+ PRs");
   const history = screen.getByRole("region", { name: "History lens" });
   expect(history.textContent).toContain("PRs · fixes");
   expect(document.body.textContent).toContain("hidden change coupling");
