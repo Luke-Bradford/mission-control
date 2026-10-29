@@ -290,7 +290,8 @@ it("W5: a fake relay replay at a different sequence is stored once and advances 
   await expect
     .poll(() => transport.sent.filter((m) => m.t === "since").at(-1), { timeout: 3000 })
     .toEqual({ t: "since", seq: 2 });
-  // the cursor is past the replay, so a duplicate would have landed by now
+  // the cursor is past the replay, so a duplicate stored row would show by now; a second post is
+  // ruled out by the answer being gated on that store, not by this timing
   expect(stored()).toHaveLength(1);
   expect(posts()).toHaveLength(1);
 });
