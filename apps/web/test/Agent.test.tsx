@@ -1987,7 +1987,7 @@ describe("Agent page: loop steps", () => {
       "working",
       [
         ["Working", "●"],
-        ["CI", "2"],
+        ["Checks", "2"],
         ["In review", "3"],
         ["Done", "4"],
       ],
@@ -1996,7 +1996,7 @@ describe("Agent page: loop steps", () => {
       "ci",
       [
         ["Working", "✓"],
-        ["CI", "●"],
+        ["Checks", "●"],
         ["In review", "3"],
         ["Done", "4"],
       ],
@@ -2005,7 +2005,7 @@ describe("Agent page: loop steps", () => {
       "review",
       [
         ["Working", "✓"],
-        ["CI", "✓"],
+        ["Checks", "✓"],
         ["In review", "●"],
         ["Done", "4"],
       ],
@@ -2014,7 +2014,7 @@ describe("Agent page: loop steps", () => {
       "done",
       [
         ["Working", "✓"],
-        ["CI", "✓"],
+        ["Checks", "✓"],
         ["In review", "✓"],
         ["Done", "✓"],
       ],
@@ -2116,7 +2116,7 @@ describe("Agent page: loop steps", () => {
       const steps = [...panel.querySelectorAll<HTMLElement>(".vstep")];
       expect(steps.map((s) => $(s, ".vname")?.textContent)).toEqual([
         "Working",
-        "CI×2",
+        "Checks×2",
         "In review",
         "Done",
       ]);
@@ -2131,7 +2131,7 @@ describe("Agent page: loop steps", () => {
       expect(current.textContent).toContain("CI is running");
       expect(current.querySelectorAll(".att")).toHaveLength(2);
       expect($(current, ".vmeta")?.textContent).toContain("13m");
-      expect(panel.querySelector("button[aria-expanded]")?.textContent).not.toBe("CI");
+      expect(panel.querySelector("button[aria-expanded]")?.textContent).not.toBe("Checks");
       // a step still to come: its rule, muted by the todo class
       const future = steps[2] as HTMLElement;
       expect(future.className).toContain("todo");
@@ -2523,7 +2523,7 @@ describe("Agent page: loop steps", () => {
     const panel = $(container, "#loopP") as HTMLElement;
     expect(dots(panel)).toEqual([
       ["Working", "!"],
-      ["CI", "2"],
+      ["Checks", "2"],
       ["In review", "3"],
       ["Done", "4"],
     ]);
@@ -2663,7 +2663,7 @@ describe("Agent page: loop steps", () => {
     const cur = [...panel.querySelectorAll(".vstep")].filter(
       (x) => x.getAttribute("aria-current") === "step",
     );
-    expect(cur.map((x) => x.querySelector(".vname")?.textContent)).toEqual(["CI"]);
+    expect(cur.map((x) => x.querySelector(".vname")?.textContent)).toEqual(["Checks"]);
   });
 });
 

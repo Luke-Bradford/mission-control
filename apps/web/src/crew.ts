@@ -599,6 +599,13 @@ export interface ShownStep {
   name: string;
   phase: Exclude<LoopPhase, "parked"> | null;
 }
+/** The build-loop path's step names on screen: the checks step reads "Checks" where the engine phase reads "CI". */
+export const LOOP_STEP_LABEL: Record<Exclude<LoopPhase, "parked">, string> = {
+  working: LOOP_PHASE_LABEL.working,
+  ci: "Checks",
+  review: LOOP_PHASE_LABEL.review,
+  done: LOOP_PHASE_LABEL.done,
+};
 /** The profile step that a landed plan marks done. */
 export const PLAN_STEP = "plan";
 /** The profile step that an open PR marks done. */
@@ -608,7 +615,7 @@ export const DRAFT_PR_STEP = "draft PR";
 export function loopSteps(loop: CrewLoop): ShownStep[] {
   return loop.steps?.length
     ? loop.steps.map(({ name, phase }) => ({ name, phase }))
-    : LOOP_PATH.map((phase) => ({ name: LOOP_PHASE_LABEL[phase], phase }));
+    : LOOP_PATH.map((phase) => ({ name: LOOP_STEP_LABEL[phase], phase }));
 }
 
 /** One mark per shown step, using phase progress and evidence for steps without a phase. */
