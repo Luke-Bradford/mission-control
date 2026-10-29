@@ -9,6 +9,7 @@ import type {
   FlightDecision,
   GuardHit,
   GuardRule,
+  LoopKind,
   MachineSample,
   Profile,
   ReviewFinding,
@@ -1010,6 +1011,41 @@ describe("Store", () => {
     expect(audit.refusalsByRule).toEqual([{ rule: "read-only", count: 1 }]);
     expect(audit.questions).toEqual({ asked: 1, answered: 1, answerMs: 60 });
     expect(store.audit(201, 300).questions).toEqual({ asked: 0, answered: 0, answerMs: null });
+  });
+
+  it("says whether each long runner ended, its kind, and whether the operator can act on it", () => {
+    store.upsertRun(run({ id: "live", agentId: "guido", startedAt: 100 }));
+    store.setSeatSession({
+      seatId: "guido",
+      runId: "live",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: 150,
+      lastTurnEndedAt: null,
+      lastTurnStartedAt: null,
+    });
+    store.upsertRun(
+      run({ id: "done", agentId: "inco", startedAt: 100, endedAt: 180, status: "ok" }),
+    );
+    store.upsertRun(run({ id: "stale", agentId: "inco", startedAt: 100 }));
+    store.upsertRun(run({ id: "watch", agentId: "flight", startedAt: 100 }));
+    store.upsertRun(run({ id: "loop", agentId: "studio", startedAt: 100 }));
+    const kinds = new Map<string, LoopKind | "observed">([
+      ["guido", "build"],
+      ["inco", "build"],
+      ["flight", "watch"],
+      ["studio", "observed"],
+    ]);
+    const byId = Object.fromEntries(
+      store.audit(100, 200, kinds).longRunners.map((r) => [r.runId, r]),
+    );
+    expect(byId.live).toMatchObject({ endedAt: null, kind: "build", actionable: true });
+    expect(byId.done).toMatchObject({ endedAt: 180, kind: "build", actionable: true });
+    expect(byId.stale).toMatchObject({ endedAt: null, kind: "build", actionable: false });
+    expect(byId.watch).toMatchObject({ endedAt: null, kind: "watch", actionable: false });
+    expect(byId.loop).toMatchObject({ endedAt: null, kind: "observed", actionable: false });
   });
 
   it("aggregates death loops and immutable model/prompt launch metadata", () => {

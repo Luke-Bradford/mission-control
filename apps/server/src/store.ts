@@ -15,6 +15,7 @@ import {
   type AuditChange,
   type AuditMetrics,
   type AuditPrSize,
+  type AuditRunKind,
   type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
@@ -2364,7 +2365,11 @@ export class Store {
   }
 
   /** Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP. */
-  audit(since: number, until: number): AuditView {
+  audit(
+    since: number,
+    until: number,
+    kinds: ReadonlyMap<string, AuditRunKind> = new Map(),
+  ): AuditView {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
     const prs = this.auditPrSizes(since, until);
@@ -2378,15 +2383,26 @@ export class Store {
     const medianSpend = median(spend.map((r) => r.costUsd));
     return {
       range: { since, until },
-      longRunners: rows(
-        `SELECT id AS runId, agent_id AS agentId, ticket, started_at AS startedAt,
-          COALESCE(ended_at, ?) - started_at AS durationMs FROM runs
-         WHERE started_at <= ? AND COALESCE(ended_at, ?) >= ? ORDER BY durationMs DESC LIMIT 100`,
-        until,
-        until,
-        until,
-        since,
-      ) as unknown as AuditView["longRunners"],
+      longRunners: (
+        rows(
+          `SELECT id AS runId, agent_id AS agentId, ticket, started_at AS startedAt, ended_at AS endedAt,
+            EXISTS (SELECT 1 FROM seat_sessions s WHERE s.run_id = runs.id) AS held,
+            COALESCE(ended_at, ?) - started_at AS durationMs FROM runs
+           WHERE started_at <= ? AND COALESCE(ended_at, ?) >= ? ORDER BY durationMs DESC LIMIT 100`,
+          until,
+          until,
+          until,
+          since,
+        ) as unknown as (Omit<AuditView["longRunners"][number], "kind" | "actionable"> & {
+          agentId: string;
+          held: number;
+        })[]
+      ).map(({ held, ...r }) => {
+        const kind = kinds.get(r.agentId) ?? null;
+        const actionable =
+          kind !== "observed" && kind !== "watch" && (r.endedAt !== null || held === 1);
+        return { ...r, kind, actionable };
+      }),
       deathLoops: rows(
         `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
           COUNT(*) AS parks FROM run_attempts a

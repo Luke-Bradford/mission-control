@@ -1,3 +1,5 @@
+import type { LoopKind } from "./runtime.ts";
+
 /** A merged PR at or above this many changed lines (additions plus deletions) is a size outlier. */
 export const AUDIT_PR_OUTLIER_LINES = 800;
 /** A seat with this many guard refusals in one UTC day is a refusal spike. */
@@ -6,6 +8,9 @@ export const AUDIT_REFUSAL_SPIKE = 10;
 export const AUDIT_SPEND_OUTLIER_FACTOR = 2;
 /** The longest window either side of a prompt or model change that the before/after metrics span. */
 export const AUDIT_CHANGE_WINDOW_MS = 7 * 86_400_000;
+
+/** What ran a long runner: a crew seat's loop kind, or "observed" for an adopted loop's run. */
+export type AuditRunKind = LoopKind | "observed";
 
 export interface AuditPrSize {
   repoId: string;
@@ -47,6 +52,13 @@ export interface AuditView {
     agentId: string;
     ticket: string | null;
     startedAt: number;
+    /** The three fields below are always set by the server; optional so web fixtures built before them type-check. */
+    /** Null while the run is open. */
+    endedAt?: number | null;
+    /** Null when the run's agent is no longer configured. */
+    kind?: AuditRunKind | null;
+    /** False for observed-loop runs, watch runs, and open runs no seat holds (stale records). */
+    actionable?: boolean;
     durationMs: number;
   }[];
   deathLoops: { runId: string; agentId: string | null; parks: number }[];
