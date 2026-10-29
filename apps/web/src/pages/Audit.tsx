@@ -182,8 +182,8 @@ function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
                 {showRepos ? `${s.repoId} · ` : ""}
                 {prLabel(s.number)}
               </a>
-              <span className="audit-bar">
-                <i style={{ width: `${(changes(s) / max) * 100}%` }} />
+              <span className="audit-bar-track">
+                <span className="audit-bar" style={{ width: `${(changes(s) / max) * 100}%` }} />
               </span>
               <span>
                 {changes(s).toLocaleString()} lines

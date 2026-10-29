@@ -351,9 +351,13 @@ it("scales PR bars, applies the fixed outlier threshold, and names repos across 
   await screen.findByText(
     `${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`,
   );
-  const bars = container.querySelectorAll<HTMLSpanElement>(".audit-bar > i");
-  expect(bars[0]?.style.width).toBe("100%");
-  expect(Number.parseFloat(bars[1]?.style.width ?? "")).toBeCloseTo((2_833 / 665_702) * 100, 8);
+  const bars = container.querySelectorAll<HTMLElement>(".audit-bar");
+  const [widestBar, smallerBar] = bars;
+  if (!widestBar || !smallerBar) throw new Error("expected two PR size bars");
+  const widest = window.getComputedStyle(widestBar).width;
+  const smaller = window.getComputedStyle(smallerBar).width;
+  expect(widest).toBe("100%");
+  expect(Number.parseFloat(smaller)).toBeCloseTo((2_833 / 665_702) * 100, 8);
   expect(screen.getByText(/665,702 lines · outlier/)).toBeTruthy();
   expect(screen.getByText(/2,833 lines · outlier/)).toBeTruthy();
   expect(
