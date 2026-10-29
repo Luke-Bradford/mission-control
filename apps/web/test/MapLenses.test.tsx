@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, lensVisuals } from "../src/map/Lenses.tsx";
-import { treemapLayout } from "../src/map/MapTreemap.tsx";
+import { historyHeat, treemapLayout } from "../src/map/MapTreemap.tsx";
 
 const scenes = vi.hoisted(
   () =>
@@ -303,8 +303,8 @@ it("packs the complete hierarchy inside the viewport and anchors links to tile c
   for (const tile of layout.tiles) {
     expect(tile.x).toBeGreaterThanOrEqual(0);
     expect(tile.y).toBeGreaterThanOrEqual(0);
-    expect(tile.x + tile.width).toBeLessThanOrEqual(1600);
-    expect(tile.y + tile.height).toBeLessThanOrEqual(1000);
+    expect(tile.x + tile.width).toBeLessThanOrEqual(1600.001);
+    expect(tile.y + tile.height).toBeLessThanOrEqual(1000.001);
   }
   const large = layout.byPath.get("apps/web/src/large.ts");
   const small = layout.byPath.get("apps/web/src/small.ts");
@@ -321,4 +321,21 @@ it("keeps every file tile positive in a mockup-sized nested repository", () => {
   const layout = treemapLayout(files, 1600, 1000);
   expect(layout.tiles).toHaveLength(753);
   expect(layout.tiles.every((tile) => tile.width > 0 && tile.height > 0)).toBe(true);
+  expect(
+    Math.max(
+      ...layout.tiles.map((tile) => Math.max(tile.width / tile.height, tile.height / tile.width)),
+    ),
+  ).toBeLessThan(20_000);
+});
+
+it("uses fixed PR heat bands rather than scaling to the hottest file", () => {
+  expect([
+    historyHeat(1),
+    historyHeat(2),
+    historyHeat(3),
+    historyHeat(9),
+    historyHeat(10),
+    historyHeat(29),
+    historyHeat(30),
+  ]).toEqual([0.16, 0.16, 0.36, 0.36, 0.6, 0.6, 0.85]);
 });

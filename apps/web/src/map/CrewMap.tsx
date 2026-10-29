@@ -292,7 +292,7 @@ export function CrewMapView({
         {lens === "impact" && <span>Click a file to trace its importers, tests, and imports.</span>}
         {lens === "history" && <span>Hotspots and hidden change coupling from merged PRs.</span>}
       </div>
-      <div className="map-main">
+      <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
           {lens === "changes" ? (
             <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>

@@ -136,6 +136,10 @@
   gap: 10px;
   min-height: 0;
 }
+.map-main-impact,
+.map-main-history {
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
+}
 .map-stage-wrap {
   position: relative;
   min-width: 0;

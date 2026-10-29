@@ -22,6 +22,8 @@ const weight = (node: Branch): number =>
         node.children.reduce((n, c) => n + weight(c), 0),
       )
     : Math.max(4, node.lines);
+export const historyHeat = (prs: number) =>
+  prs >= 30 ? 0.85 : prs >= 10 ? 0.6 : prs >= 3 ? 0.36 : prs > 0 ? 0.16 : 0;
 
 /** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
 export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
@@ -77,17 +79,65 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
           height: box.height - (showHeader ? 15 : 0) - inset,
         }
       : box;
-    const horizontal = content.width >= content.height,
-      total = node.children.reduce((n, c) => n + weight(c), 0);
-    let cursor = horizontal ? content.x : content.y;
-    for (const child of node.children) {
-      const size = ((horizontal ? content.width : content.height) * weight(child)) / total;
-      const childBox = horizontal
-        ? { x: cursor, y: content.y, width: size, height: content.height }
-        : { x: content.x, y: cursor, width: content.width, height: size };
-      cursor += size;
-      place(child, childBox, depth + 1);
+    const children = [...node.children].sort((a, b) => weight(b) - weight(a));
+    const totalWeight = children.reduce((total, child) => total + weight(child), 0);
+    const area = new Map(
+      children.map((child) => [
+        child,
+        (weight(child) * content.width * content.height) / totalWeight,
+      ]),
+    );
+    let remaining = content;
+    let row: Branch[] = [];
+    let rowWeight = 0;
+    const worst = (next: Branch[]) => {
+      const sum = next.reduce((total, child) => total + (area.get(child) ?? 0), 0);
+      const side = Math.max(1, Math.min(remaining.width, remaining.height));
+      const values = next.map((child) => area.get(child) ?? 0);
+      return Math.max(
+        (side * side * Math.max(...values)) / (sum * sum),
+        (sum * sum) / (side * side * Math.min(...values)),
+      );
+    };
+    const layRow = () => {
+      if (!row.length) return;
+      const total = rowWeight;
+      if (remaining.width >= remaining.height) {
+        const height = total / remaining.width;
+        let x = remaining.x;
+        for (const child of row) {
+          const width = (area.get(child) ?? 0) / height;
+          place(child, { x, y: remaining.y, width, height }, depth + 1);
+          x += width;
+        }
+        remaining = {
+          ...remaining,
+          y: remaining.y + height,
+          height: Math.max(0, remaining.height - height),
+        };
+      } else {
+        const width = total / remaining.height;
+        let y = remaining.y;
+        for (const child of row) {
+          const height = (area.get(child) ?? 0) / width;
+          place(child, { x: remaining.x, y, width, height }, depth + 1);
+          y += height;
+        }
+        remaining = {
+          ...remaining,
+          x: remaining.x + width,
+          width: Math.max(0, remaining.width - width),
+        };
+      }
+      row = [];
+      rowWeight = 0;
+    };
+    for (const child of children) {
+      if (row.length && worst([...row, child]) > worst(row)) layRow();
+      row.push(child);
+      rowWeight += area.get(child) ?? 0;
     }
+    layRow();
   };
   place(root, { x: 0, y: 0, width, height }, 0);
   return { tiles, folders, byPath };
@@ -138,7 +188,6 @@ export function MapTreemap({
     () => treemapLayout(snapshot.tree, size.width, size.height),
     [snapshot.tree, size],
   );
-  const max = Math.max(1, ...layout.tiles.map((tile) => visual[tile.path]?.hotspot ?? 0));
   return (
     <div
       ref={ref}
@@ -159,7 +208,7 @@ export function MapTreemap({
             : v?.seat !== undefined && v.distance !== undefined;
         const intensity = active
           ? lens === "history"
-            ? (v?.hotspot ?? 0) / max
+            ? historyHeat(v?.hotspot ?? 0)
             : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && (v?.fixes ?? 0) >= 5;
