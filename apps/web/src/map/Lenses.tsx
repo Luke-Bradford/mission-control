@@ -7,6 +7,8 @@ export interface LensVisual {
   seat?: number;
   distance?: number;
   overlap?: boolean;
+  /** Focused Impact: the file the focused file imports directly. */
+  directImport?: boolean;
   /** History: merged-PR heat and a conspicuous bug-fix signal. */
   hotspot?: number;
   fixes?: number;
@@ -73,17 +75,16 @@ export function graph(snapshot: MapSnapshot): Graph {
   return { forward, reverse, cycles };
 }
 
-/** Direct import edges around a focused file, drawn over the 3D map in Impact mode. */
+/** Complete reverse reach and direct imports around a focused file. */
 export function impactFocusLinks(
   snapshot: MapSnapshot,
   path: string | null,
 ): { from: string; to: string }[] {
   if (path === null) return [];
   const { forward, reverse } = graph(snapshot);
-  return [
-    ...[...(forward.get(path) ?? [])].map((to) => ({ from: path, to })),
-    ...[...(reverse.get(path) ?? [])].map((from) => ({ from, to: path })),
-  ];
+  const related = new Set([...downstream(path, reverse).keys(), ...(forward.get(path) ?? [])]);
+  related.delete(path);
+  return [...related].map((to) => ({ from: path, to }));
 }
 
 export function downstream(path: string, reverse: Map<string, Set<string>>) {
@@ -169,7 +170,7 @@ export function lensVisuals(
     const out: Record<string, LensVisual> = {};
     const codeChanged = changed(snapshot).map(({ seat, files }) => ({
       seat,
-      files: files.filter(isCode),
+      files: files.filter((path) => isCode(path) && !isTest(path)),
     }));
     const overlap = importOverlaps(codeChanged, forward);
     codeChanged.forEach(({ files }, seat) => {
@@ -194,11 +195,25 @@ export function lensVisuals(
       }
     });
     if (focus !== null) {
-      const related = new Set([
-        focus,
-        ...downstream(focus, reverse).keys(),
-        ...(forward.get(focus) ?? []),
-      ]);
+      const reaches = downstream(focus, reverse);
+      const imports = forward.get(focus) ?? new Set<string>();
+      const related = new Set([focus, ...reaches.keys(), ...imports]);
+      for (const path of related) {
+        const prior = out[path];
+        if (path === focus || reaches.has(path)) {
+          const focusDistance = path === focus ? 0 : (reaches.get(path) as number);
+          out[path] = {
+            ...prior,
+            seat: prior?.seat ?? 0,
+            distance: Math.min(prior?.distance ?? Infinity, focusDistance),
+            focused: path === focus,
+            dim: false,
+          };
+        } else {
+          const { distance: _distance, seat: _seat, ...rest } = prior ?? {};
+          out[path] = { ...rest, directImport: true, focused: false, dim: false };
+        }
+      }
       for (const { path } of snapshot.tree)
         out[path] = { ...(out[path] ?? {}), focused: path === focus, dim: !related.has(path) };
     }
@@ -252,9 +267,24 @@ function importOverlaps(seats: ReturnType<typeof changed>, forward: Graph["forwa
 }
 
 function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) => void }) {
+  const parts = path.split("/");
+  const filename = parts.at(-1) ?? path;
+  const directory =
+    parts.length > 3
+      ? `…/${parts.slice(-3, -1).join("/")}/`
+      : parts.length > 1
+        ? `${parts.slice(0, -1).join("/")}/`
+        : "";
   return (
-    <button type="button" className="map-lens-file" onClick={() => onFocus(path)}>
-      {path}
+    <button
+      type="button"
+      className="map-lens-file"
+      onClick={() => onFocus(path)}
+      title={path}
+      aria-label={path}
+    >
+      <span className="map-lens-directory">{directory}</span>
+      <span className="map-lens-filename">{filename}</span>
     </button>
   );
 }
@@ -287,10 +317,10 @@ export function ImpactLens({
   onFocus: (path: string | null) => void;
 }) {
   const { forward, reverse, cycles } = graph(snapshot);
-  const allChanged = changed(snapshot);
+  const allChanged = changed(snapshot).filter(({ files }) => files.length > 0);
   const allChangedCode = allChanged.map(({ seat, files }) => ({
     seat,
-    files: files.filter(isCode),
+    files: files.filter((path) => isCode(path) && !isTest(path)),
   }));
   if (focus !== null) {
     const reaches = downstream(focus, reverse);
@@ -329,7 +359,9 @@ export function ImpactLens({
         />
         <FileList
           title="Further downstream"
-          paths={[...reaches.keys()].filter((path) => (reaches.get(path) ?? 0) > 1).sort()}
+          paths={[...reaches.keys()]
+            .filter((path) => (reaches.get(path) ?? 0) > 1 && !isTest(path))
+            .sort()}
           onFocus={onFocus}
         />
       </section>
@@ -371,14 +403,19 @@ export function ImpactLens({
               {files.length} files changed → <b>{direct}</b> import them · <b>{reached.size}</b>{" "}
               depend on them
             </p>
+            {files.some(isTest) && (
+              <p className="map-lens-note">
+                Test files changed separately: {files.filter(isTest).length}
+              </p>
+            )}
+            <div className="map-lens-columns">
+              <span>changed file</span>
+              <span>tests · import · depend</span>
+            </div>
             {code.map((path) => (
               <div className="map-lens-row" key={path}>
                 <FileButton path={path} onFocus={onFocus} />
-                <span>
-                  {[...downstream(path, reverse).keys()].filter(isTest).length
-                    ? "test reaches it"
-                    : "no test"}
-                </span>
+                <span>{[...downstream(path, reverse).keys()].filter(isTest).length}</span>
                 <span>
                   {reverse.get(path)?.size ?? 0} · {downstream(path, reverse).size}
                 </span>
@@ -556,16 +593,15 @@ export function HistoryLens({
       </section>
     );
   }
-  const hotspots = changed(snapshot)
-    .flatMap(({ seat, files }) =>
-      files.flatMap((path) => {
-        const history = histories.get(path);
-        return history === undefined ? [] : [{ seat: seat.seat, path, history }];
-      }),
-    )
+  const hotspots = [...new Set(changed(snapshot).flatMap(({ files }) => files))]
+    .filter((path) => !isTest(path))
+    .flatMap((path) => {
+      const history = histories.get(path);
+      return history === undefined ? [] : [{ path, history }];
+    })
     .sort((a, b) => b.history[0] - a.history[0]);
   const fixed = [...histories.entries()]
-    .filter(([, history]) => history[1] > 0)
+    .filter(([path, history]) => history[1] > 0 && !isTest(path))
     .sort((a, b) => b[1][1] - a[1][1] || b[1][0] - a[1][0])
     .slice(0, 10);
   const unlinked = [...partners.entries()]
@@ -585,6 +621,7 @@ export function HistoryLens({
       </header>
       <HistoryRows
         title="Hotspots the seats are changing"
+        columns="PRs · fixes"
         rows={hotspots.map(({ path, history }) => ({
           path,
           text: `${history[0]} · ${history[1]}`,
@@ -593,11 +630,13 @@ export function HistoryLens({
       />
       <HistoryRows
         title="Fixed most often"
+        columns="fixes · PRs"
         rows={fixed.map(([path, history]) => ({ path, text: `${history[1]} of ${history[0]}` }))}
         onFocus={onFocus}
       />
       <HistoryRows
         title="Change together, no import between them"
+        columns="PRs · share"
         rows={unlinked.map((row) => ({
           label: `${name(row.source)} + ${name(row.path)}`,
           text: `${row.count} PRs · ${Math.round(row.share * 100)}%`,
@@ -611,16 +650,24 @@ export function HistoryLens({
 
 function HistoryRows({
   title,
+  columns,
   rows,
   onFocus,
 }: {
   title: string;
+  columns?: string;
   rows: { path?: string; label?: string; text: string; focus?: string }[];
   onFocus: (path: string) => void;
 }) {
   return (
     <div className="map-lens-section">
       <h3>{title}</h3>
+      {columns && (
+        <div className="map-lens-columns">
+          <span>file</span>
+          <span>{columns}</span>
+        </div>
+      )}
       {rows.length ? (
         rows.map((row) => {
           const path = row.path ?? row.focus ?? "";
