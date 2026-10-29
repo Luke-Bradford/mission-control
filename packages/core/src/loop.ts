@@ -28,6 +28,7 @@ import {
 import type { SeatState } from "./runtime.ts";
 import { globMatches } from "./runtime.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
+import type { TicketView } from "./views.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
 export interface CiVerdict {
@@ -167,6 +168,79 @@ export function isCiFailureEvent(text: string): boolean {
 export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 /** The park kind of a run whose author ruled on a CI failure instead of fixing it. */
 export const RULING_PARK = "ruling";
+/** The park kind of a run whose ticket lists a controller check; only the operator settles it. */
+export const CONTROLLER_CHECK_PARK = "controller-check";
+/** The heading a ticket's controller-check section opens with (the canonical spelling). */
+export const CONTROLLER_CHECK_HEADING = "## Controller check";
+/** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
+const CONTROLLER_CHECK_RE =
+  /^ {0,3}(?:>[ \t]?)*(?:[-*+][ \t]+)?(#{1,6})[ \t]+[^\n]*?\bcontroller[ \t-]*checks?\b.*$/im;
+const MAX_CHECK_REASON = 300;
+/**
+ * `body` with each properly closed fenced code block (``` or ~~~) blanked to spaces, the same
+ * length. A fence is opened only by a line that can open one, and closed only by a bare fence of
+ * the same character and at least the same length; one never closed blanks nothing.
+ */
+function withoutFences(body: string): string {
+  const lines = body.split("\n");
+  const out = [...lines];
+  let open: { ch: string; len: number; from: number } | null = null;
+  lines.forEach((line, i) => {
+    if (open === null) {
+      const m = /^ {0,3}(`{3,})[^`]*$/.exec(line) ?? /^ {0,3}(~{3,}).*$/.exec(line);
+      if (m?.[1] !== undefined) open = { ch: m[1].slice(0, 1), len: m[1].length, from: i };
+      return;
+    }
+    const m = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
+    if (m?.[1] !== undefined && m[1].startsWith(open.ch) && m[1].length >= open.len) {
+      for (let j = open.from; j <= i; j++) out[j] = " ".repeat(lines[j]?.length ?? 0);
+      open = null;
+    }
+  });
+  return out.join("\n");
+}
+/** The text of a ticket's controller-check section (up to the next heading of its level or above); null without one. */
+export function controllerCheckOf(body: string | null | undefined): string | null {
+  if (!body) return null;
+  // an unclosed or odd fence blanks nothing, so a heading after it still holds (fail closed)
+  const plain = withoutFences(body);
+  const m = CONTROLLER_CHECK_RE.exec(plain);
+  if (m === null) return null;
+  const level = m[1]?.length ?? 2;
+  const rest = plain.slice(m.index + m[0].length);
+  const next = new RegExp(`^ {0,3}#{1,${level}}(?:[ \\t]|$)`, "m").exec(rest);
+  const start = m.index + m[0].length;
+  return body.slice(start, next === null ? undefined : start + next.index).trim();
+}
+/**
+ * The controller check a read ticket carries: the section's text, "" when it has one with no text
+ * or when the body was cut and the reader could not say, null for none. A ticket that cannot be
+ * told holds (fail closed).
+ */
+export function ticketControllerCheck(
+  ticket: Pick<TicketView, "body" | "bodyTruncated" | "controllerCheck">,
+): string | null {
+  if (ticket.controllerCheck !== undefined) return ticket.controllerCheck;
+  const found = controllerCheckOf(ticket.body);
+  if (found === null && ticket.bodyTruncated) return "";
+  return found;
+}
+/** The park reason: the sha held and the ticket's controller-check text, cut to a short brief. */
+export const controllerCheckParkText = (sha: string, check: string): string => {
+  const text = check.replace(/\s+/g, " ").trim();
+  const cut =
+    text.length > MAX_CHECK_REASON ? `${text.slice(0, MAX_CHECK_REASON)}... (see ticket)` : text;
+  return `controller check on ${sha.slice(0, 7)}${cut === "" ? " (see ticket)" : `: ${cut}`}`;
+};
+/** The park reason when the ticket could not be read to decide whether it lists a check. */
+export const controllerCheckUnreadableText = (sha: string, why: string): string =>
+  `controller check on ${sha.slice(0, 7)}: ticket could not be read: ${why}`;
+/** Why a plain resume or message cannot lift this park. */
+export const CONTROLLER_CHECK_USE_ROUTE =
+  "this run waits for the controller's verdict: POST /api/runs/:id/controller-check";
+/** The rework line for a failed controller check; `note` is the controller's. */
+export const controllerCheckFailText = (sha: string, note: string | undefined): string =>
+  `The controller's check failed on ${sha.slice(0, 7)}.${note ? `\n\n${note}` : ""} Fix it, commit, and report again.`;
 /** The key of the line sent when FLIGHT's re-run of the failed jobs on `sha` failed too. */
 export const rerunFailedKey = (runId: string, sha: string): string => `rerun:${runId}:${sha}`;
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt of the re-run's failure follows. */
@@ -1096,7 +1170,10 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     s.asideOk &&
     !loop.aside &&
     s.ended === null &&
-    (loop.phase === "review" || loop.phase === "ci") &&
+    (loop.phase === "review" ||
+      loop.phase === "ci" ||
+      // the seat is free while the operator decides
+      (loop.phase === "parked" && loop.parked?.kind === CONTROLLER_CHECK_PARK)) &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -1147,6 +1224,10 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const free = (key: string): boolean => !(key in claimed);
   const working = loop.phase === "working";
   const reporting = working || loop.phase === "review";
+
+  if (working && !loop.aside && loop.pendingLine && free(loop.pendingLine.key)) {
+    return { kind: "send", key: loop.pendingLine.key, text: loop.pendingLine.text };
+  }
 
   const rv = reviewView(s, loop);
   if (fixDue(s, loop) && rv.R !== null && rv.P !== null && rv.cur !== null) {
@@ -1366,6 +1447,8 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       ? { rulingRerun: { ...rulingRerun, runs: rulingRerun.runs.map((r) => ({ ...r })) } }
       : {}),
   };
+  // the line went (its key is claimed): it is no longer pending
+  if (loop.pendingLine && loop.pendingLine.key in s.claimed) loop.pendingLine = null;
   if (loop.aside) {
     if (s.seat.holdsRun) {
       // a restart mid set-aside or mid wake left the run on its seat
@@ -1374,7 +1457,10 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
       loop.aside.wake ||=
-        loop.phase === "parked" || loop.phase === "working" || !s.asideOk || fixDue(s, loop);
+        (loop.phase === "parked" && loop.parked?.kind !== CONTROLLER_CHECK_PARK) ||
+        loop.phase === "working" ||
+        !s.asideOk ||
+        fixDue(s, loop);
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

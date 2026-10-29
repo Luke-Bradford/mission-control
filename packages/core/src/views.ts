@@ -280,6 +280,11 @@ export interface TicketView {
   closedAt?: number | null;
   /** Plain text as written on GitHub, cut at 20 000 characters (`bodyTruncated`). */
   body: string;
+  /**
+   * The ticket's controller-check section, found on the full body before it was cut; null when
+   * it has none. Absent: the reader did not look (use `body`).
+   */
+  controllerCheck?: string | null;
   /** True when the collector cut `body`. */
   bodyTruncated: boolean;
   /** The body's length in characters (code points) before the cut; the collector always sets it. */

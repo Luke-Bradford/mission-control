@@ -6,7 +6,10 @@ import {
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
+  CONTROLLER_CHECK_PARK,
   ciVerdict,
+  controllerCheckOf,
+  controllerCheckParkText,
   fillLoopText,
   hardRulesFlagKey,
   isHardRulesFlagKey,
@@ -30,6 +33,7 @@ import {
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
+  ticketControllerCheck,
   wokenEventText,
 } from "../src/loop.ts";
 import {
@@ -2207,6 +2211,23 @@ describe("set aside", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
+  it("a run parked on a controller check is set aside, and an aside one is not woken", () => {
+    const parked: Partial<RunLoop> = {
+      phase: "parked",
+      parked: { kind: CONTROLLER_CHECK_PARK, reason: "check", ended: false },
+    };
+    const a = reconcile(base({}, parked)).actions;
+    expect(a.filter((x) => x.kind === "set-aside")).toHaveLength(1);
+    const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
+    expect(r.loop.aside?.wake).toBe(false);
+    expect(kindsOf(r.actions)).not.toContain("wake");
+    // any other park brings an aside run back
+    const other = reconcile(
+      off({}, { phase: "parked", parked: { kind: "ci", reason: "x", ended: false }, ...asideOf() }),
+    );
+    expect(other.loop.aside?.wake).toBe(true);
+  });
+
   it("back on its seat clears aside", () => {
     const r = reconcile(base({}, asideOf(true)));
     expect(r.loop.aside).toBeNull();
@@ -2933,5 +2954,58 @@ describe("isHardRulesFlagKey", () => {
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash.slice(1)}`)).toBe(false);
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}0`)).toBe(false);
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}:x`)).toBe(false);
+  });
+});
+
+describe("controllerCheckOf", () => {
+  it("reads the section up to the next heading of its level", () => {
+    const body = "## Done when\n- a\n\n## Controller check\nOpen it.\n- light\n\n## Security\nx";
+    expect(controllerCheckOf(body)).toBe("Open it.\n- light");
+    expect(controllerCheckOf("## Controller check\r\nLook.\r\n")).toBe("Look.");
+    expect(controllerCheckOf("## Controller check\nA\n### Sub\nB\n## End")).toBe("A\n### Sub\nB");
+  });
+  it("holds on near-miss headings, not on prose", () => {
+    for (const h of [
+      "## Controller check",
+      "### Controller check",
+      "## controller check",
+      "## Controller checks",
+      "## Controller check (browser)",
+      "   ## Controller check ##",
+      "> ## Controller check",
+      "# Controller Check:",
+      "## Manual controller check",
+      "## Controller-check",
+      "> > ## Controller check",
+      "- ## Controller check",
+    ])
+      expect(controllerCheckOf(`${h}\nx`)).toBe("x");
+    expect(controllerCheckOf("")).toBeNull();
+    expect(controllerCheckOf("## Done when\n- a")).toBeNull();
+    expect(controllerCheckOf("text ## Controller check\nx")).toBeNull();
+    expect(controllerCheckOf("    ## Controller check\nx")).toBeNull();
+    expect(controllerCheckOf("the controller check is below")).toBeNull();
+    expect(controllerCheckOf("```md\n## Controller check\nx\n```\n")).toBeNull();
+    expect(controllerCheckOf("```pnpm -s lint``` must pass\n## Controller check\nx")).toBe("x");
+    expect(controllerCheckOf("```js\nunclosed\n## Controller check\nx")).toBe("x");
+    expect(controllerCheckOf("````\n```\n## Controller check\n````\n")).toBeNull();
+    expect(controllerCheckOf("~~~\n## Controller check\n~~~\n## Controller check\nreal")).toBe(
+      "real",
+    );
+  });
+  it("an empty section is still a check", () => {
+    expect(controllerCheckOf("## Controller check\n## Next")).toBe("");
+  });
+  it("a cut body the reader did not read holds; the reader's own answer wins", () => {
+    const t = { body: "x", bodyTruncated: true };
+    expect(ticketControllerCheck(t)).toBe("");
+    expect(ticketControllerCheck({ ...t, controllerCheck: null })).toBeNull();
+    expect(ticketControllerCheck({ ...t, controllerCheck: "look" })).toBe("look");
+    expect(ticketControllerCheck({ body: "x", bodyTruncated: false })).toBeNull();
+  });
+  it("cuts a long reason", () => {
+    const r = controllerCheckParkText("a".repeat(40), "word ".repeat(200));
+    expect(r.length).toBeLessThan(360);
+    expect(r).toContain("see ticket");
   });
 });

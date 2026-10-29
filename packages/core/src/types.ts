@@ -220,6 +220,15 @@ export interface RunLoop {
    * (not `rerun`, the hub's own re-run of a first failure).
    */
   rulingRerun?: CiRerun | null;
+  /**
+   * The ticket's `## Controller check` hold: the sha the run parked on and the phase it left, set
+   * when the engine parks the merge; `pass` once the operator's verdict on that sha is recorded.
+   */
+  /** The ticket listed a controller check once: a pass is needed even if the heading goes. */
+  controllerCheckRequired?: boolean;
+  /** A line due to the author once it is back on its seat (a controller check's fail note); cleared when claimed. */
+  pendingLine?: { key: string; text: string } | null;
+  controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
 }
 
 /** One `loop_events` row. */

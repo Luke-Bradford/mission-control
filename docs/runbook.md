@@ -825,6 +825,26 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Record a controller check
+
+A ticket with a controller-check heading (`## Controller check`, or a near spelling: another level,
+"Checks", a suffix) is never merged by the engine until you pass it. When the run's review is clean
+and CI is green, the run parks as `controller-check` with that section's text (cut to a short brief;
+the ticket has the rest), and it shows in Needs you. Once a ticket has listed a check, a pass is
+needed even if the heading is later removed. If the ticket cannot be read, the run parks the same way
+after three tries, saying so. Do the check, then record the verdict for the head you looked at:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"verdict":"pass","sha":"<7 or more characters of the head>"}'
+```
+
+`pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
+refused if the PR head has moved, and a later head, including the engine's own merge of main after a
+pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
+A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
+still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
+the note and the engine wakes the run when its seat is free.
+
 ## What it observes
 
 | Collector | Source | Cadence |

@@ -1353,6 +1353,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
+  ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -3734,6 +3735,8 @@ describe("ticket detail", () => {
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
+      // no "## Controller check" heading in the body
+      controllerCheck: null,
       labels: ["bug"],
       milestone: "MVP",
       subIssues: [{ number: 8, title: "child", state: "closed", repoId: null }],
@@ -7627,6 +7630,152 @@ describe("operator token", () => {
     );
     expect(crewPause.statusCode).toBe(401);
     expect(store.getSetting("crew.paused")).toBeNull();
+  });
+
+  describe("controller check route", () => {
+    const calls: [string, string, string, string | undefined][] = [];
+    const SHA7 = "abcdef1";
+    let noWrites = false;
+    let app: FastifyInstance;
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const post = (headers: Record<string, string>, payload: object) =>
+      app.inject({
+        method: "POST",
+        url: "/api/runs/cc/controller-check",
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      calls.length = 0;
+      noWrites = false;
+      store.upsertRun(
+        run({
+          id: "cc",
+          agentId: "guido-1",
+          loop: {
+            phase: "parked",
+            reportedEvidenceId: 0,
+            prNumber: 12,
+            pushStartedAt: null,
+            pushFor: null,
+            unparkedAt: null,
+            ciFails: 0,
+            ciFailedSha: null,
+            relayedSha: null,
+            transient: 0,
+            lastRefusal: null,
+            epoch: 0,
+            budgetExtra: 0,
+            parked: { kind: "controller-check", reason: "check", ended: false },
+            touches: null,
+            cardFor: null,
+          },
+        }),
+      );
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        get noLoopWrites() {
+          return noWrites;
+        },
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+          controllerCheck: async (id, verdict, sha, note) => {
+            calls.push([id, verdict, sha, note]);
+            return verdict === "pass" ? { lifted: true } : { lifted: false, reason: "head-moved" };
+          },
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { verdict: "pass", sha: SHA7 })).statusCode).toBe(401);
+      expect(
+        (await post({ [OPERATOR_HEADER]: "wrong" }, { verdict: "pass", sha: SHA7 })).statusCode,
+      ).toBe(401);
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a bad body", async () => {
+      for (const payload of [
+        {},
+        { verdict: "pass" },
+        { verdict: "pass", sha: "abc" },
+        { verdict: "maybe", sha: SHA7 },
+        { verdict: "pass", sha: SHA7, extra: 1 },
+        { verdict: "fail", sha: SHA7 },
+        { verdict: "fail", sha: SHA7, note: "  " },
+        { verdict: "fail", sha: SHA7, note: 3 },
+        { verdict: "fail", sha: SHA7, note: "x".repeat(COMMS_MESSAGE_MAX + 1) },
+      ]) {
+        expect((await post(key, payload)).statusCode, JSON.stringify(payload)).toBe(400);
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it("records a verdict through the engine and names a refusal", async () => {
+      const first = await post(key, { verdict: "pass", sha: SHA7 });
+      expect(first.statusCode).toBe(200);
+      const refused = await post(key, { verdict: "fail", sha: SHA7, note: "unreadable" });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain("head moved");
+      expect(calls).toEqual([
+        ["cc", "pass", SHA7, undefined],
+        ["cc", "fail", SHA7, "unreadable"],
+      ]);
+    });
+
+    it("answers 409 when loop writes are off, and for an engine that cannot record it", async () => {
+      noWrites = true;
+      expect((await post(key, { verdict: "pass", sha: SHA7 })).statusCode).toBe(409);
+      expect(calls).toEqual([]);
+      noWrites = false;
+      const bare = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+        },
+      });
+      await bare.ready();
+      const r = await bare.inject({
+        method: "POST",
+        url: "/api/runs/cc/controller-check",
+        headers: { ...json, ...key },
+        payload: { verdict: "pass", sha: SHA7 },
+      });
+      expect(r.statusCode).toBe(409);
+      await bare.close();
+    });
+
+    it("a plain resume of the park is refused with the route to use", async () => {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/runs/cc/resume",
+        headers: { ...json, ...key },
+        payload: {},
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("controller-check");
+    });
   });
 
   it("leaves GET routes and the guard check as they were", async () => {

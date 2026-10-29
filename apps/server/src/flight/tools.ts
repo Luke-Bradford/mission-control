@@ -3148,17 +3148,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         // the operator's alone: FLIGHT clears it by triaging what it counts, never by holding it
         if (a.key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
         const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
+        const waiting = attentionItems(
+          config,
+          store,
+          now(),
+          deps.lockState?.() ?? NO_LOCK,
+          rows,
+          deps.login,
+        ).find((i) => i.key === a.key);
+        if (waiting === undefined) return fail("Item is no longer waiting.");
+        // an item that is the operator's call (a controller check) may only be held for a day
         if (
-          !attentionItems(
-            config,
-            store,
-            now(),
-            deps.lockState?.() ?? NO_LOCK,
-            rows,
-            deps.login,
-          ).some((i) => i.key === a.key)
+          isOperatorCall(waiting, store) &&
+          !(a.condition.kind === "date" && a.condition.at <= now() + 24 * 60 * 60_000)
         )
-          return fail("Item is no longer waiting.");
+          return fail("This item is the operator's call; hold it until a date within a day.");
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");

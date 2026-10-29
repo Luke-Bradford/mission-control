@@ -6,6 +6,7 @@ import {
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
   ciVerdict,
+  controllerCheckOf,
   type Escalation,
   type GithubRateLimit,
   githubCollector,
@@ -789,6 +790,8 @@ export async function fetchTicket(
     url: str(issue.url, ""),
     state: openClosed(issue.state),
     closedAt: typeof issue.closedAt === "string" ? Date.parse(issue.closedAt) || null : null,
+    // read on the whole body: a section past the cut still holds a merge
+    controllerCheck: controllerCheckOf(chars.join("")),
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
     bodyLength: chars.length,

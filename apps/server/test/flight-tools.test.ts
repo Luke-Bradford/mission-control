@@ -5600,6 +5600,22 @@ describe("superuser housekeeping", () => {
     expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
   });
+  it.each(["lift", "accept", "rework", "rereview"] as const)(
+    "settle_park cannot settle a controller check (%s)",
+    async (action) => {
+      elevated();
+      runPr();
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind: "controller-check", reason: "held", ended: false },
+      });
+      const refused = await call("settle_park", { runId: "r-pr", action });
+      expect(refused).toHaveProperty("isError", true);
+      expect(JSON.stringify(refused)).toContain("This action cannot settle this park.");
+      expect(engineCalls).toEqual([]);
+    },
+  );
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
     elevated();
     runPr();
@@ -7137,6 +7153,36 @@ describe("attention hold tools", () => {
     expect(JSON.parse(store.getSetting("attention-holds") ?? "{}")[key].releasedAt).toBe(NOW);
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
+  });
+  it("allows only a hold of a day or less on a controller check", async () => {
+    live("guido-1", "r-pr", {
+      branch: "mc/7",
+      ticket: "mc#7",
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "controller-check", reason: "check", ended: false },
+      },
+    });
+    store.raiseNote({
+      key: "blocked:r-pr:0",
+      kind: "blocked",
+      runId: "r-pr",
+      seatId: null,
+      repoId: null,
+      text: "check",
+      at: NOW - 1,
+    });
+    const cc = { key: "note:blocked:r-pr:0", reason: "Waiting" };
+    expect((await call("hold_item", { ...cc, condition: { kind: "manual" } })).isError).toBe(true);
+    expect((await call("hold_item", { ...cc, condition: { kind: "crew" } })).isError).toBe(true);
+    expect(
+      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 3 * 86_400_000 } }))
+        .isError,
+    ).toBe(true);
+    expect(
+      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 1000 } })).isError,
+    ).not.toBe(true);
   });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
