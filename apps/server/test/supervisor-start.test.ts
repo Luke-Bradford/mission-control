@@ -1544,6 +1544,18 @@ describe("reused worktrees", () => {
     expect(userLines().at(-1)).toContain("changes .npmrc");
   });
 
+  it.each([
+    ["lists a controller check", "## Done when\n- x\n\n## Controller check\nLook.", true],
+    ["lists none", "## Done when\n- x", undefined],
+  ])("a loop start on a ticket that %s records whether it is required", async (_n, body, want) => {
+    const { sup } = make({
+      fetchTicket: async () => ({ ...TICKET, labels: ["area:server"], body }),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    expect(store.run(runId)?.loop?.controllerCheckRequired).toBe(want);
+  });
+
   it("records the merge that brings main into a reused worktree", async () => {
     const { sup } = make();
     sup.start();

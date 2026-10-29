@@ -6,6 +6,7 @@ import {
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
+  CONTROLLER_CHECK_PARK,
   ciVerdict,
   controllerCheckOf,
   controllerCheckParkText,
@@ -2210,6 +2211,23 @@ describe("set aside", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
+  it("a run parked on a controller check is set aside, and an aside one is not woken", () => {
+    const parked: Partial<RunLoop> = {
+      phase: "parked",
+      parked: { kind: CONTROLLER_CHECK_PARK, reason: "check", ended: false },
+    };
+    const a = reconcile(base({}, parked)).actions;
+    expect(a.filter((x) => x.kind === "set-aside")).toHaveLength(1);
+    const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
+    expect(r.loop.aside?.wake).toBe(false);
+    expect(kindsOf(r.actions)).not.toContain("wake");
+    // any other park brings an aside run back
+    const other = reconcile(
+      off({}, { phase: "parked", parked: { kind: "ci", reason: "x", ended: false }, ...asideOf() }),
+    );
+    expect(other.loop.aside?.wake).toBe(true);
+  });
+
   it("back on its seat clears aside", () => {
     const r = reconcile(base({}, asideOf(true)));
     expect(r.loop.aside).toBeNull();
@@ -2956,6 +2974,10 @@ describe("controllerCheckOf", () => {
       "   ## Controller check ##",
       "> ## Controller check",
       "# Controller Check:",
+      "## Manual controller check",
+      "## Controller-check",
+      "> > ## Controller check",
+      "- ## Controller check",
     ])
       expect(controllerCheckOf(`${h}\nx`)).toBe("x");
     expect(controllerCheckOf("")).toBeNull();
@@ -2963,6 +2985,10 @@ describe("controllerCheckOf", () => {
     expect(controllerCheckOf("text ## Controller check\nx")).toBeNull();
     expect(controllerCheckOf("    ## Controller check\nx")).toBeNull();
     expect(controllerCheckOf("the controller check is below")).toBeNull();
+    expect(controllerCheckOf("```md\n## Controller check\nx\n```\n")).toBeNull();
+    expect(controllerCheckOf("~~~\n## Controller check\n~~~\n## Controller check\nreal")).toBe(
+      "real",
+    );
   });
   it("an empty section is still a check", () => {
     expect(controllerCheckOf("## Controller check\n## Next")).toBe("");

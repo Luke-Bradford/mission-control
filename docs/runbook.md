@@ -842,7 +842,8 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
 A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
-still recorded. While the park waits, the seat is free.
+still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
+the note and the engine wakes the run when its seat is free.
 
 ## What it observes
 

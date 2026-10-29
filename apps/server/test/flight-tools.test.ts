@@ -7154,7 +7154,7 @@ describe("attention hold tools", () => {
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
   });
-  it("refuses an open-ended hold on a controller check, but a dated one is fine", async () => {
+  it("allows only a hold of a day or less on a controller check", async () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
       ticket: "mc#7",
@@ -7175,6 +7175,11 @@ describe("attention hold tools", () => {
     });
     const cc = { key: "note:blocked:r-pr:0", reason: "Waiting" };
     expect((await call("hold_item", { ...cc, condition: { kind: "manual" } })).isError).toBe(true);
+    expect((await call("hold_item", { ...cc, condition: { kind: "crew" } })).isError).toBe(true);
+    expect(
+      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 3 * 86_400_000 } }))
+        .isError,
+    ).toBe(true);
     expect(
       (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 1000 } })).isError,
     ).not.toBe(true);

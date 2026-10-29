@@ -172,18 +172,38 @@ export const RULING_PARK = "ruling";
 export const CONTROLLER_CHECK_PARK = "controller-check";
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
-/** Any near-miss spelling holds the merge too: other levels, "Checks", a suffix, a quote, up to 3 spaces. */
-const CONTROLLER_CHECK_RE = /^ {0,3}(?:> ?)?(#{1,6})[ \t]*controller[ \t]+checks?\b.*$/im;
+/** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
+const CONTROLLER_CHECK_RE =
+  /^ {0,3}(?:>[ \t]?)*(?:[-*+][ \t]+)?(#{1,6})[ \t]+[^\n]*?\bcontroller[ \t-]*checks?\b.*$/im;
 const MAX_CHECK_REASON = 300;
+/** `body` with each fenced code block (``` or ~~~) blanked to spaces, the same length. */
+function withoutFences(body: string): string {
+  let fence: string | null = null;
+  return body
+    .split("\n")
+    .map((line) => {
+      const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (fence === null) {
+        if (m?.[1] === undefined) return line;
+        fence = m[1].slice(0, 1);
+        return " ".repeat(line.length);
+      }
+      if (m?.[1]?.startsWith(fence)) fence = null;
+      return " ".repeat(line.length);
+    })
+    .join("\n");
+}
 /** The text of a ticket's controller-check section (up to the next heading of its level or above); null without one. */
 export function controllerCheckOf(body: string | null | undefined): string | null {
   if (!body) return null;
-  const m = CONTROLLER_CHECK_RE.exec(body);
+  const plain = withoutFences(body);
+  const m = CONTROLLER_CHECK_RE.exec(plain);
   if (m === null) return null;
   const level = m[1]?.length ?? 2;
-  const rest = body.slice(m.index + m[0].length);
+  const rest = plain.slice(m.index + m[0].length);
   const next = new RegExp(`^ {0,3}#{1,${level}}(?:[ \\t]|$)`, "m").exec(rest);
-  return (next === null ? rest : rest.slice(0, next.index)).trim();
+  const start = m.index + m[0].length;
+  return body.slice(start, next === null ? undefined : start + next.index).trim();
 }
 /**
  * The controller check a read ticket carries: the section's text, "" when it has one with no text

@@ -3841,7 +3841,7 @@ describe("the engine runs reviews", () => {
         await gateOpen();
         await h.engine.reconcileRun(RUN);
         expect(h.steps).not.toContain("merge");
-        expect(loopOf().lastRefusal).toBe("gh is down");
+        expect(loopOf().lastRefusal).toBe("ticket could not be read: gh is down");
         for (let i = 0; i < 4 && loopOf().parked === null; i++) {
           clock += ENGINE_TICK_MS;
           await h.engine.reconcileRun(RUN);
@@ -5722,6 +5722,38 @@ describe("the engine runs reviews", () => {
       });
       expect(store.seatSession(SEAT)?.runId).toBe(other);
       expect(h.sent).toEqual([]);
+      h.wakeError = null;
+      h.asideOn = false;
+      store.setRunEnded(other, clock, "ok", "operator");
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+      emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
+      await vi.waitFor(() => expect(loopOf().aside).toBeNull());
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+    });
+
+    it("a controller check keeps the run aside, and a fail is recorded while the seat is busy", async () => {
+      h.engine.stop();
+      h.engine = h.make({
+        fetchTicket: async () => ticketView("## Controller check\nOpen the page."),
+      });
+      h.engine.start();
+      await setAside();
+      reported(first().id, []);
+      await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(CONTROLLER_CHECK_PARK));
+      // parked on the controller, the run stays off its seat: nothing wakes it
+      expect(h.wakes).toEqual([]);
+      expect(asideRun()).toEqual({ worktree: WT, wake: false });
+      const other = "guido-1:other";
+      store.upsertRun(run({ id: other, seq: 2 }));
+      seatIdle(other);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      expect(await h.engine.controllerCheck(RUN, "fail", SHA, "swatch 3 is unreadable")).toEqual({
+        lifted: true,
+      });
+      expect(loopOf()).toMatchObject({ phase: "working", aside: { worktree: WT, wake: true } });
+      expect(h.sent).toEqual([]);
+      const note = store.comms(0, RUN).at(-1);
+      expect(note?.text).toBe(controllerCheckFailText(SHA, "swatch 3 is unreadable"));
       h.wakeError = null;
       h.asideOn = false;
       store.setRunEnded(other, clock, "ok", "operator");

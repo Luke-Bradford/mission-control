@@ -30,6 +30,7 @@ import {
   CI_PASSED_EVENT_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
+  COMMS_CAPCOM,
   COMMS_MC,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
@@ -352,6 +353,9 @@ const endReason = (run: Run): string => {
       return "ended";
   }
 };
+
+/** What a read failure of the ticket at merge starts with, in the run's last refusal. */
+const TICKET_UNREADABLE = "ticket could not be read: ";
 
 export function createEngine(deps: EngineDeps): Engine {
   const { config, store, bus, supervisor, publisher } = deps;
@@ -905,7 +909,7 @@ export function createEngine(deps: EngineDeps): Engine {
       ticket = await deps.fetchTicket(repo, issue);
       if (ticket === null) why = "the ticket was not found";
     } catch (e) {
-      why = e instanceof Error ? e.message : String(e);
+      why = (e instanceof Error ? e.message : String(e)).slice(0, 200);
     }
     if (ticket === null) {
       const at = now();
@@ -918,15 +922,16 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       tries.why = why;
       ticketTries.set(run.id, tries);
-      cur.lastRefusal = why;
+      cur.lastRefusal = `${TICKET_UNREADABLE}${why}`;
       if (tries.n < REFUSAL_TRIES) return {};
+      ticketTries.delete(run.id);
       return { park: controllerCheckUnreadableText(sha, why) };
     }
     const failed = ticketTries.get(run.id);
     if (failed !== undefined) {
-      if (cur.lastRefusal === failed.why) cur.lastRefusal = null;
       ticketTries.delete(run.id);
     }
+    if (cur.lastRefusal?.startsWith(TICKET_UNREADABLE)) cur.lastRefusal = null;
     const check = ticketControllerCheck(ticket);
     if (check !== null) cur.controllerCheckRequired = true;
     if (check === null && cur.controllerCheckRequired !== true) return null;
@@ -2207,6 +2212,7 @@ export function createEngine(deps: EngineDeps): Engine {
       unsubscribe = supervisor.on((e) => {
         if (e.kind === "run-ended") {
           lastSync.delete(e.runId);
+          ticketTries.delete(e.runId);
           kickAside(e.seatId);
         }
         const rv = store.reviewOfRun(e.runId);
@@ -2503,24 +2509,35 @@ export function createEngine(deps: EngineDeps): Engine {
             reviewWaivedSha: null,
             flightClearedSha: null,
           };
-          if (next.aside) {
-            try {
-              await supervisor.wakeRun(run.id);
-            } catch {
-              return refuse("rework-undelivered");
-            }
-            next.aside = null;
-          }
           const text = controllerCheckFailText(held.sha, note);
-          const sent = await supervisor.send(
-            run.id,
-            `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+          const row = {
+            at,
+            from: COMMS_CAPCOM,
+            to: run.agentId,
+            ticket: run.ticket ?? null,
+            ref: run.ticket ?? null,
+            targetRunId: run.id,
             text,
-          );
-          // a paused seat reads it when it resumes: the verdict is recorded all the same
-          if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId))
-            return refuse("rework-undelivered");
-          store.addComms({ at, from: "CAPCOM", to: run.agentId, ticket: run.ticket ?? null, text });
+          };
+          if (loop.aside) {
+            // off its seat (the seat may hold another run now): the note waits in Comms for the
+            // run, and the engine wakes it, in working, once its seat is free
+            if (store.addComms(row) === null) return refuse("rework-undelivered");
+            next.aside = { ...loop.aside, wake: true };
+          } else {
+            const sent = await supervisor.send(
+              run.id,
+              `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+              text,
+            );
+            // a paused seat reads it when it resumes: the verdict is recorded all the same
+            if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId))
+              return refuse("rework-undelivered");
+            const stored = store.addComms(row);
+            // delivered by the line above: not again from the inbox
+            if (stored !== null && (sent === "sent" || sent === "dup"))
+              store.markCommsInboxRead(run.agentId, [stored.id]);
+          }
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,

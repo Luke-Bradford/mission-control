@@ -3157,9 +3157,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
-        // an item that is the operator's call (a controller check) cannot be held with no end
-        if (a.condition.kind === "manual" && isOperatorCall(waiting, store))
-          return fail("This item is the operator's call; hold it until a date instead.");
+        // an item that is the operator's call (a controller check) may only be held for a day
+        if (
+          isOperatorCall(waiting, store) &&
+          !(a.condition.kind === "date" && a.condition.at <= now() + 24 * 60 * 60_000)
+        )
+          return fail("This item is the operator's call; hold it until a date within a day.");
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");
