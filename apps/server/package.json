@@ -10,6 +10,7 @@
   "dependencies": {
     "@mc/core": "workspace:*",
     "fastify": "^5.12.7",
+    "playwright-core": "1.58.2",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   }
