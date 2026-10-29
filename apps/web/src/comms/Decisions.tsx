@@ -7,7 +7,7 @@ import { ACTIONS } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import { followLink, NEEDS_YOU_PATH } from "../router.ts";
 import { answerTarget, sendAnswer } from "./answer.ts";
-import { HoldForm } from "./NeedsList.tsx";
+import { HoldForm } from "./HoldForm.tsx";
 
 export function DecisionCard({
   item,
