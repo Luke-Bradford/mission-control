@@ -827,7 +827,7 @@ describe("crew sandbox and scoped edits", () => {
         expect(
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
-        expect(f.allowRead).toEqual([tempRoot]);
+        expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
         expect(f.denyRead).not.toContain("/tmp");
         expect(f.denyRead).not.toContain("/private/tmp");
       }
@@ -862,7 +862,7 @@ describe("crew sandbox and scoped edits", () => {
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
-      expect(f.allowRead).toEqual([tempRoot]);
+      expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
       expect(f.denyWrite).toContain("/tmp/claude-*");
@@ -902,6 +902,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 
@@ -952,6 +953,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 
