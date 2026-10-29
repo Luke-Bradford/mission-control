@@ -42,7 +42,6 @@ import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
   CANNOT_START,
-  CODEX_CLI_ENV,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -50,6 +49,7 @@ import {
   CREW_CLI_ENV,
   CREW_DISABLED,
   CREW_GIT_ENV,
+  CREW_PNPM_ENV,
   carriedFrom,
   clockHm,
   compactUtc,
@@ -1220,7 +1220,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
-   * Python's caches likewise (`crewPythonEnv`).
+   * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
   function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
@@ -1235,7 +1235,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
     Object.assign(env, crewPythonEnv(tmp, seatId));
-    return { ...env, ...CREW_CLI_ENV, ...CREW_GIT_ENV };
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
   }
 
   /**
@@ -1612,7 +1612,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ),
         );
         Object.assign(env, {
-          ...CODEX_CLI_ENV,
           CODEX_HOME: home,
           [CODEX_SEAT_TOKEN_ENV]: token,
           SHELL: CODEX_SHELL,
