@@ -35,7 +35,7 @@ const listed = (selector: string) => {
   for (const [, list, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g))
     if (
       (list as string)
-        .replace(/\/\*[^]*?\*\//g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
         .split(",")
         .some((item) => item.trim() === selector)
     )
