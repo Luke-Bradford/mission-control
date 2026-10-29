@@ -8,6 +8,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
@@ -2761,7 +2762,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
 
   it("sends an unanswered labelled Comms item to FLIGHT at 15 minutes, then counts it once", () => {
     flight();
-    const openedAt = NOW - COMMS_FLIGHT_ESCALATION_MS;
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const openedAt = current - COMMS_FLIGHT_ESCALATION_MS;
     const message = store.addComms({
       at: openedAt,
       from: "guido-1",
@@ -2772,13 +2774,13 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(all(NOW - 1).find((item) => item.key === key)).toBeUndefined();
-    expect(all(NOW).find((item) => item.key === key)).toMatchObject({
+    expect(all(current - 1).find((item) => item.key === key)).toBeUndefined();
+    expect(all(current).find((item) => item.key === key)).toMatchObject({
       owner: "flight",
       flightTriage: "waiting",
-      triageDueAt: NOW + COMMS_CAPCOM_ESCALATION_MS,
+      triageDueAt: current + COMMS_CAPCOM_ESCALATION_MS,
     });
-    const late = NOW + COMMS_CAPCOM_ESCALATION_MS;
+    const late = current + COMMS_CAPCOM_ESCALATION_MS;
     expect(all(late).find((item) => item.key === key)).toMatchObject({
       owner: "flight",
       flightTriage: "missed",
@@ -2786,6 +2788,45 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(late)?.notTriaging?.keys).toEqual([key]);
     store.addCommsReaction(message.id, "flight-1", "on_it", undefined, late);
     expect(all(late).find((item) => item.key === key)).toBeUndefined();
+  });
+
+  it("does not raise a Comms item that predates the rollout cutoff", () => {
+    flight();
+    const message = store.addComms({
+      at: COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT - 1,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#909",
+      text: "An old question",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    expect(
+      all(COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR).find(
+        (item) => item.key === `comms-open:${message.id}`,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps a post-rollout Comms item in FLIGHT triage after two hours", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#909",
+      text: "A current question",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(all(current).find((item) => item.key === key)).toMatchObject({
+      flightTriage: "waiting",
+    });
+    const later = message.at + 2 * HOUR + 1;
+    expect(all(later).find((item) => item.key === key)).toMatchObject({ flightTriage: "missed" });
+    expect(aggregate(later)?.notTriaging?.keys).toContain(key);
   });
 
   it("appears when FLIGHT misses the window, counts the items, and clears once FLIGHT triages them", () => {

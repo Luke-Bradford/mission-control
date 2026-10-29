@@ -19,6 +19,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   capText,
   ciLogText,
   ciNoCheckText,
@@ -5813,6 +5814,32 @@ describe("superuser housekeeping", () => {
     for (const key of ["note:x", "guard:1", "budget:x", "lane:someone"])
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
+  });
+  it("settles a stale Comms item with its reason and keeps it out of FLIGHT triage", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "mc#909",
+      text: "The already-merged PR needs review",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(true);
+    expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(store.commsSettlement(message.id)).toMatchObject({
+      settledBy: "flight-1",
+      reason: "The PR has merged.",
+    });
+    expect(attentionItems(cfg, store, nowMs + 60 * 60_000).some((item) => item.key === key)).toBe(
+      false,
+    );
   });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();
