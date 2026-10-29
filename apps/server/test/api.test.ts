@@ -44,6 +44,7 @@ import {
   type FileDiff,
   FLIGHT_HEADLINE,
   FLIGHT_LIST_MAX,
+  FLIGHT_WAKE_SETTING,
   type FlightBriefView,
   type FlightLedgerEntry,
   type FlightSummaryView,
@@ -6053,6 +6054,46 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      expect((await get("/api/flight")).json<FlightView>().wake).toEqual({
+        lastWakeAt: null,
+        wokeOn: null,
+        nextWakeAt: null,
+      });
+      const repo = config.crew?.sessions[0]?.repoId ?? "";
+      const at = NOW - 600e3;
+      store.setSetting(
+        FLIGHT_WAKE_SETTING,
+        JSON.stringify({ repo, at, wokeOn: ["q (1)", "prs (2)"], next: at + 3600e3 }),
+      );
+      store.upsertRun(run({ id: "rf", agentId: "flight-1", startedAt: NOW - 3600e3 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "rf",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      sessionAlive = true;
+      expect((await get("/api/flight")).json<FlightView>().wake).toEqual({
+        lastWakeAt: at,
+        wokeOn: ["q (1)", "prs (2)"],
+        nextWakeAt: at + 3600e3,
+      });
+      // no session, no schedule
+      sessionAlive = false;
+      expect((await get("/api/flight")).json<FlightView>().wake?.nextWakeAt).toBeNull();
     });
 
     it("counts the wakes of FLIGHT's current run as its turn", async () => {

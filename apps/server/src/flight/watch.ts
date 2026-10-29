@@ -44,8 +44,11 @@ import {
   flightWake,
   flightWakes,
   markPrsShown,
+  nextWakeAt,
   operatorItems,
   pending,
+  recordFlightWake,
+  recordNextFlightWake,
   wakeFacts,
 } from "./state.ts";
 
@@ -336,6 +339,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
+        recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
@@ -392,6 +396,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
+    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
@@ -405,12 +410,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
       );
+      const causes = changedWakeFacts(lastFacts, wake);
       if (
-        (await supervisor.send(
-          runId,
-          wakeKey(runId, n + 1),
-          wakeLine(state, digest, changedWakeFacts(lastFacts, wake)),
-        )) === "sent"
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
+        "sent"
       ) {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
@@ -418,6 +421,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
+        recordFlightWake(store, found.session.repoId, t, causes);
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {
       lastFacts = wake;

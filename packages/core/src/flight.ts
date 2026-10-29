@@ -90,6 +90,20 @@ export interface FlightView {
     turns?: { n: number; max: number } | null;
   } | null;
   decisions: FlightDecision[];
+  /** The server always sets it with a seat; optional so older fixtures still type. */
+  wake?: FlightWakeStatus;
+}
+
+/** The setting that keeps FLIGHT's last wake across a hub restart. */
+export const FLIGHT_WAKE_SETTING = "flight.wake";
+
+/** When FLIGHT last woke and what woke it, and when it will next wake; null where unknown. */
+export interface FlightWakeStatus {
+  lastWakeAt: number | null;
+  /** The wake's reasons as the digest lists them, e.g. "q (1)"; "initial" for a fresh session. */
+  wokeOn: string[] | null;
+  /** From a real schedule only: the re-wake backstop while work is pending, or the next planned entry. */
+  nextWakeAt: number | null;
 }
 
 /** How far back `GET /api/flight` lists decisions, and the most it lists. */

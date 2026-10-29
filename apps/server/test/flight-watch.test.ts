@@ -55,6 +55,7 @@ import {
   flightSeat,
   flightStartCap,
   flightState,
+  flightView,
   markPrsShown,
   ownReply,
   pending,
@@ -798,6 +799,81 @@ describe("FLIGHT's brief in the digest", () => {
 
   const sentWake = (): FlightWake =>
     JSON.parse(sendCalls.at(-1)?.text.split("\n").at(-1) ?? "") as FlightWake;
+
+  describe("the wake status /api/flight serves", () => {
+    const status = () => flightView(config, store, nowMs, () => true).wake;
+
+    it("knows nothing before FLIGHT's first wake", () => {
+      expect(status()).toEqual({ lastWakeAt: null, wokeOn: null, nextWakeAt: null });
+    });
+
+    it("records a start's time and what woke it", async () => {
+      live("guido-1", "r-guido");
+      ask();
+      await watch.check();
+      expect(startCalls).toHaveLength(1);
+      expect(status()?.lastWakeAt).toBe(nowMs);
+      expect(status()?.wokeOn).toContain("q (1)");
+    });
+
+    it("records a wake sent to a live FLIGHT, and keeps it across a new watch", async () => {
+      liveCrew();
+      ask();
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+      const woke = status();
+      expect(woke?.lastWakeAt).toBe(nowMs);
+      expect(woke?.wokeOn).toContain("q (1)");
+      nowMs += 5 * MIN;
+      makeWatch();
+      expect(status()).toEqual({ ...woke, nextWakeAt: woke?.nextWakeAt ?? null });
+    });
+
+    it("leaves a failed send unrecorded", async () => {
+      liveCrew();
+      ask();
+      sendFails = true;
+      await watch.check();
+      expect(status()?.lastWakeAt).toBeNull();
+    });
+
+    it("schedules the re-wake backstop only while work is pending", async () => {
+      liveCrew();
+      ask();
+      await watch.check();
+      const woke = nowMs;
+      nowMs += MIN;
+      await watch.check();
+      expect(status()?.nextWakeAt).toBe(woke + FLIGHT_REWAKE_MS);
+      store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+      await watch.check();
+      expect(status()).toMatchObject({ lastWakeAt: woke, nextWakeAt: null });
+    });
+
+    it("schedules a planned entry that is not yet due, and nothing once FLIGHT is down", async () => {
+      liveCrew();
+      store.setFlightPlans(
+        "s1",
+        {
+          upsert: [
+            {
+              id: "recheck",
+              dueAt: nowMs + 30 * MIN,
+              kind: "PR recheck",
+              target: "mc#1",
+              label: "Re-check",
+              status: "pending",
+            },
+          ],
+        },
+        nowMs,
+      );
+      ask();
+      await watch.check();
+      expect(status()?.nextWakeAt).toBe(nowMs + 30 * MIN);
+      expect(flightView(config, store, nowMs, () => false).wake?.nextWakeAt).toBeNull();
+    });
+  });
 
   it("omits the brief after start and resends it after FLIGHT edits it", async () => {
     setNotes(T0);
