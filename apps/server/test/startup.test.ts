@@ -18,6 +18,7 @@ const boot = vi.hoisted(() => ({
   catalog: null as CodexModels | null,
   retryMs: 60_000,
   readGate: null as (() => Promise<Buffer>) | null,
+  discoveryComplete: null as (() => void) | null,
   ticket: vi.fn(async () => null),
 }));
 
@@ -38,7 +39,10 @@ vi.mock("../src/runtime/codex-models.ts", async (original) => {
         return current().reason;
       },
       efforts: (model: string) => current().efforts(model),
-      load: (deps: ModelDeps) => current().load(deps),
+      load: async (deps: ModelDeps) => {
+        await current().load(deps);
+        boot.discoveryComplete?.();
+      },
     },
     codexModelsFor: () => current(),
   };
@@ -143,6 +147,7 @@ beforeEach(async () => {
   boot.discoveryStarted = false;
   boot.retryMs = 60_000;
   boot.readGate = null;
+  boot.discoveryComplete = null;
   boot.ticket.mockClear();
   dir = mkdtempSync(join(tmpdir(), "mc-startup-"));
   const configPath = join(dir, "config.yaml");
@@ -221,18 +226,25 @@ describe("mixed hub startup", () => {
   it("serves before discovery filesystem preparation completes", async () => {
     boot.models = preparing.deps;
     let release: (bytes: Buffer) => void = () => {};
+    let discovered: () => void = () => {};
     const gate = new Promise<Buffer>((resolve) => {
       release = resolve;
     });
+    const discovery = new Promise<void>((resolve) => {
+      discovered = resolve;
+    });
     boot.readGate = () => gate;
+    boot.discoveryComplete = discovered;
     try {
       await (await import("../src/main.ts")).main();
       expect(await unavailable()).toContain("discovery pending");
       await claudeCanStart();
       release(Buffer.from('{"fake":"auth"}'));
-      await expect.poll(unavailable).toBeUndefined();
+      await discovery;
+      expect(await unavailable()).toBeUndefined();
     } finally {
       release(Buffer.from('{"fake":"auth"}'));
+      boot.discoveryComplete = null;
     }
   });
   for (const [name, scenario, reason] of [
