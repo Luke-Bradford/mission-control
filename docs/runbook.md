@@ -546,31 +546,18 @@ machine's hub also works. Do them in this order; the sections they name have the
    The branch check in 3 above sees a run the other hub started only once that run has pushed. If it
    could have started the ticket in the minute before you moved the card, ask whoever runs it.
 
-8. **The controller session.** The Claude Code session you run the crew from (the controller) gets
-   its behaviour from three places that live on the machine, not in the repo, so copy or recreate
-   them. In the commands, `REPO` is the folder you open Claude Code in (here,
-   `~/Dev/mission-control`); use the same folder layout on both Macs where you can.
-   - **Local Claude Code settings**, `REPO/.claude/settings.local.json` (git-ignored). This lets
-     the controller fix or revert its own crew-block changes in `CLAUDE.md` without asking first,
-     as the operator approved on 2026-10-29; without it Claude Code refuses those edits as
-     self-modification. Replace the path with this machine's absolute path:
-
-     ```json
-     {
-       "permissions": {
-         "allow": ["Edit(//Users/<you>/Dev/mission-control/CLAUDE.md)"]
-       },
-       "autoMode": {
-         "allow": [
-           "$defaults",
-           "Editing /Users/<you>/Dev/mission-control/CLAUDE.md (its rules or its Mission Control crew block), and committing and pushing that edit on a branch with a PR, is allowed: the operator approved this on 29 Oct 2026 so the controller can fix or revert its own crew-block changes without asking first, and tells the operator after."
-         ]
-       }
-     }
-     ```
-
-     Open `/hooks` once in Claude Code (or restart it) so a settings file created mid-session is
-     read.
+8. **The controller session.** The Claude Code session you run the crew from (the controller).
+   `REPO` below is the folder you open Claude Code in (here, `~/Dev/mission-control`); start the
+   session at the repo root.
+   - **From the repo, nothing to do:** `.claude/settings.json` allows `Edit(/CLAUDE.md)`, so the
+     controller can fix or revert its own crew-block changes without being refused as
+     self-modification (operator-approved 2026-10-29; the rule itself is in `CLAUDE.md`). The
+     leading `/` means the repo root on any machine. Claude Code applies a committed allow rule
+     only after you accept the workspace trust prompt for `REPO`.
+   - **Copy across by hand:** the rest lives on the machine.
+   - **Your auto-mode allowances**, the `autoMode` block in `~/.claude/settings.json`. Claude Code
+     reads `autoMode` only from user or managed settings, never from a repo's `.claude/` files,
+     so copy that block from the other Mac's `~/.claude/settings.json`.
    - **`REPO/CLAUDE.local.md`** (git-ignored): this machine's live loops, the hub's launchd job
      and port, and the preview port. Copy the other machine's and edit the names; never list the
      other machine's loops as this one's.
