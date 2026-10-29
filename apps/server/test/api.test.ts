@@ -3735,6 +3735,8 @@ describe("ticket detail", () => {
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
+      // no "## Controller check" heading in the body
+      controllerCheck: null,
       labels: ["bug"],
       milestone: "MVP",
       subIssues: [{ number: 8, title: "child", state: "closed", repoId: null }],
