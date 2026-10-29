@@ -661,6 +661,11 @@ describe("capacity", () => {
             { at: since + HOUR, pct: 40 },
             { at: since + 3 * HOUR, pct: 5 },
           ],
+          burn: Array.from({ length: 6 }, (_, index) => ({
+            at: since + index * HOUR,
+            spendPct: 0,
+          })),
+          projectedExhaustionAt: null,
           resets: [{ at: since + 3 * HOUR, resetAt: NOW + 6 * HOUR, cause: "oauth" }],
         },
       ],
@@ -796,6 +801,54 @@ describe("capacity", () => {
       },
       { accountId: "claude-main", window: "7d", points: [{ at: NOW - HOUR, pct: 60 }] },
     ]);
+  });
+
+  it("serves range-bounded quota burn and a range-sensitive exhaustion projection", () => {
+    const sample = (atMs: number, pct: number) =>
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: atMs,
+        pct,
+        resetAt: NOW + DAY,
+        source: "x",
+      });
+    sample(NOW - 6 * HOUR, 10);
+    sample(NOW - 4 * HOUR, 30);
+    sample(NOW - 2 * HOUR, 50);
+    sample(NOW - HOUR, 70);
+
+    const sixHour = tel("6h").series?.quota[0];
+    const day = tel("24h").series?.quota[0];
+
+    expect(sixHour?.burn).toEqual([
+      { at: NOW - 6 * HOUR, spendPct: 0 },
+      { at: NOW - 5 * HOUR, spendPct: 0 },
+      { at: NOW - 4 * HOUR, spendPct: 20 },
+      { at: NOW - 3 * HOUR, spendPct: 0 },
+      { at: NOW - 2 * HOUR, spendPct: 20 },
+      { at: NOW - HOUR, spendPct: 20 },
+    ]);
+    expect(sixHour?.burn.every((point) => point.at >= NOW - 6 * HOUR && point.at <= NOW)).toBe(
+      true,
+    );
+    expect(sixHour?.projectedExhaustionAt).toBe(NOW + 3 * HOUR);
+    expect(day?.projectedExhaustionAt).not.toBe(sixHour?.projectedExhaustionAt);
+  });
+
+  it("does not project quota exhaustion without spend in the selected range", () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW - 2 * HOUR,
+      pct: 40,
+      resetAt: NOW + DAY,
+      source: "x",
+    });
+
+    const quota = tel("6h").series?.quota[0];
+    expect(quota?.burn.every((point) => point.spendPct === 0)).toBe(true);
+    expect(quota?.projectedExhaustionAt).toBeNull();
   });
 
   it("7 days of minute machine samples come back as at most 72 averaged points", () => {

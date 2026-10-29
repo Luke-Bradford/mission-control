@@ -612,6 +612,29 @@ export function telemetry(
         .filter((sample) => sample.at >= since && sample.at <= now)
         .map((sample) => ({ at: sample.at, pct: sample.pct }));
       if (points.length === 0) return [];
+      const burn = Array.from({ length: throughputPoints.length }, (_, index) => ({
+        at: since + index * throughputBucketMs,
+        spendPct: 0,
+      }));
+      for (let index = 1; index < points.length; index++) {
+        const previous = points[index - 1];
+        const point = points[index];
+        if (!previous || !point) continue;
+        const spent = point.pct - previous.pct;
+        if (spent <= 0) continue;
+        const bucket = Math.min(
+          burn.length - 1,
+          Math.floor((point.at - since) / throughputBucketMs),
+        );
+        const burnPoint = burn[bucket];
+        if (burnPoint) burnPoint.spendPct += spent;
+      }
+      const totalBurn = burn.reduce((sum, point) => sum + point.spendPct, 0);
+      const latest = points.at(-1);
+      const projectedExhaustionAt =
+        totalBurn === 0 || latest === undefined || latest.pct >= 100
+          ? null
+          : now + ((100 - latest.pct) * rangeMs) / totalBurn;
       const resets = samples.flatMap((sample, index) => {
         const previous = samples[index - 1];
         if (
@@ -630,6 +653,8 @@ export function telemetry(
           alertAt: account.alertAt,
           stopAt: account.stopAt,
           points,
+          burn,
+          projectedExhaustionAt,
           resets,
         },
       ];
