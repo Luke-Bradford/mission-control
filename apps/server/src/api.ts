@@ -36,6 +36,7 @@ import {
   type CrewMode,
   type CrewPause,
   type CrewSessionFolders,
+  DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   type FileDiff,
@@ -185,6 +186,7 @@ import {
   writeCrewPause,
 } from "./crew-pause.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
+import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import {
   changedFiles,
   committedLines,
@@ -2150,6 +2152,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seat.context = context ? { total: context.total, window: context.window } : null;
             }
             const conflicts = await mapConflicts.check(checkout, store.pullRequests(repo.id));
+            const read = await readRepoRules(repo.github, checkout, repo.rules);
+            // Unreadable repo rules leave the configured ones: the map still draws.
+            const rules =
+              read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
             for (const failure of conflicts.failures)
               reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
             return {
@@ -2158,6 +2164,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ...data,
               conflicts: conflicts.conflicts,
               conflictsUnchecked: conflicts.unchecked,
+              rules: { areas: rules.areas, hardRules: rules.hardRules },
               // Slice 1b will publish sequenced deltas; none have been emitted yet.
               seq: 0,
             };

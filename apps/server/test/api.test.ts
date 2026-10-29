@@ -36,6 +36,7 @@ import {
   type CrewSessionFolders,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
+  DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
@@ -3878,6 +3879,7 @@ describe("boards, escalations, health", () => {
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
+      rules: { areas: DEFAULT_REPO_RULES.areas, hardRules: DEFAULT_REPO_RULES.hardRules },
       hist: expect.objectContaining({
         since: expect.any(Number),
         prCount: 0,
@@ -3901,6 +3903,65 @@ describe("boards, escalations, health", () => {
     });
     expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
+  });
+
+  it("carries the repo's resolved area and hard-rule globs in the map snapshot", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    const repo = config.repos.find((r) => r.id === "shop-app");
+    if (!session || !repo) throw new Error("fixture session missing");
+    const checkout = mapCheckout(dir);
+    session.checkout = checkout;
+    const configured = {
+      ...DEFAULT_REPO_RULES,
+      areas: { "area:web": ["apps/web/**"] },
+      hardRules: ["config.example.yaml"],
+    };
+    repo.rules = configured;
+    const commitClaudeMd = (text: string) => {
+      writeFileSync(join(checkout, "CLAUDE.md"), text);
+      const git = (...args: string[]) =>
+        execFileSync("git", [
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ]);
+      git("add", "CLAUDE.md");
+      git("commit", "-qm", "rules");
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+    };
+
+    // The committed CLAUDE.md wins over the configured rules.
+    commitClaudeMd(
+      '## Mission Control\n\n```yaml\nmc:\n  areas:\n    "area:core": ["packages/core/**"]\n  hard_rules: ["CLAUDE.md"]\n```\n',
+    );
+    const read = await get("/api/repos/shop-app/map");
+    expect(read.statusCode).toBe(200);
+    expect(read.json().rules).toEqual({
+      areas: { "area:core": ["packages/core/**"] },
+      hardRules: ["CLAUDE.md"],
+    });
+
+    // An explicit empty hard_rules list is sent as such.
+    commitClaudeMd(
+      '## Mission Control\n\n```yaml\nmc:\n  areas:\n    "area:core": ["packages/core/**"]\n  hard_rules: []\n```\n',
+    );
+    expect((await get("/api/repos/shop-app/map")).json().rules.hardRules).toEqual([]);
+
+    // A block that does not parse leaves the configured rules, and the map still answers.
+    commitClaudeMd("## Mission Control\n\nNo yaml fence here.\n");
+    const fallback = await get("/api/repos/shop-app/map");
+    expect(fallback.statusCode).toBe(200);
+    expect(fallback.json().rules).toEqual({
+      areas: configured.areas,
+      hardRules: configured.hardRules,
+    });
   });
 
   for (const vendor of ["claude", "codex"] as const) {
