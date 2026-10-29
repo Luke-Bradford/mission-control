@@ -170,7 +170,7 @@ export function lensVisuals(
     const out: Record<string, LensVisual> = {};
     const codeChanged = changed(snapshot).map(({ seat, files }) => ({
       seat,
-      files: files.filter(isCode),
+      files: files.filter((path) => isCode(path) && !isTest(path)),
     }));
     const overlap = importOverlaps(codeChanged, forward);
     codeChanged.forEach(({ files }, seat) => {

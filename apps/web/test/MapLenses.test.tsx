@@ -139,6 +139,7 @@ it("does not report a changed test file as untested code", () => {
     },
   };
   value.seats[1] = { ...value.seats[1], scope: { read: [], modified: [] } };
+  expect(lensVisuals(value, "impact", null)["test/consumer.test.ts"]).toBeUndefined();
   render(<CrewMapView snapshot={value} />);
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   const heading = screen.getByRole("heading", { name: "Changed, and no test imports them" });
