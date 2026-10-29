@@ -132,6 +132,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
+  FLIGHT_MOVE_COLUMNS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
@@ -194,6 +195,7 @@ import {
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
+  MOVE_COLUMNS,
   mcToolHitText,
   messageAboutText,
   missingNeedsText,
@@ -299,6 +301,7 @@ import {
   trackedText,
   UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
+  UPDATED_HUB_PREFIX,
   unclosedMarkdown,
   unknownLabelText,
   unparkCapText,
@@ -330,7 +333,7 @@ import {
   flightPowersOf,
   SEAT_ID,
 } from "../config.ts";
-import { pausedSeat, writeCrewPause } from "../crew-pause.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -1330,6 +1333,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
       return fail(notReadyText(ref));
     }
+    // what a failed start puts back: the card's column, the seat's row and the crew pause
+    const priorPause = readCrewPause(store);
+    const priorSeat = store.seatSession(seat);
+    let movedCard = false;
     if (restart && cardColumn !== "Ready") {
       const moved = await deps.board.move({
         runId: ctx.runId,
@@ -1338,6 +1345,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         column: "Ready",
       });
       if (!moved.ok) return fail(moveFailedText(moved.reason));
+      movedCard = true;
     }
     // FLIGHT says why on every start: a stopped seat goes back in rotation, a paused one is let out
     // of the pause, and the decision below records both
@@ -1367,6 +1375,27 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
       }
     } catch (e) {
+      if (priorPause !== null && pausedSeat(store, seat) === null) {
+        writeCrewPause(store, priorPause, at);
+        bus.emit("settings");
+      }
+      if (priorSeat !== null && wasStopped) {
+        const current = store.seatSession(seat);
+        if (current !== null && current.runId === null) store.setSeatSession({ ...priorSeat });
+      }
+      if (
+        movedCard &&
+        (MOVE_COLUMNS as readonly string[]).concat(FLIGHT_MOVE_COLUMNS).includes(cardColumn)
+      ) {
+        await deps.board
+          .move({
+            runId: ctx.runId,
+            repoId: repo.id,
+            issue,
+            column: cardColumn as (typeof MOVE_COLUMNS)[number],
+          })
+          .catch(() => null);
+      }
       // the supervisor's own eligibility refusal: the same text start_seat gives
       if (e instanceof SupervisorError && e.status === 422) return fail(e.message);
       return fail(
@@ -3380,6 +3409,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       : fail(`Park cannot be settled: ${operatorRefusalText(settled.reason)}.`);
   }
 
+  /** The full shas a successful update_hub decision names; none for a refusal or any other decision. */
+  const updatedHubShas = (d: { kind: string; decision: string }): string[] =>
+    d.kind === "hub" && d.decision.startsWith(UPDATED_HUB_PREFIX)
+      ? d.decision
+          .slice(UPDATED_HUB_PREFIX.length)
+          .split(/[^0-9a-f]+/)
+          .filter((t) => t.length >= 7)
+      : [];
+
   /** Why FLIGHT cannot pass this check on `note`, or null when its evidence stands. */
   async function checkEvidenceProblem(
     check: string | null,
@@ -3395,7 +3433,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       update?.[1] !== undefined &&
       store
         .flightDecisions(0, 1000)
-        .some((d) => d.kind === "hub" && d.decision.includes(update[1] as string))
+        .some((d) => updatedHubShas(d).some((t) => t.startsWith(update[1] as string)))
     )
       return null;
     const ci = /\bci:(\d{1,15})\b/.exec(note);

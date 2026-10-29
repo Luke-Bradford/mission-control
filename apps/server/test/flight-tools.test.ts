@@ -7667,6 +7667,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     engineOn = true;
   };
+  let liveLabels: string[] = [];
+  beforeEach(() => {
+    liveLabels = [];
+  });
   const DONE = "## Done when\n\n- it works\n";
   const CHECK = (item: string) => `${DONE}\n## Controller check\n\n- ${item}\n`;
   const parkOnCheck = (body: string) => {
@@ -7714,11 +7718,36 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(checkCalls).toEqual([]);
     });
     it("passes a screen-only check without evidence", async () => {
-      parkOnCheck(CHECK("the screenshot of the HUD looks right"));
+      parkOnCheck(CHECK("Screen: the HUD looks right"));
       expect((await call("settle_park", { runId: "r-pr", action: "pass-check" })).isError).toBe(
         undefined,
       );
       expect(checkCalls).toHaveLength(1);
+    });
+    it("does not take a mixed or unmarked check as screen-only", async () => {
+      for (const item of [
+        "the layout looks right and the migration preserved every row",
+        "Screen: the layout looks right and the migration preserved every row",
+        "the HUD renders",
+      ]) {
+        parkOnCheck(CHECK(item));
+        expect(await call("settle_park", { runId: "r-pr", action: "pass-check" })).toHaveProperty(
+          "isError",
+          true,
+        );
+      }
+      expect(checkCalls).toEqual([]);
+    });
+    it("never takes a refused update_hub decision as an Update", async () => {
+      parkOnCheck(CHECK("the new hub restarts and serves the page"));
+      addDecision({
+        kind: "hub",
+        decision: "Update waits for the operator: 1 commit(s) are not from a merged PR abcdef1",
+      });
+      expect(
+        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }),
+      ).toHaveProperty("isError", true);
+      expect(checkCalls).toEqual([]);
     });
     it("accepts an Update sha only when FLIGHT's log has that Update", async () => {
       parkOnCheck(CHECK("the new hub restarts and serves the page"));
@@ -7759,7 +7788,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       ]);
     });
     it("fails a check with a note, and needs the note", async () => {
-      parkOnCheck(CHECK("the screenshot looks right"));
+      parkOnCheck(CHECK("Screen: the screenshot looks right"));
       expect(await call("settle_park", { runId: "r-pr", action: "fail-check" })).toHaveProperty(
         "isError",
         true,
@@ -7844,6 +7873,26 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         decisions().find((d) => d.kind === "start" && d.decision.includes("restart")),
       ).toBeDefined();
     });
+    it("puts everything back when the start itself fails", async () => {
+      startImpl = async () => {
+        throw new Error("checkout failed");
+      };
+      // a stopped seat stays stopped
+      store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
+      expect((await start()).isError).toBe(true);
+      expect(store.seatSession("guido-1")?.state).toBe("stopped");
+      // a paused seat stays paused, with the operator's record
+      store.setSeatSession({ ...row("guido-1", ""), runId: null });
+      writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+      expect((await start()).isError).toBe(true);
+      expect(readCrewPause(store)).toMatchObject({ seats: ["guido-1"], by: "op" });
+      // a restarted card goes back to Blocked
+      writeCrewPause(store, null, NOW);
+      board(sc(7, { status: "Blocked" }));
+      moveCalls.length = 0;
+      expect((await start("restart_ticket")).isError).toBe(true);
+      expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Blocked"]);
+    });
     it("restart_ticket refuses a closed ticket and a standard repo", async () => {
       board(sc(7, { closed: true }));
       expect(await start("restart_ticket")).toHaveProperty("isError", true);
@@ -7887,7 +7936,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
   });
 
   describe("board and decisions", () => {
-    beforeEach(elevated);
+    beforeEach(() => {
+      elevated();
+      readImpl = (n) => board7(n);
+    });
+    // the live card: the cache is never what a GitHub write is checked against
+    const board7 = (n: number) => card(n, { labels: liveLabels });
     it("dismisses an operator-owned note, but never a guard, Update or operator-approval item", async () => {
       live("guido-1", "r-info", { ticket: "mc#7" });
       store.raiseNote({
@@ -7950,9 +8004,11 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     });
     it("refuses to close an always_ask ticket or one that GitHub still shows open", async () => {
       rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      liveLabels = ["approval:operator"];
       board(card(7, { labels: ["approval:operator"] }));
       expect(await call("close_issue", { issue: 7 })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
+      liveLabels = [];
       rulesNow = DEFAULT_REPO_RULES;
       board(card(7));
       fetchImpl = async (n) => ticket(n);
@@ -7995,8 +8051,32 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       });
       expect(await call("set_fields", { issue: 7 })).toHaveProperty("isError", true);
     });
+    it("fails closed when the live card cannot be read, whatever the cache says", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7)); // the cache predates the operator's always_ask label
+      for (const impl of [
+        () => null,
+        () => {
+          throw new Error("down");
+        },
+      ]) {
+        readImpl = impl;
+        fetchImpl = async (n) => ticket(n, { body: "x" });
+        for (const [name, a] of [
+          ["close_issue", { issue: 7 }],
+          ["reopen_issue", { issue: 7 }],
+          ["edit_issue", { issue: 7, body: "new" }],
+          ["set_fields", { issue: 7, size: "S" }],
+        ] as const)
+          expect(await call(name, a)).toHaveProperty("isError", true);
+      }
+      expect(ghCalls).toEqual([]);
+      expect(editCalls).toEqual([]);
+      expect(moveCalls).toEqual([]);
+    });
     it("refuses set_fields on an always_ask card", async () => {
       rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      liveLabels = ["approval:operator"];
       board(card(7, { labels: ["approval:operator"] }));
       expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
       expect(editCalls).toEqual([]);
@@ -8020,7 +8100,38 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         1,
       );
     });
+    // GitHub's answer for which PRs a commit belongs to
+    const pullsOf = (map: Record<string, { number: number; merged_at: string | null }[]>) => {
+      ghImpl = async (a) => {
+        const sha = /commits\/([0-9a-f]+)\/pulls/.exec(a[1] ?? "")?.[1] ?? "";
+        return { code: 0, stdout: JSON.stringify(map[sha] ?? []), stderr: "" };
+      };
+    };
+    it("refuses a direct commit whose subject names a PR FLIGHT cleared", async () => {
+      updaterImpl = {
+        changes: async () => ({ commits: ["3333333 change hard rules (#50)"], paths: [] }),
+        update: async () => ({ restarting: true }),
+      };
+      addDecision({ kind: "merge", decision: "Cleared PR #50; the engine handles the merge." });
+      pullsOf({}); // GitHub knows no PR for this commit
+      expect(await call("update_hub", {})).toHaveProperty("isError", true);
+      // nor one that belongs to a different, uncleared PR, or to two
+      pullsOf({ "3333333": [{ number: 77, merged_at: "2026-10-22T00:00:00Z" }] });
+      expect(await call("update_hub", {})).toHaveProperty("isError", true);
+      pullsOf({
+        "3333333": [
+          { number: 50, merged_at: "2026-10-22T00:00:00Z" },
+          { number: 77, merged_at: "2026-10-22T00:00:00Z" },
+        ],
+      });
+      expect(await call("update_hub", {})).toHaveProperty("isError", true);
+      expect(updaterRestarts).toBe(0);
+    });
     it("runs Update after merges FLIGHT cleared, and nothing else", async () => {
+      pullsOf({
+        "1111111": [{ number: 50, merged_at: "2026-10-22T00:00:00Z" }],
+        "2222222": [{ number: 51, merged_at: "2026-10-22T00:00:00Z" }],
+      });
       updaterImpl = {
         changes: async () => ({
           commits: ["1111111 Merge pull request #50 from o/b", "2222222 fix thing (#51)"],
@@ -8042,6 +8153,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     it("surfaces an Update refusal and an empty range", async () => {
       updaterImpl.changes = async () => ({ commits: [], paths: [] });
       expect(await call("update_hub", {})).toHaveProperty("isError", true);
+      pullsOf({ "1111111": [{ number: 50, merged_at: "2026-10-22T00:00:00Z" }] });
       updaterImpl = {
         changes: async () => ({ commits: ["1111111 x (#50)"], paths: [] }),
         update: async () => {

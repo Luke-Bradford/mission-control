@@ -867,7 +867,7 @@ the note and the engine wakes the run when its seat is free.
 
 FLIGHT passes a check only on evidence it produced: its `note` cites `hud-shot:<id>` (a screenshot it
 stored), `update:<sha>` (an Update in its own log) or `ci:<run id>` (a passing CI run on the checked
-head, read from GitHub), or every item of the check is screen-only (about what the screen shows). A
+head, read from GitHub), or every item of the check is marked screen-only: it starts `Screen:`, `Screenshot:` or `HUD:` and holds a single clause (no "and", "then", "," or ";"). A mixed or unmarked item needs evidence. An `update:<sha>` counts only when it names a successful `update_hub` ("Updated the hub to ..."), never a refused one. A
 check that needs evidence FLIGHT cannot produce stays with the controller. `fail-check` needs a note
 and sends it to the seat as rework. The engine logs the verdict "by FLIGHT".
 
@@ -912,7 +912,7 @@ operator.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat), `pass-check` / `fail-check` on a controller check |
-| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and a pause record is rewritten with `by: FLIGHT` |
+| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and a pause record is rewritten with `by: FLIGHT`. A start that fails puts the stop, the pause and a restarted card back |
 | `restart_ticket` | Start a seat on a ticket from any open column (Blocked too): the card goes to Ready first and the once-a-day restart limit is waived |
 | `end_run` | End a working, parked or stalled run; refused with uncommitted changes unless `discard: true` |
 | `sync_main` | Merge main into a run's branch |
@@ -920,9 +920,9 @@ operator.
 | `dismiss_item` | Dismiss any attention item except an operator approval, a budget or guard hold, or an Update hold |
 | `promote` | Reads the live card before refusing "no size" or "not on the board" |
 | `withdraw_decision` | Remove one of its own logged decisions; the log keeps a `withdraw` line |
-| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone. `always_ask` and other-lane tickets are refused; text is scanned for secrets and mentions |
+| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone. `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions |
 | `restart_engine` | Restart the loop engine once it has been silent past two of its ticks (once per ten minutes) |
-| `update_hub` | Run Update when every commit between the running code and main is a PR FLIGHT cleared with `merge_pr`; Update's own checks apply (on main, clean checkout, no seat starting, build) and the hub restarts |
+| `update_hub` | Run Update when GitHub names exactly one merged PR for every commit between the running code and main and FLIGHT cleared that PR with `merge_pr` (a PR number in a commit's text proves nothing; a direct commit refuses); Update's own checks apply (on main, clean checkout, no seat starting, build) and the hub restarts |
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run

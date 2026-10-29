@@ -16,6 +16,7 @@ import {
   PRIORITIES,
   type RepoRules,
   TICKET_SIZES,
+  UPDATED_HUB_PREFIX,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
@@ -199,13 +200,14 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
   );
 
   // ---- issues and board fields ----
+  /** The card as the project holds it now; never the cache, which may predate a protective label. */
   const liveCard = async (repoId: string, issue: number): Promise<BoardItem | undefined> =>
-    (await deps.board.read?.(repoId, issue).catch(() => null)) ??
-    store.board(repoId).find((c) => c.issueNumber === issue);
+    (await deps.board.read?.(repoId, issue).catch(() => null)) ?? undefined;
   /** The card's floor refusals (always_ask, another lane), or null. */
   const floor = async (repoId: string, issue: number): Promise<string | Result> => {
     const card = await liveCard(repoId, issue);
-    if (!card) return fail("The issue is not on this repo's board.");
+    if (!card)
+      return fail("Refused: the card could not be read live, so its labels are unchecked.");
     const rules = await deps.rules(repoId);
     if (rules instanceof Error) return fail("Cannot read repo rules.");
     const problem = h.cardProblem(card, rules);
@@ -475,7 +477,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
     "Run Update after merges you cleared: every commit between the running code and main must be a PR you cleared with merge_pr. The existing Update checks (on main, clean checkout, no seat starting, build) apply, and the hub restarts when it succeeds.",
     UpdateHubArgs,
     "hub",
-    async () => {
+    async (_a: unknown, repo) => {
       const updater: Pick<Updater, "changes" | "update" | "restart"> | undefined = deps.updater?.();
       if (updater === undefined) return fail("Update is unavailable on this hub.");
       const range = await updater.changes();
@@ -485,13 +487,33 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       for (const d of store.flightDecisions(0, 100_000))
         if (d.kind === "merge")
           for (const m of d.decision.matchAll(/Cleared PR #(\d+)/g)) cleared.add(Number(m[1]));
-      const foreign = range.commits.filter((line) => {
-        const pr = /#(\d+)/.exec(line.replace(/^[0-9a-f]+ /, ""));
-        return pr === null || !cleared.has(Number(pr[1]));
-      });
+      // each commit must belong to exactly one merged PR that GitHub names, and FLIGHT cleared
+      // that PR: a number in the commit's text proves nothing
+      const foreign: string[] = [];
+      for (const line of range.commits) {
+        const sha = line.split(" ")[0] ?? "";
+        let pulls: { number?: unknown; merged_at?: unknown }[] | null = null;
+        if (/^[0-9a-f]{7,40}$/.test(sha)) {
+          const r = await ghWrite(["api", `repos/${repo.github}/commits/${sha}/pulls`]);
+          try {
+            const parsed: unknown = JSON.parse(r.stdout);
+            if (r.ok && Array.isArray(parsed)) pulls = parsed;
+          } catch {
+            pulls = null;
+          }
+        }
+        const only = pulls?.length === 1 ? pulls[0] : undefined;
+        if (
+          only === undefined ||
+          typeof only.number !== "number" ||
+          typeof only.merged_at !== "string" ||
+          !cleared.has(only.number)
+        )
+          foreign.push(line);
+      }
       if (foreign.length > 0)
         return fail(
-          `Update waits for the operator: ${foreign.length} commit(s) are not PRs you cleared (${foreign.slice(0, 3).join("; ")}).`,
+          `Update waits for the operator: ${foreign.length} commit(s) are not from a merged PR you cleared (${foreign.slice(0, 3).join("; ")}).`,
         );
       let out: Awaited<ReturnType<Updater["update"]>>;
       try {
@@ -504,7 +526,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       const shas = range.commits.map((l) => l.split(" ")[0]).join(", ");
       if ("restarting" in out) setImmediate(() => updater.restart());
       return {
-        text: `Updated the hub to ${shas}${"restarting" in out ? "; it restarts now" : ""}.`,
+        text: `${UPDATED_HUB_PREFIX}${shas}${"restarting" in out ? "; it restarts now" : ""}.`,
       };
     },
     { engine: false },
