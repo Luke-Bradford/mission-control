@@ -1,265 +1,155 @@
 import {
-  type AgentStream,
+  type AttentionItem,
+  type CrewPause,
   type FlightSummaryView,
-  type FlightView,
-  METRICS,
   type MetricId,
+  seatIsPaused,
 } from "@mc/core";
-import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { dur, rel } from "../fmt.ts";
-import { Panel } from "../hud/Panel.tsx";
+import { dur } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
-import { metricTitle, useMetrics } from "../metrics.ts";
-import { NEEDS_YOU_PATH, navigate, PAGE_PATHS } from "../router.ts";
-import { chatRows, dockRows } from "./conversation.ts";
-import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
+import { useMetrics } from "../metrics.ts";
+import { stateWord } from "../shell/Dock.tsx";
+import { type FlightSeat, type FlightView, flightOffText } from "./flightTypes.ts";
+import { needsGroups } from "./needsGroups.ts";
 import { SUMMARY_EMPTY } from "./Summary.tsx";
+import type { FlightTab } from "./tabs.ts";
 
 const DASH = "—";
-/** Where a pulse leads: the canonical detail behind that reading. */
-const PULSE_TARGET = {
-  /** Needs you's home. */
-  needs: NEEDS_YOU_PATH,
-  /** Telemetry's flow of work shows cycle time over time. */
-  cycle: PAGE_PATHS.telemetry,
-} as const;
-type PulseTarget = keyof typeof PULSE_TARGET;
+/** Not served on `/api/flight` yet: shown as a dash rather than guessed. */
+export const WAKE_NOT_SERVED = "The hub does not report FLIGHT's wake times yet";
+/** FLIGHT refreshes a headline at least hourly (central-mind spec), so an older one is stale. */
+export const HEADLINE_STALE_MIN = 60;
 
-type PulseTone = "crit" | "warn" | "plain";
+export type FlightRun = { kind: "loading" } | { kind: "down" | "held" | "running"; why: string };
 
-/** Colour only where the reading is bad; no target is inferred, so nothing is ever "green". */
-function pulseTone(value: number, bad: "crit" | "warn" | null = null): PulseTone {
-  return value > 0 && bad !== null ? bad : "plain";
+/**
+ * Whether FLIGHT is running, held or down, and why in words. Down: no seat or a stopped one.
+ * Held: its seat is rate-limited, or the crew pause covers it.
+ */
+export function flightRun(
+  view: FlightView | undefined,
+  pause: CrewPause | null | undefined,
+): FlightRun {
+  if (view === undefined) return { kind: "loading" };
+  const seat: FlightSeat | null = view.seat;
+  if (seat === null || !seat.live) return { kind: "down", why: flightOffText(seat) };
+  if (seatIsPaused(pause ?? null, seat.id))
+    return { kind: "held", why: pause?.reason ? `crew paused: ${pause.reason}` : "crew paused" };
+  if (seat.state === "parked") return { kind: "held", why: "rate-limited" };
+  return { kind: "running", why: stateWord(seat) };
 }
 
-/** A reading with its units set smaller than its digits ("36h 34m"), as an instrument shows it. */
-function Reading({ value }: { value: number | string }) {
-  const text = String(value);
-  const parts = [...text.matchAll(/([^a-zA-Z]*)([a-zA-Z]+)/g)];
-  if (parts.length === 0) return <>{text}</>;
-  // A duration's units ("h", "m", "s") appear once each, so each keys its part.
+const RUN_LABEL = { down: "Down", held: "Held", running: "Running" } as const;
+const RUN_TONE = { down: "crit", held: "warn", running: "ok" } as const;
+
+/** One counter that opens the tab holding what it counts. */
+function Counter({
+  tab,
+  label,
+  n,
+  warn = false,
+  metric,
+  onOpen,
+}: {
+  tab: FlightTab;
+  label: string;
+  n: number | null;
+  warn?: boolean;
+  /** The registry figure this counter shows, when it is one. */
+  metric?: MetricId;
+  onOpen: (tab: FlightTab) => void;
+}) {
   return (
-    <>
-      {parts.map(([, digits, unit]) => (
-        <span key={unit}>
-          {digits}
-          <span className="flight-unit">{unit}</span>
-        </span>
-      ))}
-    </>
+    <button
+      type="button"
+      className={`flight-counter${warn && n ? " tone-warn" : ""}`}
+      onClick={() => onOpen(tab)}
+      aria-label={`${label}: ${n ?? "loading"}`}
+    >
+      <b data-metric={metric}>{n ?? DASH}</b> {label}
+    </button>
   );
 }
 
-/** FLIGHT's last message as one plain line: its first paragraph, with inline Markdown kept. */
-const firstLine = (text: string): string =>
-  text
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line !== "") ?? "";
-
-function LatestContact({ seatId }: { seatId: string | null | undefined }) {
-  const stream = useResource<AgentStream>(seatId ? RESOURCES.stream(seatId) : null).data;
-  const now = useSecond();
-  const tz = useTz();
-  const rows = chatRows(dockRows(stream, []));
-  const latestYou = [...rows].reverse().find((row) => row.kind === "you");
-  const latestFlight = [...rows].reverse().find((row) => row.kind === "flight");
-  const replied =
-    latestYou !== undefined &&
-    latestFlight !== undefined &&
-    latestYou.at !== null &&
-    latestFlight.at !== null &&
-    latestFlight.at >= latestYou.at;
-  const waiting = latestYou !== undefined && !replied;
-  const flightOnly = latestYou === undefined && latestFlight !== undefined;
-  const latest = rows.at(-1);
-
-  return (
-    <div className="flight-contact">
-      <div className="flight-contact-head">
-        <span className="flight-source">LAST CONTACT</span>
-        <Pill tone={waiting ? "neutral" : replied ? "ok" : "plain"}>
-          {waiting
-            ? "Awaiting reply"
-            : replied
-              ? "Reply received"
-              : flightOnly
-                ? "FLIGHT updated"
-                : "No exchange"}
-        </Pill>
-      </div>
-      <p className="flight-contact-line">
-        {seatId === undefined ? (
-          "Loading the current FLIGHT exchange…"
-        ) : seatId === null ? (
-          FLIGHT_NO_SEAT
-        ) : latest === undefined ? (
-          "No operator conversation in the current FLIGHT run."
-        ) : (
-          <>
-            <span className="flight-contact-who">{latest.kind === "you" ? "You" : "FLIGHT"}:</span>{" "}
-            <MarkdownInline text={"text" in latest ? firstLine(latest.text) : ""} />
-          </>
-        )}
-      </p>
-      <div className="flight-contact-foot">
-        <span className="flight-mono">
-          {latest?.at === null || latest?.at === undefined || tz === null
-            ? DASH
-            : rel(latest.at, now, tz)}
-        </span>
-        <button
-          type="button"
-          className="sm ghost flight-link"
-          onClick={() => navigate(PAGE_PATHS.comms)}
-        >
-          Open comms
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** The stand-up header: FLIGHT's judgement plus observed health, contact and forward load. */
-export function Situation() {
+/**
+ * The FLIGHT page's situation: the one-line status over the tabs (the file keeps the name the hub's
+ * Reader comments give it): whether FLIGHT is running, why, the crew pause, its last and
+ * next wake, the headline with its age, and the three counts the tabs hold.
+ */
+export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
+  const flight = useResource<FlightView>(RESOURCES.flight);
+  const pause = useResource<CrewPause | null>(RESOURCES.crewPause).data;
   const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const summary = summaryResource.data;
-  const flight = useResource<FlightView>(RESOURCES.flight).data;
-  const now = useSecond();
-  // The registry's figures (METRICS in @mc/core), so the rail agrees with every other page.
-  const metrics = useMetrics();
-  const { readings: r, view } = metrics;
-  const blocked = r.blocked?.n ?? 0;
-  const inProgress = r.inProgress?.n ?? 0;
-  const needsYou = r.needsYou?.n ?? 0;
-  // Two counts, not a sum: a PR in review can also have CI pending, so adding them double-counts.
-  const inReview = summary?.metrics.inReview ?? 0;
-  const inCi = summary?.metrics.inCi ?? 0;
-  const oldestAt = view?.inProgress.oldestAt ?? null;
-  const oldest = oldestAt === null ? 0 : Math.max(0, now - oldestAt);
-  const headlineStale = (summary?.headlineAgeMin ?? 0) >= 60;
-  // Operational state only: a stale briefing is FLIGHT's data quality, shown on the age line.
-  const status =
-    flight?.seat === null || flight?.seat?.live === false
-      ? { label: "FLIGHT offline", tone: "crit" as const }
-      : blocked > 0
-        ? { label: "Blocked work", tone: "crit" as const }
-        : needsYou > 0
-          ? { label: "Needs you", tone: "warn" as const }
-          : inProgress > 0
-            ? { label: "Work moving", tone: "ok" as const }
-            : { label: "Standing by", tone: "plain" as const };
-  const seatId = flight === undefined ? undefined : (flight.seat?.id ?? null);
-
-  const pulse = (
-    label: string,
-    value: number | string,
-    detail: string,
-    tone: PulseTone,
-    window: string,
-    target?: PulseTarget,
-    metric?: MetricId,
-  ) => {
-    const idle = value === 0 || value === DASH;
-    const content = (
-      <>
-        <span className="flight-pulse-value" data-metric={metric}>
-          <Reading value={value} />
-        </span>
-        <span className="flight-pulse-label">{label}</span>
-        <span className="flight-pulse-window" aria-hidden="true">
-          {window}
-        </span>
-        <span className="flight-pulse-detail">{detail}</span>
-      </>
-    );
-    // tone-* rather than bare crit/warn: a bare .warn on a button is the global warn button style.
-    const cls = `flight-pulse tone-${tone}${idle ? " idle" : ""}`;
-    const title = metric ? metricTitle(metrics, metric) : undefined;
-    return target ? (
-      <button
-        type="button"
-        className={cls}
-        title={title}
-        aria-label={`${value} ${label} ${detail}, ${window}`}
-        onClick={() => navigate(PULSE_TARGET[target])}
-      >
-        {content}
-      </button>
-    ) : (
-      <div className={cls} title={title}>
-        {content}
-      </div>
-    );
-  };
-  /** A registry figure: its label, window, value and hover come from the registry. */
-  const figure = (id: MetricId, detail: string, tone: PulseTone = "plain", target?: PulseTarget) =>
-    pulse(METRICS[id].label, r[id]?.value ?? DASH, detail, tone, METRICS[id].window, target, id);
-
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  // The registry figure, so the strip agrees with the header, Overview and Comms.
+  const needsYou = useMetrics().readings.needsYou?.n ?? null;
+  const run = flightRun(flight.data, pause);
+  const handling = attention === undefined ? null : needsGroups(attention).handling.length;
+  const decided = flight.data?.decisions.length ?? null;
+  const age = summary?.headlineAgeMin ?? null;
+  const stale = age !== null && age >= HEADLINE_STALE_MIN;
   return (
-    <Panel
-      id="sitP"
-      className="flight-briefing-panel"
-      title="FLIGHT briefing"
-      sub="stand-up view · live"
-    >
-      <div className="flight-briefing">
-        <div className="flight-intent-copy">
-          <div className="flight-intent-kicker">
-            <span className="flight-source think">Commander's intent</span>
-            <Pill tone={status.tone}>{status.label}</Pill>
-          </div>
-          <p className="flight-intent-headline sittext">
-            {summary ? summary.headline || SUMMARY_EMPTY : DASH}
-          </p>
-          {summaryResource.error && (
-            // Live runs below come from the crew, so they stay current without the summary.
-            <p role="alert" className="note err">
+    <section className="flight-strip" aria-label="FLIGHT status" data-testid="flight-strip">
+      <span className="flight-strip-run">
+        {run.kind === "loading" ? (
+          <Pill tone="plain">…</Pill>
+        ) : (
+          <>
+            <Pill tone={RUN_TONE[run.kind]}>{RUN_LABEL[run.kind]}</Pill>
+            <span className="s">{run.why}</span>
+          </>
+        )}
+      </span>
+      {pause && (
+        <span title={pause.reason}>
+          <Pill tone="warn">Crew paused</Pill>
+        </span>
+      )}
+      <span className="flight-strip-wake s" title={WAKE_NOT_SERVED}>
+        Last wake {DASH} · next {DASH} · woken by {DASH}
+      </span>
+      <span className="flight-strip-headline min0">
+        {flight.error && !flight.data ? (
+          <span role="alert" className="crit-t">
+            FLIGHT status unavailable: {flight.error.message}
+          </span>
+        ) : summary === undefined ? (
+          summaryResource.error ? (
+            <span role="alert" className="crit-t">
               FLIGHT summary unavailable: {summaryResource.error.message}
-            </p>
-          )}
-          <p className="flight-headline-age">
-            <span>
-              {summary?.session === null
-                ? FLIGHT_NO_SEAT
-                : summary?.headlineAgeMin === null || summary === undefined
-                  ? "FLIGHT has not refreshed this briefing yet."
-                  : summary.headlineAgeMin === 0
-                    ? "Synthesised now"
-                    : `Synthesised ${dur(summary.headlineAgeMin * 60_000)} ago`}
             </span>
-            {headlineStale && (
-              <span className="flight-gap" title="FLIGHT refreshes a headline at least hourly">
-                stale · refresh due
+          ) : (
+            DASH
+          )
+        ) : summary.session === null ? (
+          <span className="flight-gap">{flightOffText(flight.data?.seat ?? null)}</span>
+        ) : (
+          <>
+            <MarkdownInline text={summary.headline || SUMMARY_EMPTY} max={140} />{" "}
+            {age !== null && (
+              <span className={stale ? "flight-gap" : "s"}>
+                {age === 0 ? "now" : `${dur(age * 60_000)} old`}
+                {stale && " · stale"}
               </span>
             )}
-          </p>
-        </div>
-        <LatestContact seatId={seatId} />
-      </div>
-      <div className="flight-pulse-rail">
-        {figure("inProgress", "tickets started, not merged")}
-        {figure("blocked", "agents to clear", pulseTone(blocked, "crit"))}
-        {pulse(
-          "Oldest",
-          oldest === 0 ? DASH : dur(oldest),
-          "in-progress ticket, since work started",
-          "plain",
-          "now",
+          </>
         )}
-        {pulse(
-          "Review / CI",
-          inReview + inCi === 0 ? 0 : `${inReview} / ${inCi}`,
-          "PRs in review / CI pending",
-          "plain",
-          "now",
-        )}
-        {figure("merged", r.merged?.detail ? `PRs merged · ${r.merged.detail}` : "PRs merged")}
-        {figure("cycleTime", `Ready → Done · ${r.cycleTime?.detail ?? DASH}`, "plain", "cycle")}
-        {figure("needsYou", "decisions or replies", pulseTone(needsYou, "warn"), "needs")}
-      </div>
-    </Panel>
+      </span>
+      <span className="flight-strip-counters">
+        <Counter
+          tab="needs"
+          label="Needs you"
+          n={needsYou}
+          warn
+          metric="needsYou"
+          onOpen={onOpen}
+        />
+        <Counter tab="needs" label="FLIGHT handling" n={handling} onOpen={onOpen} />
+        <Counter tab="did" label="decided 24 h" n={decided} onOpen={onOpen} />
+      </span>
+    </section>
   );
 }

@@ -86,7 +86,7 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   {
     name: "FLIGHT",
     page: () => <Flight />,
-    shows: ["inProgress", "blocked", "merged", "cycleTime", "needsYou", "cost"],
+    shows: ["inProgress", "blocked", "needsYou", "cost"],
   },
   {
     name: "Telemetry",

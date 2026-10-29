@@ -39,6 +39,11 @@ export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
   const tz = useTz();
   const writable: readonly string[] = FLIGHT_NOTE_SECTIONS;
   const sections = view?.sections.filter((section) => writable.includes(section.section)) ?? [];
+  // The newest of the sections, so the collapsed panel says how old the context is.
+  const updatedAt = sections.reduce<number | null>(
+    (latest, s) => (s.updatedAt !== null && s.updatedAt > (latest ?? 0) ? s.updatedAt : latest),
+    null,
+  );
   const content = (
     <>
       <p className="pb note">
@@ -110,7 +115,18 @@ export function BriefPanel({ expanded = false }: { expanded?: boolean }) {
     </Panel>
   ) : (
     <section className="panel flight-notes" id="briefP" aria-label="FLIGHT's notes">
-      <Expandable summary={<h2>FLIGHT's notes</h2>}>{content}</Expandable>
+      <Expandable
+        summary={
+          <>
+            <h2>FLIGHT's notes</h2>
+            {updatedAt !== null && (
+              <span className="s fg2">{` · updated ${briefUpdated(updatedAt, now, tz)}`}</span>
+            )}
+          </>
+        }
+      >
+        {content}
+      </Expandable>
     </section>
   );
 }

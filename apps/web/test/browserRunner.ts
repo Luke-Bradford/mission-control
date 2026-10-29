@@ -28,6 +28,12 @@ export interface RenderedPage {
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
   boxes(selector: string): Promise<Box[]>;
+  /** Runs `fn` in the page and returns its result. */
+  evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  /** Clicks the first element matching `selector`. */
+  click(selector: string): Promise<void>;
+  /** Writes a PNG of the whole viewport to `path`. */
+  screenshot(path: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -50,6 +56,8 @@ interface Page {
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   waitForSelector(selector: string): Promise<unknown>;
   evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  click(selector: string): Promise<void>;
+  screenshot(options: { path: string }): Promise<unknown>;
   close(): Promise<void>;
 }
 interface Browser {
@@ -210,6 +218,11 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         boxes,
         async box(selector) {
           return (await boxes(selector))[0];
+        },
+        evaluate: (fn, arg) => page.evaluate(fn, arg),
+        click: (selector) => page.click(selector),
+        screenshot: async (path) => {
+          await page.screenshot({ path });
         },
         close: () => browser.close(),
       };

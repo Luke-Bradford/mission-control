@@ -14,6 +14,7 @@ import { useNow, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { useSessionScope } from "../shell/session.ts";
 import { briefUpdated } from "./Brief.tsx";
 
 const KIND_LABEL: Record<FlightMemoryKind, string> = {
@@ -255,7 +256,12 @@ function RepoMemory({ repoId }: { repoId: string }) {
 export function MemoryPanel({ expanded = false }: { expanded?: boolean }) {
   const { data: repos, error } = useResource<RepoView[]>(RESOURCES.repos);
   const [selected, setSelected] = useState("");
-  const repoId = repos?.find((repo) => repo.id === selected)?.id ?? repos?.[0]?.id;
+  const { repo: sessionRepo } = useSessionScope();
+  // A repo picked by hand wins; else the session's repo, else the first.
+  const repoId =
+    repos?.find((repo) => repo.id === selected)?.id ??
+    repos?.find((repo) => repo.id === sessionRepo)?.id ??
+    repos?.[0]?.id;
   const content = (
     <div className="pb">
       <p className="note">{FLIGHT_MEMORY_HEADING}</p>

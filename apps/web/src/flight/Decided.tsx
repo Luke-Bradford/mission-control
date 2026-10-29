@@ -14,7 +14,7 @@ import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTy
 const DASH = "—";
 export const NO_DECISIONS = "Nothing decided without you today.";
 
-function DecidedRow({
+export function DecidedRow({
   d,
   seatId,
   live,

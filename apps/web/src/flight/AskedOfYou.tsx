@@ -1,6 +1,8 @@
 import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/core";
+import { useState } from "react";
 import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { ItemBrief } from "../comms/ItemBrief.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { NEED_TEXT_MAX, needText } from "../comms/needText.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -21,15 +23,42 @@ import { HeldNeeds } from "./HeldNeeds.tsx";
 import { isNotTriaging, NotTriagingRow } from "./NotTriaging.tsx";
 
 const DASH = "—";
+
+/** An ask's full brief, open so the operator can decide from the page; Hide folds it. */
+function FullBrief({ item }: { item: AttentionItem }) {
+  const [open, setOpen] = useState(true);
+  if (!item.brief) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className="sm ghost fullbrief"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        {open ? "Hide brief" : "Full brief"}
+      </button>
+      {open && <ItemBrief brief={item.brief} approval={item.kind === "approval"} />}
+    </>
+  );
+}
 export const NOBODY_WAITING = "Nobody is waiting on you.";
 
 /**
  * Asked of you (catalogue §2.2.2): the whole Needs-you set, as the header counts it (never narrowed
  * by the session filter). A GitHub thread waiting on the operator is a card; the other items are
- * rows, with FLIGHT's take where it briefed one. Until #766 builds FLIGHT › Needs you, this is
- * Needs you's home.
+ * rows, with FLIGHT's take and its full brief where it briefed one. It is the first panel of the
+ * FLIGHT page's Needs you tab, Needs you's home.
  */
-export function AskedOfYou() {
+export function AskedOfYou({
+  withDefaults = true,
+  withHeld = true,
+}: {
+  /** False leaves out the asks FLIGHT will settle by default (the Needs you tab groups them). */
+  withDefaults?: boolean;
+  /** False leaves out the Held group (the Needs you tab places it itself). */
+  withHeld?: boolean;
+} = {}) {
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const now = useSecond();
@@ -38,7 +67,9 @@ export function AskedOfYou() {
   // A failed load counts as no threads, so the rest of the list still shows.
   if (attention === undefined || (notes.data === undefined && notes.error === null))
     return <p className="pb note">{DASH}</p>;
-  const needsYou = sortNeeds(needsYouItems(attention));
+  const needsYou = sortNeeds(needsYouItems(attention)).filter(
+    (i) => withDefaults || i.defaultDueAt === undefined,
+  );
   const open = new Map((notes.data?.open ?? []).map((t) => [t.key, t]));
   // A person item whose thread the notifications view holds is a card; any other item is a row.
   const threads = needsYou.flatMap((item) => {
@@ -60,7 +91,7 @@ export function AskedOfYou() {
     return (
       <>
         <p className="pb note">{NOBODY_WAITING}</p>
-        <HeldNeeds />
+        {withHeld && <HeldNeeds />}
         {footer}
       </>
     );
@@ -127,9 +158,10 @@ export function AskedOfYou() {
               <b>FLIGHT's take:</b> <MarkdownInline text={i.brief.recommendation} />
             </div>
           )}
+          <FullBrief item={i} />
         </div>
       ))}
-      <HeldNeeds />
+      {withHeld && <HeldNeeds />}
       {footer}
     </div>
   );
