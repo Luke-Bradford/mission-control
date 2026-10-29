@@ -5707,10 +5707,9 @@ describe("superuser housekeeping", () => {
       text: "Operator decision",
       at: NOW - 20 * 60_000,
     });
-    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
-      "isError",
-      true,
-    );
+    const overdue = await call("settle_park", { runId: "r-pr", action: "rework" });
+    expect(overdue).toHaveProperty("isError", true);
+    expect(overdue).toEqual(refused("Run is held."));
     expect(engineCalls).toEqual([]);
   });
   it("refused reruns cost no shared budget", async () => {
