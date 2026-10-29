@@ -5,7 +5,7 @@
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import type { RepoRules } from "@mc/core";
+import { type RepoRules, splitCommands } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
 import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
@@ -29,14 +29,18 @@ export function checksRun(command: string, checks: readonly string[]): string[] 
 }
 
 /**
- * The configured check a shell command runs, for the test lock: unlike `checksRun`, a chain, a pipe
- * or a `cd` before it still counts (the check still loads the Mac), but a command that only
- * mentions or extends a check does not.
+ * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
+ * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
+ * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
-  for (const segment of command.split(/&&|\|\||[|;\n\r]/)) {
-    const found = checks.find((c) => c === segment.trim());
-    if (found !== undefined) return found;
+  const ran = splitCommands(command);
+  for (const check of checks) {
+    const want = splitCommands(check)[0];
+    if (want === undefined) continue;
+    if (ran.some((argv) => argv.length === want.length && argv.every((w, i) => w === want[i]))) {
+      return check;
+    }
   }
   return null;
 }

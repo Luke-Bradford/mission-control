@@ -64,6 +64,16 @@ describe("lockedCheck", () => {
     expect(lockedCheck(`${LINT}; true`, CHECKS)).toBe(LINT);
   });
 
+  it.each([
+    ["an output redirection", `${TYPES} > /tmp/typecheck.log`],
+    ["a 2>&1 redirection", `${TYPES} 2>&1`],
+    ["the command builtin", `command ${TYPES}`],
+    ["env", `env FOO=1 ${TYPES}`],
+    ["extra spaces", "pnpm  -s   typecheck"],
+  ])("names the check behind %s", (_n, command) => {
+    expect(lockedCheck(command, CHECKS)).toBe(TYPES);
+  });
+
   it("names nothing for a command that only mentions or extends a check", () => {
     expect(lockedCheck("echo pnpm -s lint", CHECKS)).toBeNull();
     expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
