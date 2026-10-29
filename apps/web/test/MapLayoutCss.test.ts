@@ -30,14 +30,19 @@ it("reserves auto rows for the lens toolbar and deck around the flexible map row
   expect(rule(String.raw`\.map-body`)).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
 });
 
+/** The declarations of the rule whose selector list holds exactly this selector. */
+const listed = (selector: string) => {
+  for (const [, list, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g))
+    if ((list as string).split(",").some((item) => item.trim() === selector)) return body as string;
+  return "";
+};
+
 it("widens only analytical lens rails to the v3 table proportion", () => {
   expect(rule(String.raw`\.map-main`)).toContain("300px");
-  expect(rule(String.raw`\.map-main-impact`)).toContain(
-    "grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px)",
-  );
-  expect(rule(String.raw`\.map-main-history`)).toContain(
-    "grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px)",
-  );
+  for (const lens of ["impact", "history", "ownership", "review", "conflicts"])
+    expect(listed(`.map-main-${lens}`), lens).toContain(
+      "grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px)",
+    );
 });
 
 it("draws focused direct imports with the v3 dashed relationship outline", () => {
@@ -77,6 +82,27 @@ it("scopes the Ownership, Review and Conflicts key swatches under the key so the
     expect(css, name).not.toMatch(new RegExp(`^\\.${name} \\{`, "m"));
   }
   expect(rule(String.raw`\.map-analytical-key \.map-key-area`)).toContain("var(--map-key-area)");
+});
+
+it("gives the Ownership hatch, the Review dot and the conflict overlay their rules", () => {
+  expect(listed(".map-treemap-ownership .map-treemap-tile[data-hard-rule]")).toContain(
+    "repeating-linear-gradient",
+  );
+  expect(listed(".map-treemap-review .map-treemap-tile[data-severity]::after")).toContain(
+    "border-radius",
+  );
+  expect(listed(".map-treemap-review .map-treemap-tile[data-findings]::after")).toContain(
+    "attr(data-findings)",
+  );
+  expect(listed(".map-treemap-conflicts .map-treemap-tile[data-conflict]::before")).toContain(
+    "position: absolute",
+  );
+  // the label sits above the overlay
+  expect(listed(".map-treemap-conflicts .map-treemap-tile > .map-treemap-label")).toContain(
+    "position: relative",
+  );
+  expect(listed(".map-analytical-key .map-severity-important")).toContain("var(--warn-mark)");
+  expect(listed(".map-lens .map-severity-critical")).toContain("var(--crit)");
 });
 
 it("gives each key's four step swatches four distinct colours", () => {

@@ -1,4 +1,4 @@
-import type { MapSnapshot } from "@mc/core";
+import { FINDING_SEVERITIES, type FindingSeverity, globMatches, type MapSnapshot } from "@mc/core";
 import { githubItemHref } from "../links.ts";
 import { seatToken, touchedFiles } from "./cards.ts";
 
@@ -30,27 +30,23 @@ export interface LensVisual {
   area?: string;
   hardRule?: boolean;
   /** Review: highest severity and number of findings for this file. */
-  severity?: "Critical" | "Important" | "Minor";
+  severity?: FindingSeverity;
   findings?: number;
   /** Conflicts: this file is in the hub's merge-conflict check. */
   conflict?: boolean;
 }
 
-const glob = (pattern: string) =>
-  new RegExp(
-    `^${pattern
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replaceAll("**", "\\0")
-      .replaceAll("*", "[^/]*")
-      .replaceAll("\\0", ".*")}$`,
-  );
+/** The ownership areas' colours, in rules order: the mockup's three first, then other distinct tokens. */
+const AREA_TOKENS = ["--r1", "--r3", "--r2", "--r4", "--r5", "--r6", "--r7", "--r8"] as const;
 
-/** The repo's ownership rules, compiled once: which area owns a path, and whether it is hard-rule. */
+/** The repo's ownership rules: which area owns a path (null for none), and whether it is hard-rule. */
 export interface Ownership {
   /** Area labels, in the rules' order. */
   labels: string[];
+  /** Each area's colour, by its place in `labels`. */
+  colours: Record<string, string>;
   globs: Record<string, string[]>;
-  areaOf: (path: string) => string | undefined;
+  areaOf: (path: string) => string | null;
   isHardRule: (path: string) => boolean;
 }
 const ownershipCache = new WeakMap<object, Ownership>();
@@ -58,16 +54,33 @@ export function ownershipOf(rules: MapSnapshot["rules"] | undefined): Ownership 
   if (!rules) return null;
   const cached = ownershipCache.get(rules);
   if (cached) return cached;
-  const areas = Object.entries(rules.areas).map(([label, globs]) => ({
-    label,
-    tests: globs.map(glob),
-  }));
-  const hard = rules.hardRules.map(glob);
+  const areas = Object.entries(rules.areas);
+  // a path's answer is kept: the map asks for every tile and folder on each draw
+  const areaMemo = new Map<string, string | null>();
+  const hardMemo = new Map<string, boolean>();
   const out: Ownership = {
-    labels: areas.map((area) => area.label),
+    labels: areas.map(([label]) => label),
+    colours: Object.fromEntries(
+      areas.map(([label], i) => [label, `var(${AREA_TOKENS[i % AREA_TOKENS.length]})`]),
+    ),
     globs: rules.areas,
-    areaOf: (path) => areas.find((area) => area.tests.some((test) => test.test(path)))?.label,
-    isHardRule: (path) => hard.some((test) => test.test(path)),
+    areaOf: (path) => {
+      let hit = areaMemo.get(path);
+      if (hit === undefined) {
+        hit = areas.find(([, globs]) => globs.some((g) => globMatches(g, path)))?.[0] ?? null;
+        areaMemo.set(path, hit);
+      }
+      return hit;
+    },
+    isHardRule: (path) => {
+      let hit = hardMemo.get(path);
+      if (hit === undefined) {
+        // case-insensitive, as the engine reads hard rules
+        hit = rules.hardRules.some((g) => globMatches(g, path, true));
+        hardMemo.set(path, hit);
+      }
+      return hit;
+    },
   };
   ownershipCache.set(rules, out);
   return out;
@@ -245,7 +258,9 @@ export function windowVisuals(
   return out;
 }
 
-const severityOrder = { Critical: 0, Important: 1, Minor: 2 } as const;
+const severityOrder = Object.fromEntries(
+  FINDING_SEVERITIES.map((severity, i) => [severity, i]),
+) as Record<FindingSeverity, number>;
 /** The highest severity among a file's findings. */
 const topSeverity = (findings: MapSnapshot["findings"]) =>
   [...findings].sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])[0]?.severity;
@@ -287,7 +302,7 @@ export function lensVisuals(
     return Object.fromEntries(
       snapshot.tree.map(({ path }) => [
         path,
-        { area: owner.areaOf(path), hardRule: owner.isHardRule(path) },
+        { area: owner.areaOf(path) ?? undefined, hardRule: owner.isHardRule(path) },
       ]),
     );
   }
@@ -796,18 +811,44 @@ export function HistoryLens({
   );
 }
 
-const none = "none";
-export const areaColour = (label: string): string => {
-  const token = /^area:(server|web|core)$/.exec(label)?.[1];
-  return token ? `var(--area-${token})` : "var(--accent)";
-};
 const noNames: Record<string, string> = {};
 const noIndices: Record<string, number> = {};
 
+/** A seat's colour dot and call sign. */
+function SeatTag({
+  seat,
+  names,
+  indices,
+}: {
+  seat: string;
+  names: Record<string, string>;
+  indices: Record<string, number>;
+}) {
+  return (
+    <span className="map-lens-note">
+      <i
+        className="map-lens-seat-dot"
+        style={{ background: `var(${seatToken(seat, indices[seat] ?? 0)})` }}
+        aria-hidden="true"
+      />
+      {names[seat] ?? seat}
+    </span>
+  );
+}
+
+interface SeatProps {
+  /** Each seat's call sign. */
+  names?: Record<string, string>;
+  /** Each seat's colour, its place in config order. */
+  indices?: Record<string, number>;
+}
+
 export function OwnershipLens({
   snapshot,
+  names = noNames,
+  indices = noIndices,
   onFocus,
-}: {
+}: SeatProps & {
   snapshot: MapSnapshot;
   onFocus: (path: string) => void;
 }) {
@@ -827,20 +868,21 @@ export function OwnershipLens({
         </div>
       </section>
     );
-  const areas = new Map<string, { files: number; lines: number }>(
-    [...owner.labels, none].map((label) => [label, { files: 0, lines: 0 }]),
+  // null is the files no area owns
+  const areas = new Map<string | null, { files: number; lines: number }>(
+    [...owner.labels, null].map((label) => [label, { files: 0, lines: 0 }]),
   );
   for (const file of snapshot.tree) {
-    const row = areas.get(owner.areaOf(file.path) ?? none);
+    const row = areas.get(owner.areaOf(file.path));
     if (!row) continue;
     row.files++;
     row.lines += file.lines;
   }
-  const owned = snapshot.tree.length - (areas.get(none)?.files ?? 0);
+  const owned = snapshot.tree.length - (areas.get(null)?.files ?? 0);
   const changed = snapshot.seats.flatMap((seat) =>
     seat.scope.modified
       .filter((change) => change.add + change.rem > 0)
-      .map((change) => ({ seat: seat.seat, path: change.file })),
+      .map((change) => ({ seat: seat.seat, path: change.file, add: change.add, rem: change.rem })),
   );
   const hardFiles = snapshot.tree.filter((file) => owner.isHardRule(file.path)).length;
   const hardChanged = changed.filter(({ path }) => owner.isHardRule(path));
@@ -865,7 +907,7 @@ export function OwnershipLens({
               key={label}
               style={{
                 width: `${(100 * (areas.get(label)?.files ?? 0)) / Math.max(1, snapshot.tree.length)}%`,
-                background: areaColour(label),
+                background: owner.colours[label],
               }}
             />
           ))}
@@ -875,11 +917,11 @@ export function OwnershipLens({
           <span>files · lines</span>
         </div>
         {[...areas.entries()].map(([area, row]) => (
-          <div className="map-lens-row" key={area}>
+          <div className="map-lens-row" key={area ?? "(none)"}>
             <span>
-              {area}{" "}
+              {area ?? "none"}{" "}
               <span className="map-lens-note">
-                {area === none ? "everything else" : owner.globs[area]?.join(", ")}
+                {area === null ? "everything else" : owner.globs[area]?.join(", ")}
               </span>
             </span>
             <span>
@@ -895,7 +937,7 @@ export function OwnershipLens({
             <div className="map-lens-row" key={`${seat}:${path}`}>
               <FileButton path={path} onFocus={onFocus} />
               <span>
-                {seat} · {owner.areaOf(path) ?? none}
+                {names[seat] ?? seat} · {owner.areaOf(path) ?? "none"}
               </span>
             </div>
           ))
@@ -909,10 +951,13 @@ export function OwnershipLens({
           {hardFiles}
         </h3>
         {hardChanged.length ? (
-          hardChanged.map(({ seat, path }) => (
+          hardChanged.map(({ seat, path, add, rem }) => (
             <div className="map-lens-row" key={`${seat}:${path}`}>
               <FileButton path={path} onFocus={onFocus} />
-              <span>{seat}</span>
+              <SeatTag seat={seat} names={names} indices={indices} />
+              <span>
+                <span className="add">+{add}</span> <span className="rem">−{rem}</span>
+              </span>
             </div>
           ))
         ) : (
@@ -928,8 +973,9 @@ export function OwnershipLens({
 
 export function ReviewLens({
   snapshot,
+  names = noNames,
   onFocus,
-}: {
+}: Pick<SeatProps, "names"> & {
   snapshot: MapSnapshot;
   onFocus: (path: string) => void;
 }) {
@@ -956,16 +1002,19 @@ export function ReviewLens({
             <FileButton path={path} onFocus={onFocus} />
             {[...findings]
               .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
-              .map((finding) => (
-                <p key={`${finding.ticket}:${finding.round}:${finding.line}:${finding.summary}`}>
+              .map((finding, i) => (
+                <p
+                  // biome-ignore lint/suspicious/noArrayIndexKey: two findings can share seat, ticket, round and line
+                  key={`${finding.seat}:${finding.ticket}:${finding.round}:${finding.line}:${i}`}
+                >
                   <b className={`map-severity map-severity-${finding.severity.toLowerCase()}`}>
                     {finding.severity}
                   </b>{" "}
                   {finding.summary}
                   <br />
                   <span className="map-lens-note">
-                    line {finding.line ?? "—"} · {finding.seat} · #{finding.ticket} round{" "}
-                    {finding.round}
+                    line {finding.line || "—"} · {names[finding.seat] ?? finding.seat} · #
+                    {finding.ticket} round {finding.round}
                   </span>
                 </p>
               ))}
@@ -980,66 +1029,71 @@ export function ReviewLens({
   );
 }
 
-/** Distinct branch pairs across the conflicts (a pair of branches counts once, however many files). */
+/** Files with a conflict: the hub sends one row per file and branch pair, so a file can have several. */
+export const conflictFiles = (conflicts: MapSnapshot["conflicts"]) =>
+  new Set(conflicts.map((conflict) => conflict.file)).size;
+/** Distinct branch pairs across the conflicts (a pair counts once, however many files). */
 export const conflictPairs = (conflicts: MapSnapshot["conflicts"]) =>
   new Set(conflicts.map((conflict) => [...conflict.branches].sort().join("\n"))).size;
+/** "N files that conflict between open branches · P branch pairs", or what is known when some went unchecked. */
+export function conflictSummary(snapshot: MapSnapshot): string {
+  const files = conflictFiles(snapshot.conflicts);
+  const unchecked = snapshot.conflictsUnchecked.length;
+  if (files === 0)
+    return unchecked
+      ? `No conflicts among the branches checked · ${unchecked} unchecked`
+      : "No merge conflicts found between open branches";
+  const pairs = conflictPairs(snapshot.conflicts);
+  return `${files} ${files === 1 ? "file conflicts" : "files that conflict"} between open branches · ${pairs} branch ${pairs === 1 ? "pair" : "pairs"}${unchecked ? ` · ${unchecked} unchecked` : ""}`;
+}
 
 export function ConflictsLens({
   snapshot,
   names = noNames,
   indices = noIndices,
   onFocus,
-}: {
+}: SeatProps & {
   snapshot: MapSnapshot;
-  /** Each seat's call sign. */
-  names?: Record<string, string>;
-  /** Each seat's colour, its place in config order. */
-  indices?: Record<string, number>;
   onFocus: (path: string) => void;
 }) {
-  const pairs = conflictPairs(snapshot.conflicts);
+  const byFile = new Map<string, MapSnapshot["conflicts"]>();
+  for (const conflict of snapshot.conflicts) {
+    const rows = byFile.get(conflict.file) ?? [];
+    rows.push(conflict);
+    byFile.set(conflict.file, rows);
+  }
   return (
     <section className="map-lens" aria-label="Conflicts lens">
       <header>
         <h2>Conflicts</h2>
-        <p>
-          {snapshot.conflicts.length} files changed on 2+ open branches · {pairs} branch{" "}
-          {pairs === 1 ? "pair" : "pairs"}
-        </p>
+        <p>{conflictSummary(snapshot)}</p>
       </header>
-      {snapshot.conflicts.map((conflict) => {
-        // the seat that changed this file on that branch
+      {[...byFile].map(([file, pairs]) => {
+        // the seats that changed this file
         const owners = snapshot.seats.filter((seat) =>
-          seat.scope.modified.some((change) => change.file === conflict.file),
+          seat.scope.modified.some((change) => change.file === file),
         );
         const seatOn = (branch: string) =>
           owners.find((seat) => seat.branches.includes(branch)) ??
           snapshot.seats.find((seat) => seat.branches.includes(branch));
         return (
-          <div className="map-lens-section" key={`${conflict.file}:${conflict.branches.join(":")}`}>
-            <FileButton path={conflict.file} onFocus={onFocus} />
-            {conflict.branches.map((branch) => {
-              const seat = seatOn(branch);
-              const ticket = seat?.tickets[branch];
-              return (
-                <p className="map-lens-branch" key={branch}>
-                  {ticket !== undefined && <span className="map-lens-note">#{ticket}</span>}
-                  <code>{branch}</code>
-                  {seat && (
-                    <span className="map-lens-note">
-                      <i
-                        className="map-lens-seat-dot"
-                        style={{
-                          background: `var(${seatToken(seat.seat, indices[seat.seat] ?? 0)})`,
-                        }}
-                        aria-hidden="true"
-                      />
-                      {names[seat.seat] ?? seat.seat}
-                    </span>
-                  )}
-                </p>
-              );
-            })}
+          <div className="map-lens-section" key={file}>
+            <FileButton path={file} onFocus={onFocus} />
+            {pairs.map((pair) => (
+              <div className="map-lens-pair" key={pair.branches.join(":")}>
+                {pair.branches.map((branch) => {
+                  const seat = seatOn(branch);
+                  const ticket = seat?.tickets[branch];
+                  return (
+                    <p className="map-lens-branch" key={branch}>
+                      {ticket !== undefined && <span className="map-lens-note">#{ticket}</span>}
+                      <code>{branch}</code>
+                      {seat && <SeatTag seat={seat.seat} names={names} indices={indices} />}
+                    </p>
+                  );
+                })}
+              </div>
+            ))}
             {owners.length > 0 && (
               <p className="map-lens-note">
                 {owners.map((seat) => names[seat.seat] ?? seat.seat).join(", ")} changed it here
@@ -1058,9 +1112,9 @@ export function ConflictsLens({
           ))}
         </div>
       )}
-      {snapshot.conflicts.length === 0 && (
+      {byFile.size === 0 && (
         <div className="map-lens-section">
-          <p>No merge conflicts found between open branches.</p>
+          <p>{conflictSummary(snapshot)}.</p>
         </div>
       )}
     </section>

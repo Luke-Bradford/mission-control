@@ -1,6 +1,6 @@
-import type { MapSnapshot } from "@mc/core";
+import type { FindingSeverity, MapSnapshot } from "@mc/core";
 import { type CSSProperties, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { areaColour, type LensVisual, type MapLens, ownershipOf } from "./Lenses.tsx";
+import { type LensVisual, type MapLens, ownershipOf } from "./Lenses.tsx";
 
 const colours = [
   "var(--seat-1)",
@@ -13,11 +13,11 @@ const colours = [
 ];
 /** Conflicts shows each seat's changes at this strength, under the files that conflict. */
 const conflictFade = 0.3;
-const severityColours = {
+const severityColours: Record<FindingSeverity, string> = {
   Critical: "var(--rem)",
-  Important: "var(--seat-4)",
+  Important: "var(--warn-mark)",
   Minor: "var(--void-muted)",
-} as const;
+};
 type Rect = { x: number; y: number; width: number; height: number };
 export type TreemapTile = Rect & { path: string; center: [number, number] };
 export type TreemapFolder = Rect & { path: string; name: string };
@@ -237,6 +237,8 @@ type TileProps = {
   strong: boolean;
   playCurrent: boolean;
   lines: string;
+  /** What the lens says about the file, for assistive technology. */
+  note: string;
   /** Ownership: the matching area label ("" for none) and whether the file is hard-rule. */
   area: string;
   hardRule: boolean;
@@ -289,6 +291,7 @@ const Tile = memo(function Tile(t: TileProps) {
       }
       onClick={() => t.onSelect(t.path)}
       title={t.path}
+      aria-description={t.note || undefined}
     >
       <span className="map-treemap-label">{t.path.split("/").at(-1)}</span>
       {t.lines && t.width >= 58 && t.height >= 26 && (
@@ -328,7 +331,10 @@ export const MapTreemap = memo(function MapTreemap({
 }) {
   const [ref, size] = useSize();
   const files = useMemo(
-    () => (lens === "changes" ? [...snapshot.tree, ...extraFiles] : snapshot.tree),
+    () =>
+      lens === "changes" || lens === "conflicts"
+        ? [...snapshot.tree, ...extraFiles]
+        : snapshot.tree,
     [lens, snapshot.tree, extraFiles],
   );
   const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
@@ -336,6 +342,17 @@ export const MapTreemap = memo(function MapTreemap({
     () => (lens === "ownership" ? ownershipOf(snapshot.rules) : null),
     [lens, snapshot.rules],
   );
+  // the branches a conflicting file is changed on, for the tile's description
+  const conflictBranches = useMemo(() => {
+    const out = new Map<string, Set<string>>();
+    if (lens !== "conflicts") return out;
+    for (const { file, branches } of snapshot.conflicts) {
+      const set = out.get(file) ?? new Set<string>();
+      for (const branch of branches) set.add(branch);
+      out.set(file, set);
+    }
+    return out;
+  }, [lens, snapshot.conflicts]);
   const colour = (seat: string) =>
     colours[
       Math.max(0, indices[seat] ?? snapshot.seats.findIndex((item) => item.seat === seat)) %
@@ -372,7 +389,7 @@ export const MapTreemap = memo(function MapTreemap({
             style={
               {
                 ...style(folder),
-                ...(area ? { "--area-colour": areaColour(area) } : {}),
+                ...(area ? { "--area-colour": owner?.colours[area] } : {}),
               } as CSSProperties
             }
           >
@@ -415,7 +432,7 @@ export const MapTreemap = memo(function MapTreemap({
         const tileColour =
           lens === "ownership"
             ? v?.area !== undefined
-              ? areaColour(v.area)
+              ? (owner?.colours[v.area] ?? "var(--accent)")
               : "var(--void-line)"
             : lens === "review"
               ? severityColours[v?.severity ?? "Minor"]
@@ -455,6 +472,15 @@ export const MapTreemap = memo(function MapTreemap({
               lens === "changes" && changed.length
                 ? `+${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
                 : ""
+            }
+            note={
+              lens === "ownership"
+                ? `${v?.area ?? "no area"}${v?.hardRule ? ", hard-rule" : ""}`
+                : lens === "review" && v?.severity
+                  ? `${v.findings} finding${v.findings === 1 ? "" : "s"}, top severity ${v.severity}`
+                  : lens === "conflicts" && v?.conflict
+                    ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
+                    : ""
             }
             area={lens === "ownership" ? (v?.area ?? "") : ""}
             hardRule={lens === "ownership" && v?.hardRule === true}

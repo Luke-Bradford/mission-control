@@ -1,4 +1,10 @@
-import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
+import {
+  type Crew,
+  FINDING_SEVERITIES,
+  type MapSeat,
+  type MapSnapshot,
+  type RepoView,
+} from "@mc/core";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
@@ -6,9 +12,8 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
-  areaColour,
   ConflictsLens,
-  conflictPairs,
+  conflictSummary,
   downstream,
   graph,
   HistoryLens,
@@ -118,6 +123,7 @@ function errorText(error: Error): string {
 const noNames: Record<string, string> = {};
 const noWork: Record<string, SeatWork> = {};
 const noIndices: Record<string, number> = {};
+const noVisual: Record<string, LensVisual> = {};
 export function CrewMapView({
   snapshot,
   indices = noIndices,
@@ -187,10 +193,15 @@ export function CrewMapView({
   // files in the tree or new on a branch; the layout stays put while a window dims what's outside it
   const pathKey = Object.keys(changesVisual).sort().join("\n");
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual
-  const extraFiles = useMemo(
-    () => branchOnlyFiles(snapshot.tree, changesVisual),
-    [snapshot.tree, pathKey],
-  );
+  const extraFiles = useMemo(() => {
+    const branchOnly = branchOnlyFiles(snapshot.tree, changesVisual);
+    // a conflicting file new on its branches gets a tile too, so Changes and Conflicts lay out alike
+    const have = new Set([...snapshot.tree, ...branchOnly].map((file) => file.path));
+    const conflictOnly = [...new Set(snapshot.conflicts.map((conflict) => conflict.file))]
+      .filter((path) => path !== "" && !have.has(path))
+      .map((path) => ({ path, lines: 1 }));
+    return conflictOnly.length ? [...branchOnly, ...conflictOnly] : branchOnly;
+  }, [snapshot.tree, snapshot.conflicts, pathKey]);
   const searchable = useMemo(
     () => [...snapshot.tree.map((file) => file.path), ...extraFiles.map((file) => file.path)],
     [snapshot.tree, extraFiles],
@@ -231,10 +242,20 @@ export function CrewMapView({
     () => (timeline.win ? windowVisuals(changesVisual, changesSeats, timeline.win) : changesVisual),
     [changesVisual, changesSeats, timeline.win],
   );
-  const lensVisual = useMemo(
-    () => (lens === "changes" ? windowed : lensVisuals(snapshot, lens, focus)),
-    [snapshot, lens, focus, windowed],
+  // Ownership, Review and Conflicts depend on the snapshot alone, so neither the focus nor the
+  // timeline window (which tick with the clock) reruns their matching
+  const fixedVisual = useMemo(
+    () =>
+      lens === "ownership" || lens === "review" || lens === "conflicts"
+        ? lensVisuals(snapshot, lens, null)
+        : null,
+    [snapshot, lens],
   );
+  const focusVisual = useMemo(
+    () => (lens === "impact" || lens === "history" ? lensVisuals(snapshot, lens, focus) : null),
+    [snapshot, lens, focus],
+  );
+  const lensVisual = lens === "changes" ? windowed : (fixedVisual ?? focusVisual ?? noVisual);
   const { playback, marks, current } = timeline;
   // Play shows only the replayed seat's changes on the files it has reached so far
   const visibleVisual = useMemo(() => {
@@ -307,9 +328,9 @@ export function CrewMapView({
           ) : lens === "history" ? (
             <HistoryLens snapshot={snapshot} focus={focus} onFocus={setFocus} github={github} />
           ) : lens === "ownership" ? (
-            <OwnershipLens snapshot={snapshot} onFocus={setFocus} />
+            <OwnershipLens snapshot={snapshot} names={names} indices={colours} onFocus={setFocus} />
           ) : lens === "review" ? (
-            <ReviewLens snapshot={snapshot} onFocus={setFocus} />
+            <ReviewLens snapshot={snapshot} names={names} onFocus={setFocus} />
           ) : lens === "conflicts" ? (
             <ConflictsLens snapshot={snapshot} names={names} indices={colours} onFocus={setFocus} />
           ) : (
@@ -465,7 +486,7 @@ function AnalyticalMapKey({
               <span className="map-key-item" key={label}>
                 <i
                   className="map-key-swatch map-key-area"
-                  style={{ "--map-key-area": areaColour(label) } as CSSProperties}
+                  style={{ "--map-key-area": owner.colours[label] } as CSSProperties}
                   aria-hidden="true"
                 />{" "}
                 {label}
@@ -483,7 +504,7 @@ function AnalyticalMapKey({
   }
   if (lens === "review") {
     const counts = Object.fromEntries(
-      ["Critical", "Important", "Minor"].map((severity) => [
+      FINDING_SEVERITIES.map((severity) => [
         severity,
         snapshot.findings.filter((finding) => finding.severity === severity).length,
       ]),
@@ -494,7 +515,7 @@ function AnalyticalMapKey({
           <b>{snapshot.findings.length}</b> findings on{" "}
           {new Set(snapshot.findings.map((finding) => finding.file)).size} files
         </span>
-        {(["Critical", "Important", "Minor"] as const).map((severity) => (
+        {FINDING_SEVERITIES.map((severity) => (
           <span className="map-key-item" key={severity}>
             <i
               className={`map-key-swatch map-key-dot map-severity-${severity.toLowerCase()}`}
@@ -507,13 +528,11 @@ function AnalyticalMapKey({
     );
   }
   if (lens === "conflicts") {
-    const pairs = conflictPairs(snapshot.conflicts);
     return (
       <div className="map-analytical-key" role="note" aria-label="Conflicts colour key">
         <span className="map-key-item">
           <i className="map-key-swatch map-key-conflict" aria-hidden="true" />{" "}
-          {snapshot.conflicts.length} files changed on 2+ open branches · {pairs} branch{" "}
-          {pairs === 1 ? "pair" : "pairs"}
+          {conflictSummary(snapshot)}
         </span>
       </div>
     );

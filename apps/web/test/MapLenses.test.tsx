@@ -1,5 +1,5 @@
 import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
@@ -206,12 +206,10 @@ it("colours Ownership tiles by area, hatches hard-rule files, and leaves unowned
   const contract = tileAt("src/contract.ts");
   expect(contract?.getAttribute("data-area")).toBe("area:web");
   expect(contract?.hasAttribute("data-hard-rule")).toBe(true);
-  expect(contract?.style.getPropertyValue("--tile-colour")).toBe("var(--area-web)");
+  expect(contract?.style.getPropertyValue("--tile-colour")).toBe("var(--r1)");
   // a glob list matches any of its globs, `**` crosses folders
   expect(tileAt("lib/deep/util.ts")?.getAttribute("data-area")).toBe("area:core");
-  expect(tileAt("lib/deep/util.ts")?.style.getPropertyValue("--tile-colour")).toBe(
-    "var(--area-core)",
-  );
+  expect(tileAt("lib/deep/util.ts")?.style.getPropertyValue("--tile-colour")).toBe("var(--r3)");
   // a file no area owns is neutral, unless it is hard-rule
   const unowned = tileAt("src/unowned.ts");
   expect(unowned?.hasAttribute("data-area")).toBe(false);
@@ -293,7 +291,7 @@ it("shows Review severity colouring, the count on a file, and the rows", () => {
   expect(consumer?.style.getPropertyValue("--tile-colour")).toBe("var(--rem)");
   const contract = tileAt("src/contract.ts");
   expect(contract?.getAttribute("data-severity")).toBe("Important");
-  expect(contract?.style.getPropertyValue("--tile-colour")).toBe("var(--seat-4)");
+  expect(contract?.style.getPropertyValue("--tile-colour")).toBe("var(--warn-mark)");
   expect(tileAt("src/cycle.ts")?.hasAttribute("data-neutral")).toBe(true);
   const lens = screen.getByRole("region", { name: "Review lens" });
   expect(lens.textContent).toContain("Important at src/contract.ts:12");
@@ -378,7 +376,7 @@ it("names each conflict's tickets, seats and branch pairs", () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
   const lens = screen.getByRole("region", { name: "Conflicts lens" });
-  expect(lens.textContent).toContain("2 files changed on 2+ open branches · 1 branch pair");
+  expect(lens.textContent).toContain("2 files that conflict between open branches · 1 branch pair");
   const first = lens.querySelectorAll(".map-lens-section")[0];
   expect(first?.textContent).toContain("#7");
   expect(first?.textContent).toContain("feature/7-contract");
@@ -400,6 +398,158 @@ it("says so when no open branches conflict", () => {
   expect(screen.getByRole("region", { name: "Conflicts lens" }).textContent).toContain(
     "No merge conflicts",
   );
+});
+
+it("matches ownership globs as the server does: root `**/` globs, bare folders, folded hard-rule case", () => {
+  const value = snapshot();
+  value.tree = [
+    { path: "CLAUDE.md", lines: 5 },
+    { path: "docs/guide/a.md", lines: 5 },
+    { path: "Loops/run.ts", lines: 5 },
+    { path: "src/a.ts", lines: 5 },
+  ];
+  value.rules = {
+    areas: { "area:docs": ["docs"] },
+    hardRules: ["**/CLAUDE.md", "loops/**"],
+  };
+  const visual = lensVisuals(value, "ownership", null);
+  // a glob naming a folder covers what is inside it
+  expect(visual["docs/guide/a.md"]?.area).toBe("area:docs");
+  expect(visual["src/a.ts"]?.area).toBeUndefined();
+  // `**/CLAUDE.md` includes the top-level file
+  expect(visual["CLAUDE.md"]?.hardRule).toBe(true);
+  // hard rules fold case, as the engine does
+  expect(visual["Loops/run.ts"]?.hardRule).toBe(true);
+  expect(visual["src/a.ts"]?.hardRule).toBe(false);
+});
+
+it("colours areas by their place in the rules, through a fourth area", () => {
+  const value = snapshot();
+  value.tree = ["a", "b", "c", "d"].map((dir) => ({ path: `${dir}/x.ts`, lines: 5 }));
+  value.rules = {
+    areas: { "area:a": ["a/**"], "area:b": ["b/**"], "area:c": ["c/**"], "area:d": ["d/**"] },
+    hardRules: [],
+  };
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+  const colours = ["a", "b", "c", "d"].map((dir) =>
+    tileAt(`${dir}/x.ts`)?.style.getPropertyValue("--tile-colour"),
+  );
+  expect(colours).toEqual(["var(--r1)", "var(--r3)", "var(--r2)", "var(--r4)"]);
+  expect(new Set(colours).size).toBe(4);
+  // the key and the coverage bar use the same colours
+  const swatches = [...document.querySelectorAll<HTMLElement>(".map-key-area")].map((el) =>
+    el.style.getPropertyValue("--map-key-area"),
+  );
+  expect(swatches).toEqual(colours);
+});
+
+it("describes each tile for assistive technology, in the lens's terms", () => {
+  render(<CrewMapView snapshot={ownershipSnapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+  expect(tileAt("src/contract.ts")?.getAttribute("aria-description")).toBe("area:web, hard-rule");
+  expect(tileAt("src/unowned.ts")?.getAttribute("aria-description")).toBe("no area, hard-rule");
+  cleanup();
+
+  render(<CrewMapView snapshot={reviewSnapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(tileAt("src/consumer.ts")?.getAttribute("aria-description")).toBe(
+    "2 findings, top severity Critical",
+  );
+  cleanup();
+
+  render(<CrewMapView snapshot={conflictSnapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+  expect(tileAt("src/consumer.ts")?.getAttribute("aria-description")).toBe(
+    "conflicts between feature/7-contract, feature/8-consumer",
+  );
+});
+
+it("names seats by call sign in Ownership and Review, and shows hard-rule lines per seat", () => {
+  const names = { "GUIDO-1": "Guido", "INCO-1": "Inco" };
+  render(<CrewMapView snapshot={ownershipSnapshot()} names={names} />);
+  fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+  const ownership = screen.getByRole("region", { name: "Ownership lens" });
+  expect(ownership.textContent).toContain("Guido");
+  expect(ownership.textContent).not.toContain("GUIDO-1");
+  const hard = [...ownership.querySelectorAll(".map-lens-section")].find((el) =>
+    el.querySelector("h3")?.textContent?.startsWith("Hard-rule files changed"),
+  );
+  expect(hard?.textContent).toContain("+3");
+  expect(hard?.textContent).toContain("−1");
+  expect(hard?.querySelector(".map-lens-seat-dot")).toBeTruthy();
+  cleanup();
+
+  render(<CrewMapView snapshot={reviewSnapshot()} names={names} />);
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  const review = screen.getByRole("region", { name: "Review lens" });
+  expect(review.textContent).toContain("Guido");
+  expect(review.textContent).not.toContain("GUIDO-1");
+});
+
+it("counts a file once however many branch pairs it conflicts on, and groups the pane by file", () => {
+  const value = conflictSnapshot();
+  value.conflicts = [
+    {
+      file: "src/consumer.ts",
+      branches: ["feature/7-contract", "feature/8-consumer"],
+      shas: ["a", "b"],
+    },
+    {
+      file: "src/consumer.ts",
+      branches: ["feature/7-contract", "feature/9-other"],
+      shas: ["a", "c"],
+    },
+  ];
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+  const lens = screen.getByRole("region", { name: "Conflicts lens" });
+  expect(lens.querySelector("header")?.textContent).toContain(
+    "1 file conflicts between open branches · 2 branch pairs",
+  );
+  expect(lens.querySelectorAll(".map-lens-file")).toHaveLength(1);
+  expect(lens.querySelectorAll(".map-lens-pair")).toHaveLength(2);
+  expect(screen.getByRole("note", { name: "Conflicts colour key" }).textContent).toContain(
+    "1 file conflicts between open branches · 2 branch pairs",
+  );
+});
+
+it("never says no conflicts when some branches went unchecked", () => {
+  const value = snapshot();
+  value.conflicts = [];
+  value.conflictsUnchecked = [
+    { branch: "feature/7-a", reason: "head not fetched" },
+    { branch: "feature/8-b", reason: "merge check failed" },
+  ];
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+  const text = screen.getByRole("region", { name: "Conflicts lens" }).textContent ?? "";
+  expect(text).toContain("No conflicts among the branches checked · 2 unchecked");
+  expect(text).not.toContain("No merge conflicts");
+  const key = screen.getByRole("note", { name: "Conflicts colour key" }).textContent ?? "";
+  expect(key).toContain("No conflicts among the branches checked · 2 unchecked");
+  expect(key).not.toContain("No merge conflicts");
+});
+
+it("gives a conflicting file that is new on its branches a tile, in Changes and Conflicts alike", () => {
+  const value = conflictSnapshot();
+  value.conflicts = [
+    {
+      file: "src/new.ts",
+      branches: ["feature/7-contract", "feature/8-consumer"],
+      shas: ["a", "b"],
+    },
+  ];
+  render(<CrewMapView snapshot={value} />);
+  expect(tileAt("src/new.ts")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+  expect(tileAt("src/new.ts")?.hasAttribute("data-conflict")).toBe(true);
+  // the lenses that do not lay out branch-only files leave it out
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(tileAt("src/new.ts")).toBeNull();
 });
 
 it("shows Impact tallies, dependency overlap, untested changes, cycles, and a focused import trace", async () => {
