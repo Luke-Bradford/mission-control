@@ -140,9 +140,12 @@ const hasBranch = (b: string) => {
   }
 };
 
-function expectPrivateCodexPnpmStore(worktree: string): void {
-  const root = realpathSync(worktree);
-  const store = join(dirname(root), ".mc-pnpm-store", basename(root));
+function sharedPnpmStore(): string {
+  return join(root, CODEX_PNPM_STORES_DIR, "shared");
+}
+
+function expectSharedPnpmStore(): void {
+  const store = sharedPnpmStore();
   for (const [path, expected] of [
     [dirname(store), dirname(store)],
     [store, store],
@@ -883,16 +886,19 @@ describe("prepareCheckout", () => {
 
     const reused = await prepareCheckout(input());
     expect(reused).toMatchObject({ path: first.path, created: false });
-    expectPrivateCodexPnpmStore(reused.path);
+    expectSharedPnpmStore();
     expect(readFileSync(join(reused.path, "node_modules", ".modules.yaml"), "utf8")).toContain(
-      installEnv(reused.path).pnpm_config_store_dir,
+      sharedPnpmStore(),
     );
     expect(existsSync(join(reused.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
     for (let n = 0; n < 2; n++)
-      execFileSync("pnpm", ["-s", "check"], { cwd: reused.path, env: installEnv(reused.path) });
+      execFileSync("pnpm", ["-s", "check"], {
+        cwd: reused.path,
+        env: installEnv(reused.path, sharedPnpmStore()),
+      });
 
     const fresh = await prepareCheckout({ ...input(), issue: 43 });
-    expectPrivateCodexPnpmStore(fresh.path);
+    expectSharedPnpmStore();
     expect(existsSync(join(fresh.path, MC_TMP_DIR_NAME, "pnpm-store"))).toBe(false);
   });
 
