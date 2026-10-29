@@ -31,6 +31,8 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
     const def = decisionDefault(store, item);
     if (def === null || def.dueAt > now) continue;
     const ask = item.brief?.ask || item.text;
+    // the seat that asked, else FLIGHT
+    const asker = item.agentId !== null && store.seatSession(item.agentId) !== null;
     const claimed = store.claimDecisionDefault(
       {
         key: item.key,
@@ -38,6 +40,8 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
         optionId: def.option.id ?? null,
         label: def.option.label,
         dueAt: def.dueAt,
+        target: asker ? item.agentId : flightId,
+        answer: def.option.answer,
       },
       {
         at: now,
@@ -49,12 +53,23 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
       },
       now,
     );
-    if (!claimed) continue;
-    applied++;
-    // the seat that asked, else FLIGHT
-    const asker = item.agentId !== null && store.seatSession(item.agentId) !== null;
-    const target = asker ? item.agentId : flightId;
-    if (target !== null) await d.deliver?.(target, def.option.answer).catch(() => undefined);
+    if (claimed) applied++;
   }
+  await deliverPending(d);
   return applied;
+}
+
+/** Hands each applied default's answer to its seat; one that fails is retried on the next sweep. */
+async function deliverPending(d: DecisionDefaultsDeps): Promise<void> {
+  if (d.deliver === undefined) return;
+  for (const p of d.store.pendingDecisionDeliveries()) {
+    // the lead names the ask, so a seat can tell a repeat after a crash from a new answer
+    const text = `Re: ${p.key} · default applied (${p.briefAt})\n\n${p.answer}`;
+    try {
+      await d.deliver(p.target, text);
+    } catch {
+      continue;
+    }
+    d.store.markDecisionDeliveryDone(p.key, p.briefAt, d.now);
+  }
 }

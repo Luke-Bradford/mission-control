@@ -117,7 +117,10 @@ describe("decision defaults", () => {
   it("delivers the answer to the seat that asked", async () => {
     const deliver = vi.fn(async () => {});
     await sweep(DUE, store, deliver);
-    expect(deliver).toHaveBeenCalledExactlyOnceWith("GUIDO-1", "Go with Acme.");
+    expect(deliver).toHaveBeenCalledExactlyOnceWith(
+      "GUIDO-1",
+      expect.stringContaining("Go with Acme."),
+    );
   });
 
   it("delivers to FLIGHT when the asker has no seat session", async () => {
@@ -126,7 +129,10 @@ describe("decision defaults", () => {
     store.ack([key], NOW);
     const deliver = vi.fn(async () => {});
     await sweep(DUE, store, deliver);
-    expect(deliver).toHaveBeenCalledExactlyOnceWith("FLIGHT-1", "Go with Acme.");
+    expect(deliver).toHaveBeenCalledExactlyOnceWith(
+      "FLIGHT-1",
+      expect.stringContaining("Go with Acme."),
+    );
   });
 
   it("leaves an escalation alone: it is answered on GitHub", async () => {
@@ -152,6 +158,29 @@ describe("decision defaults", () => {
     expect(attentionItems(config, store, DUE).find((i) => i.key === esc?.key)).toMatchObject({
       acked: false,
     });
+  });
+
+  it("keeps the deadline stored at briefing, and a rebrief of the same ask keeps it", () => {
+    const stored = store.briefs().get(key)?.defaultAt;
+    expect(stored).toBe(DUE);
+    brief(Number(key.slice(4)));
+    expect(store.briefs().get(key)?.defaultAt).toBe(DUE);
+    // an item read after the wait policy changed still uses the stored deadline
+    expect(attentionItems(config, store, NOW).find((i) => i.key === key)?.defaultDueAt).toBe(DUE);
+  });
+
+  it("retries a delivery that failed, once it works, and sends it once", async () => {
+    const deliver = vi
+      .fn<(id: string, text: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("seat unavailable"))
+      .mockResolvedValue(undefined);
+    expect(await sweep(DUE, store, deliver)).toBe(1);
+    expect(attentionItems(config, store, DUE).find((i) => i.key === key)?.acked).toBe(true);
+    expect(await sweep(DUE + MIN, store, deliver)).toBe(0);
+    expect(await sweep(DUE + 2 * MIN, store, deliver)).toBe(0);
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(deliver).toHaveBeenLastCalledWith("GUIDO-1", expect.stringContaining("Go with Acme."));
+    expect(outcomes()).toHaveLength(1);
   });
 
   it("applies once: a second sweep and a restarted store do nothing", async () => {

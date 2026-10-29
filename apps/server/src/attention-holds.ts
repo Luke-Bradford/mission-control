@@ -139,5 +139,7 @@ export function decisionDefault(
   const briefAt = brief.askAt ?? brief.at;
   const hold = holds(store)[item.key];
   const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
-  return { option, briefAt, dueAt: Math.max(briefAt, released) + DECISION_DEFAULT_WAIT_MS };
+  // the stored deadline; a brief from before it was stored gets the current wait from the ask
+  const dueAt = brief.defaultAt ?? briefAt + DECISION_DEFAULT_WAIT_MS;
+  return { option, briefAt, dueAt: Math.max(dueAt, released + (dueAt - briefAt)) };
 }

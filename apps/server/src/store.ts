@@ -20,6 +20,7 @@ import {
   type CommsReaction,
   type CommsReactionKind,
   commsCutMarker,
+  DECISION_DEFAULT_WAIT_MS,
   type Escalation,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
@@ -1133,6 +1134,10 @@ export class Store {
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("holds", "told_state", "TEXT");
+    // where a default's answer goes and the answer; delivered_at stays null until it was handed over
+    this.addColumn("decision_defaults", "target", "TEXT");
+    this.addColumn("decision_defaults", "answer", "TEXT");
+    this.addColumn("decision_defaults", "delivered_at", "INTEGER");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
@@ -2500,7 +2505,16 @@ export class Store {
    * default was claimed before (a restart or a second sweep), so it applies at most once.
    */
   claimDecisionDefault(
-    d: { key: string; briefAt: number; optionId: string | null; label: string; dueAt: number },
+    d: {
+      key: string;
+      briefAt: number;
+      optionId: string | null;
+      label: string;
+      dueAt: number;
+      /** The seat that gets `answer`; null: nothing to deliver. */
+      target: string | null;
+      answer: string;
+    },
     message: NewCommsRow,
     at: number,
   ): boolean {
@@ -2508,10 +2522,20 @@ export class Store {
     this.transaction(() => {
       const r = this.db
         .prepare(
-          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(d.key, d.briefAt, d.optionId, d.label, d.dueAt, at);
+        .run(
+          d.key,
+          d.briefAt,
+          d.optionId,
+          d.label,
+          d.dueAt,
+          at,
+          d.target,
+          d.answer,
+          d.target === null ? at : null,
+        );
       if (r.changes === 0) return;
       this.insertComms(message, cutCommsText(message.text), null);
       this.db
@@ -2523,6 +2547,30 @@ export class Store {
       claimed = true;
     }, true);
     return claimed;
+  }
+
+  /** Applied defaults whose answer has not reached its seat yet, oldest first. */
+  pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT key, brief_at, target, answer FROM decision_defaults
+           WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`,
+        )
+        .all() as Row[]
+    ).map((r) => ({
+      key: r.key as string,
+      briefAt: r.brief_at as number,
+      target: r.target as string,
+      answer: r.answer as string,
+    }));
+  }
+
+  /** Records that an applied default's answer was handed to its seat. */
+  markDecisionDeliveryDone(key: string, briefAt: number, at: number): void {
+    this.db
+      .prepare("UPDATE decision_defaults SET delivered_at = ? WHERE key = ? AND brief_at = ?")
+      .run(at, key, briefAt);
   }
 
   /** Every ack: key → when it was acknowledged. */
@@ -5054,6 +5102,13 @@ export class Store {
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
       if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
         structured.askAt = prior?.askAt ?? last.at;
+      // A recommended option for the operator carries the deadline its default applies at, fixed
+      // when the ask begins: a rebrief of the same ask keeps it, whatever the wait is by then.
+      delete structured.defaultAt;
+      if (structured.for !== "flight" && structured.recommendedOptionId) {
+        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
+        structured.defaultAt = kept ?? (structured.askAt ?? at) + DECISION_DEFAULT_WAIT_MS;
+      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

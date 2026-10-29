@@ -1023,6 +1023,8 @@ export interface AttentionBrief {
   ask?: string;
   /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
   askAt?: number;
+  /** When the recommended option applies if nobody answers; set when the ask is first briefed. */
+  defaultAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
