@@ -266,9 +266,6 @@ export function MapTreemap({
           })}
         </svg>
       )}
-      {focus !== null && (
-        <p className="map-treemap-trace">Focused file and its relationships are traced.</p>
-      )}
     </div>
   );
 }

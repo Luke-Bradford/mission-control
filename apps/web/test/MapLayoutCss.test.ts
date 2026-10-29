@@ -25,7 +25,7 @@ it("draws focused direct imports with the v3 dashed relationship outline", () =>
   );
 });
 
-it("reserves a legend strip below, rather than over, analytical treemap tiles", () => {
-  expect(rule(String.raw`\.map-stage-wrap`)).toContain("grid-template-rows: minmax(0, 1fr) auto");
-  expect(rule(String.raw`\.map-legend`)).toContain("position: relative");
+it("keeps analytical keys in the toolbar without changing the Changes stage layout", () => {
+  expect(rule(String.raw`\.map-stage-wrap`)).not.toContain("grid-template-rows");
+  expect(rule(String.raw`\.map-analytical-key`)).toContain("display: flex");
 });

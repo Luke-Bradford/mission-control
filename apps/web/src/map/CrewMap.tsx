@@ -291,51 +291,49 @@ export function CrewMapView({
             setFocus(null);
           }}
         />
-        {lens === "impact" && <span>Click a file to trace its importers, tests, and imports.</span>}
-        {lens === "history" && <span>Hotspots and hidden change coupling from merged PRs.</span>}
+        {lens === "impact" || lens === "history" ? (
+          <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
+        ) : null}
+        {lens === "impact" && focus !== null && (
+          <span className="map-lens-trace">Focused file and its relationships are traced.</span>
+        )}
       </div>
       <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
-          <div className="map-stage-content">
-            {lens === "changes" ? (
-              <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-                <Scene
-                  nodes={displayNodes}
-                  areas={areas}
-                  snapshot={stage}
-                  names={names}
-                  focus={focusNode?.path ?? null}
-                  focusLinks={focusLinks}
-                  lens={lens}
-                  lensVisual={lensVisual}
-                  home={home}
-                  overview={overview}
-                  rotate={rotate}
-                  selected={selectedPath}
-                  indices={colours}
-                  onSelect={selectFromScene}
-                  seat={selectedSeat?.seat ?? null}
-                  seatFocus={seatFocus}
-                  dockSeats={snapshot.seats.length}
-                  onSeatSelect={followFromStage}
-                />
-              </Suspense>
-            ) : (
-              <MapTreemap
-                snapshot={snapshot}
-                lens={lens}
-                visual={lensVisual}
-                focus={focus}
-                focusLinks={focusLinks}
-                onSelect={selectFromScene}
-              />
-            )}
-          </div>
           {lens === "changes" ? (
-            <MapKey tree={snapshot.tree} />
+            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
+              <Scene
+                nodes={displayNodes}
+                areas={areas}
+                snapshot={stage}
+                names={names}
+                focus={focusNode?.path ?? null}
+                focusLinks={focusLinks}
+                lens={lens}
+                lensVisual={lensVisual}
+                home={home}
+                overview={overview}
+                rotate={rotate}
+                selected={selectedPath}
+                indices={colours}
+                onSelect={selectFromScene}
+                seat={selectedSeat?.seat ?? null}
+                seatFocus={seatFocus}
+                dockSeats={snapshot.seats.length}
+                onSeatSelect={followFromStage}
+              />
+            </Suspense>
           ) : (
-            <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
+            <MapTreemap
+              snapshot={snapshot}
+              lens={lens}
+              visual={lensVisual}
+              focus={focus}
+              focusLinks={focusLinks}
+              onSelect={selectFromScene}
+            />
           )}
+          {lens === "changes" && <MapKey tree={snapshot.tree} />}
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -524,7 +522,7 @@ function AnalyticalMapKey({
     const { forward, reverse } = graph(snapshot);
     const reach = downstream(focus, reverse);
     return (
-      <div className="map-legend" role="note" aria-label="Impact colour scale">
+      <div className="map-analytical-key" role="note" aria-label="Impact colour scale">
         <span className="map-key-item">
           <b>{focus.split("/").at(-1)}</b> · {reverse.get(focus)?.size ?? 0} import it ·{" "}
           {reach.size} depend on it
@@ -541,7 +539,7 @@ function AnalyticalMapKey({
     );
   }
   return lens === "impact" ? (
-    <div className="map-legend" role="note" aria-label="Impact colour scale">
+    <div className="map-analytical-key" role="note" aria-label="Impact colour scale">
       <span className="map-key-item">
         <KeySteps tone="impact" /> changed · imports it · 2 · 3+ steps
       </span>
@@ -552,13 +550,14 @@ function AnalyticalMapKey({
       <span className="map-key-item">click a file to trace it</span>
     </div>
   ) : (
-    <div className="map-legend" role="note" aria-label="History PR heat scale">
+    <div className="map-analytical-key" role="note" aria-label="History PR heat scale">
       <span className="map-key-item">
         <KeySteps tone="history" /> 1–2 PRs · 3–9 PRs · 10–29 PRs · 30+ PRs
       </span>
       <span className="map-key-item">
         <i className="map-key-swatch map-key-fix" aria-hidden="true" /> fixed often
       </span>
+      <span className="map-key-item">hotspots and hidden change coupling</span>
     </div>
   );
 }
