@@ -6,6 +6,8 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
 import {
+  downstream,
+  graph,
   HistoryLens,
   historyFocusLinks,
   ImpactLens,
@@ -327,7 +329,11 @@ export function CrewMapView({
               onSelect={selectFromScene}
             />
           )}
-          {lens === "changes" ? <MapKey tree={snapshot.tree} /> : <AnalyticalMapKey lens={lens} />}
+          {lens === "changes" ? (
+            <MapKey tree={snapshot.tree} />
+          ) : (
+            <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
+          )}
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -487,17 +493,67 @@ function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
   );
 }
 
-function AnalyticalMapKey({ lens }: { lens: Exclude<MapLens, "changes"> }) {
+function KeySteps({ tone }: { tone: "impact" | "history" }) {
+  return (
+    <span className={`map-key-steps map-key-steps-${tone}`} aria-hidden="true">
+      {[1, 2, 3, 4].map((step) => (
+        <i className={`map-key-swatch map-key-swatch-${step}`} key={step} />
+      ))}
+    </span>
+  );
+}
+
+function AnalyticalMapKey({
+  lens,
+  focus,
+  snapshot,
+}: {
+  lens: Exclude<MapLens, "changes">;
+  focus: string | null;
+  snapshot: MapSnapshot;
+}) {
+  if (lens === "impact" && focus !== null) {
+    const { forward, reverse } = graph(snapshot);
+    const reach = downstream(focus, reverse);
+    return (
+      <div className="map-legend" role="note" aria-label="Impact colour scale">
+        <span className="map-key-item">
+          <b>{focus.split("/").at(-1)}</b> · {reverse.get(focus)?.size ?? 0} import it ·{" "}
+          {reach.size} depend on it
+        </span>
+        <span className="map-key-item">
+          <KeySteps tone="history" /> 1 · 2 · 3 · 4+ steps away
+        </span>
+        <span className="map-key-item">
+          <i className="map-key-swatch map-key-outline" aria-hidden="true" /> it imports (
+          {forward.get(focus)?.size ?? 0})
+        </span>
+        <span className="map-key-item">Esc to clear</span>
+      </div>
+    );
+  }
   return lens === "impact" ? (
     <div className="map-legend" role="note" aria-label="Impact colour scale">
-      <span className="map-key-item">changed → importers → dependents</span>
-      <span className="map-key-item">brighter = closer import reach</span>
-      <span className="map-key-item">outline = overlapping changes</span>
+      <span className="map-key-item">
+        <KeySteps tone="impact" /> changed · imports it · 2 · 3+ steps
+      </span>
+      <span className="map-key-item">
+        <i className="map-key-swatch map-key-outline map-key-overlap" aria-hidden="true" /> changed,
+        and depends on another seat’s change
+      </span>
+      <span className="map-key-item">click a file to trace it</span>
     </div>
   ) : (
     <div className="map-legend" role="note" aria-label="History PR heat scale">
-      <span className="map-key-item">PR heat: 1–2 PRs · 3–9 PRs · 10–29 PRs · 30+ PRs</span>
-      <span className="map-key-item">corner = fix-heavy</span>
+      <span className="map-key-item">
+        <KeySteps tone="history" /> 1–2 PRs · 3–9 PRs · 10–29 PRs · 30+ PRs
+      </span>
+      <span className="map-key-item">
+        <i className="map-key-swatch map-key-fix" aria-hidden="true" /> fixed often
+      </span>
+      <span className="map-key-item">
+        <i className="map-key-swatch map-key-outline" aria-hidden="true" /> changing now
+      </span>
     </div>
   );
 }

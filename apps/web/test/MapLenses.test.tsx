@@ -205,6 +205,12 @@ it("shows Impact tallies, dependency overlap, untested changes, cycles, and a fo
   expect(lens.textContent).toContain("It imports");
   expect(lens.textContent).toContain("3depend on it");
   expect(lens.textContent).not.toContain("Further downstreamsrc/contract.ts");
+  const focusedKey = screen.getByRole("note", { name: "Impact colour scale" });
+  expect(focusedKey.textContent).toContain("contract.ts");
+  expect(focusedKey.textContent).toContain("1 · 2 · 3 · 4+ steps away");
+  expect(focusedKey.textContent).toContain("it imports");
+  expect(focusedKey.textContent).toContain("Esc to clear");
+  expect(focusedKey.querySelectorAll(".map-key-swatch")).toHaveLength(5);
   expect(document.querySelectorAll(".map-treemap-links line")).not.toHaveLength(0);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(lens.textContent).toContain("Changes overlap through imports");
@@ -277,7 +283,10 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   expect(screen.getByRole("img", { name: "Impact reach treemap" })).toBeTruthy();
-  expect(document.body.textContent).toContain("changed → importers → dependents");
+  expect(document.body.textContent).toContain("changed · imports it · 2 · 3+ steps");
+  expect(
+    screen.getByRole("note", { name: "Impact colour scale" }).querySelectorAll(".map-key-swatch"),
+  ).toHaveLength(5);
   const impact = screen.getByRole("region", { name: "Impact lens" });
   expect(impact.textContent).toContain("tests · import · depend");
   expect(impact.textContent).toContain("Test files changed separately");
@@ -303,6 +312,9 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
   expect(document.body.textContent).toContain("1–2 PRs");
   expect(document.body.textContent).toContain("30+ PRs");
+  expect(
+    screen.getByRole("note", { name: "History PR heat scale" }).querySelectorAll(".map-key-swatch"),
+  ).toHaveLength(6);
   const history = screen.getByRole("region", { name: "History lens" });
   expect(history.textContent).toContain("PRs · fixes");
   expect(document.body.textContent).toContain("hidden change coupling");
