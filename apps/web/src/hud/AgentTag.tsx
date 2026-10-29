@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { usePhone } from "../board/phone.ts";
 import { namedSeat, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import "./AgentTag.css";
 
 /** An agent's colour by its config index (`--s1…--s7`, wrapping); FLIGHT is grey. */
 export function agentColor(index: number | "flight"): string {

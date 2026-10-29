@@ -1,0 +1,17 @@
+.preview label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.preview p {
+  margin: 0;
+}

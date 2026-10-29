@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
-/** The code block's class: it scrolls sideways inside its own box (see `.md pre.md-code` in hud.css). */
+/** The code block's class: it scrolls sideways inside its own box (see `.md pre.md-code` in hud/shared.css). */
 export const MD_CODE_CLASS = "md-code";
 
 /** A fence opens on 3+ backticks and a line with no more backticks (so ```code``` is inline code). */

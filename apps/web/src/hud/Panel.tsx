@@ -1,6 +1,8 @@
 import { type ReactNode, useId } from "react";
 import { BuildChips, OWN_CHIPS } from "../shell/buildStatus.tsx";
 import { useBuildStatus } from "../shell/overlays.ts";
+import "./Panel.css";
+import "./shared.css";
 
 /**
  * A panel: header (title, subtitle, build-status chips, actions, the `P2` badge the chips replace)

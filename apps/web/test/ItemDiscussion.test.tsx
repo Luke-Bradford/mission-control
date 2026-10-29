@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ItemDiscussion as Discussion } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ItemDiscussion } from "../src/comms/ItemDiscussion.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
+import { readStyles } from "./styles.ts";
 
 function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
   const pinned: Record<string, unknown> = {};
@@ -110,7 +109,7 @@ describe("persistent item discussion", () => {
 // jsdom has no layout engine; check the responsive constraints in the real stylesheet.
 
 it("keeps the fly-out and composer within a narrow screen", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css.match(/\.flyout \{([^}]*)\}/)?.[1]).toContain("width: min(540px, 100%)");
   expect(css.match(/#discuss \.panel \{([^}]*)\}/)?.[1]).toContain("max-height: 86vh");
   expect(css.match(/#dsDiscussionForm \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");

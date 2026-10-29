@@ -1,0 +1,73 @@
+.labels {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.lb {
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 0;
+  border-radius: 2px;
+  padding: 0 6px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+/* decision briefs and the Item panel */
+.btitle {
+  font-size: 14px;
+}
+
+/* ticket beside the board (components/TicketDetail.tsx) */
+.tdetail {
+  width: auto;
+  min-width: 0;
+}
+
+.tdetail > .ph a {
+  text-decoration: none;
+  font-size: var(--fs-s);
+}
+
+.tart {
+  display: grid;
+  gap: 12px;
+}
+
+.thead {
+  display: grid;
+  gap: 6px;
+}
+
+.tbody {
+  /* a grid item: without this a long code line sets its min-content width and widens the pane */
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  padding: 8px 10px;
+  font-size: var(--fs-s);
+}
+
+.tlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-s);
+}
+
+/* in a panel body the list keeps .pb's padding */
+.pb.tlist {
+  padding: 2px 14px 12px;
+}
+
+@media (max-width: 999px) {
+  .tdetail {
+    width: auto;
+  }
+}

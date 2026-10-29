@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-/** Phone width: hud.css's `@media (max-width: 760px)` block, which the board's column CSS shares. */
+/** Phone width: board.css's `@media (max-width: 760px)` block, which the board's column CSS shares. */
 export const PHONE_QUERY = "(max-width: 760px)";
 
 const query = (): MediaQueryList | null =>

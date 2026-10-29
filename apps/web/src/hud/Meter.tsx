@@ -1,4 +1,5 @@
 import { METER_FULL_PCT, METER_WARN_PCT } from "@mc/core";
+import "./Meter.css";
 
 /** The class a meter's bar takes: ` full` from METER_FULL_PCT, ` hi` from METER_WARN_PCT, judged on the rounded value. */
 export function meterLevel(pct: number | null): "" | " hi" | " full" {

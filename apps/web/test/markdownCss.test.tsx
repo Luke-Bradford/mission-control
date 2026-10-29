@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Markdown, MD_CODE_CLASS } from "../src/components/Markdown.tsx";
+import { readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 const rule = (sel: string) => css.match(new RegExp(`\\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Markdown layout (hud.css)", () => {

@@ -51,6 +51,7 @@ import {
   useReturnFocus,
 } from "./overlays.ts";
 import { toast } from "./Toast.tsx";
+import "./ItemPanel.css";
 
 /**
  * A 540px fly-out for one thing that needs the operator. Every item uses the same brief sections;

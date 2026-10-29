@@ -1,0 +1,904 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
+.tdot {
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 2px solid var(--line-2);
+  flex: none;
+}
+
+.tdot.sm {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.vsteps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.vstep {
+  position: relative;
+  padding: 0 0 12px 34px;
+}
+
+.vstep::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-2);
+}
+
+.vstep:last-child::before {
+  display: none;
+}
+
+.vstep.done::before {
+  background: var(--fg-2);
+}
+
+.vstep .tdot {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.vstep.done .tdot {
+  background: var(--fg-2);
+  color: var(--surface);
+  border-color: var(--fg-2);
+}
+
+.vstep.cur .tdot {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.vstep.warn .tdot {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-mark);
+}
+
+.vhead {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
+  cursor: pointer;
+}
+
+.vhead:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.vname {
+  font-weight: 500;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.vmeta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.vfail {
+  font-size: var(--fs-xs);
+  color: var(--crit);
+}
+
+.vrule {
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+.atts {
+  margin-top: 6px;
+  display: grid;
+  gap: 3px;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
+
+.att {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto 34px;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  align-items: baseline;
+}
+
+.mbar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.mbar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--fg-2);
+}
+
+.tlrow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  font-size: var(--fs-s);
+}
+
+.tlbars {
+  position: relative;
+  height: 14px;
+  background: var(--surface-2);
+  border-radius: 2px;
+}
+
+.tlbars i {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
+  min-width: 4px;
+}
+
+.tl-pass {
+  background: var(--fg-2);
+}
+
+.tl-fail {
+  background: var(--crit);
+}
+
+.tl-fix {
+  background: var(--accent);
+}
+
+.tl-run {
+  background: var(--ok);
+}
+
+.tl-wait {
+  background: var(--warn-mark);
+}
+
+.check {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  padding: 3px 0;
+  font-size: var(--fs-s);
+  align-items: baseline;
+}
+
+#sideBody .check > :last-child {
+  overflow-wrap: anywhere;
+}
+
+.ck-pass,
+.ck-done {
+  color: var(--ok);
+}
+
+.ck-fail {
+  color: var(--crit);
+}
+
+.ck-run,
+.ck-in_progress {
+  color: var(--accent);
+}
+
+.ck-wait,
+.ck-pending {
+  color: var(--muted);
+}
+
+.qi {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 4px 0;
+  align-items: center;
+  font-size: var(--fs-s);
+}
+
+.vnow,
+.vhold > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vnow {
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vstep.cur .tdot {
+    animation: po 3.2s ease-in-out infinite;
+  }
+}
+
+.vhold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border-radius: var(--r);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.vhold .tdot {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-mark);
+}
+
+.idrow .big .rt {
+  font-family: var(--sans, inherit);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--fg-2);
+}
+
+/* agent */
+#page-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.picker button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 70%), var(--surface);
+  color: var(--warn);
+  border-radius: var(--r);
+}
+
+.ahead .doing {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.idrow {
+  display: flex;
+  gap: 8px 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.idrow .big {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.idrow .big i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--c);
+}
+
+.idrow .chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* a long chip (a branch, an area) is cut at the row's width rather than widening the page */
+.idrow .chips span {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  background: var(--surface-2);
+  border-radius: 2px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idrow .ctl {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tiles2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.tile2 {
+  background: var(--surface-2);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-width: 0;
+}
+
+.tile2 .v {
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile2 .v small {
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  font-weight: 400;
+  color: var(--fg-2);
+  margin-left: 4px;
+}
+
+.tile2 .d {
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  min-width: 0;
+}
+
+.tile2.now {
+  grid-column: span 2;
+}
+
+/* A long ticket title would make the head tall enough to push the side panels off the window. */
+.tile2 .nowt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.tile2 .nowdoing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctxbar {
+  display: flex;
+  height: 8px;
+  gap: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface);
+  margin: 2px 0;
+}
+
+.ctxbar i {
+  display: block;
+  height: 100%;
+  background: var(--s1);
+}
+
+.ctxbar.seg i.sys {
+  background: var(--s5);
+}
+
+.ctxbar.seg i.tools {
+  background: var(--s4);
+}
+
+.ctxbar.seg i.msgs {
+  background: var(--s1);
+}
+
+.ctxbar.seg i.buf {
+  background: var(--line-2);
+}
+
+.ctxbar.hi i {
+  background: var(--warn-mark);
+}
+
+.ctxbar.full i {
+  background: var(--crit);
+}
+
+.agrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  gap: 12px;
+}
+
+.livecall {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-s);
+}
+
+.livecall.stuck {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.livecall .t {
+  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev {
+  display: grid;
+  grid-template-columns: 44px 58px minmax(0, 1fr);
+  gap: 10px;
+  padding: 5px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-s);
+  align-items: baseline;
+}
+
+.ev .at {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.ev .who {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.ev .txt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ev.think .txt {
+  color: var(--think);
+  font-style: italic;
+}
+
+.ev.tool .txt {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.ev.tool .tres {
+  color: var(--muted);
+}
+
+.ev.tool summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev.tool .tn {
+  font-weight: 600;
+}
+
+.ev.you .who,
+.ev.you .txt {
+  color: var(--accent);
+}
+
+.ev.ask .who,
+.ev.guard .who,
+.ev.guard .txt {
+  color: var(--warn);
+}
+
+.ev.sys .txt {
+  color: var(--muted);
+}
+
+.ev details summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.ev details pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.side > #loopP {
+  flex: 1.25 1 0;
+  min-height: 260px;
+}
+
+.side > #sideP {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+
+.subrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-s);
+}
+
+.subrow:first-child {
+  border-top: 0;
+}
+
+.f {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: var(--fs-s);
+}
+
+/* A file row is a button: it opens the file's diff below the list. */
+button.f {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  white-space: normal;
+  line-height: inherit;
+}
+
+button.f:hover,
+button.f[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.fdiff {
+  margin-top: 8px;
+}
+
+.fdiff-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Agent page: the Runs list where the mockup's Loop panel sits */
+.runrow {
+  display: grid;
+  grid-template-columns: 32px 84px 44px minmax(52px, 1fr) 44px 56px;
+  gap: 2px 6px;
+  white-space: nowrap;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+
+.runrow.head {
+  border-top: 0;
+}
+
+.runrow .right {
+  text-align: right;
+}
+
+.runrow .rticket {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+}
+
+.runrow .rticket > * {
+  flex: none;
+}
+
+.run-checklist {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-checklist > li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.run-checklist-note,
+.run-checklist-next {
+  display: block;
+  font-size: var(--type-sm);
+  color: var(--fg-2);
+}
+
+.run-checklist-total {
+  color: var(--fg-2);
+}
+
+.run-trace {
+  max-width: 1100px;
+}
+
+.trace-head {
+  margin-bottom: 16px;
+}
+
+.trace-head h1 {
+  margin: 2px 0;
+  font-size: var(--type-xl);
+}
+
+.trace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 16px;
+}
+
+.trace-section {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.trace-section h2 {
+  margin: 0 0 7px;
+  font-size: var(--type-md);
+}
+
+.trace-section p {
+  margin: 4px 0;
+}
+
+@media (max-width: 700px) {
+  .trace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* the ticket's title takes what is left of the first line (never under 8ch) and is cut with an
+   ellipsis; PR chips that do not fit after it move to the next line */
+.runrow .rticket > .rtitle {
+  flex: 1 1 0;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The side panel is 320px at its narrowest (1200-1439 with FLIGHT's dock). Under the six
+   columns' minimum (32 + 84 + 44 + 52 + 44 + 56 + 5 × 6 = 342px) a run row drops Started and
+   Tokens, as it does at 390. */
+#loopBody {
+  container: runs / inline-size;
+}
+
+@container runs (width < 342px) {
+  .runrow {
+    grid-template-columns: 32px 84px minmax(0, 1fr) 56px;
+  }
+  .runrow > :nth-child(3),
+  .runrow > :nth-child(5) {
+    display: none;
+  }
+}
+
+/* the summary is a button holding two lines; the full text opens on click, Enter or Space (and is the title on hover) */
+.runrow button.rsummary {
+  grid-column: 2 / -1;
+  min-width: 0;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  line-height: inherit;
+  text-align: left;
+  white-space: normal;
+}
+
+.runrow .rsummary .rtext {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.runrow .rsummary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.runrow .rsummary.open .rtext {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.msg.sys .body {
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+@media (max-width: 999px), (max-height: 559px) {
+  .side > #sideP,
+  .side > #loopP {
+    flex: none;
+    min-height: 0;
+  }
+  #sideBody {
+    max-height: 460px;
+  }
+}
+
+@media (max-width: 999px) {
+  .agrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tile2.now {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .runrow {
+    grid-template-columns: 32px 84px minmax(0, 1fr) 56px;
+  }
+  .runrow > :nth-child(3),
+  .runrow > :nth-child(5) {
+    display: none;
+  }
+  .ev {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .ev .who {
+    display: none;
+  }
+}
+
+.rename-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rename-editor label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rename-editor input {
+  min-width: 0;
+  width: 16ch;
+  max-width: 100%;
+}
+
+.rename-editor [role="alert"] {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.queue-focus {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.queue-focus form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.queue-focus input {
+  min-width: 0;
+  width: 100%;
+}
+
+.account-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.account-chooser label,
+.account-chooser select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.account-chooser select {
+  width: 24ch;
+}

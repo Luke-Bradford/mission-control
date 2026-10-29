@@ -1,4 +1,5 @@
 import { store, useStore } from "./store.ts";
+import "./Toast.css";
 
 /** How long a toast stays (catalogue §1.3). */
 const TOAST_MS = 5200;
@@ -20,7 +21,7 @@ export function clearToast(): void {
 
 /**
  * The status line: always mounted and never `hidden` (a live region outside the accessibility tree
- * can miss its first message); hud.css hides it visually while it is empty.
+ * can miss its first message); Toast.css hides it visually while it is empty.
  */
 export function Toast() {
   const msg = useStore(message);

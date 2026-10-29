@@ -31,7 +31,7 @@ import { useSessionScope } from "../shell/session.ts";
 const DASH = "—";
 export const NO_CREW_RUNS = "No crew runs. Start a seat from a ticket on the Board.";
 
-/** The step bar's classes (hud.css): done, current and held. */
+/** The step bar's classes (overview.css): done, current and held. */
 const MARK_CLASS: Record<StepMark, string | undefined> = {
   done: "d",
   cur: "c",

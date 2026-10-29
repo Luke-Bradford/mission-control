@@ -1,0 +1,62 @@
+/*
+ * lamps and pulses: amber waits on you, green is being worked; both breathe slowly. Each kind has
+ * its own shape (hud/Lamp.tsx), so state never depends on colour: warn diamond, crit square, ok
+ * circle, off ring.
+ */
+.lamp {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn-mark);
+  flex: none;
+}
+
+.lamp.warn {
+  border-radius: 1px;
+  width: 7px;
+  height: 7px;
+  margin: 0.5px;
+  transform: rotate(45deg);
+}
+
+.lamp.crit {
+  background: var(--crit);
+  border-radius: 1px;
+}
+
+.lamp.ok {
+  background: var(--ok);
+}
+
+.lamp.off {
+  background: transparent;
+  border: 1.5px solid var(--muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lamp.pulse {
+    animation: lamp 2.4s ease-in-out infinite;
+  }
+  @keyframes lamp {
+    50% {
+      opacity: 0.25;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lamp.pulse {
+    box-shadow: 0 0 0 3px var(--warn-soft);
+  }
+  .lamp.ok.pulse {
+    box-shadow: 0 0 0 3px var(--ok-soft);
+  }
+  .lamp.crit.pulse {
+    box-shadow: 0 0 0 3px var(--crit-soft);
+  }
+}
+
+.lamp.info {
+  background: var(--accent);
+}

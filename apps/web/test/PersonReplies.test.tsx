@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { AttentionBrief, AttentionItem } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
@@ -7,6 +5,7 @@ import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { item } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const key = "person:123:1000";
 const path = `/api/attention/${encodeURIComponent(key)}`;
@@ -217,7 +216,7 @@ it.each(["loading", "failed", "empty"])("shows a %s person source response", asy
 });
 
 it("constrains the reply region and wraps long text on narrow screens", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css).toMatch(/width: min\(540px, 100%\)/);
   expect(css).toMatch(/\.person-choices\s*\{[^}]*overflow: auto;[^}]*min-height: 0;/);
   expect(css).toMatch(/\.person-choices \.opt\s*\{[^}]*overflow-wrap: anywhere;/);

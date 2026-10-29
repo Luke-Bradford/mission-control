@@ -1,0 +1,67 @@
+.modal .panel.awaypanel {
+  width: min(1120px, 100%);
+}
+
+.awaygrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.swlist {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.sw {
+  font-size: var(--fs-s);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* a long label must not squeeze its checkbox */
+.sw input {
+  flex: none;
+}
+
+.sw.locked {
+  color: var(--fg-2);
+}
+
+.sw.locked::before {
+  content: "Always";
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-top: 2px;
+  flex: none;
+}
+
+@media (max-width: 999px) {
+  .awaygrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* away modal: spacing the mockup set inline */
+.awayctl {
+  margin-bottom: 14px;
+}
+
+.awaypanel h3.gap {
+  margin-top: 14px;
+}
+
+.awaypanel p.gap {
+  margin: 8px 0;
+}
+
+.awaypanel .awaygrid > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

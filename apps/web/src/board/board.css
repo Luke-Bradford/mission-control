@@ -1,0 +1,292 @@
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-ok {
+    animation: po 3.2s ease-in-out infinite;
+  }
+}
+
+/* board */
+#page-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.query {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  padding: 3px 4px 3px 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.query code {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.kanban {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 4px 6px;
+}
+
+.kcol {
+  flex: 1 0 210px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-2);
+  border-radius: var(--r);
+}
+
+.kcol.empty {
+  flex: 0 0 44px;
+}
+
+.kcol .kh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.kcol .kh .n {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.kcol.empty .kh {
+  writing-mode: vertical-rl;
+  padding: 12px 0;
+  align-self: center;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.kcol .knot {
+  padding: 0 12px 6px;
+}
+
+.kcol.empty .knot {
+  writing-mode: vertical-rl;
+  padding: 0;
+  align-self: center;
+}
+
+.repokanbans {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+}
+
+.repokanban {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.repokanban .rkh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 2px 4px 4px;
+}
+
+.repokanban .rkh h3 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.repokanban .kanban {
+  flex: none;
+  height: 360px;
+}
+
+.kcol .kb {
+  display: grid;
+  gap: 8px;
+  padding: 2px 8px 8px;
+  overflow: auto;
+  min-height: 0;
+  align-content: start;
+}
+
+.done-more {
+  justify-self: start;
+  font-size: var(--fs-s);
+}
+
+.board-placeholder {
+  min-height: 70vh;
+}
+
+.kcard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 9px 11px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.kcard {
+  position: relative;
+}
+
+/* the title link covers the card, so the whole card opens it; GitHub links sit above the cover */
+.kcard .ktitle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.kcard .rref a {
+  position: relative;
+  z-index: 1;
+}
+
+.kcard .overlay a {
+  position: relative;
+  z-index: 1;
+}
+
+.kcard:hover {
+  border-color: var(--line-2);
+}
+
+/* The "You:" chip is a pill that opens its Needs-you item's brief; it sits above the cover. */
+.kcard .overlay button.kyou {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  line-height: inherit;
+  padding: 1px 8px 1px 7px;
+  color: var(--warn);
+}
+
+.kcard .overlay button.kyou:hover,
+.kcard .overlay button.kyou:focus-visible {
+  text-decoration: underline;
+}
+
+.kyou-more {
+  color: var(--muted);
+}
+
+/* A card waiting on the operator (or just worked) carries an edge, not a full outline. */
+.kcard.you,
+.kcard.pulse-warn {
+  border-color: var(--line);
+  box-shadow: inset 2px 0 0 var(--warn-mark);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 45%), var(--surface);
+}
+
+.kcard.pulse-ok {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
+}
+
+.kref {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.kref .p {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.ktitle {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.boardsplit {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.boardsplit.withdetail {
+  grid-template-columns: minmax(0, 1fr) min(420px, 40%);
+}
+
+@media (max-width: 999px), (max-height: 559px) {
+  .kanban {
+    height: 70vh;
+  }
+}
+
+@media (max-width: 999px) {
+  .boardsplit,
+  .boardsplit.withdetail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  /* the board stacks its columns; each is a header (name, count), the open one shows its cards */
+  .kanban {
+    flex-direction: column;
+    height: auto;
+    overflow-x: visible;
+  }
+  /* a per-repo lane's fixed 360px has the same specificity as the rule above: repeat it */
+  .repokanban .kanban {
+    height: auto;
+  }
+  .kcol,
+  .kcol.empty {
+    flex: none;
+  }
+  .kcol.empty .kh,
+  .kcol.empty .knot {
+    writing-mode: horizontal-tb;
+    align-self: stretch;
+    padding: 9px 12px;
+  }
+  .kcol .kh > button {
+    width: 100%;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+}

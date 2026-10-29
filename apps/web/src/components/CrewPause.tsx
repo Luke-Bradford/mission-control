@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
+import "./CrewPause.css";
 
 export function CrewPauseControl() {
   const { data: pause, error } = useResource<CrewPause | null>(RESOURCES.crewPause);

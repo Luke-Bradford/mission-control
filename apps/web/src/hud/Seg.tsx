@@ -1,3 +1,5 @@
+import "./Seg.css";
+
 /** A segmented control: one pressed button among a few, as a labelled group. */
 export function Seg<T extends string>({
   label,

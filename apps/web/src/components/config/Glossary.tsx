@@ -1,5 +1,6 @@
 import { BACKGROUND_STALL_MS, HUD_STATE_LABEL, HUD_STATES, METRICS, STALL_MS } from "@mc/core";
 import { Panel } from "../../hud/Panel.tsx";
+import "./Glossary.css";
 
 /** Anchor for `/setup/sources#glossary` (where the old `/config` and `/settings#glossary` land). */
 export const GLOSSARY_ID = "glossary";

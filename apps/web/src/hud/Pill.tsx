@@ -1,5 +1,6 @@
 import type { PillTone } from "@mc/core";
 import type { ReactNode } from "react";
+import "./Pill.css";
 
 /**
  * A dot plus a word, never colour alone (mockup L110–115): `ok` green, `warn` amber, `crit` red,

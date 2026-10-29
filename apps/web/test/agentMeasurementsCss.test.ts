@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, it } from "vitest";
+import { readStyle, readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 const rule = (selector: string) => css.split(`\n${selector} {`)[1]?.split("}")[0] ?? "";
 
 it("fits measured attempts and long live task text into narrow panels", () => {
@@ -12,8 +11,8 @@ it("fits measured attempts and long live task text into narrow panels", () => {
   expect(rule(".f")).toContain("grid-template-columns: minmax(0, 1fr) auto auto;");
   expect(rule(".ph")).toContain("flex-wrap: wrap;");
   expect(rule(".seg")).toContain("flex-wrap: wrap;");
-  const narrow = css.split("@media (max-width: 999px) {")[1] ?? "";
-  expect(narrow).toMatch(/\.agrid,[^{]+\{\s+grid-template-columns: minmax\(0, 1fr\);/);
+  const narrow = readStyle("agent/agent.css").split("@media (max-width: 999px) {")[1] ?? "";
+  expect(narrow).toMatch(/\.agrid \{\s+grid-template-columns: minmax\(0, 1fr\);/);
 });
 
 it("wraps the rename editor and long call signs within narrow headers", () => {

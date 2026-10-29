@@ -1,0 +1,88 @@
+/* dock: FLIGHT */
+.dock {
+  min-height: 0;
+}
+
+.dock .dh {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.dock .dh .meta {
+  width: 100%;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* Under the asks the log's top edge fades, so a line scrolled half out of view reads as the edge
+   of the scroll, not as text running behind the asks. */
+.dwait + .dmsgs {
+  padding-top: 20px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+  mask-image: linear-gradient(to bottom, transparent 2px, #000 30px);
+}
+
+/* What waits on the operator: an opaque block with the screen's one coloured edge. */
+.dwait {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--warn-mark);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.dwait .dwh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0 4px;
+  color: var(--warn);
+  font: 600 10.5px / 1.2 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: inherit;
+}
+
+.dask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 26px;
+  font-size: var(--fs-s);
+}
+
+.dask > button.sm {
+  padding: 1px 8px;
+}
+
+@media (max-width: 1199px) {
+  .dock {
+    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 100%);
+    z-index: 32;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+      calc(10px + env(safe-area-inset-bottom, 0px)) 10px;
+  }
+  .dockscrim {
+    position: fixed;
+    inset: 0;
+    z-index: 31;
+    background: var(--scrim);
+  }
+}

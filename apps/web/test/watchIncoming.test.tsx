@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { FlightArrivalDisposition, FlightWatchEntry } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -9,6 +7,7 @@ import { Drafts } from "../src/flight/Drafts.tsx";
 import { Incoming } from "../src/flight/Incoming.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
+import { readStyles } from "./styles.ts";
 
 const watch: FlightWatchEntry = {
   id: "hold",
@@ -161,7 +160,7 @@ it("shows loading, empty and failed responses", async () => {
 });
 
 it("keeps long arrival and watch text readable in the narrow single-column layout", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   // Plan's lower panels stack into one column when the page is too narrow for three.
   expect(css).toMatch(
     /@container flight \(width < 900px\)[\s\S]*?\.flight-queue-lower,[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,

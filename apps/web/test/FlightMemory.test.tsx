@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   FLIGHT_MEMORY_BODY_MAX,
   FLIGHT_MEMORY_KINDS,
@@ -17,6 +15,7 @@ import { hub, RESOURCES } from "../src/data.ts";
 import { MemoryPanel } from "../src/flight/Memory.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, MIN, NOW, REPOS } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 afterEach(() => {
   forgetOperatorToken();
@@ -215,7 +214,7 @@ it("preserves newlines and indentation in note bodies", async () => {
   await open();
   const text = screen.getByRole("listitem").querySelector(".expandable-text");
   expect(text?.textContent).toBe(body);
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css).toMatch(/\.memory-note \.expandable-text\s*\{[^}]*white-space: pre-wrap;/);
 });
 

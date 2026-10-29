@@ -8,6 +8,7 @@ import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import { closeAway, trapTab, useAwayOpen, useOverlay, useReturnFocus } from "./overlays.ts";
 import { toast } from "./Toast.tsx";
+import "./AwayModal.css";
 
 /** Confirmation for settings enforced by the hub. */
 export const AWAY_SAVED = "Saved. Away mode gates starts and PR readiness now.";

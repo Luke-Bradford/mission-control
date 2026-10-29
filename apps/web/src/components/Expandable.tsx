@@ -1,4 +1,5 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import "./Expandable.css";
 
 export function Toggle({ on, of, onClick }: { on: boolean; of?: string; onClick: () => void }) {
   const text = on ? "Show less" : "Show more";

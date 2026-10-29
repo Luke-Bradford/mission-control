@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type ConfigProfile,
   type ConfigView,
@@ -17,6 +15,7 @@ import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, CREW_CONFIG, run, seatRow } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const TEMPLATES = [
   {
@@ -372,7 +371,7 @@ describe("Setup › Loops templates", () => {
   });
 
   it("keeps phone-width horizontal scrolling inside the chain drawing (hud.css)", () => {
-    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const css = readStyles();
     const rule = (selector: string) =>
       css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
     expect(rule(String.raw`\.loop-chain-scroll`)).toContain("overflow-x: auto;");
@@ -381,7 +380,7 @@ describe("Setup › Loops templates", () => {
   });
 
   it("template rows wrap within their width (hud.css)", () => {
-    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const css = readStyles();
     const rule = (selector: string) =>
       css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
     expect(rule(String.raw`\.loop-templates > li`)).toContain("min-width: 0;");

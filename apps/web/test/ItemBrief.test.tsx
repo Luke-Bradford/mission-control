@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_LINES, BriefOptions, ItemBrief } from "../src/comms/ItemBrief.tsx";
 import { brief } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 afterEach(() => {
   cleanup();
@@ -214,7 +213,7 @@ it("omits an empty ask and does not repeat the recommended option's text", () =>
 });
 
 it("applies phone wrap and fold rules to long question, recommendation and option content", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   const declarations = (selector: string) =>
     rules

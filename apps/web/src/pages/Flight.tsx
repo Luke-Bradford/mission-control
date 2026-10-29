@@ -12,6 +12,7 @@ import { WorkInFlight } from "../flight/WorkInFlight.tsx";
 import { WorkingLog } from "../flight/WorkingLog.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { NEEDS_YOU_PANEL, navigate, useHash } from "../router.ts";
+import "../flight/flight.css";
 
 const FLIGHT_TABS = ["command", "queue", "notebook", "record"] as const;
 type FlightTab = (typeof FLIGHT_TABS)[number];

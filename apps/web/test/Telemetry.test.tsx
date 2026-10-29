@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   type ConfigView,
   LIVE_MINUTES,
@@ -28,6 +26,7 @@ import {
   NOW,
   seatRow,
 } from "./fixtures.ts";
+import { readStyle, readStyles } from "./styles.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -1339,11 +1338,11 @@ describe("ticket scope", () => {
 
 it("keeps telemetry controls and wide tables usable on narrow screens", async () => {
   await loaded();
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css.match(/\.toolbar \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");
   expect(css.match(/\.tw \{([^}]*)\}/)?.[1]).toContain("overflow-x: auto");
-  expect(css).toMatch(
-    /@media \(max-width: 999px\) \{[^}]*\.tgrid,[^}]*grid-template-columns: minmax\(0, 1fr\)/,
+  expect(readStyle("telemetry/telemetry.css")).toMatch(
+    /@media \(max-width: 999px\) \{[^}]*\.tgrid \{[^}]*grid-template-columns: minmax\(0, 1fr\)/,
   );
   for (const id of ["tLat", "tTotals"]) {
     expect(panel(id).querySelector("table")?.parentElement?.classList.contains("tw")).toBe(true);

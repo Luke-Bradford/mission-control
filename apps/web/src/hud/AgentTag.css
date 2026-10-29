@@ -1,0 +1,30 @@
+.ag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.ag i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--c, var(--fg-2));
+  flex: none;
+}
+
+.ag.sm {
+  font-size: 13px;
+}
+
+.ag .rt {
+  font-family: var(--sans, inherit);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--fg-2);
+}

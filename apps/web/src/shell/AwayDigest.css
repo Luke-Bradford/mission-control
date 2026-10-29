@@ -1,0 +1,13 @@
+/* The return digest fills the work area; long refs wrap inside phone-width tiles. */
+.away-digest {
+  overflow-y: auto;
+}
+
+.away-digest .stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.away-digest .stat2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

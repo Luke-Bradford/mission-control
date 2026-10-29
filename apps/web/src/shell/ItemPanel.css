@@ -1,0 +1,30 @@
+.flyout {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(540px, 100%);
+  z-index: 36;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+    calc(10px + env(safe-area-inset-bottom, 0px)) 10px;
+}
+
+.flyout .panel {
+  height: 100%;
+  box-shadow: var(--shadow);
+}
+
+#dsBrief {
+  border-bottom: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+#dsOpts {
+  flex-wrap: wrap;
+}
+
+#dsBrief blockquote {
+  margin: 0;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}

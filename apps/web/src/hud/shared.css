@@ -1,0 +1,786 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
+.titer {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0 5px;
+}
+
+.budget {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.qsec {
+  margin-top: 8px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rref {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.rchip {
+  color: var(--c, var(--fg-2));
+  background: color-mix(in srgb, var(--c, var(--fg-2)) 14%, transparent);
+  border: 0;
+  border-radius: 2px;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pulse-warn {
+    animation: pw 2.6s ease-in-out infinite;
+  }
+  @keyframes pw {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+  @keyframes po {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+}
+
+/* Controls in a panel head keep the body face; only the title is set as a console label. */
+.ph button,
+.ph select,
+.ph input {
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.panel > .scroll,
+.panel > .pb.scroll {
+  flex: 1 1 auto;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.col > .panel {
+  flex: none;
+}
+
+.col.free {
+  overflow: visible;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbar-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#agentsP .sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#agentsP .ph {
+  padding: 6px 8px;
+  flex-wrap: nowrap;
+}
+
+#agentsP .sub {
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Work in flight: stretch the agent link across the row, keeping ticket and PR links above it. */
+#wifP .row {
+  position: relative;
+  cursor: pointer;
+}
+
+#wifP .row:hover {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+#wifP .row .rref a {
+  position: relative;
+  z-index: 1;
+}
+
+.track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+  display: block;
+  min-width: 24px;
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--fg-2);
+}
+
+@keyframes now-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.stack {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.stack i {
+  display: block;
+  height: 100%;
+}
+
+#machP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+}
+
+#quotaP .ph {
+  padding: 8px 10px;
+  flex-wrap: nowrap;
+}
+
+#machP .pb,
+#quotaP .pb {
+  padding: 0 10px 10px;
+}
+
+#machP .lock {
+  padding: 6px;
+  gap: 4px;
+}
+
+#machP .lock .chipref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lanes {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.overlay {
+  border-top: 1px dashed var(--line-2);
+  padding-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.ahead {
+  padding: 12px 14px;
+  display: grid;
+  /* not `auto`: a nowrap chip's min-content would widen the track past the page */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.side > .panel {
+  flex: none;
+}
+
+pre.diff {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  font: 11px / 1.5 var(--mono);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+pre.diff .a {
+  color: var(--ok);
+}
+
+pre.diff .d {
+  color: var(--crit);
+}
+
+pre.diff .h {
+  color: var(--accent);
+}
+
+.add {
+  color: var(--ok);
+}
+
+.del {
+  color: var(--crit);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.composer input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.composer .hint {
+  width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+/* comms */
+.mention {
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.msg {
+  display: grid;
+  gap: 3px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  max-width: 900px;
+}
+
+.msg.tagged {
+  background: var(--warn-soft);
+}
+
+.msg.mine .from b {
+  color: var(--accent);
+}
+
+.msg .from {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.msg .body {
+  overflow-wrap: anywhere;
+}
+
+.dock .panel {
+  height: 100%;
+}
+
+.dmsgs {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.dmsg {
+  padding: 5px 14px;
+  display: grid;
+  gap: 1px;
+}
+
+.dmsg .who {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.dmsg .txt {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.dmsg.you .who,
+.dmsg.you .txt {
+  color: var(--accent);
+}
+
+.dmsg.hub .txt {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.dmsg.pending {
+  opacity: 0.7;
+}
+
+.dmsg.flight .md-txt {
+  white-space: normal;
+  max-width: 62ch;
+  line-height: 1.5;
+}
+
+.dmsg.flight .md-txt .md strong {
+  color: var(--accent);
+}
+
+.note.err {
+  color: var(--crit);
+  width: 100%;
+}
+
+/* instruments: mono ticks, dashed grid, a solid axis and a "now" cursor (hud/charts) */
+.ct {
+  fill: var(--muted);
+  font: 10px var(--mono);
+}
+
+.ct.now {
+  fill: var(--accent);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.stat2 {
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  padding: 7px 9px;
+  display: grid;
+  gap: 1px;
+}
+
+.stat2 b {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.stat2 span {
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+td.r,
+th.r {
+  text-align: right;
+}
+
+td.wrap {
+  white-space: normal;
+}
+
+.tw {
+  overflow-x: auto;
+}
+
+/* setup › sessions: a crew session's top folders and who owns each */
+.tiles {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tiles .tile {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+
+.tiles .tile.stray {
+  border-color: var(--crit);
+}
+
+/* setup › repos: the add-a-repo form and its preview */
+.setup-repos {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
+.bsec {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* catch-up: every item brought to you starts with context */
+.ctx {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  background: var(--surface);
+}
+
+.ctxline {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: var(--fs-s);
+}
+
+.rules {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: var(--fs-s);
+  display: grid;
+  gap: 4px;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  z-index: 35;
+  padding: 16px;
+}
+
+.modal .panel {
+  width: min(720px, 100%);
+  max-height: 86vh;
+}
+
+.modal pre {
+  white-space: pre-wrap;
+  font: var(--fs-s) / 1.5 var(--mono);
+  margin: 0;
+  color: var(--fg);
+}
+
+.keys {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tsec {
+  display: grid;
+  gap: 6px;
+}
+
+@media (max-width: 1199px) {
+  .shell,
+  .app.dock-hidden .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dock .panel {
+    box-shadow: var(--shadow);
+  }
+}
+
+@media (max-width: 999px), (max-height: 559px) {
+  .col {
+    overflow: visible;
+  }
+  .col > #agentsP,
+  .col > #actP {
+    flex: none;
+    min-height: 0;
+  }
+  #actP .scroll {
+    max-height: 460px;
+  }
+  #stream {
+    max-height: 60vh;
+  }
+}
+
+/* Item panel: the loop's own words keep their line breaks */
+.brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.qtext {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Markdown in agent text: wraps inside its column, code scrolls inside its block */
+.md {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.md p {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}
+
+.md li ul {
+  margin: 2px 0 0;
+}
+
+.md code,
+.rsummary code,
+.nrow code,
+.nowt code,
+.needpart code,
+.arow code,
+.btitle code,
+.opt code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.md pre.md-code {
+  margin: 0 0 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.ev .txt .md pre {
+  color: var(--fg-2);
+}
+
+.thread .doing {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+details.guard > summary {
+  cursor: pointer;
+  padding: 8px 14px;
+  font-size: var(--fs-s);
+  color: var(--muted);
+}
+
+.person-choices {
+  display: grid;
+  overflow: auto;
+  min-height: 0;
+}
+
+.person-choices .optlist,
+.person-choices textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.person-choices .opt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.person-choices textarea {
+  min-height: 6em;
+}
+
+#dsForm,
+#dsDiscussionForm {
+  flex-wrap: wrap;
+}
+
+#dsForm input,
+#dsDiscussionForm input {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+#discuss .brief,
+#discuss .opt,
+#discuss .ctx {
+  overflow-wrap: anywhere;
+}
+
+#discuss .panel {
+  max-height: 86vh;
+  overflow: hidden;
+}
+
+#discuss .ph {
+  flex: none;
+}
+
+#discuss .item-body {
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+}
+
+#discuss .expandable.open .expandable-content {
+  max-height: none;
+  overflow: visible;
+}
+
+#discuss .dmsgs {
+  overflow: visible;
+}
+
+.item-conversation > summary {
+  margin: 10px 14px;
+}
+
+.brief-section {
+  min-width: 0;
+}
+
+.brief-section .chipref {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.brief-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.brief-section .bsec {
+  margin: 0 0 6px;
+}
+
+.answer-heading {
+  margin: 10px 14px;
+}
+
+.option-pick {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+}
+
+.option-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* The whole card is the target, so the whole card shows keyboard focus. */
+.option-pick:focus-visible {
+  outline: none;
+}
+
+.opt:has(.option-pick:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.opt .expandable,
+.opt .expandable > .sm,
+.opt a {
+  position: relative;
+  z-index: 1;
+}
+
+#discuss .opt .pill {
+  justify-self: start;
+}
+
+.access-preferences {
+  display: grid;
+  gap: 8px;
+}
+
+.access-preferences input[type="time"] {
+  max-width: 100%;
+}

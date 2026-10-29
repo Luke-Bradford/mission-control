@@ -1,6 +1,7 @@
 import { prPill, type RunPr } from "@mc/core";
 import { Pill } from "./Pill.tsx";
 import { RepoRef } from "./RepoRef.tsx";
+import "./PrChip.css";
 
 /**
  * A PR a run published: its repo chip and `PR #3240` linked to GitHub (plain text when no
