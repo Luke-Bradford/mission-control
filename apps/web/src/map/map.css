@@ -156,6 +156,79 @@
   height: 100%;
   touch-action: none;
 }
+.map-treemap {
+  position: absolute;
+  inset: 0;
+  padding: 8px;
+  background: var(--void);
+}
+.map-treemap-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: minmax(26px, 1fr);
+  grid-auto-flow: dense;
+  gap: 2px;
+  height: 100%;
+}
+.map-treemap-tile {
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--void-line), white 20%);
+  border-radius: 1px;
+  box-shadow: none;
+  font: 10px var(--mono);
+  text-align: left;
+  color: var(--void-ink);
+  opacity: calc(0.22 + var(--tile-intensity) * 0.78);
+}
+.map-treemap-impact .map-treemap-tile {
+  background: color-mix(in srgb, var(--tile-colour) calc(var(--tile-intensity) * 85%), var(--void));
+}
+.map-treemap-history .map-treemap-tile {
+  background: color-mix(in srgb, var(--rem) calc(var(--tile-intensity) * 85%), var(--void));
+}
+.map-treemap-tile[data-dim] {
+  opacity: 0.12;
+}
+.map-treemap-tile[data-focused] {
+  outline: 2px solid var(--void-ink);
+  outline-offset: -2px;
+  opacity: 1;
+}
+.map-treemap-tile > .map-treemap-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-treemap-trace {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  margin: 0;
+  padding: 3px 5px;
+  font: 10px var(--mono);
+  color: var(--void-ink);
+  background: var(--void-panel);
+}
+.map-treemap-links {
+  position: absolute;
+  inset: 8px;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  pointer-events: none;
+}
+.map-treemap-links line {
+  stroke: var(--void-ink);
+  stroke-width: 0.45;
+  opacity: 0.85;
+}
+.map-treemap-links line[data-hidden] {
+  stroke-dasharray: 1.5 1.5;
+  opacity: 0.5;
+}
 .map-stage > p[role="status"],
 .map-wait-note {
   position: absolute;
@@ -373,9 +446,34 @@
   color: var(--fg);
   font: inherit;
   text-align: left;
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.map-lens-directory {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: rtl;
+}
+.map-lens-filename {
+  flex: none;
+  white-space: nowrap;
+}
+.map-lens-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.map-lens-columns span:last-child {
+  text-align: right;
+}
+.map-lens-note {
+  color: var(--muted);
 }
 .map-lens-file:hover,
 .map-lens-back:hover {

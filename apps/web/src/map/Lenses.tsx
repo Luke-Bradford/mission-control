@@ -252,9 +252,13 @@ function importOverlaps(seats: ReturnType<typeof changed>, forward: Graph["forwa
 }
 
 function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) => void }) {
+  const slash = path.lastIndexOf("/");
+  const directory = slash === -1 ? "" : path.slice(0, slash + 1);
+  const filename = slash === -1 ? path : path.slice(slash + 1);
   return (
-    <button type="button" className="map-lens-file" onClick={() => onFocus(path)}>
-      {path}
+    <button type="button" className="map-lens-file" onClick={() => onFocus(path)} title={path}>
+      <span className="map-lens-directory">{directory}</span>
+      <span className="map-lens-filename">{filename}</span>
     </button>
   );
 }
@@ -290,7 +294,7 @@ export function ImpactLens({
   const allChanged = changed(snapshot);
   const allChangedCode = allChanged.map(({ seat, files }) => ({
     seat,
-    files: files.filter(isCode),
+    files: files.filter((path) => isCode(path) && !isTest(path)),
   }));
   if (focus !== null) {
     const reaches = downstream(focus, reverse);
@@ -371,6 +375,15 @@ export function ImpactLens({
               {files.length} files changed → <b>{direct}</b> import them · <b>{reached.size}</b>{" "}
               depend on them
             </p>
+            {files.some(isTest) && (
+              <p className="map-lens-note">
+                Test files changed separately: {files.filter(isTest).length}
+              </p>
+            )}
+            <div className="map-lens-columns">
+              <span>changed file</span>
+              <span>tests · import · depend</span>
+            </div>
             {code.map((path) => (
               <div className="map-lens-row" key={path}>
                 <FileButton path={path} onFocus={onFocus} />
@@ -556,16 +569,15 @@ export function HistoryLens({
       </section>
     );
   }
-  const hotspots = changed(snapshot)
-    .flatMap(({ seat, files }) =>
-      files.flatMap((path) => {
-        const history = histories.get(path);
-        return history === undefined ? [] : [{ seat: seat.seat, path, history }];
-      }),
-    )
+  const hotspots = [...new Set(changed(snapshot).flatMap(({ files }) => files))]
+    .filter((path) => !isTest(path))
+    .flatMap((path) => {
+      const history = histories.get(path);
+      return history === undefined ? [] : [{ path, history }];
+    })
     .sort((a, b) => b.history[0] - a.history[0]);
   const fixed = [...histories.entries()]
-    .filter(([, history]) => history[1] > 0)
+    .filter(([path, history]) => history[1] > 0 && !hotspots.some((row) => row.path === path))
     .sort((a, b) => b[1][1] - a[1][1] || b[1][0] - a[1][0])
     .slice(0, 10);
   const unlinked = [...partners.entries()]
@@ -585,6 +597,7 @@ export function HistoryLens({
       </header>
       <HistoryRows
         title="Hotspots the seats are changing"
+        columns="PRs · fixes"
         rows={hotspots.map(({ path, history }) => ({
           path,
           text: `${history[0]} · ${history[1]}`,
@@ -593,11 +606,13 @@ export function HistoryLens({
       />
       <HistoryRows
         title="Fixed most often"
+        columns="fixes · PRs"
         rows={fixed.map(([path, history]) => ({ path, text: `${history[1]} of ${history[0]}` }))}
         onFocus={onFocus}
       />
       <HistoryRows
         title="Change together, no import between them"
+        columns="PRs · share"
         rows={unlinked.map((row) => ({
           label: `${name(row.source)} + ${name(row.path)}`,
           text: `${row.count} PRs · ${Math.round(row.share * 100)}%`,
@@ -611,16 +626,24 @@ export function HistoryLens({
 
 function HistoryRows({
   title,
+  columns,
   rows,
   onFocus,
 }: {
   title: string;
+  columns?: string;
   rows: { path?: string; label?: string; text: string; focus?: string }[];
   onFocus: (path: string) => void;
 }) {
   return (
     <div className="map-lens-section">
       <h3>{title}</h3>
+      {columns && (
+        <div className="map-lens-columns">
+          <span>file</span>
+          <span>{columns}</span>
+        </div>
+      )}
       {rows.length ? (
         rows.map((row) => {
           const path = row.path ?? row.focus ?? "";

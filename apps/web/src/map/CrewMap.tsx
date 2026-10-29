@@ -17,6 +17,7 @@ import {
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
+import { MapTreemap } from "./MapTreemap.tsx";
 import { layoutTree } from "./model.ts";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
 import "./map.css";
@@ -289,33 +290,44 @@ export function CrewMapView({
           }}
         />
         {lens === "impact" && <span>Click a file to trace its importers, tests, and imports.</span>}
-        {lens === "history" && <span>Hotspots and hidden change contracts from merged PRs.</span>}
+        {lens === "history" && <span>Hotspots and hidden change coupling from merged PRs.</span>}
       </div>
       <div className="map-main">
         <div className="map-stage-wrap">
-          <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-            <Scene
-              nodes={displayNodes}
-              areas={areas}
-              snapshot={stage}
-              names={names}
-              focus={focusNode?.path ?? null}
-              focusLinks={focusLinks}
+          {lens === "changes" ? (
+            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
+              <Scene
+                nodes={displayNodes}
+                areas={areas}
+                snapshot={stage}
+                names={names}
+                focus={focusNode?.path ?? null}
+                focusLinks={focusLinks}
+                lens={lens}
+                lensVisual={lensVisual}
+                home={home}
+                overview={overview}
+                rotate={rotate}
+                selected={selectedPath}
+                indices={colours}
+                onSelect={selectFromScene}
+                seat={selectedSeat?.seat ?? null}
+                seatFocus={seatFocus}
+                dockSeats={snapshot.seats.length}
+                onSeatSelect={followFromStage}
+              />
+            </Suspense>
+          ) : (
+            <MapTreemap
+              snapshot={snapshot}
               lens={lens}
-              lensVisual={lensVisual}
-              home={home}
-              overview={overview}
-              rotate={rotate}
-              selected={selectedPath}
-              indices={colours}
+              visual={lensVisual}
+              focus={focus}
+              focusLinks={focusLinks}
               onSelect={selectFromScene}
-              seat={selectedSeat?.seat ?? null}
-              seatFocus={seatFocus}
-              dockSeats={snapshot.seats.length}
-              onSeatSelect={followFromStage}
             />
-          </Suspense>
-          <MapKey tree={snapshot.tree} />
+          )}
+          {lens === "changes" && <MapKey tree={snapshot.tree} />}
         </div>
         <div className="map-rail">
           {lens === "impact" ? (

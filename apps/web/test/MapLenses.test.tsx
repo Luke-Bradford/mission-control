@@ -1,5 +1,5 @@
 import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, lensVisuals } from "../src/map/Lenses.tsx";
@@ -176,15 +176,7 @@ it("shows Impact tallies, dependency overlap, untested changes, cycles, and a fo
   expect(lens.textContent).toContain("It imports");
   expect(lens.textContent).toContain("3depend on it");
   expect(lens.textContent).not.toContain("Further downstreamsrc/contract.ts");
-  await waitFor(() =>
-    expect(
-      scenes.some((scene) =>
-        scene.focusLinks?.some(
-          (edge) => edge.from === "src/contract.ts" && edge.to === "src/cycle.ts",
-        ),
-      ),
-    ).toBe(true),
-  );
+  expect(document.querySelectorAll(".map-treemap-links line")).not.toHaveLength(0);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(lens.textContent).toContain("Changes overlap through imports");
 });
@@ -201,11 +193,9 @@ it("treats a branching import SCC as one audit unit and map clicks toggle lens f
   expect(graph(value).cycles).toEqual([["src/consumer.ts", "src/contract.ts", "src/cycle.ts"]]);
   render(<CrewMapView snapshot={snapshot()} />);
   fireEvent.click(screen.getByRole("button", { name: "History" }));
-  const select = scenes.findLast((entry) => entry.onSelect !== undefined)?.onSelect;
-  if (select === undefined) throw new Error("expected a scene selection callback");
-  act(() => select("src/contract.ts"));
+  fireEvent.click(document.querySelector(".map-treemap-tile[title='src/contract.ts']") as Element);
   expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Latest PRs");
-  act(() => select("src/contract.ts"));
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
   expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Hotspots");
 });
 
@@ -217,7 +207,7 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
   expect(lens.textContent).toContain("Hotspots the seats are changing");
   expect(lens.textContent).toContain("Fixed most often");
   expect(lens.textContent).toContain("Change together, no import between them");
-  expect(lens.textContent).toContain("22 of 59");
+  expect(lens.textContent).toContain("59 · 22");
   const historyContract = within(lens).getAllByRole("button", { name: "src/contract.ts" })[0];
   if (historyContract === undefined) throw new Error("expected the changed contract file");
   fireEvent.click(historyContract);
@@ -226,11 +216,35 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
     "https://github.com/Luke-Bradford/mission-control/pull/837",
   );
   expect(lens.textContent).toContain("Changes together with");
-  expect(
-    scenes.some((scene) =>
-      scene.focusLinks?.some(
-        (edge) => edge.from === "src/contract.ts" && edge.to === "src/untested.ts",
-      ),
-    ),
-  ).toBe(true);
+  expect(document.querySelectorAll(".map-treemap-links line")).not.toHaveLength(0);
+});
+
+it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
+  const value = snapshot();
+  value.seats[1] = {
+    ...value.seats[1],
+    scope: {
+      read: [],
+      modified: [
+        ...value.seats[1].scope.modified,
+        { file: "src/contract.ts", add: 1, rem: 0, source: "diff" },
+        { file: "test/consumer.test.ts", add: 1, rem: 0, source: "diff" },
+      ],
+    },
+  };
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("img", { name: "Impact reach treemap" })).toBeTruthy();
+  const impact = screen.getByRole("region", { name: "Impact lens" });
+  expect(impact.textContent).toContain("tests · import · depend");
+  expect(impact.textContent).toContain("Test files changed separately");
+
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
+  const history = screen.getByRole("region", { name: "History lens" });
+  expect(history.textContent).toContain("PRs · fixes");
+  expect(document.body.textContent).toContain("hidden change coupling");
+  expect(within(history).getAllByRole("button", { name: "src/contract.ts" })).toHaveLength(1);
+  expect(history.textContent).not.toContain("test/consumer.test.ts");
 });
