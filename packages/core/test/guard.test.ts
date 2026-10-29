@@ -2431,6 +2431,7 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "ssh -fN host",
     "ssh -Nf host",
     "ssh -f host sleep 9",
+    "ssh -Mf host sleep 9",
     "autossh -f host",
     "autossh -Nf host",
     "start-stop-daemon --start -b",
@@ -2452,6 +2453,10 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
 
   it("allows an ssh remote argument that only resembles a local background flag", () => {
     expect(ruleOf(bash("ssh host printf -- -foo"))).toBe("allow");
+  });
+
+  it("allows start-stop-daemon option values that contain a background flag letter", () => {
+    expect(ruleOf(bash("start-stop-daemon -Snbob --exec /bin/sleep -- 9"))).toBe("allow");
   });
 
   it.each([
