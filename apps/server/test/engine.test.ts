@@ -3384,6 +3384,7 @@ describe("the engine runs reviews", () => {
     await toReview();
     expect(first()).toMatchObject({ state: "queued", runId: null });
     expect(h.starts).toEqual([]);
+    expect(store.run(RUN)?.endedAt).toBeNull();
   });
 
   it("leaves an already-running review alone when capacity becomes constrained", async () => {
@@ -3395,7 +3396,7 @@ describe("the engine runs reviews", () => {
       cores: 8,
       memUsedBytes: 1,
       memTotalBytes: 2,
-      diskFreeBytes: 20 * 1024 ** 3,
+      diskFreeBytes: 14 * 1024 ** 3,
       diskTotalBytes: 100 * 1024 ** 3,
       agents: null,
     });

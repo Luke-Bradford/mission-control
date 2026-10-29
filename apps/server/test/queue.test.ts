@@ -91,6 +91,7 @@ let heads: string[];
 let lsRemoteFails: boolean;
 /** An error the fake `git` throws as is (a broken clone); takes precedence over `lsRemoteFails`. */
 let lsRemoteError: Error | null;
+let takeNow: number;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
   return {
@@ -214,7 +215,7 @@ const takeDeps = (): TakeDeps => ({
       .join("");
   },
   transientTakes,
-  now: () => NOW,
+  now: () => takeNow,
   log: (l) => logs.push(l),
   onNotes: () => void noteCalls++,
   supervisor: {
@@ -289,6 +290,7 @@ beforeEach(() => {
   heads = [];
   lsRemoteFails = false;
   lsRemoteError = null;
+  takeNow = NOW;
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -918,6 +920,20 @@ describe("takeNext", () => {
     await take();
     expect(started).toEqual([]);
     expect(issues(SERVER)).toEqual([1]);
+
+    takeNow += 5 * 60_000 + 1;
+    store.addMachineSample({
+      at: takeNow,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 20 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    } satisfies MachineSample);
+    await take();
+    expect(started).toEqual([{ seatId: SERVER, issue: 1, loop: NEW_LOOP }]);
   });
 
   it("counts a seat with no seat row as idle", async () => {
