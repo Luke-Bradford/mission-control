@@ -313,7 +313,7 @@ import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
-import type { Engine } from "../engine/engine.ts";
+import { type Engine, type OperatorRefusal, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -2910,14 +2910,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
           if (n >= FLIGHT_UNPARKS_PER_RUN) return fail(unparkCapText(n));
         }
+        let refusal: OperatorRefusal | null = null;
         if (
           !(await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
             kinds,
             action: a.action,
             ...(a.note === undefined ? {} : { note: a.note }),
+            onRefused: (reason) => {
+              refusal = reason;
+            },
           }))
         )
-          return fail("Park cannot be settled: check the head, hold or independent RETRO review.");
+          return fail(
+            `Park cannot be settled: ${operatorRefusalText(refusal) ?? "the engine is unavailable"}.`,
+          );
         if (a.action === "lift")
           record(now(), {
             kind: "unpark",

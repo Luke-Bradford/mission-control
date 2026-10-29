@@ -4508,6 +4508,118 @@ describe("the engine runs reviews", () => {
       ).toBe(true);
     });
 
+    describe("names the check that refused", () => {
+      const refusal = async (
+        by: "CAPCOM" | "FLIGHT",
+        opts: NonNullable<Parameters<typeof h.engine.onOperatorMessage>[2]>,
+      ) => {
+        let reason: string | null = null;
+        const lifted = await h.engine.onOperatorMessage(RUN, by, {
+          ...opts,
+          onRefused: (r) => {
+            reason = r;
+          },
+        });
+        expect(lifted).toBe(false);
+        return reason;
+      };
+      const parkedReview = async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
+      };
+
+      it("not parked", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        expect(await refusal("FLIGHT", { action: "rework" })).toBe("not-parked");
+      });
+
+      it("PR closed", async () => {
+        await parkedReview();
+        setLoop({ phase: "parked", parked: { kind: "pr-closed", reason: "closed", ended: false } });
+        expect(await refusal("CAPCOM", { action: "accept" })).toBe("pr-closed");
+      });
+
+      it("held by a stopped seat", async () => {
+        await parkedReview();
+        store.setSeatSession({ ...(store.seatSession(SEAT) as SeatSessionRow), state: "stopped" });
+        expect(await refusal("FLIGHT", { kinds: ["review"], action: "rework" })).toBe("held");
+      });
+
+      it("a budget park is never FLIGHT's", async () => {
+        await parkedReview();
+        setLoop({ phase: "parked", parked: { kind: "budget", reason: "budget", ended: false } });
+        expect(await refusal("FLIGHT", { action: "rework" })).toBe("held");
+      });
+
+      it("an action that does not fit the park", async () => {
+        await parkedReview();
+        expect(await refusal("FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe("wrong-action");
+        setLoop({ phase: "parked", parked: { kind: "review-failed", reason: "x", ended: false } });
+        expect(await refusal("FLIGHT", {})).toBe("wrong-action");
+      });
+
+      it("an action CAPCOM may not take", async () => {
+        await parkedReview();
+        expect(await refusal("CAPCOM", { action: "rework" })).toBe("not-permitted");
+      });
+
+      it("head moved", async () => {
+        await parkedReview();
+        setPr({ headSha: SHA_B });
+        expect(await refusal("CAPCOM", { action: "accept" })).toBe("head-moved");
+      });
+
+      it("a lift whose head does not descend from the push", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "stuck", reason: "stuck", ended: false } });
+        clock += 1000;
+        commit(SHA_B);
+        expect(await refusal("FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe("head-moved");
+      });
+
+      it("PR not open", async () => {
+        await parkedReview();
+        setPr({ state: "closed" });
+        expect(await refusal("CAPCOM", { action: "accept" })).toBe("pr-not-open");
+      });
+
+      it("round already granted on this head", async () => {
+        await parkedReview();
+        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT", { action: "rework" })).toBe(true);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
+      });
+
+      it("a blocking review on floor-enforcing paths", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Critical")]);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "Blocked", ended: false } });
+        expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
+          "floor-enforced",
+        );
+      });
+
+      it("the operator's message could not be stored", async () => {
+        await parkedReview();
+        expect(await refusal("CAPCOM", { beforeLift: async () => false })).toBe("before-lift");
+      });
+
+      it("the engine is off", async () => {
+        await parkedReview();
+        h.engine.stop();
+        expect(await refusal("CAPCOM", {})).toBe("engine-off");
+      });
+    });
+
     it("FLIGHT's CI reruns stop at two per head", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();

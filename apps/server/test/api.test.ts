@@ -6533,7 +6533,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(told).toEqual(["aside"]);
-    expect(calls).toEqual([["aside", "CAPCOM"]]);
+    expect(calls).toEqual([["aside", "CAPCOM", { onRefused: expect.any(Function) }]]);
     expect(r.statusCode).toBe(409);
     expect(
       (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
@@ -6559,7 +6559,7 @@ describe("the first loop's engine", () => {
         headers: json,
         payload: {},
       });
-      expect(calls).toEqual([["aside", "CAPCOM"]]);
+      expect(calls).toEqual([["aside", "CAPCOM", { onRefused: expect.any(Function) }]]);
       expect(r.statusCode).toBe(409);
       await a.close();
     },
@@ -6582,7 +6582,9 @@ describe("the first loop's engine", () => {
         headers: json,
         payload: {},
       });
-      expect(calls).toEqual([["aside", "CAPCOM", { action: "accept" }]]);
+      expect(calls).toEqual([
+        ["aside", "CAPCOM", { action: "accept", onRefused: expect.any(Function) }],
+      ]);
       expect(r.statusCode).toBe(409);
       await a.close();
     },
@@ -6633,6 +6635,32 @@ describe("the first loop's engine", () => {
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ ok: true });
+    await a.close();
+  });
+
+  it("names the check that refused the resume", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: {
+        onOperatorMessage: async (_id, _by, opts) => {
+          opts?.onRefused?.("floor-enforced");
+          return false;
+        },
+        status: () => ({ on: true, note: "" }),
+      },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toContain("only the controller can merge it");
     await a.close();
   });
 

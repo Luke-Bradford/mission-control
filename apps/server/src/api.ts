@@ -183,7 +183,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
-import type { Engine } from "./engine/engine.ts";
+import { type Engine, type OperatorRefusal, operatorRefusalText } from "./engine/engine.ts";
 import {
   changedFiles,
   committedLines,
@@ -3229,12 +3229,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+        let refusal: OperatorRefusal | null = null;
+        const onRefused = (reason: OperatorRefusal) => {
+          refusal = reason;
+        };
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
-          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept", onRefused })
+          : await deps.engine.onOperatorMessage(run.id, "CAPCOM", { onRefused });
         if (!lifted) {
           return reply.code(409).send({
-            error: "nothing to resume: the run is not parked, or its park is not lifted this way",
+            error: `nothing to resume: ${operatorRefusalText(refusal) ?? "the run is not parked, or its park is not lifted this way"}`,
           });
         }
         return { ok: true };

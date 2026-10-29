@@ -131,7 +131,7 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
+import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
@@ -224,6 +224,7 @@ let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
 let lifts: boolean;
+let refuseWith: OperatorRefusal | null = null;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
@@ -319,6 +320,7 @@ beforeEach(() => {
   busyNow = [];
   engineOn = false;
   lifts = true;
+  refuseWith = null;
   rulesNow = DEFAULT_REPO_RULES;
   reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
@@ -408,6 +410,7 @@ beforeEach(() => {
       rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
         engineCalls.push(a);
+        if (!lifts && refuseWith !== null) a[2]?.onRefused?.(refuseWith);
         return lifts;
       },
       status: () => ({ on: engineOn, note: null }),
@@ -5613,6 +5616,26 @@ describe("superuser housekeeping", () => {
     );
     expect(engineCalls).toHaveLength(1);
   });
+  it.each([
+    ["head-moved", "the pushed head moved"],
+    ["pr-not-open", "the PR is not open"],
+    ["held", "the run is held"],
+    ["round-granted", "already granted on this head"],
+    ["floor-enforced", "only the controller can merge it"],
+  ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "review", reason: "held", ended: false },
+    });
+    lifts = false;
+    refuseWith = reason;
+    const result = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(result).toHaveProperty("isError", true);
+    expect(JSON.stringify(result)).toContain(text);
+  });
   it("grants one capped review rework with a fix list, then leaves a repeat to the controller", async () => {
     elevated();
     runPr();
@@ -5640,6 +5663,7 @@ describe("superuser housekeeping", () => {
           kinds: ["review", "review-ruling"],
           action: "rework",
           note: "Fix the validation branch and add its regression test.",
+          onRefused: expect.any(Function),
         },
       ],
     ]);
