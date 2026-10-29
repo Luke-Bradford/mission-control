@@ -280,6 +280,31 @@ describe("renderHudWithPlaywright", () => {
     },
   );
 
+  it("reports the deadline, not the closed browser, when it expires while the page is being created", async () => {
+    const fake = fakePlaywright();
+    // Chrome is still starting: the page only appears after the deadline closed the browser
+    // and, as in Playwright, closing the context fails the pending call at once, before the
+    // deadline's own cleanup has finished
+    fake.context.newPage.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          fake.contextClose.mockImplementationOnce(async () => {
+            reject(
+              new Error("browserContext.newPage: Target page, context or browser has been closed"),
+            );
+            await new Promise((r) => setTimeout(r, 40));
+          });
+        }),
+    );
+    const failure = await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(fake.playwright),
+      deadlineMs: 10,
+    }).catch((e: Error) => e);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("deadline");
+    expect((failure as Error).message).not.toContain("closed");
+  });
+
   it("waits for the requested page to render and the network to settle before capture", async () => {
     let release: () => void = () => {};
     const pageReady = new Promise<void>((resolve) => {
