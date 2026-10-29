@@ -2113,7 +2113,7 @@ describe("Agent page: loop steps", () => {
           prNumber: 77,
         });
         const f = stub({
-          rows: [seat(loop)],
+          rows: [seatRow({ id: "shop-app-ta", loop })],
           runs: [],
           extra: {
             [LOOP_ROUTE]: {
@@ -2125,6 +2125,7 @@ describe("Agent page: loop steps", () => {
               },
             },
             "POST /api/runs/r-12/resume": { ok: true },
+            "POST /api/runs/r-12/message": { ok: true },
           },
         });
         const { container } = render(<Agent id="shop-app-ta" />);
@@ -2137,6 +2138,17 @@ describe("Agent page: loop steps", () => {
         expect(panel.textContent).toContain("RETRO found a missing regression test");
         expect(screen.getByRole("button", { name: "Send rework message" })).toBeTruthy();
         expect(screen.getByText(/does not waive them/)).toBeTruthy();
+        fireEvent.change(screen.getByLabelText("Message this agent"), {
+          target: { value: "Please fix the regression." },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Send rework message" }));
+        await waitFor(() =>
+          expect(JSON.parse(bodyOf(f, "/api/runs/r-12/message") as string)).toEqual({
+            text: "Please fix the regression.",
+          }),
+        );
+        expect(bodyOf(f, "/api/seats/shop-app-ta/message")).toBeUndefined();
+        expect(bodyOf(f, "/api/runs/r-12/resume")).toBeUndefined();
 
         const confirm = vi
           .spyOn(window, "confirm")
@@ -2149,6 +2161,30 @@ describe("Agent page: loop steps", () => {
         confirm.mockRestore();
       },
     );
+
+    it("keeps a parked run's composer disabled when its review park cannot load", async () => {
+      const loop = loopOf({
+        phase: "parked",
+        text: "Blocked: RETRO finding",
+        parked: "RETRO finding",
+        prNumber: 77,
+      });
+      const f = stub({
+        rows: [seatRow({ id: "shop-app-ta", loop })],
+        extra: {
+          [LOOP_ROUTE]: () => ({ status: 503, body: { error: "run details unavailable" } }),
+        },
+      });
+      render(<Agent id="shop-app-ta" />);
+      await loaded();
+
+      const send = await screen.findByRole("button", { name: "Loading review findings…" });
+      expect((send as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByLabelText("Message this agent") as HTMLInputElement).disabled).toBe(true);
+      expect(screen.queryByRole("button", { name: "Interrupt and send" })).toBeNull();
+      fireEvent.submit(document.querySelector("#agentForm") as HTMLFormElement);
+      expect(bodyOf(f, "/api/seats/shop-app-ta/message")).toBeUndefined();
+    });
 
     it("the run's limits", async () => {
       const profile = DEFAULT_PROFILES.find((p) => p.name === "small-change");

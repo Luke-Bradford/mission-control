@@ -245,10 +245,17 @@ export function SeatComposer({
   const [error, setError] = useState<string | null>(null);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
-  const loop = useResource<{ loop: RunLoop | null }>(row.run ? RESOURCES.runLoop(row.run.id) : null)
-    .data?.loop;
+  const loopResource = useResource<{ loop: RunLoop | null }>(
+    row.run ? RESOURCES.runLoop(row.run.id) : null,
+  );
+  const loop = loopResource.data?.loop;
   const parkedReview = reviewPark(loop);
   const crew = row.kind === "crew";
+  // The crew summary only says that a run is parked. Wait for its authoritative park kind before
+  // allowing a message: a review park must use its run route rather than the ordinary seat route.
+  const parkKindUnknown =
+    row.loop?.phase === "parked" && row.run !== null && loopResource.data === undefined;
+  const composerDisabled = !crew || busy || parkKindUnknown;
   const call = callSign(row);
   useEffect(() => {
     if (!prefill || used.current === prefill.token) return;
@@ -279,7 +286,7 @@ export function SeatComposer({
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (crew && !busy) void send(false);
+    if (crew && !busy && !parkKindUnknown) void send(false);
   };
 
   return (
@@ -293,19 +300,23 @@ export function SeatComposer({
         placeholder={
           placeholder ?? (parkedReview ? "Send findings back for rework…" : `Message ${call}…`)
         }
-        disabled={!crew}
+        disabled={composerDisabled}
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <button type="submit" className="primary" disabled={!crew || busy}>
-        {parkedReview ? "Send rework message" : "Send"}
+      <button type="submit" className="primary" disabled={composerDisabled}>
+        {parkKindUnknown
+          ? "Loading review findings…"
+          : parkedReview
+            ? "Send rework message"
+            : "Send"}
       </button>
-      {!parkedReview && (
+      {!parkedReview && !parkKindUnknown && (
         <button
           type="button"
           className="sm ghost"
           title="Stop the current turn, then send"
-          disabled={!crew || busy}
+          disabled={composerDisabled}
           onClick={() => void send(true)}
         >
           Interrupt and send
@@ -317,11 +328,13 @@ export function SeatComposer({
         </span>
       )}
       <span className="hint" id={HINT_ID}>
-        {parkedReview
-          ? `This sends RETRO's findings on ${reviewParkSha(parkedReview)} back for rework. It does not waive them.`
-          : crew
-            ? seatHint(row, vendor)
-            : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
+        {parkKindUnknown
+          ? "Loading the park details before a message can be sent."
+          : parkedReview
+            ? `This sends RETRO's findings on ${reviewParkSha(parkedReview)} back for rework. It does not waive them.`
+            : crew
+              ? seatHint(row, vendor)
+              : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
       </span>
     </form>
   );
