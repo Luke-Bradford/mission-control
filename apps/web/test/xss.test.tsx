@@ -1,6 +1,7 @@
 import type { ConfigView } from "@mc/core";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { ConfigYaml } from "../src/components/config/ConfigYaml.tsx";
 import { TicketDetail } from "../src/components/TicketDetail.tsx";
 import { githubHref } from "../src/links.ts";
@@ -260,6 +261,55 @@ describe("untrusted text renders literally", () => {
     for (const a of container.querySelectorAll("a")) {
       expect(a.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
     }
+  });
+});
+
+describe("untrusted text in the Comms graph", () => {
+  it("the hover card's newest message and a seat's call sign", async () => {
+    stubFetch({
+      "/api/config": CONFIG,
+      "/api/comms/links": {
+        links: [
+          {
+            from: "guido-1",
+            to: "retro-1",
+            count: 1,
+            lastId: "comms:1",
+            lastAt: NOW,
+            lastText: PAYLOAD + SCRIPT,
+          },
+        ],
+      },
+      "/api/comms/traffic": { hours: [] },
+      "/api/comms/chatter": { pairs: [] },
+    });
+    const seat = (id: string, index: number) =>
+      crewRow({
+        id,
+        index,
+        kind: "crew",
+        loopKind: "crew",
+        role: "GUIDO",
+        displayCallSign: PAYLOAD,
+      });
+    render(
+      <CommsGraph
+        rows={[seat("guido-1", 0), seat("retro-1", 1)]}
+        flightId={undefined}
+        view={{ kind: "crew" }}
+      />,
+    );
+    const edge = await waitFor(() => {
+      const el = document.querySelector(".comms-edge");
+      if (!el) throw new Error("no link yet");
+      return el;
+    });
+    fireEvent.mouseEnter(edge);
+    const tip = screen.getByRole("tooltip");
+    expect(within(tip).getByText(PAYLOAD + SCRIPT)).toBeTruthy();
+    const graph = document.querySelector(".comms-spider") as Element;
+    expect(graph.querySelector("img, script")).toBeNull();
+    expect(graph.textContent).toContain(PAYLOAD);
   });
 });
 

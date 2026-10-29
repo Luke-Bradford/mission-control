@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_HARD_RULES, DEFAULT_REPO_RULES } from "@mc/core";
+import { DEFAULT_HARD_RULES, DEFAULT_REPO_RULES, globMatches } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const reads = vi.hoisted(() => ({ count: 0, failNext: false }));
@@ -85,6 +85,11 @@ describe("parseRepoRules", () => {
       hardRulesSet: true,
     });
     expect(base?.hardRules).toEqual(["policy/**"]);
+  });
+
+  it("reads a rolling tech-debt issue number from the repo block", () => {
+    expect(parseRepoRules(block("mc: {tech_debt_issue: 656}\n")).techDebtIssue).toBe(656);
+    expect(() => parseRepoRules(block("mc: {tech_debt_issue: 0}\n"))).toThrow(/tech_debt_issue/);
   });
 
   it("unions hard rules and always-ask labels and keeps operator authority", () => {
@@ -620,6 +625,17 @@ describe("this repo's own rules", () => {
     const md = readFileSync(fileURLToPath(new URL("../../../CLAUDE.md", import.meta.url)), "utf8");
     const own = parseRepoRules(md).hardRules;
     expect(DEFAULT_HARD_RULES.filter((p) => !own.includes(p))).toEqual([]);
+  });
+
+  it("hold a seat's committed agent config (.codex/, .claude/) as hard-rule files", () => {
+    const md = readFileSync(fileURLToPath(new URL("../../../CLAUDE.md", import.meta.url)), "utf8");
+    const own = parseRepoRules(md).hardRules;
+    const hard = (p: string) => own.some((g) => globMatches(g, p, true));
+    expect(hard(".codex/config.toml")).toBe(true);
+    expect(hard(".codex/rules/default.rules")).toBe(true);
+    expect(hard(".claude/settings.json")).toBe(true);
+    expect(hard(".claude/agents/x.md")).toBe(true);
+    expect(hard("docs/codex.md")).toBe(false);
   });
 });
 

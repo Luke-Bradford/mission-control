@@ -17,6 +17,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_LABELS,
+  COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   COMMS_REACTIONS,
@@ -125,7 +126,14 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
+import {
+  COMMS_SNAPSHOT_LIMIT,
+  pinComms,
+  reactComms,
+  sendComms,
+  threadMessages,
+  validateCommsText,
+} from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -1265,10 +1273,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       // Reader: apps/web/src/App.tsx#App (pinned Comms)
       api.get("/comms/pins", () => ({ messages: storedCommsMessages(store.commsPins()) }));
-      // Reader: apps/web/src/App.tsx#App (Comms link activity)
-      api.get("/comms/links", () => ({
-        links: store.commsLinkCounts(now() - 24 * 60 * 60 * 1000),
-      }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx (Comms link activity and newest-message preview)
+      api.get("/comms/links", () => {
+        // The preview only where both ends are ones the Comms routes already serve; a removed
+        // seat's link keeps its count but not its words.
+        const served = (id: string) => knownCommsAgent(id) || id === COMMS_CREW || id === COMMS_MC;
+        return {
+          links: store
+            .commsLinkCounts(now() - 24 * 60 * 60 * 1000)
+            .map((link) =>
+              served(link.from) && served(link.to)
+                ? link
+                : { from: link.from, to: link.to, count: link.count },
+            ),
+        };
+      });
       // Reader: apps/web/src/comms/CommsGraph.tsx (24 hour Comms Traffic bars)
       api.get("/comms/traffic", () => ({
         hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
@@ -1999,7 +2018,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            const tree = await mapTree(checkout);
+            const tree = await mapTree(
+              checkout,
+              "origin/HEAD",
+              store.pullRequests(repo.id),
+              store.board(repo.id),
+              now(),
+            );
             if (!stopMapRing) stopMapRing = mapRing.start();
             mapRing.poll();
             const data = mapSeats(
@@ -2012,6 +2037,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               mapRing,
               deps.lock?.state() ?? NO_LOCK,
               now(),
+              flightSeat(config)?.seat.id ?? null,
             );
             for (const seat of data.seats) {
               const context = store.seatSession(
@@ -2200,6 +2226,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
 
       api.get("/health", async () => store.status());
+      // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
+      api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
+        const range = req.query.range ?? "30d";
+        const match = /^(7|30|90|365)d$/.exec(range);
+        if (!match) return reply.code(400).send({ error: "range must be 7d, 30d, 90d, or 365d" });
+        const until = now();
+        return store.audit(until - Number(match[1]) * 86_400_000, until);
+      });
       api.get("/machine", async (): Promise<MachineView> => {
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
@@ -2777,7 +2811,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/Dock.tsx#Dock
-      api.get("/flight", async () => flightView(config, store, Date.now()));
+      // `live` is judged from FLIGHT's session, not only its run row (#798)
+      api.get("/flight", async () =>
+        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
+      );
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
@@ -3075,10 +3112,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return crewFail(e, reply);
         }
       });
-      // The operator resumes a parked, looped run, for one whose seat no longer holds it (set aside at
-      // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
-      // review or review-ruling park waives that head's findings, as the message does. The answer
-      // waits for the engine's pass, so "ok" means the park was lifted.
+      // The operator accepts a parked, looped run's review findings for a run whose seat no longer holds
+      // it (set aside at CI or review) too. Unlike a message to the seat, this explicit Resume action
+      // waives a review or review-ruling park's findings. The answer waits for the engine's pass, so
+      // "ok" means the park was lifted.
       // Reader: docs/runbook.md#resume-a-parked-run
       api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -3090,13 +3127,79 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (deps.engine?.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
-        if (!(await deps.engine.onOperatorMessage(run.id))) {
+        const reviewWaiver =
+          run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+        const lifted = reviewWaiver
+          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
+          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+        if (!lifted) {
           return reply.code(409).send({
             error: "nothing to resume: the run is not parked, or its park is not lifted this way",
           });
         }
         return { ok: true };
       });
+      // Rework reaches a set-aside run through Comms, rather than interrupting whichever newer run
+      // now occupies its seat. The engine wakes the set-aside run after the message is stored.
+      // Reader: docs/runbook.md#rework-a-parked-run
+      api.post<{ Params: { id: string } }>(
+        "/runs/:id/message",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const run = store.run(req.params.id);
+          if (run === null) return reply.code(404).send({ error: "unknown run" });
+          if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = MessageBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (deps.engine?.status().on !== true)
+            return reply.code(409).send({ error: "the loop engine is off" });
+          const kind = run.loop.parked?.kind;
+          if (kind !== "review" && kind !== "review-ruling")
+            return reply.code(409).send({ error: "rework is only available for review parks" });
+          const knownSecrets = deps.knownSecrets ?? (async () => []);
+          try {
+            await validateCommsText(knownSecrets, body.data.text);
+          } catch (e) {
+            return crewFail(
+              new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+              reply,
+            );
+          }
+          let commsError: unknown = null;
+          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
+            kinds: [kind],
+            beforeLift: async () => {
+              try {
+                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
+                  to: run.agentId,
+                  text: body.data.text,
+                  ref: run.ticket ?? undefined,
+                  targetRunId: run.id,
+                });
+                return true;
+              } catch (e) {
+                commsError = e;
+                return false;
+              }
+            },
+          });
+          if (commsError !== null)
+            return crewFail(
+              new SupervisorError(
+                400,
+                commsError instanceof Error ? commsError.message : "Comms message refused.",
+              ),
+              reply,
+            );
+          if (!lifted)
+            return reply
+              .code(409)
+              .send({ error: "the review park could not be resumed for rework" });
+          return { ok: true };
+        },
+      );
       // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
       api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -3256,6 +3359,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
           try {
             const out = await updater.update();
+            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
             return "restarting" in out ? reply.code(202).send(out) : out;
           } catch (e) {
             captureError(reply, e);

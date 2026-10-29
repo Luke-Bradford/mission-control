@@ -443,7 +443,7 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(userLines()).toHaveLength(1));
     expect(userLines()[0]).toContain(
-      "[The ticket body was cut at 20,000 characters; 25,000 more are missing. Do not guess them; ask with mc ask_operator.]",
+      "[The ticket body was cut at 20,000 characters; 25,000 more are missing. Do not guess them; ask FLIGHT with mc ask_flight.]",
     );
   });
 
@@ -2105,6 +2105,17 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(tokens.resolve(token)).toBeNull();
     expect(readdirSync(crewDir()).filter((f) => SECRET.test(f) || f.includes(".tmp"))).toEqual([]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+  });
+
+  it("does not spawn when recording the prompt version fails", async () => {
+    vi.spyOn(store, "setRunPromptVersion").mockImplementation(() => {
+      throw new Error("audit unavailable");
+    });
+    const { sup } = make();
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(500);
+    expect(recorded()).toEqual([]);
   });
 
   it("replaces whatever is at the token path rather than writing through it (temp, then rename)", async () => {

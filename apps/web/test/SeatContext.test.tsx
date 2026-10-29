@@ -35,23 +35,23 @@ describe("a seat's Context tile", () => {
     expect(fetches()).toBe(2);
   });
 
-  it("fetches once more when the turn ends, then stops asking", async () => {
+  it("stops context requests when the turn ends", async () => {
     const view = render(<Tiles row={seat("running")} limits={[]} now={NOW} />);
     await flush();
     expect(fetches()).toBe(1);
     view.rerender(<Tiles row={seat("idle")} limits={[]} now={NOW} />);
     await flush();
-    expect(fetches()).toBe(2);
+    expect(fetches()).toBe(1);
     await act(() => vi.advanceTimersByTimeAsync(3 * SEAT_CONTEXT_REFRESH_MS));
-    expect(fetches()).toBe(2);
+    expect(fetches()).toBe(1);
   });
 
-  it("loads an idle seat's reading at mount and does not poll it", async () => {
+  it("does not request context for an idle seat", async () => {
     render(<Tiles row={seat("idle")} limits={[]} now={NOW} />);
     await flush();
-    expect(fetches()).toBe(1);
+    expect(fetches()).toBe(0);
     await act(() => vi.advanceTimersByTimeAsync(3 * SEAT_CONTEXT_REFRESH_MS));
-    expect(fetches()).toBe(1);
+    expect(fetches()).toBe(0);
   });
 
   it("counts running to stalled as one turn: no extra fetch, polling continues", async () => {
@@ -64,12 +64,12 @@ describe("a seat's Context tile", () => {
     expect(fetches()).toBe(2);
   });
 
-  it("switching from a running seat to an idle one fetches the new seat once", async () => {
+  it("switching to an idle seat does not request its unavailable context", async () => {
     const view = render(<Tiles row={seat("running")} limits={[]} now={NOW} />);
     await flush();
     view.rerender(<Tiles row={seat("idle", "guido-2")} limits={[]} now={NOW} />);
     await flush();
-    expect(fetches(OTHER)).toBe(1);
+    expect(fetches(OTHER)).toBe(0);
     expect(fetches()).toBe(1);
   });
 });

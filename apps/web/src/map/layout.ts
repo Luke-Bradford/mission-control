@@ -10,7 +10,7 @@ export const areaOf = (path: string, file = true): string =>
   ) ?? (path.includes("/") || !file ? (path.split("/")[0] as string) : ROOT_AREA);
 export const ROOT_AREA = "(root)";
 
-/** How many areas get their own direction and colour; the rest share "other". */
+/** How many areas get their own direction and a name on the stage; the rest share "other". */
 export const MAIN_AREAS = 4;
 
 /** The prototype's area directions: the biggest areas left, right, down and up, facing the camera. */
@@ -36,7 +36,7 @@ const cross = (a: Vec, b: Vec): Vec => [
   a[0] * b[1] - a[1] * b[0],
 ];
 
-/** The areas holding the most lines of code, biggest first: they get a direction and a colour. */
+/** The areas holding the most lines of code, biggest first: they get a direction and a name. */
 export function mainAreas(tree: MapSnapshot["tree"]): string[] {
   const weight = new Map<string, number>();
   for (const f of tree) {
@@ -193,7 +193,11 @@ export function forceLayout(
   const cell = (v: number) => Math.floor(v / REACH);
   // cells within ±512 of the root, packed into one number (the layout spans a few dozen cells)
   const key = (x: number, y: number, z: number) => (x + 512) * 1048576 + (y + 512) * 1024 + z + 512;
-  for (let step = 0; moving && step < steps; step++) {
+  // Large trees retain every file, but deterministic initial placement is already well-spread.
+  // Relaxing tens of thousands of nearby points is quadratic in the densest cells, so reserve it
+  // for trees small enough to benefit. This function normally runs in layout.worker.ts.
+  const relaxationSteps = n > 2500 ? 0 : steps;
+  for (let step = 0; moving && step < relaxationSteps; step++) {
     force.fill(0);
     const grid = new Map<number, number[]>();
     for (let i = 0; i < n; i++) {
@@ -240,12 +244,6 @@ export function forceLayout(
     count: node.lines >= 0 ? 1 : 0,
   }));
 }
-
-/** Muted area colours (the prototype's), so the agents' s1–s7 colours stand out against them. */
-export const AREA_COLORS = ["#4f6290", "#84566f", "#85754c", "#675f90"] as const;
-export const OTHER_AREA_COLOR = "#4d566b";
-export const areaColor = (area: string, main: string[]): string =>
-  AREA_COLORS[main.indexOf(area)] ?? OTHER_AREA_COLOR;
 
 /** Layouts kept per repo, newest first: navigating back, or a tree whose paths are unchanged, reuses one. */
 const layouts = new Map<string, { key: string; nodes: MapNode[] }[]>();

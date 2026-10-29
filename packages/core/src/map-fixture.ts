@@ -8,6 +8,7 @@ export const mapSnapshotFixture = {
     { path: "src/util.ts", lines: 20 },
   ],
   imports: [{ from: "src/main.ts", to: "src/util.ts" }],
+  hist: { since: 0, prCount: 0, fixCount: 0, files: {}, coupling: [] },
   seats: [
     {
       seat: "GUIDO-1",
@@ -16,6 +17,9 @@ export const mapSnapshotFixture = {
       ticket: 7,
       title: "Handle empty input",
       branches: ["feature/7-empty-input"],
+      changedOn: ["feature/7-empty-input"],
+      nowTicket: null,
+      tickets: { "feature/7-empty-input": 7 },
       calls: [{ tool: "Read", detail: "src/util.ts", files: ["src/util.ts"], since: 2000 }],
       scope: {
         read: ["src/main.ts", "src/util.ts"],

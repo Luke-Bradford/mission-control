@@ -27,6 +27,7 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { needsLamp } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
+import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
 import { cutText, dur, mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -146,10 +147,16 @@ export function NeedsList({
   const [error, setError] = useState<string | null>(null);
   // The header's Needs you set: the whole inbox, one per key (attention.ts).
   const list = sortNeeds(needsYouItems(items));
+  // what the one "FLIGHT is not triaging" item stands for is listed under it, not again below
+  const underIt = new Set(list.flatMap((i) => i.notTriaging?.keys ?? []));
   const others = (items ?? []).filter(
-    (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
+    (i) =>
+      !isOperatorItem(i) &&
+      !underIt.has(i.key) &&
+      i.flightTriage !== "waiting" &&
+      i.flightTriage !== "handling",
   );
-  // FLIGHT's items while it is down: nobody is handling them (#758 adds the one item for this)
+  // FLIGHT's items while it is down and before its "not triaging" item shows (a restart's grace)
   const flightDown = sortNeeds(others.filter((i) => i.flightTriage === "down"));
   const handled = sortNeeds(others.filter((i) => i.flightTriage !== "down"));
   const unacked = list.filter((i) => !i.acked);
@@ -226,6 +233,16 @@ export function NeedsList({
           </div>
         )}
         {list.map((i) => {
+          if (isNotTriaging(i))
+            return (
+              <NotTriagingRow
+                key={i.key}
+                item={i}
+                items={items}
+                busy={busy}
+                onAck={() => void ack([i.key])}
+              />
+            );
           const lamp = needsLamp([i], !i.acked);
           const agentId = i.agentId;
           const row = rows.find((r) => r.id === agentId);

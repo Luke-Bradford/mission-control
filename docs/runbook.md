@@ -334,9 +334,11 @@ What each seat's process starts with:
   dir, and `git add` / `git commit` are refused by name. A writer seat commits only through the mc commit
   tool (`mcp__mc__commit`), which the hub runs in its own clone. When the work is done and
   committed it reports with `mcp__mc__report_evidence`, and the hub's engine pushes the branch and
-  opens the draft PR (below). Any seat may ask you a question with `mcp__mc__ask_operator`. A
-  read-only seat (RETRO) has the question tool and `report_evidence`, which refuses it (read-only
-  runs have no loop).
+  opens the draft PR (below). A seat asks FLIGHT, never you, with `mcp__mc__ask_flight`; FLIGHT
+  answers it or briefs it for you, and only a briefed question reaches your Needs you. While FLIGHT
+  is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
+  (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
+  loop).
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only
@@ -786,11 +788,29 @@ A run can stay parked after its seat has moved on. This happens when it was set 
 curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'
 ```
 
-This lifts the park, as your message to a live seat would:
+On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
+and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
+action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
+the configured review-round cap for a head, optionally adding a short fix list; a second grant for
+that head is left to the controller.
+
+This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
 The route answers 409 when the engine is off, or when nothing was lifted.
+
+### Rework a parked run
+
+To send rework text to a set-aside run that is parked on review findings, use:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/message -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"text":"Please address the findings."}'
+```
+
+The text waits for that run (it is not sent to a newer run on the same seat). The route resumes only
+`review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
+refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
 ## What it observes
 
@@ -881,6 +901,10 @@ empty lists and `false`; the block may fill omitted keys. The block may replace 
 inherits. An explicit hard-rule list in either source,
 including `[]`, sets `hardRulesSet`. Without a list in either source the hub never auto-merges and
 posts a Needs you note pointing to `repos[].rules.hard_rules` in user config.
+
+Set `tech_debt_issue` to an open issue number to collect merged PR minor findings as one headed
+comment per PR. Without it, the hub uses the one open issue whose title starts `Tech debt: the
+rolling list`; when neither is available, it files the existing per-PR Backlog issue instead.
 
 An unknown key or invalid value is refused with the key named. `pick_from: []` and an area with no
 globs are refused, and area globs must be repo-relative with `**` only as a trailing `/**`. No
@@ -988,7 +1012,7 @@ theme, Setup, and the dock toggle.
 | **Board** (`/board`, `/board/<repo>/<n>`) | One lane per repo plus All repos, with its GitHub query to copy; columns Backlog, Refinement, Blocked, Ready, In progress, In review, Ready for QA, Done (Status by name, else by `status_map`); filters Priority, Has an agent, Needs me, Done 7/14/30 days; the standup brief; a card opens its ticket beside the board (read live from GitHub) or the agent working it. |
 | **Agent** (`/agent/<id>`) | The agent's header and tiles (now, context, tokens, ~cost, work, quota), its activity stream (filters Messages, Thinking, Tools, Guard; the live call bar), its recent runs, and subagents and changed files. Pause/Resume only for a TA loop. |
 | **Comms** (`/comms`) | Needs you (acknowledge stops the pulse; it clears when you act) and one thread per agent; threads arrive with the mailbox (phase 2). |
-| **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Charts take focus: ←/→ step the crosshair, Home/End jump. |
+| **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, ticket Ready/start/merge/Done facts, and crew-pause, hub-Update and quota-reset annotations. Charts take focus: ←/→ step the crosshair, Home/End jump. |
 | **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
 **Overlays.** FLIGHT's dock is a column at 1200 px and wider, and a drawer with a scrim below
@@ -1452,3 +1476,15 @@ If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery
 Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
+
+## Audit API
+
+`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
+
+- `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.
+- `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).
+- `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
+- `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
+- `surgeonProposals`: always empty until SURGEON proposals are stored.
+
+The route only reads data the hub already stores.

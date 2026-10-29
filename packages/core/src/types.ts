@@ -1,6 +1,6 @@
 import type { Owner, Stage } from "./board.ts";
 import type { CrewPause } from "./crew-pause.ts";
-import type { CatchUpKind } from "./flight.ts";
+import type { CatchUpKind, FlightNotTriagingCause } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
@@ -100,6 +100,12 @@ export interface Run {
   plan?: RunPlan;
   /** The `claude` CLI version the run started on; absent on a run that did not record it. */
   cliVersion?: string | null;
+  /** Immutable launch binding, absent on runs stored before audit capture. */
+  accountId?: AccountId | null;
+  /** Immutable launch effort, absent when the CLI used its default. */
+  effort?: string | null;
+  /** SHA-256 of the role brief, generated preamble, and first step prompt. */
+  promptHash?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
   endedBy?: "operator" | "engine" | "exit" | null;
   /** Absent until a session ends without its loop's report. */
@@ -136,6 +142,8 @@ export interface RunLoop {
   flightReruns?: Record<string, number>;
   /** Fresh RETRO requests by FLIGHT, at most two per head. */
   flightRereviews?: Record<string, number>;
+  /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
+  flightReworks?: Record<string, number>;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
@@ -401,6 +409,10 @@ export interface PullRequestView {
   assignees?: string[];
   /** The head commit's checks by name; absent on a row stored before them. */
   checks?: PrCheck[];
+  /** PR size as reported by GitHub; absent on rows collected before audit capture. */
+  additions?: number | null;
+  deletions?: number | null;
+  changedFiles?: number | null;
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -1052,6 +1064,11 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /**
+   * Only on the one FLIGHT_NOT_TRIAGING_KEY item: why FLIGHT is not triaging, the keys of the items
+   * waiting on it (FLIGHT's, listed under this one, oldest first) and when the oldest was raised.
+   */
+  notTriaging?: { cause: FlightNotTriagingCause; keys: string[]; since: number | null };
   acked: boolean;
 }
 

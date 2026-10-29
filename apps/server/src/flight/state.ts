@@ -20,6 +20,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
@@ -65,20 +66,16 @@ import {
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
-import {
-  type CcConfig,
-  type CrewSeatConfig,
-  type CrewSessionConfig,
-  seatUnavailable,
-} from "../config.ts";
+import { type CcConfig, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { attentionItems, crew, NO_LOCK } from "../hud.ts";
+import { attentionItems, crew, NO_LOCK, questionWithOperator } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
+import { flightSeat } from "./seat.ts";
 import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
@@ -93,7 +90,10 @@ interface TeamsDigestState {
   };
 }
 
-/** Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. */
+/**
+ * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
+ * "FLIGHT is not triaging" item is the operator's alone: FLIGHT never triages its own lapse.
+ */
 export function operatorItems(
   config: CcConfig,
   store: Store,
@@ -109,7 +109,10 @@ export function operatorItems(
     lock,
     rows ?? crew(config, store, now, lock, () => null).rows,
     hubLogin,
-  ).filter((i) => i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT);
+  ).filter(
+    (i) =>
+      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) && i.key !== FLIGHT_NOT_TRIAGING_KEY,
+  );
 }
 
 /** All items awaiting FLIGHT triage, before the digest's display cap. */
@@ -123,12 +126,11 @@ export function flightTriageItems(
 ): AttentionItem[] {
   const flightId = flightSeat(config)?.seat.id ?? null;
   if (flightId === null) return [];
+  // a question passed before #758 without a brief is still FLIGHT's to brief
   const questionKeys = new Set(
     store
       .openQuestions()
-      .filter(
-        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
-      )
+      .filter((q) => q.agentId !== flightId && store.run(q.runId)?.endedAt == null)
       .map((q) => `ask:${q.id}`),
   );
   return operatorItems(config, store, now, hubLogin, rows, lock)
@@ -167,18 +169,7 @@ export function flightStartCap(config: CcConfig): number {
   return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
 }
 
-/** The watch seat (the first seat that is not retiring and whose seatDef loop is "watch") and its session, else null. */
-export function flightSeat(
-  config: CcConfig,
-): { seat: CrewSeatConfig; session: CrewSessionConfig } | null {
-  for (const session of config.crew?.sessions ?? []) {
-    const seat = session.seats.find(
-      (s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "watch",
-    );
-    if (seat !== undefined) return { seat, session };
-  }
-  return null;
-}
+export { flightSeat };
 
 /** The seats whose run the HUD shows as stalled. */
 export function stalledSeats(
@@ -210,8 +201,15 @@ export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
   return new Set(found.session.seats.filter((s) => s.id !== found.seat.id).map((s) => s.id));
 }
 
-/** The watch seat has an unended active run and is not held (parked). */
-export function flightLive(config: CcConfig, store: Store): boolean {
+/** Whether a seat's CLI session is alive; null when the hub cannot tell (`Supervisor.sessionAlive`). */
+export type SessionAlive = (seatId: string) => boolean | null;
+
+/**
+ * The watch seat has an unended active run and is not held (parked). With `alive`, a run the hub
+ * holds no live session for is not live, whatever its row says; null from `alive` (the hub cannot
+ * tell yet, as during a restart's take-back) leaves it to the row.
+ */
+export function flightLive(config: CcConfig, store: Store, alive?: SessionAlive): boolean {
   const found = flightSeat(config);
   if (found === null) return false;
   const row = store.seatSession(found.seat.id);
@@ -222,7 +220,8 @@ export function flightLive(config: CcConfig, store: Store): boolean {
     !ACTIVE_SEAT_STATES.includes(row.state)
   )
     return false;
-  return store.run(row.runId)?.endedAt === null;
+  if (store.run(row.runId)?.endedAt !== null) return false;
+  return alive?.(found.seat.id) !== false;
 }
 
 /** The wakes a FLIGHT run has had: its claimed wake keys. */
@@ -231,7 +230,12 @@ export function flightWakes(store: Store, runId: string): number {
   return Object.keys(store.claimedKeys(runId)).filter((k) => k.startsWith(prefix)).length;
 }
 
-export function flightView(config: CcConfig, store: Store, now: number): FlightView {
+export function flightView(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  alive?: SessionAlive,
+): FlightView {
   const found = flightSeat(config);
   const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
   return {
@@ -243,7 +247,7 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
             call: seatCallSign(found.seat.id),
             model: found.seat.model,
             state: store.seatSession(found.seat.id)?.state ?? null,
-            live: flightLive(config, store),
+            live: flightLive(config, store, alive),
             turns:
               runId === null
                 ? null
@@ -545,7 +549,7 @@ export function flightState(i: {
   const questions = open
     .filter(
       (q) =>
-        q.passedAt === null &&
+        !questionWithOperator(q, briefs.get(`ask:${q.id}`)) &&
         ((briefs.get(`ask:${q.id}`)?.at ?? -1) < q.at ||
           briefs.get(`ask:${q.id}`)?.for === "flight") &&
         mine.some((s) => s.id === q.agentId) &&

@@ -19,11 +19,23 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
-function distance(a: string, b: string): number {
-  const rgb = (hex: string) => hex.match(/\w\w/g)?.map((part) => Number.parseInt(part, 16)) ?? [];
-  const [ar, ag, ab] = rgb(a);
-  const [br, bg, bb] = rgb(b);
-  return Math.hypot(ar - br, ag - bg, ab - bb);
+function deltaE(a: string, b: string): number {
+  const lab = (hex: string): [number, number, number] => {
+    const linear = [1, 3, 5].map((i) => {
+      const channel = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+      return channel <= 0.040_45 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    const [r, g, b] = linear;
+    const xyz = [
+      (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.9505,
+      0.2126 * r + 0.7152 * g + 0.0722 * b,
+      (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.089,
+    ].map((value) => (value > 0.008_856 ? Math.cbrt(value) : 7.787 * value + 16 / 116));
+    return [116 * xyz[1] - 16, 500 * (xyz[0] - xyz[1]), 200 * (xyz[1] - xyz[2])];
+  };
+  const [l1, a1, b1] = lab(a);
+  const [l2, a2, b2] = lab(b);
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
 
 describe("visual system v2", () => {
@@ -39,9 +51,9 @@ describe("visual system v2", () => {
       expect(agents).not.toContain(theme["--crit"]);
       for (const [index, agent] of agents.entries()) {
         for (const other of agents.slice(index + 1))
-          expect(distance(agent, other), `${agent} / ${other}`).toBeGreaterThanOrEqual(35);
+          expect(deltaE(agent, other), `${agent} / ${other}`).toBeGreaterThanOrEqual(20);
         for (const state of [theme["--ok"], theme["--warn"], theme["--crit"]])
-          expect(distance(agent, state), `${agent} / ${state}`).toBeGreaterThanOrEqual(55);
+          expect(deltaE(agent, state), `${agent} / ${state}`).toBeGreaterThanOrEqual(20);
       }
       for (const [index, agent] of agents.entries())
         expect(
@@ -50,6 +62,15 @@ describe("visual system v2", () => {
         ).toBeGreaterThanOrEqual(2);
     }
   });
+
+  it.each(["dark", "light"] as const)(
+    "keeps chart slots s2 and s5 perceptually distinct: %s",
+    (theme) => {
+      expect(
+        deltaE(THEME_TOKENS[theme]["--s2"], THEME_TOKENS[theme]["--s5"]),
+      ).toBeGreaterThanOrEqual(25);
+    },
+  );
 
   it("uses the shared borderless stat bar and unbounded Overview panel bodies", () => {
     expect(css).toMatch(/--type-(?:xs|sm|base|md|lg|xl):/);

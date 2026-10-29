@@ -63,6 +63,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.syncMain,
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
+  MC_TOOL_NAMES.closeTicket,
   MC_TOOL_NAMES.briefItem,
   MC_TOOL_NAMES.readPr,
   MC_TOOL_NAMES.readCiLog,
@@ -83,7 +84,9 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);
  * `grantable`: a role may add. Writers commit and sync main; `push` and `draft_pr` are the hub's
- * own and never appear.
+ * own and never appear. A seat asks FLIGHT (`ask_flight`), never the operator: only FLIGHT's
+ * brief (`brief_item { for: "operator" }`) puts a decision in the operator's Needs you, and the hub
+ * does not offer `ask_flight` to FLIGHT itself (#758).
  */
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
@@ -92,7 +95,7 @@ export const MC_TOOL_GRANTS: Readonly<
     base: [
       "commit",
       "sync_main",
-      "ask_operator",
+      MC_TOOL_NAMES.askFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsSend,
@@ -102,7 +105,7 @@ export const MC_TOOL_GRANTS: Readonly<
   },
   "read-only": {
     base: [
-      "ask_operator",
+      MC_TOOL_NAMES.askFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsSend,
@@ -295,7 +298,7 @@ export const WRITER_TOOLS = [
   "Bash",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
-  MC_TOOLS.askOperator,
+  MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsSend,
@@ -308,7 +311,7 @@ export const READONLY_TOOLS = [
   "Glob",
   "TodoWrite",
   "Bash",
-  MC_TOOLS.askOperator,
+  MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsSend,

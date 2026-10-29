@@ -58,7 +58,6 @@ export const flightSummary = (over: Partial<FlightSummaryView> = {}): FlightSumm
   incoming: 0,
   metrics: {
     since: NOW - 12 * 60 * MIN,
-    merged: 7,
     opened: 8,
     inReview: 4,
     inCi: 2,
@@ -70,7 +69,6 @@ export const flightSummary = (over: Partial<FlightSummaryView> = {}): FlightSumm
       { seat: "guido-1", tokens: 2000, costUsd: 2.5 },
     ],
     flight: { wakes: 10, costUsd: 1.25 },
-    readyToMergedMin: null,
     forTheController: 0,
   },
   ...over,

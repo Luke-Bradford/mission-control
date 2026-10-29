@@ -288,6 +288,13 @@ describe("Telemetry refetch", () => {
 });
 
 describe("Telemetry toolbar", () => {
+  it("uses h2 headings for its top-level data groups", async () => {
+    await loaded();
+    for (const name of ["Flow of work", "Agents", "Capacity", "Cost"]) {
+      expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
+    }
+  });
+
   it("asks for 6h by default and the picked range on a switch", async () => {
     const { fetch } = await loaded();
     expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=6h", expect.anything());

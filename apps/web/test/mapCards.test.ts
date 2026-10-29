@@ -1,346 +1,191 @@
-import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
+import { touchedNodes } from "../src/map/agents.ts";
 import {
-  agentCard,
-  badgeModels,
-  isStuck,
-  recentFailures,
-  uncheckedNotes,
+  changeTotals,
+  isWorking,
+  nodeWork,
+  readCount,
+  seatToken,
+  workLine,
 } from "../src/map/cards.ts";
-import { applyDelta } from "../src/map/model.ts";
+import { layoutTree } from "../src/map/model.ts";
 
-const now = 2_000_000;
-function seat(): MapSeat {
+const now = 1_000_000;
+function seat(id = "GUIDO-1"): MapSeat {
   const s: MapSeat = structuredClone(mapSnapshotFixture.seats[0]);
+  s.seat = id;
   s.since = now;
   s.calls = [];
   s.badges = { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null };
   return s;
 }
 
-describe("unchecked conflict notes", () => {
-  it("names each unmerged branch's unchecked reason, and the branch when the seat has several", () => {
+describe("who the map shows", () => {
+  it("shows a seat live now, with a recent path or an unmerged change, and leaves the rest out", () => {
     const s = seat();
-    const snapshot: MapSnapshot = {
-      ...structuredClone(mapSnapshotFixture),
-      conflictsUnchecked: [
-        { branch: "set-aside", reason: "head not fetched" },
-        { branch: "someone-else", reason: "merge check failed" },
+    s.state = "idle";
+    s.since = now - 120_000;
+    s.scope = { read: ["src/main.ts"], modified: [] };
+    s.recent = [];
+    expect(isWorking(s, now)).toBe(false);
+    // a run that ended keeps its path on the map while the hub keeps it
+    s.recent = [{ file: "src/main.ts", at: now - 300_000 }];
+    expect(isWorking(s, now)).toBe(true);
+    // until the hub would have let it go
+    expect(isWorking(s, now - 300_000 + MAP_RECENT_MS + 1)).toBe(false);
+    s.recent = [];
+    s.scope.modified = [{ file: "src/main.ts", add: 1, rem: 0, source: "diff" }];
+    expect(isWorking(s, now)).toBe(true);
+    s.scope.modified = [];
+    s.since = now - 30_000; // within a minute of its last turn
+    expect(isWorking(s, now)).toBe(true);
+    s.since = now - 120_000;
+    s.calls = [{ tool: "Read", detail: "x", files: [], since: now }];
+    expect(isWorking(s, now)).toBe(true);
+  });
+
+  it("keeps a seat waiting on the operator in the selector; a stopped run or the test lock isn't that", () => {
+    const s = seat();
+    Object.assign(s, { state: "idle", since: 0, recent: [], scope: { read: [], modified: [] } });
+    expect(isWorking(s, now)).toBe(false);
+    s.badges.waiting = { kind: "parked", since: 0, reason: "Needs CAPCOM", stopped: false };
+    expect(isWorking(s, now)).toBe(true);
+    s.badges.waiting = { kind: "parked", since: 0, reason: "run ended (stopped)", stopped: true };
+    expect(isWorking(s, now)).toBe(false);
+    s.badges.waiting = { kind: "test-lock", since: 0, reason: "pnpm test", stopped: false };
+    expect(isWorking(s, now)).toBe(false);
+    s.badges.questions = [{ id: 1, from: "GUIDO-1", to: "CAPCOM", ticket: null, since: 0 }];
+    expect(isWorking(s, now)).toBe(true);
+  });
+});
+
+describe("what a seat is on", () => {
+  it("says the ticket, its PR and title as the Overview does, or nothing without either", () => {
+    const on = { ticket: 7, title: "Handle empty input", pr: null };
+    expect(workLine(on)).toBe("#7 · Handle empty input");
+    expect(workLine({ ...on, pr: 12 })).toBe("#7 · PR #12 · Handle empty input");
+    expect(workLine({ ...on, ticket: null, pr: 12 })).toBe("PR #12 · Handle empty input");
+    expect(workLine({ ...on, ticket: null })).toBeNull();
+  });
+
+  it("gives each seat one map colour token by its place, FLIGHT its own", () => {
+    expect(seatToken("GUIDO-1", 0)).toBe("--seat-1");
+    expect(seatToken("GUIDO-1", 9)).toBe("--seat-3");
+    expect(seatToken("FLIGHT", 2)).toBe("--seat-flight");
+  });
+
+  it("counts its changed files and lines, marking churn, and its distinct reads", () => {
+    const s = seat();
+    s.recent = [];
+    s.scope = {
+      read: ["a.ts", "b.ts", "a.ts"],
+      modified: [
+        { file: "a.ts", add: 10, rem: 2, source: "diff" },
+        { file: "c.ts", add: 3, rem: 0, source: "churn" },
+        // a mode-only change moved no line, so it counts for nothing
+        { file: "d.ts", add: 0, rem: 0, source: "diff" },
       ],
     };
-    s.branches = ["current"];
-    expect(uncheckedNotes(s, snapshot)).toEqual([]);
-    s.branches = ["current", "set-aside"];
-    expect(uncheckedNotes(s, snapshot)).toEqual([
-      "Conflicts not checked on set-aside: head not fetched",
-    ]);
-    s.branches = ["set-aside"];
-    expect(uncheckedNotes(s, snapshot)).toEqual(["Conflicts not checked: head not fetched"]);
-  });
-});
-
-describe("map stuck rule", () => {
-  it("marks a stalled run and otherwise leaves an ordinary running turn alone", () => {
-    const s = seat();
-    expect(isStuck(s, now)).toBe(false);
-    s.state = "stalled";
-    expect(isStuck(s, now)).toBe(true);
-  });
-  it("requires a call to run longer than ten minutes, including any parallel call", () => {
-    const s = seat();
-    s.calls = [{ tool: "Bash", detail: "tests", files: [], since: now - 600_000 }];
-    expect(isStuck(s, now)).toBe(false);
-    s.calls.push({ tool: "Read", detail: "src/main.ts", files: [], since: now - 600_001 });
-    expect(isStuck(s, now)).toBe(true);
-  });
-  it("counts three mixed refusals and failures only within the last ten minutes", () => {
-    const s = seat();
-    s.badges.failures = [
-      { at: now - 600_000, tool: "Write", refused: true, why: "denied" },
-      { at: now - 1, tool: "Bash", refused: false, why: "error" },
-      { at: now - 600_001, tool: "Read", refused: false, why: "old" },
-      { at: now + 1, tool: "Read", refused: false, why: "future" },
+    expect(changeTotals(s)).toEqual({ files: 2, add: 13, rem: 2, churn: true });
+    // a.ts and b.ts were read (a.ts changed too)
+    expect(readCount(s)).toBe(2);
+    // once a run's reads are gone, a file on its path it didn't change still counts, as its disc does
+    s.scope.read = [];
+    s.recent = [
+      { file: "b.ts", at: 1 },
+      { file: "a.ts", at: 2 },
     ];
-    expect(recentFailures(s, now)).toHaveLength(2);
-    expect(isStuck(s, now)).toBe(false);
-    s.badges.failures.push({ at: now, tool: "guard", refused: true, why: "blocked" });
-    expect(isStuck(s, now)).toBe(true);
-    s.badges.failures = s.badges.failures.filter((f) => f.at <= now);
-    expect(isStuck(s, now + 1)).toBe(false);
-  });
-  it("never calls a seat whose run the operator stopped stuck, however long it has been parked", () => {
-    const s = seat();
-    s.badges.waiting = {
-      kind: "parked",
-      since: now - 86_400_000,
-      reason: "run ended (stopped)",
-      stopped: true,
-    };
-    expect(isStuck(s, now)).toBe(false);
-    s.badges.waiting.stopped = false;
-    expect(isStuck(s, now)).toBe(true);
-  });
-  it.each(["test-lock", "parked"] as const)(
-    "requires a %s wait older than fifteen minutes",
-    (kind) => {
-      const s = seat();
-      s.badges.waiting = { kind, since: now - 900_000, reason: "waiting", stopped: false };
-      expect(isStuck(s, now)).toBe(false);
-      expect(isStuck(s, now + 1)).toBe(true);
-    },
-  );
-});
-
-describe("map badge data", () => {
-  it("derives every fixture badge and its age from its own timestamp", () => {
-    expect(badgeModels(mapSnapshotFixture.seats[0], 65_000)).toEqual([
-      { kind: "questions", text: "Questions: 1 awaiting reply", age: "1m ago", tone: "muted" },
-      {
-        kind: "failures",
-        text: "1 refused in 10 min · Permission denied",
-        age: "1m ago",
-        tone: "warn",
-      },
-      {
-        kind: "review",
-        text: "Review round 1: 0 Critical, 1 Important, 0 Minor",
-        age: "1m ago",
-        tone: "warn",
-      },
-      {
-        kind: "tests",
-        text: "Local tests: 4 passed, 0 failed · edited since",
-        age: "1m ago",
-        tone: "muted",
-      },
-      { kind: "ci", text: "CI @aaaaaaaa: unknown", age: "1m ago", tone: "muted" },
-    ]);
-  });
-  it("uses the oldest question, latest failure reason, and drops expired failures", () => {
-    const s = seat();
-    s.badges.questions = [
-      { id: 1, from: "a", to: "b", ticket: 7, since: now - 60_000 },
-      { id: 2, from: "a", to: "c", ticket: 8, since: now - 120_000 },
-    ];
-    s.badges.failures = [
-      { at: now - 5_000, tool: "Bash", refused: false, why: "latest" },
-      { at: now - 600_001, tool: "Read", refused: false, why: "expired" },
-      { at: now - 50_000, tool: "Write", refused: true, why: "older" },
-    ];
-    expect(badgeModels(s, now).map((b) => [b.text, b.age])).toEqual([
-      ["Questions: 2 awaiting reply", "2m ago"],
-      ["1 refused · 1 failed in 10 min · latest", "5s ago"],
-    ]);
-  });
-  it("omits absent and wrong-ticket reviews; unknown runners stay unknown", () => {
-    const s = seat();
-    expect(badgeModels(s, now)).toEqual([]);
-    s.badges.review = {
-      ticket: 99,
-      round: 10,
-      counts: { Critical: 9, Important: 9, Minor: 9 },
-      at: now,
-    };
-    s.badges.tests = { runner: null, status: "unknown", at: now - 3_000, editedSince: false };
-    expect(badgeModels(s, now).map((b) => b.text)).toEqual(["Local tests: unknown"]);
-  });
-  it("reports head-SHA check states and waiting kind, reason and age", () => {
-    const s = seat();
-    s.badges.ci = {
-      sha: "0123456789abcdef",
-      at: now - 9_000,
-      checks: ["passing", "pending", "failing"].map((state) => ({
-        name: state,
-        kind: "check" as const,
-        state: state as "passing" | "pending" | "failing",
-        conclusion: state,
-        attempt: null,
-        url: null,
-      })),
-    };
-    s.badges.waiting = {
-      kind: "test-lock",
-      reason: "pnpm test",
-      since: now - 120_000,
-      stopped: false,
-    };
-    expect(badgeModels(s, now).map((b) => [b.text, b.age])).toEqual([
-      ["CI @01234567: 1 passing, 1 failing, 1 pending", "9s ago"],
-      ["Waiting: test-lock · pnpm test", "2m ago"],
-    ]);
-    s.badges.waiting.kind = "parked";
-    expect(badgeModels(s, now).at(-1)?.text).toBe("Waiting: parked · pnpm test");
-  });
-  it("counts unique scope and accessing files; thinking never claims a file", () => {
-    const s = seat();
-    s.calls = [
-      { tool: "Read", detail: "src/main.ts", files: ["src/main.ts"], since: now - 1_000 },
-      { tool: "Read", detail: "src/util.ts", files: ["src/main.ts", "src/util.ts"], since: now },
-    ];
-    expect(agentCard(s, now)).toMatchObject({
-      scope: 2,
-      modified: 1,
-      accessing: 2,
-      folder: "src",
-      docked: false,
-    });
-    // The card and the orb label read the same state.
-    expect(agentCard(s, now).state).toBe("reading src/main.ts 1s · +1 calls");
-    s.calls = [];
-    expect(agentCard(s, now).state).toBe("thinking");
-    s.state = "idle";
-    s.since = now - 60_000;
-    expect(agentCard(s, now)).toMatchObject({ docked: true, state: "idle 1m" });
+    s.calls = [{ tool: "Glob", detail: "**", files: ["e.ts", "f.ts"], since: 3 }];
+    expect(readCount(s)).toBe(1);
   });
 });
 
-describe("live badge changes", () => {
-  it.each([null, { runner: null, status: "unknown" } as const])(
-    "completes an ordinary Bash call without invalidation for tests=%j",
-    (tests) => {
-      const s = structuredClone(mapSnapshotFixture);
-      s.seq = 10;
-      s.seats[0].calls = [{ tool: "Bash", detail: "git status", files: [], since: now - 1000 }];
-      const next = applyDelta(
-        s,
-        {
-          seq: 11,
-          type: "call.end",
-          seat: s.seats[0].seat,
-          files: [],
-          resultTok: 1,
-          error: false,
-          refused: false,
-          why: null,
-          tests,
-        },
-        now,
-      );
-      expect(next?.seq).toBe(11);
-      expect(next?.seats[0].calls).toEqual([]);
-      expect(next?.seats[0].badges.tests).toEqual(s.seats[0].badges.tests);
-      expect(s.seats[0].calls).toHaveLength(1);
-    },
-  );
-  it.each([
-    ["changed additions", "src/main.ts", 99, 1, true],
-    ["changed removals", "src/main.ts", 3, 99, true],
-    ["new file", "src/new.ts", 1, 0, true],
-    ["unchanged counts", "src/main.ts", 3, 1, false],
-  ] as const)("marks test freshness for a diff with %s", (_, file, add, rem, editedSince) => {
-    const s: MapSnapshot = structuredClone(mapSnapshotFixture);
-    s.seq = 10;
-    s.seats[0].scope.modified = [{ file: "src/main.ts", add: 3, rem: 1, source: "diff" }];
-    s.seats[0].badges.tests = {
-      runner: "vitest",
-      status: "passed",
-      passed: 4,
-      failed: 0,
-      at: now - 1000,
-      editedSince: false,
+describe("who worked on a node", () => {
+  const snapshot = (): MapSnapshot => {
+    const a = seat("GUIDO-1");
+    const b = seat("GUIDO-2");
+    const c = seat("RETRO-1");
+    a.scope = {
+      read: ["src/x.ts"],
+      modified: [
+        { file: "src/x.ts", add: 5, rem: 1, source: "diff" },
+        { file: "src/y.ts", add: 2, rem: 2, source: "churn" },
+      ],
     };
-    const next = applyDelta(
-      s,
-      { seq: 11, type: "diff", seat: s.seats[0].seat, file, add, rem },
-      now,
-    );
-    expect(next?.seats[0].badges.tests).toMatchObject({ editedSince, at: now - 1000 });
-    expect(s.seats[0].badges.tests?.editedSince).toBe(false);
-  });
-  it("refetches parsed tests even when a tool succeeded, so their age uses server time", () => {
-    const s = structuredClone(mapSnapshotFixture);
-    expect(
-      applyDelta(
-        s,
-        {
-          seq: 1,
-          type: "call.end",
-          seat: s.seats[0].seat,
-          files: ["src/util.ts"],
-          resultTok: 1,
-          error: false,
-          refused: false,
-          why: null,
-          tests: { runner: "vitest", status: "failed", passed: 2, failed: 1 },
-        },
-        now,
-      ),
-    ).toBeNull();
-  });
-  it("marks parsed tests edited since on a subsequent edit without changing their timestamp", () => {
-    const s: import("@mc/core").MapSnapshot = structuredClone(mapSnapshotFixture);
-    s.seats[0].badges.tests = {
-      runner: "vitest",
-      status: "passed",
-      passed: 4,
-      failed: 0,
-      at: now - 1000,
-      editedSince: false,
-    };
-    const edited = applyDelta(
-      s,
-      { seq: 1, type: "edit", seat: s.seats[0].seat, file: "src/main.ts", add: 1, rem: 0 },
-      now,
-    );
-    expect(edited?.seats[0].badges.tests).toMatchObject({ editedSince: true, at: now - 1000 });
-    expect(s.seats[0].badges.tests?.editedSince).toBe(false);
-  });
-  it("refetches failures and questions because their delta lacks complete badge data", () => {
-    const s = structuredClone(mapSnapshotFixture);
-    expect(
-      applyDelta(
-        s,
-        {
-          seq: 1,
-          type: "call.end",
-          seat: s.seats[0].seat,
-          files: [],
-          resultTok: 0,
-          error: true,
-          refused: false,
-          why: "error",
-          tests: null,
-        },
-        now,
-      ),
-    ).toBeNull();
-    expect(
-      applyDelta(
-        s,
-        { seq: 1, type: "message", from: "GUIDO-1", to: "CAPCOM", kind: "answer", ticket: 7 },
-        now,
-      ),
-    ).toBeNull();
-  });
-});
-
-it("uses distinct fixture timestamps instead of the seat's state age for badges", () => {
-  expect(badgeModels(mapSnapshotFixture.seats[0], 61_550).map((b) => [b.kind, b.age])).toEqual([
-    ["questions", "1m ago"],
-    ["failures", "1m ago"],
-    ["review", "59s ago"],
-    ["tests", "1m ago"],
-    ["ci", "59s ago"],
-  ]);
-});
-
-it("refetches waiting metadata on park and when a waiting seat changes state", () => {
-  const s = structuredClone(mapSnapshotFixture);
-  expect(
-    applyDelta(s, { seq: 1, type: "state", seat: "GUIDO-1", state: "parked", since: now }, now),
-  ).toBeNull();
-  const waiting = s as import("@mc/core").MapSnapshot;
-  waiting.seats[0].badges.waiting = {
-    kind: "test-lock",
-    since: now - 1000,
-    reason: "pnpm test",
-    stopped: false,
+    b.scope = { read: [], modified: [{ file: "src/x.ts", add: 40, rem: 7, source: "diff" }] };
+    c.scope = { read: ["src/x.ts", "src/z.ts"], modified: [] };
+    return { ...structuredClone(mapSnapshotFixture), seats: [a, b, c] };
   };
-  expect(
-    applyDelta(
-      waiting,
-      { seq: 1, type: "state", seat: "GUIDO-1", state: "running", since: now },
-      now,
-    ),
-  ).toBeNull();
+
+  it("lists each seat that touched a file in seat order: changed with its own +/−, read, or both", () => {
+    expect(nodeWork(snapshot(), ["src/x.ts"])).toEqual([
+      { seat: "GUIDO-1", changed: { add: 5, rem: 1, churn: false }, read: true },
+      { seat: "GUIDO-2", changed: { add: 40, rem: 7, churn: false }, read: false },
+      { seat: "RETRO-1", changed: null, read: true },
+    ]);
+  });
+
+  it("sums a folder's files per seat, and counts a file a call only accessed as read", () => {
+    const s = snapshot();
+    (s.seats[1] as MapSeat).calls = [{ tool: "Grep", detail: "", files: ["src/z.ts"], since: 0 }];
+    expect(nodeWork(s, ["src/x.ts", "src/y.ts", "src/z.ts"])).toEqual([
+      { seat: "GUIDO-1", changed: { add: 7, rem: 3, churn: true }, read: true },
+      { seat: "GUIDO-2", changed: { add: 40, rem: 7, churn: false }, read: false },
+      { seat: "RETRO-1", changed: null, read: true },
+    ]);
+    expect(nodeWork(s, ["src/w.ts"])).toEqual([]);
+    (s.seats[0] as MapSeat).recent = [{ file: "src/w.ts", at: 1 }];
+    expect(nodeWork(s, ["src/w.ts"])).toEqual([{ seat: "GUIDO-1", changed: null, read: true }]);
+  });
+});
+
+describe("the colours on a node's disc", () => {
+  const tree = ["src/x.ts", "src/y.ts", "src/z.ts", "src/w.ts"].map((path) => ({ path, lines: 5 }));
+  const nodes = layoutTree(tree);
+  const of = (...seats: [string, Partial<MapSeat["scope"]>][]): MapSnapshot => ({
+    ...structuredClone(mapSnapshotFixture),
+    tree,
+    seats: seats.map(([id, scope]) => {
+      const s = seat(id);
+      s.recent = [];
+      s.scope = { read: [], modified: [], ...scope };
+      return s;
+    }),
+  });
+
+  it("gives a file one seat's colour when one seat touched it, read or changed alike", () => {
+    const touched = touchedNodes(
+      of(
+        ["GUIDO-1", { read: ["src/x.ts"] }],
+        ["GUIDO-2", { modified: [{ file: "src/y.ts", add: 1, rem: 0, source: "diff" }] }],
+      ),
+      nodes,
+    );
+    expect(touched.get("src/x.ts")).toEqual(["GUIDO-1"]);
+    expect(touched.get("src/y.ts")).toEqual(["GUIDO-2"]);
+    expect(touched.has("src/z.ts")).toBe(false);
+  });
+
+  it("splits a shared file between its seats in seat order, whoever touched it first", () => {
+    const shared = (order: string[]) =>
+      touchedNodes(
+        of(
+          ...order.map(
+            (id) =>
+              [
+                id,
+                id === "RETRO-1"
+                  ? { read: ["src/x.ts"] }
+                  : { modified: [{ file: "src/x.ts", add: 2, rem: 1, source: "diff" as const }] },
+              ] as [string, Partial<MapSeat["scope"]>],
+          ),
+        ),
+        nodes,
+      ).get("src/x.ts");
+    expect(shared(["GUIDO-1", "RETRO-1"])).toEqual(["GUIDO-1", "RETRO-1"]);
+    expect(shared(["GUIDO-1", "GUIDO-2", "RETRO-1"])).toEqual(["GUIDO-1", "GUIDO-2", "RETRO-1"]);
+    // the order is the snapshot's (the selector's), so a colour keeps its arc
+    expect(shared(["RETRO-1", "GUIDO-1"])).toEqual(["RETRO-1", "GUIDO-1"]);
+  });
 });

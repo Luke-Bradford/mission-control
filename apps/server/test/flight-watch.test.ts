@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_GHOST_MS,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
@@ -114,6 +115,11 @@ let statusCalls: number;
 let startFails: string | null;
 let sendFails = false;
 let facts: SeatFacts | null;
+/** What the supervisor's `sessionAlive` answers for FLIGHT. */
+let alive: boolean | null;
+let resumeCalls: string[];
+/** What a take-back does, when a test says. */
+let onResume: ((runId: string) => void | Promise<void>) | null;
 let enabled: boolean;
 let started = 0;
 let listener: ((e: SupervisorEvent) => void) | null = null;
@@ -191,6 +197,7 @@ const makeWatch = () => {
         store.upsertRun(run(runId, seatId));
         store.setSeatSession(row(seatId, runId));
         facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+        if (alive === false) alive = true;
         return { runId };
       },
       send: async (runId, key, text): Promise<SendResult> => {
@@ -209,6 +216,11 @@ const makeWatch = () => {
         endCalls.push(runId);
         store.upsertRun(run(runId, "flight-1", { endedAt: nowMs, status: "ok" }));
         store.setSeatSession(row("flight-1", null));
+      },
+      sessionAlive: () => alive,
+      resumeRun: async (runId) => {
+        resumeCalls.push(runId);
+        await onResume?.(runId);
       },
     },
   });
@@ -235,6 +247,9 @@ beforeEach(() => {
   startFails = null;
   sendFails = false;
   facts = null;
+  alive = null;
+  resumeCalls = [];
+  onResume = null;
   enabled = true;
   started = 0;
   listener = null;
@@ -1069,6 +1084,7 @@ describe("the FLIGHT watcher", () => {
         },
         send: async () => "sent",
         endRunByEngine: async () => {},
+        resumeRun: async () => {},
       },
     });
     await w.check();
@@ -1110,6 +1126,157 @@ describe("the FLIGHT watcher", () => {
     for (let i = 0; i < 3; i++) await watch.check();
     expect(startCalls).toHaveLength(6);
     expect(notesOpen()).toEqual([]);
+  });
+
+  describe("a FLIGHT run with no live session (#798)", () => {
+    const ghostRun = () => {
+      live("flight-1", "r-ghost");
+      alive = false;
+      facts = null;
+    };
+
+    it("takes it back once, then ends it (engine, reason recorded) and starts FLIGHT", async () => {
+      ghostRun();
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      expect(startCalls).toEqual([]);
+      nowMs += FLIGHT_GHOST_MS - 1;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      nowMs += 1;
+      await watch.check();
+      expect(endCalls).toEqual(["r-ghost"]);
+      expect(startCalls).toHaveLength(1);
+      expect(store.seatSession("flight-1")?.runId).toBe("r-flight-1");
+      expect(store.agentEvents(0).map((e) => [e.agentId, e.from, e.to, e.text])).toEqual([
+        [
+          "flight-1",
+          "idle",
+          "idle",
+          "Idle → Idle: its CLI session was gone (run #1 ended to start FLIGHT afresh)",
+        ],
+      ]);
+      expect(notesOpen()).toEqual([]);
+    });
+
+    it("leaves a run its take-back brought back alone", async () => {
+      ghostRun();
+      onResume = () => {
+        alive = true;
+        facts = { inTurn: false, resumedAt: nowMs, rateLimitedUntil: null };
+      };
+      await watch.check();
+      nowMs += FLIGHT_GHOST_MS;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      expect(endCalls).toEqual([]);
+      expect(startCalls).toEqual([]);
+      expect(store.seatSession("flight-1")?.runId).toBe("r-ghost");
+    });
+
+    it("waits while the hub cannot tell (a restart's take-back), and while the seat is held", async () => {
+      live("flight-1", "r-ghost");
+      alive = null;
+      nowMs += 10 * FLIGHT_GHOST_MS;
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+      watch.stop();
+      let held = true;
+      watch = createFlightWatch({
+        config,
+        store,
+        bus,
+        enabled: true,
+        blocked: () => held,
+        now: () => nowMs,
+        supervisor: {
+          status: () => ({ enabled: true, note: null }),
+          on: () => () => {},
+          busy: () => [],
+          seatFacts: () => null,
+          sessionAlive: () => false,
+          startWatch: async () => ({ runId: "x" }),
+          send: async () => "sent",
+          endRunByEngine: async (runId) => void endCalls.push(runId),
+          resumeRun: async (runId) => void resumeCalls.push(runId),
+        },
+      });
+      for (let i = 0; i < 2; i++) {
+        await watch.check();
+        nowMs += FLIGHT_GHOST_MS;
+      }
+      expect([resumeCalls, endCalls]).toEqual([[], []]);
+      held = false;
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+    });
+
+    it("says the process is gone when FLIGHT will not start again, once", async () => {
+      ghostRun();
+      await watch.check();
+      nowMs += FLIGHT_GHOST_MS;
+      startFails = "could not start the CLI";
+      for (let i = 0; i < 4; i++) await watch.check();
+      expect(endCalls).toEqual(["r-ghost"]);
+      expect(startCalls).toHaveLength(3);
+      expect(notesOpen()).toMatchObject([
+        {
+          kind: "blocked",
+          seatId: "flight-1",
+          text: flightStartFailedText(
+            "its process is gone, and a restart failed: could not start the CLI",
+          ),
+        },
+      ]);
+      // said in that note: a later failure is just the failure
+      live("flight-1", "r-hand");
+      alive = true;
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(notesOpen()).toEqual([]);
+      noFlight();
+      alive = null;
+      for (let i = 0; i < 4; i++) await watch.check();
+      expect(notesOpen()).toMatchObject([
+        { text: flightStartFailedText("could not start the CLI") },
+      ]);
+    });
+
+    it("leaves a parked FLIGHT, or one at its account's stop line, to that first", async () => {
+      live("flight-1", "r-ghost");
+      store.setSeatSession(row("flight-1", "r-ghost", "parked"));
+      alive = false;
+      await watch.check();
+      nowMs += 10 * FLIGHT_GHOST_MS;
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+      store.setSeatSession(row("flight-1", "r-ghost"));
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: nowMs - 1000,
+        pct: 95,
+        resetAt: nowMs + 60 * MIN,
+        source: "test",
+      });
+      await watch.check();
+      expect([resumeCalls, endCalls, startCalls]).toEqual([[], [], []]);
+    });
+
+    it("forgets a run it was waiting on when the watch stops", async () => {
+      ghostRun();
+      await watch.check();
+      expect(resumeCalls).toEqual(["r-ghost"]);
+      watch.stop();
+      makeWatch();
+      nowMs += FLIGHT_GHOST_MS;
+      await watch.check();
+      // a new wait, with a new take-back: nothing ended on the old one's clock
+      expect(resumeCalls).toEqual(["r-ghost", "r-ghost"]);
+      expect(endCalls).toEqual([]);
+    });
   });
 
   it("does not start FLIGHT at the account's stop", async () => {
@@ -1266,6 +1433,36 @@ describe("the FLIGHT watcher", () => {
       await watch.check();
       expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
       facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      await watch.check();
+      expect(down()).toEqual([]);
+    });
+
+    it("uses the last turn line rather than a transcript touch while FLIGHT is in a turn", async () => {
+      const transcriptPath = join(dir, "flight.jsonl");
+      const first = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(T0).toISOString(),
+        message: { content: [{ type: "text", text: "working" }] },
+      });
+      writeFileSync(transcriptPath, `${first}\n`);
+      live("flight-1", "r-flight");
+      store.upsertRun(run("r-flight", "flight-1", { transcriptPath }));
+      store.setDigest("r-flight", foldTranscript(null, [first], T0).digest);
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+
+      nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
+      // HUD context reads refresh mtime without adding an agent turn.
+      utimesSync(transcriptPath, nowMs / 1000, nowMs / 1000);
+      await watch.check();
+      expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
+
+      const next = JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(nowMs).toISOString(),
+        message: { content: [{ type: "text", text: "back" }] },
+      });
+      writeFileSync(transcriptPath, `${first}\n${next}\n`);
+      store.setDigest("r-flight", foldTranscript(null, [first, next], nowMs).digest);
       await watch.check();
       expect(down()).toEqual([]);
     });
@@ -1610,6 +1807,7 @@ describe("the FLIGHT watcher", () => {
         },
         send: async () => "sent",
         endRunByEngine: async () => {},
+        resumeRun: async () => {},
       },
     });
     await off.check();

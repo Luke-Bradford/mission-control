@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type {
-  AttentionItem,
-  NotificationCategory,
-  NotificationEvent,
-  NotificationPreferences,
+import {
+  type AttentionItem,
+  FLIGHT_NOT_TRIAGING_KEY,
+  type NotificationCategory,
+  type NotificationEvent,
+  type NotificationPreferences,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { CcConfig } from "./config.ts";
-import { FLIGHT_DOWN_ITEMS } from "./hud.ts";
 import type { Store } from "./store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -100,7 +100,8 @@ const briefedAsk = (item: AttentionItem): boolean =>
   item.brief !== undefined && item.brief.for !== "flight";
 
 const categoryOf = (item: AttentionItem): NotificationCategory | null => {
-  if (FLIGHT_DOWN_ITEMS.has(item.key)) return "flightDown";
+  // the one "FLIGHT is not triaging" item: it carries the watch's FLIGHT-down notes too (#758)
+  if (item.key === FLIGHT_NOT_TRIAGING_KEY) return "flightDown";
   if (briefedAsk(item)) return "asks";
   switch (item.kind) {
     case "tag":
@@ -130,6 +131,16 @@ const categoryOf = (item: AttentionItem): NotificationCategory | null => {
  * with the same ask is not new, and its `at` is left out because it can move with the item.
  */
 function versionOf(category: NotificationCategory, item: AttentionItem): string {
+  // Once per episode: its count, reason and time move while FLIGHT stays out, and `seen` keeps only
+  // items still present, so it notifies again only after it has cleared and come back.
+  // Only a coarse class is in the version: the operator's own Stop, or FLIGHT out on its own. So a
+  // failed start after a Stop is news, while down and late flipping within an outage is not.
+  if (item.key === FLIGHT_NOT_TRIAGING_KEY)
+    return JSON.stringify([
+      category,
+      item.key,
+      item.notTriaging?.cause === "stopped" ? "stopped" : "out",
+    ]);
   if (category === "asks")
     return JSON.stringify([category, item.kind, item.brief?.ask ?? item.text]);
   if (category === "stalls") return JSON.stringify([item.kind, item.at]);
@@ -266,6 +277,15 @@ export class LocalNotifications {
       }
       if (previous === version || item.acked) {
         seen[item.key] = version;
+        continue;
+      }
+      // The operator's own Stop tells them nothing with nothing waiting, and, being their choice,
+      // must not wake them: it waits out quiet hours like an ask, staying unseen until then.
+      if (
+        item.notTriaging?.cause === "stopped" &&
+        (item.notTriaging.keys.length === 0 || (quiet && p.enabled !== false))
+      ) {
+        if (previous !== undefined) seen[item.key] = previous;
         continue;
       }
       // An ask held back by quiet hours stays unseen, so it notifies once they end.

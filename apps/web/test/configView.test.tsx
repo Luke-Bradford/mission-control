@@ -1,3 +1,4 @@
+import { METRICS } from "@mc/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ConfigYaml, scalar } from "../src/components/config/ConfigYaml.tsx";
@@ -90,6 +91,14 @@ describe("scalar", () => {
 });
 
 describe("Glossary", () => {
+  it("defines WIP with the In progress registry definition", () => {
+    const { container } = render(<Glossary />);
+    const terms = [...container.querySelectorAll("dt")];
+    const wip = terms.find((term) => term.textContent === "ticket states")?.nextElementSibling;
+    expect(wip?.textContent).toContain(METRICS.inProgress.definition);
+    expect(wip?.textContent).not.toContain("in progress + review");
+  });
+
   it("is a panel with its anchor and the data-model terms", () => {
     const { container } = render(<Glossary />);
     const gloss = container.querySelector("dl.gloss");

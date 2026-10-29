@@ -58,9 +58,6 @@ export function MapPage({ repoId }: { repoId: string | null }) {
             ))}
           </select>
         </label>
-        <span className="map-scope">
-          Crew seats only · one repo at a time · history stays in each agent's own view
-        </span>
       </header>
       {failed && !loaded ? (
         <div className="map-wait">

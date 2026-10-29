@@ -679,7 +679,6 @@ function afterMerge(s: LoopSnapshot): LoopAction[] {
 /** The state step: the first matching row of the table changes the loop. */
 function stateStep(s: LoopSnapshot): Step {
   const { loop, pr, evidence, headCommit, pushed, now, seat } = s;
-  const rounds = s.limits?.rounds ?? REVIEW_ROUNDS;
   const prNumber = pr?.number ?? loop.prNumber;
   const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
@@ -779,6 +778,7 @@ function stateStep(s: LoopSnapshot): Step {
 
   if (rv.on && rv.R !== null && rv.P !== null && rv.cur !== null) {
     const { R, P, cur } = rv;
+    const rounds = reviewRoundLimit(s, loop, P);
     if (cur.state === "failed") {
       const n = failedAttempts(R.rows, loop.epoch, P);
       if (n >= REVIEW_ATTEMPTS) {
@@ -1068,8 +1068,13 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.cur !== null &&
     rv.blocked &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
-    fixesSent(s.claimed, s.runId, loop.epoch) + 1 < (s.limits?.rounds ?? REVIEW_ROUNDS)
+    fixesSent(s.claimed, s.runId, loop.epoch) + 1 < reviewRoundLimit(s, loop, rv.P)
   );
+}
+
+/** A FLIGHT rework grant permits exactly one more blocking RETRO outcome on that head. */
+function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
+  return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */

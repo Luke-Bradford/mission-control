@@ -1,30 +1,10 @@
 import { mapSnapshotFixture as mapFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { areaColor, OTHER_AREA_COLOR, repoLayout } from "../src/map/layout.ts";
-import {
-  applyDelta,
-  fileStyle,
-  layoutTree,
-  level,
-  pickRepo,
-  pinToken,
-  tokenBand,
-} from "../src/map/model.ts";
+import { repoLayout } from "../src/map/layout.ts";
+import { applyDelta, layoutTree, pickRepo } from "../src/map/model.ts";
 
 describe("map rules", () => {
-  it("uses distinct muted area tones and configured seat order", () => {
-    expect(areaColor("apps/web", ["apps/server", "apps/web"])).not.toEqual(
-      areaColor("apps/server", ["apps/server", "apps/web"]),
-    );
-    expect(areaColor("docs", ["apps/server"])).toBe(OTHER_AREA_COLOR);
-    const s: import("@mc/core").MapSnapshot = structuredClone(mapFixture);
-    expect(fileStyle(s, ["src/main.ts"], "src", 3000, { "GUIDO-1": 4 }).token).toBe("--s5");
-  });
-  it("ports the prototype level and payload band boundaries", () => {
-    expect([0, 10, 11, 50, 51, 200, 201, 500, 501].map(level)).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4]);
-    expect([0, 99, 100, 999, 1000, 3999, 4000].map(tokenBand)).toEqual([0, 0, 1, 1, 2, 2, 3]);
-  });
-  it("keeps existing positions when branch files are added and bounds large trees", () => {
+  it("keeps existing positions when branch files are added and keeps large trees as individual files", () => {
     const tree = [
       { path: "src/a.ts", lines: 5 },
       { path: "src/b.ts", lines: 500000 },
@@ -41,8 +21,9 @@ describe("map rules", () => {
     const large = layoutTree(
       Array.from({ length: 2001 }, (_, i) => ({ path: `src/f${i}.ts`, lines: 1 })),
     );
-    expect(large.filter((n) => n.count > 0)).toHaveLength(1);
-    expect(large.find((n) => n.path === "src")?.count).toBe(2001);
+    const files = large.filter((n) => n.count > 0);
+    expect(files).toHaveLength(2001);
+    expect(files.every((node) => node.files[0] === node.path && node.count === 1)).toBe(true);
   });
   it("lays out every file as its own node, apart from its neighbours, each area its own way", () => {
     const tree = [
@@ -106,31 +87,6 @@ describe("map rules", () => {
     expect(Math.hypot(...added.map((v, i) => v - (folder[i] as number)))).toBeLessThan(30);
     // navigating back to the old tree reuses its layout
     expect(repoLayout("stability", tree, [])).toBe(first);
-  });
-  it("separates findings by shape and HUD severity token from all seven seat colours", () => {
-    expect(pinToken("Critical")).toBe("--crit");
-    expect(pinToken("Important")).toBe("--warn");
-    for (let i = 0; i < 7; i++) {
-      const s: import("@mc/core").MapSnapshot = structuredClone(mapFixture);
-      s.seats = Array.from({ length: 7 }, (_, j) => ({
-        ...s.seats[0],
-        seat: `seat-${j}`,
-        scope: { read: [], modified: [] },
-        calls: [],
-      }));
-      s.seats[i].scope.modified = [{ file: "a.ts", add: 51, rem: 0, source: "diff" }];
-      expect(fileStyle(s, ["a.ts"], "src").token).toBe(`--s${i + 1}`);
-      expect(fileStyle(s, ["a.ts"], "src").level).toBe(2);
-    }
-  });
-  it("distinguishes read/write overlap and current access without claiming conflict", () => {
-    const s: import("@mc/core").MapSnapshot = structuredClone(mapFixture);
-    s.seats = [s.seats[0], { ...structuredClone(s.seats[0]), seat: "other" }];
-    s.seats[0].scope = { read: [], modified: [{ file: "a", add: 1, rem: 2, source: "churn" }] };
-    s.seats[1].scope = { read: ["a"], modified: [] };
-    expect(fileStyle(s, ["a"], "src").overlap).toBe("shared");
-    s.seats[1].scope.modified = [{ file: "a", add: 1, rem: 0, source: "diff" }];
-    expect(fileStyle(s, ["a"], "src").overlap).toBe("write overlap");
   });
   it("applies ordered changes, ignores duplicates and requests resync on gaps", () => {
     const s: import("@mc/core").MapSnapshot = structuredClone(mapFixture);

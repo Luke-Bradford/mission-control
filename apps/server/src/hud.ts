@@ -20,17 +20,24 @@ import {
   type CrewLoop,
   type CrewQueueItem,
   type CrewRow,
+  clockHm,
   crewHudState,
   currentReview,
   type DriverStop,
   driverStopKey,
   type Escalation,
   escalationKind,
+  FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
   FLIGHT_HANDLING_MAX_MS,
+  FLIGHT_NOT_TRIAGING_KEY,
+  FLIGHT_NOTE_KEY,
+  FLIGHT_OFF_GRACE_MS,
   FLIGHT_TRIAGE_WAIT_MS,
+  type FlightNotTriagingCause,
   fixesSent,
   flightFloorBlocked,
+  flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
@@ -43,6 +50,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
   OWNER_LOOP,
@@ -97,6 +105,7 @@ import {
 } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
+import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
@@ -570,10 +579,175 @@ export function crew(
 
 const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k);
 
-/** The items that say FLIGHT is down: the operator's at once, as FLIGHT can't triage its own outage. */
-export const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
+/** The watch's FLIGHT-down notes as items: folded into the one "FLIGHT is not triaging" item. */
+const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
   FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
 );
+
+/**
+ * Whether FLIGHT is triaging, and if not, why (FLIGHT_NOT_TRIAGING_CAUSES, "late" aside: that
+ * depends on the items). `since`: when it stopped (its watch note, or its seat's last change);
+ * `liveSince`: when its live run started, from which an item's triage window runs at the latest,
+ * so FLIGHT coming back gets a fresh window rather than a backlog of missed ones.
+ */
+interface FlightTriage {
+  flightId: string;
+  repoId: string;
+  triaging: boolean;
+  /** Routes items as a live FLIGHT: live, or within the restart grace. */
+  live: boolean;
+  cause: Exclude<FlightNotTriagingCause, "late"> | null;
+  /** The watch note's text, when one says why. */
+  detail: string | null;
+  since: number | null;
+  liveSince: number;
+  /** An "off" FLIGHT within FLIGHT_OFF_GRACE_MS: when the item will show, else null. */
+  showsAt: number | null;
+}
+
+/**
+ * The operator's call (#758): FLIGHT may brief it for the operator but never keep it, and it is
+ * never folded into the "FLIGHT is not triaging" item. The decision kinds, the held hub Update,
+ * and a run parked on its budget or account.
+ */
+export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+  if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.kind !== "blocked") return false;
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  return park === "budget" || park === "account";
+}
+
+/**
+ * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
+ * themselves so they notify as they always did: a stuck run, or an error a seat is stuck on, is
+ * not news to fold into a count.
+ */
+const STUCK_KINDS: readonly AttentionItem["kind"][] = [
+  "stalled",
+  "blocked",
+  "parked",
+  "lock",
+  "error",
+];
+
+/** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
+const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
+  isOperatorCall(item, store) || STUCK_KINDS.includes(item.kind);
+
+/**
+ * A seat's question FLIGHT passed to the operator with its brief: the operator's to answer, not
+ * FLIGHT's. Passed without one (before #758), it is still FLIGHT's.
+ */
+export function questionWithOperator(
+  q: { passedAt: number | null },
+  brief: AttentionItem["brief"],
+): boolean {
+  return q.passedAt !== null && brief !== undefined && brief.for !== "flight";
+}
+
+/** When this hub process started (main.ts); null in a test or tool that never sets it. */
+let hubStartedAt: number | null = null;
+/** main.ts: a FLIGHT seat with no seat row yet counts as stopped since the hub started. */
+export function markHubStarted(at: number | null): void {
+  hubStartedAt = at;
+}
+
+/** Runs of FLIGHT walked back for `liveSince`: hours of a crash loop at FLIGHT_STARTS_MAX an hour. */
+const LIVE_SINCE_RUNS = 30;
+
+/**
+ * When FLIGHT's current stretch of being up began: its live run's start, moved back over each
+ * earlier run that ended within FLIGHT_OFF_GRACE_MS of the next one's start (a rotation, a quick
+ * restart, a crash the watch recovered), so only a real outage gives items a fresh window and a
+ * crash loop cannot keep resetting them.
+ */
+function flightLiveSince(store: Store, flightId: string, run: Run): number {
+  let start = run.startedAt;
+  for (const prev of store.runs(flightId, LIVE_SINCE_RUNS)) {
+    if (prev.id === run.id || prev.startedAt >= start) continue;
+    if (prev.endedAt === null || start - prev.endedAt > FLIGHT_OFF_GRACE_MS) break;
+    start = prev.startedAt;
+  }
+  return start;
+}
+
+function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage | null {
+  const found = flightSeat(config);
+  if (found === null) return null;
+  const flightId = found.seat.id;
+  const live = flightLive(config, store);
+  const notes = store.notes().filter((n) => n.dismissedAt === null);
+  const note =
+    notes.find((n) => n.key === FLIGHT_NOTE_KEY) ??
+    notes.find((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+  const row = store.seatSession(flightId);
+  const run = row?.runId == null ? null : store.run(row.runId);
+  const base = { flightId, repoId: found.session.repoId, live, liveSince: 0, showsAt: null };
+  if (note !== undefined) {
+    return {
+      ...base,
+      triaging: false,
+      cause: note.key === FLIGHT_NOTE_KEY ? "start-failed" : "down",
+      detail: note.text,
+      since: note.at,
+      liveSince: live && run !== null ? flightLiveSince(store, flightId, run) : 0,
+    };
+  }
+  if (live) {
+    return {
+      ...base,
+      triaging: true,
+      cause: null,
+      detail: null,
+      since: null,
+      liveSince: run === null ? 0 : flightLiveSince(store, flightId, run),
+    };
+  }
+  // never run: down since this hub started (a test without a start time: just now, so in grace)
+  const since = row === null ? (hubStartedAt ?? now) : Math.max(row.updatedAt, run?.endedAt ?? 0);
+  if (row?.state === "stopped") {
+    return { ...base, triaging: false, cause: "stopped", detail: null, since };
+  }
+  // parked is an outage, not a restart: no grace (the watch's note, when raised, says more)
+  if (row?.state === "parked") {
+    return { ...base, triaging: false, cause: "down", detail: "FLIGHT is parked.", since };
+  }
+  const showsAt = since + FLIGHT_OFF_GRACE_MS;
+  if (now < showsAt) {
+    // Within the restart grace (a rotation, a crash the watch recovers, a hub restart) FLIGHT
+    // still counts as triaging, so items keep their windows and a "late" item carries through
+    // rather than vanishing and notifying again when FLIGHT is back.
+    const last = run ?? store.runs(flightId, 1)[0] ?? null;
+    return {
+      ...base,
+      live: true,
+      triaging: true,
+      cause: null,
+      detail: null,
+      since,
+      liveSince: last === null ? 0 : flightLiveSince(store, flightId, last),
+      showsAt,
+    };
+  }
+  return { ...base, triaging: false, cause: "off", detail: null, since };
+}
+
+/** When a not-running FLIGHT's grace ends and its "not triaging" item shows; null if not pending. */
+export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: number): number | null {
+  return flightTriage(config, store, now)?.showsAt ?? null;
+}
+
+/** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
+function sinceText(at: number, now: number, timeZone: string): string {
+  const hm = clockHm(at, timeZone);
+  if (at >= startOfLocalDay(now, timeZone)) return hm;
+  const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
+    at,
+  );
+  return `${day} ${hm}`;
+}
 
 /** An attention item before its ack is read; the server always knows its owner. */
 type OwnedItem = Omit<AttentionItem, "acked" | "owner"> & { owner: AttentionOwner };
@@ -603,8 +777,9 @@ function otherLogin(
  * Messages are not needs: unread chatter is counted on its Comms thread. FLIGHT's own lines count
  * only as an `@CAPCOM` question (a `tag` for the operator); another agent's `@CAPCOM` tag, or a
  * question on its direct line, is FLIGHT's to triage and reaches the operator only through a brief
- * FLIGHT writes for them. A seat's `ask_operator` question is its `ask:` item alone, never also the
- * Comms line that mirrors it.
+ * FLIGHT writes for them. So is a seat's `ask_flight` question: its `ask:` item alone (never also
+ * the Comms line that mirrors it), FLIGHT's from the start until FLIGHT briefs it for the operator.
+ * While FLIGHT is not triaging, one "FLIGHT is not triaging" item stands for all of them.
  * Sorted by ATTENTION_KINDS order, then time; `acked` from the acks table.
  */
 export function attentionItems(
@@ -780,13 +955,26 @@ export function attentionItems(
 
   items.push(...crewItems(config, store, lock, rows));
 
-  const live = flightLive(config, store);
-  const passed = new Set(
+  const triage = flightTriage(config, store, now);
+  const live = triage?.live ?? false;
+  const triaging = triage?.triaging ?? false;
+  // FLIGHT's own questions (from before #758, when it had a question tool) stay the operator's.
+  const flightAsks = new Set(
     store
       .openQuestions()
-      .filter((q) => q.passedAt !== null || q.agentId === flightId)
+      .filter((q) => q.agentId === flightId)
       .map((q) => `ask:${q.id}`),
   );
+  /**
+   * Missed or late: with a FLIGHT seat it stays FLIGHT's, counted by the one not-triaging item,
+   * except an operator's call or a stuck run, which reaches the operator as itself.
+   */
+  const missed = (item: AttentionItem, triageDueAt?: number): AttentionItem => ({
+    ...item,
+    ...(triage === null || keptRaw(item, store) ? {} : { owner: OWNER_FLIGHT }),
+    flightTriage: "missed",
+    ...(triageDueAt === undefined ? {} : { triageDueAt }),
+  });
   const route = (i: OwnedItem): AttentionItem => {
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
@@ -800,44 +988,112 @@ export function attentionItems(
       ...(brief === undefined ? {} : { brief }),
       acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
     };
-    if (
-      i.owner !== OWNER_OPERATOR ||
-      passed.has(i.key) ||
-      ownReply(i, flightId) ||
-      FLIGHT_DOWN_ITEMS.has(i.key)
-    )
-      return item;
+    // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
+    // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
+    const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
+    if (seatAsk && triage !== null) {
+      if (brief !== undefined && brief.for !== "flight") return item;
+      if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
+      if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
+      if (brief?.for === "flight")
+        return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
+      const triageDueAt = Math.max(i.at, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS;
+      return now < triageDueAt
+        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
+        : missed(item, triageDueAt);
+    }
+    if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
-    if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS)
-      return { ...item, flightTriage: "missed" };
-    if (!live) return item;
+    if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);
+    // nobody is triaging: an operator's call or a stuck run goes straight to the operator
+    if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     // A PR only becomes an attention item after its existing quiet wait.
     const raisedAt =
       i.kind === "stalled"
         ? (rows.find((r) => r.id === i.agentId)?.stateSince ?? i.at)
         : i.at + (i.kind === "pr" ? PR_WAIT_MS : 0);
-    const triageDueAt = raisedAt + FLIGHT_TRIAGE_WAIT_MS;
+    const triageDueAt = Math.max(raisedAt, triage?.liveSince ?? 0) + FLIGHT_TRIAGE_WAIT_MS;
     return now < triageDueAt
       ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
-      : { ...item, flightTriage: "missed", triageDueAt };
+      : missed(item, triageDueAt);
   };
   const result: AttentionItem[] = items
+    // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
+    .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => {
       const item = route(i);
       // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
       // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
-      // With FLIGHT down it is still FLIGHT's (#758 adds the one "FLIGHT is not triaging" item).
+      // While FLIGHT is not triaging it is still FLIGHT's, counted by the not-triaging item.
       const chatter = (i.kind === "tag" || i.kind === "message") && !ownReply(i, flightId);
       const briefed = item.brief !== undefined && item.brief.for !== "flight";
       if (!chatter || briefed || item.owner !== OWNER_OPERATOR) return item;
-      return live
+      return triaging
         ? { ...item, owner: OWNER_FLIGHT }
         : { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     });
   const partition = partitionAttention(store, result, acks);
-  return includeHeld ? [...partition.items, ...partition.held] : partition.items;
+  const shown =
+    triage === null
+      ? partition.items
+      : withNotTriaging(partition.items, triage, acks, now, config.operator.timezone);
+  return includeHeld ? [...shown, ...partition.held] : shown;
+}
+
+/**
+ * Adds the one "FLIGHT is not triaging" item (#758) when FLIGHT is not triaging, or is live but
+ * has let one or more items pass their triage window. It counts what waits on FLIGHT meanwhile:
+ * items marked down or missed, and while FLIGHT is reported down, those still in their window.
+ * Those stay FLIGHT's, listed under it, so Needs you shows one item instead of N raw ones.
+ */
+function withNotTriaging(
+  items: AttentionItem[],
+  triage: FlightTriage,
+  acks: Map<string, number>,
+  now: number,
+  timeZone: string,
+): AttentionItem[] {
+  const members = items
+    .filter(
+      (i) =>
+        i.owner === OWNER_FLIGHT &&
+        (i.flightTriage === "down" ||
+          i.flightTriage === "missed" ||
+          (!triage.triaging && i.flightTriage === "waiting")),
+    )
+    .sort((a, b) => a.at - b.at);
+  const cause: FlightNotTriagingCause | null =
+    triage.cause ?? (triage.triaging && members.length > 0 ? "late" : null);
+  if (cause === null) return items;
+  const dated = members.filter((i) => i.at > 0);
+  const since = dated.length === 0 ? null : Math.min(...dated.map((i) => i.at));
+  const lateAt = Math.min(...members.map((i) => i.triageDueAt ?? i.at));
+  const at = since ?? (cause === "late" ? lateAt : (triage.since ?? 0));
+  const ackAt = acks.get(FLIGHT_NOT_TRIAGING_KEY);
+  const item: AttentionItem = {
+    key: FLIGHT_NOT_TRIAGING_KEY,
+    kind: "blocked",
+    owner: OWNER_OPERATOR,
+    agentId: triage.flightId,
+    repoId: triage.repoId,
+    text: flightNotTriagingText(
+      cause,
+      members.length,
+      since === null ? null : sinceText(since, now, timeZone),
+      triage.detail,
+    ),
+    tool: null,
+    at,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    notTriaging: { cause, keys: members.map((i) => i.key), since },
+    // read as it was: a member raised after the ack makes it unread again
+    acked: ackAt !== undefined && ackAt >= Math.max(at, ...members.map((i) => i.at)),
+  };
+  return [item, ...items];
 }
 
 /** Identity of the ask and brief, independent of refresh time and read state. */

@@ -26,6 +26,45 @@ const at = (path: string) => {
 };
 
 describe("App", () => {
+  it("does not re-render the application on a clock tick", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const renders = vi.fn();
+    window.history.replaceState(null, "", "/");
+    render(<App onRender={renders} />);
+    await vi.runOnlyPendingTimersAsync();
+    const initial = renders.mock.calls.length;
+
+    await act(async () => vi.advanceTimersByTime(1000));
+
+    expect(renders).toHaveBeenCalledTimes(initial);
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["/", "Overview"],
+    ["/flight", "Flight"],
+    ["/board", "Board"],
+    ["/agent", "Agents"],
+    ["/map/sample", "Crew activity map"],
+    ["/comms", "Comms"],
+    ["/telemetry", "Telemetry"],
+    ["/audit", "Audit"],
+    ["/setup/loops", "Setup"],
+  ])("%s has one page heading and the shell landmarks", async (path, heading) => {
+    const { container } = at(path);
+    await screen.findByRole("heading", { level: 1, name: heading });
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(screen.getByRole("main")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+  });
+
+  it("skips from the Board link to the board content", async () => {
+    at("/board");
+    const board = await screen.findByRole("heading", { level: 2, name: "Work board" });
+    fireEvent.click(screen.getByRole("link", { name: "Skip to board" }));
+    expect(document.activeElement).toBe(board);
+  });
+
   it.each([
     ["/", "page-overview", "Overview"],
     ["/flight", "page-flight", "Flight"],
@@ -34,6 +73,7 @@ describe("App", () => {
     ["/map/sample", "page-map", "Map"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
+    ["/audit", "page-audit", "Audit"],
     ["/setup/loops", "page-setup", null],
   ])("%s renders its page and marks its tab", async (path, id, tabName) => {
     const { container } = at(path);

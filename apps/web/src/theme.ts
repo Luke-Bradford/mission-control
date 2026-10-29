@@ -94,7 +94,7 @@ export const THEME_TOKENS: Record<"dark" | "light", Record<TokenName, string>> =
     "--s2": "#9c62e2",
     "--s3": "#d35bab",
     "--s4": "#5350bf",
-    "--s5": "#c05bdf",
+    "--s5": "#e989e9",
     "--s6": "#4384af",
     "--s7": "#2eafc4",
     "--s8": "#6c639d",

@@ -157,6 +157,35 @@ describe("Decided without you", () => {
     expect(rows[1]?.textContent).toContain("question d1");
   });
 
+  it("lists closed and reordered tickets, with the ref linked to its issue", async () => {
+    stubDecided(
+      flightView({
+        decisions: [
+          decided("d1", NOW - HOUR, {
+            kind: "close",
+            ref: "shop-app#7",
+            about: "shop-app#7: Old (replaced by shop-app#8)",
+            decision: "Closed as duplicate: https://github.com/octo-org/shop-app/issues/7",
+          }),
+          decided("d2", NOW - 2 * HOUR, {
+            kind: "reorder",
+            ref: "shop-app#2",
+            about: "shop-app#2 above shop-app#1",
+            decision: "Reordered queue",
+          }),
+        ],
+      }),
+    );
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("decided-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("Closed as duplicate");
+    const link = rows[0]?.querySelector("a");
+    expect(link?.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/7");
+    expect(link?.textContent).toBe("shop-app#7");
+    expect(rows[1]?.textContent).toContain("Reordered queue");
+  });
+
   it("says so when nothing was decided without you today", async () => {
     stubDecided(flightView({ decisions: [decided("d1", NOW - 2 * HOUR, { kind: "pass" })] }));
     const { container } = render(<Flight />);
@@ -716,7 +745,7 @@ describe("FLIGHT page", () => {
     expect(container.querySelector("#controlP")?.textContent).toContain("Choose a release window");
     expect(container.querySelector("#controlP")?.textContent).toContain("Prepare the release");
     expect(container.querySelector("#controlP")?.textContent).toContain("Spike cache pressure");
-    fireEvent.click(screen.getByRole("button", { name: "Needs you: 1 decisions or replies, now" }));
+    fireEvent.click(screen.getByRole("button", { name: "1 Needs you decisions or replies, now" }));
     expect(window.location.pathname).toBe(PAGE_PATHS.flight);
     expect(window.location.hash).toBe("#askP");
     await waitFor(() =>
@@ -923,11 +952,11 @@ describe("FLIGHT page", () => {
       });
       render(<Flight />);
       const cycle = await screen.findByRole("button", {
-        name: "Cycle time p50: 1.2 h Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
+        name: "1.2 h Cycle time p50 Ready → Done · p85 30 h · 8 tickets · 1 left out, 14d",
       });
       expect(cycle.getAttribute("title")).toBe(metricHover("cycleTime"));
       expect(
-        await screen.findByRole("button", { name: /^Needs you: 0 decisions or replies, now$/ }),
+        await screen.findByRole("button", { name: /^0 Needs you decisions or replies, now$/ }),
       ).toBeTruthy();
       expect(pulseValue(document.body, "Merged")).toBe("6");
       // Merged and Review / CI are read here only: they lead nowhere.
@@ -1313,6 +1342,39 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
     fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("item").textContent).toBe("a");
+  });
+
+  it("Asked of you shows FLIGHT not triaging as one item with what waits on it listed under it (#758)", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({
+          key: "flight:not-triaging",
+          kind: "blocked",
+          agentId: "flight-1",
+          escalationId: null,
+          text: "FLIGHT is not triaging: 1 waiting since 12:55. FLIGHT has not triaged them within its window.",
+          notTriaging: { cause: "late", keys: ["ask:1"], since: NOW - 5 * 60_000 },
+        }),
+        item({
+          key: "ask:1",
+          kind: "question",
+          escalationId: null,
+          text: "GUIDO-1 asks: Which lane?",
+          owner: "flight",
+          flightTriage: "missed",
+        }),
+      ],
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    const row = await screen.findByTestId("not-triaging");
+    expect(row.textContent).toContain("FLIGHT is not triaging: 1 waiting since 12:55.");
+    // Needs you's home shows them at once; the item stays FLIGHT's, so it is no row of its own
+    expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
+    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
+    expect(screen.queryByText(NOBODY_WAITING)).toBeNull();
   });
 
   it("keeps person notifications out of Asked of you until FLIGHT passes them up", async () => {

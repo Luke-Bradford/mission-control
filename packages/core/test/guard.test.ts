@@ -135,8 +135,8 @@ describe("scratch mode", () => {
     expect(ruleOf(bash("pnpm -s vitest run a.test.ts"), scratch)).toBe("allow");
   });
 
-  it("scratch: ask_operator, report_evidence and report_plan denied, report_findings allowed", () => {
-    for (const tool of [MC_TOOLS.askOperator, MC_TOOLS.reportEvidence, MC_TOOLS.reportPlan]) {
+  it("scratch: ask_flight, report_evidence and report_plan denied, report_findings allowed", () => {
+    for (const tool of [MC_TOOLS.askFlight, MC_TOOLS.reportEvidence, MC_TOOLS.reportPlan]) {
       expect(guardDecision({ tool, input: {} }, scratch)).toEqual({
         kind: "deny",
         rule: "read-only",
@@ -146,21 +146,26 @@ describe("scratch mode", () => {
     expect(guardDecision({ tool: MC_TOOLS.reportFindings, input: {} }, scratch)).toEqual({
       kind: "allow",
     });
-    expect(guardDecision({ tool: MC_TOOLS.askOperator, input: {} }, writer)).toEqual({
+    expect(guardDecision({ tool: MC_TOOLS.askFlight, input: {} }, writer)).toEqual({
       kind: "allow",
     });
   });
 
-  it.each(["merge_pr", "settle_park", "rerun_ci", "edit_card", "dismiss_item", "gh_read"])(
-    "guards %s with the live repo powers",
-    (name) => {
-      const event = { tool: `mcp__mc__${name}`, input: {} };
-      expect(guardDecision(event, writer)).toMatchObject({ kind: "deny", rule: "flight-powers" });
-      expect(guardDecision(event, { ...writer, flightPowers: "superuser" })).toEqual({
-        kind: "allow",
-      });
-    },
-  );
+  it.each([
+    "merge_pr",
+    "settle_park",
+    "rerun_ci",
+    "edit_card",
+    "dismiss_item",
+    "gh_read",
+    "close_ticket",
+  ])("guards %s with the live repo powers", (name) => {
+    const event = { tool: `mcp__mc__${name}`, input: {} };
+    expect(guardDecision(event, writer)).toMatchObject({ kind: "deny", rule: "flight-powers" });
+    expect(guardDecision(event, { ...writer, flightPowers: "superuser" })).toEqual({
+      kind: "allow",
+    });
+  });
 
   it("a superuser-only tool is denied on a standard repo and allowed on a superuser one", () => {
     const e = { tool: "mcp__mc__promote", input: {} };
@@ -396,7 +401,7 @@ describe("guardDecision: read-only seats", () => {
     expect(ruleOf({ tool, input: {} }, readOnly)).toBe("read-only");
     expect(ruleOf({ tool, input: {} }, writer)).toBe("allow");
   });
-  it.each(["mcp__mc__ask_operator", "mcp__mc__report_evidence"])(
+  it.each(["mcp__mc__ask_flight", "mcp__mc__report_evidence"])(
     "allows %s in both modes",
     (tool) => {
       expect(ruleOf({ tool, input: {} }, readOnly)).toBe("allow");

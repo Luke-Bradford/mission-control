@@ -15,6 +15,58 @@ export type ReviewState = (typeof REVIEW_STATES)[number];
 export const FINDING_SEVERITIES = ["Critical", "Important", "Minor"] as const;
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 
+export const FINDING_CATEGORIES = [
+  "correctness",
+  "security",
+  "spec",
+  "test-missing",
+  "test-wrong",
+  "test-stale",
+  "scope",
+  "style",
+  "docs",
+] as const;
+export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
+
+/** RETRO's standing standards and the review step's profile checklist. */
+export const REVIEW_CHECK_IDS = [
+  "new-behaviour-tests",
+  "typed-identifiers",
+  "parameterized-sql",
+  "boundary-validation",
+  "authorization",
+  "scope",
+  "spec",
+  "quality",
+  "blast-radius",
+  "browser",
+] as const;
+export type ReviewCheckId = (typeof REVIEW_CHECK_IDS)[number];
+export const REVIEW_CHECK_RESULTS = ["pass", "fail", "n-a"] as const;
+export type ReviewCheckResult = (typeof REVIEW_CHECK_RESULTS)[number];
+
+export interface ReviewCheck {
+  check: ReviewCheckId;
+  result: ReviewCheckResult;
+  note?: string;
+}
+
+export interface ReportedTest {
+  command: string;
+  file?: string;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration: number;
+}
+
+export const FINDING_RESOLUTION_OUTCOMES = ["fixed", "reply-accepted", "held", "waived"] as const;
+export type FindingResolutionOutcome = (typeof FINDING_RESOLUTION_OUTCOMES)[number];
+export interface FindingResolution {
+  findingRef: { reviewId: number; pos: number };
+  outcome: FindingResolutionOutcome;
+}
+
 /** The severities the author must fix before merge. */
 export const BLOCKING_SEVERITIES: readonly FindingSeverity[] = ["Critical", "Important"];
 
@@ -51,6 +103,7 @@ export interface ReviewFinding {
   scenario: string;
   /** A concrete suggested change for the author. */
   fix: string;
+  category?: FindingCategory;
 }
 
 export interface StoredFinding extends ReviewFinding {

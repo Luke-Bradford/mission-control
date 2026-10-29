@@ -37,6 +37,7 @@ const idle: MapSnapshot = {
     calls: [],
     recent: [],
     scope: { read: [], modified: [] },
+    badges: { ...structuredClone(s.badges), questions: [], waiting: null },
   })),
   findings: [],
 };
@@ -157,28 +158,22 @@ describe("Map page", () => {
     });
     at("/map/sample");
     await screen.findByText("3D scene");
-    expect(screen.getByText(/No crew activity recorded on sample right now/)).toBeTruthy();
-    expect(screen.getByText(/2 files at origin\/HEAD, each its own node/)).toBeTruthy();
+    expect(screen.getByText("No seat is working in this repo right now.")).toBeTruthy();
+    expect(screen.getByText(/2 files/)).toBeTruthy();
   });
 
-  it("names the branches whose conflicts went unchecked, on the seat's card too", async () => {
+  it("uses h2 headings for the mapped page's Seats and Selected sections", async () => {
     stubFetch({
       "/api/repos": repos,
       "/api/config": config,
       "/api/crew": { rows: [] },
-      "/api/repos/sample/map": {
-        ...idle,
-        conflictsUnchecked: [{ branch: "feature/7-empty-input", reason: "head not fetched" }],
-      },
+      "/api/repos/sample/map": idle,
     });
     at("/map/sample");
     await screen.findByText("3D scene");
-    expect(
-      screen.getByText(/Conflicts not checked for feature\/7-empty-input \(head not fetched\)\./),
-    ).toBeTruthy();
-    expect(screen.getByRole("article", { name: "GUIDO-1" }).textContent).toContain(
-      "Conflicts not checked: head not fetched",
-    );
+    expect(screen.getByRole("heading", { level: 1, name: "Crew activity map" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Seats" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Selected" })).toBeTruthy();
   });
 
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {

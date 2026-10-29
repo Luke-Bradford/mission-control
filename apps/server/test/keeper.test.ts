@@ -214,6 +214,7 @@ describe("the keeper", () => {
       cliPid: expect.any(Number),
       lines: 0,
       awaiting: false,
+      parsedResults: true,
     });
     expect(readPidFile(folder, "keeper.pid")).toBe(process.pid);
     c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
@@ -309,6 +310,45 @@ describe("the keeper", () => {
     const d = await client(folder);
     expect(d.msgs[0]).toMatchObject({ lines: 2, awaiting: false });
     d.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 2 });
+    d.say({ t: "close", graceMs: 300 });
+    await k.done;
+  });
+
+  it("ends the turn at a result whose type is not its first key, as Claude 2.1.302 prints it", async () => {
+    // the real CLI's result starts {"duration_api_ms":…; a keeper that matched a {"type":"result"
+    // prefix said awaiting forever, so FLIGHT was never woken after a hub restart (#798)
+    const folder = folderFor(
+      `require("node:readline").createInterface({ input: process.stdin }).on("line", (l) => {
+         console.log(JSON.stringify({ type: "assistant", text: '"type":"result"' }));
+         console.log(JSON.stringify({ duration_api_ms: 5, stop_reason: "end_turn", type: "result" }));
+       });`,
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "hi", user: true });
+    await until(() => expect(c.outs()).toHaveLength(2));
+    const d = await client(folder);
+    expect(d.msgs[0]).toMatchObject({ lines: 2, awaiting: false, parsedResults: true });
+    d.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 2 });
+    d.say({ t: "close", graceMs: 300 });
+    await k.done;
+  });
+
+  it("does not end the turn at a line that only quotes a result", async () => {
+    const folder = folderFor(
+      `require("node:readline").createInterface({ input: process.stdin }).on("line", (l) => {
+         console.log(JSON.stringify({ type: "assistant", text: '{"type":"result"}' }));
+       });`,
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "hi", user: true });
+    await until(() => expect(c.outs()).toHaveLength(1));
+    const d = await client(folder);
+    expect(d.msgs[0]).toMatchObject({ lines: 1, awaiting: true });
+    d.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 1 });
     d.say({ t: "close", graceMs: 300 });
     await k.done;
   });

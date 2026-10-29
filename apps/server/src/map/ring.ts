@@ -1,14 +1,23 @@
 import { existsSync, globSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { CrewVendor, MapCall, MapChange, MapDelta, MapTests } from "@mc/core";
+import {
+  type CrewVendor,
+  MAP_RECENT_MS,
+  type MapCall,
+  type MapChange,
+  type MapDelta,
+  type MapTests,
+  namesOnly,
+} from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
 import { SeatDiff } from "./diff.ts";
 
-const KEEP_MS = 15 * 60_000;
+/** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
+const KEEP_MS = MAP_RECENT_MS;
 type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
@@ -61,7 +70,12 @@ function tests(output: string): MapTests {
 
 interface RunScope {
   read: string[];
+  /** Edit churn from the run's Edit and Write calls: never the branch's real change. */
   modified: MapChange[];
+  /** file → when a call last edited it. */
+  touched: Record<string, number>;
+  /** Each edit's churn and time, so churn can be counted since a commit rather than for the run. */
+  edits: { file: string; add: number; rem: number; at: number }[];
   editedAt: number;
   tests: { tests: MapTests; at: number } | null;
 }
@@ -72,7 +86,14 @@ export class CallRing {
 
   scope(runId: string): RunScope {
     return structuredClone(
-      this.runScopes.get(runId) ?? { read: [], modified: [], editedAt: 0, tests: null },
+      this.runScopes.get(runId) ?? {
+        read: [],
+        modified: [],
+        touched: {},
+        edits: [],
+        editedAt: 0,
+        tests: null,
+      },
     );
   }
 
@@ -129,6 +150,24 @@ export class CallRing {
     for (const [file, { add, rem }] of changes)
       if (add || rem)
         this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
+  }
+
+  /**
+   * The run's real branch change (`git diff --numstat` from its merge base to the worktree, cached
+   * per HEAD and index), or null while it is unread or unavailable.
+   */
+  diff(runId: string): MapChange[] | null {
+    return this.diffs.get(runId)?.diff.changes() ?? null;
+  }
+
+  /** The branch that diff was read on: the worktree's checkout, which may be a later run's. */
+  diffBranch(runId: string): string | null {
+    return this.diffs.get(runId)?.diff.branch() ?? null;
+  }
+
+  /** The worktree's untracked, unignored files, read with that diff; null while unknown. */
+  untracked(runId: string): string[] | null {
+    return this.diffs.get(runId)?.diff.untracked() ?? null;
   }
 
   calls(seat: string): RingCall[] {
@@ -416,18 +455,25 @@ export class CallRing {
     const scope = this.runScopes.get(source.id) ?? {
       read: [],
       modified: [],
+      touched: {},
+      edits: [],
       editedAt: 0,
       tests: null,
     };
     this.runScopes.set(source.id, scope);
     if (!error && !refused) {
-      if (call.writeTok === undefined) scope.read = [...new Set([...scope.read, ...call.files])];
+      // a name-only listing (Glob) opened none of its files: they aren't read
+      if (call.writeTok === undefined && !namesOnly(call.tool))
+        scope.read = [...new Set([...scope.read, ...call.files])];
       for (const change of call.churn) {
         const previous = scope.modified.find((c) => c.file === change.file);
         if (previous) {
           previous.add += change.add;
           previous.rem += change.rem;
         } else scope.modified.push({ ...change });
+        scope.touched[change.file] = Math.max(scope.touched[change.file] ?? 0, call.since);
+        scope.edits.push({ ...change, at: call.since });
+        if (scope.edits.length > 2000) scope.edits.shift();
         scope.editedAt = Math.max(scope.editedAt, call.since);
       }
     }

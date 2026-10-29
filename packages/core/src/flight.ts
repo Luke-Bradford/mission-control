@@ -39,6 +39,8 @@ export const FLIGHT_DECISION_KINDS = [
   "end",
   "ticket",
   "comment",
+  "close",
+  "reorder",
   "rerun",
   "ruling",
   "sync",
@@ -192,10 +194,10 @@ export interface FlightSummaryOutcome extends FlightSummaryItem {
 /**
  * Daily and live hub metrics. A run's whole cost and tokens are attributed when it was
  * active in the window (still open or ended at or after `since`); the hub has no per-turn cost.
+ * Merged PRs and cycle time are not here: the metric registry (`METRICS`) is their one definition.
  */
 export interface FlightMetrics {
   since: number;
-  merged: number;
   opened: number;
   inReview: number;
   inCi: number;
@@ -205,8 +207,6 @@ export interface FlightMetrics {
   parks: { day: number; live: { kind: string; n: number }[] };
   seats: { seat: string; tokens: number; costUsd: number }[];
   flight: { wakes: number; costUsd: number };
-  /** Latest successful Ready move at or before merge, falling back to the flow issue start. */
-  readyToMergedMin: number | null;
   forTheController: number;
 }
 export interface FlightSummaryView {
@@ -410,17 +410,19 @@ export const ticketReadText = (
 ): string =>
   `#${n} ${title} [${column}${size === undefined || size === null ? "" : ` · Size ${size}`}]\n\n${cutNote === null ? "" : `${cutNote}\n\n`}${body}`;
 
-export const ANSWER_ONE_OF = "give answer or pass_to_operator, not both";
 export const noOpenQuestionText = (id: number): string =>
   `Not answered: there is no open question ${id}.`;
 export const ANSWER_OWN_QUESTION = "Not answered: that is your own question to the operator.";
 export const askerRunEndedText = (call: string): string =>
   `Not answered: the run of ${call} that asked it has ended.`;
 export const PASSED_DECISION = "Passed to the operator";
-export const PASSED_TEXT =
-  "Passed to the operator. It is in the operator's Needs-you list now; your basis is in Decided without you.";
-export const answerMessageText = (answer: string): string =>
-  `FLIGHT, answering for the operator: ${answer}`;
+/**
+ * answer_question no longer passes a bare question up (#758): a seat's question reaches the
+ * operator only with FLIGHT's brief.
+ */
+export const passNeedsBriefText = (id: number): string =>
+  `Not passed: a seat's question reaches the operator only with your brief. Call mc brief_item { key: "ask:${id}", for: "operator", ask, assessment, recommendation, options?, basis }.`;
+export const answerMessageText = (answer: string): string => `FLIGHT answers: ${answer}`;
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
@@ -486,7 +488,7 @@ export const PROMOTE_ENGINE_OFF =
   "Not moved: the loop engine is off on this server, so no card moves.";
 export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
 export const promoteOffText = (repoId: string): string =>
-  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with mc ask_operator.`;
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.`;
@@ -568,9 +570,9 @@ export const notRunOfSeatText = (runId: string, call: string): string =>
   `Not sent: ${runId} is not an unended run of ${call}.`;
 export const RUN_ID_NEEDS_UNPARK = "Not sent: runId goes with unpark: true.";
 export const parkNotYoursText = (kind: string): string =>
-  `Not sent: a ${kind} park is the operator's call; pass it to them with mc ask_operator.`;
+  `Not sent: a ${kind} park is the operator's call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.`;
 export const unparkCapText = (n: number): string =>
-  `Not sent: you have un-parked this run ${n} times; pass it to the operator with mc ask_operator.`;
+  `Not sent: you have un-parked this run ${n} times; pass it up with mc brief_item { for: "operator" } on its Needs-you item.`;
 export const ENGINE_OFF_TEXT =
   "Not sent: the loop engine is off on this server, so nothing can be un-parked.";
 export const messageAboutText = (call: string): string => `Message to ${call}`;
@@ -617,7 +619,7 @@ export const createdText = (ref: string, inBacklog: boolean): string =>
 export const createdDraftText = (ref: string, repoId: string): string =>
   `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
 export const notOnProjectText = (ref: string): string =>
-  `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with mc ask_operator.`;
+  `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with an @CAPCOM line in your reply.`;
 export const COMMENTED_DECISION = "Commented";
 export const commentedText = (issue: number): string =>
   `Commented on #${issue}. Recorded in Decided without you.`;
@@ -625,6 +627,29 @@ export const commentTextText = (what: string): string =>
   `Not commented: ${what}. The comment is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
 export const commentFailedText = (issue: number): string =>
   `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
+
+/** Superseded tickets FLIGHT may close in an hour; the operator reopens a wrong one. */
+export const FLIGHT_CLOSES_PER_HOUR = 5;
+export const CLOSE_DESCRIPTION = `Close a ticket of your repo as duplicate or not-planned when another open ticket on its board replaces it. Posts one comment linking the replacement and closes in the same call. FLIGHT never reopens: if a close was wrong, ask the operator to reopen it. Refused for a ticket with a live run, an open PR, open sub-issues, open tickets blocked by or depending on it, another lane, or always_ask; a closed, same or off-board replacement; and in Away. At most ${FLIGHT_CLOSES_PER_HOUR} an hour. Superuser repos only.`;
+export const closeComment = (replacement: number): string =>
+  `Superseded by #${replacement}. (FLIGHT, Mission Control; reopen if wrong)`;
+export const CLOSED_PREFIX = "Closed as";
+export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
+  `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
+/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both spend the cap. */
+export const CLOSE_UNCONFIRMED_DECISION =
+  "Close unconfirmed; the comment and close may have landed";
+export const CLOSE_FAILED_DECISION = "Close failed; the replacement comment may have posted";
+export const closeRefusedText = (why: string): string => `Not closed: ${why}.`;
+export const closedText = (ref: string, replacement: string): string =>
+  `Closed ${ref}; linked its open replacement ${replacement}. Recorded in Decided without you.`;
+export const closeFailedText = (): string =>
+  "Not closed: GitHub refused the comment and close; see the server log.";
+export const closeUnconfirmedText = (): string =>
+  "Close unconfirmed: GitHub accepted the call but the ticket does not read as closed; the comment may have posted. Tell the operator.";
+/** The most waiting tickets whose bodies close_ticket reads for "Depends on", and how many at once. */
+export const FLIGHT_CLOSE_DEPENDENT_READS_MAX = 60;
+export const FLIGHT_CLOSE_DEPENDENT_READ_BATCH = 4;
 
 /** GitHub reads (read_pr, read_ci_log, list_tickets): the calls FLIGHT may make in an hour, together. */
 export const FLIGHT_GH_READS_PER_HOUR = 60;
@@ -947,8 +972,74 @@ export const FLIGHT_NOTE_KEY = "flight:start-failed";
  */
 export const FLIGHT_DOWN_NOTE_KEY = "flight:down";
 export const FLIGHT_DOWN_STALL_MS = 30 * 60_000;
-/** The notes that say FLIGHT is down: the operator's at once, and notified through quiet hours. */
+/**
+ * How long FLIGHT's run may stay with no live session after the watch's take-back, before the
+ * watch ends it and starts FLIGHT afresh (#798).
+ */
+export const FLIGHT_GHOST_MS = 2 * 60_000;
+/**
+ * The notes that say FLIGHT is down. They are never Needs-you items of their own: the one
+ * FLIGHT_NOT_TRIAGING_KEY item carries their text and is what notifies (#758).
+ */
 export const FLIGHT_DOWN_NOTES: readonly string[] = [FLIGHT_NOTE_KEY, FLIGHT_DOWN_NOTE_KEY];
+
+/**
+ * The one Needs-you item that stands for everything waiting on FLIGHT while FLIGHT is not
+ * triaging: not live, stopped, reported down by its watch, or late on an item's triage window.
+ * The items it counts stay FLIGHT's and are listed under it; it clears when FLIGHT triages them or
+ * comes back. It notifies under `flightDown` once per episode, through quiet hours, except after
+ * the operator's own Stop, which waits them out.
+ */
+export const FLIGHT_NOT_TRIAGING_KEY = "flight:not-triaging";
+/** hold_item on FLIGHT_NOT_TRIAGING_KEY: FLIGHT clears it by triaging what it counts. */
+export const HOLD_NOT_TRIAGING_REFUSED =
+  "Not held: the not-triaging item is the operator's. Triage the items it counts and it clears.";
+/**
+ * Why FLIGHT is not triaging, most telling first: its watch could not keep it running, its watch
+ * reports it down, the operator stopped it, it is not running, or it is live and missed a window.
+ */
+export const FLIGHT_NOT_TRIAGING_CAUSES = [
+  "start-failed",
+  "down",
+  "stopped",
+  "off",
+  "late",
+] as const;
+export type FlightNotTriagingCause = (typeof FLIGHT_NOT_TRIAGING_CAUSES)[number];
+/**
+ * How long FLIGHT may be not running, with no watch note and no operator Stop, before the item
+ * shows: the watch restarts it within a pass after a crash, a rotation or a hub restart, and such a
+ * blip must not notify through quiet hours. A watch that is off (a preview, no crew) shows after it.
+ */
+export const FLIGHT_OFF_GRACE_MS = FLIGHT_TICK_MS;
+
+/**
+ * "FLIGHT is not triaging: 3 waiting since 14:05. FLIGHT is down: it is parked. …". For the
+ * operator's own Stop it says "FLIGHT is stopped", never "down". `since` is already a clock time;
+ * `detail` is the watch note's text, when one is open.
+ */
+export function flightNotTriagingText(
+  cause: FlightNotTriagingCause,
+  n: number,
+  since: string | null,
+  detail: string | null,
+): string {
+  const lead = cause === "stopped" ? "FLIGHT is stopped" : "FLIGHT is not triaging";
+  const count =
+    n === 0 ? "nothing waiting yet" : `${n} waiting${since === null ? "" : ` since ${since}`}`;
+  const why =
+    detail ??
+    (cause === "stopped"
+      ? n === 0
+        ? null
+        : "Start it to have them triaged."
+      : cause === "off"
+        ? "FLIGHT is not running."
+        : cause === "late"
+          ? "FLIGHT has not triaged them within its window."
+          : null);
+  return `${lead}: ${count}.${why === null ? "" : ` ${why}`}`;
+}
 export const flightDownText = (reason: string): string =>
   `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
 export const flightStartFailedText = (reason: string): string =>

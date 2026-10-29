@@ -55,14 +55,38 @@ export interface MapSeat {
    * runs set aside), which name the seat in conflicts and conflictsUnchecked.
    */
   branches: string[];
+  /**
+   * The ticket the seat's current run is on, when `ticket` is another: the ticket its changes are
+   * on, while its current run has none yet. null otherwise.
+   */
+  nowTicket: number | null;
+  /** The branches in `branches` whose changes are in `scope.modified`. */
+  changedOn: string[];
+  /** The ticket of each branch in `branches`, from the newest run on it, where it has one. */
+  tickets: Record<string, number>;
   calls: MapCall[];
   /** Docked seats drop reads but retain unmerged modifications. */
   scope: { read: string[]; modified: MapChange[] };
-  /** Recent accesses position an orb; they never identify what a seat is thinking about. */
+  /**
+   * The seat's last accesses, oldest first, a run of accesses to one file listed once at its
+   * latest: its path on the map, kept for MAP_RECENT_MS after each call ends (its run's end, for a
+   * call cut off). Name-only listings are left out. They never identify what a seat is thinking.
+   */
   recent: { file: string; at: number }[];
   context: Pick<ContextUsage, "total" | "window"> | null;
   badges: MapBadges;
 }
+
+/** How long the hub keeps a seat's finished calls, and so its path, after they end. */
+export const MAP_RECENT_MS = 15 * 60_000;
+/** The most accesses a seat's `recent` lists (a run of accesses to one file counts once). */
+export const MAP_RECENT_CAP = 48;
+/**
+ * Tools that only match names (Glob, LS): the files they list were never opened, so the map counts
+ * them neither as read nor on a seat's path.
+ */
+export const MAP_NAME_ONLY_TOOLS: readonly string[] = ["Glob", "LS"];
+export const namesOnly = (tool: string): boolean => MAP_NAME_ONLY_TOOLS.includes(tool);
 
 /** Why a branch's conflicts went unchecked: its head isn't in the checkout, or the check failed. */
 export const MAP_UNCHECKED_REASONS = ["head not fetched", "merge check failed"] as const;
@@ -76,6 +100,17 @@ export interface MapSnapshot {
   repoId: string;
   tree: { path: string; lines: number }[];
   imports: { from: string; to: string }[];
+  /** Merged-PR file history, keyed by the index of the file in `tree` to keep the snapshot small. */
+  hist: {
+    /** Start of the fixed history window, in milliseconds since the epoch. */
+    since: number;
+    prCount: number;
+    fixCount: number;
+    /** [merged PR count, bug-fix PR count, latest merged timestamp, recent PR numbers]. */
+    files: Record<string, [number, number, number, number[]]>;
+    /** [file index, file index, shared PR count, share of the less-frequently changed file]. */
+    coupling: [number, number, number, number][];
+  };
   seats: MapSeat[];
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */

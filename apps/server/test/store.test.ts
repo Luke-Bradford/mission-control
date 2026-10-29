@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AuditView,
   BoardItem,
   Escalation,
   FlightDecision,
@@ -17,7 +18,14 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { COMMS_CAPCOM, COMMS_TEXT_MAX, commsCutMarker, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
+import {
+  COMMS_CAPCOM,
+  COMMS_TEXT_MAX,
+  commsCutMarker,
+  DEFAULT_PROFILES,
+  FLIGHT_SIGNALS_SETTING,
+  NEW_LOOP,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -124,6 +132,9 @@ describe("Store", () => {
         endedAt: 2000,
         costUsd: 1.5,
         tokens: { input: 1, output: 2, cacheRead: 3, cacheCreate: 4 },
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-hash",
       }),
     );
     const rows = store.runs("a1", 10);
@@ -134,6 +145,9 @@ describe("Store", () => {
         endedAt: 2000,
         costUsd: 1.5,
         tokens: { input: 1, output: 2, cacheRead: 3, cacheCreate: 4 },
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-hash",
       }),
     );
   });
@@ -680,6 +694,9 @@ describe("Store", () => {
       assignees: ["a", "b"],
       checks: [],
       closingIssues: [1, 3],
+      additions: 12,
+      deletions: 4,
+      changedFiles: 3,
       ...over,
     });
     store.upsertPullRequests(
@@ -700,6 +717,442 @@ describe("Store", () => {
     store.replacePullRequests("r1", [pr("r1", 5)], 0);
     expect(store.pullRequests("r1").map((p) => p.number)).toEqual([5]);
     expect(store.pullRequests("r2")).toHaveLength(1);
+  });
+
+  it("keeps an immutable merged PR snapshot after the live cache is replaced", () => {
+    const merged = {
+      repoId: "r1",
+      number: 7,
+      title: "merged",
+      url: "u",
+      branch: "fix/7",
+      ticket: "r1#7",
+      state: "merged" as const,
+      isDraft: false,
+      review: "approved" as const,
+      ci: "passing" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: 3,
+      headSha: "head",
+      mergeable: "MERGEABLE" as const,
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    };
+    store.upsertPullRequests("r1", [merged], 4);
+    store.replacePullRequests("r1", [], 5);
+    expect(store.prHistory("r1")).toEqual([merged]);
+  });
+
+  it("fills missing merged PR sizes after migrating a legacy database", () => {
+    const old = join(dir, "old-merged-pr.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(`CREATE TABLE pull_requests (
+      repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
+      branch TEXT NOT NULL, ticket TEXT, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
+      review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      merged_at INTEGER, PRIMARY KEY (repo_id, number))`);
+    db.exec(`INSERT INTO pull_requests VALUES
+      ('r1', 7, 'merged', 'u', 'fix/7', 'r1#7', 'merged', 0, 'approved', 'passing', 1, 2, 3)`);
+    db.close();
+
+    const migrated = new Store(old);
+    const observed = {
+      ...migrated.pullRequests("r1")[0],
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    };
+    migrated.upsertPullRequests("r1", [observed], 4);
+    expect(migrated.prHistory("r1")[0]).toMatchObject({
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    });
+    migrated.upsertPullRequests(
+      "r1",
+      [{ ...observed, additions: 99, deletions: 98, changedFiles: 97 }],
+      5,
+    );
+    migrated.replacePullRequests("r1", [], 6);
+    expect(migrated.prHistory("r1")[0]).toMatchObject({
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+    });
+    migrated.close();
+  });
+
+  it("keeps each daily retrospective", () => {
+    store.recordRetrospective("r1", "2026-10-27", 1, { merged: 2 });
+    store.recordRetrospective("r1", "2026-10-28", 2, { merged: 3 });
+    expect(store.retrospectives("r1")).toEqual([{ merged: 3 }, { merged: 2 }]);
+  });
+
+  it("aggregates durable audit data inside its requested range", () => {
+    store.upsertRun(
+      run({ ticket: "repo#1", startedAt: 100, endedAt: 200, status: "ok", costUsd: 1 }),
+    );
+    store.addGuardHit({ agentId: "a1", runId: "r1", rule: "read-only", text: "refused", at: 150 });
+    store.addQuestion({ agentId: "a1", runId: "r1", text: "why?", at: 120 });
+    store.answerQuestions("a1", 180);
+    const audit = store.audit(100, 200);
+    expect(audit.longRunners).toEqual([expect.objectContaining({ runId: "r1", durationMs: 100 })]);
+    expect(audit.refusalsByRule).toEqual([{ rule: "read-only", count: 1 }]);
+    expect(audit.questions).toEqual({ asked: 1, answered: 1, answerMs: 60 });
+    expect(store.audit(201, 300).questions).toEqual({ asked: 0, answered: 0, answerMs: null });
+  });
+
+  it("aggregates death loops and immutable model/prompt launch metadata", () => {
+    store.upsertRun(
+      run({
+        id: "timeline",
+        startedAt: 110,
+        model: "opus",
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-a",
+      }),
+    );
+    store.upsertRun(run({ id: "outside", startedAt: 99, model: "old", promptHash: "old" }));
+    store.setRunLoop(
+      "timeline",
+      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "one", ended: false } },
+      120,
+    );
+    store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 130);
+    store.setRunLoop(
+      "timeline",
+      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "two", ended: false } },
+      140,
+    );
+    store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 210);
+
+    const audit = store.audit(100, 200);
+    expect(audit.deathLoops).toEqual([{ runId: "timeline", agentId: "a1", parks: 2 }]);
+    expect(audit.modelPromptTimeline).toEqual([
+      {
+        at: 110,
+        model: "opus",
+        accountId: "account-a",
+        effort: "high",
+        promptHash: "prompt-a",
+      },
+    ]);
+  });
+
+  it("counts completed rework rounds without inflating retries", () => {
+    const review = (
+      authorRunId: string,
+      round: number,
+      attempt: number,
+      state: "reported" | "failed",
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId,
+        repoId: "repo",
+        seatId: "retro",
+        prNumber: 7,
+        sha: `${authorRunId}-${round}`,
+        epoch: 0,
+        attempt,
+        round,
+        at: at - 1,
+      });
+      expect(id).not.toBeNull();
+      store.setReviewState(id as number, ["queued"], state, {
+        at,
+        ...(state === "failed" ? { failure: "retry" } : {}),
+      });
+    };
+    review("first-pass", 1, 1, "reported", 110);
+    review("reworked", 1, 1, "failed", 120);
+    review("reworked", 1, 2, "reported", 130);
+    review("reworked", 2, 1, "reported", 140);
+    review("reworked", 2, 2, "reported", 150);
+    review("reworked", 3, 1, "failed", 160);
+
+    expect(store.audit(100, 200).reworkRounds).toEqual([
+      { runId: "reworked", agentId: null, rounds: 1, maxRound: 2 },
+      { runId: "first-pass", agentId: null, rounds: 0, maxRound: 1 },
+    ]);
+  });
+
+  it("counts a merged ticket's cost once when it has multiple PRs", () => {
+    store.upsertRun(run({ ticket: "repo#1", costUsd: 10 }));
+    const pr = (number: number) => ({
+      repoId: "repo",
+      number,
+      title: "t",
+      url: "u",
+      branch: `fix/${number}`,
+      ticket: "repo#1",
+      state: "merged" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: 100,
+      headSha: null,
+      mergeable: null,
+    });
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 101);
+    expect(store.audit(0, 200).costPerMergedTicket).toEqual([{ ticket: "repo#1", costUsd: 10 }]);
+  });
+
+  describe("audit panels", () => {
+    const mergedPr = (number: number, mergedAt: number, over: Record<string, unknown> = {}) => ({
+      repoId: "repo",
+      number,
+      title: "t",
+      url: "u",
+      branch: `fix/${number}`,
+      ticket: `repo#${number}`,
+      state: "merged" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt,
+      headSha: null,
+      mergeable: null,
+      ...over,
+    });
+
+    it("lists each merged PR's size in range, with the outliers", () => {
+      store.upsertPullRequests(
+        "repo",
+        [
+          mergedPr(1, 150, { additions: 10, deletions: 5, changedFiles: 2 }),
+          mergedPr(2, 160, { additions: 700, deletions: 100, changedFiles: 30 }),
+          mergedPr(3, 170),
+          mergedPr(4, 50, { additions: 900, deletions: 0, changedFiles: 4 }),
+        ],
+        200,
+      );
+      const { prSizes } = store.audit(100, 200) as unknown as AuditView;
+      expect(prSizes.prs.map((p) => p.number)).toEqual([2, 1]);
+      expect(prSizes.prs[1]).toEqual({
+        repoId: "repo",
+        number: 1,
+        ticket: "repo#1",
+        mergedAt: 150,
+        additions: 10,
+        deletions: 5,
+        changedFiles: 2,
+      });
+      expect(prSizes.outliers.map((p) => p.number)).toEqual([2]);
+      expect((store.audit(300, 400) as unknown as AuditView).prSizes).toEqual({
+        prs: [],
+        outliers: [],
+      });
+    });
+
+    it("names the seat and run of each improvement candidate", () => {
+      store.upsertRun(
+        run({ id: "cheap1", agentId: "a1", startedAt: 110, ticket: "repo#1", costUsd: 1 }),
+      );
+      store.upsertRun(run({ id: "cheap2", agentId: "a2", startedAt: 120, costUsd: 1 }));
+      store.upsertRun(run({ id: "cheap3", agentId: "a2", startedAt: 130, costUsd: 1 }));
+      store.upsertRun(
+        run({ id: "dear", agentId: "a3", startedAt: 140, ticket: "repo#9", costUsd: 9 }),
+      );
+      store.upsertRun(run({ id: "outside", agentId: "a3", startedAt: 20, costUsd: 99 }));
+      store.setRunLoop(
+        "cheap2",
+        { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "x", ended: false } },
+        150,
+      );
+      store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 150 });
+      store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 151 });
+      store.addGuardHit({ agentId: "a2", runId: null, rule: "network", text: "t", at: 152 });
+      const id = store.requestReview({
+        authorRunId: "cheap1",
+        repoId: "repo",
+        seatId: "retro",
+        prNumber: 1,
+        sha: "s",
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 160,
+      }) as number;
+      store.setReviewState(id, ["queued"], "reported", { at: 170 });
+
+      const audit = store.audit(100, 200) as unknown as AuditView;
+      expect(audit.longRunners).toEqual(
+        expect.arrayContaining([expect.objectContaining({ runId: "dear", agentId: "a3" })]),
+      );
+      expect(audit.deathLoops).toEqual([{ runId: "cheap2", agentId: "a2", parks: 1 }]);
+      expect(audit.reworkRounds).toEqual([
+        { runId: "cheap1", agentId: "a1", rounds: 1, maxRound: 2 },
+      ]);
+      expect(audit.refusals).toEqual([
+        { agentId: "a2", runId: "cheap2", rule: "read-only", count: 2 },
+        { agentId: "a2", runId: null, rule: "network", count: 1 },
+      ]);
+      expect(audit.spendOutliers).toEqual([
+        { runId: "dear", agentId: "a3", ticket: "repo#9", costUsd: 9 },
+      ]);
+    });
+
+    it("counts a known zero-cost run in the spend median", () => {
+      store.upsertRun(run({ id: "free", startedAt: 110, costUsd: 0 }));
+      store.upsertRun(run({ id: "one", startedAt: 120, costUsd: 1 }));
+      store.upsertRun(run({ id: "three", startedAt: 130, costUsd: 3 }));
+      store.upsertRun(run({ id: "unknown", startedAt: 140 }));
+      expect((store.audit(100, 200) as unknown as AuditView).spendOutliers).toEqual([
+        { runId: "three", agentId: "a1", ticket: null, costUsd: 3 },
+      ]);
+    });
+
+    it("keeps change metrics inside the selected range", () => {
+      store.upsertRun(run({ id: "q1", startedAt: 100, promptHash: "h1" }));
+      store.upsertRun(run({ id: "q2", startedAt: 300, promptHash: "h2" }));
+      store.upsertPullRequests("repo", [mergedPr(1, 150), mergedPr(2, 270), mergedPr(3, 320)], 500);
+      const { changes } = store.audit(250, 500) as unknown as AuditView;
+      expect(changes).toHaveLength(1);
+      expect(changes[0]).toMatchObject({
+        windowMs: 50,
+        before: { merged: 1 },
+        after: { merged: 1 },
+      });
+    });
+
+    it("finds chatter, refusal spikes and flakes in range only", () => {
+      for (let i = 0; i < 7; i++) {
+        store.addComms({ at: 110 + i, from: "alpha", to: "beta", ticket: "mc#1", text: "ping" });
+        store.addComms({ at: 120 + i, from: "beta", to: "alpha", ticket: "mc#1", text: "pong" });
+      }
+      for (let i = 0; i < 10; i++) {
+        store.addGuardHit({
+          agentId: "spiky",
+          runId: "r",
+          rule: "network",
+          text: "t",
+          at: 100 + i,
+        });
+      }
+      store.addGuardHit({ agentId: "calm", runId: "r", rule: "network", text: "t", at: 100 });
+      store.setSetting(
+        `${FLIGHT_SIGNALS_SETTING}:repo`,
+        JSON.stringify({
+          flakes: {
+            a: { key: "repo:CI/unit", at: 150, evidence: "e" },
+            b: { key: "repo:CI/unit", at: 160, evidence: "e" },
+            c: { key: "repo:CI/e2e", at: 50, evidence: "e" },
+          },
+        }),
+      );
+      store.setSetting(`${FLIGHT_SIGNALS_SETTING}:broken`, "{");
+
+      const audit = store.audit(100, 200) as unknown as AuditView;
+      expect(audit.chatter).toEqual([{ from: "alpha", to: "beta", ticket: "mc#1", rounds: 7 }]);
+      expect(audit.refusalSpikes).toEqual([{ agentId: "spiky", day: 0, count: 10 }]);
+      expect(audit.flakes).toEqual([{ key: "repo:CI/unit", count: 2, lastAt: 160 }]);
+
+      const later = store.audit(1000, 2000) as unknown as AuditView;
+      expect(later.chatter).toEqual([]);
+      expect(later.refusalSpikes).toEqual([]);
+      expect(later.flakes).toEqual([]);
+    });
+
+    it("measures equal windows before and after a prompt or model change", () => {
+      store.upsertRun(
+        run({
+          id: "p1",
+          startedAt: 100,
+          promptHash: "h1",
+          model: "m1",
+          ticket: "repo#1",
+          costUsd: 4,
+        }),
+      );
+      store.upsertRun(
+        run({
+          id: "p2",
+          startedAt: 300,
+          promptHash: "h2",
+          model: "m1",
+          ticket: "repo#2",
+          costUsd: 2,
+        }),
+      );
+      store.upsertRun(
+        run({
+          id: "p3",
+          startedAt: 350,
+          promptHash: "h2",
+          model: "m2",
+          ticket: "repo#3",
+          costUsd: 6,
+        }),
+      );
+      store.upsertPullRequests(
+        "repo",
+        [mergedPr(1, 150), mergedPr(2, 310), mergedPr(3, 360), mergedPr(9, 450)],
+        500,
+      );
+      const review = (author: string, round: number, at: number, blocking: boolean) => {
+        const id = store.requestReview({
+          authorRunId: author,
+          repoId: "repo",
+          seatId: "retro",
+          prNumber: 1,
+          sha: `${author}-${round}`,
+          epoch: 0,
+          attempt: 1,
+          round,
+          at: at - 1,
+        }) as number;
+        store.setReviewState(id, ["queued"], "running", { at, runId: `rv-${id}` });
+        store.recordFindings(id, `rv-${id}`, {
+          verdict: { spec: "pass", quality: blocking ? "fail" : "pass" },
+          summary: "s",
+          findings: blocking
+            ? [{ severity: "Critical", file: "f", line: 1, summary: "s", scenario: "s", fix: "f" }]
+            : [],
+          at,
+        });
+      };
+      review("p1", 1, 200, true);
+      review("p1", 2, 250, false);
+      review("p2", 1, 320, false);
+
+      const { changes } = store.audit(0, 500) as unknown as AuditView;
+      expect(changes).toEqual([
+        {
+          kind: "prompt",
+          agentId: "a1",
+          at: 300,
+          from: "h1",
+          to: "h2",
+          windowMs: 200,
+          before: { merged: 1, reviewFailRate: 0.5, medianCostPerMergedTicket: 4, reworkRounds: 1 },
+          after: { merged: 3, reviewFailRate: 0, medianCostPerMergedTicket: 4, reworkRounds: 0 },
+        },
+        {
+          kind: "model",
+          agentId: "a1",
+          at: 350,
+          from: "m1",
+          to: "m2",
+          windowMs: 150,
+          before: {
+            merged: 1,
+            reviewFailRate: 1 / 3,
+            medianCostPerMergedTicket: 2,
+            reworkRounds: 1,
+          },
+          after: { merged: 2, reviewFailRate: null, medianCostPerMergedTicket: 6, reworkRounds: 0 },
+        },
+      ]);
+      expect((store.audit(600, 700) as unknown as AuditView).changes).toEqual([]);
+    });
   });
 
   // #26 A1: the scheduler emits `boards` / `escalations` only when a write changed a row.
@@ -1860,6 +2313,13 @@ describe("comms", () => {
       ticket: "mc#1",
       text: "late",
     });
+  });
+
+  it("keeps a run-targeted message out of another run's pending Comms", () => {
+    store.addComms({ ...row("rework"), targetRunId: "r1" });
+    store.addComms({ ...row("general"), at: 101 });
+    expect(store.comms(0, "r1").map((message) => message.text)).toEqual(["rework", "general"]);
+    expect(store.comms(0, "r2").map((message) => message.text)).toEqual(["general"]);
   });
 
   it("counts chatter rounds only when both sides exchanged messages", () => {

@@ -11,7 +11,7 @@ export const MC_TOOL_NAMES = {
   syncMain: "sync_main",
   push: "push",
   draftPr: "draft_pr",
-  askOperator: "ask_operator",
+  askFlight: "ask_flight",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
   restoreFile: "restore_file",
@@ -37,6 +37,7 @@ export const MC_TOOL_NAMES = {
 
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
+  closeTicket: "close_ticket",
   briefItem: "brief_item",
   readPr: "read_pr",
   readCiLog: "read_ci_log",
@@ -65,7 +66,7 @@ export const MC_TOOLS = {
   syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
-  askOperator: mcTool(MC_TOOL_NAMES.askOperator),
+  askFlight: mcTool(MC_TOOL_NAMES.askFlight),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
   restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
@@ -91,6 +92,7 @@ export const MC_TOOLS = {
 
   createTicket: mcTool(MC_TOOL_NAMES.createTicket),
   commentTicket: mcTool(MC_TOOL_NAMES.commentTicket),
+  closeTicket: mcTool(MC_TOOL_NAMES.closeTicket),
   briefItem: mcTool(MC_TOOL_NAMES.briefItem),
   readPr: mcTool(MC_TOOL_NAMES.readPr),
   readCiLog: mcTool(MC_TOOL_NAMES.readCiLog),
@@ -134,11 +136,11 @@ export const MC_SYNC_DIRTY =
 export const MC_SYNC_NOT_WORKING =
   "Not merged: your run is waiting for CI or review, and Mission Control brings main into the branch itself then.";
 export const MC_SYNC_OFF =
-  "Not merged: Mission Control's engine is off, so main cannot be brought into your branch now. Ask the operator.";
+  "Not merged: Mission Control's engine is off, so main cannot be brought into your branch now. Ask FLIGHT with mc ask_flight.";
 export const syncTooSoonText = (minutes: number): string =>
   `Not merged: main was brought into your branch less than ${SYNC_MAIN_GAP_MIN} minutes ago. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
 export const syncFailedText = (why: string): string =>
-  `Not merged: ${why}. Ask the operator if it keeps happening.`;
+  `Not merged: ${why}. Ask FLIGHT with mc ask_flight if it keeps happening.`;
 
 export const NOTHING_TO_COMMIT = "Nothing to commit.";
 /** The last line of every refused commit that names paths. */
@@ -190,7 +192,7 @@ export const otherAreaText = (paths: readonly string[], call: string): string =>
   `Not committed: ${pathList(paths)} ${isAre(paths)} in ${call}'s area.`;
 
 export const protectedPathsText = (paths: readonly string[]): string =>
-  `Not committed: ${pathList(paths)} ${isAre(paths)} protected (build, install and CI files); ask the operator if the ticket needs ${paths.length === 1 ? "it" : "them"}.`;
+  `Not committed: ${pathList(paths)} ${isAre(paths)} protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs ${paths.length === 1 ? "it" : "them"}.`;
 
 /** New or changed symlinks (mode 120000) and gitlinks (160000), which the commit tool refuses. */
 export const specialPathsText = (paths: readonly string[]): string =>
@@ -198,7 +200,7 @@ export const specialPathsText = (paths: readonly string[]): string =>
 
 /** `git add` or `git commit` passed the commit tool's slow timeout. */
 export const MC_COMMIT_TOO_SLOW =
-  "Not committed: git took too long to stage or commit your changes, so the index was reset. Try again; if it keeps happening, tell the operator.";
+  "Not committed: git took too long to stage or commit your changes, so the index was reset. Try again; if it keeps happening, tell FLIGHT with mc ask_flight.";
 
 /** The read-only rule's words: the guard's rule text, and the commit tool's refusal, build on it. */
 export const READ_ONLY_CANNOT_WRITE = "Read-only roles cannot write";
@@ -219,7 +221,7 @@ export const formerSubmoduleText = (paths: readonly string[]): string =>
 
 /** The index listing the former-submodule check reads passed its own output cap. */
 export const MC_INDEX_UNLISTABLE =
-  "Not committed: the commit tool could not list the index; ask the operator.";
+  "Not committed: the commit tool could not list the index; ask FLIGHT with mc ask_flight.";
 
 /**
  * A secret in the staged changes (`where` is the file) or the message (`commit message`). Refused
@@ -230,10 +232,16 @@ export const commitSecretText = (where: string, line: number, kind: string): str
 
 /** The staged changes' listing passed the commit tool's output cap. */
 export const MC_COMMIT_TOO_BIG =
-  "Not committed: the change is too large for the commit tool to check, so the index was reset. Commit fewer files at once; if it keeps happening, tell the operator.";
+  "Not committed: the change is too large for the commit tool to check, so the index was reset. Commit fewer files at once; if it keeps happening, tell FLIGHT with mc ask_flight.";
 
-export const ASKED_OPERATOR =
-  "Asked the operator. The answer arrives as a message; carry on with what you can meanwhile.";
+export const ASKED_FLIGHT =
+  "Asked FLIGHT. It answers, or takes the question to the operator with its brief; the answer arrives as a message. Carry on with what you can meanwhile.";
+/** A seat's comms_send to CAPCOM labelled `question`: a seat's questions go to FLIGHT (#758). */
+export const COMMS_QUESTION_TO_FLIGHT =
+  "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";
+/** ask_flight from FLIGHT itself: it takes decisions to the operator with a brief, never a bare question. */
+export const ASK_FLIGHT_SELF =
+  'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item, or an @CAPCOM question in your reply.';
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";
@@ -296,7 +304,7 @@ export const MC_PUSH_MERGE =
   "Not pushed: the branch has a merge commit Mission Control did not make, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
 /** The worktree has a merge in progress that the engine did not start. */
 export const MC_COMMIT_MERGE_UNKNOWN =
-  "Not committed: your worktree has a merge in progress that Mission Control did not start. Ask the operator.";
+  "Not committed: your worktree has a merge in progress that Mission Control did not start. Ask FLIGHT with mc ask_flight.";
 export const commitUnresolvedText = (paths: readonly string[]): string =>
   `Not committed: ${pathList(paths)} ${isAre(paths)} still unmerged. Resolve the conflict, then commit again.`;
 export const commitMarkersText = (paths: readonly string[]): string =>
@@ -390,18 +398,18 @@ export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build
 export const MC_PLAN_PROFILE_ONLY =
   "Not written: profile and profile_reason are for planner seats.";
 export const MC_PLAN_ALREADY =
-  "Not written: the ticket already has a ## Plan section. Ask the operator with mc ask_operator if it needs replacing.";
+  "Not written: the ticket already has a ## Plan section. Ask FLIGHT with mc ask_flight if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";
 export const MC_PLAN_BODY_UNCLOSED =
-  "Not written: the ticket body ends inside an unclosed code or HTML block, which would swallow the plan. Ask the operator with mc ask_operator to close it.";
+  "Not written: the ticket body ends inside an unclosed code or HTML block, which would swallow the plan. Ask FLIGHT with mc ask_flight to have it closed.";
 export const planTooLongText = (max: number, room: number): string =>
   `Not written: the ticket and the plan together would pass ${max.toLocaleString("en-US")} characters, so the developer's brief would be cut. Shorten the plan to ${room.toLocaleString("en-US")} characters or fewer, then call mc report_plan again.`;
 export const MC_PLAN_NO_ROOM =
-  "Not written: the ticket is already too long for a plan to fit the developer's brief. Ask the operator with mc ask_operator.";
+  "Not written: the ticket is already too long for a plan to fit the developer's brief. Ask FLIGHT with mc ask_flight.";
 export const planTextText = (what: string): string =>
   `Not written: the plan is posted to GitHub and must not notify anyone, reference another item or hold a secret (${what}); reword it, then call mc report_plan again. ${REFERENCE_ADVICE}`;
 export const MC_PLAN_GH_FAILED =
-  "Not written: GitHub could not be reached through gh. Try again in a minute; if it keeps failing, ask the operator.";
+  "Not written: GitHub could not be reached through gh. Try again in a minute; if it keeps failing, ask FLIGHT with mc ask_flight.";
 export const planWrittenText = (ref: string): string => `plan written to ${ref}`;
 
 /** The most missing paths a refusal lists. */

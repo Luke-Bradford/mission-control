@@ -63,6 +63,7 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "edit_card",
   "dismiss_item",
   MC_TOOL_NAMES.ghRead,
+  MC_TOOL_NAMES.closeTicket,
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
@@ -188,7 +189,7 @@ export const MC_WRITER_TOOLS = [MC_TOOLS.commit, MC_TOOLS.syncMain] as const;
 
 /** The mc tools a scratch seat may not call: a review answers with report_findings alone. */
 export const MC_SCRATCH_DENIED_TOOLS = [
-  MC_TOOLS.askOperator,
+  MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.reportPlan,
 ] as const;

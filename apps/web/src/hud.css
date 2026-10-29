@@ -41,7 +41,7 @@
   --s2: #9c62e2;
   --s3: #d35bab;
   --s4: #5350bf;
-  --s5: #c05bdf;
+  --s5: #e989e9;
   --s6: #4384af;
   --s7: #2eafc4;
   --s8: #6c639d;
@@ -180,7 +180,7 @@
   --s2: #9c62e2;
   --s3: #d35bab;
   --s4: #5350bf;
-  --s5: #c05bdf;
+  --s5: #e989e9;
   --s6: #4384af;
   --s7: #2eafc4;
   --s8: #6c639d;
@@ -250,6 +250,8 @@ button {
   cursor: pointer;
   line-height: 1.3;
   white-space: nowrap;
+  min-width: 24px;
+  min-height: 24px;
 }
 @media (prefers-reduced-motion: no-preference) {
   button {
@@ -335,6 +337,8 @@ select {
     4px 4px,
     4px 4px;
   background-repeat: no-repeat;
+  min-width: 24px;
+  min-height: 24px;
 }
 input[type="radio"] {
   accent-color: var(--accent);
@@ -805,12 +809,10 @@ input[type="radio"] {
   @keyframes pw {
     0%,
     100% {
-      box-shadow: inset 2px 0 0 var(--warn-mark);
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        inset 2px 0 0 var(--warn-mark),
-        0 0 14px var(--warn-soft);
+      opacity: 0.7;
     }
   }
   .pulse-ok {
@@ -819,12 +821,10 @@ input[type="radio"] {
   @keyframes po {
     0%,
     100% {
-      box-shadow: 0 0 0 0 transparent;
+      opacity: 1;
     }
     50% {
-      box-shadow:
-        0 0 0 3px var(--ok-soft),
-        0 0 16px var(--ok-soft);
+      opacity: 0.7;
     }
   }
 }
@@ -952,6 +952,10 @@ input[type="radio"] {
 .top-clock {
   color: var(--fg);
   font: 11px var(--mono);
+  line-height: 16px;
+  height: 16px;
+  min-width: 5ch;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .met {
@@ -1217,6 +1221,11 @@ th {
   align-items: center;
   flex-wrap: wrap;
 }
+.toolbar-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
 
 /* overview */
 #page-overview {
@@ -1251,7 +1260,7 @@ th {
 }
 .overview-grid .ph h2 {
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--type-base);
   font-weight: 600;
 }
 #timelineP {
@@ -1283,7 +1292,7 @@ th {
 }
 .nbanner b {
   font-family: var(--display);
-  font-size: 18px;
+  font-size: var(--type-lg);
   font-weight: 600;
   color: var(--warn);
 }
@@ -1303,7 +1312,7 @@ th {
   color: var(--ok);
 }
 .nbanner .bit {
-  font-size: 14px;
+  font-size: var(--type-md);
 }
 .nbanner .accent {
   color: var(--accent);
@@ -1338,7 +1347,9 @@ th {
   height: 14px;
   margin-left: 100px;
   border-top: 1px solid var(--line-2);
-  font: 10px / 1 var(--mono);
+  font-family: var(--mono);
+  font-size: var(--type-xs);
+  line-height: 1;
 }
 .overview-axis > span {
   position: absolute;
@@ -1412,11 +1423,13 @@ th {
   gap: 8px;
   align-items: center;
   height: 100%;
-  min-height: var(--lane-min);
+  /* Keep the 19px visual lane while extending its pointer target to 24px. */
+  min-height: 24px;
   max-height: var(--lane-max);
+  margin-block: -2.5px;
   color: var(--fg-2);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--type-sm);
 }
 .overview-lane:hover {
   background: var(--accent-soft);
@@ -1469,7 +1482,8 @@ th {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font: 10px var(--mono);
+  font-family: var(--mono);
+  font-size: var(--type-xs);
   text-transform: lowercase;
 }
 .overview-legend > span {
@@ -1544,7 +1558,9 @@ th {
   background: var(--ok);
 }
 .trow .rowlink {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
   max-width: 100%;
   color: inherit;
   text-decoration: none;
@@ -1700,19 +1716,19 @@ th {
   text-overflow: ellipsis;
 }
 #agentsList .need {
-  font-size: 11px;
+  font-size: var(--type-xs);
   line-height: 14px;
   max-width: 100%;
   gap: 4px;
 }
 #agentsList .need button {
-  min-height: 14px;
+  min-height: 24px;
   padding: 0 4px;
   line-height: 12px;
-  font-size: 10px;
+  font-size: var(--type-xs);
 }
 #agentsList .xs {
-  font-size: 11px;
+  font-size: var(--type-xs);
   line-height: 14px;
 }
 .crew-skeleton .kpi-skeleton {
@@ -1742,7 +1758,7 @@ th {
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
   color: var(--fg);
 }
 #agentsList .agent-effort {
@@ -2107,9 +2123,13 @@ th {
   padding: 8px 10px;
   flex-wrap: nowrap;
 }
-#machP .pb,
+#machP .pb {
+  padding: 0 10px 10px;
+  overflow: auto;
+}
 #quotaP .pb {
   padding: 0 10px 10px;
+  overflow: auto;
 }
 #machP .resrow {
   grid-template-columns: 42px minmax(24px, 1fr) 128px;
@@ -2163,7 +2183,7 @@ th {
 }
 #quotaP .meter .num {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
 }
 #machP .resrow .num {
   font-size: var(--fs-xs);
@@ -2325,6 +2345,8 @@ th {
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
+  margin: 0;
+  font-size: inherit;
   font-weight: 600;
 }
 .kcol .kh .n {
@@ -2383,6 +2405,13 @@ th {
   overflow: auto;
   min-height: 0;
   align-content: start;
+}
+.done-more {
+  justify-self: start;
+  font-size: var(--fs-s);
+}
+.board-placeholder {
+  min-height: 70vh;
 }
 .kcard {
   background: var(--surface);
@@ -3785,6 +3814,14 @@ pre.diff .h {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* What the one "FLIGHT is not triaging" item stands for, listed under it (#758). */
+.not-triaging-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
 .kind {
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -3975,6 +4012,77 @@ button.nrow.thread.tagged {
   width: 100%;
 }
 
+/* audit */
+#page-audit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.audit-panel:last-child {
+  grid-column: 1 / -1;
+}
+.audit-list {
+  display: grid;
+  gap: 7px;
+}
+.audit-list > a,
+.audit-list > span,
+.audit-change,
+.audit-proposal,
+.audit-size {
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.audit-list > :last-child {
+  border-bottom: 0;
+}
+.audit-size,
+.audit-proposal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.audit-bar {
+  flex: 1;
+  min-width: 36px;
+  height: 8px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.audit-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+}
+.audit-change {
+  display: grid;
+  gap: 3px;
+}
+.audit-proposal > :first-child {
+  flex: 1;
+}
+.audit-status {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.audit-status-open {
+  color: var(--amber);
+}
+.audit-status-verified {
+  color: var(--green);
+}
+.audit-status-dismissed {
+  color: var(--fg2);
+}
 /* telemetry */
 #page-telemetry {
   display: flex;
@@ -4332,10 +4440,18 @@ td.wrap {
   flex-direction: column-reverse;
   align-items: stretch;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.account-quota {
+  overflow: hidden;
 }
 .account-quota .meter .track {
   width: 100%;
   flex: none;
+  min-width: 0;
+  max-width: 100%;
 }
 .account-meter.ok .track i {
   background: var(--ok);
@@ -4345,6 +4461,11 @@ td.wrap {
   margin-top: 3px;
   color: var(--muted);
   font-size: var(--fs-xs);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .accounts-github {
   border-top: 1px solid var(--line);
@@ -4431,8 +4552,24 @@ td.wrap {
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
-.setup-title h1 {
+.setup-title h2 {
   font: 600 22px var(--display);
+}
+
+/* Kept out of the normal tab sequence until a keyboard user asks to bypass the chrome. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--fg);
+  transform: translateY(-150%);
+}
+.skip-link:focus {
+  transform: translateY(0);
 }
 .sgrid {
   display: grid;
@@ -4595,7 +4732,7 @@ td.wrap {
   background: transparent;
 }
 .repo-pick .chip button {
-  min-height: auto;
+  min-height: 24px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -6162,6 +6299,169 @@ kbd {
   border-radius: var(--r-s);
   padding: 6px 8px;
 }
+/* Setup › Loops: the operational chain scrolls as one drawing on narrow screens. */
+.loop-show {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+}
+.loop-show button[aria-pressed="true"] {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.loop-chain-scroll {
+  overflow-x: auto;
+  padding: 12px 14px;
+}
+.loop-chain {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 170px);
+  gap: 34px;
+  min-width: 1200px;
+  padding: 18px 0 210px;
+}
+.loop-routes {
+  position: absolute;
+  inset: 0;
+  width: 1280px;
+  height: 320px;
+  overflow: visible;
+  pointer-events: none;
+}
+.loop-route {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  marker-end: url(#loop-arrow);
+}
+.loop-route path,
+.loop-route marker {
+  fill: var(--warn);
+}
+.loop-route.review-return {
+  stroke-dasharray: 5 4;
+}
+.loop-route.conflict-route {
+  stroke: var(--crit);
+  stroke-dasharray: 5 4;
+}
+.loop-route.flight-return {
+  stroke: var(--think);
+  stroke-dasharray: 5 4;
+}
+.loop-route.active {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px var(--warn));
+}
+.loop-route-label {
+  position: absolute;
+  z-index: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--warn);
+  font: var(--fs-xs) var(--mono);
+  white-space: nowrap;
+}
+.ci-label {
+  top: 137px;
+  left: 370px;
+}
+.review-label {
+  top: 185px;
+  left: 430px;
+}
+.loop-chain-step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 96px;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  background: var(--surface);
+}
+.loop-chain-step:not(:last-of-type)::after {
+  position: absolute;
+  top: 47px;
+  left: 100%;
+  width: 34px;
+  border-top: 2px solid var(--line-2);
+  content: "";
+}
+.loop-chain-step.selected {
+  border: 2px solid var(--accent);
+}
+.loop-chain-step.now {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.loop-chain-step span {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.loop-chain-step small,
+.loop-flight small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.loop-flight {
+  position: absolute;
+  top: 220px;
+  left: 1060px;
+  width: 190px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 9px;
+  border: 1px solid var(--crit);
+  border-radius: var(--r-s);
+}
+.loop-flight span {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.loop-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.loop-inspector {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 0;
+  padding: 12px 14px;
+  font-size: var(--fs-s);
+}
+.loop-inspector dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.loop-inspector dd {
+  min-width: 0;
+  margin: 0;
+}
+.loop-run {
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  font-size: var(--fs-s);
+}
+@media (max-width: 700px) {
+  .loop-details {
+    grid-template-columns: 1fr;
+  }
+}
 .askcards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -6430,6 +6730,9 @@ kbd {
   }
 }
 @media (max-width: 760px) {
+  .audit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .top {
     padding: 10px 14px;
     gap: 8px 12px;
@@ -6501,7 +6804,7 @@ kbd {
     align-self: stretch;
     padding: 9px 12px;
   }
-  .kcol button.kh {
+  .kcol .kh > button {
     width: 100%;
     border: 0;
     background: none;
@@ -7082,7 +7385,7 @@ button.nrow.thread.tagged {
   margin: 0;
   padding-bottom: 4px;
   border-bottom: 2px solid var(--stage-colour);
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -7107,12 +7410,12 @@ button.nrow.thread.tagged {
   background: var(--surface-2);
   color: var(--fg);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--type-sm);
 }
 .pipeline-ticket {
   flex: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--type-xs);
 }
 .pipeline-skeleton {
   height: 28px;
@@ -7133,7 +7436,7 @@ button.nrow.thread.tagged {
   gap: 4px;
   min-width: 0;
   max-width: 42%;
-  font-size: 11px;
+  font-size: var(--type-xs);
 }
 .pipeline-assignee i {
   flex: none;
@@ -7178,11 +7481,11 @@ button.nrow.thread.tagged {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--type-xs);
   color: var(--muted);
 }
 .overview-kpi .lbl {
-  font-size: 10px;
+  font-size: var(--type-xs);
   line-height: 11px;
   color: var(--muted);
   white-space: normal;
@@ -7193,7 +7496,7 @@ button.nrow.thread.tagged {
 .overview-kpi .v {
   grid-row: 2;
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--type-xl);
   font-weight: 600;
   line-height: 1.05;
   letter-spacing: 0.01em;

@@ -8,7 +8,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, sortNeeds } from "../attention.ts";
+import { needsYouItems, openNeedsYou, sortNeeds } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -246,15 +246,21 @@ export function FlightChat({
             return (
               <div className="dask" key={i.key} data-testid="waiting-ask">
                 <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
-                  {ATTENTION_LABEL[i.kind]}
+                  {/* the not-triaging item is about FLIGHT, not a blocked seat */}
+                  {i.notTriaging ? "FLIGHT" : ATTENTION_LABEL[i.kind]}
                 </Pill>
                 <span className="min0 ellip" title={i.text}>
                   {i.text}
                 </span>
                 {agent ? <AgentTag bare sm id={agent.id} index={agent.index} /> : i.agentId}
                 <span className="spacer" />
-                <button type="button" className="sm" onClick={() => openItem(i.key)}>
-                  Open
+                <button
+                  type="button"
+                  className="sm"
+                  // "FLIGHT is not triaging" lists its items on Needs you's home
+                  onClick={() => (i.notTriaging ? openNeedsYou() : openItem(i.key))}
+                >
+                  {i.notTriaging ? "Show them" : "Open"}
                 </button>
               </div>
             );

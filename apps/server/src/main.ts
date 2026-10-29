@@ -57,6 +57,7 @@ import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
+import { markHubStarted } from "./hud.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -64,7 +65,7 @@ import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
-import { proposeQueueReorder, type QueueReorderDeps } from "./queue-reorder.ts";
+import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -110,6 +111,7 @@ export async function main(): Promise<void> {
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
   writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
+  markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
   const bus = new ChangeBus();
   // per-run bearer tokens for /mcp and the guard: the supervisor issues one at each spawn and
@@ -332,7 +334,7 @@ export async function main(): Promise<void> {
         throw new Error("Focus writes unavailable.");
       return setSeatFocus(config, configPath, crewReloader, seatId, focus, Date.now());
     },
-    queueReorder: (seatId, move, above) => proposeQueueReorder(queueReorder, seatId, move, above),
+    queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     config,
     store,

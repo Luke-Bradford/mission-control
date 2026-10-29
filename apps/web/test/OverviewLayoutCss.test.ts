@@ -7,6 +7,18 @@ const main = readFileSync(join(import.meta.dirname, "../src/main.tsx"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
+  it("gives compact Overview and Setup controls a 24px minimum target", () => {
+    expect(rule("button")).toContain("min-width: 24px");
+    expect(rule("button")).toContain("min-height: 24px");
+    expect(rule("select")).toContain("min-width: 24px");
+    expect(rule("select")).toContain("min-height: 24px");
+    expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
+    expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: -2.5px");
+    expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
+  });
+
   it("caps content-sized rows and gives unused height to the Live log", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
     expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
@@ -89,11 +101,46 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("#timelineP .ph")).toContain("flex-wrap: nowrap");
   });
 
-  it("wraps KPI labels without ellipses and keeps eight Crew rows below the 45% cap", () => {
+  it("maps every Overview text style to the shared six-step type scale", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
-    expect(label).toContain("font-size: 10px");
+    expect(label).toContain("font-size: var(--type-xs)");
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
+    for (const selector of [
+      String.raw`\.overview-grid \.ph h2`,
+      String.raw`\.nbanner b`,
+      String.raw`\.nbanner \.bit`,
+      String.raw`\.overview-lane`,
+      String.raw`#agentsList \.need`,
+      String.raw`#agentsList \.need button`,
+      String.raw`#agentsList \.xs`,
+      String.raw`#agentsList \.agent-model`,
+      String.raw`#quotaP \.meter \.num`,
+      String.raw`\.pipeline-stage h3`,
+      String.raw`\.pipeline-chip`,
+      String.raw`\.pipeline-ticket`,
+    ])
+      expect(rule(selector), selector).toMatch(/font-size: var\(--type-(?:xs|sm|base|md|lg|xl)\)/);
+  });
+
+  it.each([1366, 1600, 1920])(
+    "permits Crew, Machine, Quota and Pipeline content at %ipx",
+    (viewport) => {
+      expect(viewport).toBeGreaterThanOrEqual(1366);
+      for (const selector of [
+        "#agentsList",
+        "#machP .pb",
+        "#quotaP .pb",
+        "#pipelineP > .pipeline-grid",
+      ]) {
+        const panel = rule(selector);
+        expect(panel, `${viewport}px ${selector}`).toMatch(/overflow(?:-y)?: (?:auto|visible)/);
+        expect(panel, `${viewport}px ${selector}`).not.toMatch(/(?:^|;)\s*height:\s*\d+px/);
+      }
+    },
+  );
+
+  it("keeps eight Crew rows below the 45% cap", () => {
     const row = rule(String.raw`#agentsList \.trow`);
     const height = Number(row.match(/height: (\d+)px/)?.[1]);
     expect(height).toBeLessThanOrEqual(40);

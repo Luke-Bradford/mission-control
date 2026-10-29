@@ -199,6 +199,7 @@ import { recordNoReport } from "./no-report.ts";
 import {
   attachSession,
   type CrewSession,
+  endsAtResult,
   type KeeperSession,
   SessionControlError,
   type SessionEvent,
@@ -494,8 +495,14 @@ export interface Supervisor {
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
+   * Whether the seat's CLI session is attached and alive, for the run its row holds: the process
+   * the hub holds, not the run row. Null while the hub cannot tell: crew is off or stopping, the startup take-back is running,
+   * or a start, resume or account move for the seat is under way. Never throws.
+   */
+  sessionAlive?(seatId: string): boolean | null;
+  /**
    * Ends the run `ok`, `endedBy: "engine"`, only when it is its seat's current run, closes its
-   * process, removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
+   * process (with none attached, ends any keeper it left and revokes its token), removes its worktree (a failure leaves a `cleanup:<run>` blocked note) and leaves the
    * seat idle. An ended or unknown run is left alone, with no event. A run Stop is already ending
    * stays Stop's (endedBy operator, seat stopped, worktree kept). Does nothing on a server that
    * does not run crew (disabled, or without the crew lock).
@@ -1181,6 +1188,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
+  /** The audit identity includes both generated developer instructions and the first user brief. */
+  function recordPromptVersion(run: Run, rolePath: string, brief: string): void {
+    const payload = [
+      "developer-instructions",
+      readFileSync(crewPromptPath(deps.dbPath, run.id), "utf8"),
+      "first-brief",
+      brief,
+    ].join("\0");
+    store.setRunPromptVersion(
+      run.id,
+      createHash("sha256").update(payload).digest("hex"),
+      rolePath,
+      now(),
+    );
+  }
+
   /**
    * Token and MCP files a hub that went down without seeing its processes exit left behind: their
    * tokens died with its memory. Run once the crew lock is held, before any spawn. The lock lives
@@ -1270,6 +1293,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     references = "",
     keepPrompt = false,
     beforeLaunch?: () => Run | undefined,
+    beforeSpawn?: () => void,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1300,7 +1324,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (bindingProblem) throw new SupervisorError(409, bindingProblem);
     const current = beforeLaunch?.();
     if (current !== undefined) run = current;
-    return launch(info, run, cliSessionId, checkout, resume, repoDocs, references, keepPrompt);
+    return launch(
+      info,
+      run,
+      cliSessionId,
+      checkout,
+      resume,
+      repoDocs,
+      references,
+      keepPrompt,
+      beforeSpawn,
+    );
   }
 
   function launch(
@@ -1312,6 +1346,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     repoDocs: RepoDocs | null,
     references = "",
     keepPrompt = false,
+    beforeSpawn?: () => void,
   ): Live {
     const pause = pausedSeat(store, info.seat.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
@@ -1383,6 +1418,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         },
       );
     }
+    beforeSpawn?.();
     const keeperSpawn = randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
@@ -1758,20 +1794,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /**
    * Ends a run's keeper and CLI, then removes the folder and the cursor. A folder whose keeper is
    * not alive goes at once; one whose processes will not end is kept (and said), so the next start
-   * finds it. Never throws.
+   * finds it. True when the keeper is gone. Never throws.
    */
-  async function endAndRemoveKeeper(seatId: string, runId: string): Promise<void> {
+  async function endAndRemoveKeeper(seatId: string, runId: string): Promise<boolean> {
     const dir = crewKeeperDir(deps.dbPath, runId);
     try {
       if (keeperAlive(dir) && !(await endKeeper(dir, keeperEndWait(), log))) {
         log(`${seatId}: could not end the keeper of ${runId}; its folder is kept`);
-        return;
+        return false;
       }
     } catch (e) {
       log(`${seatId}: could not end the keeper of ${runId}: ${errText(e)}`);
-      return;
+      return false;
     }
     removeKeeper(seatId, runId);
+    return true;
   }
 
   /** Registers a seat's process: its exit releases the grant, and its events reach `onEvent`. */
@@ -2189,6 +2226,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
       // Codex needs earlier item paths and unresolved requests even before the saved cursor.
       from: (h) => (row.vendor === "codex" ? 0 : cursor?.spawn === h.spawn ? cursor.line : 0),
+      // A Claude keeper from before #798 never saw a `result` (the CLI does not print `type`
+      // first), so it says a turn is open after every turn, and the seat would wait on it forever
+      // (FLIGHT never woken). The transcript says whether the CLI is between turns. One gap: a
+      // keeper whose transcript write failed holds later lines in memory only, so the file can end
+      // at an older result while a turn runs. The seat then looks idle until the turn's next line
+      // starts a turn again (a replayed one does at once).
+      awaiting: (h) =>
+        h.awaiting &&
+        (row.vendor === "codex" ||
+          h.parsedResults === true ||
+          run === null ||
+          !endsAtResult(run.transcriptPath)),
       raw: row.vendor === "codex",
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
@@ -2201,6 +2250,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // whoever ended the run found no process to end, so the run's token and holds are still here
       dropGrant(row.seatId, runId);
       if (found.kind === "attached") await found.session.close();
+      // endRunByEngine may be ending this folder too (no live entry): same pids, forced removal
       await endAndRemoveKeeper(row.seatId, runId);
       return;
     }
@@ -2889,6 +2939,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: planner || readOnly ? null : checkout.branch,
         ticket:
@@ -2968,9 +3020,46 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         return result;
       });
+      let brief = ticketBrief({
+        call: call(info),
+        role: info.seat.role,
+        mode: def.mode,
+        loop: def.loop,
+        here: def.here,
+        repo: info.repo.github,
+        issue,
+        title,
+        body: ticket.body,
+        bodyTruncated: ticket.bodyTruncated,
+        bodyLength: ticket.bodyLength ?? ticket.body.length,
+        branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
+        area: info.seat.area,
+        commands:
+          def.mode === "writer"
+            ? (info.repo.commands?.writer ?? [])
+            : (info.repo.commands?.review ?? []),
+        fullSuite: info.repo.fullSuite ?? [],
+        leftoverChanges: checkout.leftoverChanges,
+        ...(run.profile ? { profile: run.profile } : {}),
+        ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
+        ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
+      });
+      if (installNote) brief += `\n\n${installNote}`;
+      if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, cliSessionId, checkout, false, repoDocs, references);
+        l = await checkedLaunch(
+          info,
+          run,
+          cliSessionId,
+          checkout,
+          false,
+          repoDocs,
+          references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, brief),
+        );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -3012,32 +3101,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      let brief = ticketBrief({
-        call: call(info),
-        role: info.seat.role,
-        mode: def.mode,
-        loop: def.loop,
-        here: def.here,
-        repo: info.repo.github,
-        issue,
-        title,
-        body: ticket.body,
-        bodyTruncated: ticket.bodyTruncated,
-        bodyLength: ticket.bodyLength ?? ticket.body.length,
-        branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
-        area: info.seat.area,
-        commands:
-          def.mode === "writer"
-            ? (info.repo.commands?.writer ?? [])
-            : (info.repo.commands?.review ?? []),
-        fullSuite: info.repo.fullSuite ?? [],
-        leftoverChanges: checkout.leftoverChanges,
-        ...(run.profile ? { profile: run.profile } : {}),
-        ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
-        ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
-      });
-      if (installNote) brief += `\n\n${installNote}`;
-      if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
       // answered: wait for that, so the exit that marks the run failed and the seat in error
@@ -3055,10 +3118,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
     const info = need(seatId);
+    const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
-    if (seatDef(info.seat).loop !== "watch") {
+    if (def.loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
@@ -3103,6 +3167,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: null,
         ticket: null,
@@ -3113,6 +3179,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         summary: null,
       };
       store.upsertRun(run);
+      const first = opts?.first;
+      const brief = watchBrief({
+        call: call(info),
+        repo: info.repo.github,
+        seats: info.session.seats
+          .filter((s) => seatDef(s).mode === "writer")
+          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+        fullSuite: info.repo.fullSuite ?? [],
+      });
+      const firstBrief =
+        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief;
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3123,6 +3200,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           false,
           repoDocs,
           references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, firstBrief),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3164,18 +3244,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: checkout.path,
       });
-      const first = opts?.first;
-      const brief = watchBrief({
-        call: call(info),
-        repo: info.repo.github,
-        seats: info.session.seats
-          .filter((s) => seatDef(s).mode === "writer")
-          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
-        fullSuite: info.repo.fullSuite ?? [],
-      });
-      await enqueue(l, () =>
-        writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
-      ).catch(() => {});
+      await enqueue(l, () => writeLine(l, firstBrief)).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
@@ -3189,6 +3258,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
@@ -3301,6 +3371,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
         model,
+        accountId: info.seat.accountId,
+        effort: info.seat.effort ?? null,
         ...on,
         branch: null,
         ticket: author.ticket,
@@ -3313,6 +3385,36 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      const touches = author.loop?.touches;
+      const evidence = store.evidenceNotes(author.id);
+      const prevReply =
+        prev === null
+          ? null
+          : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
+      const brief = reviewBrief({
+        call: call(info),
+        repo: info.repo.github,
+        issue,
+        title: ticket.title,
+        prNumber: review.prNumber,
+        sha: review.sha,
+        mergeBase: scratch.mergeBase,
+        round: review.round,
+        body: ticket.body,
+        bodyTruncated: ticket.bodyTruncated,
+        bodyLength: ticket.bodyLength ?? ticket.body.length,
+        notes: evidence.map((e) => e.note),
+        prevSha: prev?.sha ?? null,
+        prevFindings: prev
+          ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+          : [],
+        prevReply,
+        diffCut: inputs.diffCut,
+        since: inputs.since,
+        touches: touches?.sha === review.sha ? touches.paths : [],
+        commands: info.repo.commands?.review ?? [],
+        fullSuite: info.repo.fullSuite ?? [],
+      });
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3323,6 +3425,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           false,
           repoDocs,
           references,
+          false,
+          undefined,
+          () => recordPromptVersion(run, def.prompt, brief),
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -3364,36 +3469,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         state: "starting",
         reason: null,
         worktree: scratch.path,
-      });
-      const touches = author.loop?.touches;
-      const evidence = store.evidenceNotes(author.id);
-      const prevReply =
-        prev === null
-          ? null
-          : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
-      const brief = reviewBrief({
-        call: call(info),
-        repo: info.repo.github,
-        issue,
-        title: ticket.title,
-        prNumber: review.prNumber,
-        sha: review.sha,
-        mergeBase: scratch.mergeBase,
-        round: review.round,
-        body: ticket.body,
-        bodyTruncated: ticket.bodyTruncated,
-        bodyLength: ticket.bodyLength ?? ticket.body.length,
-        notes: evidence.map((e) => e.note),
-        prevSha: prev?.sha ?? null,
-        prevFindings: prev
-          ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
-          : [],
-        prevReply,
-        diffCut: inputs.diffCut,
-        since: inputs.since,
-        touches: touches?.sha === review.sha ? touches.paths : [],
-        commands: info.repo.commands?.review ?? [],
-        fullSuite: info.repo.fullSuite ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       await session.ready;
@@ -3512,6 +3587,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l.endedBy = "engine";
       l.run = { ...l.run, endedAt: at, status: "ok" };
       closing = l.ending ??= closeLive(l);
+    } else {
+      // No process here (a take-back that left the run with no session, #798): the run's token
+      // is revoked and a keeper that lives on is ended before the seat is freed. A keeper that
+      // will not end is said in a blocked note: its CLI may still be running beside the seat's
+      // next run. (A take-back finishing now may end the same folder too: the same pids, and
+      // the folder's removal is forced, so the second does nothing.)
+      dropGrant(seatId, runId);
+      if (!(await endAndRemoveKeeper(seatId, runId))) {
+        try {
+          store.raiseNote({
+            key: `cleanup:${runId}`,
+            kind: "blocked",
+            runId,
+            seatId,
+            repoId: info.repo.id,
+            text: `${call(info)}'s run #${run.seq} was ended, but its CLI could not be stopped and may still be running; stop it by hand (its keeper folder is ${crewKeeperDir(deps.dbPath, runId)}).`,
+            at: now(),
+          });
+          bus.emit("attention");
+        } catch (e) {
+          log(`${seatId}: could not record the cleanup note: ${errText(e)}`);
+        }
+      }
+      removeRunFiles(runId);
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -3957,7 +4056,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
         writeLine(l, text);
-        // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
+        // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's
+        // reply to FLIGHT's brief)
         try {
           if (opts.questions !== "none") {
             store.answerQuestions(seatId, now(), opts.questions === "unpassed");
@@ -4012,6 +4112,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
       return { inTurn: l.inTurn, resumedAt: l.resumedAt, rateLimitedUntil: l.rateLimitedUntil };
+    },
+
+    sessionAlive(seatId) {
+      if (
+        !mayAct() ||
+        stopping ||
+        reattaching !== null ||
+        starting.has(seatId) ||
+        transfers.has(seatId)
+      )
+        return null;
+      const l = live.get(seatId);
+      // a process for another run than the row's (one being ended) is not this run's session
+      return l?.session.alive === true && l.run.id === store.seatSession(seatId)?.runId;
     },
 
     async contextUsage(seatId) {
