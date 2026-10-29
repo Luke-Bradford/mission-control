@@ -210,6 +210,8 @@ const WRAPPERS: Readonly<Record<string, { valued: readonly string[]; operands: n
   nohup: { valued: [], operands: 0 },
   noglob: { valued: [], operands: 0 },
   nocorrect: { valued: [], operands: 0 },
+  // `corepack pnpm …` delegates to the selected package manager.
+  corepack: { valued: [], operands: 0 },
   sudo: { valued: ["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T"], operands: 0 },
   timeout: { valued: ["-s", "--signal", "-k", "--kill-after"], operands: 1 },
   nice: { valued: ["-n", "--adjustment"], operands: 0 },
@@ -274,6 +276,11 @@ const BACKGROUND_LAUNCHERS = new Set([
   "ssh-agent",
   "systemd-run",
   "daemonize",
+  // These use, or start, gpg-agent as needed.
+  "gpg",
+  "gpg-connect-agent",
+  // A shell builtin that detaches an existing job.
+  "disown",
 ]);
 /**
  * Programs that start a daemon only with one option, which GnuPG also takes as any unambiguous
@@ -283,9 +290,116 @@ const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; short
   "gpg-agent": { option: "--daemon", shortest: "--dae".length },
   gpgconf: { option: "--launch", shortest: "--la".length },
 };
+
+/** SSH options whose value consumes the rest of a short-option cluster, or the next word. */
+const SSH_VALUED_OPTIONS = new Set([
+  "b",
+  "B",
+  "c",
+  "D",
+  "E",
+  "e",
+  "F",
+  "I",
+  "i",
+  "J",
+  "L",
+  "l",
+  "m",
+  "O",
+  "o",
+  "p",
+  "P",
+  "Q",
+  "R",
+  "S",
+  "W",
+  "w",
+]);
+/** autossh additionally takes a monitor port with `-M`. */
+const AUTOSSH_VALUED_OPTIONS = new Set([...SSH_VALUED_OPTIONS, "M"]);
+
+/** Whether SSH's local options include `-f`, before its destination or a `--` marker. */
+function sshBackgrounds(program: string, args: readonly string[]): boolean {
+  const valued = program === "autossh" ? AUTOSSH_VALUED_OPTIONS : SSH_VALUED_OPTIONS;
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] ?? "";
+    if (arg === "--" || !arg.startsWith("-") || arg === "-") return false;
+    if (arg.startsWith("--")) continue;
+    for (let i = 1; i < arg.length; i++) {
+      const option = arg.charAt(i);
+      if (option === "f") return true;
+      if (valued.has(option)) {
+        if (i + 1 === arg.length) at++;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+/** start-stop-daemon options whose value consumes the rest of a short-option cluster. */
+const START_STOP_DAEMON_VALUED_OPTIONS = new Set([
+  "a",
+  "c",
+  "C",
+  "d",
+  "g",
+  "n",
+  "N",
+  "p",
+  "r",
+  "s",
+  "u",
+  "x",
+]);
+/** start-stop-daemon long options that consume the next argv element. */
+const START_STOP_DAEMON_VALUED_LONG_OPTIONS = new Set([
+  "--startas",
+  "--chuid",
+  "--chdir",
+  "--chroot",
+  "--group",
+  "--name",
+  "--nicelevel",
+  "--pidfile",
+  "--retry",
+  "--signal",
+  "--user",
+  "--exec",
+]);
+
+/** Whether start-stop-daemon starts its requested process in the background. */
+function startStopDaemonLaunches(args: readonly string[]): boolean {
+  let start = false;
+  let background = false;
+  for (let argAt = 0; argAt < args.length; argAt++) {
+    const arg = args[argAt] ?? "";
+    if (arg === "--") break;
+    if (arg === "--start") start = true;
+    else if (arg === "--background") background = true;
+    else if (START_STOP_DAEMON_VALUED_LONG_OPTIONS.has(arg)) argAt++;
+    else if (/^-[A-Za-z]+$/.test(arg)) {
+      for (let optionAt = 1; optionAt < arg.length; optionAt++) {
+        const option = arg.charAt(optionAt);
+        if (option === "S") start = true;
+        else if (option === "b") background = true;
+        if (START_STOP_DAEMON_VALUED_OPTIONS.has(option)) {
+          if (optionAt + 1 === arg.length) argAt++;
+          break;
+        }
+      }
+    }
+  }
+  return start && background;
+}
+
 /** Whether `program` with `args` hands work to something that outlives this tool call. */
 function launches(program: string, args: readonly string[]): boolean {
   if (BACKGROUND_LAUNCHERS.has(program)) return true;
+  // ssh and autossh fork into the background under -f (including `ssh -Nf`).
+  if ((program === "ssh" || program === "autossh") && sshBackgrounds(program, args)) return true;
+  if (program === "start-stop-daemon" && startStopDaemonLaunches(args)) return true;
   const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
     ? BACKGROUND_LAUNCH_OPTIONS[program]
     : undefined;
@@ -489,12 +603,10 @@ const PNPM_COMMANDS = new Set([
   "run",
   "run-script",
   "self-update",
-  "server",
   "set",
   "setup",
   "start",
   "store",
-  "t",
   "test",
   "tst",
   "un",
@@ -1497,6 +1609,12 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   if (gitEnv) extra.push({ argv: [GIT_ENV_OVERRIDE], background: bg });
   const program = words[at];
   if (program === undefined) return extra;
+  // A shell expansion in the line's command position can resolve to any program. Arguments may
+  // safely expand, but this position determines what the shell invokes, so it cannot be judged.
+  // Nested commands (runner suffixes and eval scripts) are already judged fail-closed by their
+  // caller; retaining their existing rule keeps specific refusals such as gpg and tmux.
+  if (mux === "none" && !gitEnv && EXPANDS.test(program))
+    return [...extra, { argv: [UNREADABLE_LINE], background: bg }];
   const name = baseName(program);
   const rest = words.slice(at + 1);
   const restBraces = braces.slice(at + 1);
@@ -1551,6 +1669,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   // foreground (no command-line splitting: that is a runner's, and these are scripts or binaries)
   const bin = packageBinStart(name, rest);
   if (bin !== -1) {
+    if (EXPANDS.test(rest[bin] ?? "")) out.push({ argv: [UNREADABLE_LINE], background: bg });
     for (let i = bin; i < rest.length; i++) {
       const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));
       out.push(

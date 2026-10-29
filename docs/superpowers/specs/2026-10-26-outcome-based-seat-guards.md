@@ -13,6 +13,11 @@ Seat guards constrain outcomes, not ordinary development commands. The operator'
 
 Codex sends ordinary commands to the shared guard and then its OS sandbox. Claude exposes broad Bash inside the equivalent sandbox and uses the same guard hook. The role prompt explains the workflow and available Mission Control tools; it is not a command allowlist.
 
+The parser follows known wrappers and launch forms, rather than attempting to model every program's
+arguments. A program that itself executes an argument is not semantically interpreted: generic
+runner checking currently refuses `npx cross-env A=1 open .`, while `bun x open .` remains an
+accepted boundary. Neither form has a special compatibility rule.
+
 ## Test plan
 
 - Prove ordinary local commands reach the sandbox.
