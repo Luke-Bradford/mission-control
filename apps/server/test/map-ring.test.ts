@@ -254,6 +254,45 @@ describe("crew call ring", () => {
     ]);
   });
 
+  it("records files only: a folder searched, listed or cd'd into is never a path (#946)", () => {
+    const { ring, transcriptPath, cwd } = setup("claude");
+    mkdirSync(join(cwd, "apps", "web"), { recursive: true });
+    writeFileSync(join(cwd, "apps", "web", "a.ts"), "");
+    const use = (id: string, name: string, input: Record<string, unknown>) => ({
+      type: "tool_use",
+      id,
+      name,
+      input,
+    });
+    const frames = [
+      {
+        type: "assistant",
+        message: {
+          content: [
+            use("grep", "Grep", { pattern: "x", path: "apps/web" }),
+            use("ls", "Bash", { command: "ls apps/web" }),
+            use("cd", "Bash", { command: "cd apps/web && cat apps/web/a.ts" }),
+          ],
+        },
+      },
+      {
+        type: "user",
+        message: {
+          content: ["grep", "ls", "cd"].map((id) => ({
+            type: "tool_result",
+            tool_use_id: id,
+            content: [{ type: "text", text: "ok" }],
+          })),
+        },
+      },
+    ];
+    appendFileSync(transcriptPath, `${frames.map((f) => JSON.stringify(f)).join("\n")}\n`);
+    ring.poll();
+    const files = ring.calls("seat").flatMap((c) => c.files);
+    expect(files).toEqual(["apps/web/a.ts"]);
+    expect(ring.scope("run").read).toEqual(["apps/web/a.ts"]);
+  });
+
   it("counts a file opened as read, never the names a Glob listed", () => {
     const { ring, transcriptPath, cwd } = setup("claude");
     mkdirSync(join(cwd, "src"));

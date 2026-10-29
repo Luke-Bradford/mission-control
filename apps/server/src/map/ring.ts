@@ -99,6 +99,7 @@ export class CallRing {
   }
 
   private rows = new Map<string, RingCall[]>();
+  private stats = new Map<string, boolean>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
   private sequences = new Map<string, number>();
@@ -213,6 +214,7 @@ export class CallRing {
 
   poll(): void {
     const now = Date.now();
+    this.stats.clear();
     const sources = this.sources();
     for (const source of sources) {
       let tail = this.tails.get(source.id);
@@ -276,6 +278,20 @@ export class CallRing {
     );
   }
 
+  // one stat per path per poll: folders are never tracked, only files
+  private isFile(absolute: string): boolean {
+    let known = this.stats.get(absolute);
+    if (known === undefined) {
+      try {
+        known = statSync(absolute).isFile();
+      } catch {
+        known = false;
+      }
+      this.stats.set(absolute, known);
+    }
+    return known;
+  }
+
   private file(source: RingSource, value: unknown, existing = false): string | null {
     if (typeof value !== "string" || !value) return null;
     const absolute = resolve(source.cwd, value);
@@ -283,6 +299,7 @@ export class CallRing {
     if (!path || path === ".." || path.startsWith("../") || isAbsolute(path)) return null;
     if (existsSync(absolute)) {
       try {
+        if (!this.isFile(absolute)) return null;
         const real = relative(realpathSync(source.cwd), realpathSync(absolute));
         if (real === ".." || real.startsWith("../") || isAbsolute(real)) return null;
       } catch {
