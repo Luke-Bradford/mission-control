@@ -153,7 +153,7 @@ export function RunTrace({
         </div>
       </div>
       <div className="trace-grid">
-        <main>
+        <div className="trace-main">
           <section className="trace-section">
             <h2>Loop edges</h2>
             {edgeCounts(view.tries).length ? (
@@ -179,7 +179,7 @@ export function RunTrace({
               ))}
             </section>
           )}
-        </main>
+        </div>
         <aside>
           <section className="trace-section">
             <h2>Where the tokens go</h2>
@@ -215,6 +215,7 @@ export function RunTracePanel({ agentId, runId }: { agentId: string; runId: stri
   const to = agentPath(agentId);
   return (
     <Panel
+      className="trace-panel"
       title="Run Trace"
       actions={
         <a href={to} onClick={(e) => followLink(e, to)}>
@@ -222,14 +223,16 @@ export function RunTracePanel({ agentId, runId }: { agentId: string; runId: stri
         </a>
       }
     >
-      <RunTrace
-        runId={runId}
-        view={loop.data}
-        startedAt={startedAt}
-        endedAt={endedAt}
-        now={Date.now()}
-        run={run}
-      />
+      <div className="pb scroll">
+        <RunTrace
+          runId={runId}
+          view={loop.data}
+          startedAt={startedAt}
+          endedAt={endedAt}
+          now={Date.now()}
+          run={run}
+        />
+      </div>
     </Panel>
   );
 }
