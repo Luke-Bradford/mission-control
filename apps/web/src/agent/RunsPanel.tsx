@@ -10,7 +10,7 @@ import { type KeyboardEvent, memo, type ReactNode, useEffect, useState } from "r
 import { useSecond } from "../clock.ts";
 import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { BUILD_LOOP_TEMPLATE, isLoopInFlight, runElapsed, runPrs } from "../crew.ts";
+import { BUILD_LOOP_TEMPLATE, isLoopInFlight, NO_LOOP, runElapsed, runPrs } from "../crew.ts";
 import { RESOURCES, type Resource, useResource } from "../data.ts";
 import { cost, dayMonth, dur, hhmm, kTokens } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -96,27 +96,15 @@ const runDur = (r: RunView, now: number): string => {
   return ms === null ? DASH : dur(ms);
 };
 
-function TimedLoopBody({
-  kind,
-  row,
-  view,
-  prs,
-  limits,
-  loopView,
-}: {
-  kind: "steps" | "timeline";
-  row: CrewRow;
-  view?: RunLoopView;
-  prs?: PullRequestView[];
-  limits?: LoopLimits;
-  loopView?: Resource<RunLoopView>;
-}) {
+function TimedLoopBody({ row, loopView }: { row: CrewRow; loopView?: Resource<RunLoopView> }) {
   const now = useSecond();
-  return kind === "steps" ? (
-    <LoopSteps row={row} view={view} prs={prs} limits={limits as LoopLimits} now={now} />
-  ) : (
-    <LoopTimeline row={row} loopView={loopView as Resource<RunLoopView>} now={now} />
-  );
+  return <LoopTimeline row={row} loopView={loopView as Resource<RunLoopView>} now={now} />;
+}
+
+/** The compact checklist needs recorded visits; retain the existing static stepper only while they load. */
+function LoadingSteps({ row, limits }: { row: CrewRow; limits: LoopLimits }) {
+  const now = useSecond();
+  return <LoopSteps row={row} view={undefined} prs={undefined} limits={limits} now={now} />;
 }
 
 export const RunRow = memo(function RunRow({
@@ -311,23 +299,35 @@ export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
     <Budget view={loopView.data} tokens={row.run?.tokens} limits={limits} />
   );
   const trace = row.loop && row.run ? tracePath(row.id, row.run.id) : null;
+  const activeReviewPark = reviewPark(loopView.data?.loop);
+  const activeEndAside =
+    row.run?.endedAt === null && loopView.data?.loop?.aside ? (
+      <EndAsideButton row={row} runId={row.run.id} />
+    ) : null;
 
   let body: ReactNode;
   if (view === "steps") {
     body = (
       <>
         {budget}
-        {loopView.data && Array.isArray(loopView.data.tries) && (
-          <RunChecklist view={loopView.data} now={Date.now()} />
+        {activeEndAside}
+        {activeReviewPark && row.run && (
+          <WaiveReviewFindings runId={row.run.id} park={activeReviewPark} />
         )}
-        <TimedLoopBody row={row} view={loopView.data} prs={repoPrs} limits={limits} kind="steps" />
+        {loopView.data ? (
+          <RunChecklist view={loopView.data} now={Date.now()} />
+        ) : row.loop ? (
+          <LoadingSteps row={row} limits={limits} />
+        ) : (
+          <p className="s muted">{NO_LOOP}</p>
+        )}
       </>
     );
   } else if (view === "timeline") {
     body = (
       <>
         {budget}
-        <TimedLoopBody row={row} loopView={loopView} kind="timeline" />
+        <TimedLoopBody row={row} loopView={loopView} />
       </>
     );
   } else if (runs.error && !runs.data) {

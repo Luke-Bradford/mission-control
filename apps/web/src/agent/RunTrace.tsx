@@ -11,9 +11,10 @@ const stepLabel = (step: LoopStep): string => (step === "ci" ? "Checks" : LOOP_P
 const allTokens = (tries: readonly LoopTry[]): number | null => stepTokens(tries);
 
 const routeAfter = (step: LoopStep, outcome: LoopTry["outcome"]): LoopStep | null => {
+  if (outcome === "parked" || outcome === "stopped") return null;
   if (step === "working") return "ci";
-  if (step === "ci") return outcome === "fail" ? "working" : "review";
-  if (step === "review") return outcome === "fail" ? "working" : "done";
+  if (step === "ci") return outcome === "pass" ? "review" : outcome === "fail" ? "working" : null;
+  if (step === "review") return outcome === "pass" ? "done" : outcome === "fail" ? "working" : null;
   return null;
 };
 
@@ -35,15 +36,16 @@ const edgeCounts = (tries: readonly LoopTry[]): readonly [string, number][] => {
 
 /** A compact history: every recorded try is a visit, so a return is never hidden in an aggregate. */
 export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) {
-  const total = allTokens(view.tries);
-  const first = view.tries[0];
-  const last = view.tries.at(-1);
+  const tries = Array.isArray(view.tries) ? view.tries : [];
+  const total = allTokens(tries);
+  const first = tries[0];
+  const last = tries.at(-1);
   const elapsed =
     first && last ? Math.round(((last.endedAt ?? now) - first.startedAt) / 60_000) : 0;
-  if (view.tries.length === 0) return <p className="s muted">No loop steps recorded yet.</p>;
+  if (tries.length === 0) return <p className="s muted">No loop steps recorded yet.</p>;
   return (
     <ol className="run-checklist">
-      {visits(view.tries).map((visit) => (
+      {visits(tries).map((visit) => (
         <li key={`${visit.step}:${visit.fix ? "fix" : "try"}:${visit.n}:${visit.startedAt}`}>
           <span className={tryClass(visit)}>{visit.outcome === "pass" ? "✓" : "●"}</span>
           <span>
@@ -80,7 +82,7 @@ function StopRules({ view, run }: { view: RunLoopView; run?: RunView }) {
         CI fixes {ciFails} / {limits.tries}
       </p>
       <p>
-        Rework rounds {round} / {limits.rounds}
+        Review round {round} / {limits.rounds}
       </p>
       {view.budget !== null && (
         <p>
@@ -94,21 +96,25 @@ function StopRules({ view, run }: { view: RunLoopView; run?: RunView }) {
 function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
   const current = view.tries.at(-1);
   if (!current) return null;
+  const held = current.outcome === "parked" || current.outcome === "stopped";
   const next = routeAfter(current.step, current.outcome);
   const conditional =
-    current.outcome === "running" && (current.step === "ci" || current.step === "review");
+    (current.outcome === "running" || current.outcome === "waiting") &&
+    (current.step === "ci" || current.step === "review");
   const limits = runLimits(run);
   return (
     <section className="trace-section">
       <h2>Next</h2>
       <p>
-        {conditional
-          ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : ""}.`
-          : next
-            ? current.outcome === "running"
-              ? `${stepLabel(current.step)} → ${stepLabel(next)}`
-              : `If ${stepLabel(current.step)} ${current.outcome === "pass" ? "passes" : "fails"} → ${stepLabel(next)}`
-            : "Waiting for the next recorded loop step."}
+        {held
+          ? `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${current.reason}` : ""}.`
+          : conditional
+            ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : ""}.`
+            : next
+              ? current.outcome === "running" || current.outcome === "waiting"
+                ? `${stepLabel(current.step)} → ${stepLabel(next)}`
+                : `If ${stepLabel(current.step)} ${current.outcome === "pass" ? "passes" : "fails"} → ${stepLabel(next)}`
+              : "Waiting for the next recorded loop step."}
       </p>
     </section>
   );
@@ -163,6 +169,7 @@ export function RunTrace({
           <section className="trace-section">
             <h2>Step-by-step timeline</h2>
             <RunChecklist view={view} now={now} />
+            {view.review && <p className="s muted">{view.review.description}</p>}
           </section>
           {view.events.length > 0 && (
             <section className="trace-section">

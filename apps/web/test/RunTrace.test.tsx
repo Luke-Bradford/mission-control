@@ -1,4 +1,10 @@
-import type { LoopTry, RunLoopView, RunView } from "@mc/core";
+import {
+  type LoopTry,
+  REVIEW_STATUS_BLOCKED,
+  REVIEW_STATUS_RUNNING,
+  type RunLoopView,
+  type RunView,
+} from "@mc/core";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RunChecklist, RunTrace } from "../src/agent/RunTrace.tsx";
@@ -86,7 +92,7 @@ describe("Run trace", () => {
     expect(screen.getByText("Working → Checks ×2")).toBeTruthy();
     expect(screen.getByText("Working · 1.5k")).toBeTruthy();
     expect(screen.getByText("CI fixes 1 / 2")).toBeTruthy();
-    expect(screen.getByText("Rework rounds 1 / 2")).toBeTruthy();
+    expect(screen.getByText("Review round 1 / 2")).toBeTruthy();
     expect(screen.getByText(/If Checks pass → In review/)).toBeTruthy();
     expect(screen.getByText("CI started")).toBeTruthy();
   });
@@ -106,5 +112,81 @@ describe("Run trace", () => {
       <RunTrace runId="review" view={review} startedAt={NOW - 12_000} endedAt={null} now={NOW} />,
     );
     expect(screen.getByText(/If In review pass → Done/)).toBeTruthy();
+  });
+
+  it("keeps queued checks and reviews conditional, but does not project parked or stopped visits", () => {
+    const waitingReview = {
+      ...view,
+      tries: [{ ...tries[0], step: "review" as const, endedAt: null, outcome: "waiting" as const }],
+    };
+    const parkedChecks = {
+      ...view,
+      tries: [{ ...tries[1], endedAt: null, outcome: "parked" as const, reason: "CI cap reached" }],
+    };
+    const stoppedReview = {
+      ...view,
+      tries: [
+        {
+          ...tries[0],
+          step: "review" as const,
+          outcome: "stopped" as const,
+          reason: "operator stopped run",
+        },
+      ],
+    };
+    const { rerender } = render(
+      <RunTrace
+        runId="queued"
+        view={waitingReview}
+        startedAt={NOW - 12_000}
+        endedAt={null}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(/If In review pass → Done; if it fails → Working/)).toBeTruthy();
+    rerender(<RunChecklist view={parkedChecks} now={NOW} />);
+    expect(screen.queryByText(/Next:/)).toBeNull();
+    rerender(
+      <RunTrace
+        runId="parked"
+        view={parkedChecks}
+        startedAt={NOW - 9_000}
+        endedAt={null}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText("Checks parked: CI cap reached.")).toBeTruthy();
+    rerender(
+      <RunTrace
+        runId="stopped"
+        view={stoppedReview}
+        startedAt={NOW - 12_000}
+        endedAt={null}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText("In review stopped: operator stopped run.")).toBeTruthy();
+  });
+
+  it("shows the loop API's recorded review state alongside its review visit", () => {
+    const review = {
+      ...view,
+      tries: [{ ...tries[0], step: "review" as const, endedAt: null, outcome: "running" as const }],
+      review: { state: "pending" as const, description: REVIEW_STATUS_RUNNING },
+    };
+    const { rerender } = render(
+      <RunTrace runId="review" view={review} startedAt={NOW - 12_000} endedAt={null} now={NOW} />,
+    );
+    expect(screen.getByText(REVIEW_STATUS_RUNNING)).toBeTruthy();
+    rerender(
+      <RunTrace
+        runId="blocked"
+        view={{ ...review, review: { state: "failure", description: REVIEW_STATUS_BLOCKED } }}
+        startedAt={NOW - 12_000}
+        endedAt={null}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText(REVIEW_STATUS_BLOCKED)).toBeTruthy();
   });
 });
