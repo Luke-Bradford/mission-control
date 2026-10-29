@@ -606,15 +606,43 @@ describe("POST /api/guard/check", () => {
   });
 
   describe("the check recorder", () => {
+    const CONFIGURED = ["pnpm -s lint", "pnpm -s typecheck"];
     const spy = () => {
       const calls: unknown[][] = [];
       const checks: CheckRecorder = {
         begin: async (k, c) => void calls.push(["begin", k, c]),
         end: async (k, ok) => void calls.push(["end", k, ok]),
+        lockedBy: async (_run, c) => CONFIGURED.find((x) => x === c) ?? null,
         dropRun: () => {},
       };
       return { calls, checks };
     };
+
+    it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s typecheck"))).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({ runId: "run-a", command: "pnpm -s typecheck" });
+      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await until(() => lock.state().waiting.length === 1);
+      await check(tokA, post("a1"));
+      expect((await b).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({ runId: "run-b" });
+    });
+
+    it("answers a check that waited too long with the busy text, and takes no lock for other commands", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, bash("a1", "pnpm -s lint"));
+      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await until(() => lock.state().waiting.length === 1);
+      vi.advanceTimersByTime(LOCK_WAIT_MS);
+      expect(reason((await b).body)).toBe(lockBusyText("GUIDO-1", "pnpm -s lint"));
+      expect((await check(tokB, bash("b2", "ls"))).body).toBe("{}");
+    });
 
     it("starts a record at PreToolUse of a Bash call and ends it at PostToolUse (ok) or PostToolUseFailure (not ok)", async () => {
       const { calls, checks } = spy();

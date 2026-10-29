@@ -28,6 +28,19 @@ export function checksRun(command: string, checks: readonly string[]): string[] 
   return checks.filter((c) => segments.includes(c));
 }
 
+/**
+ * The configured check a shell command runs, for the test lock: unlike `checksRun`, a chain, a pipe
+ * or a `cd` before it still counts (the check still loads the Mac), but a command that only
+ * mentions or extends a check does not.
+ */
+export function lockedCheck(command: string, checks: readonly string[]): string | null {
+  for (const segment of command.split(/&&|\|\||[|;\n\r]/)) {
+    const found = checks.find((c) => c === segment.trim());
+    if (found !== undefined) return found;
+  }
+  return null;
+}
+
 /** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */
 export interface CloneState {
   head: string;
@@ -45,6 +58,8 @@ export interface CheckRecorder {
   begin(key: CallKey, command: string): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean): Promise<void>;
+  /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
+  lockedBy(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
 }
@@ -66,6 +81,14 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, { runId: string; matched: string[]; head: string }>();
   return {
+    async lockedBy(runId, command) {
+      try {
+        return lockedCheck(command, await d.checks(runId));
+      } catch (e) {
+        d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
     async begin(key, command) {
       try {
         const matched = checksRun(command, await d.checks(key.runId));

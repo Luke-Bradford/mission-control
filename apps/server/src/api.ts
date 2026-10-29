@@ -1671,7 +1671,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             await checks?.end(key, !failed);
             return answer();
           }
-          const verdict = crewGuardDecision(
+          let verdict = crewGuardDecision(
             config,
             seat.repoId,
             seatMode(who.seatId),
@@ -1682,6 +1682,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           );
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          if (
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const check = await checks?.lockedBy(who.runId, command);
+            if (check) verdict = { kind: "lock", command: check };
+          }
           if (
             verdict.kind !== "deny" &&
             body.data.tool_name === "Bash" &&
