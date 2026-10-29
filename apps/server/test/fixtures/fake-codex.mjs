@@ -37,7 +37,12 @@ const completeItem = (scenario, itemId, type) => {
   notify("item/completed", {
     threadId,
     turnId: active?.turnId,
-    item: { id: itemId, type, status: "completed" },
+    item: {
+      id: itemId,
+      type,
+      status: "completed",
+      ...(scenario.exitCode === undefined ? {} : { exitCode: scenario.exitCode }),
+    },
   });
   if (!scenario.holdTurn) endTurn(scenario.failed ? "failed" : "completed");
 };

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CheckRecorder } from "../src/check-runs.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
@@ -19,6 +20,7 @@ function approver(
   mode: CrewMode = "writer",
   grants: string[] = [],
   runGrants?: () => readonly string[],
+  checks?: CheckRecorder,
 ) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
@@ -41,6 +43,7 @@ function approver(
     record,
     seatGrants,
     ...(runGrants === undefined ? {} : { runGrants }),
+    ...(checks === undefined ? {} : { checks }),
   });
   return { approve, record, seatGrants, config };
 }
@@ -283,4 +286,47 @@ it("approves a confined Git path relative to the approved command cwd", async ()
       signal(),
     ),
   ).toBe("accept");
+});
+
+describe("Codex check records", () => {
+  const recorder = () => {
+    const begun: unknown[][] = [];
+    const checks: CheckRecorder = {
+      begin: async (k, c) => void begun.push([k, c]),
+      end: async () => {},
+      dropRun: () => {},
+    };
+    return { begun, checks };
+  };
+  const request = (command: string, params: Record<string, unknown>) => {
+    const r = commandRequest(command);
+    return { ...r, params: { ...r.params, ...params } };
+  };
+
+  it("starts a record for an accepted shell command, keyed as the lock is (approval id, else item id)", async () => {
+    const { begun, checks } = recorder();
+    const h = approver("writer", [], undefined, checks);
+    expect(
+      await h.approve(request("pnpm -s lint", { itemId: "item-1" }), undefined, signal()),
+    ).toBe("accept");
+    expect(
+      await h.approve(
+        request("pnpm -s typecheck", { itemId: "item-2", approvalId: "appr-2" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    expect(begun).toEqual([
+      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint"],
+      [{ runId: "run", toolUseId: "appr-2" }, "pnpm -s typecheck"],
+    ]);
+  });
+
+  it("starts no record for a refused command", async () => {
+    const { begun, checks } = recorder();
+    const h = approver("writer", [], undefined, checks);
+    const denied = request("git push origin x", { itemId: "item-3" });
+    expect(await h.approve(denied, undefined, signal())).toBe("decline");
+    expect(begun).toEqual([]);
+  });
 });

@@ -14,6 +14,7 @@ import {
   mcTool,
   seatCallSign,
 } from "@mc/core";
+import type { CheckRecorder } from "../check-runs.ts";
 import { type CcConfig, crewSeatGrants } from "../config.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -52,6 +53,8 @@ export function createCodexApprover(i: {
   superuserTools?: readonly McToolName[];
   seatGrants?: (seatId: string) => readonly string[];
   runGrants?: () => readonly string[];
+  /** Notes the clone a shell command starts on, for the push gate's check record. */
+  checks?: CheckRecorder;
 }): CodexSessionInput["approve"] {
   // Command approvals (approvalId, else itemId) this approver was asked about: a second request
   // for one is a sandbox retry.
@@ -157,6 +160,16 @@ export function createCodexApprover(i: {
               h?.command ?? "a full suite",
             ),
           );
+        }
+      }
+    }
+    if (signal.aborted) return refuse("codex-allowlist");
+    // the lock's key: the completion event names the same one (see codex-session's tool-result)
+    const id = params.approvalId ?? params.itemId;
+    if (i.checks !== undefined && (typeof id === "string" || typeof id === "number")) {
+      for (const event of events) {
+        if (event.tool === "Bash" && event.input.command !== undefined) {
+          await i.checks.begin({ runId: i.runId, toolUseId: String(id) }, event.input.command);
         }
       }
     }
