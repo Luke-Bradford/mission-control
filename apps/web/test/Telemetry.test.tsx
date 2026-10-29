@@ -851,7 +851,8 @@ describe("Capacity and cost", () => {
         },
       }),
     );
-    expect(panel("tQuota").querySelector(".annotation")?.textContent).toContain(
+    expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("");
+    expect(panel("tQuota").querySelector("svg")?.getAttribute("aria-label")).toContain(
       "claude-main 5h reset",
     );
   });
@@ -905,9 +906,13 @@ describe("Capacity and cost", () => {
     const quota = panel("tQuota");
     expect(quota.querySelectorAll("path.line")).toHaveLength(2);
     expect(quota.querySelectorAll("path.line")[1]?.getAttribute("stroke-dasharray")).toBe("4 3");
-    expect(quota.textContent).toContain("codex-main 7d reset");
-    expect(quota.textContent).toContain("codex-main 7d stop forecast");
-    expect(quota.textContent).toContain("codex-main 7d full forecast");
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain("codex-main 7d reset");
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain(
+      "codex-main 7d stop forecast",
+    );
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain(
+      "codex-main 7d full forecast",
+    );
   });
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {

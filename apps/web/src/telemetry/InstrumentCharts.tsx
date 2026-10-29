@@ -1,8 +1,16 @@
 import { TELEMETRY_RANGES, type Telemetry } from "@mc/core";
 import { useState } from "react";
-import { keyStep, pointerX, Tip, useChartCursor, useChartWidth } from "../hud/charts/Hover.tsx";
+import {
+  keyStep,
+  Legend,
+  pointerX,
+  Tip,
+  useChartCursor,
+  useChartWidth,
+} from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { chartAnnotations } from "./annotations.ts";
 import { minutesAgo, type Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
@@ -38,7 +46,7 @@ function CrewStateTimeline({
   spans: Series["stateSpans"];
   from: number;
   to: number;
-  annotations: Series["annotations"];
+  annotations: { at: number; label: string }[];
 }) {
   const [ref, width] = useChartWidth(560);
   const [local, setLocal] = useState<number | null>(null);
@@ -88,19 +96,42 @@ function CrewStateTimeline({
         best === null || Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best,
       null,
     );
+  const visibleAnnotations = annotations
+    .filter((event) => event.at >= visibleFrom && event.at <= visibleTo)
+    .sort((a, b) => a.at - b.at);
+  const annotationMarkers: typeof visibleAnnotations = [];
+  for (const event of visibleAnnotations) {
+    const previous = annotationMarkers.at(-1);
+    if (previous === undefined || Math.abs(x(previous.at) - x(event.at)) >= 8)
+      annotationMarkers.push(event);
+  }
   return (
     <div className="chart crew-state-chart" ref={ref}>
-      <div className="chart-controls">
-        <button type="button" onClick={() => setZoom((value) => Math.min(16, value * 2))}>
-          Zoom in crew state
+      {/* biome-ignore lint/a11y/useSemanticElements: a fieldset would add a border in the chart toolbar */}
+      <span className="seg" role="group" aria-label="Crew state zoom">
+        <button
+          type="button"
+          aria-label="Zoom in crew state"
+          onClick={() => setZoom((value) => Math.min(16, value * 2))}
+        >
+          +
         </button>
-        <button type="button" onClick={() => setZoom((value) => Math.max(1, value / 2))}>
-          Zoom out crew state
+        <button
+          type="button"
+          aria-label="Zoom out crew state"
+          onClick={() => setZoom((value) => Math.max(1, value / 2))}
+        >
+          −
         </button>
-        <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>
-          Reset crew state zoom
+        <button
+          type="button"
+          aria-label="Reset crew state zoom"
+          onClick={() => setZoom(1)}
+          disabled={zoom === 1}
+        >
+          Reset
         </button>
-      </div>
+      </span>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
@@ -143,23 +174,18 @@ function CrewStateTimeline({
               ))}
           </g>
         ))}
-        {annotations
-          .filter((event) => event.at >= visibleFrom && event.at <= visibleTo)
-          .map((event) => (
-            <g className="annotation" key={`${event.at}:${event.kind}`}>
-              <line
-                x1={x(event.at)}
-                x2={x(event.at)}
-                y1={0}
-                y2={height - 18}
-                stroke="var(--warn)"
-                strokeDasharray="2 3"
-              />
-              <text className="ct" x={x(event.at) + 3} y={12}>
-                {event.cause}
-              </text>
-            </g>
-          ))}
+        {annotationMarkers.map((event) => (
+          <g className="annotation" key={`${event.at}:${event.label}`}>
+            <line
+              x1={x(event.at)}
+              x2={x(event.at)}
+              y1={0}
+              y2={height - 18}
+              stroke="var(--warn)"
+              strokeDasharray="2 3"
+            />
+          </g>
+        ))}
         {at !== null && (
           <line
             className="xhair"
@@ -197,9 +223,9 @@ function CrewStateTimeline({
             ...annotations
               .filter((event) => event.at === at)
               .map((event) => ({
-                key: `${event.at}:${event.kind}`,
+                key: `${event.at}:${event.label}`,
                 name: "Event",
-                value: event.cause,
+                value: event.label,
               })),
           ]}
         />
@@ -223,10 +249,7 @@ export function InstrumentCharts({
   to?: number;
 }) {
   const at = (ms: number) => minutesAgo((to - ms) / MINUTE_MS);
-  const annotations = (series?.annotations ?? []).map((event) => ({
-    at: event.at,
-    label: event.cause,
-  }));
+  const annotations = chartAnnotations(series?.annotations ?? []);
   const tickets = series?.tickets ?? [];
   const completed = tickets
     .filter(
@@ -283,12 +306,21 @@ export function InstrumentCharts({
         {!series ? (
           unavailable("Timestamped crew-state history", scope.range)
         ) : (
-          <CrewStateTimeline
-            spans={series.stateSpans}
-            from={from}
-            to={to}
-            annotations={series.annotations}
-          />
+          <>
+            <CrewStateTimeline
+              spans={series.stateSpans}
+              from={from}
+              to={to}
+              annotations={annotations}
+            />
+            <Legend
+              items={Object.entries(STATE_COLOUR).map(([name, color]) => ({
+                key: name,
+                name,
+                color,
+              }))}
+            />
+          </>
         )}
       </Panel>
       <Panel id="tFlow" title="Cumulative flow" sub="observed Ready and merged ticket events">
@@ -297,24 +329,32 @@ export function InstrumentCharts({
         ) : !flowEvents.length && !mergedPoints.length ? (
           <p className="pb s muted">No board-stage observations in this range.</p>
         ) : (
-          <LineChart
-            series={[
-              {
-                id: "in-progress",
-                name: "in progress",
-                color: "var(--accent)",
-                points: activePoints,
-              },
-              { id: "merged", name: "merged", color: "var(--s2)", points: mergedPoints },
-            ]}
-            from={from}
-            to={to}
-            label="Cumulative flow"
-            xLabels={labels}
-            at={at}
-            annotations={annotations}
-            format={(v) => String(Math.round(v))}
-          />
+          <>
+            <LineChart
+              series={[
+                {
+                  id: "in-progress",
+                  name: "in progress",
+                  color: "var(--accent)",
+                  points: activePoints,
+                },
+                { id: "merged", name: "merged", color: "var(--s2)", points: mergedPoints },
+              ]}
+              from={from}
+              to={to}
+              label="Cumulative flow"
+              xLabels={labels}
+              at={at}
+              annotations={annotations}
+              format={(v) => String(Math.round(v))}
+            />
+            <Legend
+              items={[
+                { key: "in-progress", name: "in progress", color: "var(--accent)" },
+                { key: "merged", name: "merged", color: "var(--s2)" },
+              ]}
+            />
+          </>
         )}
       </Panel>
       <Panel id="tCycleControl" title="Cycle-time control chart" sub="p50 and p85, hours">

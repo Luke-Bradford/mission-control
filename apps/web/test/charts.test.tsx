@@ -5,6 +5,7 @@ import { ChartCursorProvider } from "../src/hud/charts/Hover.tsx";
 import { LineChart } from "../src/hud/charts/LineChart.tsx";
 import { StackedArea } from "../src/hud/charts/StackedArea.tsx";
 import { VBars } from "../src/hud/charts/VBars.tsx";
+import { chartAnnotations } from "../src/telemetry/annotations.ts";
 import { InstrumentCharts, nearestRank } from "../src/telemetry/InstrumentCharts.tsx";
 
 const k = (v: number): string => `${Math.round(v)}`;
@@ -109,7 +110,8 @@ describe("VBars time workspace", () => {
     const [throughput, other] = container.querySelectorAll("svg");
     fireEvent.focus(throughput as SVGSVGElement);
     expect(other?.parentElement?.querySelector(".tip")?.textContent).toContain("x2%");
-    expect(throughput?.querySelector(".annotation")?.textContent).toBe("hub Update");
+    expect(throughput?.querySelector(".annotation")?.textContent).toBe("");
+    expect(throughput?.parentElement?.querySelector(".tip")?.textContent).toContain("hub Update");
   });
 
   it("snaps an external time cursor to the nearest dated bar", () => {
@@ -140,6 +142,20 @@ describe("VBars time workspace", () => {
 });
 
 describe("Instrument charts", () => {
+  it("keeps only operator-relevant events in the annotation layer", () => {
+    expect(
+      chartAnnotations([
+        { at: 1, kind: "crew-paused", cause: "Crew paused" },
+        { at: 2, kind: "oauth-usage", cause: "OAuth usage polled" },
+        { at: 3, kind: "quota-poll", cause: "Quota polled" },
+        { at: 4, kind: "hub-update", cause: "Updated Mission Control" },
+      ]),
+    ).toEqual([
+      { at: 1, label: "Crew paused" },
+      { at: 4, label: "Updated Mission Control" },
+    ]);
+  });
+
   it("uses nearest-rank cycle percentiles without dropping a single observation", () => {
     expect(nearestRank([2], 0.5)).toBe(2);
     expect(nearestRank([1, 2, 9], 0.5)).toBe(2);
@@ -199,7 +215,10 @@ describe("Instrument charts", () => {
               { ticket: "repo#1", readyAt: 10, startedAt: 12, mergedAt: 30, doneAt: 40 },
               { ticket: "repo#2", readyAt: 20, startedAt: 24, mergedAt: null, doneAt: 50 },
             ],
-            annotations: [{ at: 30, kind: "hub-update", cause: "Updated Mission Control" }],
+            annotations: [
+              { at: 30, kind: "hub-update", cause: "Updated Mission Control" },
+              { at: 35, kind: "oauth-usage" as "hub-update", cause: "OAuth usage polled" },
+            ],
           }}
           ticketCosts={[{ ticket: "repo#1", tokens: 100, costUsd: 1.25 }]}
           from={0}
@@ -214,6 +233,8 @@ describe("Instrument charts", () => {
     expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
     expect(getByRole("heading", { name: "Cost in range per merged ticket" })).toBeTruthy();
+    expect(container.querySelectorAll("#tCrewState .legend span")).toHaveLength(4);
+    expect(container.querySelectorAll("#tFlow .legend span")).toHaveLength(2);
     const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
     fireEvent.focus(timeline);
     fireEvent.keyDown(timeline, { key: "ArrowLeft" });
@@ -221,6 +242,7 @@ describe("Instrument charts", () => {
     const before = timeline.getAttribute("data-from");
     fireEvent.click(getByRole("button", { name: "Zoom in crew state" }));
     expect(timeline.getAttribute("data-from")).not.toBe(before);
+    expect(container.querySelector(".crew-state-chart .seg")).not.toBeNull();
   });
 });
 
@@ -376,7 +398,7 @@ describe("LineChart", () => {
     );
     const line = container.querySelector("path.line")?.getAttribute("d") ?? "";
     expect(line.match(/M/g)).toHaveLength(2);
-    expect(container.querySelector(".annotation")?.textContent).toBe("quota reset");
+    expect(container.querySelector(".annotation")?.textContent).toBe("");
     const svg = container.querySelector("svg") as SVGSVGElement;
     expect(svg.getAttribute("aria-label")).toContain("events 100 quota reset");
     expect(svg.getAttribute("aria-label")).toContain("thresholds alert 80%, stop 95%");

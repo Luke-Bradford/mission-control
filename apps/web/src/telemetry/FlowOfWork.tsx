@@ -6,6 +6,7 @@ import { MetricName } from "../hud/MetricName.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { useSeatName } from "../seatName.ts";
+import { chartAnnotations } from "./annotations.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
 function Stat({
@@ -92,10 +93,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
               every={2}
               accentLast
               times={t.throughput.map((d) => Date.parse(`${d.day}T12:00:00Z`))}
-              annotations={(t.series?.annotations ?? []).map((event) => ({
-                at: event.at,
-                label: event.kind.replace("-", " "),
-              }))}
+              annotations={chartAnnotations(t.series?.annotations ?? [])}
               bars={t.throughput.map((d) => ({
                 key: d.day,
                 label: narrowDay(d.day),

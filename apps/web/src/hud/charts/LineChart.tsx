@@ -143,9 +143,15 @@ export function LineChart({
     return runs.filter((run) => run.length === 1).flat();
   };
 
-  const visibleAnnotations = annotations.filter(
-    (annotation) => annotation.at >= from && annotation.at <= to,
-  );
+  const visibleAnnotations = annotations
+    .filter((annotation) => annotation.at >= from && annotation.at <= to)
+    .sort((a, b) => a.at - b.at);
+  const annotationMarkers: typeof visibleAnnotations = [];
+  for (const annotation of visibleAnnotations) {
+    const previous = annotationMarkers.at(-1);
+    if (previous === undefined || Math.abs(X(previous.at) - X(annotation.at)) >= 8)
+      annotationMarkers.push(annotation);
+  }
   const aria = `${label}: ${series
     .map((s) => {
       const vs = valued(s);
@@ -227,7 +233,7 @@ export function LineChart({
             </text>
           </g>
         ))}
-        {visibleAnnotations.map((annotation) => {
+        {annotationMarkers.map((annotation) => {
           const x = X(annotation.at);
           return (
             <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
@@ -240,9 +246,6 @@ export function LineChart({
                 strokeDasharray="2 3"
                 strokeWidth={1}
               />
-              <text className="ct" x={x + 3} y={yTop + 12}>
-                {annotation.label}
-              </text>
             </g>
           );
         })}

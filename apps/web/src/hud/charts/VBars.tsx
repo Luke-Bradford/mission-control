@@ -80,6 +80,19 @@ export function VBars({
     setHover(index);
     if (times) cursor?.setAt(index === null ? null : (times[index] ?? null));
   };
+  const selectedAnnotations =
+    times && selected !== null
+      ? annotations.filter((annotation) => {
+          const closest = times.reduce(
+            (best, time, i) =>
+              Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                ? i
+                : best,
+            0,
+          );
+          return closest === selected;
+        })
+      : [];
   // Labels thin out further when they would not fit their slots (~6.5 px a character at 11 px).
   const labelPx = Math.max(...bars.map((b) => b.label.length)) * 6.5 + 8;
   const step = Math.max(every, Math.ceil(labelPx / slot));
@@ -155,48 +168,71 @@ export function VBars({
           );
         })}
         {times &&
-          annotations.flatMap((annotation) => {
-            const index = times.reduce(
-              (best, time, i) =>
-                Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
-                  ? i
-                  : best,
-              0,
-            );
-            if (index < 0) return [];
-            const x = left(index) + bw / 2;
-            return (
-              <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={yTop}
-                  y2={yBottom}
-                  stroke={annotation.color ?? "var(--warn)"}
-                  strokeDasharray="2 3"
-                />
-                <text className="ct" x={x + 3} y={yTop + 12}>
-                  {annotation.label}
-                </text>
-              </g>
-            );
-          })}
+          annotations
+            .filter((annotation, index, all) => {
+              const nearest = all[index - 1];
+              if (nearest === undefined) return true;
+              const previous = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - nearest.at) < Math.abs((times[best] ?? time) - nearest.at)
+                    ? i
+                    : best,
+                0,
+              );
+              const current = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                    ? i
+                    : best,
+                0,
+              );
+              return previous !== current;
+            })
+            .flatMap((annotation) => {
+              const index = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                    ? i
+                    : best,
+                0,
+              );
+              if (index < 0) return [];
+              const x = left(index) + bw / 2;
+              return (
+                <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={yTop}
+                    y2={yBottom}
+                    stroke={annotation.color ?? "var(--warn)"}
+                    strokeDasharray="2 3"
+                  />
+                </g>
+              );
+            })}
       </svg>
       {selected !== null && bars[selected] && (
         <Tip
           x={left(selected) + bw / 2}
           width={w}
           title={bars[selected].tip}
-          rows={
-            bars[selected].segments.length > 1
+          rows={[
+            ...(bars[selected].segments.length > 1
               ? [...bars[selected].segments].reverse().map((s) => ({
                   key: s.name,
                   name: s.name,
                   color: s.color,
                   value: format(s.value),
                 }))
-              : []
-          }
+              : []),
+            ...selectedAnnotations.map((annotation) => ({
+              key: `event:${annotation.label}`,
+              name: "Event",
+              color: annotation.color ?? "var(--warn)",
+              value: annotation.label,
+            })),
+          ]}
         />
       )}
     </div>

@@ -18,6 +18,7 @@ import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useSeatName } from "../seatName.ts";
+import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
@@ -155,10 +156,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
           ]
         : [];
     }),
-    ...(t?.series?.annotations ?? []).map((event) => ({
-      at: event.at,
-      label: event.cause,
-    })),
+    ...chartAnnotations(t?.series?.annotations ?? []),
   ];
   const quotaTo = Math.max(now, ...limits.map((row) => row.resetAt));
   const quotaChart = {
@@ -225,6 +223,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
                 to: r.endedAt ?? now,
                 label: `${nameOf(r.seatId)} suite`,
               }))}
+              annotations={chartAnnotations(t.series?.annotations ?? [])}
               {...chart}
             />
             <Legend
