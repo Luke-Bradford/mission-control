@@ -1000,6 +1000,29 @@ describe("Store", () => {
       ]);
     });
 
+    it("counts a known zero-cost run in the spend median", () => {
+      store.upsertRun(run({ id: "free", startedAt: 110, costUsd: 0 }));
+      store.upsertRun(run({ id: "one", startedAt: 120, costUsd: 1 }));
+      store.upsertRun(run({ id: "three", startedAt: 130, costUsd: 3 }));
+      store.upsertRun(run({ id: "unknown", startedAt: 140 }));
+      expect((store.audit(100, 200) as unknown as AuditView).spendOutliers).toEqual([
+        { runId: "three", agentId: "a1", ticket: null, costUsd: 3 },
+      ]);
+    });
+
+    it("keeps change metrics inside the selected range", () => {
+      store.upsertRun(run({ id: "q1", startedAt: 100, promptHash: "h1" }));
+      store.upsertRun(run({ id: "q2", startedAt: 300, promptHash: "h2" }));
+      store.upsertPullRequests("repo", [mergedPr(1, 150), mergedPr(2, 270), mergedPr(3, 320)], 500);
+      const { changes } = store.audit(250, 500) as unknown as AuditView;
+      expect(changes).toHaveLength(1);
+      expect(changes[0]).toMatchObject({
+        windowMs: 50,
+        before: { merged: 1 },
+        after: { merged: 1 },
+      });
+    });
+
     it("finds chatter, refusal spikes and flakes in range only", () => {
       for (let i = 0; i < 7; i++) {
         store.addComms({ at: 110 + i, from: "alpha", to: "beta", ticket: "mc#1", text: "ping" });

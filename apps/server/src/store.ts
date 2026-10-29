@@ -2256,7 +2256,7 @@ export class Store {
     const prs = this.auditPrSizes(since, until);
     const spend = rows(
       `SELECT id AS runId, agent_id AS agentId, ticket, cost_usd AS costUsd FROM runs
-       WHERE started_at >= ? AND started_at <= ? AND cost_usd IS NOT NULL AND cost_usd > 0
+       WHERE started_at >= ? AND started_at <= ? AND cost_usd IS NOT NULL
        ORDER BY cost_usd DESC, id`,
       since,
       until,
@@ -2312,7 +2312,9 @@ export class Store {
       spendOutliers:
         medianSpend === null
           ? []
-          : spend.filter((r) => r.costUsd >= medianSpend * AUDIT_SPEND_OUTLIER_FACTOR),
+          : spend.filter(
+              (r) => r.costUsd > 0 && r.costUsd >= medianSpend * AUDIT_SPEND_OUTLIER_FACTOR,
+            ),
       questions: (rows(
         `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
           AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
@@ -2423,7 +2425,11 @@ export class Store {
         ["model", last.model, run.model],
       ] as const) {
         if (to === null || to === from) continue;
-        const windowMs = Math.min(AUDIT_CHANGE_WINDOW_MS, until - run.started_at);
+        const windowMs = Math.min(
+          AUDIT_CHANGE_WINDOW_MS,
+          run.started_at - since,
+          until - run.started_at,
+        );
         changes.push({
           kind,
           agentId: run.agent_id,
