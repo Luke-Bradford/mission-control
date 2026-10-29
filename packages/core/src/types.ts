@@ -1049,6 +1049,8 @@ export interface AttentionBrief {
 export interface AttentionItem {
   hold?: AttentionHold;
   holdReleased?: string;
+  /** When that hold was released; FLIGHT's brief older than this is stale. */
+  holdReleasedAt?: number;
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
@@ -1295,9 +1297,14 @@ export type AttentionHoldCondition =
   | { readonly kind: "crew" }
   | { readonly kind: "manual" };
 
+/** Conditions only FLIGHT files (with `brief_item`'s hold): a PR's CI reaching a state, or another item resolving. */
+export type AttentionWaitCondition =
+  | { readonly kind: "ci"; readonly pr: string; readonly state: "passing" | "failing" }
+  | { readonly kind: "item"; readonly key: string };
+
 export interface AttentionHold {
   reason: string;
-  condition: AttentionHoldCondition;
+  condition: AttentionHoldCondition | AttentionWaitCondition;
   by: string;
   at: number;
   releasedAt?: number;
