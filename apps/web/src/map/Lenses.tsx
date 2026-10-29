@@ -5,7 +5,14 @@ import { touchedFiles } from "./cards.ts";
 export type MapLens = "changes" | "impact" | "history";
 export interface LensVisual {
   /** Changes: every seat that currently changed or read this file. */
-  changes?: { seat: string; changed: boolean; read: boolean; lines: number }[];
+  changes?: {
+    seat: string;
+    changed: boolean;
+    read: boolean;
+    add: number;
+    rem: number;
+    lines: number;
+  }[];
   /** Impact: seat colour index and dependency distance (zero is a changed seed). */
   seat?: number;
   distance?: number;
@@ -161,7 +168,39 @@ export function historyFocusLinks(snapshot: MapSnapshot, path: string | null) {
   });
 }
 
-/** Per-file map styling data for the active analytical lens. */
+function lineCounts(seat: MapSnapshot["seats"][number], path: string) {
+  const change = seat.scope.modified.find((item) => item.file === path);
+  const add = change?.add ?? 0;
+  const rem = change?.rem ?? 0;
+  return { add, rem, lines: add + rem };
+}
+
+/**
+ * Changes, inside a time window: a seat keeps a file only if one of its ticks for it falls in the
+ * window (the mockup's inWin); a file no seat keeps drops out.
+ */
+export function windowVisuals(
+  visual: Record<string, LensVisual>,
+  seats: MapSnapshot["seats"],
+  win: [from: number, to: number],
+): Record<string, LensVisual> {
+  const seen = new Map(
+    seats.map((seat) => [
+      seat.seat,
+      new Set(
+        seat.recent.filter((tick) => tick.at >= win[0] && tick.at <= win[1]).map((t) => t.file),
+      ),
+    ]),
+  );
+  const out: Record<string, LensVisual> = {};
+  for (const [path, v] of Object.entries(visual)) {
+    const changes = (v.changes ?? []).filter((change) => seen.get(change.seat)?.has(path));
+    if (changes.length) out[path] = { ...v, changes };
+  }
+  return out;
+}
+
+/** Per-file map styling data for the active lens. */
 export function lensVisuals(
   snapshot: MapSnapshot,
   lens: MapLens,
@@ -183,10 +222,7 @@ export function lensVisuals(
           seat: seat.seat,
           changed: changed.has(path),
           read: read.has(path),
-          lines: (() => {
-            const change = seat.scope.modified.find((item) => item.file === path);
-            return (change?.add ?? 0) + (change?.rem ?? 0);
-          })(),
+          ...lineCounts(seat, path),
         });
       }
     });

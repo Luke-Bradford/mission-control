@@ -32,7 +32,7 @@ it("finds a file and shows each seat that touched it: changed with its +/−, re
     scope: { read: ["src/main.ts"], modified: [] },
   });
   render(<CrewMapView snapshot={snapshot} />);
-  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file" }), {
     target: { value: "main" },
   });
   fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));
@@ -44,8 +44,8 @@ it("finds a file and shows each seat that touched it: changed with its +/−, re
     "GUIDO-2changed +30 −4 · read",
     "RETRO-1read",
   ]);
-  expect(within(card).getByRole("button", { name: "Zoom to it" })).toBeTruthy();
-  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
+  expect(within(card).getByRole("button", { name: "Show on map" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Changes treemap" })).toBeTruthy();
 });
 it("loads live data, resyncs a gap and reconnect, and closes its subscription", async () => {
   const sources: {
@@ -148,7 +148,7 @@ it("updates the open card as live changes arrive", async () => {
     "/api/repos/sample/map": { ...mapSnapshotFixture, seq: 10 },
   });
   render(<LiveCrewMap repo="sample" />);
-  const search = await screen.findByRole("searchbox", { name: "Find a file or folder" });
+  const search = await screen.findByRole("searchbox", { name: "Find a file" });
   fireEvent.change(search, { target: { value: "util" } });
   fireEvent.click(screen.getByRole("button", { name: "src/util.ts" }));
   act(() =>
@@ -177,13 +177,26 @@ it("finds and focuses individual files in a large tree", async () => {
   snapshot.tree = Array.from({ length: 2001 }, (_, i) => ({ path: `src/file-${i}.ts`, lines: 1 }));
   snapshot.tree.push({ path: "settings.ts", lines: 1 });
   render(<CrewMapView snapshot={snapshot} />);
-  const search = screen.getByRole("searchbox", { name: "Find a file or folder" });
+  const search = screen.getByRole("searchbox", { name: "Find a file" });
   fireEvent.change(search, { target: { value: "file-2000" } });
   fireEvent.click(screen.getByRole("button", { name: "src/file-2000.ts" }));
   expect(screen.getByRole("heading", { name: "src/file-2000.ts" })).toBeTruthy();
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/file-2000.ts']")
+      ?.hasAttribute("data-focused"),
+  ).toBe(true);
   fireEvent.change(search, { target: { value: "settings.ts" } });
   fireEvent.keyDown(search, { key: "Enter" });
   expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
+  expect(
+    document.querySelector(".map-treemap-tile[title='settings.ts']")?.hasAttribute("data-focused"),
+  ).toBe(true);
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/file-2000.ts']")
+      ?.hasAttribute("data-focused"),
+  ).toBe(false);
 }, 20_000);
 
 it("throttles delta-driven refetches to one per 2 s, never holding the first load", async () => {

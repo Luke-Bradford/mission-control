@@ -265,7 +265,7 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   render(<CrewMapView snapshot={value} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
-  expect(screen.getByRole("img", { name: "Impact reach treemap" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Impact reach treemap" })).toBeTruthy();
   expect(document.body.textContent).toContain("changed · imports it · 2 · 3+ steps");
   expect(
     screen.getByRole("note", { name: "Impact colour scale" }).querySelectorAll(".map-key-swatch"),
@@ -292,7 +292,7 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   ).toBe(true);
 
   fireEvent.click(screen.getByRole("button", { name: "History" }));
-  expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "History PR heat treemap" })).toBeTruthy();
   expect(document.body.textContent).toContain("1–2 PRs");
   expect(document.body.textContent).toContain("30+ PRs");
   const historyKey = screen.getByRole("note", { name: "History PR heat scale" });
@@ -394,7 +394,7 @@ it("draws Changes as a coloured treemap and gives every working seat a timeline 
   value.seats[1].recent = [{ file: "src/consumer.ts", at: now - 5_000 }];
   render(<CrewMapView snapshot={value} />);
 
-  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Changes treemap" })).toBeTruthy();
   expect(screen.getByRole("note", { name: "Changes colour key" }).textContent).toContain(
     "read only",
   );
@@ -411,97 +411,255 @@ it("draws Changes as a coloured treemap and gives every working seat a timeline 
   expect(screen.getAllByRole("listitem", { name: /timeline for/i })).toHaveLength(2);
 });
 
+it("lists only working seats on the timeline, with a tick for each access and read ticks round", () => {
+  const value = snapshot();
+  const now = Date.now();
+  value.seats[0].recent = [
+    { file: "src/contract.ts", at: now - 4 * MIN },
+    { file: "src/cycle.ts", at: now - 2 * MIN },
+  ];
+  value.seats[1].recent = [{ file: "src/consumer.ts", at: now - 3 * MIN }];
+  // an idle seat that has been docked for a while is not a row
+  value.seats.push({
+    ...structuredClone(value.seats[0]),
+    seat: "IDLE-1",
+    badges: { ...value.seats[0].badges, questions: [], waiting: null },
+    state: "idle",
+    since: now - 20 * MIN,
+    calls: [],
+    recent: [],
+    scope: { read: [], modified: [] },
+  });
+  render(<CrewMapView snapshot={value} />);
+  const rows = screen.getAllByRole("listitem", { name: /timeline for/i });
+  expect(rows).toHaveLength(2);
+  const ticks = (row: HTMLElement) => [...row.querySelectorAll(".map-timeline-tick")];
+  expect(ticks(rows[0] as HTMLElement)).toHaveLength(2);
+  expect(ticks(rows[0] as HTMLElement).map((t) => t.hasAttribute("data-read"))).toEqual([
+    false,
+    true,
+  ]);
+  expect(ticks(rows[1] as HTMLElement)).toHaveLength(1);
+  expect(ticks(rows[1] as HTMLElement)[0]?.hasAttribute("data-read")).toBe(false);
+  expect(document.querySelector(".map-timeline-axis")?.textContent).toContain("now");
+});
+
+const MIN = 60_000;
 function playSnapshot() {
   const value = snapshot();
   const now = Date.now();
   value.seats[0].recent = [
-    { file: "src/contract.ts", at: now - 18 * 60_000 },
-    { file: "src/cycle.ts", at: now - 15 * 60_000 },
-    { file: "src/untested.ts", at: now - 12 * 60_000 },
-    { file: "src/consumer.ts", at: now - 40 * 60_000 },
+    { file: "src/contract.ts", at: now - 11 * MIN },
+    { file: "src/cycle.ts", at: now - 8 * MIN },
+    { file: "src/untested.ts", at: now - 5 * MIN },
   ];
-  value.seats[1].recent = [{ file: "src/consumer.ts", at: now - 14 * 60_000 }];
+  value.seats[1].recent = [{ file: "src/consumer.ts", at: now - 14 * MIN }];
   return value;
 }
 const tile = (path: string) =>
   document.querySelector(`.map-treemap-tile[title='${path}']`) as HTMLElement;
+const mark = (path: string) => document.querySelector(`.map-treemap-mark[data-for='${path}']`);
 const playback = () => screen.getByRole("status", { name: "Playback" }).textContent;
+const reset = () => window.history.replaceState(null, "", window.location.pathname);
 
-it("restores win, play and step from the hash, replays on the treemap and timeline, and writes them back", () => {
+it("restores win, play and step from the hash, frozen at its step, and writes them back", () => {
   vi.useFakeTimers();
   try {
-    window.history.replaceState(null, "", "#win=10,20&play=GUIDO-1&step=2");
+    window.history.replaceState(null, "", "#foo=bar&win=12,3&play=GUIDO-1&step=2");
     render(<CrewMapView snapshot={playSnapshot()} />);
 
-    // the window is 20 to 10 minutes ago: the 40 minute old tick is outside it
+    // the window is 12 to 3 minutes ago: INCO-1's 14 minute old read of consumer is outside it
     expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
       false,
     );
+    expect(screen.getByText(/\d\d:\d\d – \d\d:\d\d selected/)).toBeTruthy();
     expect(playback()).toContain("step 2 of 3");
-    expect(screen.getByRole("button", { name: "■ Stop" })).toBeTruthy();
+    // a link restores the step and waits there
+    act(() => vi.advanceTimersByTime(2000));
+    expect(playback()).toContain("step 2 of 3");
+    expect(window.location.hash).toBe("#foo=bar&win=12,3&play=GUIDO-1&step=2");
     // only the replayed seat's files so far carry a step marker; the current one is outlined
-    expect(tile("src/contract.ts").querySelector(".map-treemap-mark")?.textContent).toBe("1");
-    expect(tile("src/cycle.ts").querySelector(".map-treemap-mark")?.textContent).toBe("2");
+    expect(mark("src/contract.ts")?.textContent).toBe("1");
+    expect(mark("src/cycle.ts")?.textContent).toBe("2");
+    expect(mark("src/cycle.ts")?.hasAttribute("data-current")).toBe(true);
+    expect(mark("src/untested.ts")).toBeNull();
     expect(tile("src/cycle.ts").hasAttribute("data-play-current")).toBe(true);
-    expect(tile("src/contract.ts").hasAttribute("data-play-current")).toBe(false);
-    expect(tile("src/untested.ts").querySelector(".map-treemap-mark")).toBeNull();
     expect(tile("src/untested.ts").hasAttribute("data-changed")).toBe(false);
-    // the other seat's change is hidden while GUIDO-1 plays
     expect(tile("src/consumer.ts").hasAttribute("data-changed")).toBe(false);
     expect(document.querySelectorAll(".map-timeline-tick[data-current]")).toHaveLength(1);
     expect(document.querySelectorAll(".map-timeline-playhead")).toHaveLength(2);
+    // every tick is drawn, the window is an overlay
+    expect(document.querySelectorAll(".map-timeline-tick")).toHaveLength(4);
+    expect(document.querySelectorAll(".map-timeline-window")).toHaveLength(2);
 
+    // Stop, then Play again: it runs on from step 1 to the end, other hash parts left alone
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(window.location.hash).toBe("#foo=bar&win=12,3");
+    fireEvent.click(screen.getByRole("button", { name: "Play GUIDO-1" }));
+    expect(window.location.hash).toBe("#foo=bar&win=12,3&play=GUIDO-1&step=1");
+    act(() => vi.advanceTimersByTime(400));
     act(() => vi.advanceTimersByTime(400));
     expect(playback()).toContain("step 3 of 3");
-    expect(tile("src/untested.ts").hasAttribute("data-play-current")).toBe(true);
     expect(tile("src/untested.ts").dataset.changed).toBe("GUIDO-1");
-    expect(window.location.hash).toBe("#win=10%2C20&play=GUIDO-1&step=3");
-    expect(screen.getByRole("button", { name: "↺ Reset" })).toBeTruthy();
+    expect(window.location.hash).toBe("#foo=bar&win=12,3&play=GUIDO-1&step=3");
+    expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
 
+    // clearing the window leaves the replay's own sequence as it was
     fireEvent.click(screen.getByRole("button", { name: "Clear window" }));
-    expect(window.location.hash).toBe("#play=GUIDO-1&step=3");
-    expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
-      true,
-    );
-
-    // widening the window to the whole hour adds the 40 minute old tick: 3 of 4, still going
-    expect(playback()).toContain("step 3 of 4");
-    act(() => vi.advanceTimersByTime(400));
-    expect(playback()).toContain("step 4 of 4");
+    expect(window.location.hash).toBe("#foo=bar&play=GUIDO-1&step=3");
+    expect(playback()).toContain("step 3 of 3");
 
     // Reset ends the replay and shows every seat again
-    fireEvent.click(screen.getByRole("button", { name: "↺ Reset" }));
-    expect(window.location.hash).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(window.location.hash).toBe("#foo=bar");
     expect(playback()).toBe("");
     expect(document.querySelector(".map-treemap-mark")).toBeNull();
     expect(tile("src/consumer.ts").dataset.changed).toBe("INCO-1");
   } finally {
     vi.useRealTimers();
-    window.history.replaceState(null, "", window.location.pathname);
+    reset();
+  }
+});
+
+it("follows a link opened in place, and ends a replay of a seat that is not on the timeline", () => {
+  vi.useFakeTimers();
+  try {
+    window.history.replaceState(null, "", "#play=NOBODY&step=4");
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    expect(window.location.hash).toBe("");
+    expect(playback()).toBe("");
+    // one click plays, not two
+    fireEvent.click(screen.getByRole("button", { name: "Play GUIDO-1" }));
+    expect(playback()).toContain("step 1 of 3");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+    act(() => {
+      window.history.replaceState(null, "", "#win=12,6");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(playback()).toBe("");
+    expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  } finally {
+    vi.useRealTimers();
+    reset();
   }
 });
 
 it("plays the row picked in the timeline, not the first", () => {
   vi.useFakeTimers();
   try {
-    window.history.replaceState(null, "", window.location.pathname);
+    reset();
     render(<CrewMapView snapshot={playSnapshot()} />);
-    expect(screen.getByRole("button", { name: "▶ Play GUIDO-1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Play GUIDO-1" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Replay INCO-1" }));
     expect(window.location.hash).toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "▶ Play INCO-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play INCO-1" }));
     expect(window.location.hash).toBe("#play=INCO-1&step=1");
-    expect(playback()).toBe("INCO-1 step 1 of 1 · changed consumer.ts");
-    expect(tile("src/consumer.ts").querySelector(".map-treemap-mark")?.textContent).toBe("1");
+    expect(playback()).toMatch(/^INCO-1 step 1 of 1 · \d\d:\d\d · changed consumer\.ts$/);
+    expect(mark("src/consumer.ts")?.textContent).toBe("1");
     expect(tile("src/contract.ts").hasAttribute("data-changed")).toBe(false);
     // a one-tick replay is already complete
-    expect(screen.getByRole("button", { name: "↺ Reset" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "↺ Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(window.location.hash).toBe("");
   } finally {
     vi.useRealTimers();
-    window.history.replaceState(null, "", window.location.pathname);
+    reset();
   }
+});
+
+it("ends a replay when the lens changes, and shows no markers on the others", () => {
+  vi.useFakeTimers();
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Play GUIDO-1" }));
+    expect(document.querySelectorAll(".map-treemap-mark")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+    expect(window.location.hash).toBe("");
+    expect(document.querySelector(".map-treemap-mark")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    expect(playback()).toBe("");
+    expect(document.querySelector(".map-treemap-mark")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("chooses a window by dragging the timeline, and the map drops what is outside it", () => {
+  vi.useFakeTimers();
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      const track = this.classList.contains("map-timeline-track");
+      return {
+        left: 0,
+        top: 0,
+        right: 1000,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        width: track ? 1000 : 0,
+        height: 0,
+        toJSON() {},
+      };
+    });
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    expect(tile("src/untested.ts").dataset.changed).toBe("GUIDO-1");
+    expect(tile("src/consumer.ts").dataset.changed).toBe("INCO-1");
+    const list = screen.getByRole("list", { name: "Working seat timelines" });
+    // a fifth to three fifths of the 15 minutes: 12 to 6 minutes ago
+    fireEvent.mouseDown(list, { clientX: 200, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 600 });
+    expect(document.querySelectorAll(".map-timeline-window")).toHaveLength(2);
+    fireEvent.mouseUp(window, { clientX: 600 });
+    expect(window.location.hash).toBe("#win=12,6");
+    expect(screen.getByText(/\d\d:\d\d – \d\d:\d\d selected/)).toBeTruthy();
+    expect(tile("src/contract.ts").dataset.changed).toBe("GUIDO-1");
+    expect(tile("src/untested.ts").hasAttribute("data-changed")).toBe(false);
+    expect(tile("src/consumer.ts").hasAttribute("data-changed")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear window" }));
+    expect(window.location.hash).toBe("");
+    expect(tile("src/untested.ts").dataset.changed).toBe("GUIDO-1");
+    expect(tile("src/consumer.ts").dataset.changed).toBe("INCO-1");
+
+    // a bare click chooses nothing
+    fireEvent.mouseDown(list, { clientX: 300, button: 0 });
+    fireEvent.mouseUp(window, { clientX: 300 });
+    expect(window.location.hash).toBe("");
+  } finally {
+    rect.mockRestore();
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("leaves a folder whole when a seat reads the directory", () => {
+  const value = snapshot();
+  value.seats[1].scope.read = ["src", "src/contract.ts"];
+  value.seats[1].recent = [{ file: "src", at: Date.now() }];
+  value.seats[1].calls = [{ tool: "Bash", detail: "ls src", files: ["src"], since: Date.now() }];
+  render(<CrewMapView snapshot={value} />);
+  expect(tile("src")).toBeNull();
+  for (const file of value.tree) expect(tile(file.path)).toBeTruthy();
+  expect(tile("src/contract.ts").dataset.read).toBe("INCO-1");
+  // and the layout never lets a path be both
+  const layout = treemapLayout(
+    [
+      { path: "a/b/c.ts", lines: 5 },
+      { path: "a/b", lines: 9 },
+      { path: "d", lines: 3 },
+      { path: "d/e.ts", lines: 3 },
+    ],
+    100,
+    100,
+  );
+  expect(layout.tiles.map((t) => t.path).sort()).toEqual(["a/b/c.ts", "d"]);
 });
 
 it("splits a tile between two changers and rings it for two readers, in config colours", () => {
@@ -532,6 +690,7 @@ it("splits a tile between two changers and rings it for two readers, in config c
   // 4 changed lines against 180: the first and last magnitude bands
   expect(shared.style.getPropertyValue("--tile-intensity")).toBe("0.42");
   expect(shared.style.getPropertyValue("--tile-intensity-2")).toBe("1");
+  expect(shared.querySelector(".map-treemap-lines")?.textContent).toBe("+183 −1");
   const read = tile("src/cycle.ts");
   expect(read.dataset.read).toBe("READ-1 READ-2");
   expect(read.dataset.neutral).toBe("true");
@@ -554,7 +713,7 @@ it("keeps branch-only files and recent reads visible and searchable", () => {
   expect(tile("src/new.ts").dataset.changed).toBe("GUIDO-1");
   // an idle path with no scope.read still colours as a read
   expect(tile("src/isolated-read.ts").dataset.read).toBe("INCO-1");
-  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file" }), {
     target: { value: "new.ts" },
   });
   fireEvent.click(screen.getByRole("button", { name: "src/new.ts" }));

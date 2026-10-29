@@ -59,7 +59,7 @@ it("lists one row per working seat: its light, call sign and what it is on, and 
   expect(light(rows[1])).toBe("var(--seat-flight)");
   // nothing else on a row: no state, counts, badges or notes
   expect(rows[0]?.children).toHaveLength(3);
-  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Changes treemap" })).toBeTruthy();
 });
 
 it("selects and follows a seat from its row, shows its card, and lets go on a second click", () => {
@@ -86,7 +86,7 @@ it("selects and follows a seat from its row, shows its card, and lets go on a se
   expect(facts.Now).toBe("thinking");
   fireEvent.click(row);
   expect(row.getAttribute("aria-pressed")).toBe("false");
-  expect(card.textContent).toContain("Pick a seat to follow it");
+  expect(card.textContent).toContain("Pick a seat for its card");
 });
 
 it("shows no warnings: no questions, failures, review, tests, CI, findings or conflicts", () => {
@@ -107,7 +107,7 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
   const { container } = render(<CrewMapView snapshot={snapshot} />);
   fireEvent.click(screen.getByRole("button", { name: /^GUIDO-1/ }));
   const seatCard = container.textContent ?? "";
-  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
+  fireEvent.change(screen.getByRole("searchbox", { name: "Find a file" }), {
     target: { value: "main" },
   });
   fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));

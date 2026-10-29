@@ -11,7 +11,7 @@ import {
   workLine,
 } from "./cards.ts";
 
-function stateLabel(seat: MapSeat, now: number): string {
+export function stateLabel(seat: MapSeat, now: number): string {
   if (seat.state === "stalled") return `stalled ${duration(now - seat.since)}`;
   const call = [...seat.calls].sort((left, right) => left.since - right.since)[0];
   if (call) {

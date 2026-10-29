@@ -10,7 +10,7 @@ export interface MapRepoOption {
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-const pickRepo = (
+export const pickRepo = (
   ids: string[],
   running: { repoId: string; started: number }[],
   last: string,

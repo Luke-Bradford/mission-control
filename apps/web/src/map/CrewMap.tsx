@@ -1,10 +1,10 @@
 import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { isWorking, type SeatWork, seatToken } from "./cards.ts";
+import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
   downstream,
   graph,
@@ -16,6 +16,7 @@ import {
   type LensVisual,
   lensVisuals,
   type MapLens,
+  windowVisuals,
 } from "./Lenses.tsx";
 import { LiveMap } from "./live.ts";
 import { branchOnlyFiles, historyHeat, MapTreemap } from "./MapTreemap.tsx";
@@ -153,10 +154,36 @@ export function CrewMapView({
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
-  const changesVisual = useMemo(() => lensVisuals(snapshot, "changes", null), [snapshot]);
+  const workingSeats = useMemo(
+    () => snapshot.seats.filter((seat) => isWorking(seat, now)),
+    [snapshot.seats, now],
+  );
+  const timeline = useSessionTimeline(workingSeats, now);
+  // What Changes draws: the working seats and their fresh paths only. The clock ticks every few
+  // seconds; the drawing is redone only when a seat starts or stops working or its path changes.
+  const clock = useRef(now);
+  clock.current = now;
+  const freshKey = workingSeats
+    .map((seat) => `${seat.seat}\t${freshRecent(seat, now).length}`)
+    .join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: freshKey stands for the clock here
+  const changesSeats = useMemo(
+    () =>
+      snapshot.seats
+        .filter((seat) => isWorking(seat, clock.current))
+        .map((seat) => ({ ...seat, recent: freshRecent(seat, clock.current) })),
+    [snapshot.seats, freshKey],
+  );
+  const changesVisual = useMemo(
+    () => lensVisuals({ ...snapshot, seats: changesSeats }, "changes", null),
+    [snapshot, changesSeats],
+  );
+  // files in the tree or new on a branch; the layout stays put while a window dims what's outside it
+  const pathKey = Object.keys(changesVisual).sort().join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual
   const extraFiles = useMemo(
     () => branchOnlyFiles(snapshot.tree, changesVisual),
-    [snapshot.tree, changesVisual],
+    [snapshot.tree, pathKey],
   );
   const searchable = useMemo(
     () => [...snapshot.tree.map((file) => file.path), ...extraFiles.map((file) => file.path)],
@@ -167,8 +194,7 @@ export function CrewMapView({
     ? searchable.filter((path) => path !== "" && path.toLowerCase().includes(needle))
     : [];
   const selectedPath = selection?.kind === "node" ? selection.path : null;
-  const selectedFiles = selectedPath === null ? [] : [selectedPath];
-  // stable callbacks, so the scene's props change only when what it shows does
+  // stable callbacks, so the treemap's props change only when what it shows does
   const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
   const selectFromScene = useCallback(
     (path: string) => {
@@ -179,13 +205,11 @@ export function CrewMapView({
   );
   const searchSelect = (path: string) => {
     selectNode(path);
-    setFocus(null);
-    queueMicrotask(() => setFocus(path));
+    setFocus(path);
   };
-  const selectSeat = useCallback((seat: string | null, frame: boolean) => {
+  const selectSeat = useCallback((seat: string | null) => {
     setSelection(seat === null ? null : { kind: "seat", seat });
-    if (seat === null || !frame) return;
-    setFocus(null);
+    if (seat !== null) setFocus(null);
   }, []);
   const named = { snapshot, indices: colours, names };
   const focusLinks = useMemo(
@@ -197,15 +221,14 @@ export function CrewMapView({
           : [],
     [lens, snapshot, focus],
   );
+  const windowed = useMemo(
+    () => (timeline.win ? windowVisuals(changesVisual, changesSeats, timeline.win) : changesVisual),
+    [changesVisual, changesSeats, timeline.win],
+  );
   const lensVisual = useMemo(
-    () => (lens === "changes" ? changesVisual : lensVisuals(snapshot, lens, focus)),
-    [snapshot, lens, focus, changesVisual],
+    () => (lens === "changes" ? windowed : lensVisuals(snapshot, lens, focus)),
+    [snapshot, lens, focus, windowed],
   );
-  const workingSeats = useMemo(
-    () => snapshot.seats.filter((seat) => isWorking(seat, now)),
-    [snapshot.seats, now],
-  );
-  const timeline = useSessionTimeline(workingSeats, now);
   const { playback, marks, current } = timeline;
   // Play shows only the replayed seat's changes on the files it has reached so far
   const visibleVisual = useMemo(() => {
@@ -214,13 +237,14 @@ export function CrewMapView({
       [...marks.keys()].map((path): [string, LensVisual] => [
         path,
         {
-          changes: (lensVisual[path]?.changes ?? []).filter(
+          changes: (changesVisual[path]?.changes ?? []).filter(
             (change) => change.seat === playback.seat && change.changed,
           ),
         },
       ]),
     );
-  }, [lens, lensVisual, playback, marks]);
+  }, [lens, lensVisual, changesVisual, playback, marks]);
+  const replaying = lens === "changes" && playback !== null;
   useEffect(() => {
     const clearFocus = (event: KeyboardEvent) => {
       if (event.key === "Escape" && focus !== null) setFocus(null);
@@ -236,6 +260,7 @@ export function CrewMapView({
           onChange={(next) => {
             setLens(next);
             setFocus(null);
+            if (next !== "changes") timeline.stop();
           }}
         />
         {lens === "changes" ? (
@@ -262,8 +287,9 @@ export function CrewMapView({
             visual={visibleVisual}
             indices={colours}
             extraFiles={extraFiles}
-            marks={playback ? marks : undefined}
-            currentMark={playback ? (current?.file ?? null) : null}
+            marks={replaying ? marks : undefined}
+            currentMark={replaying ? (current?.file ?? null) : null}
+            markSeat={replaying ? playback.seat : null}
             focus={focus}
             focusLinks={focusLinks}
             onSelect={selectFromScene}
@@ -283,7 +309,7 @@ export function CrewMapView({
                   snapshot={snapshot}
                   seats={workingSeats}
                   selected={selectedSeat?.seat ?? null}
-                  onSelect={(seat) => selectSeat(seat, true)}
+                  onSelect={selectSeat}
                   work={seatWork}
                 />
               </section>
@@ -292,8 +318,8 @@ export function CrewMapView({
                 <input
                   type="search"
                   className="map-find"
-                  aria-label="Find a file or folder"
-                  placeholder="Find a file or folder"
+                  aria-label="Find a file"
+                  placeholder="Find a file"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -308,7 +334,7 @@ export function CrewMapView({
                       </button>
                     ))}
                     {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-                    {!matches.length && <p>No file or folder matches.</p>}
+                    {!matches.length && <p>No file matches.</p>}
                   </div>
                 )}
                 {/* Announces the selection only: the card's "Now" line ticks every few seconds. */}
@@ -329,26 +355,10 @@ export function CrewMapView({
                     />
                   ) : selectedPath !== null ? (
                     <>
-                      <NodeDetail
-                        {...named}
-                        path={selectedPath}
-                        files={
-                          selectedFiles.length
-                            ? selectedFiles
-                            : snapshot.tree
-                                .map((f) => f.path)
-                                .filter((f) => f.startsWith(`${selectedPath}/`))
-                        }
-                      />
+                      <NodeDetail {...named} path={selectedPath} files={[selectedPath]} />
                       <div className="map-detail-actions">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFocus(null);
-                            queueMicrotask(() => setFocus(selectedPath));
-                          }}
-                        >
-                          Zoom to it
+                        <button type="button" onClick={() => setFocus(selectedPath)}>
+                          Show on map
                         </button>
                         <button type="button" onClick={() => setSelection(null)}>
                           Close
@@ -357,7 +367,7 @@ export function CrewMapView({
                     </>
                   ) : (
                     <p className="map-note">
-                      Pick a seat to follow it, or click a node to see who changed or read it.
+                      Pick a seat for its card, or click a file to see who changed or read it.
                     </p>
                   )}
                 </aside>
@@ -385,7 +395,7 @@ function ChangesKey({ tree }: { tree: MapSnapshot["tree"] }) {
   return (
     <div className="map-changes-key" role="note" aria-label="Changes colour key">
       <span className="map-key-item">
-        <KeySteps tone="changes" /> changed
+        changed <KeySteps tone="changes" />
         <span className="map-key-muted">1–10 · –40 · –120 · 120+ lines</span>
       </span>
       <span className="map-key-item">
