@@ -15,6 +15,9 @@ const CHROME = [
   "/usr/bin/chromium-browser",
 ].find((path): path is string => path !== undefined && existsSync(path));
 
+// A cold Vite and Chrome start on a loaded CI runner can exceed Vitest's 10 s hook default.
+const COLD_START_TIMEOUT_MS = 60_000;
+
 interface Browser {
   newPage(): Promise<Page>;
   close(): Promise<void>;
@@ -100,12 +103,12 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${address.port}`;
   if (!CHROME) return;
   browser = await chromium.launch({ executablePath: CHROME, headless: true });
-});
+}, COLD_START_TIMEOUT_MS);
 
 afterAll(async () => {
   await browser?.close();
   await server?.close();
-});
+}, COLD_START_TIMEOUT_MS);
 
 describe.skipIf(!CHROME)("Audit PR bars in a browser", () => {
   it("uses the production stylesheet's logarithmic fill widths", async () => {
