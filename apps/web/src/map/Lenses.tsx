@@ -337,7 +337,7 @@ export function ImpactLens({
   }
   const untested = allChangedCode.flatMap(({ seat, files }) =>
     files
-      .filter((path) => ![...downstream(path, reverse).keys()].some(isTest))
+      .filter((path) => !isTest(path) && ![...downstream(path, reverse).keys()].some(isTest))
       .map((path) => ({ seat: seat.seat, path })),
   );
   const overlap = allChangedCode.flatMap((owner) =>

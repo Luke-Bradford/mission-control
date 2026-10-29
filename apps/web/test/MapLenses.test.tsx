@@ -91,6 +91,22 @@ it("keeps non-code changes out of Impact code rows and untested findings", () =>
   );
 });
 
+it("does not report a changed test file as untested code", () => {
+  const value = snapshot();
+  value.seats[0] = {
+    ...value.seats[0],
+    scope: {
+      read: [],
+      modified: [{ file: "test/consumer.test.ts", add: 2, rem: 0, source: "diff" }],
+    },
+  };
+  value.seats[1] = { ...value.seats[1], scope: { read: [], modified: [] } };
+  render(<CrewMapView snapshot={value} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  const heading = screen.getByRole("heading", { name: "Changed, and no test imports them" });
+  expect(heading.parentElement?.textContent).not.toContain("test/consumer.test.ts");
+});
+
 function snapshot(): MapSnapshot {
   const value: MapSnapshot = structuredClone(mapSnapshotFixture);
   value.tree = [
