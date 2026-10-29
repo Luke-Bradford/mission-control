@@ -17,6 +17,8 @@ const CHROME = [
 
 // A cold Vite and Chrome start on a loaded CI runner can exceed Vitest's 10 s hook default.
 const COLD_START_TIMEOUT_MS = 60_000;
+// The test's first page load makes Vite transform the page cold, which outlasts Vitest's 5 s test default on a loaded runner.
+const BROWSER_TEST_TIMEOUT_MS = 60_000;
 
 interface Browser {
   newPage(): Promise<Page>;
@@ -24,7 +26,7 @@ interface Browser {
 }
 interface Page {
   route(url: string | RegExp, handler: (route: Route) => Promise<void>): Promise<void>;
-  goto(url: string, options: { waitUntil: "networkidle" }): Promise<unknown>;
+  goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   locator(selector: string): Locator;
   close(): Promise<void>;
 }
@@ -32,7 +34,9 @@ interface Route {
   fulfill(options: { contentType: string; body: string }): Promise<void>;
 }
 interface Locator {
+  first(): Locator;
   nth(index: number): Locator;
+  waitFor(): Promise<void>;
   boundingBox(): Promise<{ width: number } | null>;
 }
 interface Chromium {
@@ -120,7 +124,8 @@ describe.skipIf(!CHROME)("Audit PR bars in a browser", () => {
     await page.route(/\/api\/config$/, (route) =>
       route.fulfill({ contentType: "application/json", body: JSON.stringify(config) }),
     );
-    await page.goto(`${origin}/test/auditBarBrowser.html`, { waitUntil: "networkidle" });
+    await page.goto(`${origin}/test/auditBarBrowser.html`, { waitUntil: "load" });
+    await page.locator(".audit-bar").first().waitFor();
 
     const fills = page.locator(".audit-bar");
     const tracks = page.locator(".audit-bar-track");
@@ -139,5 +144,5 @@ describe.skipIf(!CHROME)("Audit PR bars in a browser", () => {
       3,
     );
     await page.close();
-  });
+  }, BROWSER_TEST_TIMEOUT_MS);
 });
