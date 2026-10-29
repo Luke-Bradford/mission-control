@@ -241,6 +241,8 @@ describe("Agent run trace", () => {
     });
     render(<Agent id="removed" />);
     expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
+    expect(screen.getByText("CI fixes 0 / unavailable")).toBeTruthy();
+    expect(screen.queryByText("CI fixes 0 / 3")).toBeNull();
   });
 });
 

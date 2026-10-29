@@ -74,15 +74,15 @@ export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) 
 function StopRules({ view, run }: { view: RunLoopView; run?: RunView }) {
   const ciFails = view.loop?.ciFails ?? 0;
   const round = view.round ?? 0;
-  const limits = runLimits(run);
+  const limits = run ? runLimits(run) : null;
   return (
     <section className="trace-section">
       <h2>Stop rules</h2>
       <p>
-        CI fixes {ciFails} / {limits.tries}
+        CI fixes {ciFails} / {limits?.tries ?? "unavailable"}
       </p>
       <p>
-        Review round {round} / {limits.rounds}
+        Review round {round} / {limits?.rounds ?? "unavailable"}
       </p>
       {view.budget !== null && (
         <p>
@@ -101,7 +101,7 @@ function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
   const conditional =
     (current.outcome === "running" || current.outcome === "waiting") &&
     (current.step === "ci" || current.step === "review");
-  const limits = runLimits(run);
+  const limits = run ? runLimits(run) : null;
   return (
     <section className="trace-section">
       <h2>Next</h2>
@@ -109,7 +109,7 @@ function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
         {held
           ? `${stepLabel(current.step)} ${current.outcome}${current.reason ? `: ${current.reason}` : ""}.`
           : conditional
-            ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : ""}.`
+            ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? (limits ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : " (CI cap unavailable)") : ""}.`
             : next
               ? current.outcome === "running" || current.outcome === "waiting"
                 ? `${stepLabel(current.step)} → ${stepLabel(next)}`
