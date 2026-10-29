@@ -339,7 +339,8 @@ export function Dock() {
   );
   const lastReply = replyIds.at(-1) ?? null;
   const [seenReply, setSeenReply] = useState<string | null | undefined>(undefined);
-  const looking = visible;
+  // A folded dock hides its replies, so they stay unread until it is expanded.
+  const looking = visible && !collapsed;
   useEffect(() => {
     if (stream === undefined) return;
     if (seenReply === undefined || looking) setSeenReply(lastReply);
