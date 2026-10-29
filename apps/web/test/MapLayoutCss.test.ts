@@ -35,3 +35,8 @@ it("keeps every analytical scale swatch opaque against either theme's page backg
     expect(rule(`\\.map-key-swatch-${step}`)).toContain("opacity: 1");
   }
 });
+
+it("keeps each Impact seat chip's custom colour above the shared key-icon rule", () => {
+  expect(rule(String.raw`\.map-key-seat-chip i`)).toContain("background: var(--map-key-seat)");
+  expect(css.indexOf(".map-key-seat-chip i")).toBeGreaterThan(css.indexOf(".map-analytical-key i"));
+});

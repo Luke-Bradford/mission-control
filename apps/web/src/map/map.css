@@ -345,12 +345,6 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.map-key-seat-chip i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--map-key-seat);
-}
 .map-key-idle {
   color: var(--fg-2);
   white-space: nowrap;
@@ -359,6 +353,12 @@
 .map-analytical-key i {
   display: inline-block;
   background: var(--void-ink);
+}
+.map-key-seat-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--map-key-seat);
 }
 .map-legend .key-light {
   width: 8px;
