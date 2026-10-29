@@ -176,26 +176,33 @@ export const CONTROLLER_CHECK_HEADING = "## Controller check";
 const CONTROLLER_CHECK_RE =
   /^ {0,3}(?:>[ \t]?)*(?:[-*+][ \t]+)?(#{1,6})[ \t]+[^\n]*?\bcontroller[ \t-]*checks?\b.*$/im;
 const MAX_CHECK_REASON = 300;
-/** `body` with each fenced code block (``` or ~~~) blanked to spaces, the same length. */
+/**
+ * `body` with each properly closed fenced code block (``` or ~~~) blanked to spaces, the same
+ * length. A fence is opened only by a line that can open one, and closed only by a bare fence of
+ * the same character and at least the same length; one never closed blanks nothing.
+ */
 function withoutFences(body: string): string {
-  let fence: string | null = null;
-  return body
-    .split("\n")
-    .map((line) => {
-      const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-      if (fence === null) {
-        if (m?.[1] === undefined) return line;
-        fence = m[1].slice(0, 1);
-        return " ".repeat(line.length);
-      }
-      if (m?.[1]?.startsWith(fence)) fence = null;
-      return " ".repeat(line.length);
-    })
-    .join("\n");
+  const lines = body.split("\n");
+  const out = [...lines];
+  let open: { ch: string; len: number; from: number } | null = null;
+  lines.forEach((line, i) => {
+    if (open === null) {
+      const m = /^ {0,3}(`{3,})[^`]*$/.exec(line) ?? /^ {0,3}(~{3,}).*$/.exec(line);
+      if (m?.[1] !== undefined) open = { ch: m[1].slice(0, 1), len: m[1].length, from: i };
+      return;
+    }
+    const m = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
+    if (m?.[1] !== undefined && m[1].startsWith(open.ch) && m[1].length >= open.len) {
+      for (let j = open.from; j <= i; j++) out[j] = " ".repeat(lines[j]?.length ?? 0);
+      open = null;
+    }
+  });
+  return out.join("\n");
 }
 /** The text of a ticket's controller-check section (up to the next heading of its level or above); null without one. */
 export function controllerCheckOf(body: string | null | undefined): string | null {
   if (!body) return null;
+  // an unclosed or odd fence blanks nothing, so a heading after it still holds (fail closed)
   const plain = withoutFences(body);
   const m = CONTROLLER_CHECK_RE.exec(plain);
   if (m === null) return null;
@@ -1218,6 +1225,10 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const working = loop.phase === "working";
   const reporting = working || loop.phase === "review";
 
+  if (working && !loop.aside && loop.pendingLine && free(loop.pendingLine.key)) {
+    return { kind: "send", key: loop.pendingLine.key, text: loop.pendingLine.text };
+  }
+
   const rv = reviewView(s, loop);
   if (fixDue(s, loop) && rv.R !== null && rv.P !== null && rv.cur !== null) {
     return {
@@ -1436,6 +1447,8 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       ? { rulingRerun: { ...rulingRerun, runs: rulingRerun.runs.map((r) => ({ ...r })) } }
       : {}),
   };
+  // the line went (its key is claimed): it is no longer pending
+  if (loop.pendingLine && loop.pendingLine.key in s.claimed) loop.pendingLine = null;
   if (loop.aside) {
     if (s.seat.holdsRun) {
       // a restart mid set-aside or mid wake left the run on its seat

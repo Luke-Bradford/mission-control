@@ -226,6 +226,8 @@ export interface RunLoop {
    */
   /** The ticket listed a controller check once: a pass is needed even if the heading goes. */
   controllerCheckRequired?: boolean;
+  /** A line due to the author once it is back on its seat (a controller check's fail note); cleared when claimed. */
+  pendingLine?: { key: string; text: string } | null;
   controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
 }
 

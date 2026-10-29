@@ -2522,7 +2522,14 @@ export function createEngine(deps: EngineDeps): Engine {
           if (loop.aside) {
             // off its seat (the seat may hold another run now): the note waits in Comms for the
             // run, and the engine wakes it, in working, once its seat is free
-            if (store.addComms(row) === null) return refuse("rework-undelivered");
+            const stored = store.addComms(row);
+            if (stored === null) return refuse("rework-undelivered");
+            // the pending line below carries the note to the seat: the inbox must not repeat it
+            store.markCommsInboxRead(run.agentId, [stored.id]);
+            next.pendingLine = {
+              key: `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+              text,
+            };
             next.aside = { ...loop.aside, wake: true };
           } else {
             const sent = await supervisor.send(

@@ -5761,6 +5761,14 @@ describe("the engine runs reviews", () => {
       emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
       await vi.waitFor(() => expect(loopOf().aside).toBeNull());
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      // the woken run is sent the note, once; the inbox does not repeat it
+      const text = controllerCheckFailText(SHA, "swatch 3 is unreadable");
+      await vi.waitFor(() => expect(h.sent.at(-1)?.text).toBe(text));
+      await h.engine.reconcileRun(RUN);
+      expect(h.sent.filter((m) => m.text === text)).toHaveLength(1);
+      expect(loopOf().pendingLine ?? null).toBeNull();
+      const noted = store.commsInbox(SEAT).filter((m) => m.text === text);
+      expect(noted.every((m) => store.commsInboxRead(SEAT, m.id))).toBe(true);
     });
 
     it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {

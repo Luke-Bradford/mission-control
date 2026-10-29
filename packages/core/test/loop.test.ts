@@ -2986,6 +2986,9 @@ describe("controllerCheckOf", () => {
     expect(controllerCheckOf("    ## Controller check\nx")).toBeNull();
     expect(controllerCheckOf("the controller check is below")).toBeNull();
     expect(controllerCheckOf("```md\n## Controller check\nx\n```\n")).toBeNull();
+    expect(controllerCheckOf("```pnpm -s lint``` must pass\n## Controller check\nx")).toBe("x");
+    expect(controllerCheckOf("```js\nunclosed\n## Controller check\nx")).toBe("x");
+    expect(controllerCheckOf("````\n```\n## Controller check\n````\n")).toBeNull();
     expect(controllerCheckOf("~~~\n## Controller check\n~~~\n## Controller check\nreal")).toBe(
       "real",
     );
