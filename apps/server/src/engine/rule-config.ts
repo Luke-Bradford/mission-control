@@ -41,6 +41,8 @@ export const repoRulesSchema = z.strictObject({
   hard_rules_by: z.enum(HARD_RULES_BY).optional(),
   tech_debt_issue: issueNumber.optional(),
   always_ask: z.array(nonEmpty).optional(),
+  // exact commands, matched whole against a seat's shell call: see check-runs.ts
+  checks: z.array(nonEmpty).optional(),
 });
 
 /** Resolve user config over defaults; supplied maps and lists replace defaults. */
@@ -59,6 +61,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     hardRulesBy: r.hard_rules_by ?? base.hardRulesBy,
     ...(r.tech_debt_issue === undefined ? {} : { techDebtIssue: r.tech_debt_issue }),
     alwaysAsk: r.always_ask ?? base.alwaysAsk,
+    checks: r.checks ?? base.checks,
   });
 }
 
@@ -95,5 +98,6 @@ export function overlayRepoBlock(
       ? {}
       : { techDebtIssue: base.techDebtIssue ?? block.tech_debt_issue }),
     alwaysAsk: union(base.alwaysAsk, block.always_ask ?? []),
+    checks: block.checks ?? base.checks,
   });
 }

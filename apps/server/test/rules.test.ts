@@ -217,6 +217,14 @@ describe("parseRepoRules", () => {
     expect(r.alwaysAsk).toEqual(["migrations", "deps"]);
   });
 
+  it("reads checks as an exact command list, [] by default, and refuses a blank command", () => {
+    expect(parseRepoRules(block("mc: {}")).checks).toEqual([]);
+    const r = parseRepoRules(block('mc:\n  checks: ["pnpm -s lint", "pnpm -s typecheck"]\n'));
+    expect(r.checks).toEqual(["pnpm -s lint", "pnpm -s typecheck"]);
+    expect(() => parseRepoRules(block('mc: {checks: [""]}'))).toThrow(RepoRulesError);
+    expect(() => parseRepoRules(block("mc: {checks: pnpm}"))).toThrow(RepoRulesError);
+  });
+
   it("reads hard_rules_by, defaults it to the operator, and refuses an unknown value", () => {
     const by = (v: string) =>
       parseRepoRules(block(`mc:\n  hard_rules: []\n  hard_rules_by: ${v}\n`));

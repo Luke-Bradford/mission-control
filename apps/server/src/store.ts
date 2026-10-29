@@ -354,6 +354,12 @@ CREATE TABLE IF NOT EXISTS test_lock_runs (
   ended_at INTEGER, outcome TEXT
 );
 CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
+-- A configured check a seat ran in its clone, on the head it ran against (the push gate reads it).
+CREATE TABLE IF NOT EXISTS check_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, command TEXT NOT NULL,
+  head_sha TEXT NOT NULL, ok INTEGER NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
 CREATE TABLE IF NOT EXISTS keeper_cursors (
   run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
@@ -1959,6 +1965,7 @@ export class Store {
       ["seat_lines", 7, "AND origin != 'engine'"],
       ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
       ["run_evidence", 30, ""],
+      ["check_runs", 30, ""],
       ["review_findings", QA_RETENTION_DAYS, ""],
       ["comms", COMMS_RETENTION_DAYS, ""],
       ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
@@ -4697,6 +4704,26 @@ export class Store {
       )`)
       .get(since) as Row;
     return row.n as number;
+  }
+
+  /** A configured check ran to its end on `headSha`: `ok` when the command exited successfully. */
+  addCheckRun(c: { runId: string; command: string; headSha: string; ok: boolean; at: number }): void {
+    this.db
+      .prepare(
+        "INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
+  }
+
+  /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */
+  latestCheckRun(runId: string, command: string, headSha: string): { ok: boolean; at: number } | null {
+    const r = this.db
+      .prepare(
+        `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?
+         ORDER BY at DESC, id DESC LIMIT 1`,
+      )
+      .get(runId, command, headSha) as Row | undefined;
+    return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
   }
 
   addLockHold(h: LockHoldRow): void {
