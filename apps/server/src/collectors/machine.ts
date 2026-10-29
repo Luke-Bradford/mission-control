@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { statfs } from "node:fs/promises";
-import { type CpuInfo, cpus, freemem, totalmem } from "node:os";
+import { type CpuInfo, cpus, freemem, loadavg, totalmem } from "node:os";
 import { promisify } from "node:util";
 import type { MachineSample } from "@mc/core";
 
@@ -14,6 +14,9 @@ export interface MachineDeps {
   totalmem: () => number;
   freemem: () => number;
   vmStat: () => Promise<string>;
+  swapUsage: () => Promise<string>;
+  memoryPressure: () => Promise<string>;
+  loadavg: () => number[];
   statfs: (p: string) => Promise<{ bavail: number; blocks: number; bsize: number }>;
   ps: () => Promise<string>;
   /** `ps -axww -o pid=,ppid=,rss=,%cpu=,args=`: the whole process table, for the test run's tree. */
@@ -43,6 +46,9 @@ export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now"
     totalmem,
     freemem,
     vmStat: () => run("vm_stat", []),
+    swapUsage: () => run("sysctl", ["vm.swapusage"]),
+    memoryPressure: () => run("memory_pressure", []),
+    loadavg,
     statfs: async (p) => {
       const s = await statfs(p);
       return { bavail: Number(s.bavail), blocks: Number(s.blocks), bsize: Number(s.bsize) };
@@ -87,6 +93,25 @@ export function parseVmStat(text: string, totalBytes: number): number | null {
   if (!size || free === null || inactive === null || speculative === null) return null;
   const available = (free + inactive + speculative) * Number(size);
   return Math.max(0, totalBytes - available);
+}
+
+/** Parses `sysctl vm.swapusage`'s total and used figures (K, M, G or T units). */
+export function parseSwapUsage(text: string): { totalBytes: number; usedBytes: number } | null {
+  const bytes = (value: string, unit: string): number =>
+    Number(value) * 1024 ** ({ K: 1, M: 2, G: 3, T: 4 }[unit.toUpperCase() as "K"] ?? 0);
+  const total = /\btotal\s*=\s*([\d.]+)\s*([KMGT])/i.exec(text);
+  const used = /\bused\s*=\s*([\d.]+)\s*([KMGT])/i.exec(text);
+  if (!total || !used) return null;
+  return {
+    totalBytes: bytes(total[1] as string, total[2] as string),
+    usedBytes: bytes(used[1] as string, used[2] as string),
+  };
+}
+
+/** Parses `memory_pressure`'s system-wide free percentage. */
+export function parseMemoryPressure(text: string): number | null {
+  const value = /System-wide memory free percentage:\s*([\d.]+)%/i.exec(text)?.[1];
+  return value === undefined ? null : Number(value);
 }
 
 /** The claude/codex rows of `ps -axo pid=,rss=,%cpu=,comm=`; RSS is KiB, the command may hold spaces. */
@@ -206,6 +231,32 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
     errors.push(`disk: ${msg(e)}`);
   }
 
+  let swapUsedBytes = prev?.swapUsedBytes ?? null;
+  let swapTotalBytes = prev?.swapTotalBytes ?? null;
+  try {
+    const swap = parseSwapUsage(await deps.swapUsage());
+    if (swap === null) throw new Error("unrecognised vm.swapusage output");
+    swapUsedBytes = swap.usedBytes;
+    swapTotalBytes = swap.totalBytes;
+  } catch (e) {
+    errors.push(`swap: ${msg(e)}`);
+  }
+
+  let memoryPressureFreePct = prev?.memoryPressureFreePct ?? null;
+  try {
+    memoryPressureFreePct = parseMemoryPressure(await deps.memoryPressure());
+    if (memoryPressureFreePct === null) throw new Error("unrecognised memory_pressure output");
+  } catch (e) {
+    errors.push(`memory_pressure: ${msg(e)}`);
+  }
+
+  let load1 = prev?.load1 ?? null;
+  try {
+    load1 = deps.loadavg()[0] ?? null;
+  } catch (e) {
+    errors.push(`load: ${msg(e)}`);
+  }
+
   let agents = prev?.agents ?? null;
   try {
     agents = parsePs(await deps.ps());
@@ -232,6 +283,10 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       memTotalBytes,
       diskFreeBytes,
       diskTotalBytes,
+      swapUsedBytes,
+      swapTotalBytes,
+      memoryPressureFreePct,
+      load1,
       agents,
       testRun,
     },

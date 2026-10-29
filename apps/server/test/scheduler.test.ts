@@ -125,8 +125,8 @@ const machineSample = (over: Partial<MachineSample> = {}): MachineSample => ({
   cores: 8,
   memUsedBytes: 1,
   memTotalBytes: 2,
-  diskFreeBytes: 3,
-  diskTotalBytes: 4,
+  diskFreeBytes: 20 * 1024 ** 3,
+  diskTotalBytes: 100 * 1024 ** 3,
   agents: null,
   ...over,
 });
@@ -1007,6 +1007,36 @@ describe("scheduler", () => {
       await s.tick("machine"); // +61 s: next minute
       expect(add).toHaveBeenCalledTimes(2);
       expect(store.machineSamples(0).map((m) => m.at)).toEqual([minute + 1000, minute + 61_000]);
+    });
+
+    it("raises one machine-capacity item and closes it after five minutes of headroom", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let tight = true;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: tight ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              agents: { count: 2, rssBytes: 3 * 1024 ** 3, cpuPct: 10 },
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain("disk free");
+      tight = false;
+      t += 5 * 60_000 + 1;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
     it("writes collector status when ok/error changes and otherwise once a minute", async () => {

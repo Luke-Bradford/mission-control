@@ -1216,6 +1216,23 @@ describe("start_seat", () => {
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
 
+  it("refuses a start while machine capacity is constrained", async () => {
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 14 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+    expect(await start()).toEqual(
+      refused("the machine has insufficient headroom: disk free is 14.0 GB (below 15 GB)"),
+    );
+    expect(startCalls).toEqual([]);
+  });
+
   it("FLIGHT explicitly starts otherwise excluded work as a draft while away", async () => {
     store.setSetting(
       AWAY_SETTING,
