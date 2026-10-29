@@ -154,6 +154,23 @@ describe("collectFlow issues", () => {
     ]);
   });
 
+  it("clears an earlier Done timestamp when a ticket is active again", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 3), ev("Done", 2), ev("In Progress", 1)) });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toContainEqual({
+      repoId: "shop-app",
+      number: 1,
+      size: null,
+      startAt: Date.parse(at(3)),
+      doneAt: null,
+    });
+  });
+
   it("starts at Ready before In Progress, In Review and Done", async () => {
     store.replaceBoard("shop-app", [board(1, { size: "M" })]);
     const { gql } = stub({

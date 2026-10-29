@@ -244,6 +244,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         number: i.issueNumber,
         size: i.size,
         ...flow,
+        doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
     }
     const prs: FlowPr[] = [];
