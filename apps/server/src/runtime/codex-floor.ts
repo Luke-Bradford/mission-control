@@ -1,9 +1,8 @@
 /** Codex seat confinement: the server owns filesystem checks; core supplies pure parsing. */
 import { lstatSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   CODEX_MIN_VERSION,
-  CODEX_PNPM_STORES_DIR,
   CODEX_PROJECT_DOC_CONFIG,
   CODEX_SEAT_PROFILE,
   CODEX_SEAT_TOKEN_ENV,
@@ -28,6 +27,8 @@ export function codexSeatConfig(
   mcpUrl: string,
   tmpDir: string,
 ): string {
+  if (i.pnpmStoreDir === undefined || !isAbsolute(i.pnpmStoreDir))
+    throw new Error("codex seat config: pnpmStoreDir must be absolute");
   const denied = sandboxReadDenies(i);
   for (const path of [
     i.cwd,
@@ -35,6 +36,7 @@ export function codexSeatConfig(
     i.worktreeGitDir,
     i.home,
     i.dataDir,
+    i.pnpmStoreDir,
     ...denied,
     tmpDir,
   ]) {
@@ -50,7 +52,6 @@ export function codexSeatConfig(
   if ([i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(tmpDir, path)))
     throw new Error("codex seat config: tmpDir contains a seat or operator path");
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
-  const pnpmStore = join(dirname(i.cwd), CODEX_PNPM_STORES_DIR, basename(i.cwd));
   return [
     `approvals_reviewer = ${tomlString("user")}`,
     `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
@@ -71,7 +72,7 @@ export function codexSeatConfig(
     grant(":root", "read"),
     ...denied.map((path) => grant(path, "deny")),
     grant(tmpDir, "write"),
-    grant(i.pnpmStoreDir ?? pnpmStore, "read"),
+    grant(i.pnpmStoreDir, "read"),
     ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
     grant(".", mode === "read-only" ? "read" : "write"),

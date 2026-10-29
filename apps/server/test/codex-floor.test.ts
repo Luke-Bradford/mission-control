@@ -34,6 +34,7 @@ const sandboxInput: CrewSandboxInput = {
   home: "/home/you",
   dataDir: "/home/you/.local/share/mission-control",
   denyRead: [],
+  pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
 };
 
 /** The installed Codex CLI, when this machine has one (the probe below runs only then). */
@@ -107,6 +108,12 @@ describe.skipIf(installedCodex === null)("Codex seat profile under the real code
 describe("codexSeatConfig", () => {
   const url = "http://127.0.0.1:7420/mcp";
   const tmp = "/tmp/claude-501/seat-1";
+
+  it("requires the hub-owned pnpm store instead of falling back to a worktree store", () => {
+    expect(() =>
+      codexSeatConfig({ ...sandboxInput, pnpmStoreDir: undefined }, "writer", url, tmp),
+    ).toThrow("codex seat config: pnpmStoreDir must be absolute");
+  });
 
   it("writes the isolated profile, MCP auth and command environment", () => {
     const config = codexSeatConfig(sandboxInput, "writer", url, tmp);
