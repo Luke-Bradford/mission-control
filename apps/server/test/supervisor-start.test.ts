@@ -56,6 +56,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
   startMissingNeedsText,
@@ -836,6 +837,7 @@ describe("startRun", () => {
       `${common}/worktrees/guido-1-42`,
       // the run's token, MCP, prompt and transcript files: no seat rewrites them (R28)
       join(dir, "db"),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
     ]);
@@ -2483,7 +2485,7 @@ import(${JSON.stringify(fixture)});
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
     expect(spawn.env[PNPM_STORE_ENV]).toBe(
-      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
     );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
