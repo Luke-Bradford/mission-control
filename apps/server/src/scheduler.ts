@@ -90,7 +90,7 @@ import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
 import { followPrs } from "./github-board.ts";
-import { attentionItems, crew, flightNotTriagingDueAt, NO_LOCK } from "./hud.ts";
+import { attentionItems, crew, flightNotTriagingDueAt, forgetViews, NO_LOCK } from "./hud.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
@@ -448,6 +448,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     triageAt = Math.min(...due);
     triageTimer = setTimeout(() => {
       triageTimer = null;
+      // never read a view built earlier in this second: the timer's reason is that time has passed
+      forgetViews(store);
       void applyDefaults();
       bus.emit("attention");
     }, triageAt - at);
@@ -459,6 +461,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
     const currentRows = rows ?? crew(config, store, at, lock).rows;
+    let waiting: Set<string> | undefined;
     if (
       evaluateHolds(
         store,
@@ -479,6 +482,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             const seat = store.seatSession(r.id);
             return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
           }),
+        (pr) => {
+          const [repoId, number] = pr.split("#");
+          return (
+            store.pullRequests(repoId ?? "").find((p) => p.number === Number(number))?.ci ?? null
+          );
+        },
+        (key) => {
+          waiting ??= new Set(
+            attentionItems(config, store, at, lock, currentRows, null, true).map((i) => i.key),
+          );
+          return !waiting.has(key);
+        },
       )
     )
       emit("attention");

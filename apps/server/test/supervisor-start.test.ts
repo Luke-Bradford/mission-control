@@ -1464,6 +1464,7 @@ describe("reused worktrees", () => {
         dbPath,
         inClone: sup.inClone,
         knownSecrets: async () => [],
+        checks: async () => [],
         gh: async () => ({ code: 0, stdout: "", stderr: "" }),
       }).find((t) => t.name === "commit");
       expect(commit).toBeDefined();
@@ -1626,6 +1627,54 @@ describe("contextUsage", () => {
       window: 200000,
     });
     expect(await sup.contextUsage("retro")).toBeNull();
+  });
+
+  it("asks the CLI once per turn and serves the cache in between (#934)", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    await until(() => expect(seatState("guido-1")).toBe("idle")); // the first turn has ended
+    const first = await sup.contextUsage("guido-1");
+    expect(first?.total).toBe(3340);
+    await Promise.all([sup.contextUsage("guido-1"), sup.contextUsage("guido-1")]);
+    expect(await sup.contextUsage("guido-1")).toEqual(first);
+    expect(asks()).toBe(1);
+    await sup.message("guido-1", "next", { interrupt: false });
+    // reads during the turn are the cache's; the one after it ends asks again, once
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(2);
+    });
+    await sup.contextUsage("guido-1");
+    await sup.contextUsage("guido-1");
+    expect(asks()).toBe(2);
+  });
+  it("after a failed ask the next read within 30 s is the cache's; 31 s on, or a turn later, it asks (#934)", async () => {
+    let t = Date.now();
+    const { sup } = make({ now: () => t });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "NOCONTROL", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // the ask times out
+    expect(asks()).toBe(1);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(1);
+    t += 31_000;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // asks again (and fails again)
+    expect(asks()).toBe(2);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(2);
+    // a turn that ends needs no wait
+    await sup.message("guido-1", "again", { interrupt: false });
+    await until(() => expect(userLines()).toHaveLength(3));
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(3);
+    });
   });
 });
 

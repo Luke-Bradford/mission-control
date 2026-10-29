@@ -60,6 +60,7 @@ import {
 } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath } from "../store.ts";
+import { onlyHubMerges, yes } from "./hub-merges.ts";
 import { mcSection } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
@@ -440,16 +441,6 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   /** git's exit code 1 is an answer ("no"), anything else is a failure. */
-  async function yes(g: G, args: string[]): Promise<boolean> {
-    try {
-      await g(args);
-      return true;
-    } catch (e) {
-      if ((e as { code?: unknown } | null)?.code === 1) return false;
-      throw e;
-    }
-  }
-
   /** Whether the clone has commit `sha` (rev-parse exits 1 when not; `cat-file -e` exits 128). */
   const have = (g: G, sha: string) => yes(g, ["rev-parse", "-q", "--verify", `${sha}^{commit}`]);
 
@@ -477,50 +468,6 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (await have(g, mainSha)) return;
     await g(["fetch", "--no-tags", "origin", `refs/heads/${defaultBranch}`]);
     if (!(await have(g, mainSha))) throw new Error("origin's tip could not be fetched");
-  }
-
-  /**
-   * Whether every commit on `tip` beyond `merged` is a hub-made `Merge main into <branch>`:
-   * two parents, each on main or another such commit. Nothing unmerged is in them.
-   */
-  async function onlyHubMerges(
-    g: G,
-    branch: string,
-    merged: string,
-    tip: string,
-    mainSha: string,
-  ): Promise<boolean> {
-    if (!(await yes(g, ["merge-base", "--is-ancestor", merged, tip]))) return false;
-    const rows = (await g(["log", "--format=%H%x09%an%x09%P%x09%s", tip, "--not", merged, mainSha]))
-      .split("\n")
-      .filter((l) => l !== "")
-      .map((l) => l.split("\t"));
-    const inRange = new Set(rows.map((r) => r[0]));
-    for (const [commit, author, parents, subject] of rows) {
-      const ps = (parents ?? "").split(" ").filter((p) => p !== "");
-      if (author !== MC_MERGE_AUTHOR || subject !== `Merge main into ${branch}`) return false;
-      if (ps.length !== 2) return false;
-      for (const p of ps) {
-        if (!inRange.has(p) && !(await yes(g, ["merge-base", "--is-ancestor", p, mainSha]))) {
-          return false;
-        }
-      }
-      // the tree must be the clean merge of the parents, so no edit rides along
-      if ((await mergeTree(g, ps)) !== (await g(["rev-parse", `${commit}^{tree}`])).trim()) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /** The tree of a clean merge of two commits, or null when they conflict. */
-  async function mergeTree(g: G, [a, b]: string[]): Promise<string | null> {
-    try {
-      return (await g(["merge-tree", "--write-tree", a as string, b as string])).trim();
-    } catch (e) {
-      if ((e as { code?: unknown } | null)?.code === 1) return null;
-      throw e;
-    }
   }
 
   /** The run's branch when it is of the run's shape for its issue, else null. */

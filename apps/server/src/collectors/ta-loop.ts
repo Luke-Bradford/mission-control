@@ -10,6 +10,7 @@ import {
 import { basename, join } from "node:path";
 import type { Run, RunDigest } from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
+import { existsNoted } from "../file-deps.ts";
 import type { Store } from "../store.ts";
 import {
   applyFacts,
@@ -146,7 +147,7 @@ export function parseStatusMd(text: string): StatusMd | null {
 export const PAUSE_FILE = "PAUSE";
 
 export function isPaused(loop: AdoptedLoop): boolean {
-  return existsSync(join(loop.stateDir, PAUSE_FILE));
+  return existsNoted(join(loop.stateDir, PAUSE_FILE));
 }
 
 /** In-memory collector state: transcript facts by path (empty after a server restart). */

@@ -84,6 +84,7 @@ const publisher = () =>
     gh: async () => ({ code: 0, stdout: "", stderr: "" }),
     dbPath: join(dir, "mc.sqlite"),
     knownSecrets: async () => [],
+    checks: async () => [],
     now: () => START,
   } satisfies McToolsDeps);
 

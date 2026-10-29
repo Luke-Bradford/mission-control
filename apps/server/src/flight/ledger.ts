@@ -24,7 +24,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import type { CcConfig } from "../config.ts";
-import { crew, NO_LOCK } from "../hud.ts";
+import { crew, NO_CLI_VERSION, NO_LOCK } from "../hud.ts";
 import type { Store } from "../store.ts";
 import { flightBriefView, flightHeadline, flightSeat, flightTriageItems } from "./state.ts";
 import { cut } from "./tools.ts";
@@ -157,7 +157,7 @@ export function flightSummary(
     dropped: 0,
   };
   for (const e of entries) if (e.kind === "watch") counts[e.status]++;
-  const rows = crew(config, store, now, lock, () => null).rows;
+  const rows = crew(config, store, now, lock, NO_CLI_VERSION).rows;
   const watching = open.filter((e) => e.kind === "watch");
   for (const watch of flightBriefView(config, store, lock, now, rows).watch ?? []) {
     const status = watch.state === "warn" ? "blocked" : watch.state === "ok" ? "done" : "active";

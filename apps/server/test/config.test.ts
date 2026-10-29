@@ -1472,6 +1472,7 @@ describe("repo rules in user config", () => {
       hardRulesSet: true,
       hardRulesBy: "controller",
       alwaysAsk: ["deps"],
+      checks: [],
       userSet: [
         "templates",
         "pick_from",

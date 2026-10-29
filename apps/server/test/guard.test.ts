@@ -30,6 +30,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -602,6 +603,44 @@ describe("POST /api/guard/check", () => {
     expect(r.statusCode).toBe(200);
     expect(r.body).toBe("{}");
     expect(lock.state().holder).toBeNull();
+  });
+
+  describe("the check recorder", () => {
+    const spy = () => {
+      const calls: unknown[][] = [];
+      const checks: CheckRecorder = {
+        begin: async (k, c) => void calls.push(["begin", k, c]),
+        end: async (k, ok) => void calls.push(["end", k, ok]),
+        dropRun: () => {},
+      };
+      return { calls, checks };
+    };
+
+    it("starts a record at PreToolUse of a Bash call and ends it at PostToolUse (ok) or PostToolUseFailure (not ok)", async () => {
+      const { calls, checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, bash("c1", "pnpm -s lint"));
+      await check(tokA, post("c1"));
+      await check(tokA, bash("c2", "pnpm -s typecheck"));
+      await check(tokA, post("c2", "PostToolUseFailure"));
+      expect(calls).toEqual([
+        ["begin", { runId: "run-a", toolUseId: "c1" }, "pnpm -s lint"],
+        ["end", { runId: "run-a", toolUseId: "c1" }, true],
+        ["begin", { runId: "run-a", toolUseId: "c2" }, "pnpm -s typecheck"],
+        ["end", { runId: "run-a", toolUseId: "c2" }, false],
+      ]);
+    });
+
+    it("records a held full suite too, and nothing for a denied call or another tool", async () => {
+      const { calls, checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, bash("t1", "pnpm -s test"));
+      await check(tokA, bash("d1", "git push origin x"));
+      await check(tokA, pre("w1", "Write", { file_path: "/w/x.ts" }));
+      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "t1" }, "pnpm -s test"]]);
+    });
   });
 
   it("records the suite's pass or fail from the Post hook event", async () => {

@@ -315,6 +315,7 @@ function make(
     processStart?: SupervisorDeps["processStart"];
     controlTimeoutMs?: number;
     now?: () => number;
+    checks?: SupervisorDeps["checks"];
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
@@ -374,6 +375,7 @@ function make(
     log,
     tokens,
     lock,
+    ...(over.checks === undefined ? {} : { checks: over.checks }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),
