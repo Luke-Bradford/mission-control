@@ -292,9 +292,6 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         },
         evaluate: (fn, arg) => page.evaluate(fn, arg),
         click: (selector) => page.click(selector),
-        screenshot: async (path) => {
-          await page.screenshot({ path });
-        },
         close: () => browser.close(),
       };
     },
