@@ -145,6 +145,8 @@
 }
 .map-stage-wrap {
   position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--void-line);
@@ -152,6 +154,11 @@
   overflow: hidden;
   background: var(--void);
   color: var(--void-ink);
+}
+.map-stage-content {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
 }
 .map-stage {
   position: absolute;
@@ -168,6 +175,7 @@
   --treemap-folder: var(--void-2);
   --treemap-line: var(--void-line);
   --treemap-ink: var(--void-ink);
+  --treemap-panel: var(--void-panel);
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -178,6 +186,7 @@
   --treemap-folder: var(--surface-2);
   --treemap-line: var(--line-2);
   --treemap-ink: var(--fg);
+  --treemap-panel: var(--surface-2);
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .map-treemap {
@@ -185,6 +194,7 @@
     --treemap-folder: var(--surface-2);
     --treemap-line: var(--line-2);
     --treemap-ink: var(--fg);
+    --treemap-panel: var(--surface-2);
   }
 }
 .map-treemap-folder {
@@ -278,7 +288,7 @@
   padding: 3px 5px;
   font: 10px var(--mono);
   color: var(--treemap-ink);
-  background: var(--void-panel);
+  background: var(--treemap-panel);
 }
 .map-treemap-links {
   position: absolute;
@@ -307,21 +317,26 @@
 
 /* the key: one muted line along the stage's foot */
 .map-legend {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
-  max-width: calc(100% - 24px);
+  position: relative;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 16px;
   margin: 0;
+  padding: 6px 12px;
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
   color: var(--void-muted);
   pointer-events: none;
   z-index: 1;
+}
+.map-main-impact .map-legend,
+.map-main-history .map-legend {
+  border-top: 1px solid var(--line-2);
+  color: var(--fg-2);
+  background: var(--surface);
 }
 .map-key-item {
   display: inline-flex;

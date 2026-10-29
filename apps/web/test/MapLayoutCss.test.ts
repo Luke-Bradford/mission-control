@@ -24,3 +24,8 @@ it("draws focused direct imports with the v3 dashed relationship outline", () =>
     "dashed",
   );
 });
+
+it("reserves a legend strip below, rather than over, analytical treemap tiles", () => {
+  expect(rule(String.raw`\.map-stage-wrap`)).toContain("grid-template-rows: minmax(0, 1fr) auto");
+  expect(rule(String.raw`\.map-legend`)).toContain("position: relative");
+});

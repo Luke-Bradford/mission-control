@@ -296,39 +296,41 @@ export function CrewMapView({
       </div>
       <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
-          {lens === "changes" ? (
-            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-              <Scene
-                nodes={displayNodes}
-                areas={areas}
-                snapshot={stage}
-                names={names}
-                focus={focusNode?.path ?? null}
-                focusLinks={focusLinks}
+          <div className="map-stage-content">
+            {lens === "changes" ? (
+              <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
+                <Scene
+                  nodes={displayNodes}
+                  areas={areas}
+                  snapshot={stage}
+                  names={names}
+                  focus={focusNode?.path ?? null}
+                  focusLinks={focusLinks}
+                  lens={lens}
+                  lensVisual={lensVisual}
+                  home={home}
+                  overview={overview}
+                  rotate={rotate}
+                  selected={selectedPath}
+                  indices={colours}
+                  onSelect={selectFromScene}
+                  seat={selectedSeat?.seat ?? null}
+                  seatFocus={seatFocus}
+                  dockSeats={snapshot.seats.length}
+                  onSeatSelect={followFromStage}
+                />
+              </Suspense>
+            ) : (
+              <MapTreemap
+                snapshot={snapshot}
                 lens={lens}
-                lensVisual={lensVisual}
-                home={home}
-                overview={overview}
-                rotate={rotate}
-                selected={selectedPath}
-                indices={colours}
+                visual={lensVisual}
+                focus={focus}
+                focusLinks={focusLinks}
                 onSelect={selectFromScene}
-                seat={selectedSeat?.seat ?? null}
-                seatFocus={seatFocus}
-                dockSeats={snapshot.seats.length}
-                onSeatSelect={followFromStage}
               />
-            </Suspense>
-          ) : (
-            <MapTreemap
-              snapshot={snapshot}
-              lens={lens}
-              visual={lensVisual}
-              focus={focus}
-              focusLinks={focusLinks}
-              onSelect={selectFromScene}
-            />
-          )}
+            )}
+          </div>
           {lens === "changes" ? (
             <MapKey tree={snapshot.tree} />
           ) : (
