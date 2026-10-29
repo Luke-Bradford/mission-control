@@ -614,7 +614,7 @@ function foldCodex(
 ): void {
   if (typeof ev.method !== "string") return;
   const p = isObj(ev.params) ? ev.params : {};
-  const at = timeOf(ev.timestamp) ?? fileMtime;
+  const at = timeOf(ev.timestamp) ?? (typeof ev.at === "number" ? ev.at : fileMtime);
   d.lastEventAt = Math.max(d.lastEventAt ?? at, at);
   const threadId = str(p.threadId);
   const turnId = str(isObj(p.turn) ? p.turn.id : p.turnId);

@@ -207,6 +207,30 @@ describe("delta heartbeats", () => {
     const facts = foldTranscript(null, kept, start, "codex");
     expect(facts.digest.lastEventAt).toBeGreaterThanOrEqual(start + 14 * 60 * 1000);
   });
+
+  it("drops cumulative turn diffs but keeps their byte size in one heartbeat per turn per minute", () => {
+    const hb = deltaHeartbeats();
+    const diff = "α".repeat(1000);
+    const update = (sec: number, turnId = "tu") =>
+      JSON.stringify({
+        method: "turn/diff/updated",
+        params: { turnId, diff },
+        timestamp: new Date(start + sec * 1000).toISOString(),
+      });
+    const first = compactTranscriptLine(update(0), hb);
+    expect(parse(first)).toEqual({
+      method: "turn/diff/updated",
+      turnId: "tu",
+      diffBytes: Buffer.byteLength(diff),
+      at: start,
+    });
+    expect(compactTranscriptLine(update(30), hb)).toBeNull();
+    expect(compactTranscriptLine(update(30, "other"), hb)).not.toBeNull();
+    const next = compactTranscriptLine(update(DELTA_HEARTBEAT_MS / 1000), hb);
+    expect(next).not.toBeNull();
+    const facts = foldTranscript(null, [first as string, next as string], start, "codex");
+    expect(facts.digest.lastEventAt).toBe(start + DELTA_HEARTBEAT_MS);
+  });
 });
 
 describe("compacting existing transcripts", () => {
@@ -323,5 +347,20 @@ describe("compacting existing transcripts", () => {
 
   it("keeps a final line with no newline as it is", () => {
     expect(compactTranscriptText(`${contextAnswer}\n{"a":1}\ncut`)).toBe('{"a":1}\ncut');
+  });
+
+  it("backfills ended Codex transcripts by dropping cumulative turn diffs", () => {
+    const diffs = Array.from({ length: 30 }, (_, i) =>
+      JSON.stringify({
+        method: "turn/diff/updated",
+        params: { turnId: "turn", diff: "x".repeat((i + 1) * 100_000) },
+        timestamp: new Date(Date.parse("2026-10-29T10:00:00.000Z") + i * 60_000).toISOString(),
+      }),
+    ).join("\n");
+    add("diffs", 5, crewFile("diffs"), `${diffs}\n`);
+    const result = summarise();
+    expect(result.rewritten).toHaveLength(1);
+    expect(statSync(crewFile("diffs")).size).toBeLessThan(2 * MB);
+    expect(readFileSync(crewFile("diffs"), "utf8").trim().split("\n")).toHaveLength(30);
   });
 });
