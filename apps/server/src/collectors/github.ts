@@ -127,7 +127,7 @@ const ISSUE_QUERY = `query Ticket($owner: String!, $name: String!, $number: Int!
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      number title url state body
+      number title url state closedAt body
       author { login }
       labels(first: 20) { nodes { name } }
       milestone { title }
@@ -205,7 +205,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
-        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
+        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
         author { login }
         assignees(first: 10) { nodes { login } }
@@ -772,6 +772,7 @@ export async function fetchTicket(
     title: str(issue.title, ""),
     url: str(issue.url, ""),
     state: openClosed(issue.state),
+    closedAt: typeof issue.closedAt === "string" ? Date.parse(issue.closedAt) || null : null,
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
     bodyLength: chars.length,
@@ -1074,6 +1075,9 @@ function mapPr(
     mergeable: lookup(MERGEABLE, n.mergeable),
     author: str(path(n, "author", "login"), "") || null,
     assignees: logins(n.assignees),
+    additions: typeof n.additions === "number" ? n.additions : null,
+    deletions: typeof n.deletions === "number" ? n.deletions : null,
+    changedFiles: typeof n.changedFiles === "number" ? n.changedFiles : null,
   };
 }
 

@@ -20,6 +20,7 @@ const labelGlob = z
   .refine((g) => !g.replace(/\/\*\*$/, "").includes("**"), "`**` only as a trailing /**");
 
 const nonEmpty = z.string().min(1);
+const issueNumber = z.number().int().positive().safe();
 // `pick_from: []` is refused on purpose: pausing a repo is not this key's job. Status names are
 // not checked against the board here; the engine reports a status it cannot find.
 export const repoRulesSchema = z.strictObject({
@@ -38,6 +39,7 @@ export const repoRulesSchema = z.strictObject({
   // `null` inherits the base list; `[]` explicitly sets no paths.
   hard_rules: z.array(protectedGlob).nullable().optional(),
   hard_rules_by: z.enum(HARD_RULES_BY).optional(),
+  tech_debt_issue: issueNumber.optional(),
   always_ask: z.array(nonEmpty).optional(),
 });
 
@@ -55,6 +57,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     hardRules: r.hard_rules ?? base.hardRules,
     hardRulesSet: Array.isArray(r.hard_rules) || base.hardRulesSet,
     hardRulesBy: r.hard_rules_by ?? base.hardRulesBy,
+    ...(r.tech_debt_issue === undefined ? {} : { techDebtIssue: r.tech_debt_issue }),
     alwaysAsk: r.always_ask ?? base.alwaysAsk,
   });
 }
@@ -88,6 +91,9 @@ export function overlayRepoBlock(
       base.hardRulesBy === "operator" || block.hard_rules_by === "operator"
         ? "operator"
         : (block.hard_rules_by ?? base.hardRulesBy),
+    ...(base.techDebtIssue === undefined && block.tech_debt_issue === undefined
+      ? {}
+      : { techDebtIssue: base.techDebtIssue ?? block.tech_debt_issue }),
     alwaysAsk: union(base.alwaysAsk, block.always_ask ?? []),
   });
 }

@@ -543,7 +543,7 @@ describe("Comms routes", () => {
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/comms/mentions/seen", expect.anything()),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Acknowledge shop-app-ta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ack shop-app-ta" }));
     await waitFor(() => {
       const hit = fetch.mock.calls.find(([path]) => path === "/api/comms/comms%3A9/reactions");
       expect(JSON.parse(String(hit?.[1]?.body))).toEqual({ reaction: "seen" });
@@ -2244,7 +2244,7 @@ describe("Needs you: row actions", () => {
     expect(b.disabled).toBe(true);
   });
 
-  it("shows the confirmed waiver and disabled set-aside rework action for a review park", async () => {
+  it("sends a set-aside review park's rework message without waiving its findings", async () => {
     const currentRun = seatRow().run as NonNullable<CrewRow["run"]>;
     const row = seatRow({
       id: "guido-1",
@@ -2285,6 +2285,7 @@ describe("Needs you: row actions", () => {
           },
         },
         ...route("/api/runs/r-a/resume"),
+        ...route("/api/runs/r-a/message"),
       },
       [row, seatRow({ id: "flight-1", index: 2 })],
     );
@@ -2293,11 +2294,18 @@ describe("Needs you: row actions", () => {
     const waive = await within(need).findByRole("button", {
       name: "Waive findings on abc1234 and resume",
     });
-    const rework = within(need).getByRole("button", {
-      name: "Rework message (needs #832)",
-    }) as HTMLButtonElement;
-    expect(rework.disabled).toBe(true);
-    expect(rework.title).toBe("Rework for a set-aside run needs #832.");
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework message" }));
+    fireEvent.change(within(need).getByRole("textbox", { name: "Rework message" }), {
+      target: { value: "Please fix RETRO's finding." },
+    });
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework" }));
+    await waitFor(() =>
+      expect(posts).toContainEqual({
+        path: "/api/runs/r-a/message",
+        body: { text: "Please fix RETRO's finding." },
+      }),
+    );
+    expect(posts).not.toContainEqual({ path: "/api/runs/r-a/resume", body: {} });
     const confirm = vi
       .spyOn(window, "confirm")
       .mockReturnValueOnce(false)
@@ -2307,6 +2315,60 @@ describe("Needs you: row actions", () => {
     fireEvent.click(waive);
     await waitFor(() => expect(posts).toContainEqual({ path: "/api/runs/r-a/resume", body: {} }));
     confirm.mockRestore();
+  });
+
+  it("shows a review rework route's refusal", async () => {
+    const currentRun = seatRow().run as NonNullable<CrewRow["run"]>;
+    const row = seatRow({
+      id: "guido-1",
+      ticket: "shop-app#1",
+      run: { ...currentRun, id: "r-b" },
+      asideRuns: [
+        {
+          runId: "r-a",
+          ticket: "shop-app#2",
+          ticketTitle: "Parked work",
+          loop: {
+            phase: "parked",
+            text: "Blocked: RETRO finding",
+            prNumber: 2,
+            parked: "RETRO finding",
+          },
+        },
+      ],
+    });
+    stubNeeds(
+      [
+        item({
+          key: "park:a",
+          kind: "parked",
+          agentId: "guido-1",
+          escalationId: null,
+          ticket: "shop-app#2",
+          url: null,
+          text: "RETRO finding",
+        }),
+      ],
+      undefined,
+      {
+        "/api/runs/r-a/loop": {
+          loop: {
+            parked: { kind: "review", reason: "RETRO finding", ended: false },
+            pushFor: "abc1234def",
+          },
+        },
+        "POST /api/runs/r-a/message": () => ({ status: 409, body: { error: "review park moved" } }),
+      },
+      [row, seatRow({ id: "flight-1", index: 2 })],
+    );
+    render(<Comms item={null} />);
+    const need = await rowOf("RETRO finding");
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework message" }));
+    fireEvent.change(within(need).getByRole("textbox", { name: "Rework message" }), {
+      target: { value: "Fix it." },
+    });
+    fireEvent.click(within(need).getByRole("button", { name: "Send rework" }));
+    expect((await within(need).findByRole("alert")).textContent).toContain("review park moved");
   });
 });
 

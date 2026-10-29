@@ -12,6 +12,7 @@ import {
   type StreamKind,
 } from "@mc/core";
 import { type FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSecond } from "../clock.ts";
 import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -24,7 +25,7 @@ import { Seg } from "../hud/Seg.tsx";
 import { useSeatName } from "../seatName.ts";
 import { toast } from "../shell/Toast.tsx";
 import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
-import { messageSeat, seatError } from "./seat.ts";
+import { messageRun, messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
 
 const DASH = "—";
@@ -157,7 +158,18 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
  * tool_use left open by an ended run is not live); a stalled agent's bar says since when nothing
  * was written; a waiting run names its queued full suite and the lock holder.
  */
-function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+function LiveCall({ row, tz }: { row: CrewRow; tz: string | null }) {
+  const lock = useTestLock();
+  const running = row.run?.status === "running";
+  const waiting = running ? lock?.waiting.find((w) => w.runId === row.run?.id) : undefined;
+  const live = running ? (row.digest?.liveTool ?? null) : null;
+  const stalled = running && row.hudState === "stalled";
+  if (!waiting && !live && !stalled) return <div id="liveCall" />;
+  return <TickingLiveCall row={row} tz={tz} />;
+}
+
+function TickingLiveCall({ row, tz }: { row: CrewRow; tz: string | null }) {
+  const now = useSecond();
   const nameOf = useSeatName();
   const lock = useTestLock();
   const running = row.run?.status === "running";
@@ -254,7 +266,8 @@ export function SeatComposer({
     setBusy(true);
     setError(null);
     try {
-      await messageSeat(row, text, interrupt);
+      if (parkedReview && row.run) await messageRun(row.run.id, text);
+      else await messageSeat(row, text, interrupt);
       setText("");
       toast(`Delivered to ${call}.`);
       onSent?.();
@@ -287,15 +300,17 @@ export function SeatComposer({
       <button type="submit" className="primary" disabled={!crew || busy}>
         {parkedReview ? "Send rework message" : "Send"}
       </button>
-      <button
-        type="button"
-        className="sm ghost"
-        title="Stop the current turn, then send"
-        disabled={!crew || busy}
-        onClick={() => void send(true)}
-      >
-        Interrupt and send
-      </button>
+      {!parkedReview && (
+        <button
+          type="button"
+          className="sm ghost"
+          title="Stop the current turn, then send"
+          disabled={!crew || busy}
+          onClick={() => void send(true)}
+        >
+          Interrupt and send
+        </button>
+      )}
       {error && (
         <span className="crit-t s" role="alert">
           {error}
@@ -313,7 +328,7 @@ export function SeatComposer({
 }
 
 /** The Activity panel (catalogue 2.4.4): the latest run's transcript, as inert text. */
-export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   const nameOf = useSeatName();
   const [filter, setFilter] = useState<Filter>("all");
   const stream = useResource<AgentStream>(RESOURCES.stream(row.id));
@@ -377,7 +392,7 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
         <Seg label="Activity filter" options={FILTERS} value={filter} onChange={setFilter} />
       }
     >
-      <LiveCall row={row} now={now} tz={tz} />
+      <LiveCall row={row} tz={tz} />
       <div className="scroll" id="stream" ref={box} onScroll={onScroll}>
         {empty !== null ? (
           <p className="pb s muted">{empty}</p>

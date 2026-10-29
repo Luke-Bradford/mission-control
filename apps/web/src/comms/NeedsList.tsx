@@ -17,8 +17,8 @@ import {
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
-import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
-import { interruptSeat, seatError } from "../agent/seat.ts";
+import { reviewPark, reviewParkSha, WaiveReviewFindings } from "../agent/reviewPark.tsx";
+import { interruptSeat, messageRun, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
 import { isOperatorItem, itemOwner, needsYouItems, ownerLabel, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
@@ -124,7 +124,7 @@ function holdsLock(i: AttentionItem, lock: TestLockState | undefined): boolean {
 /** The text FLIGHT is asked about a stray file (the mockup's "… outside every area. Whose is it?"). */
 const strayQuestion = (text: string): string => `${text.replace(/[.\s]+$/, "")}. Whose is it?`;
 
-/** A review park names its waiver and keeps set-aside rework unavailable until #832 supplies its route. */
+/** A review park keeps its explicit waiver apart from its rework message. */
 function ReviewParkNeedActions({
   item,
   row,
@@ -138,6 +138,10 @@ function ReviewParkNeedActions({
   onOpen: () => void;
   fallback: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const aside = row?.asideRuns?.find(
     (run) => run.ticket === item.ticket && run.loop.phase === "parked",
   );
@@ -154,19 +158,60 @@ function ReviewParkNeedActions({
         {fallback}
       </button>
     );
-  const current = row?.run?.id === runId;
+  const send = async () => {
+    if (text.trim() === "") return;
+    setSending(true);
+    setError(null);
+    try {
+      await messageRun(runId, text);
+      setText("");
+      setOpen(false);
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      setSending(false);
+    }
+  };
   return (
     <>
       <WaiveReviewFindings runId={runId} park={park} />
       <button
         type="button"
         className="sm primary"
-        disabled={busy || !current}
-        title={current ? undefined : "Rework for a set-aside run needs #832."}
-        onClick={onOpen}
+        disabled={busy || sending}
+        onClick={() => setOpen(true)}
       >
-        {current ? "Open rework message" : "Rework message (needs #832)"}
+        Send rework message
       </button>
+      {open && (
+        <form
+          className="s"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <input
+            aria-label="Rework message"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Send findings back for rework…"
+            disabled={sending}
+          />
+          <button type="submit" className="sm primary" disabled={sending || text.trim() === ""}>
+            Send rework
+          </button>
+          <span className="hint">
+            This sends RETRO's findings on {reviewParkSha(park)} back for rework. It does not waive
+            them.
+          </span>
+          {error && (
+            <span className="crit-t s" role="alert">
+              {error}
+            </span>
+          )}
+        </form>
+      )}
     </>
   );
 }

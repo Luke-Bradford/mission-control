@@ -90,7 +90,7 @@ export function Telemetry() {
   return (
     <section id="page-telemetry" className={refetching ? "refetching" : undefined}>
       <div className="toolbar">
-        <h2>Telemetry</h2>
+        <h1 className="toolbar-heading">Telemetry</h1>
         <Seg label="Range" options={RANGES} value={range} onChange={setRange} />
         <label className="s fg2" htmlFor={agentSel}>
           Agent
@@ -134,13 +134,13 @@ export function Telemetry() {
         <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
       )}
       <Kpis t={t} live={scope.live} filtered={agent !== "" || account !== "" || ticket !== ""} />
-      <h3 className="grp">Flow of work</h3>
+      <h2 className="grp">Flow of work</h2>
       <FlowOfWork t={t} scope={scope} />
-      <h3 className="grp">Agents</h3>
+      <h2 className="grp">Agents</h2>
       <AgentsGroup t={t} scope={scope} turnAgent={turnAgent} />
-      <h3 className="grp">Capacity</h3>
+      <h2 className="grp">Capacity</h2>
       <CapacityGroup t={t} scope={scope} />
-      <h3 className="grp">Cost</h3>
+      <h2 className="grp">Cost</h2>
       <CostGroup t={t} scope={scope} />
     </section>
   );

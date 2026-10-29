@@ -6,11 +6,12 @@ import {
   runPill,
   startOfLocalDay,
 } from "@mc/core";
-import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useState } from "react";
+import { useSecond } from "../clock.ts";
 import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { BUILD_LOOP_TEMPLATE, isLoopInFlight, runElapsed, runPrs } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, type Resource, useResource } from "../data.ts";
 import { cost, dayMonth, dur, hhmm, kTokens } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -94,11 +95,165 @@ const runDur = (r: RunView, now: number): string => {
   return ms === null ? DASH : dur(ms);
 };
 
+function TimedLoopBody({
+  kind,
+  row,
+  view,
+  prs,
+  limits,
+  loopView,
+}: {
+  kind: "steps" | "timeline";
+  row: CrewRow;
+  view?: RunLoopView;
+  prs?: PullRequestView[];
+  limits?: LoopLimits;
+  loopView?: Resource<RunLoopView>;
+}) {
+  const now = useSecond();
+  return kind === "steps" ? (
+    <LoopSteps row={row} view={view} prs={prs} limits={limits as LoopLimits} now={now} />
+  ) : (
+    <LoopTimeline row={row} loopView={loopView as Resource<RunLoopView>} now={now} />
+  );
+}
+
+export const RunRow = memo(function RunRow({
+  row,
+  run,
+  tz,
+  prs,
+  open,
+  onToggle,
+  onRender,
+  onTimeRender,
+}: {
+  row: CrewRow;
+  run: RunView;
+  tz: string | null;
+  prs: ReturnType<typeof runPrs>;
+  open: boolean;
+  onToggle: (id: string) => void;
+  /** Test instrumentation for the static row boundary. */
+  onRender?: () => void;
+  /** Test instrumentation for the clock-owning cell. */
+  onTimeRender?: () => void;
+}) {
+  onRender?.();
+  const pill = runPill(run, row);
+  const tokens = run.tokens ? kTokens(run.tokens.input + run.tokens.output) : DASH;
+  const parkedReview = reviewPark(run.loop);
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the summary is the keyboard route
+    // biome-ignore lint/a11y/noStaticElementInteractions: as above; the row is a container
+    <div
+      className="runrow s"
+      onClick={(e) => {
+        if (run.summary && !(e.target as Element).closest("a")) onToggle(run.id);
+      }}
+    >
+      <span className="num">#{run.seq}</span>
+      <span>
+        <Pill tone={pill.tone}>{pill.label}</Pill>
+      </span>
+      <RunTimes run={run} tz={tz} onRender={onTimeRender} />
+      <span className="num right">{tokens}</span>
+      <span className="num right">{cost(run.costUsd)}</span>
+      {run.endedAt === null && run.loop?.aside && run.id !== row.run?.id && (
+        // a set-aside run the seat has moved on from; the wrapper keeps the click off the row
+        // biome-ignore lint/a11y/useKeyWithClickEvents: the button inside is the keyboard route
+        // biome-ignore lint/a11y/noStaticElementInteractions: as above; this only stops bubbling
+        <span onClick={(e) => e.stopPropagation()}>
+          <EndAsideButton row={row} runId={run.id} />
+        </span>
+      )}
+      {run.endedAt === null && run.id !== row.run?.id && parkedReview && (
+        // The button inside is keyboard-accessible; this wrapper only prevents the run row toggle.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: as above
+        // biome-ignore lint/a11y/noStaticElementInteractions: as above
+        <span onClick={(e) => e.stopPropagation()}>
+          <WaiveReviewFindings runId={run.id} park={parkedReview} />
+        </span>
+      )}
+      {(run.ticket || prs.length > 0) && (
+        <span className="rticket min0 xs">
+          {run.ticket && <TicketRef ticket={run.ticket} bare />}
+          {run.ticketTitle && (
+            <span className="rtitle" title={run.ticketTitle}>
+              {run.ticketTitle}
+            </span>
+          )}
+          {prs.map((pr) => (
+            <PrChip key={`${pr.repoId}#${pr.number}`} pr={pr} bare />
+          ))}
+        </span>
+      )}
+      {run.summary && (
+        <button
+          type="button"
+          className={open ? "rsummary s fg2 open" : "rsummary s fg2"}
+          title={run.summary}
+          aria-expanded={open}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(run.id);
+          }}
+          onKeyDown={noChord}
+          onKeyUp={noChord}
+        >
+          <Clamp className="rtext" lines={2} open={open}>
+            <MarkdownInline text={run.summary} />
+          </Clamp>
+        </button>
+      )}
+    </div>
+  );
+});
+
+function RunTimes({
+  run,
+  tz,
+  onRender,
+}: {
+  run: RunView;
+  tz: string | null;
+  onRender?: () => void;
+}) {
+  if (run.status !== "running") {
+    onRender?.();
+    return <RunTimesBody run={run} tz={tz} now={Date.now()} />;
+  }
+  return <TickingRunTimes run={run} tz={tz} onRender={onRender} />;
+}
+
+function TickingRunTimes({
+  run,
+  tz,
+  onRender,
+}: {
+  run: RunView;
+  tz: string | null;
+  onRender?: () => void;
+}) {
+  onRender?.();
+  const now = useSecond();
+  return <RunTimesBody run={run} tz={tz} now={now} />;
+}
+
+function RunTimesBody({ run, tz, now }: { run: RunView; tz: string | null; now: number }) {
+  return (
+    <>
+      <Started ms={run.startedAt} now={now} tz={tz} />
+      <span className="num right">{runDur(run, now)}</span>
+    </>
+  );
+}
+
 /**
  * The mockup's Loop panel: where a looped run is (Steps) and the loop's recent runs. It opens on
  * Steps while the loop is in flight; a choice the viewer makes holds until that changes.
  */
-export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   const inFlight = isLoopInFlight(row);
   const runId = row.run?.id ?? null;
   // A pick lasts for the loop it was made on: a new run or a change in flight forgets it.
@@ -151,14 +306,14 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
     body = (
       <>
         {budget}
-        <LoopSteps row={row} view={loopView.data} prs={repoPrs} limits={limits} now={now} />
+        <TimedLoopBody row={row} view={loopView.data} prs={repoPrs} limits={limits} kind="steps" />
       </>
     );
   } else if (view === "timeline") {
     body = (
       <>
         {budget}
-        <LoopTimeline row={row} loopView={loopView} now={now} />
+        <TimedLoopBody row={row} loopView={loopView} kind="timeline" />
       </>
     );
   } else if (runs.error && !runs.data) {
@@ -176,83 +331,17 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
           <span className="right">Tokens</span>
           <span className="right">~Cost</span>
         </div>
-        {list.map((r) => {
-          const pill = runPill(r, row);
-          const tokens = r.tokens ? kTokens(r.tokens.input + r.tokens.output) : DASH;
-          const prs = runPrs(r, row.kind === "crew" ? repoPrs : undefined);
-          const parkedReview = reviewPark(r.loop);
-          return (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: the summary is the keyboard route
-            // biome-ignore lint/a11y/noStaticElementInteractions: as above; the row is a container
-            <div
-              className="runrow s"
-              key={r.id}
-              onClick={(e) => {
-                // a link in the row (a ticket or PR on GitHub) goes where it points
-                if (r.summary && !(e.target as Element).closest("a")) toggle(r.id);
-              }}
-            >
-              <span className="num">#{r.seq}</span>
-              <span>
-                <Pill tone={pill.tone}>{pill.label}</Pill>
-              </span>
-              <Started ms={r.startedAt} now={now} tz={tz} />
-              <span className="num right">{runDur(r, now)}</span>
-              <span className="num right">{tokens}</span>
-              <span className="num right">{cost(r.costUsd)}</span>
-              {r.endedAt === null && r.loop?.aside && r.id !== row.run?.id && (
-                // a set-aside run the seat has moved on from; the wrapper keeps the click off the row
-                // biome-ignore lint/a11y/useKeyWithClickEvents: the button inside is the keyboard route
-                // biome-ignore lint/a11y/noStaticElementInteractions: as above; this only stops bubbling
-                <span onClick={(e) => e.stopPropagation()}>
-                  <EndAsideButton row={row} runId={r.id} />
-                </span>
-              )}
-              {r.endedAt === null && r.id !== row.run?.id && parkedReview && (
-                // The button inside is keyboard-accessible; this wrapper only prevents the run row toggle.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: as above
-                // biome-ignore lint/a11y/noStaticElementInteractions: as above
-                <span onClick={(e) => e.stopPropagation()}>
-                  <WaiveReviewFindings runId={r.id} park={parkedReview} />
-                </span>
-              )}
-              {(r.ticket || prs.length > 0) && (
-                <span className="rticket min0 xs">
-                  {r.ticket && <TicketRef ticket={r.ticket} bare />}
-                  {r.ticketTitle && (
-                    <span className="rtitle" title={r.ticketTitle}>
-                      {r.ticketTitle}
-                    </span>
-                  )}
-                  {prs.map((pr) => (
-                    <PrChip key={`${pr.repoId}#${pr.number}`} pr={pr} bare />
-                  ))}
-                </span>
-              )}
-              {r.summary && (
-                // A disclosure: the button opens the full text, as a click on the row does. Links
-                // in the Markdown render as spans, so nothing interactive sits inside it.
-                <button
-                  type="button"
-                  className={open.has(r.id) ? "rsummary s fg2 open" : "rsummary s fg2"}
-                  title={r.summary}
-                  aria-expanded={open.has(r.id)}
-                  onClick={(e) => {
-                    // the row's own click handler would toggle a second time
-                    e.stopPropagation();
-                    toggle(r.id);
-                  }}
-                  onKeyDown={noChord}
-                  onKeyUp={noChord}
-                >
-                  <Clamp className="rtext" lines={2} open={open.has(r.id)}>
-                    <MarkdownInline text={r.summary} />
-                  </Clamp>
-                </button>
-              )}
-            </div>
-          );
-        })}
+        {list.map((run) => (
+          <RunRow
+            key={run.id}
+            row={row}
+            run={run}
+            tz={tz}
+            prs={runPrs(run, row.kind === "crew" ? repoPrs : undefined)}
+            open={open.has(run.id)}
+            onToggle={toggle}
+          />
+        ))}
       </>
     );
   }

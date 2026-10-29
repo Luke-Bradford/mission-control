@@ -1,6 +1,14 @@
 import type { AttentionItem, ConfigView, Crew } from "@mc/core";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { useSecond } from "./clock.ts";
+import {
+  lazy,
+  Profiler,
+  type ProfilerOnRenderCallback,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { RESOURCES, useResource } from "./data.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 
@@ -51,6 +59,7 @@ const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.S
 const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
+const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
 
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
@@ -60,7 +69,14 @@ const TITLE = "Mission Control";
  * popped-out window (`?popout=1`) shows the Agent page alone. An old path is redirected to where
  * it now lives; any other unknown path goes to Overview.
  */
-export function App() {
+export function App({
+  onRender,
+  onPageRender,
+}: {
+  onRender?: () => void;
+  onPageRender?: ProfilerOnRenderCallback;
+} = {}) {
+  onRender?.();
   const path = usePath();
   const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.
@@ -120,11 +136,30 @@ export function App() {
   }
   return (
     <div className={cls}>
+      {shown.page === "board" && (
+        // biome-ignore lint/a11y/useValidAnchor: this fragment link moves focus to the Board heading.
+        <a
+          className="skip-link"
+          href="#board-content"
+          onClick={() => document.getElementById("board-content")?.focus()}
+        >
+          Skip to board
+        </a>
+      )}
       <Header page={shown.page} />
       <div className={`shell${showDock ? "" : " shell-full"}`}>
         <main>
           <AwayDigest>
-            <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+            <Suspense fallback={<p>Loading…</p>}>
+              {r &&
+                (onPageRender ? (
+                  <Profiler id={r.page} onRender={onPageRender}>
+                    <PageView route={r} />
+                  </Profiler>
+                ) : (
+                  <PageView route={r} />
+                ))}
+            </Suspense>
           </AwayDigest>
         </main>
         {showDock && <Dock />}
@@ -170,29 +205,41 @@ function useItemUrl(popout: boolean) {
 }
 
 function PageView({ route: r }: { route: Route }) {
+  let page: ReactNode;
   switch (r.page) {
     case "overview":
-      return <Overview />;
+      page = <Overview />;
+      break;
     case "flight":
-      return <Flight />;
+      page = <Flight />;
+      break;
     case "board":
-      return <BoardPage repoId={r.repoId} ticket={r.ticket} />;
+      page = <BoardPage repoId={r.repoId} ticket={r.ticket} />;
+      break;
     case "agent":
-      return <Agent id={r.id} />;
+      page = <Agent id={r.id} />;
+      break;
     case "map":
-      return <MapPage repoId={r.repoId} />;
+      page = <MapPage repoId={r.repoId} />;
+      break;
     case "comms":
-      return <Comms item={r.item} view={r.view} />;
+      page = <Comms item={r.item} view={r.view} />;
+      break;
     case "telemetry":
-      return <Telemetry />;
+      page = <Telemetry />;
+      break;
+    case "audit":
+      page = <Audit />;
+      break;
     case "setup":
-      return <Setup tab={r.tab} />;
+      page = <Setup tab={r.tab} />;
+      break;
   }
+  return page;
 }
 
 /** The global shortcuts, reading the latest crew, attention and page when a key is pressed. */
 function useShellKeys(current: Route, popout: boolean) {
-  const now = useSecond();
   const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const flight = useResource<FlightView>(RESOURCES.flight).data;
@@ -202,8 +249,8 @@ function useShellKeys(current: Route, popout: boolean) {
     config?.crew?.sessions.flatMap((s) => s.seats).find((s) => !s.retiring && s.loop === "watch")
       ?.id;
   const { repo } = useSessionScope();
-  const latest = useRef({ current, rows, items, popout, repo, flightId, now });
-  latest.current = { current, rows, items, popout, repo, flightId, now };
+  const latest = useRef({ current, rows, items, popout, repo, flightId });
+  latest.current = { current, rows, items, popout, repo, flightId };
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
@@ -215,7 +262,7 @@ function useShellKeys(current: Route, popout: boolean) {
         dir,
         latest.current.repo,
         latest.current.flightId,
-        latest.current.now,
+        Date.now(),
       );
       if (id === null) return;
       setSelectedAgent(id);
