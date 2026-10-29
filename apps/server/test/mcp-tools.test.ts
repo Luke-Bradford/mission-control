@@ -1315,6 +1315,31 @@ describe("Comms seat tools", () => {
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
   });
 
+  it("keeps rework targeted at an aside run from a newer run on the same seat", async () => {
+    store.addComms({
+      at: NOW - 1,
+      from: "CAPCOM",
+      to: "guido-1",
+      ticket: "mc#42",
+      text: "Rework the review findings.",
+      targetRunId: RUN,
+    });
+    const newer = "guido-1:newer";
+    liveSeat("guido-1", newer);
+    const current = JSON.parse((await read({}, tools, { ...CTX, runId: newer })).text) as {
+      messages: { text: string }[];
+    };
+    expect(current.messages.map((message) => message.text)).not.toContain(
+      "Rework the review findings.",
+    );
+
+    liveSeat("guido-1", RUN);
+    const resumed = JSON.parse((await read()).text) as { messages: { text: string }[] };
+    expect(resumed.messages.map((message) => message.text)).toContain(
+      "Rework the review findings.",
+    );
+  });
+
   it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
     const own = store.addComms({
       at: NOW - 6,

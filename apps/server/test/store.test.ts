@@ -2055,6 +2055,13 @@ describe("comms", () => {
     });
   });
 
+  it("keeps a run-targeted message out of another run's pending Comms", () => {
+    store.addComms({ ...row("rework"), targetRunId: "r1" });
+    store.addComms({ ...row("general"), at: 101 });
+    expect(store.comms(0, "r1").map((message) => message.text)).toEqual(["rework", "general"]);
+    expect(store.comms(0, "r2").map((message) => message.text)).toEqual(["general"]);
+  });
+
   it("counts chatter rounds only when both sides exchanged messages", () => {
     for (let index = 0; index < 14; index++) {
       store.addComms({ at: index, from: "alpha", to: "beta", ticket: "mc#one-way", text: "ping" });

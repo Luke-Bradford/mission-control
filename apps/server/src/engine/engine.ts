@@ -209,6 +209,8 @@ export interface Engine {
     opts?: {
       kinds?: readonly string[];
       action?: "lift" | "rereview" | "accept" | "rework";
+      /** Stores operator work after lift guards pass but before the resumed run can wake. */
+      beforeLift?: () => Promise<boolean>;
       /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
       note?: string;
     },
@@ -440,7 +442,7 @@ export function createEngine(deps: EngineDeps): Engine {
       reviews: store.reviewsOfRun(run.id),
       events: store.loopEventsOfRun(run.id),
       messages: store
-        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER)
+        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER, run.id)
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
@@ -2203,6 +2205,7 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           if (flightHeld(store.run(run.id) ?? run)) return;
         }
+        if (opts?.beforeLift !== undefined && !(await opts.beforeLift())) return;
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);

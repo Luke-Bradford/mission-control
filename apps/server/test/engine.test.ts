@@ -5365,6 +5365,48 @@ describe("the engine runs reviews", () => {
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
     });
 
+    it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {
+      await setAside();
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review findings", ended: false },
+      });
+      let storedWhileParked = false;
+      expect(
+        await h.engine.onOperatorMessage(RUN, "CAPCOM", {
+          kinds: ["review"],
+          beforeLift: async () => {
+            storedWhileParked = loopOf().phase === "parked";
+            store.addComms({
+              at: clock,
+              from: "CAPCOM",
+              to: SEAT,
+              ticket: `${REPO}#7`,
+              text: "Please rework this.",
+              targetRunId: RUN,
+            });
+            return true;
+          },
+        }),
+      ).toBe(true);
+      expect(storedWhileParked).toBe(true);
+      expect(loopOf().phase).toBe("working");
+      expect(store.comms(0, RUN).map((message) => message.text)).toContain("Please rework this.");
+      expect(h.wakes).toContain(RUN);
+
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review findings", ended: false },
+      });
+      expect(
+        await h.engine.onOperatorMessage(RUN, "CAPCOM", {
+          kinds: ["review"],
+          beforeLift: async () => false,
+        }),
+      ).toBe(false);
+      expect(loopOf().phase).toBe("parked");
+    });
+
     it("freed at review", async () => {
       await setAside();
       expect(asideRun()).toEqual({ worktree: WT, wake: false });

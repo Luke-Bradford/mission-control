@@ -800,6 +800,18 @@ This accepts the parked run:
 
 The route answers 409 when the engine is off, or when nothing was lifted.
 
+### Rework a parked run
+
+To send rework text to a set-aside run that is parked on review findings, use:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/message -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"text":"Please address the findings."}'
+```
+
+The text waits for that run (it is not sent to a newer run on the same seat). The route resumes only
+`review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
+refused; use the explicitly named resume route above only when accepting a review waiver is intended.
+
 ## What it observes
 
 | Collector | Source | Cadence |

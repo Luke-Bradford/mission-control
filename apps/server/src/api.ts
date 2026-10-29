@@ -126,7 +126,14 @@ import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { COMMS_SNAPSHOT_LIMIT, pinComms, reactComms, sendComms, threadMessages } from "./comms.ts";
+import {
+  COMMS_SNAPSHOT_LIMIT,
+  pinComms,
+  reactComms,
+  sendComms,
+  threadMessages,
+  validateCommsText,
+} from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -3132,6 +3139,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
+      // Rework reaches a set-aside run through Comms, rather than interrupting whichever newer run
+      // now occupies its seat. The engine wakes the set-aside run after the message is stored.
+      // Reader: docs/runbook.md#rework-a-parked-run
+      api.post<{ Params: { id: string } }>(
+        "/runs/:id/message",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const run = store.run(req.params.id);
+          if (run === null) return reply.code(404).send({ error: "unknown run" });
+          if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = MessageBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (deps.engine?.status().on !== true)
+            return reply.code(409).send({ error: "the loop engine is off" });
+          const kind = run.loop.parked?.kind;
+          if (kind !== "review" && kind !== "review-ruling")
+            return reply.code(409).send({ error: "rework is only available for review parks" });
+          const knownSecrets = deps.knownSecrets ?? (async () => []);
+          try {
+            await validateCommsText(knownSecrets, body.data.text);
+          } catch (e) {
+            return crewFail(
+              new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+              reply,
+            );
+          }
+          let commsError: unknown = null;
+          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
+            kinds: [kind],
+            beforeLift: async () => {
+              try {
+                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
+                  to: run.agentId,
+                  text: body.data.text,
+                  ref: run.ticket ?? undefined,
+                  targetRunId: run.id,
+                });
+                return true;
+              } catch (e) {
+                commsError = e;
+                return false;
+              }
+            },
+          });
+          if (commsError !== null)
+            return crewFail(
+              new SupervisorError(
+                400,
+                commsError instanceof Error ? commsError.message : "Comms message refused.",
+              ),
+              reply,
+            );
+          if (!lifted)
+            return reply
+              .code(409)
+              .send({ error: "the review park could not be resumed for rework" });
+          return { ok: true };
+        },
+      );
       // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
       api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
         const run = store.run(req.params.id);

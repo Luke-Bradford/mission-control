@@ -638,6 +638,7 @@ export interface NewCommsRow {
   label?: CommsLabel | null;
   ref?: string | null;
   replyTo?: string | null;
+  targetRunId?: string | null;
   mentions?: readonly string[];
 }
 
@@ -1180,6 +1181,7 @@ export class Store {
     );
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
+    this.addColumn("comms", "target_run_id", "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
@@ -3132,7 +3134,7 @@ export class Store {
       }
       const inserted = this.db
         .prepare(
-          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           row.at,
@@ -3143,6 +3145,7 @@ export class Store {
           row.label ?? null,
           row.ref ?? null,
           replyTo,
+          row.targetRunId ?? null,
         );
       id = Number(inserted.lastInsertRowid);
       const mention = this.db.prepare(
@@ -3274,13 +3277,37 @@ export class Store {
   commsForCrew(): CommsRow[] {
     return this.commsForWhere("to_id = 'crew'");
   }
+  /** Seat-side reads include only general Comms and rows targeted at its live run. */
+  commsForCrewRun(runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "to_id = 'crew'");
+  }
   commsForAgent(id: string, contact?: string): CommsRow[] {
     return contact === undefined
       ? this.commsForWhere("from_id=? OR to_id=?", id, id)
       : this.commsForPair(id, contact);
   }
+  commsForAgentRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "from_id=? OR to_id=?", id, id);
+  }
   commsInbox(id: string): CommsRow[] {
     return this.commsForWhere(
+      `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      id,
+      id,
+      id,
+    );
+  }
+  commsInboxRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(
+      runId,
       `id IN (
         SELECT id FROM comms WHERE to_id=?
         UNION
@@ -3426,6 +3453,13 @@ export class Store {
       this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
     ).map((r) => this.commsRow(r));
   }
+  private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
+    return this.commsForWhere(
+      `(${where}) AND (target_run_id IS NULL OR target_run_id = ?)`,
+      ...args,
+      runId,
+    );
+  }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
@@ -3505,10 +3539,14 @@ export class Store {
   }
 
   /** The hand-offs at or after `since`, oldest first. */
-  comms(since: number): CommsRow[] {
+  comms(since: number, targetRunId?: string): CommsRow[] {
     const rows = this.db
-      .prepare("SELECT * FROM comms WHERE at >= ? ORDER BY at, id")
-      .all(since) as Row[];
+      .prepare(
+        targetRunId === undefined
+          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id"
+          : "SELECT * FROM comms WHERE at >= ? AND (target_run_id IS NULL OR target_run_id = ?) ORDER BY at, id",
+      )
+      .all(since, ...(targetRunId === undefined ? [] : [targetRunId])) as Row[];
     // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
     // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({
