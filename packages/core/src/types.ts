@@ -433,9 +433,12 @@ export interface FlowPr {
   firstPushCi: "passing" | "failing" | "pending" | null;
 }
 
+/** A repo milestone: its due date and how many of its issues are open and closed. */
 export interface RepoGoal {
   repoId: RepoId;
+  number: number;
   title: string;
+  state: "open" | "closed";
   dueOn: number | null;
   open: number;
   closed: number;

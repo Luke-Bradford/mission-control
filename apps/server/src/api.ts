@@ -12,6 +12,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  type CiRunsView,
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
@@ -58,12 +59,15 @@ import {
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
+  type MilestonesView,
   NEW_LOOP,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
   pace5h,
   projectAtReset,
+  QA_RETENTION_DAYS,
+  type QaFindingsView,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type RepoProfile,
@@ -458,6 +462,13 @@ const GuardCheckBody = z.strictObject({
 
 const MAX_GUARD_DAYS = 30;
 const GUARD_DAYS = /^[1-9]\d?$/;
+/** The `days` of a QA board read: whole days, 1..QA_RETENTION_DAYS; null when it is not. */
+function qaDays(raw: unknown, fallback: number): number | null {
+  if (raw === undefined) return fallback;
+  if (typeof raw !== "string" || !/^[1-9]\d{0,2}$/.test(raw)) return null;
+  return Number(raw) <= QA_RETENTION_DAYS ? Number(raw) : null;
+}
+const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
@@ -1460,7 +1471,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .type("application/json")
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
-            lock?.release(key);
+            lock?.release(key, body.data.hook_event_name === "PostToolUseFailure");
             return answer();
           }
           const verdict = crewGuardDecision(
@@ -1537,21 +1548,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table), Kpis.tsx (Lock wait) and components/LockLines.tsx (usually about)
-      api.get("/test-lock/history", async (): Promise<TestLockHistory> => {
-        const at = now();
-        const runs = store.lockRuns(at - TELEMETRY_RANGES["7d"] * 60_000);
-        const today = runs.filter(
-          (r) => r.startedAt >= startOfLocalDay(at, config.operator.timezone),
-        );
-        return {
-          runs,
-          today: {
-            runs: today.length,
-            waitMs: today.reduce((sum, r) => sum + r.startedAt - r.queuedAt, 0),
-          },
-          usualMs: usualLockMs(runs),
-        };
-      });
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/test-lock/history",
+        async (req, reply): Promise<TestLockHistory | FastifyReply> => {
+          const days = qaDays(req.query.days, 7);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          const at = now();
+          const runs = store.lockRuns(at - days * DAY_MS);
+          const today = runs.filter(
+            (r) => r.startedAt >= startOfLocalDay(at, config.operator.timezone),
+          );
+          return {
+            runs,
+            today: {
+              runs: today.length,
+              waitMs: today.reduce((sum, r) => sum + r.startedAt - r.queuedAt, 0),
+            },
+            usualMs: usualLockMs(runs),
+          };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (the CI run history behind the QA board's flaky-test and green-rate views)
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/qa/ci-runs",
+        async (req, reply): Promise<CiRunsView | FastifyReply> => {
+          const days = qaDays(req.query.days, 7);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          return { runs: store.ciRuns(now() - days * DAY_MS) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (review findings with category and resolution)
+      api.get<{ Querystring: { days?: unknown } }>(
+        "/qa/findings",
+        async (req, reply): Promise<QaFindingsView | FastifyReply> => {
+          const days = qaDays(req.query.days, 30);
+          if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
+          return { findings: store.qaFindings(now() - days * DAY_MS) };
+        },
+      );
+
+      // Reader: docs/runbook.md#qa-board-data (milestones with due dates and progress)
+      api.get(
+        "/qa/milestones",
+        async (): Promise<MilestonesView> => ({
+          milestones: store.milestones(),
+        }),
+      );
 
       api.get<{ Querystring: { days?: unknown } }>(
         "/guard/hits",

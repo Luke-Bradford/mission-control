@@ -1200,6 +1200,9 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/test-lock"],
   ["GET", "/api/test-lock/history"],
   ["GET", "/api/guard/hits?days=7"],
+  ["GET", "/api/qa/ci-runs"],
+  ["GET", "/api/qa/findings"],
+  ["GET", "/api/qa/milestones"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -6903,6 +6906,143 @@ describe("test lock history", () => {
     ]);
     expect(h.today).toEqual({ runs: 4, waitMs: 4000 });
     expect(h.usualMs).toEqual({ test: 200 });
+  });
+
+  it("reads further back with days, up to ninety, and refuses more", async () => {
+    store.addLockHold({
+      runId: "old",
+      seatId: "guido-1",
+      toolUseId: "call",
+      command: "pnpm -s test",
+      since: NOW - 40 * 86400000,
+    });
+    store.deleteLockHold("old", "call", NOW - 40 * 86400000 + 100, true);
+    expect((await get("/api/test-lock/history")).json().runs).toEqual([]);
+    const far = (await get("/api/test-lock/history?days=90")).json();
+    expect(far.runs).toEqual([expect.objectContaining({ runId: "old", outcome: "fail" })]);
+    expect((await get("/api/test-lock/history?days=91")).statusCode).toBe(400);
+    expect((await get("/api/test-lock/history?days=x")).statusCode).toBe(400);
+  });
+});
+
+describe("QA board data", () => {
+  it("serves CI runs, newest first, from the days asked", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 3,
+          title: "t",
+          url: "u",
+          branch: "b",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "failing",
+          createdAt: 1,
+          updatedAt: 2,
+          mergedAt: null,
+          headSha: "abc",
+          mergeable: null,
+          checks: [
+            {
+              workflow: "CI",
+              name: "test",
+              kind: "check",
+              state: "failing",
+              conclusion: "FAILURE",
+              attempt: 1,
+              url: "https://example.test/1",
+            },
+          ],
+        },
+      ],
+      NOW - 1000,
+    );
+    const body = (await get("/api/qa/ci-runs")).json();
+    expect(body.runs).toEqual([
+      expect.objectContaining({
+        repoId: "shop-app",
+        prNumber: 3,
+        sha: "abc",
+        workflow: "CI",
+        name: "test",
+        attempt: 1,
+        conclusion: "FAILURE",
+      }),
+    ]);
+    expect((await get("/api/qa/ci-runs?days=0")).statusCode).toBe(400);
+    expect((await get("/api/qa/ci-runs?days=91")).statusCode).toBe(400);
+  });
+
+  it("serves milestones with due dates and progress", async () => {
+    store.replaceMilestones("shop-app", [
+      {
+        repoId: "shop-app",
+        number: 1,
+        title: "MVP",
+        state: "open",
+        dueOn: 5000,
+        open: 2,
+        closed: 8,
+      },
+    ]);
+    expect((await get("/api/qa/milestones")).json()).toEqual({
+      milestones: [
+        {
+          repoId: "shop-app",
+          number: 1,
+          title: "MVP",
+          state: "open",
+          dueOn: 5000,
+          open: 2,
+          closed: 8,
+        },
+      ],
+    });
+  });
+
+  it("serves findings with category and resolution", async () => {
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "shop-app",
+      seatId: "retro-1",
+      prNumber: 9,
+      sha: "a".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - 1000,
+    }) as number;
+    store.setReviewState(id, ["queued"], "running", { at: NOW - 900, runId: "rev" });
+    store.recordFindings(id, "rev", {
+      verdict: { spec: "fail", quality: "pass" },
+      summary: "s",
+      findings: [
+        {
+          severity: "Important",
+          file: "a.ts",
+          line: 1,
+          summary: "x",
+          scenario: "y",
+          fix: "z",
+          category: "test-missing",
+        },
+      ],
+      at: NOW - 800,
+    });
+    expect((await get("/api/qa/findings")).json().findings).toEqual([
+      expect.objectContaining({
+        reviewId: id,
+        prNumber: 9,
+        category: "test-missing",
+        severity: "Important",
+        resolution: null,
+      }),
+    ]);
+    expect((await get("/api/qa/findings?days=91")).statusCode).toBe(400);
   });
 });
 

@@ -664,6 +664,147 @@ describe("Store", () => {
     expect(store.pullRequests("r1").find((p) => p.number === 1)?.checks).toEqual(passed);
   });
 
+  it("appends each polled check run to ci_runs and updates it in place when it concludes", () => {
+    const pr = {
+      repoId: "r1",
+      number: 5,
+      title: "t",
+      url: "u",
+      branch: "fix/1-x",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "pending" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: "sha1",
+      mergeable: null,
+    };
+    const check = (over: object = {}) => ({
+      workflow: "CI",
+      name: "test",
+      kind: "check" as const,
+      state: "pending" as const,
+      conclusion: "IN_PROGRESS",
+      attempt: 1,
+      url: "https://example.test/1",
+      ...over,
+    });
+    store.upsertPullRequests("r1", [{ ...pr, checks: [check()] }], 1000);
+    store.upsertPullRequests(
+      "r1",
+      [{ ...pr, checks: [check({ state: "failing", conclusion: "FAILURE" })] }],
+      2000,
+    );
+    store.upsertPullRequests(
+      "r1",
+      [
+        {
+          ...pr,
+          checks: [
+            check({ state: "passing", conclusion: "SUCCESS", attempt: 2 }),
+            {
+              name: "lint",
+              kind: "status" as const,
+              state: "passing" as const,
+              conclusion: "success",
+              attempt: null,
+              url: null,
+            },
+          ],
+        },
+      ],
+      3000,
+    );
+    expect(store.ciRuns(0)).toEqual([
+      expect.objectContaining({
+        name: "lint",
+        attempt: 0,
+        workflow: null,
+        firstSeenAt: 3000,
+        at: 3000,
+      }),
+      expect.objectContaining({
+        name: "test",
+        attempt: 2,
+        conclusion: "SUCCESS",
+        firstSeenAt: 3000,
+      }),
+      expect.objectContaining({
+        name: "test",
+        attempt: 1,
+        state: "failing",
+        conclusion: "FAILURE",
+        prNumber: 5,
+        sha: "sha1",
+        firstSeenAt: 1000,
+        at: 2000,
+      }),
+    ]);
+    expect(store.ciRuns(2500).map((r) => r.name)).toEqual(["lint", "test"]);
+  });
+
+  it("keeps ci_runs ninety days", async () => {
+    const pr = {
+      repoId: "r1",
+      number: 5,
+      title: "t",
+      url: "u",
+      branch: "b",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: "sha1",
+      mergeable: null,
+      checks: [
+        {
+          name: "test",
+          kind: "check" as const,
+          state: "passing" as const,
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    };
+    const day = 86_400_000;
+    store.upsertPullRequests("r1", [pr], 10 * day);
+    await store.pruneHistory(10 * day + 90 * day);
+    expect(store.ciRuns(0)).toHaveLength(1);
+    await store.pruneHistory(10 * day + 90 * day + 1);
+    expect(store.ciRuns(0)).toEqual([]);
+  });
+
+  it("replaces a repo's milestones, scoped to the repo", () => {
+    const goal = (over: object = {}) => ({
+      repoId: "r1",
+      number: 1,
+      title: "MVP",
+      state: "open" as const,
+      dueOn: 5000,
+      open: 3,
+      closed: 7,
+      ...over,
+    });
+    store.replaceMilestones("r1", [goal(), goal({ number: 2, title: "Later", dueOn: null })]);
+    store.replaceMilestones("r2", [goal({ repoId: "r2", title: "Other" })]);
+    expect(store.milestones().map((m) => [m.repoId, m.title, m.dueOn, m.open, m.closed])).toEqual([
+      ["r1", "MVP", 5000, 3, 7],
+      ["r1", "Later", null, 3, 7],
+      ["r2", "Other", 5000, 3, 7],
+    ]);
+    store.replaceMilestones("r1", [goal({ state: "closed", open: 0, closed: 10 })]);
+    expect(store.milestones("r1")).toEqual([goal({ state: "closed", open: 0, closed: 10 })]);
+    expect(store.milestones("r2")).toHaveLength(1);
+  });
+
   it("pull requests upsert, replace, scope to the repo and round-trip every field", () => {
     const pr = (repoId: string, number: number, over: object = {}) => ({
       repoId,
@@ -1782,6 +1923,78 @@ describe("reviews", () => {
     );
   });
 
+  describe("finding resolutions", () => {
+    const round = (n: number, runId: string, findings: ReviewFinding[], resolutions = []) => {
+      const id = store.requestReview(request({ round: n, attempt: n, sha: String(n).repeat(40) }));
+      if (id === null) throw new Error("no id");
+      store.setReviewState(id, ["queued"], "starting", { at: 110 * n });
+      store.setReviewState(id, ["starting"], "running", { at: 120 * n, runId });
+      const blocking = findings.some((f) => f.severity !== "Minor");
+      store.recordFindings(id, runId, {
+        verdict: blocking ? verdict : { spec: "pass", quality: "pass" },
+        summary: "ok",
+        findings,
+        resolutions,
+        at: 200 * n,
+      });
+      return id;
+    };
+
+    it("stores the category, and no resolution until a later round reports", () => {
+      const first = round(1, "rev-1", [finding({ category: "test-missing" }), finding()]);
+      expect(store.findingsOf(first)).toMatchObject([
+        { pos: 0, category: "test-missing" },
+        { pos: 1 },
+      ]);
+      expect(store.findingsOf(first).map((f) => f.resolution)).toEqual([undefined, undefined]);
+    });
+
+    it("sets RETRO's outcome on each finding it names, and the engine's fixed on the rest when the round accepts", () => {
+      const first = round(1, "rev-1", [
+        finding(),
+        finding({ severity: "Important" }),
+        finding({ severity: "Important", file: "c.ts" }),
+        finding({ severity: "Minor" }),
+      ]);
+      const second = round(2, "rev-2", [], [
+        { findingRef: { reviewId: first, pos: 0 }, outcome: "reply-accepted" },
+        { findingRef: { reviewId: first, pos: 1 }, outcome: "held" },
+      ] as never);
+      expect(store.findingsOf(first).map((f) => [f.pos, f.resolution, f.resolvedReviewId])).toEqual(
+        [
+          [0, "reply-accepted", second],
+          [1, "held", second],
+          [2, "fixed", second],
+          [3, undefined, undefined],
+        ],
+      );
+    });
+
+    it("leaves unnamed findings open while the later round still blocks", () => {
+      const first = round(1, "rev-1", [finding(), finding({ file: "b.ts" })]);
+      const second = round(2, "rev-2", [finding({ file: "b.ts" })], [
+        { findingRef: { reviewId: first, pos: 0 }, outcome: "fixed" },
+      ] as never);
+      expect(store.findingsOf(first).map((f) => f.resolution)).toEqual(["fixed", undefined]);
+      expect(store.findingsOf(second).map((f) => f.resolution)).toEqual([undefined]);
+    });
+
+    it("lists findings with their review for the QA board", () => {
+      const first = round(1, "rev-1", [finding({ category: "security" })]);
+      round(2, "rev-2", []);
+      expect(store.qaFindings(0)).toEqual([
+        expect.objectContaining({
+          reviewId: first,
+          prNumber: 7,
+          round: 1,
+          category: "security",
+          resolution: "fixed",
+        }),
+      ]);
+      expect(store.qaFindings(10_000)).toEqual([]);
+    });
+  });
+
   it("review runs are not ticket runs", () => {
     store.upsertRun(run({ id: "author", ticket: "repo#5", startedAt: 1000 }));
     store.upsertRun(run({ id: "rev-run", ticket: "repo#5", startedAt: 2000, reviewId: 1 }));
@@ -2221,13 +2434,32 @@ describe("test lock history", () => {
     expect(store.lockRuns(0)[0]).toMatchObject({ queuedAt: 4500, endedAt: 6000, outcome: "freed" });
   });
 
-  it("prunes history strictly older than eight days on the next insert", () => {
+  it("records the Post hook event as pass or fail, and a failed call fails the whole hold", () => {
+    const h = { runId: "r1", seatId: "a1", command: "pnpm test", toolUseId: "one", since: 1000 };
+    store.addLockHold(h);
+    store.deleteLockHold("r1", "one", 2000, false);
+    expect(store.lockRuns(0)[0]).toMatchObject({ endedAt: 2000, outcome: "pass" });
+    store.addLockHold({ ...h, runId: "r2", since: 3000 });
+    store.deleteLockHold("r2", "one", 4000, true);
+    expect(store.lockRuns(0)[0]).toMatchObject({ runId: "r2", endedAt: 4000, outcome: "fail" });
+    store.addLockHold({ ...h, runId: "r3", since: 5000 });
+    store.addLockHold({ ...h, runId: "r3", toolUseId: "two", since: 5001 });
+    store.deleteLockHold("r3", "one", 6000, true);
+    expect(store.lockRuns(0)[0]).toMatchObject({ runId: "r3", endedAt: null, outcome: "fail" });
+    store.deleteLockHold("r3", "two", 7000, false);
+    expect(store.lockRuns(0)[0]).toMatchObject({ runId: "r3", endedAt: 7000, outcome: "fail" });
+  });
+
+  it("prunes history strictly older than ninety days on the next insert", () => {
+    const day = 86400000;
     const h = { runId: "old", seatId: "a1", command: "test", toolUseId: "one", since: 1000 };
     store.addLockHold(h);
     store.deleteLockHolds("old", 2000);
     store.addLockHold({ ...h, runId: "edge", since: 1001 });
-    store.addLockHold({ ...h, runId: "new", since: 1001 + 8 * 86400000 });
-    expect(store.lockRuns(0).map((r) => r.runId)).toEqual(["new", "edge"]);
+    store.addLockHold({ ...h, runId: "eight", since: 1001 + 8 * day });
+    expect(store.lockRuns(0).map((r) => r.runId)).toEqual(["eight", "edge", "old"]);
+    store.addLockHold({ ...h, runId: "new", since: 1001 + 90 * day });
+    expect(store.lockRuns(0).map((r) => r.runId)).toEqual(["new", "eight", "edge"]);
   });
 });
 
@@ -2571,13 +2803,15 @@ describe("hub retention", () => {
 
   it("prunes past each window, keeping boundary and newer rows and review history", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
-    const now = 40 * 86_400_000;
+    const now = 100 * 86_400_000;
     const seatCutoff = now - 7 * 86_400_000;
     const month = now - 30 * 86_400_000;
+    const quarter = now - 90 * 86_400_000;
     store.upsertRun(run());
     for (const [i, offset] of [-1, 0, 1].entries()) {
       store.upsertRun(run({ id: `seat${i}`, endedAt: seatCutoff + offset }));
       store.upsertRun(run({ id: `owner${i}`, endedAt: month + offset }));
+      store.upsertRun(run({ id: `quarter${i}`, endedAt: quarter + offset }));
       db.prepare("INSERT INTO seat_lines VALUES (?, ?, 'seat', 'sys', 'text', ?)").run(
         String(i),
         `seat${i}`,
@@ -2596,25 +2830,27 @@ describe("hub retention", () => {
         (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, created_at, ended_at)
         VALUES (?, ?, 'repo', 'seat', 1, ?, 1, 1, 1, 'reported', ?, ?)`).run(
         i + 1,
-        `owner${i}`,
+        `quarter${i}`,
         String(i),
         0,
-        month + offset,
+        quarter + offset,
       );
       db.prepare(`INSERT INTO review_findings
         (review_id, author_run_id, pos, severity, file, line, summary, scenario, fix, state)
         VALUES (?, ?, 0, 'minor', 'file.ts', 1, 'summary', 'scenario', 'fix', 'open')`).run(
         i + 1,
-        `owner${i}`,
+        `quarter${i}`,
       );
     }
     db.exec(`INSERT INTO flight_decisions (at, kind, about, decision, basis)
-      VALUES (0, 'end', 'run', 'ended', 'done')`);
+      VALUES (${now - 1}, 'end', 'run', 'ended', 'done')`);
     try {
       await store.pruneHistory(now);
       for (const table of ["seat_lines", "loop_events", "run_evidence", "review_findings"]) {
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 2 });
       }
+      // a finding lives ninety days, not thirty
+      expect(db.prepare("SELECT COUNT(*) AS n FROM review_findings").get()).toEqual({ n: 2 });
       expect(db.prepare("SELECT key FROM seat_lines ORDER BY key").all()).toEqual([
         { key: "1" },
         { key: "2" },
@@ -2624,7 +2860,7 @@ describe("hub retention", () => {
         { review_id: 3 },
       ]);
       expect(db.prepare("SELECT COUNT(*) AS n FROM reviews").get()).toEqual({ n: 3 });
-      expect(db.prepare("SELECT COUNT(*) AS n FROM runs").get()).toEqual({ n: 7 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM runs").get()).toEqual({ n: 10 });
       expect(db.prepare("SELECT COUNT(*) AS n FROM flight_decisions").get()).toEqual({ n: 1 });
     } finally {
       db.close();

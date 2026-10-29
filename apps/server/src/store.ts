@@ -12,6 +12,7 @@ import {
   type BoardItem,
   type BriefOption,
   type ChosenProfile,
+  type CiRunView,
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_MC,
@@ -60,7 +61,10 @@ import {
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
+  QA_RETENTION_DAYS,
+  type QaFindingView,
   type ReplyDraft,
+  type RepoGoal,
   type RepoId,
   type ReportedTest,
   type ReviewCheck,
@@ -201,6 +205,19 @@ CREATE TABLE IF NOT EXISTS review_resolutions (
   review_id INTEGER NOT NULL, prior_review_id INTEGER NOT NULL, finding_pos INTEGER NOT NULL,
   outcome TEXT NOT NULL, PRIMARY KEY (review_id, prior_review_id, finding_pos)
 );
+-- One row per check run of a PR head, kept as the hub polled it: updated in place as it concludes.
+CREATE TABLE IF NOT EXISTS ci_runs (
+  repo_id TEXT NOT NULL, sha TEXT NOT NULL, name TEXT NOT NULL, attempt INTEGER NOT NULL,
+  pr_number INTEGER NOT NULL, workflow TEXT, state TEXT NOT NULL, conclusion TEXT NOT NULL, url TEXT,
+  first_seen_at INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, sha, name, attempt)
+);
+CREATE INDEX IF NOT EXISTS ci_runs_at ON ci_runs(at);
+-- A repo's milestones as GitHub last answered, replaced whole on each read.
+CREATE TABLE IF NOT EXISTS milestones (
+  repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL,
+  due_on INTEGER, open INTEGER NOT NULL, closed INTEGER NOT NULL, PRIMARY KEY (repo_id, number)
+);
 -- Lines sent to a seat, one row per key: a claimed key is never sent twice.
 CREATE TABLE IF NOT EXISTS seat_lines (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, seat_id TEXT NOT NULL, origin TEXT NOT NULL,
@@ -312,7 +329,7 @@ CREATE TABLE IF NOT EXISTS test_lock_holds (
   run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
   since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
 );
--- One row per hold, retained for eight days.
+-- One row per hold, retained for QA_RETENTION_DAYS. outcome: pass or fail from the Post hook event.
 CREATE TABLE IF NOT EXISTS test_lock_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seat_id TEXT NOT NULL,
   command TEXT NOT NULL, queued_at INTEGER NOT NULL, started_at INTEGER NOT NULL,
@@ -1148,6 +1165,8 @@ export class Store {
     this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("review_findings", "category", "TEXT");
+    this.addColumn("review_findings", "resolution", "TEXT");
+    this.addColumn("review_findings", "resolved_review_id", "INTEGER");
     // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
     this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "additions", "INTEGER");
@@ -1854,6 +1873,7 @@ export class Store {
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
+    this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
       AND json_extract(r.loop, '$.aside') IS NULL
@@ -1865,7 +1885,7 @@ export class Store {
       ["seat_lines", 7, "AND origin != 'engine'"],
       ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
       ["run_evidence", 30, ""],
-      ["review_findings", 30, ""],
+      ["review_findings", QA_RETENTION_DAYS, ""],
       ["comms", COMMS_RETENTION_DAYS, ""],
       ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
     ] as const;
@@ -2161,7 +2181,30 @@ export class Store {
          (json_extract(record, '$.deletions') IS NULL AND ? IS NOT NULL) OR
          (json_extract(record, '$.changedFiles') IS NULL AND ? IS NOT NULL))`,
     );
+    const addCiRun = this.db.prepare(
+      `INSERT INTO ci_runs (repo_id, sha, name, attempt, pr_number, workflow, state, conclusion, url,
+         first_seen_at, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(repo_id, sha, name, attempt) DO UPDATE SET pr_number = excluded.pr_number,
+         workflow = excluded.workflow, state = excluded.state, conclusion = excluded.conclusion,
+         url = excluded.url, at = excluded.at`,
+    );
     for (const p of prs) {
+      if (p.headSha)
+        for (const c of p.checks ?? [])
+          addCiRun.run(
+            repoId,
+            p.headSha,
+            c.name,
+            c.attempt ?? 0,
+            p.number,
+            c.workflow ?? null,
+            c.state,
+            c.conclusion,
+            c.url,
+            readAt,
+            readAt,
+          );
       const runs = this.db
         .prepare(
           "SELECT id FROM runs WHERE repo_id = ? AND (json_extract(loop, '$.prNumber') = ? OR id IN (SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?))",
@@ -3046,13 +3089,37 @@ export class Store {
         `INSERT INTO review_resolutions (review_id, prior_review_id, finding_pos, outcome)
          VALUES (?, ?, ?, ?)`,
       );
-      for (const resolution of r.resolutions ?? [])
+      const resolve = this.db.prepare(
+        `UPDATE review_findings SET resolution = ?, resolved_review_id = ?
+         WHERE review_id = ? AND pos = ? AND resolution IS NULL`,
+      );
+      for (const resolution of r.resolutions ?? []) {
         insertResolution.run(
           reviewId,
           resolution.findingRef.reviewId,
           resolution.findingRef.pos,
           resolution.outcome,
         );
+        resolve.run(
+          resolution.outcome,
+          reviewId,
+          resolution.findingRef.reviewId,
+          resolution.findingRef.pos,
+        );
+      }
+      // A round that reports nothing to fix accepts the author's work: the blocking findings of the
+      // earlier rounds that RETRO did not name were fixed.
+      if (blocking === 0) {
+        this.db
+          .prepare(
+            `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
+             WHERE state = 'open' AND resolution IS NULL AND review_id IN (
+               SELECT p.id FROM reviews p, reviews c
+               WHERE c.id = ? AND p.author_run_id = c.author_run_id AND p.epoch = c.epoch
+                 AND p.round < c.round)`,
+          )
+          .run(reviewId, reviewId);
+      }
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),
         findings: r.findings,
@@ -3077,6 +3144,35 @@ export class Store {
       fix: r.fix as string,
       category: (r.category as StoredFinding["category"]) ?? undefined,
       state: r.state as StoredFinding["state"],
+      resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
+      resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
+    }));
+  }
+
+  /** Findings of reviews that ended since `since`, newest review first. */
+  qaFindings(since: number): QaFindingView[] {
+    const rows = this.db
+      .prepare(
+        `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
+         JOIN reviews v ON v.id = f.review_id
+         WHERE v.ended_at >= ? ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.review_id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      reviewEndedAt: r.ended_at as number | null,
+      pos: r.pos as number,
+      severity: r.severity as string,
+      category: r.category as string | null,
+      file: r.file as string,
+      line: r.line as number,
+      summary: r.summary as string,
+      resolution: r.resolution as string | null,
+      resolvedReviewId: r.resolved_review_id as number | null,
     }));
   }
 
@@ -4091,19 +4187,31 @@ export class Store {
         SELECT 1 FROM test_lock_runs WHERE run_id = ? AND ended_at IS NULL
       )`)
       .run(h.runId, h.seatId, h.command, h.queuedAt ?? h.since, h.since, h.runId);
-    this.db.prepare("DELETE FROM test_lock_runs WHERE started_at < ?").run(h.since - 8 * 86400000);
+    this.db
+      .prepare("DELETE FROM test_lock_runs WHERE started_at < ?")
+      .run(h.since - QA_RETENTION_DAYS * 86400000);
   }
 
-  deleteLockHold(runId: string, toolUseId: string, at = Date.now()): void {
+  /**
+   * One held call ended. `failed` is the Post hook event (PostToolUseFailure): the hold's outcome is
+   * `fail` when any of its calls failed, else `pass`; with no event (undefined) it is `done`.
+   */
+  deleteLockHold(runId: string, toolUseId: string, at = Date.now(), failed?: boolean): void {
     this.db
       .prepare("DELETE FROM test_lock_holds WHERE run_id = ? AND tool_use_id = ?")
       .run(runId, toolUseId);
+    if (failed === true) {
+      this.db
+        .prepare("UPDATE test_lock_runs SET outcome = 'fail' WHERE run_id = ? AND ended_at IS NULL")
+        .run(runId);
+    }
     this.db
-      .prepare(`UPDATE test_lock_runs SET ended_at = ?, outcome = 'done'
+      .prepare(`UPDATE test_lock_runs SET ended_at = ?,
+        outcome = CASE WHEN outcome = 'fail' THEN 'fail' WHEN ? IS NULL THEN 'done' ELSE 'pass' END
       WHERE run_id = ? AND ended_at IS NULL AND NOT EXISTS (
         SELECT 1 FROM test_lock_holds WHERE run_id = ?
       )`)
-      .run(at, runId, runId);
+      .run(at, failed === undefined ? null : 1, runId, runId);
   }
 
   /** Every held call of the run. */
@@ -4132,6 +4240,55 @@ export class Store {
       endedAt: r.ended_at as number | null,
       outcome: r.outcome as TestLockRun["outcome"],
       ticket: r.ticket as string | null,
+    }));
+  }
+
+  /** Check runs last read since `since`, newest first. */
+  ciRuns(since: number): CiRunView[] {
+    const rows = this.db
+      .prepare("SELECT * FROM ci_runs WHERE at >= ? ORDER BY at DESC, name, attempt DESC")
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      sha: r.sha as string,
+      workflow: r.workflow as string | null,
+      name: r.name as string,
+      attempt: r.attempt as number,
+      state: r.state as CiRunView["state"],
+      conclusion: r.conclusion as string,
+      url: r.url as string | null,
+      firstSeenAt: r.first_seen_at as number,
+      at: r.at as number,
+    }));
+  }
+
+  /** The repo's milestones, from the last full read. */
+  replaceMilestones(repoId: RepoId, goals: RepoGoal[]): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM milestones WHERE repo_id = ?").run(repoId);
+      const ins = this.db.prepare(
+        `INSERT INTO milestones (repo_id, number, title, state, due_on, open, closed)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const g of goals) ins.run(repoId, g.number, g.title, g.state, g.dueOn, g.open, g.closed);
+    });
+  }
+
+  milestones(repoId?: RepoId): RepoGoal[] {
+    const rows = (
+      repoId === undefined
+        ? this.db.prepare("SELECT * FROM milestones ORDER BY repo_id, number").all()
+        : this.db.prepare("SELECT * FROM milestones WHERE repo_id = ? ORDER BY number").all(repoId)
+    ) as Row[];
+    return rows.map((r) => ({
+      repoId: r.repo_id as RepoId,
+      number: r.number as number,
+      title: r.title as string,
+      state: r.state as RepoGoal["state"],
+      dueOn: r.due_on as number | null,
+      open: r.open as number,
+      closed: r.closed as number,
     }));
   }
 

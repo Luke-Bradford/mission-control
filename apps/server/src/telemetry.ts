@@ -80,11 +80,11 @@ export function median(values: number[]): number | null {
     : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
 }
 
-/** Median length of each command's done holds, once it has three. */
+/** Median length of each command's finished holds (not failed, not freed), once it has three. */
 export function usualLockMs(runs: TestLockRun[]): Record<string, number> {
   const lengths = new Map<string, number[]>();
   for (const r of runs) {
-    if (r.outcome !== "done" || r.endedAt === null) continue;
+    if ((r.outcome !== "done" && r.outcome !== "pass") || r.endedAt === null) continue;
     const list = lengths.get(r.command) ?? [];
     list.push(r.endedAt - r.startedAt);
     lengths.set(r.command, list);

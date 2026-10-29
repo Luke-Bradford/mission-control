@@ -21,6 +21,7 @@ import {
   type PullRequestView,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
+  type RepoGoal,
   type RepoId,
   SEARCH_MAX_PAGES,
   SEARCH_PAGE_SIZE,
@@ -212,6 +213,21 @@ const PR_FIELDS = `
         closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
+
+/** A repo's milestones: due date, state and issue counts. Read-only; page 1 holds the newest 50. */
+const MILESTONES_MAX = 50;
+const MILESTONES_QUERY = `query Milestones($owner: String!, $name: String!) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    milestones(first: ${MILESTONES_MAX}, orderBy: {field: NUMBER, direction: DESC}) {
+      nodes {
+        number title state dueOn
+        openIssues: issues(states: OPEN) { totalCount }
+        closedIssues: issues(states: CLOSED) { totalCount }
+      }
+    }
+  }
+}`;
 
 const MAIN_SELECTION = `defaultBranchRef {
       target { ... on Commit { oid committedDate statusCheckRollup { state contexts(first: 10) { nodes { ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } }
@@ -892,6 +908,35 @@ export async function fetchComments(
   return { comments, truncated: !hasQuestionFence(comments) && more() };
 }
 
+/** The repo's milestones with their due dates and open and closed issue counts. */
+export async function fetchMilestones(
+  repo: CcConfig["repos"][number],
+  gql: Gql,
+): Promise<RepoGoal[]> {
+  const [owner = "", name = ""] = repo.github.split("/");
+  const nodes = path(
+    await call(gql, MILESTONES_QUERY, { owner, name }),
+    "repository",
+    "milestones",
+    "nodes",
+  );
+  if (!Array.isArray(nodes)) throw new Error(`milestones not found for ${repo.github}`);
+  return nodes.flatMap((n) => {
+    if (!isObj(n) || typeof n.number !== "number" || typeof n.title !== "string") return [];
+    return [
+      {
+        repoId: repo.id,
+        number: n.number,
+        title: n.title,
+        state: n.state === "CLOSED" ? ("closed" as const) : ("open" as const),
+        dueOn: ms(n.dueOn) || null,
+        open: num(path(n, "openIssues", "totalCount")),
+        closed: num(path(n, "closedIssues", "totalCount")),
+      },
+    ];
+  });
+}
+
 async function fetchEscalations(
   repo: CcConfig["repos"][number],
   gql: Gql,
@@ -1299,6 +1344,11 @@ export async function collectGithub(
     // Keep the rows, but say they are the last good read.
     store.markPullRequestsStale(repo.id);
     failures.push(`prs: ${errMsg(e)}`);
+  }
+  try {
+    store.replaceMilestones(repo.id, await fetchMilestones(repo, gql));
+  } catch (e) {
+    failures.push(`milestones: ${errMsg(e)}`);
   }
   const collector = githubCollector(repo.id);
   if (failures.length > 0) {
