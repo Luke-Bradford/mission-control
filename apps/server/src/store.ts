@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
 );
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-  done_at INTEGER NOT NULL, PRIMARY KEY (repo_id, number)
+  done_at INTEGER, PRIMARY KEY (repo_id, number)
 );
 CREATE TABLE IF NOT EXISTS flow_prs (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
@@ -1047,6 +1047,25 @@ export class Store {
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
+    // Flow now retains open work for the cumulative-flow chart. SQLite cannot drop NOT NULL in
+    // place, so reconstruct databases created before open rows were recorded.
+    const flowDone = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
+    if (flowDone.find((column) => column.name === "done_at")?.notnull === 1) {
+      this.transaction(() => {
+        const current = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
+        if (current.find((column) => column.name === "done_at")?.notnull !== 1) return;
+        this.db.exec(`
+          ALTER TABLE flow_issues RENAME TO flow_issues_before_open_work;
+          CREATE TABLE flow_issues (
+            repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
+            done_at INTEGER, PRIMARY KEY (repo_id, number)
+          );
+          INSERT INTO flow_issues (repo_id, number, size, start_at, done_at)
+            SELECT repo_id, number, size, start_at, done_at FROM flow_issues_before_open_work;
+          DROP TABLE flow_issues_before_open_work;
+        `);
+      }, true);
+    }
     if (this.getSetting("flight-wake-compact-v1") === null) {
       this.transaction(() => {
         if (this.getSetting("flight-wake-compact-v1") !== null) return;
@@ -2627,7 +2646,7 @@ export class Store {
     return r ? r.read_at : null;
   }
 
-  /** Replaces the repo's flow rows; an issue without a `doneAt` is not stored. */
+  /** Replaces the repo's finished and open flow rows. */
   replaceFlow(repoId: RepoId, issues: FlowIssue[], prs: FlowPr[]): void {
     this.transaction(() => {
       this.db.prepare("DELETE FROM flow_issues WHERE repo_id = ?").run(repoId);
@@ -2635,9 +2654,7 @@ export class Store {
       const insIssue = this.db.prepare(
         "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
       );
-      for (const i of issues) {
-        if (i.doneAt !== null) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
-      }
+      for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
       const insPr = this.db.prepare(
         "INSERT INTO flow_prs (repo_id, number, merged_at, first_push_ci) VALUES (?, ?, ?, ?)",
       );
@@ -2645,17 +2662,21 @@ export class Store {
     });
   }
 
-  /** Issues done at or after `sinceMs`, across repos, oldest first. */
+  /** Issues done at or after `sinceMs`, plus every open flow issue, oldest first. */
   flowIssues(sinceMs: number): FlowIssue[] {
     const rows = this.db
-      .prepare("SELECT * FROM flow_issues WHERE done_at >= ? ORDER BY done_at ASC, repo_id, number")
+      .prepare(
+        `SELECT * FROM flow_issues
+         WHERE done_at >= ? OR done_at IS NULL
+         ORDER BY COALESCE(done_at, start_at, 0) ASC, repo_id, number`,
+      )
       .all(sinceMs) as Row[];
     return rows.map((r) => ({
       repoId: r.repo_id as string,
       number: r.number as number,
       size: r.size as string | null,
       startAt: r.start_at as number | null,
-      doneAt: r.done_at as number,
+      doneAt: r.done_at as number | null,
     }));
   }
 

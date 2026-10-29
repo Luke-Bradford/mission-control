@@ -33,6 +33,7 @@ import type { Store } from "./store.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts";
 
 const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const CHART_STATES = new Set(["running", "waiting", "parked", "idle"] as const);
 
@@ -325,6 +326,61 @@ export function telemetry(
         : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
   };
 
+  const throughputBucketMs = rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
+  const throughputPoints = Array.from(
+    { length: Math.ceil(rangeMs / throughputBucketMs) },
+    (_, index) => ({ at: since + index * throughputBucketMs, merged: 0 }),
+  );
+  for (const mergedAt of merged) {
+    if (mergedAt < since || mergedAt > now) continue;
+    const index = Math.min(
+      throughputPoints.length - 1,
+      Math.floor((mergedAt - since) / throughputBucketMs),
+    );
+    const point = throughputPoints[index];
+    if (point) point.merged += 1;
+  }
+
+  const qualityPoints: TelemetrySeries["quality"] = Array.from(
+    { length: Math.ceil(rangeMs / DAY_MS) },
+    (_, index) => {
+      const start = since + index * DAY_MS;
+      const end = Math.min(now + 1, start + DAY_MS);
+      const dailyPrs = store.flowPrs(start).filter((pr) => pr.mergedAt < end);
+      const dailyKnownCi = dailyPrs.filter((pr) => pr.firstPushCi !== null);
+      const dailyKeys = new Set(dailyPrs.map((pr) => `${pr.repoId}#${pr.number}`));
+      const dailyReviews = new Map<string, ReviewRow[]>();
+      for (const review of store.reviewsIn(["reported"])) {
+        const key = `${review.repoId}#${review.prNumber}`;
+        if (dailyKeys.has(key)) dailyReviews.set(key, [...(dailyReviews.get(key) ?? []), review]);
+      }
+      const reviewedDaily = [...dailyReviews.values()];
+      const firstPassDaily = reviewedDaily.filter(
+        (reviews) =>
+          reviews.filter((review) => review.round === 1).sort((a, b) => a.id - b.id)[0]
+            ?.blocking === 0,
+      );
+      return {
+        at: start,
+        ciGreenFirstPushPct:
+          dailyKnownCi.length === 0
+            ? null
+            : (dailyKnownCi.filter((pr) => pr.firstPushCi === "passing").length /
+                dailyKnownCi.length) *
+              100,
+        reviewRoundsPerPr:
+          reviewedDaily.length === 0
+            ? null
+            : reviewedDaily.reduce(
+                (sum, reviews) => sum + Math.max(...reviews.map((review) => review.round)),
+                0,
+              ) / reviewedDaily.length,
+        firstPassReviewPct:
+          reviewedDaily.length === 0 ? null : (firstPassDaily.length / reviewedDaily.length) * 100,
+      };
+    },
+  );
+
   // ── agents ──
   const bucketMs = rangeMs / TELEMETRY_POINTS;
   const tokensPerMinute: AgentSeries[] = ids.map((agentId) => {
@@ -582,10 +638,7 @@ export function telemetry(
 
   const tickets: TelemetrySeries["tickets"] = store
     .flowIssues(since)
-    .filter(
-      (issue): issue is typeof issue & { doneAt: number } =>
-        issue.doneAt !== null && issue.doneAt <= now,
-    )
+    .filter((issue) => issue.doneAt === null || issue.doneAt <= now)
     .map((issue) => {
       const ticket = `${issue.repoId}#${issue.number}`;
       const mergedAt =
@@ -623,7 +676,14 @@ export function telemetry(
       })),
     ),
   ].sort((a, b) => a.at - b.at || a.kind.localeCompare(b.kind));
-  const series: TelemetrySeries = { stateSpans, quota: chartQuota, tickets, annotations };
+  const series: TelemetrySeries = {
+    stateSpans,
+    quota: chartQuota,
+    tickets,
+    throughput: throughputPoints,
+    quality: qualityPoints,
+    annotations,
+  };
 
   // Averaged per bucket in SQL: at most TELEMETRY_POINTS rows, however many samples the range holds.
   const machine: Telemetry["machine"] = store.machineBuckets(
@@ -707,8 +767,35 @@ export function telemetry(
     row.deletions =
       row.deletions == null || counts?.deletions == null ? null : row.deletions + counts.deletions;
   }
+  const mergedTickets = new Set(
+    prs
+      .filter(
+        (pr) =>
+          pr.ticket !== null && pr.mergedAt !== null && pr.mergedAt >= since && pr.mergedAt <= now,
+      )
+      .map((pr) => pr.ticket as string),
+  );
+  const allTicketRuns = store.runsOverlapping(0, now + 1).filter((run) => known.has(run.agentId));
+  const allDigests = store.digests(allTicketRuns.map((run) => run.id));
+  const totalCostByTicket = new Map<string, number | null>();
+  for (const run of allTicketRuns) {
+    const ticket = runTicket(run, runPrs(config, store, run, prCache));
+    if (ticket === null || !mergedTickets.has(ticket) || !matches(run)) continue;
+    totalCostByTicket.set(
+      ticket,
+      addCost(
+        totalCostByTicket.get(ticket) ?? null,
+        runSpend(run, allDigests.get(run.id), 0, now)[0] ?? null,
+      ),
+    );
+  }
   const tokensByTicket: Telemetry["tokensByTicket"] = [...byTicket]
-    .map(([ticket, t]) => ({ ticket, tokens: Math.round(t.tokens), costUsd: t.costUsd }))
+    .map(([ticket, t]) => ({
+      ticket,
+      tokens: Math.round(t.tokens),
+      costUsd: t.costUsd,
+      totalCostUsd: mergedTickets.has(ticket) ? (totalCostByTicket.get(ticket) ?? null) : null,
+    }))
     .sort((a, b) => b.tokens - a.tokens || a.ticket.localeCompare(b.ticket));
   const totalRows: Telemetry["totals"] = [...totals.values()]
     .map(({ cacheCreate, ...row }) => {

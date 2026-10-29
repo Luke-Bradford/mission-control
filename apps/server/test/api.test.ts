@@ -4501,7 +4501,7 @@ describe("telemetry", () => {
     expect((await read("ticket=site-builder%237")).totals[0]?.input).toBe(40);
     expect(
       (await read("ticket=shop-app%237&agent=shop-app-ta&account=claude-main")).tokensByTicket,
-    ).toEqual([{ ticket: "shop-app#7", tokens: 10, costUsd: null }]);
+    ).toEqual([{ ticket: "shop-app#7", tokens: 10, costUsd: null, totalCostUsd: null }]);
     expect((await read("ticket=shop-app%237&account=codex-main")).totals).toEqual([]);
     expect((await read("ticket=&agent=&account=")).totals[0]?.input).toBe(70);
     store.upsertRun(
@@ -4542,7 +4542,24 @@ describe("telemetry", () => {
     const byDefault = (await get("/api/telemetry")).json() as Telemetry;
     expect(tokensIn(byDefault)).toBeGreaterThan(0);
     expect(byDefault.today.agents).toBe(2);
-    expect(byDefault.series).toEqual({ stateSpans: [], quota: [], tickets: [], annotations: [] });
+    expect(byDefault.series).toEqual({
+      stateSpans: [],
+      quota: [],
+      tickets: [],
+      throughput: Array.from({ length: 6 }, (_, index) => ({
+        at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
+        merged: 0,
+      })),
+      quality: [
+        {
+          at: NOW - 6 * 60 * 60_000,
+          ciGreenFirstPushPct: null,
+          reviewRoundsPerPr: null,
+          firstPassReviewPct: null,
+        },
+      ],
+      annotations: [],
+    });
     const lastHour = (await get("/api/telemetry?range=1h")).json() as Telemetry;
     expect(tokensIn(lastHour)).toBe(0);
     for (const range of ["1h", "6h", "24h", "7d"]) {

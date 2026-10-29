@@ -189,8 +189,8 @@ function firstPushCi(node: unknown, required: readonly string[]): FlowPr["firstP
 }
 
 /**
- * Hourly, read-only: for issues that reached Done and PRs merged in the last FLOW_DAYS, reads the
- * Status-change timeline and the first commits' CI. Rows are replaced only when every batch
+ * Hourly, read-only: for active flow work, issues that reached Done and PRs merged in the last
+ * FLOW_DAYS, reads the Status-change timeline and the first commits' CI. Rows are replaced only when every batch
  * succeeded; a failure keeps the old rows, is recorded as the flow collector's status, never throws.
  */
 export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: number): Promise<void> {
@@ -199,6 +199,18 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
     const done = store
       .board(repo.id)
       .filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);
+    const open = store
+      .board(repo.id)
+      .filter(
+        (i) =>
+          !i.closed &&
+          ["Ready", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
+      );
+    const flowIssues = [
+      ...done,
+      ...open.filter((i) => !done.some((d) => d.issueNumber === i.issueNumber)),
+    ];
+    const openNumbers = new Set(open.map((issue) => issue.issueNumber));
     const merged = store
       .pullRequests(repo.id)
       .filter((p) => p.mergedAt !== null && p.mergedAt >= since);
@@ -208,7 +220,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       repo,
       "issue",
       ISSUE_FIELDS,
-      done.map((i) => i.issueNumber),
+      flowIssues.map((i) => i.issueNumber),
     );
     const truncated = await pageTimelines(gql, repo, timelines);
     const checks = await readAll(
@@ -220,14 +232,18 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
     );
 
     const issues: FlowIssue[] = [];
-    for (const i of done) {
+    for (const i of flowIssues) {
       const node = timelines.get(i.issueNumber);
       if (!isObj(node)) continue;
+      const flow = issueFlow(repo, node);
+      // A card presently in Done without an observed Done event is not a flow fact. Open cards,
+      // however, must remain visible even before their first Ready transition is observed.
+      if (flow.doneAt === null && !openNumbers.has(i.issueNumber)) continue;
       issues.push({
         repoId: repo.id,
         number: i.issueNumber,
         size: i.size,
-        ...issueFlow(repo, node),
+        ...flow,
       });
     }
     const prs: FlowPr[] = [];

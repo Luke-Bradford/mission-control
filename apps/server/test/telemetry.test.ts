@@ -336,6 +336,12 @@ describe("flow of work", () => {
     expect(th.filter((d) => d.merged === 0)).toHaveLength(11);
   });
 
+  it("serves timestamped throughput bounded to the requested range", () => {
+    const throughput = tel("6h").series?.throughput ?? [];
+    expect(throughput).toHaveLength(6);
+    expect(throughput.every((point) => point.at >= NOW - 6 * HOUR && point.at <= NOW)).toBe(true);
+  });
+
   it("cycle time: p50 and p85 by size in XS S M L XL order then none, and the excluded count", () => {
     const issue = (number: number, size: string | null, days: number | null): FlowIssue => ({
       repoId: "shop-app",
@@ -419,6 +425,30 @@ describe("flow of work", () => {
       retroFindingsPerPr: null,
       sentBackPrs: 0,
       humanReviewWaitMs: null,
+    });
+  });
+
+  it("serves daily quality with null gaps", () => {
+    store.replaceFlow(
+      "shop-app",
+      [],
+      [
+        { repoId: "shop-app", number: 1, mergedAt: NOW - DAY, firstPushCi: "passing" },
+        { repoId: "shop-app", number: 2, mergedAt: NOW - 3 * DAY, firstPushCi: "failing" },
+      ],
+    );
+    const quality = tel("7d").series?.quality ?? [];
+    expect(quality).toContainEqual({
+      at: NOW - 2 * DAY,
+      ciGreenFirstPushPct: null,
+      reviewRoundsPerPr: null,
+      firstPassReviewPct: null,
+    });
+    expect(quality).toContainEqual({
+      at: NOW - DAY,
+      ciGreenFirstPushPct: 100,
+      reviewRoundsPerPr: null,
+      firstPassReviewPct: null,
     });
   });
 });
@@ -643,6 +673,18 @@ describe("capacity", () => {
           doneAt: since + 4 * HOUR,
         },
       ],
+      throughput: Array.from({ length: 6 }, (_, index) => ({
+        at: since + index * HOUR,
+        merged: index === 3 ? 1 : 0,
+      })),
+      quality: [
+        {
+          at: since,
+          ciGreenFirstPushPct: null,
+          reviewRoundsPerPr: null,
+          firstPassReviewPct: null,
+        },
+      ],
       annotations: [
         { at: since + 2 * HOUR, kind: "hub-update", cause: "Updated to abc (auto)" },
         { at: since + 3 * HOUR, kind: "quota-reset", cause: "oauth" },
@@ -694,6 +736,25 @@ describe("capacity", () => {
     ]);
     expect(tel("6h", NOW).series?.annotations).toEqual([
       { at: NOW - HOUR, kind: "hub-update", cause: "Updated to inside (manual)" },
+    ]);
+  });
+
+  it("keeps open tickets in the flow series with their observed state entry", () => {
+    const since = NOW - 6 * HOUR;
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 44, size: "S", startAt: since + HOUR, doneAt: null }],
+      [],
+    );
+
+    expect(tel("6h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#44",
+        readyAt: since + HOUR,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: null,
+      },
     ]);
   });
 
@@ -862,8 +923,8 @@ describe("cost", () => {
     store.upsertRun(run({ id: "d", seq: 4, tokens: tok(0, 0) }));
     const t = tel();
     expect(t.tokensByTicket).toEqual([
-      { ticket: "shop-app#7", tokens: 300, costUsd: 3 },
-      { ticket: "site-builder#3", tokens: 10, costUsd: null },
+      { ticket: "shop-app#7", tokens: 300, costUsd: 3, totalCostUsd: null },
+      { ticket: "site-builder#3", tokens: 10, costUsd: null, totalCostUsd: null },
     ]);
     // Run d has no usage at all: its all-zero row is dropped.
     expect(t.totals).toEqual([
@@ -909,8 +970,39 @@ describe("cost", () => {
       }),
     );
     const t = tel("1h");
-    expect(t.tokensByTicket).toEqual([{ ticket: "shop-app#1", tokens: 500, costUsd: 2 }]);
+    expect(t.tokensByTicket).toEqual([
+      { ticket: "shop-app#1", tokens: 500, costUsd: 2, totalCostUsd: null },
+    ]);
     expect(t.totals[0]).toMatchObject({ input: 500, costUsd: 2 });
+  });
+  it("includes all run cost for a ticket merged inside the range", () => {
+    store.upsertRun(
+      run({
+        id: "before-range",
+        ticket: "shop-app#99",
+        startedAt: NOW - 8 * HOUR,
+        endedAt: NOW - 7 * HOUR,
+        costUsd: 3,
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "in-range",
+        seq: 2,
+        ticket: "shop-app#99",
+        startedAt: NOW - 2 * HOUR,
+        endedAt: NOW - HOUR,
+        costUsd: 2,
+      }),
+    );
+    store.replacePullRequests("shop-app", [{ ...pr(99, NOW - HOUR), ticket: "shop-app#99" }], NOW);
+
+    expect(tel("6h").tokensByTicket).toContainEqual({
+      ticket: "shop-app#99",
+      tokens: 0,
+      costUsd: 2,
+      totalCostUsd: 5,
+    });
   });
   // #26 A3: a run whose branch names no ticket counts toward its PR's ticket.
   it("counts a run without a ticket of its own toward its PR's ticket", () => {
@@ -940,7 +1032,9 @@ describe("cost", () => {
     store.upsertRun(
       run({ id: "a", tokens: tok(10, 0), prs: [{ repo: "o/shop-app", number: 41 }] }),
     );
-    expect(tel().tokensByTicket).toEqual([{ ticket: "shop-app#3349", tokens: 10, costUsd: null }]);
+    expect(tel().tokensByTicket).toEqual([
+      { ticket: "shop-app#3349", tokens: 10, costUsd: null, totalCostUsd: null },
+    ]);
   });
 });
 

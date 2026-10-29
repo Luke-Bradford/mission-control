@@ -335,6 +335,15 @@ export interface Telemetry {
       mergedAt: number | null;
       doneAt: number | null;
     }[];
+    /** Range-bounded throughput buckets. `at` is the start of the bucket. */
+    throughput: { at: number; merged: number }[];
+    /** Daily quality buckets. Missing observations remain null rather than becoming zero. */
+    quality: {
+      at: number;
+      ciGreenFirstPushPct: number | null;
+      reviewRoundsPerPr: number | null;
+      firstPassReviewPct: number | null;
+    }[];
     annotations: {
       at: number;
       kind: "crew-paused" | "crew-resumed" | "hub-update" | "quota-reset";
@@ -372,7 +381,7 @@ export interface Telemetry {
     /** Configured loops. */
     agents: number;
   };
-  /** FLOW_DAYS local days, oldest first, zeros kept. */
+  /** FLOW_DAYS local days, oldest first, zeros kept. Kept for the summary tile. */
   throughput: { day: string; merged: number }[];
   /**
    * Start of work to Done by size over FLOW_DAYS, p50 and p85 in ms (the registry's cycle time,
@@ -429,7 +438,14 @@ export interface Telemetry {
   subagents: (SubagentInfo & { agentId: AgentId })[];
   quota: { accountId: AccountId; window: "5h" | "7d"; points: { at: number; pct: number }[] }[];
   machine: { at: number; cpuPct: number | null; memPct: number | null }[];
-  tokensByTicket: { ticket: string; tokens: number; costUsd: number | null }[];
+  tokensByTicket: {
+    ticket: string;
+    tokens: number;
+    /** Cost allocated to the selected range, pro rata for runs crossing its boundary. */
+    costUsd: number | null;
+    /** Full cost of all observed runs for a ticket merged in the selected range; null otherwise. */
+    totalCostUsd?: number | null;
+  }[];
   totals: {
     agentId: AgentId;
     accountId: AccountId;
