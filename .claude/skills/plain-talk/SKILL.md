@@ -78,6 +78,19 @@ More rules for words:
 - Say who did what: "RETRO-CX found two problems", not "two problems were found".
 - A list for options or steps; prose for one idea.
 
+## Between agents
+
+A message from one seat to another, or to FLIGHT, is read by a model, not a person. Use the
+same rules with one change: shorter. Drop every pleasantry, every hedge and every filler word.
+Keep full sentences, exact names, exact error text and the order of steps. Do not drop articles
+or joining words; that can change which step comes first. Pattern: what happened, what you did,
+what you need.
+
+**Before:** "Hi FLIGHT, just wanted to let you know that I think the tests might be failing
+because of the lock, could you possibly take a look when you get a chance?"
+**After:** "Tests on 80001f8 wait for the test lock held by GUIDO-CX. Nothing needed; reporting
+in 20 minutes."
+
 ## Before sending, check
 
 - [ ] The first sentence says what happened.
