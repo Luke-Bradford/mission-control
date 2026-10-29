@@ -829,7 +829,7 @@ describe("capacity", () => {
       { at: NOW - 2 * HOUR, spendPct: 20 },
       { at: NOW - HOUR, spendPct: 20 },
     ]);
-    expect(sixHour?.burn.every((point) => point.at >= NOW - 6 * HOUR && point.at <= NOW)).toBe(
+    expect(sixHour?.burn?.every((point) => point.at >= NOW - 6 * HOUR && point.at <= NOW)).toBe(
       true,
     );
     expect(sixHour?.projectedExhaustionAt).toBe(NOW + 3 * HOUR);
@@ -847,7 +847,7 @@ describe("capacity", () => {
     });
 
     const quota = tel("6h").series?.quota[0];
-    expect(quota?.burn.every((point) => point.spendPct === 0)).toBe(true);
+    expect(quota?.burn?.every((point) => point.spendPct === 0)).toBe(true);
     expect(quota?.projectedExhaustionAt).toBeNull();
   });
 
