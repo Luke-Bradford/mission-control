@@ -11,6 +11,7 @@ import {
 } from "@mc/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { hub, RESOURCES } from "../src/data.ts";
 import { Loops } from "../src/setup/Loops.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -143,10 +144,11 @@ describe("Setup › Loops templates", () => {
         profile: { ...TEMPLATES[0], checklist: "", checks: [] },
       },
     }) as unknown as RunView;
+    let currentRuns: RunView[] = [selectedRun];
     const fetchFn = stubFetch({
       "/api/crew": { rows: [], firstRunToday: null },
       "/api/boards/shop-app": [boardItem()],
-      "/api/agents/guido-1/runs?limit=50": [selectedRun],
+      "/api/agents/guido-1/runs?limit=50": () => ({ status: 200, body: currentRuns }),
       "/api/agents/retro-1/runs?limit=50": [],
       "/api/runs/run-real/loop": {
         runId: "run-real",
@@ -213,6 +215,20 @@ describe("Setup › Loops templates", () => {
     expect(screen.getByRole("region", { name: "Step inspector" }).textContent).toContain(
       "Model / commandsonnet",
     );
+    currentRuns = [];
+    hub.refetch(RESOURCES.runs("guido-1").path);
+    await waitFor(() => {
+      expect(
+        within(chain).getByRole("button", { name: "Loop only" }).getAttribute("aria-pressed"),
+      ).toBe("true");
+      expect(
+        within(chain).getByRole("button", { name: "With run" }).getAttribute("aria-pressed"),
+      ).toBe("false");
+      expect(within(chain).queryByText(/used \d\/3/)).toBeNull();
+      expect(
+        within(chain).getByLabelText("CI checks returns to Build").getAttribute("class"),
+      ).not.toContain("active");
+    });
   });
 
   it("uses the picked repository's planner and reviewer seats, and shows parked runs as parked", async () => {

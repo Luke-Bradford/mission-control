@@ -343,6 +343,7 @@ function LoopChain({ config }: { config: ConfigView }) {
         all.findIndex(({ run: other }) => other.ticket === run.ticket) === index,
     );
   const picked = ticketRuns.find(({ run }) => run.id === runId) ?? null;
+  const showRun = withRun && picked !== null;
   const runLoop = useResource<RunLoopView>(picked ? RESOURCES.runLoop(picked.run.id) : null);
   const runProfile = picked?.run.profile?.profile;
   const profile =
@@ -414,12 +415,12 @@ function LoopChain({ config }: { config: ConfigView }) {
                 <option key={run.id} value={run.id}>{`${run.ticket} · ${title}`}</option>
               ))}
             </select>
-            <button type="button" aria-pressed={!withRun} onClick={() => setWithRun(false)}>
+            <button type="button" aria-pressed={!showRun} onClick={() => setWithRun(false)}>
               Loop only
             </button>
             <button
               type="button"
-              aria-pressed={withRun}
+              aria-pressed={showRun}
               disabled={!picked}
               onClick={() => setWithRun(true)}
             >
@@ -445,13 +446,13 @@ function LoopChain({ config }: { config: ConfigView }) {
                 </marker>
               </defs>
               <path
-                className={`loop-route ci-return${withRun ? " active" : ""}`}
+                className={`loop-route ci-return${showRun ? " active" : ""}`}
                 aria-label="CI checks returns to Build"
                 d="M 510 108 V 150 H 330 V 108"
                 markerEnd="url(#loop-arrow)"
               />
               <path
-                className={`loop-route review-return${withRun ? " active" : ""}`}
+                className={`loop-route review-return${showRun ? " active" : ""}`}
                 aria-label="Review returns to Build"
                 d="M 714 108 V 198 H 300 V 108"
                 markerEnd="url(#loop-arrow)"
@@ -479,7 +480,7 @@ function LoopChain({ config }: { config: ConfigView }) {
               <button
                 key={item.name}
                 type="button"
-                className={`loop-chain-step${index === selected ? " selected" : ""}${withRun && index === nowIndex ? " now" : ""}`}
+                className={`loop-chain-step${index === selected ? " selected" : ""}${showRun && index === nowIndex ? " now" : ""}`}
                 onClick={() => setSelected(index)}
                 aria-pressed={index === selected}
                 aria-label={`${item.name}: gate: ${item.gate}`}
@@ -491,11 +492,11 @@ function LoopChain({ config }: { config: ConfigView }) {
             ))}
             <span className="loop-route-label ci-label">
               CI fail ≤{triesLimit}
-              {withRun ? ` · used ${ciUses}/${triesLimit}` : ""}
+              {showRun ? ` · used ${ciUses}/${triesLimit}` : ""}
             </span>
             <span className="loop-route-label review-label">
               changes ≤{reviewLimit}
-              {withRun ? ` · used ${reviewUses}/${reviewLimit}` : ""}
+              {showRun ? ` · used ${reviewUses}/${reviewLimit}` : ""}
             </span>
             <div className="loop-flight">
               <b>FLIGHT at cap</b>
@@ -543,7 +544,7 @@ function LoopChain({ config }: { config: ConfigView }) {
                 : "No open tickets with runs to show."}
           </p>
         )}
-        {withRun && picked && (
+        {showRun && picked && (
           <Panel title="Run overlay" sub="chosen ticket">
             <div className="loop-run">
               <b>{`Ticket #${picked.run.ticket?.split("#")[1]} · ${picked.title}`}</b>
