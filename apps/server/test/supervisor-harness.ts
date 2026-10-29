@@ -403,7 +403,7 @@ const userLines = () =>
     .map((l) => l.message.content as string);
 
 const seatState = (seatId: string) => store.seatSession(seatId)?.state;
-const until = (fn: () => unknown) => vi.waitFor(fn, { timeout: 20_000, interval: 10 });
+const until = (fn: () => unknown) => vi.waitFor(fn, { timeout: 5000, interval: 10 });
 /**
  * A run's private directories are removed asynchronously (after its keeper exits); under CI load
  * that can take seconds, so wait for the path to go rather than asserting at once (#689). Kept under

@@ -2332,7 +2332,11 @@ describe("repo guidance at launch", () => {
   });
 });
 
-describe("Codex launch through a test-only account", () => {
+// A real child's handshake can take seconds on a loaded machine. These waits fit inside the
+// describe's test timeout, which is above the project's 15 s.
+const untilCodex = (fn: () => unknown) => vi.waitFor(fn, { timeout: 20_000, interval: 10 });
+
+describe("Codex launch through a test-only account", { timeout: 60_000 }, () => {
   afterEach(() => {
     vi.mocked(homedir).mockReset();
   });
@@ -2410,7 +2414,7 @@ import(${JSON.stringify(fixture)});
     sup.start();
 
     const plain = await sup.startWatch("flight-1");
-    await until(() => expect(spawns()).toHaveLength(1));
+    await untilCodex(() => expect(spawns()).toHaveLength(1));
     const plainPrompt = readFileSync(crewPromptPath(dbPath, plain.runId), "utf8");
     const plainGrants = grants(spawns()[0] as { env: Record<string, string> });
     await sup.endRun("flight-1");
@@ -2419,7 +2423,7 @@ import(${JSON.stringify(fixture)});
     if (!repo) throw new Error("missing test repo");
     repo.guidance = guidance;
     const guided = await sup.startWatch("flight-1");
-    await until(() => expect(spawns()).toHaveLength(2));
+    await untilCodex(() => expect(spawns()).toHaveLength(2));
     const guidedPrompt = readFileSync(crewPromptPath(dbPath, guided.runId), "utf8");
     expect(guidedPrompt).toContain(advice);
     expect(guidedPrompt.replace(`${advice}\n\n`, "")).toBe(plainPrompt);
@@ -2428,7 +2432,7 @@ import(${JSON.stringify(fixture)});
 
     const build = await sup.startRun("guido-1", 42);
     const review = await sup.startRun("retro", 43);
-    await until(() => expect(spawns()).toHaveLength(4));
+    await untilCodex(() => expect(spawns()).toHaveLength(4));
     for (const runId of [build.runId, review.runId])
       expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).not.toContain(
         "# Mission Control work guidance (advice, not rules)",
@@ -2455,7 +2459,7 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     const spawn = recorded().find((m) => m.type === "spawn");
     expect(spawn.args).toEqual(["app-server", "-c", `mc_run="${runId}"`]);
     const folder = crewCodexDir(dbPath, runId);
@@ -2530,7 +2534,7 @@ import(${JSON.stringify(fixture)});
     expect(store.run(runId)?.sessionId).toBe("codex-thread-1");
     expect(store.run(runId)?.cliVersion).toBe("0.154.0");
     await sup.endRunByEngine(runId);
-    await until(() => expect(existsSync(folder)).toBe(false));
+    await untilCodex(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
     expect(store.getSetting(`codex-tmp:${runId}`)).toBeNull();
   });
@@ -2550,7 +2554,7 @@ import(${JSON.stringify(fixture)});
       const { sup } = codex();
       sup.start();
       const { runId } = await sup.startRun("guido-1", 42);
-      await until(() =>
+      await untilCodex(() =>
         expect(recorded().some((message) => message.method === "turn/start")).toBe(true),
       );
       const brief = recorded().find((message) => message.method === "turn/start").params.input[0]
@@ -2575,7 +2579,7 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ holdTurn: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await vi.waitFor(() => expect(seatState("guido-1")).toBe("running"), { timeout: 5_000 });
+    await vi.waitFor(() => expect(seatState("guido-1")).toBe("running"), { timeout: 20_000 });
     await sup.message("guido-1", JSON.stringify({ failed: true }), { interrupt: true });
     // Sending the replacement must clear the interrupted turn's idle state immediately.
     expect(seatState("guido-1")).toBe("running");
@@ -2586,7 +2590,7 @@ import(${JSON.stringify(fixture)});
           reason: "last turn ended in an error",
         });
       },
-      { timeout: 5_000 },
+      { timeout: 20_000 },
     );
     await sup.endRunByEngine(runId);
   });
@@ -2609,11 +2613,11 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex(scenario);
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("decline"));
+    await untilCodex(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({ runId, rule: "codex-allowlist" }),
     );
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2624,9 +2628,9 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ command });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("decline"));
+    await untilCodex(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2647,7 +2651,7 @@ import(${JSON.stringify(fixture)});
     });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() =>
+    await untilCodex(() =>
       expect(recorded()).toContainEqual({
         id: "approval-1",
         result: { action: "decline", content: null },
@@ -2656,7 +2660,7 @@ import(${JSON.stringify(fixture)});
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({ runId, rule: "codex-allowlist" }),
     );
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2664,9 +2668,9 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ changes: [{ path: "apps/a.ts", kind: { type: "add" } }] });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("accept"));
+    await untilCodex(() => expect(decision()).toBe("accept"));
     expect(store.guardHits(0)).toEqual([]);
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2686,14 +2690,14 @@ import(${JSON.stringify(fixture)});
     );
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(lock.state().waiting).toHaveLength(1));
+    await untilCodex(() => expect(lock.state().waiting).toHaveLength(1));
     expect(decision()).toBeUndefined();
     lock.releaseRun("other");
-    await until(() => expect(decision()).toBe("accept"));
+    await untilCodex(() => expect(decision()).toBe("accept"));
     expect(lock.state().holder?.runId).toBe(runId);
     // The fake uses this input to complete the held item, leaving the turn open.
     await sup.message("guido-1", JSON.stringify({ completeItem: true }), { interrupt: false });
-    await until(() => expect(lock.state().holder).toBeNull());
+    await untilCodex(() => expect(lock.state().holder).toBeNull());
     expect(seatState("guido-1")).toBe("running");
     await sup.endRunByEngine(runId);
   });
@@ -2702,8 +2706,8 @@ import(${JSON.stringify(fixture)});
     const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true, exitPending: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("accept"));
-    await until(() => expect(seatState("guido-1")).toBe("error"));
+    await untilCodex(() => expect(decision()).toBe("accept"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("error"));
     expect(lock.state().holder).toBeNull();
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
@@ -2712,15 +2716,15 @@ import(${JSON.stringify(fixture)});
     const { sup, lock, log } = codex({ command: "pnpm -s test", holdItem: true, ackDelayMs: 100 });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("accept"));
+    await untilCodex(() => expect(decision()).toBe("accept"));
     await sup.message("guido-1", JSON.stringify({ turnError: true }), { interrupt: false });
-    await until(() =>
+    await untilCodex(() =>
       expect(log).toHaveBeenCalledWith(expect.stringContaining("Codex request refused")),
     );
     expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
     await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
-    await until(() => expect(lock.state().holder).toBeNull());
+    await untilCodex(() => expect(lock.state().holder).toBeNull());
     await sup.endRunByEngine(runId);
   });
 
@@ -2739,12 +2743,12 @@ import(${JSON.stringify(fixture)});
     );
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("accept"));
-    await until(() =>
+    await untilCodex(() => expect(decision()).toBe("accept"));
+    await untilCodex(() =>
       expect(log).toHaveBeenCalledWith(expect.stringContaining("turn/start timeout")),
     );
     expect(lock.state().holder?.runId).toBe(runId);
-    await until(() => expect(seatState("guido-1")).toBe("error"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("error"));
     expect(lock.state().holder).toBeNull();
   });
 
@@ -2752,10 +2756,10 @@ import(${JSON.stringify(fixture)});
     const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("accept"));
+    await untilCodex(() => expect(decision()).toBe("accept"));
     expect(lock.state().holder?.runId).toBe(runId);
     await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     expect(lock.state().holder).toBeNull();
     await sup.endRunByEngine(runId);
   });
@@ -2771,10 +2775,10 @@ import(${JSON.stringify(fixture)});
     );
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(lock.state().waiting).toHaveLength(1));
+    await untilCodex(() => expect(lock.state().waiting).toHaveLength(1));
     if (how === "close") await sup.endRunByEngine(runId);
     else await sup.message("guido-1", JSON.stringify({ exit: true }), { interrupt: false });
-    await until(() => expect(lock.state().waiting).toEqual([]));
+    await untilCodex(() => expect(lock.state().waiting).toEqual([]));
     expect(decision()).not.toBe("accept");
     lock.releaseRun("other");
     expect(lock.state().holder).toBeNull();
@@ -2791,7 +2795,7 @@ import(${JSON.stringify(fixture)});
       sup.start();
       const { runId } = await sup.startRun("guido-1", 42);
       if (when === "closing") await sup.endRunByEngine(runId);
-      await until(() =>
+      await untilCodex(() =>
         expect(store.guardHits(0)).toContainEqual(
           expect.objectContaining({ runId, rule: "codex-allowlist" }),
         ),
@@ -2805,11 +2809,11 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ command: "git log HEAD --output=out" });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("decline"));
+    await untilCodex(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({ runId, rule: "git-write" }),
     );
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2818,7 +2822,7 @@ import(${JSON.stringify(fixture)});
     vi.spyOn(lock, "acquire").mockResolvedValue(false);
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(decision()).toBe("decline"));
+    await untilCodex(() => expect(decision()).toBe("decline"));
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({
         runId,
@@ -2826,7 +2830,7 @@ import(${JSON.stringify(fixture)});
         text: `${lockBusyText("another seat", "a full suite")}: pnpm -s test`,
       }),
     );
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
@@ -2841,13 +2845,13 @@ import(${JSON.stringify(fixture)});
     );
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(lock.state().waiting).toHaveLength(1));
+    await untilCodex(() => expect(lock.state().waiting).toHaveLength(1));
     await sup.message("guido-1", JSON.stringify({}), { interrupt: true });
-    await until(() => expect(decision()).toBe("decline"));
+    await untilCodex(() => expect(decision()).toBe("decline"));
     expect(lock.state().waiting).toEqual([]);
     lock.releaseRun("other");
     expect(lock.state().holder).toBeNull();
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRunByEngine(runId);
   });
 
