@@ -217,12 +217,12 @@ describe("the route table", () => {
 
   it("names the live readers for attention hold and dismiss routes", () => {
     const readers = readerComments();
-    expect(readers.get("GET /api/attention/held")).toContain("apps/web/src/comms/AskedOfYou.tsx");
+    expect(readers.get("GET /api/attention/held")).toContain("apps/web/src/flight/AskedOfYou.tsx");
     expect(readers.get("POST /api/attention/:key/hold")).toContain(
       "apps/web/src/comms/Decisions.tsx",
     );
     expect(readers.get("POST /api/attention/:key/hold/release")).toContain(
-      "apps/web/src/comms/AskedOfYou.tsx",
+      "apps/web/src/flight/AskedOfYou.tsx",
     );
     expect(readers.get("POST /api/attention/:key/dismiss")).toContain(
       "apps/web/src/comms/answer.ts",
