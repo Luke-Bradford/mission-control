@@ -1,4 +1,4 @@
-import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import { HUD_PAGE_PATHS, HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   HUD_RENDER_DEADLINE_MS,
@@ -9,6 +9,22 @@ import {
 } from "../src/flight/hud-render.ts";
 
 const URL = "http://127.0.0.1:7420/map";
+
+describe("hudRenderRequest page allowlist", () => {
+  const guard = hudRenderRequest("http://127.0.0.1:7420");
+
+  it("accepts every HUD page in the nav, Audit included", () => {
+    for (const path of Object.values(HUD_PAGE_PATHS))
+      expect(guard.page(path)).toBe(new globalThis.URL(path, guard.origin).toString());
+    expect(guard.page("/audit")).toBe("http://127.0.0.1:7420/audit");
+    expect(guard.page("/agents/x")).toBe("http://127.0.0.1:7420/agents/x");
+  });
+
+  it("still refuses an unknown or look-alike path", () => {
+    for (const path of ["/unknown", "/auditing", "/audit-x", "/api/health"])
+      expect(() => guard.page(path)).toThrow("HUD page required");
+  });
+});
 
 class FakeRoute {
   readonly continued = vi.fn(async () => {});
