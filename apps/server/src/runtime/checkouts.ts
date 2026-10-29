@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import {
   branchFor,
   CANNOT_START,
+  CODEX_PNPM_STORES_DIR,
   DIFF_CUT_LINE,
   MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
@@ -98,7 +99,56 @@ const CHECKOUT_TEXT = "the crew checkout is missing or has uncommitted changes";
 
 /** A Codex worktree's stable store, beside (not inside) the seat-writable worktree. */
 export const codexPnpmStoreDir = (worktree: string): string =>
-  join(dirname(worktree), ".mc-pnpm-store", basename(worktree));
+  join(dirname(worktree), CODEX_PNPM_STORES_DIR, basename(worktree));
+
+/** Removes one store folder; a link (the folder or the entry) is left alone, never followed. */
+async function removeStoreEntry(storeRoot: string, name: string): Promise<void> {
+  const real = await lstat(storeRoot).catch(() => null);
+  if (real === null || !real.isDirectory()) return;
+  const entry = join(storeRoot, name);
+  const stat = await lstat(entry).catch(() => null);
+  if (stat === null || !stat.isDirectory()) return;
+  await rm(entry, { recursive: true, force: true });
+}
+
+/**
+ * Removes a worktree's private pnpm store. Never throws: the startup sweep takes what a failure
+ * leaves.
+ */
+async function removeCodexPnpmStore(worktree: string): Promise<void> {
+  const store = codexPnpmStoreDir(worktree);
+  await removeStoreEntry(dirname(store), basename(store)).catch(() => {});
+}
+
+/**
+ * Removes the private stores in each of `roots` (a worktrees folder or a session's) whose
+ * worktree no longer exists. A store of a live or set-aside run has its worktree and stays.
+ * Returns the number removed; a failure on one is skipped.
+ */
+export async function sweepPnpmStores(roots: readonly string[]): Promise<number> {
+  let removed = 0;
+  for (const root of roots) {
+    const storeRoot = join(root, CODEX_PNPM_STORES_DIR);
+    const kind = await lstat(storeRoot).catch(() => null);
+    if (kind === null || !kind.isDirectory()) continue;
+    for (const name of await readdir(storeRoot).catch(() => [])) {
+      if (
+        await lstat(join(root, name)).then(
+          () => true,
+          () => false,
+        )
+      )
+        continue;
+      try {
+        await removeStoreEntry(storeRoot, name);
+        removed++;
+      } catch {
+        // taken at the next start
+      }
+    }
+  }
+  return removed;
+}
 
 export type CheckoutErrorCode =
   | "checkout"
@@ -1600,6 +1650,7 @@ export async function removeCheckout(
     gitDir: common,
     timeoutMs: CREW_GIT_SLOW_MS,
   });
+  await removeCodexPnpmStore(path);
 }
 
 export interface ScratchInput {

@@ -988,6 +988,17 @@ describe("startReview", () => {
     expect(existsSync(join(root, "retro-review-notes"))).toBe(true);
   });
 
+  it("sweepScratch removes a private pnpm store whose worktree is gone, and keeps a live one", async () => {
+    const stores = join(root, ".mc-pnpm-store");
+    mkdirSync(join(stores, "guido-1-gone"), { recursive: true });
+    mkdirSync(join(stores, "guido-1-live"), { recursive: true });
+    mkdirSync(join(root, "guido-1-live"));
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await until(() => expect(existsSync(join(stores, "guido-1-gone"))).toBe(false));
+    expect(existsSync(join(stores, "guido-1-live"))).toBe(true);
+  });
+
   it("sweepScratch also removes a leftover review worktree still at the old flat path", async () => {
     const r = reviewOfPush();
     git(clone, "fetch", "-q", "origin");

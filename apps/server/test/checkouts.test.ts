@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 import {
+  CODEX_PNPM_STORES_DIR,
   DIFF_CUT_LINE,
   MC_TMP_DIR_NAME,
   PNPM_STORE_DIR_NAME,
@@ -43,6 +44,7 @@ import {
   prepareReadOnlyCheckout,
   prepareScratch,
   removeCheckout,
+  sweepPnpmStores,
   syncReusedWorktree,
   UV_SYNC_ARGS,
   uvInstallEnv,
@@ -1838,6 +1840,59 @@ describe("removeCheckout", () => {
     expect((await fail(removeCheckout(clone, join(dir, "elsewhere")))).code).toBe("path");
     expect((await fail(removeCheckout(clone, clone))).code).toBe("path");
     expect(readdirSync(join(dir, "elsewhere"))).toEqual([]);
+  });
+});
+
+describe("a checkout's private pnpm store", () => {
+  const storeOf = (worktree: string) =>
+    join(dirname(worktree), CODEX_PNPM_STORES_DIR, basename(worktree));
+  const plant = (worktree: string) => {
+    mkdirSync(storeOf(worktree), { recursive: true });
+    writeFileSync(join(storeOf(worktree), "index.db"), "db\n");
+  };
+
+  it("is removed with the worktree, and a neighbour's is kept", async () => {
+    await prepareCheckout(input());
+    plant(wtPath());
+    const other = join(dirname(wtPath()), "other-1");
+    plant(other);
+    await removeCheckout(clone, wtPath(), { force: true });
+    expect(existsSync(wtPath())).toBe(false);
+    expect(existsSync(storeOf(wtPath()))).toBe(false);
+    expect(existsSync(storeOf(other))).toBe(true);
+  });
+
+  it("is kept when the worktree is refused as dirty", async () => {
+    await prepareCheckout(input());
+    plant(wtPath());
+    writeFileSync(join(wtPath(), "wip.txt"), "wip\n");
+    await fail(removeCheckout(clone, wtPath()));
+    expect(existsSync(storeOf(wtPath()))).toBe(true);
+  });
+
+  it("sweeps stores whose worktree is gone, keeps live ones and never follows a link", async () => {
+    await prepareCheckout(input());
+    plant(wtPath());
+    const gone = join(dirname(wtPath()), "gone-7");
+    plant(gone);
+    const outside = join(dir, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "keep"), "x\n");
+    symlinkSync(outside, storeOf(join(dirname(wtPath()), "linked-3")));
+    await sweepPnpmStores([dirname(wtPath())]);
+    expect(existsSync(storeOf(gone))).toBe(false);
+    expect(existsSync(storeOf(wtPath()))).toBe(true);
+    expect(existsSync(join(outside, "keep"))).toBe(true);
+  });
+
+  it("sweeps nothing when the store folder is itself a link", async () => {
+    const root = dirname(wtPath());
+    mkdirSync(root, { recursive: true });
+    const outside = join(dir, "outside");
+    mkdirSync(join(outside, "gone-1"), { recursive: true });
+    symlinkSync(outside, join(root, ".mc-pnpm-store"));
+    await sweepPnpmStores([root]);
+    expect(existsSync(join(outside, "gone-1"))).toBe(true);
   });
 });
 
