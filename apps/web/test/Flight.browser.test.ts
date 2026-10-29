@@ -4,18 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import {
-  brief,
-  CONFIG,
-  crewRow,
-  HOUR,
-  item,
-  METRICS_VIEW,
-  MIN,
-  NOW,
-  REPOS,
-  seatRow,
-} from "./fixtures.ts";
+import { brief, CONFIG, HOUR, item, METRICS_VIEW, MIN, NOW, REPOS, seatRow } from "./fixtures.ts";
 import { flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
 
 const decision = (id: number, at: number, over: Record<string, unknown> = {}) => ({

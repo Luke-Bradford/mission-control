@@ -11,7 +11,6 @@ import { Pending } from "./Pending.tsx";
 import { Summary } from "./Summary.tsx";
 import { WorkingLog } from "./WorkingLog.tsx";
 
-const DASH = "—";
 export const NO_DECISIONS_24H = "FLIGHT has decided nothing in the last 24 hours.";
 export const DECISIONS_CAPPED = `newest ${FLIGHT_VIEW_LIMIT} shown · the hub serves no older decisions of the last 24 h`;
 export const NO_MATCHING = "No decision matches those filters.";
