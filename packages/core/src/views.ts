@@ -336,9 +336,9 @@ export interface Telemetry {
       doneAt: number | null;
     }[];
     /** Range-bounded throughput buckets. `at` is the start of the bucket. */
-    throughput: { at: number; merged: number }[];
+    throughput?: { at: number; merged: number }[];
     /** Daily quality buckets. Missing observations remain null rather than becoming zero. */
-    quality: {
+    quality?: {
       at: number;
       ciGreenFirstPushPct: number | null;
       reviewRoundsPerPr: number | null;
