@@ -10,9 +10,6 @@
   --void-line: #1a2440;
   --void-ink: #dbe4f5;
   --void-muted: #8391ad;
-  --void-faint: #4a5675;
-  --void-scrim: rgba(4, 6, 12, 0.84);
-  --void-panel: rgba(10, 15, 29, 0.96);
   --add: #4fdc8a;
   --rem: #ff6b6b;
   /* the seats' colours on the void, in both themes: the dark theme's s1–s7 and its FLIGHT tone */
@@ -385,7 +382,6 @@
   border-radius: 50%;
   background: var(--map-key-seat);
 }
-/* a shared file's disc: two seats' halves */
 .map-key-steps {
   display: inline-flex;
   gap: 1px;
@@ -503,12 +499,7 @@
 .map-timeline-controls strong {
   color: var(--fg);
 }
-.map-timeline-controls [role="status"] {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.map-timeline-list {
+.map-timeline-controls .map-timeline-list {
   display: grid;
   gap: 3px;
   margin: 0;
@@ -612,41 +603,6 @@
   color: var(--rem);
   font-weight: 500;
   font-family: var(--mono);
-}
-
-/* overlay labels, projected from the scene; labels.ts keeps them apart */
-.map-change {
-  display: flex;
-  gap: 4px;
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1;
-  padding: 2px 4px;
-  border: 1px solid var(--void-line);
-  border-radius: 2px;
-  background: var(--void-scrim);
-  color: var(--void-ink);
-}
-.map-change b {
-  font-weight: 500;
-}
-/* a seat's call sign over its light, in its colour */
-/* a label lifted off its anchor keeps a leader line back to it */
-.lifted {
-  overflow: visible;
-}
-.lifted::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 100%;
-  width: 1px;
-  height: max(0px, calc(var(--lift) - 50%));
-  background: currentColor;
-  opacity: 0.45;
-}
-.map-change.lifted::after {
-  background: var(--void-muted);
 }
 
 /* the rail: the seat selector, then the selection's card */
@@ -970,7 +926,7 @@
   font-size: 11px;
 }
 
-/* the deck: live status and camera controls */
+/* the deck: live status */
 .map-deck {
   display: flex;
   flex-wrap: wrap;
@@ -1010,4 +966,10 @@
   .map-live i {
     animation: none;
   }
+}
+
+.map-timeline-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

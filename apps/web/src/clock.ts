@@ -44,5 +44,5 @@ export const useNow: () => number = ticker(5000);
  * its text without the time).
  */
 export function useTz(): string | null {
-  return useResource<ConfigView>(RESOURCES.config).data?.operator.timezone ?? null;
+  return useResource<ConfigView>(RESOURCES.config).data?.operator?.timezone ?? null;
 }

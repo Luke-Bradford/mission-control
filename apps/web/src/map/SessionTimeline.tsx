@@ -1,5 +1,6 @@
 import type { MapSeat } from "@mc/core";
-import { type CSSProperties, type MouseEvent as ReactMouseEvent, useRef } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useRef } from "react";
+import { useTz } from "../clock.ts";
 import { seatToken } from "./cards.ts";
 import {
   TIMELINE_SPAN_MS,
@@ -8,8 +9,13 @@ import {
   type useSessionTimeline,
 } from "./timeline.ts";
 
-const clock = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+const clockIn = (tz: string | null) => (at: number) =>
+  new Date(at).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: tz ?? undefined,
+  });
 const AXIS_STEP_MS = 5 * 60_000;
 
 /**
@@ -28,38 +34,48 @@ export function SessionTimeline({
   names: Record<string, string>;
 }) {
   const { win, drag, playback, current, anchor, selected } = timeline;
+  const clock = clockIn(useTz());
+  const dragFrom = useRef<number | null>(null);
   const list = useRef<HTMLUListElement>(null);
   const label = (seat: string) => names[seat] ?? seat;
   const from = anchor - TIMELINE_SPAN_MS;
   const pct = (at: number) => Math.max(0, Math.min(100, ((at - from) / TIMELINE_SPAN_MS) * 100));
   const place = (at: number) => `${pct(at)}%`;
   const shownWindow = drag ?? win;
-  const finished = playback !== null && playback.step >= playback.total;
+  const finished = playback !== null && (playback.step >= playback.total || timeline.paused);
+  const done = playback !== null && playback.step >= playback.total;
+  const PRESETS_MIN = [5, 10];
 
-  const startDrag = (event: ReactMouseEvent) => {
-    const track = list.current?.querySelector(".map-timeline-track");
-    if ((event.target as HTMLElement).closest("button") || !track || event.button !== 0) return;
-    const rect = track.getBoundingClientRect();
-    if (!rect.width) return;
-    const at = (x: number) =>
-      from + Math.max(0, Math.min(1, (x - rect.left) / rect.width)) * TIMELINE_SPAN_MS;
-    const start = at(event.clientX);
-    const range = (x: number): TimeWindow => {
-      const end = at(x);
-      return [Math.min(start, end), Math.max(start, end)];
-    };
+  const track = () => list.current?.querySelector(".map-timeline-track");
+  const timeAt = (clientX: number) => {
+    const rect = track()?.getBoundingClientRect();
+    if (!rect?.width) return null;
+    return from + Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * TIMELINE_SPAN_MS;
+  };
+  const range = (a: number, b: number): TimeWindow => [Math.min(a, b), Math.max(a, b)];
+  // a drag over the tracks or the axis picks a window; the presets are the keyboard route
+  const startDrag = (event: ReactPointerEvent) => {
+    const target = event.target as HTMLElement;
+    if (event.button !== 0 || !target.closest(".map-timeline-track, .map-timeline-axis-track"))
+      return;
+    const start = timeAt(event.clientX);
+    if (start === null) return;
+    dragFrom.current = start;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     event.preventDefault();
-    const move = (e: MouseEvent) => timeline.setDrag(range(e.clientX));
-    const up = (e: MouseEvent) => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      const chosen = range(e.clientX);
-      timeline.setDrag(null);
-      // a click, or a sliver of a drag, chooses nothing
-      if (chosen[1] - chosen[0] >= TIMELINE_SPAN_MS / 100) timeline.chooseWindow(chosen);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+  };
+  const moveDrag = (event: ReactPointerEvent) => {
+    const at = timeAt(event.clientX);
+    if (dragFrom.current !== null && at !== null) timeline.setDrag(range(dragFrom.current, at));
+  };
+  const endDrag = (event: ReactPointerEvent, commit: boolean) => {
+    const start = dragFrom.current;
+    dragFrom.current = null;
+    timeline.setDrag(null);
+    const at = timeAt(event.clientX);
+    if (!commit || start === null || at === null) return;
+    // a click, or a sliver of a drag, chooses nothing
+    if (Math.abs(at - start) >= TIMELINE_SPAN_MS / 100) timeline.chooseWindow(range(start, at));
   };
 
   const axis: number[] = [];
@@ -70,20 +86,55 @@ export function SessionTimeline({
     <section className="map-timeline" aria-label="Session timeline">
       <div className="map-timeline-controls">
         <strong>Session</strong>
-        <span>{win ? `${clock(win[0])} – ${clock(win[1])} selected` : "last 15 min"}</span>
+        <span>
+          {win
+            ? `${clock(win[0])} – ${clock(win[1])} selected`
+            : `last ${TIMELINE_SPAN_MS / 60_000} min`}
+        </span>
         <button type="button" disabled={!win} onClick={timeline.clearWindow}>
           Clear window
         </button>
-        <button type="button" disabled={!selected} onClick={timeline.toggle}>
-          <span aria-hidden="true">{finished ? "↺" : playback ? "■" : "▶"}</span>{" "}
-          {!selected ? "Play" : finished ? "Reset" : playback ? "Stop" : `Play ${label(selected)}`}
-        </button>
-        {/* a step a few hundred ms apart is not read out; the first and last are */}
-        <span
-          role="status"
-          aria-label="Playback"
-          aria-live={playback && !finished ? "off" : "polite"}
+        <span className="map-timeline-presets">
+          {PRESETS_MIN.map((min) => (
+            <button
+              type="button"
+              key={min}
+              onClick={() => timeline.chooseWindow([anchor - min * 60_000, anchor])}
+            >
+              {`Last ${min} min`}
+            </button>
+          ))}
+          <button type="button" disabled={!win} onClick={timeline.clearWindow}>
+            All
+          </button>
+        </span>
+        <button
+          type="button"
+          disabled={!playback && (!selected || !timeline.canPlay)}
+          onClick={timeline.toggle}
         >
+          <span aria-hidden="true">{finished ? "↺" : playback ? "■" : "▶"}</span>{" "}
+          {playback
+            ? finished
+              ? "Reset"
+              : "Stop"
+            : !selected
+              ? "Play"
+              : !timeline.canPlay
+                ? "Nothing to replay"
+                : `Play ${label(selected)}`}
+        </button>
+        {/* read out at the start and the end of a replay; each step between is only shown */}
+        <span role="status" aria-label="Playback" className="sr-only">
+          {playback && current
+            ? playback.step === 1 && !done
+              ? `Replaying ${label(playback.seat)}, ${playback.total} steps`
+              : done
+                ? `${label(playback.seat)} replay finished`
+                : ""
+            : ""}
+        </span>
+        <span className="map-timeline-step" aria-hidden="true">
           {playback && current
             ? `${label(playback.seat)} step ${playback.step} of ${playback.total} · ${clock(current.at)} · ${current.changed ? "changed" : "read"} ${current.file.split("/").at(-1)}`
             : ""}
@@ -93,7 +144,10 @@ export function SessionTimeline({
         className="map-timeline-list"
         aria-label="Working seat timelines"
         ref={list}
-        onMouseDown={startDrag}
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={(event) => endDrag(event, true)}
+        onPointerCancel={(event) => endDrag(event, false)}
       >
         {seats.map((seat) => (
           <li

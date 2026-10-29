@@ -98,6 +98,8 @@ function restorePlayback(seats: MapSeat[], win: TimeWindow | null, now: number):
   if (!seat) return null;
   const found = seats.find((item) => item.seat === seat);
   const seq = found ? playSequence(timelineTicks(found, now), win) : [];
+  // nothing to replay: a link to a window with no ticks is not a replay
+  if (!seq.length) return null;
   const step = Math.floor(Number(hashValue("step")));
   return {
     seat,
@@ -131,6 +133,19 @@ export function useSessionTimeline(seats: MapSeat[], now: number) {
     writeHash({ play: null, step: null });
   }, [orphaned]);
 
+  // a `play` the hash names but nothing is playing is stale: take it out
+  useEffect(() => {
+    if (playing === null && hashValue("play") !== null) writeHash({ play: null, step: null });
+  }, [playing]);
+
+  // a window older than the timeline's span has nothing left in it
+  useEffect(() => {
+    if (win && win[1] < now - TIMELINE_SPAN_MS) {
+      setWin(null);
+      writeHash({ win: null });
+    }
+  }, [win, now]);
+
   // the hash is the link: following one in place restores what it says
   useEffect(() => {
     const follow = () => {
@@ -138,7 +153,9 @@ export function useSessionTimeline(seats: MapSeat[], now: number) {
       const next = parseWindow(hashValue("win"), at);
       setWin(next);
       setPlaySeat((current) => hashValue("play") ?? current);
-      setPlaying(restorePlayback(seats, next, at));
+      const restored = restorePlayback(seats, next, at);
+      setPlaying(restored);
+      if (!restored && hashValue("play") !== null) writeHash({ play: null, step: null });
     };
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
@@ -166,6 +183,10 @@ export function useSessionTimeline(seats: MapSeat[], now: number) {
     setWin(next);
     writeHash({ win: formatWindow(next, Date.now()) });
   }, []);
+  const canPlay = useMemo(
+    () => selected !== undefined && playSequence(timelineTicks(selected, now), win).length > 0,
+    [selected, now, win],
+  );
   const toggle = () => {
     if (playing && active) return stop();
     if (!selected) return;
@@ -197,6 +218,8 @@ export function useSessionTimeline(seats: MapSeat[], now: number) {
     drag,
     setDrag,
     selected: selected?.seat ?? null,
+    canPlay,
+    paused: playing?.paused ?? false,
     select,
     toggle,
     stop,

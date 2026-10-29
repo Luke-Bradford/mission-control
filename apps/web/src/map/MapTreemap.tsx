@@ -161,7 +161,7 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
 }
 
 function useSize() {
-  const ref = useRef<HTMLFieldSetElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 1000, height: 700 });
   useLayoutEffect(() => {
     const el = ref.current;
@@ -318,9 +318,10 @@ export const MapTreemap = memo(function MapTreemap({
         colours.length
     ];
   return (
-    // a group (a fieldset), not an image: its tiles are buttons
-    <fieldset
+    // biome-ignore lint/a11y/useSemanticElements: a group, not an image (its tiles are buttons); a fieldset is not a positioned canvas
+    <div
       ref={ref}
+      role="group"
       className={`map-treemap map-treemap-${lens}`}
       aria-label={
         lens === "changes"
@@ -454,7 +455,7 @@ export const MapTreemap = memo(function MapTreemap({
           })}
         </svg>
       )}
-    </fieldset>
+    </div>
   );
 });
 

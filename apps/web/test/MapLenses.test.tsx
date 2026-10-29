@@ -459,7 +459,8 @@ function playSnapshot() {
 const tile = (path: string) =>
   document.querySelector(`.map-treemap-tile[title='${path}']`) as HTMLElement;
 const mark = (path: string) => document.querySelector(`.map-treemap-mark[data-for='${path}']`);
-const playback = () => screen.getByRole("status", { name: "Playback" }).textContent;
+const playback = () => document.querySelector(".map-timeline-step")?.textContent ?? null;
+const announced = () => screen.getByRole("status", { name: "Playback" }).textContent;
 const reset = () => window.history.replaceState(null, "", window.location.pathname);
 
 it("restores win, play and step from the hash, frozen at its step, and writes them back", () => {
@@ -492,8 +493,10 @@ it("restores win, play and step from the hash, frozen at its step, and writes th
     expect(document.querySelectorAll(".map-timeline-tick")).toHaveLength(4);
     expect(document.querySelectorAll(".map-timeline-window")).toHaveLength(2);
 
-    // Stop, then Play again: it runs on from step 1 to the end, other hash parts left alone
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    // a paused link offers Reset, not Stop
+    expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
+    // Reset, then Play again: it runs on from step 1 to the end, other hash parts left alone
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(window.location.hash).toBe("#foo=bar&win=12,3");
     fireEvent.click(screen.getByRole("button", { name: "Play GUIDO-1" }));
     expect(window.location.hash).toBe("#foo=bar&win=12,3&play=GUIDO-1&step=1");
@@ -612,11 +615,12 @@ it("chooses a window by dragging the timeline, and the map drops what is outside
     expect(tile("src/untested.ts").dataset.changed).toBe("GUIDO-1");
     expect(tile("src/consumer.ts").dataset.changed).toBe("INCO-1");
     const list = screen.getByRole("list", { name: "Working seat timelines" });
+    const trackEl = list.querySelector(".map-timeline-track") as HTMLElement;
     // a fifth to three fifths of the 15 minutes: 12 to 6 minutes ago
-    fireEvent.mouseDown(list, { clientX: 200, button: 0 });
-    fireEvent.mouseMove(window, { clientX: 600 });
+    fireEvent.pointerDown(trackEl, { clientX: 200, button: 0 });
+    fireEvent.pointerMove(list, { clientX: 600 });
     expect(document.querySelectorAll(".map-timeline-window")).toHaveLength(2);
-    fireEvent.mouseUp(window, { clientX: 600 });
+    fireEvent.pointerUp(list, { clientX: 600 });
     expect(window.location.hash).toBe("#win=12,6");
     expect(screen.getByText(/\d\d:\d\d – \d\d:\d\d selected/)).toBeTruthy();
     expect(tile("src/contract.ts").dataset.changed).toBe("GUIDO-1");
@@ -629,11 +633,81 @@ it("chooses a window by dragging the timeline, and the map drops what is outside
     expect(tile("src/consumer.ts").dataset.changed).toBe("INCO-1");
 
     // a bare click chooses nothing
-    fireEvent.mouseDown(list, { clientX: 300, button: 0 });
-    fireEvent.mouseUp(window, { clientX: 300 });
+    fireEvent.pointerDown(trackEl, { clientX: 300, button: 0 });
+    fireEvent.pointerUp(list, { clientX: 300 });
     expect(window.location.hash).toBe("");
   } finally {
     rect.mockRestore();
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("offers nothing to replay when a linked window holds no ticks", () => {
+  try {
+    window.history.replaceState(null, "", "#win=2,1&play=GUIDO-1&step=2");
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    const button = screen.getByRole("button", { name: "Nothing to replay" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(playback()).toBe("");
+    // the stale replay is out of the link, the window stays
+    expect(window.location.hash).toBe("#win=2,1");
+  } finally {
+    reset();
+  }
+});
+
+it("drops a window that has scrolled out of the timeline's span", () => {
+  vi.useFakeTimers();
+  try {
+    window.history.replaceState(null, "", "#win=12,6");
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    expect(tile("src/untested.ts").hasAttribute("data-changed")).toBe(false);
+    act(() => vi.advanceTimersByTime(20 * MIN));
+    expect(window.location.hash).toBe("");
+    expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("chooses a window from the preset buttons, and 'All' clears it", () => {
+  vi.useFakeTimers();
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Last 5 min" }));
+    expect(window.location.hash).toBe("#win=5,0");
+    // only GUIDO-1's read of untested.ts, 5 minutes ago, is at the window's edge
+    expect(tile("src/contract.ts").hasAttribute("data-changed")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Last 10 min" }));
+    expect(window.location.hash).toBe("#win=10,0");
+    expect(tile("src/untested.ts").dataset.changed).toBe("GUIDO-1");
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(window.location.hash).toBe("");
+    expect(tile("src/contract.ts").dataset.changed).toBe("GUIDO-1");
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("announces a replay at its start and end only, not at each step", () => {
+  vi.useFakeTimers();
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Play GUIDO-1" }));
+    expect(announced()).toBe("Replaying GUIDO-1, 3 steps");
+    act(() => vi.advanceTimersByTime(400));
+    expect(announced()).toBe("");
+    expect(playback()).toContain("step 2 of 3");
+    act(() => vi.advanceTimersByTime(400));
+    expect(announced()).toBe("GUIDO-1 replay finished");
+  } finally {
     vi.useRealTimers();
     reset();
   }
