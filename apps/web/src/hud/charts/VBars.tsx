@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Grid, keyStep, PAD, Tip, useChartWidth, XAxis } from "./Hover.tsx";
+import { Grid, keyStep, PAD, Tip, useChartCursor, useChartWidth, XAxis } from "./Hover.tsx";
 
 export interface VBar {
   key: string;
@@ -34,6 +34,8 @@ export function VBars({
   accentLast = false,
   format = (v) => String(Math.round(v)),
   height = 150,
+  times,
+  annotations = [],
 }: {
   bars: VBar[];
   label: string;
@@ -41,9 +43,14 @@ export function VBars({
   accentLast?: boolean;
   format?: (v: number) => string;
   height?: number;
+  /** Epoch timestamps for bars in the shared time-chart workspace. */
+  times?: number[];
+  /** Events at known times, rendered only when the bars are timestamped. */
+  annotations?: { at: number; label: string; color?: string }[];
 }) {
   const [ref, w] = useChartWidth(560);
   const [hover, setHover] = useState<number | null>(null);
+  const cursor = useChartCursor();
   const n = bars.length;
   if (n === 0) return <div className="chart" ref={ref} />;
 
@@ -58,12 +65,39 @@ export function VBars({
   const slot = (x1 - x0) / n;
   const bw = Math.max(1, Math.min(BAR_MAX, slot * BAR_SHARE));
   const left = (i: number): number => x0 + i * slot + (slot - bw) / 2;
+  const cursorAt = cursor?.at;
+  const selected =
+    times && cursorAt !== null && cursorAt !== undefined
+      ? cursorAt < times[0] || cursorAt > (times.at(-1) ?? cursorAt)
+        ? null
+        : times.reduce(
+            (best, time, i) =>
+              Math.abs(time - cursorAt) < Math.abs((times[best] ?? time) - cursorAt) ? i : best,
+            0,
+          )
+      : hover;
+  const setSelected = (index: number | null) => {
+    setHover(index);
+    if (times) cursor?.setAt(index === null ? null : (times[index] ?? null));
+  };
+  const selectedAnnotations =
+    times && selected !== null
+      ? annotations.filter((annotation) => {
+          const closest = times.reduce(
+            (best, time, i) =>
+              Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                ? i
+                : best,
+            0,
+          );
+          return closest === selected;
+        })
+      : [];
   // Labels thin out further when they would not fit their slots (~6.5 px a character at 11 px).
   const labelPx = Math.max(...bars.map((b) => b.label.length)) * 6.5 + 8;
   const step = Math.max(every, Math.ceil(labelPx / slot));
 
   const aria = `${label}: ${bars.map((b) => `${b.label} ${format(total(b))}`).join(", ")}`;
-  const hovered = hover === null ? undefined : bars[hover];
 
   return (
     <div className="chart" ref={ref}>
@@ -73,7 +107,7 @@ export function VBars({
         preserveAspectRatio="xMinYMin meet"
         role="img"
         aria-label={aria}
-        {...keyStep(n, hover, setHover)}
+        {...keyStep(n, selected, setSelected)}
       >
         <Grid max={peak} y={Y} x0={x0} x1={x1} label={format} />
         <XAxis y={yBottom} x0={x0} x1={x1} at={[]} />
@@ -83,7 +117,7 @@ export function VBars({
           const visible = b.segments.filter((s) => s.value > 0);
           let acc = 0;
           return (
-            <g key={b.key} className={hover === i ? "on" : undefined}>
+            <g key={b.key} className={selected === i ? "on" : undefined}>
               {visible.map((s, k) => {
                 const yb = Y(acc);
                 acc += s.value;
@@ -127,28 +161,78 @@ export function VBars({
                 width={slot}
                 height={yBottom - yTop}
                 fill="transparent"
-                onPointerEnter={() => setHover(i)}
-                onPointerLeave={() => setHover((h) => (h === i ? null : h))}
+                onPointerEnter={() => setSelected(i)}
+                onPointerLeave={() => setSelected(null)}
               />
             </g>
           );
         })}
+        {times &&
+          annotations
+            .filter((annotation, index, all) => {
+              const nearest = all[index - 1];
+              if (nearest === undefined) return true;
+              const previous = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - nearest.at) < Math.abs((times[best] ?? time) - nearest.at)
+                    ? i
+                    : best,
+                0,
+              );
+              const current = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                    ? i
+                    : best,
+                0,
+              );
+              return previous !== current;
+            })
+            .flatMap((annotation) => {
+              const index = times.reduce(
+                (best, time, i) =>
+                  Math.abs(time - annotation.at) < Math.abs((times[best] ?? time) - annotation.at)
+                    ? i
+                    : best,
+                0,
+              );
+              if (index < 0) return [];
+              const x = left(index) + bw / 2;
+              return (
+                <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={yTop}
+                    y2={yBottom}
+                    stroke={annotation.color ?? "var(--warn)"}
+                    strokeDasharray="2 3"
+                  />
+                </g>
+              );
+            })}
       </svg>
-      {hovered && hover !== null && (
+      {selected !== null && bars[selected] && (
         <Tip
-          x={left(hover) + bw / 2}
+          x={left(selected) + bw / 2}
           width={w}
-          title={hovered.tip}
-          rows={
-            hovered.segments.length > 1
-              ? [...hovered.segments].reverse().map((s) => ({
+          title={bars[selected].tip}
+          rows={[
+            ...(bars[selected].segments.length > 1
+              ? [...bars[selected].segments].reverse().map((s) => ({
                   key: s.name,
                   name: s.name,
                   color: s.color,
                   value: format(s.value),
                 }))
-              : []
-          }
+              : []),
+            ...selectedAnnotations.map((annotation) => ({
+              key: `event:${annotation.label}`,
+              name: "Event",
+              color: annotation.color ?? "var(--warn)",
+              value: annotation.label,
+            })),
+          ]}
         />
       )}
     </div>

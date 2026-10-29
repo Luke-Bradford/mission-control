@@ -9,6 +9,7 @@ import {
   pointerX,
   spread,
   Tip,
+  useChartCursor,
   useChartWidth,
   useGradientId,
   XAxis,
@@ -37,6 +38,7 @@ export function StackedArea({
   format,
   height = 170,
   live = false,
+  times,
 }: {
   series: AreaSeries[];
   /** What is plotted; the aria-label adds each series' latest and peak. */
@@ -49,11 +51,28 @@ export function StackedArea({
   height?: number;
   /** The newest point is now and still moving: the cursor pulses. */
   live?: boolean;
+  /** Epoch times for the evenly spaced points, enabling a workspace crosshair. */
+  times?: number[];
 }) {
   const [ref, w] = useChartWidth(1100);
   const gid = useGradientId();
   const [hover, setHover] = useState<number | null>(null);
+  const cursor = useChartCursor();
+  const cursorAt = cursor?.at ?? null;
   const n = Math.max(0, ...series.map((s) => s.values.length));
+  const cursorIndex =
+    cursorAt === null || !times?.length
+      ? null
+      : times.reduce(
+          (best, time, i) =>
+            Math.abs(time - cursorAt) < Math.abs((times[best] ?? time) - cursorAt) ? i : best,
+          0,
+        );
+  const activeHover = cursorIndex ?? hover;
+  const select = (index: number | null) => {
+    setHover(index);
+    cursor?.setAt(index === null ? null : (times?.[index] ?? null));
+  };
   // The host stays mounted so its width is followed once series arrive.
   if (series.length === 0 || n < 2) return <div className="chart" ref={ref} />;
 
@@ -96,7 +115,7 @@ export function StackedArea({
         preserveAspectRatio="xMinYMin meet"
         role="img"
         aria-label={aria}
-        {...keyStep(n, hover, setHover)}
+        {...keyStep(n, activeHover, select)}
       >
         <defs>
           {series.map((s, i) => (
@@ -126,11 +145,11 @@ export function StackedArea({
         <text className="ct now" x={X(n - 1)} y={height - 3} textAnchor="end">
           {xLabels[1]}
         </text>
-        {hover !== null && (
+        {activeHover !== null && (
           <line
             className="xhair"
-            x1={X(hover)}
-            x2={X(hover)}
+            x1={X(activeHover)}
+            x2={X(activeHover)}
             y1={yTop}
             y2={yBottom}
             stroke="var(--fg-2)"
@@ -145,20 +164,20 @@ export function StackedArea({
           width={Math.max(0, x1 - x0)}
           height={yBottom - yTop}
           fill="transparent"
-          onPointerMove={(e) => setHover(nearestIndex(pointerX(e, w), n, x0, x1))}
-          onPointerLeave={() => setHover(null)}
+          onPointerMove={(e) => select(nearestIndex(pointerX(e, w), n, x0, x1))}
+          onPointerLeave={() => select(null)}
         />
       </svg>
-      {hover !== null && (
+      {activeHover !== null && (
         <Tip
-          x={X(hover)}
+          x={X(activeHover)}
           width={w}
-          title={at(hover, n)}
+          title={at(activeHover, n)}
           rows={[...series].reverse().map((s) => ({
             key: s.id,
             name: s.name,
             color: s.color,
-            value: format(s.values[hover] ?? 0),
+            value: format(s.values[activeHover] ?? 0),
           }))}
         />
       )}

@@ -8,6 +8,7 @@ import {
   pointerX,
   spread,
   Tip,
+  useChartCursor,
   useChartWidth,
   useGradientId,
   XAxis,
@@ -19,6 +20,8 @@ export interface LineSeries {
   color: string;
   /** Oldest first; a null value breaks the line. */
   points: { at: number; v: number | null }[];
+  /** A forecast rather than an observed trace. */
+  dash?: string;
 }
 
 const pct = (v: number): string => `${Math.round(v)}%`;
@@ -37,11 +40,14 @@ export function LineChart({
   max = 100,
   ticks,
   limit = false,
+  annotations = [],
+  guides = [],
   label,
   xLabels,
   at,
   height = 170,
   live = false,
+  format = pct,
 }: {
   series: LineSeries[];
   bands?: { from: number; to: number; label: string }[];
@@ -51,6 +57,10 @@ export function LineChart({
   /** Y values (in the same units as `max`) to grid and label; default 0, 50 and 100 % of `max`. */
   ticks?: number[];
   limit?: boolean;
+  /** Events known at a precise sample time, such as an observed quota reset. */
+  annotations?: { at: number; label: string; color?: string }[];
+  /** Horizontal threshold lines in the chart's value units. */
+  guides?: { value: number; label: string; color?: string }[];
   label: string;
   xLabels: [string, string];
   /** The tooltip heading for a sample time. */
@@ -58,10 +68,18 @@ export function LineChart({
   height?: number;
   /** `to` is now and moving: the cursor pulses. */
   live?: boolean;
+  /** Value formatter for axes, readouts and the accessible summary. */
+  format?: (value: number) => string;
 }) {
   const [ref, w] = useChartWidth(560);
   const gid = useGradientId();
-  const [hover, setHover] = useState<number | null>(null);
+  const [localHover, setLocalHover] = useState<number | null>(null);
+  const cursor = useChartCursor();
+  const hover = cursor?.at ?? localHover;
+  const setHover = (at: number | null) => {
+    setLocalHover(at);
+    cursor?.setAt(at);
+  };
   const span = Math.max(1, to - from);
   const x0 = PAD.l;
   const x1 = w - PAD.r;
@@ -72,9 +90,6 @@ export function LineChart({
 
   const valued = (s: LineSeries) =>
     s.points.filter((p): p is { at: number; v: number } => p.v !== null);
-  const times = [...new Set(series.flatMap((s) => valued(s).map((p) => p.at)))].sort(
-    (a, b) => a - b,
-  );
   const nearest = <T extends { at: number }>(list: T[], t: number): T | undefined =>
     list.reduce<T | undefined>(
       (best, p) => (best === undefined || Math.abs(p.at - t) < Math.abs(best.at - t) ? p : best),
@@ -114,15 +129,47 @@ export function LineChart({
       });
   };
 
+  // A path containing a single move command is invisible. Keep those observations visible without
+  // connecting across a missing reading.
+  const lonePoints = (s: LineSeries): { at: number; v: number }[] => {
+    const runs: { at: number; v: number }[][] = [[]];
+    for (const p of s.points) {
+      if (p.v === null) runs.push([]);
+      else runs.at(-1)?.push({ at: p.at, v: p.v });
+    }
+    return runs.filter((run) => run.length === 1).flat();
+  };
+
+  const visibleAnnotations = annotations
+    .filter((annotation) => annotation.at >= from && annotation.at <= to)
+    .sort((a, b) => a.at - b.at);
+  const times = [
+    ...new Set([
+      ...series.flatMap((s) => valued(s).map((p) => p.at)),
+      ...visibleAnnotations.map((annotation) => annotation.at),
+    ]),
+  ].sort((a, b) => a - b);
+  const annotationMarkers: typeof visibleAnnotations = [];
+  for (const annotation of visibleAnnotations) {
+    const previous = annotationMarkers.at(-1);
+    if (previous === undefined || Math.abs(X(previous.at) - X(annotation.at)) >= 8)
+      annotationMarkers.push(annotation);
+  }
   const aria = `${label}: ${series
     .map((s) => {
       const vs = valued(s);
       const last = vs.at(-1);
       return last
-        ? `${s.name} latest ${pct(last.v)}, peak ${pct(Math.max(...vs.map((p) => p.v)))}`
+        ? `${s.name} latest ${format(last.v)}, peak ${format(Math.max(...vs.map((p) => p.v)))}`
         : `${s.name} no readings`;
     })
-    .join("; ")}`;
+    .join(
+      "; ",
+    )}${guides.length ? `; thresholds ${guides.map((guide) => guide.label).join(", ")}` : ""}${
+    visibleAnnotations.length
+      ? `; events ${visibleAnnotations.map((annotation) => `${at(annotation.at)} ${annotation.label}`).join(", ")}`
+      : ""
+  }`;
 
   return (
     <div className="chart" ref={ref}>
@@ -160,7 +207,7 @@ export function LineChart({
               </g>
             );
           })}
-        <Grid max={max} ticks={ticks} y={Y} x0={x0} x1={x1} label={pct} />
+        <Grid max={max} ticks={ticks} y={Y} x0={x0} x1={x1} label={format} />
         {limit && (
           <line
             className="limit"
@@ -173,6 +220,38 @@ export function LineChart({
             strokeWidth={1}
           />
         )}
+        {guides.map((guide) => (
+          <g key={`${guide.value}:${guide.label}`} className="guide">
+            <line
+              x1={x0}
+              x2={x1}
+              y1={Y(guide.value)}
+              y2={Y(guide.value)}
+              stroke={guide.color ?? "var(--warn)"}
+              strokeDasharray="4 3"
+              strokeWidth={1}
+            />
+            <text className="ct" x={x1 - 3} y={Y(guide.value) - 3} textAnchor="end">
+              {guide.label}
+            </text>
+          </g>
+        ))}
+        {annotationMarkers.map((annotation) => {
+          const x = X(annotation.at);
+          return (
+            <g className="annotation" key={`${annotation.at}:${annotation.label}`}>
+              <line
+                x1={x}
+                x2={x}
+                y1={yTop}
+                y2={yBottom}
+                stroke={annotation.color ?? "var(--warn)"}
+                strokeDasharray="2 3"
+                strokeWidth={1}
+              />
+            </g>
+          );
+        })}
         <defs>
           {series.map((s, i) => (
             <FadeGradient
@@ -194,10 +273,21 @@ export function LineChart({
               d={path(s)}
               fill="none"
               stroke={s.color}
+              strokeDasharray={s.dash}
               strokeWidth={1.5}
               strokeLinejoin="round"
               strokeLinecap="round"
             />
+            {lonePoints(s).map((p) => (
+              <circle
+                className="point"
+                key={`${p.at}:${p.v}`}
+                cx={X(p.at)}
+                cy={Y(p.v)}
+                r={2.5}
+                fill={s.color}
+              />
+            ))}
           </g>
         ))}
         <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />
@@ -243,16 +333,33 @@ export function LineChart({
           x={X(hover)}
           width={w}
           title={at(hover)}
-          rows={series.map((s) => {
-            // A shared crosshair must not invent a value from another sample time.
-            const value = s.points.find((point) => point.at === hover)?.v;
-            return {
-              key: s.id,
-              name: s.name,
-              color: s.color,
-              value: value === null || value === undefined ? "—" : pct(value),
-            };
-          })}
+          rows={series
+            .map((s) => {
+              // A shared crosshair must not invent a value from another sample time.
+              const value = s.points.find((point) => point.at === hover)?.v;
+              return {
+                key: s.id,
+                name: s.name,
+                color: s.color,
+                value: value === null || value === undefined ? "—" : format(value),
+              };
+            })
+            .concat(
+              guides.map((guide) => ({
+                key: `guide:${guide.label}`,
+                name: "Threshold",
+                color: guide.color ?? "var(--warn)",
+                value: guide.label,
+              })),
+              visibleAnnotations
+                .filter((annotation) => annotation.at === hover)
+                .map((annotation) => ({
+                  key: `event:${annotation.label}`,
+                  name: "Event",
+                  color: "var(--warn)",
+                  value: annotation.label,
+                })),
+            )}
         />
       )}
     </div>
