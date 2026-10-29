@@ -712,11 +712,10 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.claimedKeys(runId)).toEqual({});
     });
 
-    it("resumes a missing CLI through the API message route and asks CAPCOM to retry", async () => {
+    it("stores an API FYI for a missing CLI without waking or resuming it", async () => {
       const { sup, cfg, runId } = await idleRun();
       prep.sessions[0]?.detach();
       await noKeepers();
-      const release = holdResume();
       const app = buildApp({ config: cfg, store, bus, supervisor: sup });
       try {
         const response = await app.inject({
@@ -725,17 +724,13 @@ describe("supervisor events (Plan 7a)", () => {
           headers: { "content-type": "application/json" },
           payload: { text: "fix it" },
         });
-        expect(response.statusCode).toBe(409);
-        expect(response.json()).toEqual({
-          error: "GUIDO-1 is being resumed; try again in a moment",
-        });
-        release();
-        await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ ok: true });
         expect(store.seatSession("guido-1")?.runId).toBe(runId);
-        expect(prep.sessions).toHaveLength(2);
+        expect(prep.sessions).toHaveLength(1);
+        expect(store.comms(0).map((message) => message.text)).toEqual(["fix it"]);
         expect(userLines()).not.toContain("fix it");
       } finally {
-        release();
         await app.close();
       }
     });
