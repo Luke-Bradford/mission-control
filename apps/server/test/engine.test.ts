@@ -3795,6 +3795,25 @@ describe("the engine runs reviews", () => {
         expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "theirs" });
       });
 
+      it("a hold replaced while parked names the new holder and releases to the phase it left", async () => {
+        await h.engine.holdMerge(RUN, "FLIGHT", "mine");
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(loopOf().mergeHold?.from).toBe("review");
+        expect(await h.engine.holdMerge(RUN, "CAPCOM", "theirs")).toEqual({ ok: true });
+        expect(loopOf().parked?.reason).toBe("merge held by CAPCOM: theirs");
+        expect(loopOf().mergeHold).toMatchObject({
+          by: "CAPCOM",
+          reason: "theirs",
+          from: "review",
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked?.reason).toBe("merge held by CAPCOM: theirs");
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
       it("refuses to hold or release when there is nothing to do", async () => {
         expect((await h.engine.releaseMergeHold(RUN, "CAPCOM")).ok).toBe(false);
         expect((await h.engine.holdMerge("nope", "CAPCOM", "x")).ok).toBe(false);
