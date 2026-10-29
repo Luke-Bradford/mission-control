@@ -11,6 +11,7 @@ import {
   type CommsReactionKind,
   type CommsSendInput,
   type CommsThreadMessage,
+  commsCutMarker,
   scanSecrets,
 } from "@mc/core";
 import { commsPosition, type Store } from "./store.ts";
@@ -116,30 +117,51 @@ export function commsInboxPrompt(store: Store, seatId: string, runId: string): s
     .commsInboxRun(seatId, runId)
     .filter((row) => canReadComms(store, seatId, row, pins))
     .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)));
+  const cursor = store.commsInboxCursor(seatId);
   let omitted = Math.max(0, rows.length - COMMS_INBOX_PROMPT_ROWS);
-  const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) =>
-    JSON.stringify({
-      id: row.id,
-      at: row.at,
-      from: row.from,
-      to: row.to,
-      text: row.text,
-      label: row.label,
-      ref: row.ref,
-      replyTo: row.replyTo,
-      mentions: row.mentions,
-      pinned: pins.has(row.id),
-      unread: true,
-    }),
-  );
+  const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) => ({
+    id: row.id,
+    at: row.at,
+    from: row.from,
+    to: row.to,
+    text: row.text,
+    label: row.label,
+    ref: row.ref,
+    replyTo: row.replyTo,
+    mentions: row.mentions,
+    pinned: pins.has(row.id),
+    unread: Number(row.id.slice(6)) > cursor,
+  }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
   const render = () =>
-    [heading, omitted === 0 ? "" : `${omitted} older: use comms_inbox`, ...lines].join("\n");
+    [
+      heading,
+      omitted === 0 ? "" : `${omitted} older: use comms_inbox`,
+      ...lines.map((line) => JSON.stringify(line)),
+    ].join("\n");
   while (lines.length > 0 && render().length > COMMS_INBOX_PROMPT_MAX) {
+    if (lines.length === 1) {
+      const line = lines[0];
+      if (line === undefined) break;
+      const chars = Array.from(line.text);
+      const empty = line.text;
+      line.text = "";
+      const room = Math.max(0, COMMS_INBOX_PROMPT_MAX - render().length);
+      let kept = Math.max(0, room - 64);
+      do {
+        const marker = commsCutMarker(kept, chars.length);
+        line.text = `${chars.slice(0, kept).join("")}${marker}`;
+        kept--;
+      } while (render().length > COMMS_INBOX_PROMPT_MAX && kept >= 0);
+      if (line.text === empty) break;
+      break;
+    }
     lines.shift();
     omitted++;
   }
+  const newest = rows.at(-1);
+  if (newest !== undefined) store.markCommsInboxRead(seatId, newest.id);
   return render();
 }
 

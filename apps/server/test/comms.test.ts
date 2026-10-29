@@ -225,6 +225,35 @@ it("caps a turn inbox at 40 messages or 8k characters, keeping the newest", () =
   expect(prompt).not.toContain('"text":"0 ');
 });
 
+it("keeps the newest oversized inbox row and marks delivered rows read", () => {
+  const first = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "first",
+    targetRunId: "r",
+  });
+  const newest = store.addComms({
+    at: 2,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "newest ".repeat(2_000),
+    targetRunId: "r",
+  });
+  if (first === null || newest === null) throw new Error("expected stored Comms rows");
+
+  const delivered = commsInboxPrompt(store, "seat", "r");
+  expect(delivered.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
+  expect(delivered).toContain(newest.id);
+  expect(delivered).toContain("stored text cut");
+  expect(delivered).toContain('"unread":true');
+
+  const later = commsInboxPrompt(store, "seat", "r");
+  expect(later).toContain('"unread":false');
+});
+
 it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", async () => {
   let at = 10;
   const deps = {

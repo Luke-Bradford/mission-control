@@ -3537,6 +3537,23 @@ export class Store {
       .get(scope) as { offset: number } | undefined;
     return r ? `comms:${r.offset}` : null;
   }
+  /** Cursor for Comms that a seat itself has received, separate from the operator's UI reads. */
+  commsInboxCursor(seatId: string): number {
+    const r = this.db
+      .prepare("SELECT offset FROM comms_reads WHERE thread_id=? AND source_id='inbox'")
+      .get(`inbox:${seatId}`) as { offset: number } | undefined;
+    return r?.offset ?? 0;
+  }
+  markCommsInboxRead(seatId: string, messageId: string): void {
+    const id = commsMessageNumber(messageId);
+    if (id === null) return;
+    this.db
+      .prepare(
+        `INSERT INTO comms_reads(thread_id,source_id,offset,block) VALUES (?, 'inbox', ?, 0)
+         ON CONFLICT(thread_id,source_id) DO UPDATE SET offset=MAX(offset,excluded.offset)`,
+      )
+      .run(`inbox:${seatId}`, id);
+  }
 
   /** The hand-offs at or after `since`, oldest first. */
   comms(since: number, targetRunId?: string): CommsRow[] {

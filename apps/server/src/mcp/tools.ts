@@ -1188,6 +1188,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
     const pinned = new Set(store.commsPins().map((row) => row.id));
+    const cursor = store.commsInboxCursor(ctx.seatId);
     const rows = store
       .commsInboxRun(ctx.seatId, ctx.runId)
       .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
@@ -1203,10 +1204,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
               : row.text,
           operator: row.from === COMMS_CAPCOM,
           pinned: pinned.has(row.id),
-          unread: true,
+          unread: Number(row.id.slice(6)) > cursor,
           reactions: store.commsReactions(row.id),
         };
       });
+    const newest = rows.at(-1);
+    if (newest !== undefined) store.markCommsInboxRead(ctx.seatId, newest.id);
     return { text: JSON.stringify({ messages: rows }) };
   }
 

@@ -1288,11 +1288,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           knownSecrets: deps.knownSecrets,
           now: () => at,
           seatSender: false,
-          notify: async (to, text) => {
+          notify: async (to, _text) => {
             // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
             if (to !== seat || (lift !== null && !lift.onSeat)) return;
             try {
-              await deps.supervisor.message(seat, `FLIGHT: ${text}`, {
+              await deps.supervisor.message(seat, "", {
                 interrupt: false,
                 questions: "none",
               });

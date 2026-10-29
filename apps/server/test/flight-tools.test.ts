@@ -1587,10 +1587,10 @@ describe("message_seat", () => {
     ...over,
   });
 
-  it("sends with the FLIGHT prefix and records it", async () => {
+  it("wakes through the supervisor inbox boundary and records it", async () => {
     expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
     expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Please push", { interrupt: false, questions: "none" }],
+      ["guido-1", "", { interrupt: false, questions: "none" }],
     ]);
     expect(decisions()).toMatchObject([
       {
@@ -1766,7 +1766,7 @@ describe("message_seat unpark", () => {
       text: "Sent to GUIDO-1, and its run is un-parked.",
     });
     expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Carry on", { interrupt: false, questions: "none" }],
+      ["guido-1", "", { interrupt: false, questions: "none" }],
     ]);
     expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
     expect(decisions()).toMatchObject([

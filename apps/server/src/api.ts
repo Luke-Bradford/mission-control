@@ -2743,7 +2743,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 },
               },
               COMMS_CAPCOM,
-              { to: id, text: b.text, ref: ticket ?? undefined },
+              {
+                to: id,
+                text: b.text,
+                ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ref: ticket ?? undefined,
+              },
             );
           } catch (e) {
             if (e instanceof SupervisorError) throw e;

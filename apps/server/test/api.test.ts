@@ -5254,6 +5254,7 @@ describe("crew routes", () => {
       expect(r.json()).toEqual({ ok: true });
     }
     expect(supervisorCalls).toEqual([
+      ["message", "guido-1", "now", { interrupt: true }],
       ["interrupt", "guido-1"],
       ["end", "guido-1", { hold: undefined }],
     ]);
