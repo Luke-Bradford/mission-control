@@ -851,6 +851,54 @@ describe("capacity", () => {
     expect(quota?.projectedExhaustionAt).toBeNull();
   });
 
+  it("counts spend from the sample immediately before the range", () => {
+    const since = NOW - 6 * HOUR;
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since - MIN,
+      pct: 10,
+      resetAt: NOW + DAY,
+      source: "x",
+    });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since + MIN,
+      pct: 30,
+      resetAt: NOW + DAY,
+      source: "x",
+    });
+
+    const quota = tel("6h").series?.quota[0];
+    expect(quota?.burn?.[0]).toEqual({ at: since, spendPct: 20 });
+    expect(quota?.projectedExhaustionAt).toBe(NOW + 21 * HOUR);
+  });
+
+  it("does not count a reset whose usage percentage rises as spend", () => {
+    const since = NOW - 6 * HOUR;
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since - MIN,
+      pct: 40,
+      resetAt: NOW + DAY,
+      source: "x",
+    });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: since + MIN,
+      pct: 50,
+      resetAt: NOW + 2 * DAY,
+      source: "x",
+    });
+
+    const quota = tel("6h").series?.quota[0];
+    expect(quota?.burn?.every((point) => point.spendPct === 0)).toBe(true);
+    expect(quota?.projectedExhaustionAt).toBeNull();
+  });
+
   it("7 days of minute machine samples come back as at most 72 averaged points", () => {
     const sample = (atMs: number, cpuPct: number | null): MachineSample => ({
       at: atMs,

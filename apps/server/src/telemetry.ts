@@ -608,18 +608,20 @@ export function telemetry(
   const chartQuota: TelemetrySeries["quota"] = config.accounts.flatMap((account) =>
     WINDOWS.flatMap((window) => {
       const samples = store.usage(account.id, window, 0);
-      const points = samples
-        .filter((sample) => sample.at >= since && sample.at <= now)
-        .map((sample) => ({ at: sample.at, pct: sample.pct }));
+      const rangeSamples = samples.filter((sample) => sample.at >= since && sample.at <= now);
+      const points = rangeSamples.map((sample) => ({ at: sample.at, pct: sample.pct }));
       if (points.length === 0) return [];
       const burn = Array.from({ length: throughputPoints.length }, (_, index) => ({
         at: since + index * throughputBucketMs,
         spendPct: 0,
       }));
-      for (let index = 1; index < points.length; index++) {
-        const previous = points[index - 1];
-        const point = points[index];
+      const baseline = samples.filter((sample) => sample.at < since).at(-1);
+      const burnSamples = baseline ? [baseline, ...rangeSamples] : rangeSamples;
+      for (let index = 1; index < burnSamples.length; index++) {
+        const previous = burnSamples[index - 1];
+        const point = burnSamples[index];
         if (!previous || !point) continue;
+        if (previous.resetAt !== point.resetAt) continue;
         const spent = point.pct - previous.pct;
         if (spent <= 0) continue;
         const bucket = Math.min(
