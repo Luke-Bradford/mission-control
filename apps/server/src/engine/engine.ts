@@ -318,13 +318,26 @@ const REVIEWS_CHAIN = "\0reviews";
 /**
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
  * that is not retiring; null when there is none (the operator reviews). With a `role` (the run's
- * profile names one), the first such seat of that role is preferred.
+ * profile names one), the first such seat of that role is preferred. With `avail`, the first of those
+ * whose account is not at its stop is preferred; when every one is at its stop, the first stands, so
+ * its reviews wait rather than vanish.
  */
-export function reviewerOf(config: CcConfig, seatId: string, role?: string): CrewSeatConfig | null {
+export function reviewerOf(
+  config: CcConfig,
+  seatId: string,
+  role?: string,
+  avail?: { store: Store; now: number },
+): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
   const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
-  return seats.find((x) => x.role === role) ?? seats[0] ?? null;
+  const ofRole = seats.filter((x) => x.role === role);
+  const pool = ofRole.length > 0 ? ofRole : seats;
+  const open =
+    avail === undefined
+      ? undefined
+      : pool.find((x) => !accountAtStop(config, avail.store, x.accountId, avail.now));
+  return open ?? pool[0] ?? null;
 }
 
 /** The review seat's role the run's profile asks for, if it has a profile. */
@@ -361,6 +374,9 @@ export function createEngine(deps: EngineDeps): Engine {
   const { config, store, bus, supervisor, publisher } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
+  /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
+  const reviewerFor = (run: Run): CrewSeatConfig | null =>
+    reviewerOf(config, run.agentId, reviewRoleOf(run), { store, now: now() });
   const chains = new Map<string, Promise<void>>();
   const ruleNotes = new Map<RepoId, string>();
   /** Whether each repo's rules set `hard_rules` at their last good read. */
@@ -663,7 +679,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
-    const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
+    const reviewer = reviewerFor(run);
     let review: LoopReviewFacts | null = null;
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map(reviewFact);
@@ -1172,7 +1188,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         return;
       case "request-review": {
-        const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
+        const reviewer = reviewerFor(run);
         if (reviewer === null) return;
         if (cur.prNumber === null) {
           log(`${run.id}: no PR number to review`);
@@ -1451,7 +1467,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "pr-body": {
         const row = store.review(a.reviewId);
-        const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
+        const reviewer = reviewerFor(run);
         if (row === null || reviewer === null) return;
         const r = await publisher.postMinorFindings(run, {
           id: row.id,
@@ -1508,7 +1524,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (run === null || loop === undefined || loop === null) return;
     // an ended run's status is final: no more writes for it (its ended passes would repeat one)
     if (run.endedAt != null) return;
-    if (reviewerOf(config, run.agentId, reviewRoleOf(run)) === null) return;
+    if (reviewerFor(run) === null) return;
     if (!config.repos.some((r) => r.id === run.repoId)) return;
     const sha = store.runPush(run.id)?.sha;
     if (sha === undefined) return;
@@ -1591,7 +1607,7 @@ export function createEngine(deps: EngineDeps): Engine {
       pr?.state === "open" &&
       pr.headSha === pushed.sha &&
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
-      (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
+      (conflicting || reviewerFor(run) !== null)
     ) {
       // Origin's tip is read every pass; cached strays also depend on the seat area.
       const area = [...(seatConfig(run.agentId)?.area ?? [])];
@@ -2101,11 +2117,7 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (
-        author === null ||
-        row.seatId === reviewerOf(config, author.agentId, reviewRoleOf(author))?.id
-      )
-        continue;
+      if (author === null || row.seatId === reviewerFor(author)?.id) continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
         store.addLoopEvent(

@@ -144,7 +144,7 @@ const HUB = START + 30 * 60_000;
 const REPO = "mc";
 const SEAT = "guido-1";
 const RETRO = "retro-1";
-const KNOWN_SEATS = [SEAT, RETRO, "guido-2", "retro-2"];
+const KNOWN_SEATS = [SEAT, RETRO, "guido-2", "retro-2", "retro-cx"];
 const RUN = "guido-1:20261021T100000Z";
 const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
@@ -3403,6 +3403,56 @@ describe("the engine runs reviews", () => {
     expect(reviewerOf(config, "guido-1", "RETRO")?.id).toBe(RETRO);
     expect(reviewerOf(config, "guido-1", "NOBODY")?.id).toBe(RETRO);
     expect(reviewerOf(config, "guido-1")?.id).toBe(RETRO);
+  });
+
+  describe("a review seat whose account is at its stop", () => {
+    const stopAccount = (accountId: string): void => {
+      store.addUsage({
+        accountId,
+        window: "7d",
+        at: clock,
+        pct: 100,
+        resetAt: clock + 60 * MIN,
+        source: "test",
+      });
+    };
+    const addCodexReviewer = (): void => {
+      config.accounts.push({ id: "codex-main", vendor: "codex", alertAt: 80, stopAt: 95 });
+      seats().splice(
+        seats().findIndex((s) => s.id === RETRO),
+        0,
+        { ...retroSeat(), id: "retro-cx", accountId: "codex-main" },
+      );
+    };
+
+    it("reviewerOf gives the next reviewer when the first one's account is at its stop", () => {
+      addCodexReviewer();
+      const at = { store, now: clock };
+      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe("retro-cx");
+      stopAccount("codex-main");
+      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe(RETRO);
+    });
+
+    it("reviewerOf keeps the first reviewer when every account is at its stop", () => {
+      addCodexReviewer();
+      stopAccount("codex-main");
+      stopAccount("claude-main");
+      expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
+    });
+
+    it("a queued review moves to an available reviewer when its seat's account stops", async () => {
+      addCodexReviewer();
+      h.busyList = [{ seatId: "retro-cx", state: "running" }];
+      await toReview();
+      const old = first();
+      expect(old).toMatchObject({ state: "queued", seatId: "retro-cx" });
+      stopAccount("codex-main");
+      h.busyList = [];
+      await h.engine.tick();
+      expect(store.review(old.id)?.state).toBe("superseded");
+      await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
+      expect(reviewRows()[1]).toMatchObject({ seatId: RETRO, sha: SHA });
+    });
   });
 
   it("a queued review for a removed reviewer is re-requested for the new one", async () => {
