@@ -1589,9 +1589,7 @@ describe("message_seat", () => {
 
   it("wakes through the supervisor inbox boundary and records it", async () => {
     expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(messageCalls).toEqual([
-      ["guido-1", "", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(decisions()).toMatchObject([
       {
         kind: "message",
@@ -1765,9 +1763,7 @@ describe("message_seat unpark", () => {
     expect(await call("message_seat", U())).toEqual({
       text: "Sent to GUIDO-1, and its run is un-parked.",
     });
-    expect(messageCalls).toEqual([
-      ["guido-1", "", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
     expect(decisions()).toMatchObject([
       {
