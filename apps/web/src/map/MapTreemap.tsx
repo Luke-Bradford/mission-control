@@ -103,19 +103,6 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
       if (!row.length) return;
       const total = rowWeight;
       if (remaining.width >= remaining.height) {
-        const height = total / remaining.width;
-        let x = remaining.x;
-        for (const child of row) {
-          const width = (area.get(child) ?? 0) / height;
-          place(child, { x, y: remaining.y, width, height }, depth + 1);
-          x += width;
-        }
-        remaining = {
-          ...remaining,
-          y: remaining.y + height,
-          height: Math.max(0, remaining.height - height),
-        };
-      } else {
         const width = total / remaining.height;
         let y = remaining.y;
         for (const child of row) {
@@ -127,6 +114,19 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
           ...remaining,
           x: remaining.x + width,
           width: Math.max(0, remaining.width - width),
+        };
+      } else {
+        const height = total / remaining.width;
+        let x = remaining.x;
+        for (const child of row) {
+          const width = (area.get(child) ?? 0) / height;
+          place(child, { x, y: remaining.y, width, height }, depth + 1);
+          x += width;
+        }
+        remaining = {
+          ...remaining,
+          y: remaining.y + height,
+          height: Math.max(0, remaining.height - height),
         };
       }
       row = [];

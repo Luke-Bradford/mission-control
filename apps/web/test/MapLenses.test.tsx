@@ -339,3 +339,16 @@ it("uses fixed PR heat bands rather than scaling to the hottest file", () => {
     historyHeat(30),
   ]).toEqual([0.16, 0.16, 0.36, 0.36, 0.6, 0.6, 0.85]);
 });
+
+it("squarifies equal root files at the 1600×1000 reference size", () => {
+  const layout = treemapLayout(
+    Array.from({ length: 4 }, (_, index) => ({ path: `file-${index}.ts`, lines: 10 })),
+    1600,
+    1000,
+  );
+  expect(
+    Math.max(
+      ...layout.tiles.map((tile) => Math.max(tile.width / tile.height, tile.height / tile.width)),
+    ),
+  ).toBeLessThanOrEqual(2);
+});
