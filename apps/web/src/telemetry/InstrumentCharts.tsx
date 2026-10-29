@@ -344,7 +344,7 @@ export function InstrumentCharts({
       <Panel id="tQualityTrend" title="Quality trends" sub="daily small multiples">
         {unavailable("Daily quality history", scope.range)}
       </Panel>
-      <Panel id="tCostMerged" title="Cost per merged ticket" sub="API-equivalent estimate">
+      <Panel id="tCostMerged" title="Cost in range per merged ticket" sub="API-equivalent estimate">
         {!series ? (
           unavailable("Merged-ticket cost history", scope.range)
         ) : !mergedCosts.length ? (
@@ -367,7 +367,7 @@ export function InstrumentCharts({
               Math.max(1, ...mergedCosts.flatMap((point) => (point.v === null ? [] : [point.v]))) *
               1.1
             }
-            label="Cost per merged ticket"
+            label="Cost in range per merged ticket"
             xLabels={labels}
             at={at}
             annotations={annotations}

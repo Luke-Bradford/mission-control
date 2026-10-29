@@ -192,6 +192,7 @@ describe("Instrument charts", () => {
     expect(container.querySelectorAll("#tFlow path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
+    expect(getByRole("heading", { name: "Cost in range per merged ticket" })).toBeTruthy();
     const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
     fireEvent.focus(timeline);
     fireEvent.keyDown(timeline, { key: "ArrowLeft" });
