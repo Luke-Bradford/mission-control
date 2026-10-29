@@ -184,6 +184,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
+import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
@@ -308,6 +309,8 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
+  hudShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   config: CcConfig;
@@ -2212,6 +2215,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       api.get("/escalations", async () => store.escalations());
+
+      // Reader: docs/runbook.md#hud-screenshots (the operator opens the reference FLIGHT cites)
+      api.get<{ Params: { id: string } }>("/hud-screenshots/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here. The
+        // HUD renderer never holds it (the bootstrap refuses its header), nor does a page's script.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const png = deps.hudShots?.read(req.params.id) ?? null;
+        if (!png) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, no-store")
+          .header("x-content-type-options", "nosniff")
+          .type("image/png")
+          .send(png);
+      });
 
       if (operatorToken !== undefined) {
         // Reader: apps/web/src/api.ts#loadOperatorToken (the HUD reads the token at page load)

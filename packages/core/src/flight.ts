@@ -1095,7 +1095,7 @@ export function wakeLine(
   causes: string[] = ["initial"],
 ): string {
   const productPass = s.prs.some((p) => p.state === "merged")
-    ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap with the screenshot reference."
+    ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
 }

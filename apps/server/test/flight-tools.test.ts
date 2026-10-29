@@ -246,6 +246,8 @@ let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
 let screenshotCalls: string[];
 let screenshotImpl: (url: string) => Promise<Buffer>;
+let shotsSaved: Buffer[];
+let shotsSaveImpl: (png: Buffer) => string;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -337,9 +339,15 @@ beforeEach(() => {
   logs = [];
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
+  shotsSaved = [];
+  shotsSaveImpl = (png) => {
+    shotsSaved.push(png);
+    return "a".repeat(32);
+  };
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
+    hudShots: { save: (png) => shotsSaveImpl(png), read: () => null },
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
@@ -643,6 +651,59 @@ describe("screenshot_hud", () => {
     need(cfg.repos[0]).flightPowers = "standard";
     expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
     expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  });
+
+  it("stores the screenshot and cites an opaque reference in the answer", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    const result = await call("screenshot_hud", { page: "/map" });
+    expect(result.text).toBe(`HUD screenshot (1600×1000). Reference: hud-shot:${"a".repeat(32)}`);
+    expect(shotsSaved).toEqual([Buffer.from("png")]);
+    expect(result).toMatchObject({ image: { mimeType: "image/png" } });
+  });
+
+  it("still returns the image when it cannot be stored", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    shotsSaveImpl = () => {
+      throw new Error("disk full");
+    };
+    const result = await call("screenshot_hud", { page: "/map" });
+    expect(result.text).toContain("Not stored");
+    expect(result.isError).toBeUndefined();
+    expect(result).toMatchObject({ image: { mimeType: "image/png" } });
+  });
+
+  it("applies a powers downgrade made while the call waits in the render queue", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    let release: () => void = () => {};
+    screenshotImpl = () =>
+      new Promise<Buffer>((resolve) => {
+        release = () => resolve(Buffer.from("png"));
+      });
+    const first = call("screenshot_hud", { page: "/map" });
+    await vi.waitFor(() => expect(screenshotCalls).toHaveLength(1));
+    const second = call("screenshot_hud", { page: "/board" });
+    need(cfg.repos[0]).flightPowers = "standard"; // while the second is queued behind the first
+    release();
+    await first;
+    expect(await second).toEqual({ text: needsSuperuserText("o/mc"), isError: true });
+    expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  });
+
+  it("runs a queued render after the one before it failed", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    let fail: (e: Error) => void = () => {};
+    screenshotImpl = (url) =>
+      url.endsWith("/map")
+        ? new Promise<Buffer>((_, reject) => {
+            fail = reject;
+          })
+        : Promise.resolve(Buffer.from("png"));
+    const first = call("screenshot_hud", { page: "/map" });
+    await vi.waitFor(() => expect(screenshotCalls).toHaveLength(1));
+    const second = call("screenshot_hud", { page: "/board" });
+    fail(new Error("Chrome crashed"));
+    expect((await first).text).toBe("Chrome crashed");
+    expect(await second).toMatchObject({ image: { mimeType: "image/png" } });
   });
 
   it("counts attempted launches, expires the hourly cap, and describes the limit", async () => {

@@ -38,6 +38,8 @@ function fakePlaywright(
     goto?: () => Promise<void>;
     pageUrl?: string;
     close?: () => Promise<void>;
+    /** Resolves the page-level readiness wait; absent: the page is ready at once. */
+    pageReady?: Promise<void>;
   } = {},
 ) {
   const order: string[] = [];
@@ -45,13 +47,20 @@ function fakePlaywright(
   let websocketHandler: ((route: { close: ReturnType<typeof vi.fn> }) => Promise<void>) | undefined;
   let pageHandler: ((page: { close(): Promise<void> }) => void) | undefined;
   const popupClose = vi.fn(async () => {});
+  const pageEvents = new Map<string, Array<() => void>>();
   const page = {
     goto: vi.fn(async () => {
       order.push("goto");
       pageHandler?.({ close: popupClose });
       await over.goto?.();
     }),
-    waitForFunction: vi.fn(async () => {}),
+    waitForFunction: vi.fn(async (expression: string) => {
+      order.push(expression.includes("hudReady") ? "hudReady" : "pageReady");
+      if (!expression.includes("hudReady")) await over.pageReady;
+    }),
+    on: vi.fn((event: string, handler: () => void) => {
+      pageEvents.set(event, [...(pageEvents.get(event) ?? []), handler]);
+    }),
     screenshot: vi.fn(async () =>
       typeof over.screenshot === "function"
         ? over.screenshot()
@@ -83,16 +92,9 @@ function fakePlaywright(
     newContext: vi.fn(async () => context),
     close: browserClose,
   };
-  const kill = vi.fn();
-  const serverClose = vi.fn(over.close ?? (async () => {}));
-  const server = {
-    wsEndpoint: vi.fn(() => "ws://browser"),
-    process: vi.fn(() => ({ kill })),
-    close: serverClose,
-  };
+  const proxyClose = vi.fn(async () => {});
   const chromium = {
-    launchServer: vi.fn(async () => server),
-    connect: vi.fn(async () => browser),
+    launch: vi.fn(async () => browser),
   };
   return {
     playwright: { chromium } as unknown as HudPlaywright,
@@ -104,8 +106,10 @@ function fakePlaywright(
     popupClose,
     contextClose,
     browserClose,
-    serverClose,
-    kill,
+    proxyClose,
+    emit: (event: string) => {
+      for (const h of pageEvents.get(event) ?? []) h();
+    },
     request: (method: string, url: string) => {
       if (!requestHandler) throw new Error("request route not installed");
       const route = new FakeRoute(method, url);
@@ -120,10 +124,12 @@ function fakePlaywright(
   };
 }
 
-const options = (playwright: HudPlaywright) => ({
+const options = (playwright: HudPlaywright, proxyClose = vi.fn(async () => {})) => ({
   executablePath: "/chrome",
   fileExists: () => true,
   loadPlaywright: async () => playwright,
+  startProxy: async () => ({ address: "127.0.0.1:9999", close: proxyClose }),
+  quietMs: 5,
 });
 
 describe("hudRenderRequest", () => {
@@ -148,23 +154,31 @@ describe("renderHudWithPlaywright", () => {
     const png = await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));
 
     expect(png).toEqual(Buffer.from("png"));
-    expect(fake.chromium.launchServer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        headless: true,
-        executablePath: "/chrome",
-        chromiumSandbox: true,
-        timeout: HUD_RENDER_DEADLINE_MS,
-      }),
-    );
-    expect(fake.chromium.launchServer).toHaveBeenCalledWith(
-      expect.objectContaining({ host: "127.0.0.1" }),
-    );
+    // launch() (a private pipe), never launchServer() (a control socket), behind the hub-only proxy
+    expect(fake.chromium).not.toHaveProperty("launchServer");
+    expect(fake.chromium.launch).toHaveBeenCalledWith({
+      headless: true,
+      executablePath: "/chrome",
+      chromiumSandbox: true,
+      timeout: expect.any(Number),
+      proxy: { server: "http://127.0.0.1:9999" },
+    });
+    const launched = (fake.chromium.launch.mock.calls as unknown as [{ timeout: number }][])[0];
+    expect(launched?.[0].timeout).toBeLessThanOrEqual(HUD_RENDER_DEADLINE_MS);
     expect(fake.browser.newContext).toHaveBeenCalledWith({
       serviceWorkers: "block",
       extraHTTPHeaders: { [HUD_RENDERER_HEADER]: "1" },
       viewport: { width: 1600, height: 1000 },
     });
-    expect(fake.order).toEqual(["route", "websocket", "page", "goto"]);
+    expect(fake.order).toEqual([
+      "route",
+      "websocket",
+      "page",
+      "goto",
+      "hudReady",
+      "pageReady",
+      "pageReady",
+    ]);
     expect(fake.page.goto).toHaveBeenCalledWith(URL, {
       waitUntil: "load",
       timeout: expect.any(Number),
@@ -184,7 +198,7 @@ describe("renderHudWithPlaywright", () => {
   it("aborts bootstrap, SSE and every non-GET before consulting the generic guard", async () => {
     const fake = fakePlaywright();
     const base = hudRenderRequest(URL);
-    const guard = Object.assign(vi.fn(base), { page: base.page });
+    const guard = Object.assign(vi.fn(base), { page: base.page, origin: base.origin });
     await renderHudWithPlaywright(URL, guard, options(fake.playwright));
 
     const bootstrap = await fake.request("GET", `http://127.0.0.1:7420${OPERATOR_BOOTSTRAP_PATH}`);
@@ -222,9 +236,10 @@ describe("renderHudWithPlaywright", () => {
   });
 
   it.each(["navigation", "screenshot"])(
-    "closes on the overall deadline during %s and kills Chrome when close hangs",
+    "closes on the overall deadline during %s even when close hangs",
     async (stage) => {
       const never = () => new Promise<void>(() => {});
+      const proxyClose = vi.fn(never);
       const fake = fakePlaywright({
         ...(stage === "navigation"
           ? { goto: never }
@@ -233,17 +248,47 @@ describe("renderHudWithPlaywright", () => {
       });
       await expect(
         renderHudWithPlaywright(URL, hudRenderRequest(URL), {
-          ...options(fake.playwright),
+          ...options(fake.playwright, proxyClose),
           deadlineMs: 10,
           closeTimeoutMs: 10,
         }),
       ).rejects.toThrow("timed out");
       expect(fake.contextClose).toHaveBeenCalledOnce();
       expect(fake.browserClose).toHaveBeenCalledOnce();
-      expect(fake.serverClose).toHaveBeenCalledOnce();
-      expect(fake.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(proxyClose).toHaveBeenCalledOnce();
     },
   );
+
+  it("waits for the requested page to render and the network to settle before capture", async () => {
+    let release: () => void = () => {};
+    const pageReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fake = fakePlaywright({ pageReady });
+    const render = renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));
+    await vi.waitFor(() => expect(fake.order).toContain("pageReady"));
+    await new Promise((r) => setTimeout(r, 30));
+    // the shell is ready but the lazy page's placeholder is still up: no capture yet
+    expect(fake.page.screenshot).not.toHaveBeenCalled();
+    release();
+    await render;
+    expect(fake.page.screenshot).toHaveBeenCalledOnce();
+    const expressions = fake.page.waitForFunction.mock.calls.map((c) => c[0]);
+    expect(expressions.some((e) => e.includes("Loading…") && e.includes("main"))).toBe(true);
+  });
+
+  it("holds the capture while a page request is still in flight", async () => {
+    const fake = fakePlaywright();
+    fake.page.goto.mockImplementationOnce(async () => {
+      fake.emit("request"); // a data fetch that has not answered
+    });
+    const render = renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(fake.page.screenshot).not.toHaveBeenCalled();
+    fake.emit("requestfinished");
+    await render;
+    expect(fake.page.screenshot).toHaveBeenCalledOnce();
+  });
 
   it("refuses an oversized PNG", async () => {
     const fake = fakePlaywright({ screenshot: Buffer.alloc(HUD_SCREENSHOT_MAX_BYTES + 1) });
@@ -260,7 +305,7 @@ describe("renderHudWithPlaywright", () => {
         fileExists: () => false,
       }),
     ).rejects.toThrow("no system Chrome");
-    expect(fake.chromium.launchServer).not.toHaveBeenCalled();
+    expect(fake.chromium.launch).not.toHaveBeenCalled();
 
     const missing = Object.assign(new Error("Cannot find package 'playwright-core'"), {
       code: "ERR_MODULE_NOT_FOUND",

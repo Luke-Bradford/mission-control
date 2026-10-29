@@ -53,7 +53,8 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
-import { renderHudWithPlaywright } from "./flight/hud-render.ts";
+import { renderHudInHelper } from "./flight/hud-render.ts";
+import { hudShotStore } from "./flight/hud-store.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { editCardFields, type Move, moveCard } from "./github-board.ts";
@@ -328,10 +329,14 @@ export async function main(): Promise<void> {
     edit: (repoId, issue, fields) => engineBoard.edit(repoId, issue, fields),
   };
 
+  // FLIGHT's HUD screenshots are kept under the private data dir, for a week.
+  const hudShots = hudShotStore(join(dirname(dbPath), "hud-screenshots"));
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    hudShots,
     hubOrigin: `http://${HOST}:${port}`,
-    screenshotHud: renderHudWithPlaywright,
+    screenshotHud: renderHudInHelper,
     focus: (seatId, focus) => {
       if (preview && process.env.MC_CONFIG === undefined)
         throw new Error("Focus writes unavailable.");
@@ -453,6 +458,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    hudShots,
     queueReorder,
     mapRing,
     operatorToken,
