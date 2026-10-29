@@ -289,17 +289,65 @@ const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; short
   "gpg-agent": { option: "--daemon", shortest: "--dae".length },
   gpgconf: { option: "--launch", shortest: "--la".length },
 };
+
+/** SSH options whose value consumes the rest of a short-option cluster, or the next word. */
+const SSH_VALUED_OPTIONS = new Set([
+  "b",
+  "c",
+  "D",
+  "E",
+  "e",
+  "F",
+  "I",
+  "i",
+  "J",
+  "L",
+  "l",
+  "m",
+  "M",
+  "O",
+  "o",
+  "p",
+  "Q",
+  "R",
+  "S",
+  "W",
+  "w",
+]);
+
+/** Whether SSH's local options include `-f`, before its destination or a `--` marker. */
+function sshBackgrounds(args: readonly string[]): boolean {
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at] ?? "";
+    if (arg === "--" || !arg.startsWith("-") || arg === "-") return false;
+    if (arg.startsWith("--")) continue;
+    for (let i = 1; i < arg.length; i++) {
+      const option = arg.charAt(i);
+      if (option === "f") return true;
+      if (SSH_VALUED_OPTIONS.has(option)) {
+        if (i + 1 === arg.length) at++;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+/** Whether a command's short option clusters contain `option`. */
+function hasShortOption(args: readonly string[], option: string): boolean {
+  return args.some((arg) => /^-[A-Za-z]+$/.test(arg) && arg.includes(option));
+}
+
 /** Whether `program` with `args` hands work to something that outlives this tool call. */
 function launches(program: string, args: readonly string[]): boolean {
   if (BACKGROUND_LAUNCHERS.has(program)) return true;
-  // ssh and autossh fork into the background under -f (including `ssh -fN`).
-  if ((program === "ssh" || program === "autossh") && args.some((a) => a.startsWith("-f")))
-    return true;
+  // ssh and autossh fork into the background under -f (including `ssh -Nf`).
+  if ((program === "ssh" || program === "autossh") && sshBackgrounds(args)) return true;
   // start-stop-daemon only detaches the started process when both options are present.
   if (
     program === "start-stop-daemon" &&
-    args.some((a) => a === "--start" || a === "-S") &&
-    args.some((a) => a === "--background" || a === "-b")
+    (args.includes("--start") || hasShortOption(args, "S")) &&
+    (args.includes("--background") || hasShortOption(args, "b"))
   )
     return true;
   const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
@@ -1515,7 +1563,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   // safely expand, but this position determines what the shell invokes, so it cannot be judged.
   // Nested commands (runner suffixes and eval scripts) are already judged fail-closed by their
   // caller; retaining their existing rule keeps specific refusals such as gpg and tmux.
-  if (depth === 0 && mux === "none" && !gitEnv && EXPANDS.test(program))
+  if (mux === "none" && !gitEnv && EXPANDS.test(program))
     return [...extra, { argv: [UNREADABLE_LINE], background: bg }];
   const name = baseName(program);
   const rest = words.slice(at + 1);
