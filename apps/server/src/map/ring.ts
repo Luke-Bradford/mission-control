@@ -14,6 +14,7 @@ import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
+import { cutBytes } from "../util.ts";
 import { SeatDiff } from "./diff.ts";
 
 /** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
@@ -439,12 +440,15 @@ export class CallRing {
     error: boolean,
     refused: boolean,
     at: number,
+    cutBytes: number | null = null,
   ): void {
     const call = this.rows.get(source.seat)?.find((c) => c.runId === source.id && c.id === id);
     if (!call || call.end !== null) return;
     call.end = at;
-    call.resultSize = output.length;
-    call.resultTok = Math.ceil(output.length / 4);
+    // a result the transcript holds cut is as long as it was, not as long as what is kept
+    const size = cutBytes ?? output.length;
+    call.resultSize = size;
+    call.resultTok = Math.ceil(size / 4);
     call.refused = refused;
     call.error = error && !refused;
     call.why =
@@ -528,7 +532,15 @@ export class CallRing {
           item.type === "fileChange" ? item.changes : undefined,
         );
         if (ev.method === "item/completed")
-          this.finish(source, item.id, tool.result, tool.error, item.status === "declined", at);
+          this.finish(
+            source,
+            item.id,
+            tool.result,
+            tool.error,
+            item.status === "declined",
+            at,
+            tool.cutBytes,
+          );
       }
       return;
     }
@@ -557,6 +569,7 @@ export class CallRing {
           block.is_error === true,
           false,
           at,
+          cutBytes(block),
         );
     }
   }

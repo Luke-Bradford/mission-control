@@ -778,20 +778,28 @@ describe("the compact transcript (#934)", () => {
     expect((JSON.parse(live[3] as string).params.item.aggregatedOutput as string).length).toBe(
       2 * 1024 * 1024,
     );
-    // the file holds neither the delta nor the usage answer, and the output is cut and marked
+    // the file holds a delta-free heartbeat for the delta, not the usage answer, and the output is
+    // cut and marked
     const kept = lines();
-    expect(methods(kept)).toEqual(["item/started", "item/completed", "turn/completed"]);
+    expect(methods(kept)).toEqual([
+      "item/started",
+      "item/commandExecution/outputDelta",
+      "item/completed",
+      "turn/completed",
+    ]);
+    expect(JSON.parse(kept[1] as string).params.delta).toBeUndefined();
     expect(readFileSync(transcript).length).toBeLessThan(20 * 1024);
-    const item = JSON.parse(kept[1] as string).params.item;
+    const item = JSON.parse(kept[2] as string).params.item;
     expect(item.outputTruncated).toEqual({ bytes: 2 * 1024 * 1024 });
     // a hub that comes back is numbered through the dropped lines and gets the compact form
     const again = await client(folder);
     again.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
     await until(() => expect(again.outs()).toHaveLength(5));
     expect(again.outs().map(([n]) => n)).toEqual([0, 1, 2, 3, 4]);
+    expect(again.outs()[2]?.[1]).toBe(""); // exactly empty, not null
     expect(methods(again.outs().map(([, l]) => l as string))).toEqual([
       "item/started",
-      null,
+      "item/commandExecution/outputDelta",
       null,
       "item/completed",
       "turn/completed",
@@ -802,6 +810,116 @@ describe("the compact transcript (#934)", () => {
     await until(() => expect(resumed.outs()).toHaveLength(2));
     expect(resumed.outs().map(([n]) => n)).toEqual([3, 4]);
     resumed.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+
+  const usage = `{ type: "control_response", response: { subtype: "success", request_id: "r", response: {
+    categories: [{ name: "Messages", tokens: 5 }], totalTokens: 5, maxTokens: 100, gridRows: [[1]] } } }`;
+
+  it("a dropped last line still has its number: a hub replaying from 0 gets the lines, then the exit", async () => {
+    const folder = folderFor(
+      `const say = (m) => console.log(JSON.stringify(m));
+       process.stdin.once("data", () => {
+         say({ method: "item/started", params: { item: { id: "c" } } });
+         say(${usage});
+       });
+       process.stdin.on("end", () => process.exit(0));`,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder);
+    const a = await client(folder);
+    a.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    a.say({ t: "in", line: "go", user: false });
+    await until(() => expect(a.outs()).toHaveLength(2));
+    const b = await client(folder);
+    expect(b.msgs[0]).toMatchObject({ t: "hello", lines: 2 });
+    b.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(b.outs()).toHaveLength(2));
+    expect(b.outs()[1]).toEqual([1, ""]);
+    b.say({ t: "close", graceMs: 300 });
+    await k.done;
+    await b.closed;
+    expect(b.msgs.at(-1)).toEqual({ t: "exit", code: 0, signal: null });
+  });
+
+  it("a long replay with a compacted line arriving during it ends in order, the new line whole", async () => {
+    const big = 300 * 1024;
+    const folder = folderFor(
+      `const say = (m) => console.log(JSON.stringify(m));
+       for (let i = 0; i < 1500; i++) say({ method: "item/started", params: { item: { id: "c" + i } } });
+       process.stdin.once("data", () => say({ method: "item/completed", params: { item: {
+         id: "x", type: "commandExecution", aggregatedOutput: "y".repeat(${big}) } } }));
+       process.stdin.on("end", () => process.exit(0));`,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "go", user: false });
+    await until(() => expect(c.outs()).toHaveLength(1501));
+    expect(c.outs().map(([n]) => n)).toEqual(Array.from({ length: 1501 }, (_, i) => i));
+    const last = JSON.parse(c.outs()[1500]?.[1] as string);
+    expect(last.params.item.aggregatedOutput).toHaveLength(big);
+    expect(lines()).toHaveLength(1501);
+    expect(lines()[1500]?.length).toBeLessThan(20 * 1024);
+    c.say({ t: "close", graceMs: 300 });
+    await k.done;
+  });
+
+  it("with the transcript failing, dropped lines keep their numbers and the rest come from memory", async () => {
+    const folder = folderFor(
+      `const say = (m) => console.log(JSON.stringify(m));
+       process.stdin.once("data", () => {
+         say({ method: "item/started", params: { item: { id: "c" } } });
+         say(${usage});
+         say({ method: "turn/completed" });
+       });
+       process.stdin.on("end", () => process.exit(0));`,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder, {
+      write: () => {
+        throw new Error("disk full");
+      },
+    });
+    const a = await client(folder);
+    a.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    a.say({ t: "in", line: "go", user: false });
+    await until(() => expect(a.outs()).toHaveLength(3));
+    expect(String(a.outs()[1]?.[1]).includes("gridRows")).toBe(true); // live: whole
+    const b = await client(folder);
+    b.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(b.outs()).toHaveLength(3));
+    expect(b.outs().map(([n]) => n)).toEqual([0, 1, 2]);
+    expect(b.outs()[1]?.[1]).toBe("");
+    expect(methods([b.outs()[0]?.[1] as string, b.outs()[2]?.[1] as string])).toEqual([
+      "item/started",
+      "turn/completed",
+    ]);
+    b.say({ t: "close", graceMs: 300 });
+    await k.done;
+  });
+
+  it("leaves a heartbeat for a long delta-only command, one per minute of it", async () => {
+    const folder = folderFor(
+      `const say = (m) => console.log(JSON.stringify(m));
+       process.stdin.once("data", () => {
+         for (let i = 0; i < 50; i++) say({ method: "item/commandExecution/outputDelta",
+           params: { threadId: "t", turnId: "u", itemId: "c", delta: "line " + i } });
+       });
+       process.stdin.on("end", () => process.exit(0));`,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "go", user: false });
+    await until(() => expect(c.outs()).toHaveLength(50));
+    const kept = lines().map((l) => JSON.parse(l));
+    expect(kept).toHaveLength(1);
+    expect(kept[0].params).toEqual({ threadId: "t", turnId: "u", itemId: "c" });
+    expect(Number.isFinite(Date.parse(kept[0].timestamp))).toBe(true);
+    c.say({ t: "close", graceMs: 300 });
     await k.done;
   });
 });

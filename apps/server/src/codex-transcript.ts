@@ -1,6 +1,6 @@
 import { type CrewVendor, isObj, MC_MCP_SERVER } from "@mc/core";
 import { cleanText } from "./clean.ts";
-import { str } from "./util.ts";
+import { cutBytes, str } from "./util.ts";
 
 export { CODEX_APPROVAL_DECISION } from "./runtime/codex-wire.ts";
 
@@ -55,6 +55,8 @@ export function codexTool(item: Record<string, unknown>) {
     name: cleanText(name),
     input: input === undefined ? "" : JSON.stringify(input),
     result,
+    /** Bytes the transcript's compaction cut from `result`, whose own length is the kept part. */
+    cutBytes: cutBytes(item),
     status: str(item.status) ?? undefined,
     exitCode: typeof item.exitCode === "number" ? item.exitCode : null,
     ms: typeof item.durationMs === "number" ? Math.max(0, item.durationMs) : null,

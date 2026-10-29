@@ -167,6 +167,57 @@ describe("crew call ring", () => {
     });
   }
 
+  it("measures a result the transcript holds cut by the bytes it was, not the bytes kept (#934)", () => {
+    const at = (n: number) => new Date(Date.UTC(2026, 9, 25, 0, 0, n)).toISOString();
+    const claude = setup("claude");
+    appendFileSync(
+      claude.transcriptPath,
+      `${JSON.stringify({
+        type: "assistant",
+        timestamp: at(0),
+        message: {
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+        },
+      })}\n${JSON.stringify({
+        type: "user",
+        timestamp: at(1),
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: "kept",
+              outputTruncated: { bytes: 4000 },
+            },
+          ],
+        },
+      })}\n`,
+    );
+    claude.ring.poll();
+    expect(claude.ring.calls("seat")[0]).toMatchObject({ resultSize: 4000, resultTok: 1000 });
+    const codex = setup("codex");
+    const item = (extra: object) => ({
+      id: "c1",
+      type: "commandExecution",
+      command: "pnpm test",
+      ...extra,
+    });
+    appendFileSync(
+      codex.transcriptPath,
+      `${JSON.stringify({ method: "item/started", timestamp: at(0), params: { item: item({}) } })}\n${JSON.stringify(
+        {
+          method: "item/completed",
+          timestamp: at(1),
+          params: {
+            item: item({ aggregatedOutput: "kept", outputTruncated: { bytes: 8000 } }),
+          },
+        },
+      )}\n`,
+    );
+    codex.ring.poll();
+    expect(codex.ring.calls("seat")[0]).toMatchObject({ resultSize: 8000, resultTok: 2000 });
+  });
+
   it("resolves Glob patterns to existing files within the requested checkout directory", () => {
     const { ring, transcriptPath, cwd } = setup("claude");
     mkdirSync(join(cwd, "src"));

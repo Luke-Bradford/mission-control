@@ -45,7 +45,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
-import { compactTranscriptLine } from "./transcript-compact.ts";
+import { compactTranscriptLine, deltaHeartbeats } from "./transcript-compact.ts";
 
 /** Bumped when the wire changes; a hub that finds another version ends that keeper and resumes. */
 export const KEEPER_PROTOCOL_VERSION = 1;
@@ -491,6 +491,8 @@ export function runKeeper(
    * full for the attached hub until it has them: live delivery is not compacted, only the file is.
    */
   const live = new Map<number, string>();
+  /** Which output deltas leave a heartbeat in the transcript (one per item per minute). */
+  const heartbeats = deltaHeartbeats();
   /** The first of them: every line below it is in the transcript. */
   let firstHeld = Number.POSITIVE_INFINITY;
   let lineCount = 0;
@@ -607,14 +609,14 @@ export function runKeeper(
     }
     const n = lineCount;
     // the transcript keeps a compact form (#934); the hub, attached now, still hears the whole line
-    const kept = compactTranscriptLine(line);
+    const kept = compactTranscriptLine(line, heartbeats);
     if (kept !== line && client?.ready) live.set(n, line);
     const ok = kept === null ? !transcriptFailed : record(kept);
     if (ok) {
       offsets.push((offsets[n] as number) + (kept === null ? 0 : Buffer.byteLength(kept) + 1));
     } else {
       if (firstHeld === Number.POSITIVE_INFINITY) firstHeld = n;
-      if (kept !== null) held.set(n, line);
+      if (kept !== null) held.set(n, kept);
     }
     lineCount = n + 1;
     if (spec.turnEnd === "codex") {

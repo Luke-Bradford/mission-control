@@ -360,3 +360,37 @@ it("defers stream format detection past bookkeeping and unknown objects", () => 
   );
   expect(readStream(claude, 200).events.map((e) => e.text)).toEqual(["Ready."]);
 });
+
+it("says how many bytes a cut result lost (#934)", () => {
+  const p = write(
+    "cut.jsonl",
+    `${[
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "m",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+        },
+        parent_tool_use_id: null,
+        timestamp: at(0),
+      }),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: "kept",
+              outputTruncated: { bytes: 123456 },
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+        timestamp: at(1),
+      }),
+    ].join("\n")}\n`,
+  );
+  const text = JSON.stringify(readStream(p, 10).events);
+  expect(text).toContain("kept\\n(123456 bytes cut)");
+});

@@ -679,11 +679,16 @@ function toContextUsage(v: unknown): ContextUsage | null {
  * A seat's last context usage. The CLI is asked once per turn, after it ends, never per request:
  * every answer is a 30 KB line in the CLI's output (#934).
  */
+/** After a failed context ask, how long before a read asks again (ms). */
+const CONTEXT_RETRY_MS = 30 * 1000;
+
 interface ContextCache {
   usage: ContextUsage | null;
   /** A turn has ended since `usage` was asked for (or it never was): the next read asks once. */
   stale: boolean;
   inflight: Promise<void> | null;
+  /** After a failed ask: the earliest time (ms) the next read may ask again, inside the same turn. */
+  retryAt: number;
 }
 
 export function createSupervisor(deps: SupervisorDeps): Supervisor {
@@ -693,7 +698,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const refreshContext = (l: Live): Promise<void> => {
     let cache = contextCaches.get(l);
     if (!cache) {
-      cache = { usage: null, stale: true, inflight: null };
+      cache = { usage: null, stale: true, inflight: null, retryAt: 0 };
       contextCaches.set(l, cache);
     }
     if (cache.inflight) return cache.inflight;
@@ -701,9 +706,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     c.stale = false;
     c.inflight = (async () => {
       try {
-        c.usage = toContextUsage(await l.session.control("get_context_usage"));
+        const usage = toContextUsage(await l.session.control("get_context_usage"));
+        if (usage === null) throw new Error("not the usage shape");
+        c.usage = usage;
       } catch {
-        // keep the last answer: it is old, not wrong
+        // keep the last answer (old, not wrong), and ask again soon rather than next turn
+        c.stale = true;
+        c.retryAt = now() + CONTEXT_RETRY_MS;
       } finally {
         c.inflight = null;
       }
@@ -1093,7 +1102,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.inTurn = false;
         l.interrupted = false;
         const cache = contextCaches.get(l);
-        if (cache) cache.stale = true;
+        if (cache) {
+          cache.stale = true;
+          cache.retryAt = 0;
+        }
         fold(l);
         if (l.parkedTurn) {
           l.parkedTurn = false; // parked stays until the next line starts a turn
@@ -4214,9 +4226,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       need(seatId);
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
-      // from the cache; the CLI is asked only when a turn has ended since it last was (or never)
+      // Codex answers from its own live token counts: nothing to ask, nothing written
+      if (l.run.vendor === "codex") {
+        try {
+          return toContextUsage(await l.session.control("get_context_usage"));
+        } catch {
+          return null;
+        }
+      }
+      // from the cache; the CLI is asked once per turn (when a turn has ended since it last was),
+      // and again after a failed ask once CONTEXT_RETRY_MS has passed
       const cache = contextCaches.get(l);
-      if (!cache || (cache.stale && !l.inTurn)) await refreshContext(l);
+      if (!cache || (cache.stale && now() >= cache.retryAt)) await refreshContext(l);
       else if (cache.inflight) await cache.inflight;
       return contextCaches.get(l)?.usage ?? null;
     },

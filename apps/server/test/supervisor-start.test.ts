@@ -1650,6 +1650,19 @@ describe("contextUsage", () => {
     await sup.contextUsage("guido-1");
     expect(asks()).toBe(2);
   });
+  it("after a failed ask the next read within 30 s is the cache's, not another ask (#934)", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "NOCONTROL", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // the ask times out
+    expect(asks()).toBe(1);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(1);
+  });
 });
 
 describe("the crew lock", () => {
