@@ -3596,7 +3596,7 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       expect(h.resumes).toEqual([RUN]);
       expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
-      expect(h.sent[0]?.text).toContain("a Important thing");
+      expect(h.sent[0]?.text).toContain("1 Important");
       await h.engine.tick();
       expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
     },

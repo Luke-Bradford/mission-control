@@ -1266,6 +1266,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/mentions/seen", { ids: [] }],
   ["GET", "/api/comms/pins"],
   ["GET", "/api/comms/links"],
+  ["GET", "/api/comms/metrics"],
   ["GET", "/api/comms/traffic"],
   ["GET", "/api/comms/chatter"],
   ["GET", "/api/comms/open"],
