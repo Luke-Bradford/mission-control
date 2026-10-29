@@ -28,6 +28,7 @@ import {
   CODEX_SHELL,
   CREW_DISABLED,
   CREW_GIT_ENV,
+  CREW_PNPM_ENV,
   claimedText,
   conflictKey,
   conflictText,
@@ -623,6 +624,7 @@ describe("startRun", () => {
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "DISABLE_AUTOUPDATER",
+      ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
       "UV_NO_SYNC",
       "UV_OFFLINE",
@@ -646,6 +648,9 @@ describe("startRun", () => {
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
     // a timed-out suite is killed, not moved to the background still holding the test lock
     expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    // pnpm stays on its installed version: the sandbox cannot fetch the repo's pin (#953)
+    expect(env).toMatchObject(CREW_PNPM_ENV);
+    expect(env.pnpm_config_pm_on_fail).toBe("ignore");
   });
 
   it.each([1000, 9999999999])(

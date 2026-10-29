@@ -741,8 +741,14 @@ export const CREW_CLI_ENV = {
   DISABLE_AUTOUPDATER: "1",
 } as const;
 
-/** Keep pnpm on its installed version when a sandbox cannot fetch the project's pin. */
-export const CODEX_CLI_ENV = {
+/**
+ * Every crew seat (Claude and Codex): keep pnpm on its installed version when the sandbox cannot
+ * fetch the project's `packageManager` pin. Without it, pnpm in a repo whose pin differs from the
+ * installed pnpm retries the download with no network and hangs (#953). The cost: a pin
+ * mismatch is ignored in every repo a seat works in, so an install there runs on the installed
+ * pnpm, not the pinned one.
+ */
+export const CREW_PNPM_ENV = {
   pnpm_config_pm_on_fail: "ignore",
   npm_config_update_notifier: "false",
 } as const;
