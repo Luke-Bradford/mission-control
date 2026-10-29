@@ -23,7 +23,7 @@ type Props = LightProps & {
   areas?: string[];
   focus: string | null;
   /** Direct import relationships around the focused file, highlighted on the map. */
-  focusLinks?: { from: string; to: string; unlinked?: boolean }[];
+  focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
   lens?: MapLens;
   lensVisual?: Record<string, LensVisual>;
   home: number;
@@ -511,7 +511,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       previousFocus = next.focus;
     }
     const nextLinkKey = (next.focusLinks ?? [])
-      .map((edge) => `${edge.from}\t${edge.to}`)
+      .map((edge) => `${edge.from}\t${edge.to}\t${edge.unlinked ? "hidden" : "import"}`)
       .join("\n");
     if (nextLinkKey !== focusLinkKey) {
       clearFocusLines();
@@ -532,13 +532,23 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
             "position",
             new THREE.Float32BufferAttribute(vertices, 3),
           ),
-          new THREE.LineBasicMaterial({
-            color,
-            transparent: true,
-            opacity: 0.9,
-            depthWrite: false,
-          }),
+          unlinked
+            ? new THREE.LineDashedMaterial({
+                color,
+                dashSize: 0.18,
+                gapSize: 0.1,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+              })
+            : new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+              }),
         );
+        if (unlinked) line.computeLineDistances();
         scene.add(line);
         focusLines.push(line);
       }
@@ -567,21 +577,38 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     const matrix = new THREE.Matrix4();
     const plain = new THREE.Color(NODE);
     const picked = new THREE.Color(SIGNAL);
-    const impact = new THREE.Color("#3f94b5");
-    const history = new THREE.Color("#b56f3f");
+    const impactSeats = ["#75c8ff", "#ff9d6a", "#a1e2a6", "#e3c16f", "#df9bc7"];
+    const historyLow = new THREE.Color("#5b7894");
+    const historyHigh = new THREE.Color("#ffad65");
     spheres.forEach((node, i) => {
       const chosen = node.path === next.selected;
-      // every file is an individual node; selection is the only reason to enlarge one
-      const size = (node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4) * (chosen ? 1.8 : 1);
+      const visual = next.lensVisual?.[node.path];
+      let lensColor = plain.clone();
+      if (next.lens === "impact" && visual?.distance !== undefined) {
+        lensColor.set(impactSeats[(visual.seat ?? 0) % impactSeats.length] ?? SIGNAL);
+        // Changed seeds are strongest; each dependency hop becomes quieter without losing its seat.
+        lensColor.lerp(plain, Math.min(visual.distance, 4) * 0.16);
+        if (visual.overlap) lensColor.lerp(new THREE.Color("#ffd166"), 0.42);
+      }
+      if (next.lens === "history" && visual?.hotspot !== undefined) {
+        lensColor = historyLow
+          .clone()
+          .lerp(historyHigh, Math.min(1, Math.log2(visual.hotspot + 1) / 5));
+        // A high fix share makes a hotspot visibly more urgent than pure churn.
+        if (visual.fixes && visual.fixes / visual.hotspot >= 0.2)
+          lensColor.lerp(new THREE.Color("#ff6f7d"), 0.45);
+      }
+      if (visual?.dim) lensColor.lerp(plain, 0.72);
+      if (visual?.focused) lensColor = picked.clone();
+      const baseSize = node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4;
+      const size =
+        baseSize *
+        (chosen ? 1.8 : 1) *
+        (visual?.focused ? 1.45 : 1) *
+        (visual?.overlap || (visual?.fixes ?? 0) > 0 ? 1.15 : 1) *
+        (visual?.confidence ? 1 + visual.confidence * 0.45 : 1);
       matrix.makeScale(size, size, size).setPosition(...node.position);
       mesh.setMatrixAt(i, matrix);
-      const visual = next.lensVisual?.[node.path];
-      const lensColor =
-        next.lens === "impact" && visual?.reach
-          ? impact
-          : next.lens === "history" && visual?.hotspot
-            ? history
-            : plain;
       mesh.setColorAt(i, chosen ? picked : lensColor);
       const color = chosen ? picked : lensColor;
       (points.geometry.getAttribute("color") as THREE.BufferAttribute).setXYZ(

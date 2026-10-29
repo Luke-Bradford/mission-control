@@ -270,7 +270,7 @@ export function CrewMapView({
           : [],
     [lens, snapshot, focus],
   );
-  const lensVisual = useMemo(() => lensVisuals(snapshot, lens), [snapshot, lens]);
+  const lensVisual = useMemo(() => lensVisuals(snapshot, lens, focus), [snapshot, lens, focus]);
   useEffect(() => {
     const clearFocus = (event: KeyboardEvent) => {
       if (event.key === "Escape" && focus !== null) setFocus(null);

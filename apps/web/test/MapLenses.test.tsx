@@ -2,20 +2,48 @@ import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { graph } from "../src/map/Lenses.tsx";
+import { graph, lensVisuals } from "../src/map/Lenses.tsx";
 
 const scenes = vi.hoisted(
-  () => [] as { focusLinks?: { from: string; to: string }[]; onSelect?: (path: string) => void }[],
+  () =>
+    [] as {
+      focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
+      lens?: "changes" | "impact" | "history";
+      lensVisual?: Record<
+        string,
+        { distance?: number; hotspot?: number; fixes?: number; dim?: boolean }
+      >;
+      onSelect?: (path: string) => void;
+    }[],
 );
 vi.mock("../src/map/MapScene.tsx", () => ({
   MapScene: (props: {
-    focusLinks?: { from: string; to: string }[];
+    focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
+    lens?: "changes" | "impact" | "history";
+    lensVisual?: Record<
+      string,
+      { distance?: number; hotspot?: number; fixes?: number; dim?: boolean }
+    >;
     onSelect?: (path: string) => void;
   }) => {
     scenes.push(props);
     return <div>3D scene</div>;
   },
 }));
+
+it("derives seed reach, history heat and focused partner confidence from the map payload", () => {
+  const value = snapshot();
+  const impact = lensVisuals(value, "impact", null);
+  expect(impact["src/contract.ts"]).toMatchObject({ distance: 0 });
+  expect(impact["src/consumer.ts"]).toMatchObject({ distance: 0, overlap: true });
+  expect(impact["test/consumer.test.ts"]).toMatchObject({ distance: 1 });
+  expect(impact["src/untested.ts"]).toMatchObject({ distance: 0 });
+
+  const history = lensVisuals(value, "history", "src/contract.ts");
+  expect(history["src/contract.ts"]).toMatchObject({ hotspot: 59, fixes: 22, dim: false });
+  expect(history["src/untested.ts"]).toMatchObject({ confidence: 0.67, dim: false });
+  expect(history["src/consumer.ts"]).toMatchObject({ hotspot: 12, fixes: 2, dim: true });
+});
 
 function snapshot(): MapSnapshot {
   const value: MapSnapshot = structuredClone(mapSnapshotFixture);

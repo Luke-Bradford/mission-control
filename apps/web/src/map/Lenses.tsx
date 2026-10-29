@@ -3,9 +3,17 @@ import { githubItemHref } from "../links.ts";
 
 export type MapLens = "changes" | "impact" | "history";
 export interface LensVisual {
-  reach?: number;
+  /** Impact: seat colour index and dependency distance (zero is a changed seed). */
+  seat?: number;
+  distance?: number;
+  overlap?: boolean;
+  /** History: merged-PR heat and a conspicuous bug-fix signal. */
   hotspot?: number;
   fixes?: number;
+  confidence?: number;
+  linked?: boolean;
+  focused?: boolean;
+  dim?: boolean;
 }
 
 const isTest = (path: string) =>
@@ -140,29 +148,79 @@ function linked(a: string, b: string, forward: Graph["forward"], reverse: Graph[
 export function historyFocusLinks(snapshot: MapSnapshot, path: string | null) {
   if (path === null) return [];
   const { forward, reverse } = graph(snapshot);
-  return snapshot.hist.coupling.flatMap(([left, right]) => {
+  return snapshot.hist.coupling.flatMap(([left, right, , confidence]) => {
     const a = snapshot.tree[left]?.path;
     const b = snapshot.tree[right]?.path;
     if (!a || !b || (a !== path && b !== path)) return [];
-    return [{ from: a, to: b, unlinked: !linked(a, b, forward, reverse) }];
+    return [{ from: a, to: b, unlinked: !linked(a, b, forward, reverse), confidence }];
   });
 }
 
 /** Per-file map styling data for the active analytical lens. */
-export function lensVisuals(snapshot: MapSnapshot, lens: MapLens): Record<string, LensVisual> {
+export function lensVisuals(
+  snapshot: MapSnapshot,
+  lens: MapLens,
+  focus: string | null,
+): Record<string, LensVisual> {
   if (lens === "changes") return {};
   if (lens === "impact") {
-    const { reverse } = graph(snapshot);
-    return Object.fromEntries(
-      snapshot.tree.map(({ path }) => [path, { reach: downstream(path, reverse).size }]),
-    );
+    const { forward, reverse } = graph(snapshot);
+    const out: Record<string, LensVisual> = {};
+    changed(snapshot).forEach(({ files }, seat) => {
+      const code = files.filter((path) => reverse.has(path));
+      for (const path of code) {
+        const prior = out[path];
+        out[path] = {
+          seat: prior?.seat ?? seat,
+          distance: 0,
+          overlap: prior !== undefined && prior.seat !== seat,
+          focused: focus === path,
+        };
+      }
+      for (const [path, distance] of downstreamFrom(code, reverse)) {
+        const prior = out[path];
+        out[path] = {
+          seat: prior?.seat ?? seat,
+          distance: Math.min(prior?.distance ?? Infinity, distance),
+          overlap: prior !== undefined && prior.seat !== seat,
+          focused: focus === path,
+        };
+      }
+    });
+    if (focus !== null) {
+      const related = new Set([
+        focus,
+        ...downstream(focus, reverse).keys(),
+        ...(forward.get(focus) ?? []),
+      ]);
+      for (const { path } of snapshot.tree)
+        out[path] = { ...(out[path] ?? {}), focused: path === focus, dim: !related.has(path) };
+    }
+    return out;
   }
-  return Object.fromEntries(
+  const out: Record<string, LensVisual> = Object.fromEntries(
     Object.entries(snapshot.hist.files).flatMap(([index, history]) => {
       const path = snapshot.tree[Number(index)]?.path;
-      return path ? [[path, { hotspot: history[0], fixes: history[1] }]] : [];
+      return path
+        ? [[path, { hotspot: history[0], fixes: history[1], focused: focus === path }]]
+        : [];
     }),
   );
+  if (focus !== null) {
+    const partners = historyFocusLinks(snapshot, focus);
+    const partnerSet = new Set(partners.flatMap(({ from, to }) => [from, to]));
+    for (const { path } of snapshot.tree) {
+      const partner = partners.find((edge) => edge.from === path || edge.to === path);
+      out[path] = {
+        ...(out[path] ?? {}),
+        focused: path === focus,
+        dim: !partnerSet.has(path),
+        confidence: partner?.confidence,
+        linked: partner ? !partner.unlinked : undefined,
+      };
+    }
+  }
+  return out;
 }
 
 function changed(snapshot: MapSnapshot) {
