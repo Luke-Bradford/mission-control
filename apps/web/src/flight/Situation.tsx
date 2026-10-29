@@ -1,6 +1,7 @@
 import {
   type AttentionItem,
   type CrewPause,
+  FLIGHT_VIEW_LIMIT,
   type FlightSummaryView,
   type MetricId,
   seatIsPaused,
@@ -25,8 +26,8 @@ export const HEADLINE_STALE_MIN = 60;
 export type FlightRun = { kind: "loading" } | { kind: "down" | "held" | "running"; why: string };
 
 /**
- * Whether FLIGHT is running, held or down, and why in words. Down: no seat or a stopped one.
- * Held: its seat is rate-limited, or the crew pause covers it.
+ * Whether FLIGHT is running, held or down, and why in words. Held: the crew pause covers its seat,
+ * or it is rate-limited. Down: no seat, or a stopped one that is neither.
  */
 export function flightRun(
   view: FlightView | undefined,
@@ -34,10 +35,13 @@ export function flightRun(
 ): FlightRun {
   if (view === undefined) return { kind: "loading" };
   const seat: FlightSeat | null = view.seat;
-  if (seat === null || !seat.live) return { kind: "down", why: flightOffText(seat) };
+  if (seat === null) return { kind: "down", why: flightOffText(null) };
+  // Held before down: the hub serves a rate-limited seat, and a paused one once its run ends, as
+  // not live, but each is waiting to resume, not stopped.
   if (seatIsPaused(pause ?? null, seat.id))
     return { kind: "held", why: pause?.reason ? `crew paused: ${pause.reason}` : "crew paused" };
   if (seat.state === "parked") return { kind: "held", why: "rate-limited" };
+  if (!seat.live) return { kind: "down", why: flightOffText(seat) };
   return { kind: "running", why: stateWord(seat) };
 }
 
@@ -55,7 +59,7 @@ function Counter({
 }: {
   tab: FlightTab;
   label: string;
-  n: number | null;
+  n: number | string | null;
   warn?: boolean;
   /** The registry figure this counter shows, when it is one. */
   metric?: MetricId;
@@ -88,7 +92,10 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
   const needsYou = useMetrics().readings.needsYou?.n ?? null;
   const run = flightRun(flight.data, pause);
   const handling = attention === undefined ? null : needsGroups(attention).handling.length;
-  const decided = flight.data?.decisions.length ?? null;
+  const decidedN = flight.data?.decisions.length ?? null;
+  // The hub serves at most FLIGHT_VIEW_LIMIT, so a full list is a floor, not a count.
+  const decided =
+    decidedN !== null && decidedN >= FLIGHT_VIEW_LIMIT ? `${FLIGHT_VIEW_LIMIT}+` : decidedN;
   const age = summary?.headlineAgeMin ?? null;
   const stale = age !== null && age >= HEADLINE_STALE_MIN;
   return (

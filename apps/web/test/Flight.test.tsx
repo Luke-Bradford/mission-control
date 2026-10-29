@@ -2,6 +2,7 @@ import {
   type CrewLoop,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_VIEW_LIMIT,
   type FlightBriefSectionKey,
   type FlightBriefView,
 } from "@mc/core";
@@ -1014,13 +1015,42 @@ describe("FLIGHT page", () => {
     it("says Held when FLIGHT's seat is rate-limited", async () => {
       stubFetch({
         "/api/flight": flightView({
-          seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "parked", live: true },
+          seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "parked", live: false },
         }),
         "/api/config": CONFIG,
       });
       render(<Flight />);
       await waitFor(async () => expect((await strip()).textContent).toContain("rate-limited"));
       expect((await strip()).textContent).toContain("Held");
+      expect((await strip()).textContent).not.toContain("Down");
+    });
+
+    it("says Held, not Down, when the crew pause covers a FLIGHT seat that is no longer live", async () => {
+      stubFetch({
+        "/api/flight": flightView({
+          seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "stopped", live: false },
+        }),
+        "/api/settings/crew-pause": { seats: ["flight-1"], reason: "quota low", at: NOW, by: "o" },
+        "/api/config": CONFIG,
+      });
+      render(<Flight />);
+      await waitFor(async () => expect((await strip()).textContent).toContain("Held"));
+      expect((await strip()).textContent).toContain("crew paused: quota low");
+      expect((await strip()).textContent).not.toContain("Down");
+    });
+
+    it("shows FLIGHT_VIEW_LIMIT decisions as a floor, and the decisions tab says the list is cut", async () => {
+      const many = Array.from({ length: FLIGHT_VIEW_LIMIT }, (_, i) =>
+        decided(`d${i + 1}`, NOW - (i + 1) * 20 * MIN),
+      );
+      stubFetch({ "/api/flight": flightView({ decisions: many }), "/api/config": CONFIG });
+      render(<Flight />);
+      expect(await screen.findByRole("button", { name: "decided 24 h: 100+" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+      expect(
+        screen.getByText("newest 100 shown · the hub serves no older decisions of the last 24 h"),
+      ).toBeTruthy();
+      expect(screen.queryByText(/100 of 100/)).toBeNull();
     });
 
     it("reports a failed summary while live work stays", async () => {

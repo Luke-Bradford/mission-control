@@ -15,7 +15,7 @@ import {
   useFlightUnread,
   useItem,
 } from "../src/shell/overlays.ts";
-import { DOCK_KEY } from "../src/storage.ts";
+import { DOCK_COLLAPSED_KEY, DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
 import { readStyles } from "./styles.ts";
@@ -127,6 +127,20 @@ describe("Dock content", () => {
 });
 
 describe("Dock on a wide screen", () => {
+  it("starts collapsed to its title row, expands on click, and remembers the choice", () => {
+    stubWidth(true);
+    const { container } = render(<Dock />);
+    const toggle = screen.getByRole("button", { name: "Expand" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Collapse" }).getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(false);
+    expect(localStorage.getItem(DOCK_COLLAPSED_KEY)).toBe("false");
+  });
+
   it("is shown by default; Hide hides it and remembers, showing again remembers that", () => {
     stubWidth(true);
     const { container } = render(<Dock />);

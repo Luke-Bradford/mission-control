@@ -1,4 +1,4 @@
-import { type Crew, clockHm, FLIGHT_DECISION_KINDS } from "@mc/core";
+import { type Crew, clockHm, FLIGHT_DECISION_KINDS, FLIGHT_VIEW_LIMIT } from "@mc/core";
 import { useMemo, useState } from "react";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -12,6 +12,7 @@ import { WorkingLog } from "./WorkingLog.tsx";
 
 const DASH = "—";
 export const NO_DECISIONS_24H = "FLIGHT has decided nothing in the last 24 hours.";
+export const DECISIONS_CAPPED = `newest ${FLIGHT_VIEW_LIMIT} shown · the hub serves no older decisions of the last 24 h`;
 export const NO_MATCHING = "No decision matches those filters.";
 export const MISSING_POWERS_PENDING =
   "Missing powers: not available yet. The hub does not report what FLIGHT lacked.";
@@ -104,7 +105,9 @@ function Decisions() {
           onChange={(e) => setText(e.target.value)}
         />
         <span className="s note">
-          {shown} of {all.length} · last 24 h
+          {all.length >= FLIGHT_VIEW_LIMIT
+            ? DECISIONS_CAPPED
+            : `${shown} of ${all.length} · last 24 h`}
         </span>
       </search>
       {groups.length === 0 ? (

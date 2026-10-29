@@ -8,7 +8,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, openNeedsYou, sortNeeds } from "../attention.ts";
+import { needsYouItems, openNeedsYou, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -32,6 +32,7 @@ import {
 } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { DOCK_COLLAPSED_KEY, readBool, writeBool } from "../storage.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
 import "./Dock.css";
@@ -306,6 +307,14 @@ export function Dock() {
   const { visible, wide, toggle } = useDock();
   const hide = useRef<HTMLButtonElement>(null);
   const drawer = visible && !wide;
+  // The column starts folded to its title row; the drawer is opened to be read, so never folds.
+  const [folded, setFolded] = useState(() => readBool(DOCK_COLLAPSED_KEY, true));
+  const collapsed = wide && folded;
+  const waiting = useNeedsYou().length;
+  const fold = () => {
+    writeBool(DOCK_COLLAPSED_KEY, !folded);
+    setFolded(!folded);
+  };
   useReturnFocus(drawer);
   useEffect(() => {
     if (drawer) hide.current?.focus();
@@ -366,7 +375,7 @@ export function Dock() {
         <div className="dockscrim" data-testid="dock-scrim" onClick={toggle} aria-hidden="true" />
       )}
       <aside
-        className="dock"
+        className={collapsed ? "dock collapsed" : "dock"}
         id="dock"
         aria-label="FLIGHT"
         hidden={!visible}
@@ -385,6 +394,19 @@ export function Dock() {
                 onClick={() => void start()}
               >
                 Start FLIGHT
+              </button>
+            )}
+            {collapsed && waiting > 0 && <Pill tone="warn">{`Waiting on you · ${waiting}`}</Pill>}
+            {wide && (
+              <button
+                type="button"
+                className="sm"
+                aria-expanded={!collapsed}
+                aria-controls="dockBody"
+                title={collapsed ? "Expand FLIGHT's conversation" : "Collapse FLIGHT to its title"}
+                onClick={fold}
+              >
+                {collapsed ? "Expand" : "Collapse"}
               </button>
             )}
             <button
@@ -417,7 +439,9 @@ export function Dock() {
               {err}
             </p>
           )}
-          <FlightChat where="dock" />
+          <div className="dockbody" id="dockBody">
+            <FlightChat where="dock" />
+          </div>
         </div>
       </aside>
     </>
