@@ -90,6 +90,26 @@ it("does not fabricate a running span for a currently parked agent", async () =>
   expect(container.querySelector(".overview-span")).toBeNull();
 });
 
+it("keeps an observed open lock when a parked agent has no current turn", async () => {
+  stub(
+    [
+      {
+        agentId: "dev-1",
+        spans: [
+          { kind: "turn", from: NOW - HOUR, to: null },
+          { kind: "lock", from: NOW - 30 * MIN, to: null },
+        ],
+        ticks: [],
+      },
+    ],
+    [seatRow({ id: "dev-1", hudState: "parked" })],
+  );
+  const { container } = render(<TimelinePanel />);
+  await screen.findByTitle("dev-1");
+  expect(container.querySelector(".k-turn")).toBeNull();
+  expect(container.querySelector(".k-lock")).not.toBeNull();
+});
+
 it("slides every second between fetches", async () => {
   const fetch = stub([
     { agentId: "dev-1", spans: [{ kind: "turn", from: NOW - 30 * MIN, to: null }], ticks: [] },

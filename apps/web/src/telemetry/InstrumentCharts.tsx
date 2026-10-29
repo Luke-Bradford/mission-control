@@ -238,11 +238,13 @@ export function InstrumentCharts({
   let merged = 0;
   const flowEvents = tickets
     .flatMap((ticket) =>
-      ticket.readyAt === null || ticket.doneAt === null || ticket.doneAt < ticket.readyAt
+      ticket.readyAt === null
         ? []
         : [
             { at: ticket.readyAt, delta: 1 },
-            { at: ticket.doneAt, delta: -1 },
+            ...(ticket.doneAt !== null && ticket.doneAt >= ticket.readyAt
+              ? [{ at: ticket.doneAt, delta: -1 }]
+              : []),
           ],
     )
     .sort((a, b) => a.at - b.at);

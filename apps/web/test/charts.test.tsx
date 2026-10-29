@@ -163,6 +163,27 @@ describe("Instrument charts", () => {
     expect(container.querySelectorAll("#tFlow path.line")).toHaveLength(2);
   });
 
+  it("keeps an observed Ready ticket in cumulative flow until it is done", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#open", readyAt: 20, startedAt: 20, mergedAt: null, doneAt: null },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector("#tFlow svg")?.getAttribute("aria-label")).toContain(
+      "in progress latest 1",
+    );
+  });
+
   it("renders only the supplied server observations, retaining their timestamps", () => {
     const { container, getByRole } = render(
       <ChartCursorProvider>
@@ -249,9 +270,32 @@ describe("LineChart", () => {
     expect(container.querySelector("svg")?.getAttribute("aria-label")).toBe(
       "Machine load: CPU latest 40%, peak 40%; Memory latest 25%, peak 25%",
     );
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    // CPU's isolated first reading is a visible point, but still has no fill.
+    expect(container.querySelectorAll("circle.point")).toHaveLength(1);
     // one fill per unbroken run: CPU's lone first reading has none
     expect(container.querySelectorAll("path.area")).toHaveLength(2);
+  });
+
+  it("marks a lone observed value rather than drawing an invisible move-only path", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "cycle",
+            name: "p50 cycle time",
+            color: "var(--accent)",
+            points: [{ at: 50, v: 4 }],
+          },
+          { id: "cost", name: "cost", color: "var(--warn)", points: [{ at: 50, v: 1.25 }] },
+        ]}
+        from={0}
+        to={100}
+        label="Single observations"
+        xLabels={["start", "now"]}
+        at={String}
+      />,
+    );
+    expect(container.querySelectorAll("circle.point")).toHaveLength(2);
   });
 
   it("hover lists each series at the nearest sample", () => {

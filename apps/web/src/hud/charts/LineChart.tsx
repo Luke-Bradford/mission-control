@@ -132,6 +132,17 @@ export function LineChart({
       });
   };
 
+  // A path containing a single move command is invisible. Keep those observations visible without
+  // connecting across a missing reading.
+  const lonePoints = (s: LineSeries): { at: number; v: number }[] => {
+    const runs: { at: number; v: number }[][] = [[]];
+    for (const p of s.points) {
+      if (p.v === null) runs.push([]);
+      else runs.at(-1)?.push({ at: p.at, v: p.v });
+    }
+    return runs.filter((run) => run.length === 1).flat();
+  };
+
   const visibleAnnotations = annotations.filter(
     (annotation) => annotation.at >= from && annotation.at <= to,
   );
@@ -261,6 +272,16 @@ export function LineChart({
               strokeLinejoin="round"
               strokeLinecap="round"
             />
+            {lonePoints(s).map((p) => (
+              <circle
+                className="point"
+                key={`${p.at}:${p.v}`}
+                cx={X(p.at)}
+                cy={Y(p.v)}
+                r={2.5}
+                fill={s.color}
+              />
+            ))}
           </g>
         ))}
         <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />
