@@ -341,6 +341,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
@@ -491,6 +492,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     start() {
       if (interval !== null) return;
       stopped = false;
+      // a schedule kept from before a restart is not this watch's; idle passes recompute it
+      const found = flightSeat(config);
+      if (found !== null) recordNextFlightWake(store, found.session.repoId, null);
       offSupervisor = supervisor.on((e) => {
         if (e.seatId === flightSeat(config)?.seat.id) {
           if (e.kind === "idle") lastTurnEndAt = now();

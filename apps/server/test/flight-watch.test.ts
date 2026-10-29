@@ -814,6 +814,20 @@ describe("FLIGHT's brief in the digest", () => {
       expect(startCalls).toHaveLength(1);
       expect(status()?.lastWakeAt).toBe(nowMs);
       expect(status()?.wokeOn).toContain("q (1)");
+      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_MS);
+    });
+
+    it("keeps the last wake but drops a stale schedule across a restart", async () => {
+      liveCrew();
+      ask();
+      await watch.check();
+      expect(status()?.nextWakeAt).toBe(nowMs + FLIGHT_REWAKE_MS);
+      const woke = status();
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      makeWatch();
+      watch.start();
+      await watch.check();
+      expect(status()).toEqual({ ...woke, nextWakeAt: null });
     });
 
     it("records a wake sent to a live FLIGHT, and keeps it across a new watch", async () => {
