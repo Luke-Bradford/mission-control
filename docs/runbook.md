@@ -1051,21 +1051,6 @@ step through agents; `/` opens the selected agent (its composer is off for an ob
 smallest panels do not fit, the work area scrolls); below that the page scrolls; at 390 px nothing
 scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
-## Decision defaults
-
-An item FLIGHT has briefed for the operator with a recommended option carries a deadline
-(`defaultDueAt`): 40 minutes after the ask (`DECISION_DEFAULT_WAIT_MS`), stored on the brief as `defaultAt` when the ask is first briefed (a rebrief of the same ask keeps it, so a later change of the wait does not move it). If nobody has answered by
-then, the hub applies the recommended option once: the card is acked (it leaves Decisions),
-"Default applied: <option> (<ask>)" is stored in FLIGHT ↔ CAPCOM, and the option's answer is
-messaged to the seat that asked, or to FLIGHT when the asker has no seat. An escalation (answered on
-GitHub) never gets a default: the hub writes nothing there. An answer (ack) before the deadline
-cancels it. Held stops the clock: nothing applies while held, and the 40 minutes restart when the
-hold is released. Each (item, ask) is claimed in the `decision_defaults` table in one transaction
-with its Comms message and ack, so a restart or a repeated sweep never applies it twice, a failed
-write leaves it to the next sweep, an answer that could not be handed over is retried on later sweeps until it is delivered, and an overdue default applies on the first sweep after a restart.
-The Comms Decisions card does not yet count down to `defaultDueAt` (it still reads the triage deadline);
-that web change is a separate follow-up ticket.
-
 ## Away mode
 
 The server reads the settings saved by `POST /api/settings/away` before starting work or marking
