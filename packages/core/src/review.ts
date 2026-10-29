@@ -201,26 +201,11 @@ export function fixText(i: {
   sha: string;
   findings: readonly ReviewFinding[];
 }): string {
-  const ordered = BLOCKING_SEVERITIES.flatMap((s) => i.findings.filter((f) => f.severity === s));
-  const n = ordered.length;
-  const head = `${i.retro} reviewed ${i.sha.slice(0, 7)} and found ${n} ${n === 1 ? "issue" : "issues"} to resolve before this PR can merge. Please address each finding below, or explain in your evidence note why you think it should not change. Commit any fix with mc commit, then call mc report_evidence and say what changed or which finding you are responding to and why. ${i.retro} will review the response.`;
-  const entries = ordered.map(
-    (f, k) =>
-      `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}`,
-  );
-  const more = (k: number): string => `…and ${k} more; the next review lists them again.`;
-  const build = (kept: number): string => {
-    const parts = [head, ""];
-    if (kept > 0) parts.push(entries.slice(0, kept).join("\n\n"));
-    if (kept < entries.length) {
-      if (kept > 0) parts.push("");
-      parts.push(more(entries.length - kept));
-    }
-    return parts.join("\n");
-  };
-  let kept = 0;
-  while (kept < entries.length && build(kept + 1).length <= FIX_TEXT_MAX) kept++;
-  return build(kept);
+  const counts = BLOCKING_SEVERITIES.flatMap((severity) => {
+    const n = i.findings.filter((f) => f.severity === severity).length;
+    return n === 0 ? [] : [`${n} ${severity}`];
+  });
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address them, then report_evidence.`;
 }
 
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";

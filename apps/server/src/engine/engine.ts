@@ -32,6 +32,7 @@ import {
   CI_RERUN_FAILED_TEXT,
   COMMS_CAPCOM,
   COMMS_MC,
+  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
   cardMark,
@@ -1134,7 +1135,13 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a real excerpt is kept: a failed read or an empty answer is asked for again
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
-        const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
+        const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
+        const shortened = "\n[CI output shortened; inspect the CI log.]";
+        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+        const text =
+          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+            ? intro + excerpt
+            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
         const sent = await send(run.id, a.key, text);
         if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {

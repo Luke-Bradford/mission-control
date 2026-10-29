@@ -23,8 +23,11 @@ export const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 export const COMMS_TICKET = /^[^#]+#[1-9]\d*$/;
 
 export const COMMS_TEXT_MAX = 32_000;
-export const COMMS_MESSAGE_MAX = COMMS_TEXT_MAX;
+/** A Comms message is a pointer, never the structured record itself. */
+export const COMMS_MESSAGE_MAX = 1_200;
 export const COMMS_MESSAGE_BODY_LIMIT = COMMS_MESSAGE_MAX * 6 + 1024;
+export const commsTooLongText =
+  "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.";
 export const commsCutMarker = (kept: number, total: number): string =>
   `\n[stored text cut at ${kept} of ${total} characters]`;
 

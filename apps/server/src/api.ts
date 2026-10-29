@@ -32,6 +32,7 @@ import {
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  type CommsMetricsView,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -78,6 +79,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   type PullRequestView,
   pace5h,
+  percentile,
   projectAtReset,
   QA_RETENTION_DAYS,
   type QaFindingsView,
@@ -1493,6 +1495,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/comms/traffic", () => ({
         hours: store.commsHourlyLinkCounts(now() - 24 * 60 * 60 * 1000),
       }));
+      // Reader: apps/web/src/comms/CommsGraph.tsx#CommsGraph (per-seat Comms length p95)
+      api.get("/comms/metrics", (): CommsMetricsView => {
+        const to = now();
+        const from = to - 24 * 60 * 60 * 1000;
+        const lengths = new Map<string, number[]>();
+        for (const row of store.comms(from)) {
+          const values = lengths.get(row.from) ?? [];
+          values.push(Array.from(row.text).length);
+          lengths.set(row.from, values);
+        }
+        return {
+          from,
+          to,
+          p95BySeat: [...lengths]
+            .map(([seatId, values]) => ({ seatId, p95: percentile(values, 95), n: values.length }))
+            .sort((a, b) => a.seatId.localeCompare(b.seatId)),
+        };
+      });
       // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
       api.get("/comms/chatter", () => ({
         pairs: store.commsChatter(

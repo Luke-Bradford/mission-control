@@ -3,7 +3,6 @@ import { fillLoopText, RATE_LIMIT_RETRY_MS } from "../src/loop.ts";
 import {
   carriedFrom,
   currentReview,
-  FIX_TEXT_MAX,
   failedAttempts,
   findingFileOk,
   fixesSent,
@@ -49,7 +48,7 @@ const fin = (over: Partial<ReviewFinding>): ReviewFinding => ({
 });
 
 describe("fixText", () => {
-  it("orders and numbers", () => {
+  it("counts severities and points to the structured findings", () => {
     const t = fixText({
       retro: "RETRO",
       sha: "abcdef1234",
@@ -59,23 +58,16 @@ describe("fixText", () => {
         fin({ summary: "c" }),
       ],
     });
-    expect(t).toContain("RETRO reviewed abcdef1 and found 3 issues to resolve");
-    expect(t).toContain("or explain in your evidence note why you think it should not change");
-    expect(t).not.toContain("as written");
-    expect(t).not.toContain("Ruling:");
-    expect(t).toContain(
-      "1. [Critical] a.ts — b\n   Why: w\n   Suggested fix: f\n\n2. [Important] a.ts:3 — a",
+    expect(t).toBe(
+      "RETRO reviewed abcdef1: 1 Critical, 2 Important.\nFindings are in RETRO's report_findings record; address them, then report_evidence.",
     );
-    expect(t.indexOf("3. [Important] a.ts:3 — c")).toBeGreaterThan(t.indexOf("2."));
-    expect(t).not.toContain(":0");
   });
 
-  it("caps", () => {
+  it("stays short for many findings", () => {
     const findings = Array.from({ length: 50 }, () => fin({ fix: "x".repeat(1900) }));
     const t = fixText({ retro: "RETRO", sha: "abcdef1", findings });
-    expect(t.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
-    expect(t).toContain("found 50 issues");
-    expect(t).toMatch(/…and \d+ more; the next review lists them again\.$/);
+    expect(t.length).toBeLessThanOrEqual(1200);
+    expect(t).toContain("50 Important");
   });
 
   it("skips Minor; singular", () => {
@@ -84,8 +76,8 @@ describe("fixText", () => {
       sha: "abcdef1",
       findings: [fin({ severity: "Minor" }), fin({ severity: "Critical" })],
     });
-    expect(t).toContain("found 1 issue to resolve");
-    expect(t).not.toContain("2. ");
+    expect(t).toContain("1 Critical");
+    expect(t).not.toContain("Minor");
   });
 });
 

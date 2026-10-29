@@ -19,6 +19,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   capText,
   ciLogText,
@@ -1781,6 +1782,14 @@ describe("message_seat", () => {
     text: "Please push",
     basis: "idle",
     ...over,
+  });
+
+  it("refuses a long message and directs FLIGHT to the structured report", async () => {
+    expect(await call("message_seat", M({ text: "x".repeat(COMMS_MESSAGE_MAX + 1) }))).toEqual(
+      refused(
+        "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      ),
+    );
   });
 
   it("wakes through the supervisor inbox boundary and records it", async () => {

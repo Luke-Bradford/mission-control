@@ -12,12 +12,12 @@ import {
   awayBugDecisionAbout,
   type BoardItem,
   CI_EXCERPT_MAX,
+  COMMS_MESSAGE_MAX,
   COMMS_TEXT_MAX,
   CONTROLLER_CHECK_HEADING,
   CONTROLLER_CHECK_PARK,
   cleanupBranchNoteKey,
   closedIssueText,
-  commsCutMarker,
   conflictKey,
   controllerCheckFailText,
   controllerCheckParkText,
@@ -30,7 +30,6 @@ import {
   EVIDENCE_REMIND_MS,
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
-  FIX_TEXT_MAX,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -1247,7 +1246,7 @@ describe("CI and review", () => {
   });
 
   it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
-    "delivers a %i-character CI excerpt whole without parking and bounds only its stored copy",
+    "shortens a %i-character CI excerpt to the Comms limit without parking",
     async (length) => {
       await inCi();
       await failCi();
@@ -1256,12 +1255,9 @@ describe("CI and review", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
       const text = h.sent[0]?.text ?? "";
-      expect(text.endsWith(excerpt)).toBe(true);
-      expect(store.comms(0)[0]?.text).toBe(
-        text.length <= COMMS_TEXT_MAX
-          ? text
-          : `${text.slice(0, COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, text.length)}`,
-      );
+      expect(Array.from(text)).toHaveLength(COMMS_MESSAGE_MAX);
+      expect(text.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
+      expect(store.comms(0)[0]?.text).toBe(text);
       expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
@@ -3657,12 +3653,12 @@ describe("the engine runs reviews", () => {
         from: RETRO,
         to: SEAT,
         ticket: `${REPO}#7`,
-        text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
+        text: "RETRO-1 reviewed aaaaaaa: 1 Critical, 1 Important.\nFindings are in RETRO-1's report_findings record; address them, then report_evidence.",
       },
     ]);
   });
 
-  it("stores a long review hand-off whole without parking the author", async () => {
+  it("stores a concise review hand-off without parking the author", async () => {
     await toReview();
     const findings = Array.from({ length: 6 }, () => ({
       ...finding("Important"),
@@ -3671,9 +3667,8 @@ describe("the engine runs reviews", () => {
     reported(first().id, findings);
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     const text = need(h.sent[0]).text;
-    expect(text.length).toBeGreaterThan(CI_EXCERPT_MAX);
-    expect(text.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
-    expect(FIX_TEXT_MAX).toBeLessThan(COMMS_TEXT_MAX);
+    expect(text.length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(text).toContain("6 Important");
     expect(store.comms(0)[0]?.text).toBe(text);
     expect(loopOf().parked).toBeNull();
   });
@@ -4558,7 +4553,7 @@ describe("the engine runs reviews", () => {
         });
       });
 
-      it("a carried blocking review sends its findings in the fix line", async () => {
+      it("a carried blocking review sends its findings count in the fix line", async () => {
         h.busyList = [{ seatId: RETRO, state: "running" }];
         await toReview();
         await h.engine.reconcileRun(RUN);
@@ -4578,7 +4573,7 @@ describe("the engine runs reviews", () => {
         expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
         expect(h.steps).not.toContain("merge");
         await vi.waitFor(() =>
-          expect(h.sent.some((s) => s.text.includes("a Important thing"))).toBe(true),
+          expect(h.sent.some((s) => s.text.includes("1 Important"))).toBe(true),
         );
       });
 

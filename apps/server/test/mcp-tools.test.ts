@@ -22,6 +22,7 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
@@ -1302,6 +1303,14 @@ describe("Comms seat tools", () => {
     tool("comms_inbox", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
+
+  it("refuses a long message and directs the seat to its structured report", async () => {
+    expect(await send({ to: "crew", text: "x".repeat(COMMS_MESSAGE_MAX + 1) })).toEqual({
+      text: "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      isError: true,
+    });
+    expect(store.comms(0)).toEqual([]);
+  });
 
   it("reads recent stored crew, direct and mentioned context without leaking other DMs", async () => {
     store.addComms({ at: NOW - 4, from: "retro", to: "crew", ticket: null, text: "crew" });
