@@ -219,14 +219,13 @@ describe("Agent run trace", () => {
     });
     stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
     const view = render(<Agent id={row.id} />);
-    await screen.findByText("Loop total");
-    expect(view.container.querySelector(".vsteps")).toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
     const trace = screen.getByRole("link", { name: "Trace" });
     expect(trace.getAttribute("href")).toBe(`/agent/${row.id}?trace=r-12`);
     fireEvent.click(trace);
     expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: "Back to agent" }));
-    await screen.findByText("Loop total");
+    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
     view.unmount();
   });
 
@@ -2095,13 +2094,49 @@ describe("Agent page: loop steps", () => {
       const ci = loopOf({ phase: "ci", text: "CI is running", prNumber: 77 });
       const tries = [triesAt("working", 1, "pass"), triesAt("ci", 1, "running", { endedAt: null })];
       const panel = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: "pending" })] });
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
-      expect(panel.textContent).toContain("Checks");
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
+      expect(panel.textContent).toContain("CI is running");
       cleanup();
       const quiet = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: null })] });
-      await screen.findByText("Loop total");
-      expect(quiet.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(quiet.querySelector(".vsteps")).not.toBeNull());
+    });
+
+    it("shows every step open: passed with outcome and time, current with tries, to come with its rule", async () => {
+      const tries = [
+        triesAt("working", 1, "pass"),
+        triesAt("ci", 1, "fail", { reason: "lint" }),
+        triesAt("ci", 2, "running", { startedAt: NOW - 3 * MIN, endedAt: null }),
+      ];
+      const panel = await openLoop(
+        loopOf({ phase: "ci", text: "CI is running", prNumber: 77 }),
+        viewOf("ci", tries),
+        { prs: [pr77({ ci: "pending" })] },
+      );
+      await waitFor(() => expect(panel.querySelector(".vsteps .att")).not.toBeNull());
+      const steps = [...panel.querySelectorAll<HTMLElement>(".vstep")];
+      expect(steps.map((s) => $(s, ".vname")?.textContent)).toEqual([
+        "Working",
+        "CI×2",
+        "In review",
+        "Done",
+      ]);
+      // a passed step: its try, outcome and duration, no click needed
+      const passed = steps[0] as HTMLElement;
+      expect(passed.className).toContain("done");
+      expect($(passed, ".att")?.textContent).toContain("pass");
+      expect($(passed, ".att")?.textContent).toContain("10m");
+      // the current step: live text, both tries, time in step
+      const current = steps[1] as HTMLElement;
+      expect(current.getAttribute("aria-current")).toBe("step");
+      expect(current.textContent).toContain("CI is running");
+      expect(current.querySelectorAll(".att")).toHaveLength(2);
+      expect($(current, ".vmeta")?.textContent).toContain("13m");
+      expect(panel.querySelector("button[aria-expanded]")?.textContent).not.toBe("CI");
+      // a step still to come: its rule, muted by the todo class
+      const future = steps[2] as HTMLElement;
+      expect(future.className).toContain("todo");
+      expect($(future, ".vrule")?.textContent).toBeTruthy();
+      expect(future.querySelector(".att")).toBeNull();
     });
 
     it("review round 2 of 3", async () => {
@@ -2118,8 +2153,7 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "review", text: "In review", prNumber: 77 }),
         viewOf("review", tries, { round: 2, review }),
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
       expect(panel.textContent).toContain("In review");
     });
 
@@ -2135,8 +2169,7 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "parked", text: `Blocked: ${why}`, parked: why, prNumber: 77 }),
         viewOf("parked", tries),
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
       expect(panel.textContent).toContain(`parked: ${why}`);
     });
 
@@ -2245,8 +2278,7 @@ describe("Agent page: loop steps", () => {
           ],
         },
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
     });
 
     it("the loop's own counter", async () => {
