@@ -48,6 +48,7 @@ import {
   MC_SYNC_NOT_WORKING,
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
+  MERGE_HOLD_PARK,
   MINOR_POSTED,
   mergedMainText,
   mergedText,
@@ -3737,6 +3738,87 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       reported(first().id, []);
     }
+
+    describe("a hold on the merge", () => {
+      it("parks a clean, green run instead of merging, and merges once released", async () => {
+        await toReview();
+        expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({
+          ok: true,
+        });
+        expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT", reason: "design not approved" });
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, []);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(loopOf().parked?.reason).toContain("design not approved");
+        expect(h.steps).not.toContain("merge");
+        await h.engine.reconcileRun(RUN);
+        await h.engine.tick();
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+        expect(loopOf().mergeHold ?? null).toBeNull();
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("a run held while parked on the hold is not lifted by a resume", async () => {
+        await h.engine.holdMerge(RUN, "CAPCOM", "wait");
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(await h.engine.onOperatorMessage(RUN, "CAPCOM")).toEqual({
+          lifted: false,
+          reason: "use-merge-hold",
+        });
+        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toEqual({
+          lifted: false,
+          reason: "use-merge-hold",
+        });
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("FLIGHT cannot release a hold the controller set; the controller can", async () => {
+        await toReview();
+        await h.engine.holdMerge(RUN, "CAPCOM", "veto");
+        const refused = await h.engine.releaseMergeHold(RUN, "FLIGHT");
+        expect(refused.ok).toBe(false);
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "veto" });
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
+        expect(loopOf().mergeHold ?? null).toBeNull();
+      });
+
+      it("FLIGHT cannot replace the controller's hold, the controller can replace FLIGHT's", async () => {
+        await toReview();
+        await h.engine.holdMerge(RUN, "CAPCOM", "veto");
+        expect((await h.engine.holdMerge(RUN, "FLIGHT", "mine")).ok).toBe(false);
+        expect(loopOf().mergeHold?.by).toBe("CAPCOM");
+        await h.engine.releaseMergeHold(RUN, "CAPCOM");
+        await h.engine.holdMerge(RUN, "FLIGHT", "mine");
+        expect(await h.engine.holdMerge(RUN, "CAPCOM", "theirs")).toEqual({ ok: true });
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "theirs" });
+      });
+
+      it("a hold replaced while parked names the new holder and releases to the phase it left", async () => {
+        await h.engine.holdMerge(RUN, "FLIGHT", "mine");
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(loopOf().mergeHold?.from).toBe("review");
+        expect(await h.engine.holdMerge(RUN, "CAPCOM", "theirs")).toEqual({ ok: true });
+        expect(loopOf().parked?.reason).toBe("merge held by CAPCOM: theirs");
+        expect(loopOf().mergeHold).toMatchObject({
+          by: "CAPCOM",
+          reason: "theirs",
+          from: "review",
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().parked?.reason).toBe("merge held by CAPCOM: theirs");
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("refuses to hold or release when there is nothing to do", async () => {
+        expect((await h.engine.releaseMergeHold(RUN, "CAPCOM")).ok).toBe(false);
+        expect((await h.engine.holdMerge("nope", "CAPCOM", "x")).ok).toBe(false);
+      });
+    });
 
     describe("a ticket's controller check", () => {
       const CHECK = "Open the swatches in a browser, light and dark.";

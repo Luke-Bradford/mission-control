@@ -394,7 +394,7 @@ export interface FlightToolsDeps {
   profiles?: () => readonly Profile[] | ProfilesError;
   engine:
     | (Pick<Engine, "onOperatorMessage" | "status" | "acceptRuling" | "syncMain" | "uncommitted"> &
-        Partial<Pick<Engine, "clearFlight" | "rerunCi">>)
+        Partial<Pick<Engine, "clearFlight" | "rerunCi" | "holdMerge" | "releaseMergeHold">>)
     | null;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -2779,6 +2779,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     note: z.string().min(1).max(2_000).optional(),
     basis: basisArg,
   });
+  const HoldArgs = z.strictObject({
+    runId: text(200),
+    action: z.enum(["hold", "release"]),
+    reason: z.string().min(1).max(300).optional(),
+    basis: basisArg,
+  });
   const EditArgs = z.strictObject({
     issue: issueNumber,
     size: z.enum(TICKET_SIZES).optional(),
@@ -2981,6 +2987,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             basis: a.basis,
           });
         return { text: `Settled ${run.id}: ${a.action}.` };
+      },
+    ),
+    superTool(
+      MC_TOOL_NAMES.holdPr,
+      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released. You can never release a hold the operator or controller set.",
+      HoldArgs,
+      "hold",
+      async (a) => {
+        const found = devRun(a.runId);
+        if (isRefusal(found)) return found;
+        const run = found.run;
+        if (!inRunLane(run)) return fail("Run is in another lane.");
+        const engine = deps.engine;
+        if (!engine?.holdMerge || !engine.releaseMergeHold)
+          return fail("The merge hold is unavailable: the engine is unavailable.");
+        if (a.action === "hold") {
+          if (a.reason === undefined) return fail("A reason is required to hold a PR.");
+          const r = await engine.holdMerge(run.id, "FLIGHT", a.reason);
+          return r.ok
+            ? { text: `Held ${run.id}: the engine will not merge it until the hold is released.` }
+            : fail(`Cannot hold: ${r.text}.`);
+        }
+        const hold = run.loop?.mergeHold;
+        if (!hold) return fail("Run's merge is not held.");
+        if (hold.by !== "FLIGHT")
+          return fail("The controller set this hold; only the controller can release it.");
+        const r = await engine.releaseMergeHold(run.id, "FLIGHT");
+        return r.ok
+          ? { text: `Released the hold on ${run.id}.` }
+          : fail(`Cannot release: ${r.text}.`);
       },
     ),
     superTool(
@@ -3573,6 +3609,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.screenshotHud,
     MC_TOOL_NAMES.endRun,
     MC_TOOL_NAMES.dismissItem,
+    MC_TOOL_NAMES.holdPr,
     MC_TOOL_NAMES.briefItem,
     MC_TOOL_NAMES.readPr,
     MC_TOOL_NAMES.readCiLog,

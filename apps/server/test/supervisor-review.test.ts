@@ -452,6 +452,7 @@ describe("startWatch", () => {
       "mcp__mc__accept_ruling",
       "mcp__mc__merge_pr",
       "mcp__mc__settle_park",
+      "mcp__mc__hold_pr",
       "mcp__mc__rerun_ci",
       "mcp__mc__edit_card",
       "mcp__mc__dismiss_item",

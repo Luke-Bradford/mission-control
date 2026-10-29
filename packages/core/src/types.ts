@@ -229,6 +229,11 @@ export interface RunLoop {
   /** A line due to the author once it is back on its seat (a controller check's fail note); cleared when claimed. */
   pendingLine?: { key: string; text: string } | null;
   controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
+  /**
+   * A hold on the run's merge by FLIGHT or the controller (CAPCOM): the engine does not merge
+   * while it stands. `from` is the phase the run left when it parked on the hold.
+   */
+  mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
 }
 
 /** One `loop_events` row. */
@@ -293,6 +298,8 @@ export interface RunPr {
   url: string;
   state: PullRequestView["state"] | null;
   ticket: string | null;
+  /** Set while FLIGHT or the controller holds this PR's merge: who holds it, and why. */
+  hold?: { by: "FLIGHT" | "CAPCOM"; reason: string };
 }
 
 /** A run in a list; full assistant text stays on the individual run record. */

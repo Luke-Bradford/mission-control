@@ -72,6 +72,8 @@ import {
   MC_SYNC_NOT_WORKING,
   MC_SYNC_OFF,
   MC_SYNC_UP_TO_DATE,
+  MERGE_HOLD_PARK,
+  MERGE_HOLD_USE_ROUTE,
   MERGE_STEP_WORDS,
   type MergeStep,
   MINOR_CLEARED,
@@ -79,6 +81,7 @@ import {
   mainConflictText,
   mergedMainText,
   mergedText,
+  mergeHoldParkText,
   mergeStepFailedText,
   minorIssueFailedText,
   minorNotPostedText,
@@ -214,7 +217,11 @@ export type OperatorRefusal =
   | "before-lift"
   | "rework-undelivered"
   | "use-controller-check"
+  | "use-merge-hold"
   | "engine-error";
+
+export type MergeHoldBy = "CAPCOM" | "FLIGHT";
+export type MergeHoldResult = { ok: true } | { ok: false; text: string };
 
 export type OperatorResult = { lifted: true } | { lifted: false; reason: OperatorRefusal };
 
@@ -233,6 +240,7 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
+  "use-merge-hold": MERGE_HOLD_USE_ROUTE,
   "engine-error": "the engine hit an error; see the hub log",
 };
 
@@ -278,6 +286,14 @@ export interface Engine {
     sha: string,
     note?: string,
   ): Promise<OperatorResult>;
+  /**
+   * Holds the run's merge: the engine does not merge it, even after a clean review and green CI,
+   * until the hold is released; it parks as `merge-hold` when it would otherwise merge. The
+   * controller (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
+   */
+  holdMerge(runId: string, by: MergeHoldBy, reason: string): Promise<MergeHoldResult>;
+  /** Releases the hold. FLIGHT cannot release one the controller set; the controller can release any. */
+  releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
    * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
@@ -1329,6 +1345,23 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "merge": {
+        // a hold from FLIGHT or the controller keeps the merge until it is released
+        if (cur.mergeHold) {
+          const hold = cur.mergeHold;
+          const reason = mergeHoldParkText(hold.by, hold.reason);
+          out.parked = true;
+          cur.mergeHold = { ...hold, from: cur.phase === "parked" ? hold.from : cur.phase };
+          cur.phase = "parked";
+          cur.parked = { kind: MERGE_HOLD_PARK, reason, ended: false };
+          store.addLoopEvent(
+            `${run.id}:${cur.epoch}:parked:merge-hold:${hold.at}`,
+            run.id,
+            parkedEventText(reason),
+            at,
+          );
+          out.again = true;
+          return;
+        }
         // a ticket's `## Controller check` holds the merge until the operator's pass on this head
         const check = await controllerCheckHold(run, cur, a.sha);
         if (check !== null) {
@@ -2327,6 +2360,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         // only the controller's verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
+        if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
@@ -2571,6 +2605,74 @@ export function createEngine(deps: EngineDeps): Engine {
         result = { lifted: true };
         await pass(run.id);
       }).then(() => result);
+    },
+
+    holdMerge(runId, by, reason) {
+      const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
+      return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
+        if (!live()) return refuse("the loop engine is off");
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run === null || !loop || run.endedAt !== null)
+          return refuse("the run is not an active looped run");
+        if (loop.prNumber !== undefined && findPr(run, loop)?.state === "merged")
+          return refuse("the run's PR is already merged");
+        if (loop.merging?.done.includes("merge")) return refuse("the run's PR is already merged");
+        if (loop.mergeHold && loop.mergeHold.by === "CAPCOM" && by !== "CAPCOM")
+          return refuse("the controller already holds this run's merge");
+        const at = now();
+        // a run already parked on the hold keeps the phase it left, and its park names the new holder
+        const parkedOnHold = loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK;
+        const from = loop.mergeHold?.from;
+        store.setRunLoop(runId, {
+          ...loop,
+          mergeHold: { by, reason, at, ...(from ? { from } : {}) },
+          ...(parkedOnHold && loop.parked
+            ? { parked: { ...loop.parked, reason: mergeHoldParkText(by, reason) } }
+            : {}),
+        });
+        store.addLoopEvent(
+          `${runId}:merge-hold:${at}`,
+          runId,
+          `merge held by ${by}: ${reason}`,
+          at,
+        );
+        bus.emit("agents");
+        return { ok: true };
+      });
+    },
+
+    releaseMergeHold(runId, by) {
+      const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
+      return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
+        if (!live()) return refuse("the loop engine is off");
+        const run = store.run(runId);
+        const loop = run?.loop;
+        const hold = loop?.mergeHold;
+        if (run === null || !loop || !hold) return refuse("the run's merge is not held");
+        if (hold.by === "CAPCOM" && by !== "CAPCOM")
+          return refuse("the controller set this hold; only the controller can release it");
+        const at = now();
+        const next: RunLoop = { ...loop, mergeHold: null };
+        if (loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK) {
+          next.phase = hold.from ?? "ci";
+          next.parked = null;
+          next.unparkedAt = at;
+          next.transient = 0;
+          next.lastRefusal = null;
+        }
+        store.setRunLoop(runId, next);
+        store.addLoopEvent(
+          `${runId}:merge-hold-release:${at}`,
+          runId,
+          `merge hold released by ${by}`,
+          at,
+        );
+        lastTransient.delete(runId);
+        bus.emit("agents");
+        await pass(runId);
+        return { ok: true };
+      });
     },
 
     clearFlight(runId, expectedSha) {

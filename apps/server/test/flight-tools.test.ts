@@ -213,6 +213,7 @@ let startCalls: unknown[][];
 let endCalls: string[];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
+let holdCalls: unknown[][];
 let clearanceCalls: unknown[][];
 let clearanceOk: boolean;
 let rerunOk: boolean;
@@ -309,6 +310,7 @@ beforeEach(() => {
   endCalls = [];
   messageCalls = [];
   engineCalls = [];
+  holdCalls = [];
   clearanceCalls = [];
   clearanceOk = true;
   rerunOk = true;
@@ -424,6 +426,14 @@ beforeEach(() => {
         return syncImpl();
       },
       uncommitted: async () => dirty,
+      holdMerge: async (...a) => {
+        holdCalls.push(["hold", ...a]);
+        return { ok: true };
+      },
+      releaseMergeHold: async (...a) => {
+        holdCalls.push(["release", ...a]);
+        return { ok: true };
+      },
     },
     rules: async () => rulesNow,
     board: {
@@ -638,6 +648,7 @@ describe("tool list", () => {
       "update_brief",
       "merge_pr",
       "settle_park",
+      "hold_pr",
       "rerun_ci",
       "edit_card",
       "dismiss_item",
@@ -5473,6 +5484,7 @@ describe("superuser housekeeping", () => {
   it.each([
     ["merge_pr", { pr: 12 }],
     ["settle_park", { runId: "r", action: "accept" }],
+    ["hold_pr", { runId: "r", action: "release" }],
     ["rerun_ci", { pr: 12 }],
     ["edit_card", { issue: 7, size: "S" }],
     ["dismiss_item", { key: "note:x" }],
@@ -5730,6 +5742,66 @@ describe("superuser housekeeping", () => {
     expect(overdue).toHaveProperty("isError", true);
     expect(overdue).toEqual(refused("Run is held."));
     expect(engineCalls).toEqual([]);
+  });
+  it("hold_pr holds a run in its lane and logs a decision", async () => {
+    elevated();
+    runPr();
+    expect(
+      await call("hold_pr", {
+        runId: "r-pr",
+        action: "hold",
+        reason: "design not approved",
+        basis: "The controller vetoed this design.",
+      }),
+    ).not.toHaveProperty("isError", true);
+    expect(holdCalls).toEqual([["hold", "r-pr", "FLIGHT", "design not approved"]]);
+    expect(decisions().filter((d) => d.kind === "hold")).toHaveLength(1);
+  });
+  it("hold_pr releases FLIGHT's own hold", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      mergeHold: { by: "FLIGHT", reason: "wait", at: NOW },
+    });
+    expect(
+      await call("hold_pr", { runId: "r-pr", action: "release", basis: "The design is approved." }),
+    ).not.toHaveProperty("isError", true);
+    expect(holdCalls).toEqual([["release", "r-pr", "FLIGHT"]]);
+  });
+  it.each(["CAPCOM"] as const)("hold_pr cannot release a hold set by %s", async (by) => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      mergeHold: { by, reason: "veto", at: NOW },
+    });
+    const refusal = await call("hold_pr", {
+      runId: "r-pr",
+      action: "release",
+      basis: "I think it is fine now.",
+    });
+    expect(refusal).toHaveProperty("isError", true);
+    expect(JSON.stringify(refusal)).toContain("controller");
+    expect(holdCalls).toEqual([]);
+    expect(need(store.run("r-pr")?.loop).mergeHold).toMatchObject({ by, reason: "veto" });
+  });
+  it("hold_pr needs a reason to hold and respects the lane", async () => {
+    elevated();
+    runPr();
+    expect(
+      await call("hold_pr", { runId: "r-pr", action: "hold", basis: "Checked the state." }),
+    ).toHaveProperty("isError", true);
+    need(cfg.crew).lane = "home";
+    board(card(7, { labels: ["lane:work"] }));
+    const other = await call("hold_pr", {
+      runId: "r-pr",
+      action: "hold",
+      reason: "x",
+      basis: "Checked the state.",
+    });
+    expect(other).toEqual(refused("Run is in another lane."));
+    expect(holdCalls).toEqual([]);
   });
   it("refused reruns cost no shared budget", async () => {
     elevated();

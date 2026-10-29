@@ -59,6 +59,7 @@ export type FlightPowers = (typeof FLIGHT_POWERS)[number];
 export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "merge_pr",
   "settle_park",
+  "hold_pr",
   "rerun_ci",
   "edit_card",
   "dismiss_item",

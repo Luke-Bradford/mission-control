@@ -170,6 +170,8 @@ export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, 
 export const RULING_PARK = "ruling";
 /** The park kind of a run whose ticket lists a controller check; only the operator settles it. */
 export const CONTROLLER_CHECK_PARK = "controller-check";
+/** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
+export const MERGE_HOLD_PARK = "merge-hold";
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
 /** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
@@ -238,6 +240,12 @@ export const controllerCheckUnreadableText = (sha: string, why: string): string 
 /** Why a plain resume or message cannot lift this park. */
 export const CONTROLLER_CHECK_USE_ROUTE =
   "this run waits for the controller's verdict: POST /api/runs/:id/controller-check";
+/** The park reason of a held merge: who holds it and why. */
+export const mergeHoldParkText = (by: string, reason: string): string =>
+  `merge held by ${by}: ${reason}`;
+/** Why a plain resume or message cannot lift this park. */
+export const MERGE_HOLD_USE_ROUTE =
+  "this run's merge is held: release the hold with POST /api/runs/:id/merge-hold";
 /** The rework line for a failed controller check; `note` is the controller's. */
 export const controllerCheckFailText = (sha: string, note: string | undefined): string =>
   `The controller's check failed on ${sha.slice(0, 7)}.${note ? `\n\n${note}` : ""} Fix it, commit, and report again.`;
@@ -1163,6 +1171,10 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
+/** A park that waits on someone's call, not on the seat: the seat may be free while it stands. */
+const isDecisionPark = (kind: string | undefined): boolean =>
+  kind === CONTROLLER_CHECK_PARK || kind === MERGE_HOLD_PARK;
+
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
@@ -1173,7 +1185,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     (loop.phase === "review" ||
       loop.phase === "ci" ||
       // the seat is free while the operator decides
-      (loop.phase === "parked" && loop.parked?.kind === CONTROLLER_CHECK_PARK)) &&
+      (loop.phase === "parked" && isDecisionPark(loop.parked?.kind))) &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -1457,7 +1469,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
       loop.aside.wake ||=
-        (loop.phase === "parked" && loop.parked?.kind !== CONTROLLER_CHECK_PARK) ||
+        (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
         loop.phase === "working" ||
         !s.asideOk ||
         fixDue(s, loop);
