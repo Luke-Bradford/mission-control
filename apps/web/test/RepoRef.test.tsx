@@ -1,10 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RepoRef, TicketRef } from "../src/hud/RepoRef.tsx";
-import { Comms } from "../src/pages/Comms.tsx";
-import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, item, NOW, seatRow } from "./fixtures.ts";
+import { CONFIG } from "./fixtures.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -90,65 +88,5 @@ describe("RepoRef", () => {
       "https://github.com/octo-org/shop-app/issues/3349",
     );
     expect(screen.getByText("<b>x</b>")).toBeTruthy();
-  });
-});
-
-describe("one repo, one colour", () => {
-  it("is the same on Comms and on Flight", async () => {
-    const row = seatRow({ run: crewRow().run, ticket: "site-builder#5", hudState: "running" });
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "pr:site-builder#3756",
-          kind: "pr",
-          repoId: "site-builder",
-          escalationId: null,
-          text: "PR #3756 · You: decide on the draft",
-          url: "https://github.com/octo-org/site-builder/pull/3756",
-          ticket: "site-builder#5",
-        }),
-      ],
-      "/api/crew": { rows: [row], firstRunToday: null },
-      "/api/config": CONFIG,
-    });
-    const comms = render(<Comms item={null} />);
-    await screen.findByRole("link", { name: "site-builder PR #3756" });
-    const onComms = comms.container.querySelector<HTMLElement>("#cNeeds .rchip");
-    expect(onComms?.textContent).toBe("site-builder");
-    const colour = onComms?.style.getPropertyValue("--c");
-    expect(colour).toBe("var(--r2)");
-    comms.unmount();
-
-    const flight = render(<Flight />);
-    const list = await screen.findByRole("table", { name: "Crew runs" });
-    await within(list).findByRole("link", { name: "site-builder #5" });
-    expect(
-      flight.container.querySelector<HTMLElement>("#wifP .rchip")?.style.getPropertyValue("--c"),
-    ).toBe(colour);
-  });
-});
-
-describe("Needs you", () => {
-  it("links a PR item's 'PR #3756' to the pull request, repo from the item", async () => {
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "pr:site-builder#3756",
-          kind: "pr",
-          repoId: "site-builder",
-          agentId: null,
-          escalationId: null,
-          text: "PR #3756 · You: decide on the draft",
-          url: "https://github.com/octo-org/site-builder/pull/3756",
-          at: NOW,
-        }),
-      ],
-      "/api/crew": { rows: [], firstRunToday: null },
-      "/api/config": CONFIG,
-    });
-    render(<Comms item={null} />);
-    const link = await screen.findByRole("link", { name: "site-builder PR #3756" });
-    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/site-builder/pull/3756");
-    expect(screen.getByText(/You: decide on the draft/)).toBeTruthy();
   });
 });

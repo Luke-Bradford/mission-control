@@ -3056,12 +3056,6 @@ pre.diff .h {
 .msg.peer .body {
   color: var(--fg-2);
 }
-.cgrid {
-  display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  gap: 12px;
-  height: 100%;
-}
 .comms-page,
 .comms-grid,
 .comms-left,
@@ -3812,13 +3806,6 @@ pre.diff .h {
     display: none;
   }
 }
-.col > #cThreadsP {
-  flex: 1 1 0;
-  min-height: 220px;
-}
-#cNeeds {
-  max-height: 330px;
-}
 .nrow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3826,6 +3813,9 @@ pre.diff .h {
   align-items: start;
   padding: 8px 14px;
   border-top: 1px solid var(--line);
+}
+#cNeeds {
+  max-height: 330px;
 }
 .nrow > .lamp {
   margin-top: 5px;
@@ -3852,41 +3842,6 @@ pre.diff .h {
   font-weight: 600;
   color: var(--warn);
   margin-right: 6px;
-}
-.chan {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 8px;
-  align-items: center;
-  padding: 8px 14px;
-  border-top: 1px solid var(--line);
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  border-radius: 0;
-  border-left: 0;
-  border-right: 0;
-  border-bottom: 0;
-  background: transparent;
-}
-.chan:hover {
-  background: var(--surface-2);
-  border-color: var(--line);
-}
-.chan.on {
-  background: var(--accent-soft);
-}
-.chan.tagged,
-button.nrow.thread.tagged {
-  background: var(--warn-soft);
-}
-.chan .s2 {
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* dock: FLIGHT */
@@ -6701,15 +6656,13 @@ kbd {
   }
   .col > #agentsP,
   .col > #actP,
-  .col > #cThreadsP,
   .side > #sideP,
   .side > #loopP {
     flex: none;
     min-height: 0;
   }
   #actP .scroll,
-  #sideBody,
-  #chanList {
+  #sideBody {
     max-height: 460px;
   }
   .kanban {
@@ -6723,7 +6676,6 @@ kbd {
 @media (max-width: 999px) {
   .ov,
   .agrid,
-  .cgrid,
   .tgrid,
   .awaygrid,
   .boardsplit,
@@ -6946,34 +6898,11 @@ kbd {
   color: var(--fg-2);
 }
 
-/* comms threads */
-button.nrow.thread {
-  width: 100%;
-  min-width: 0;
-  text-align: left;
-  background: none;
-  border-radius: 0;
-  border-width: 1px 0 0;
-  cursor: pointer;
-  color: inherit;
-}
-/* a thread is one line: the doing line takes what is left and is cut with an ellipsis */
-.thread .tbody {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
 .thread .doing {
-  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-button.nrow.thread:hover,
-button.nrow.thread.sel {
-  background: var(--surface-2);
 }
 
 details.guard > summary {
@@ -6981,10 +6910,6 @@ details.guard > summary {
   padding: 8px 14px;
   font-size: var(--fs-s);
   color: var(--muted);
-}
-
-button.nrow.thread.tagged {
-  background: var(--warn-soft);
 }
 
 .person-choices {

@@ -23,8 +23,8 @@ function Toggle() {
 const toggle = () => fireEvent.click(screen.getByRole("button", { name: "toggle" }));
 
 describe("BUILD_NOTES", () => {
-  it("is the catalogue's table plus the Repos tab: 65 chips with a class, a label and a note", () => {
-    expect(BUILD_NOTES).toHaveLength(65);
+  it("is the catalogue's table plus the Repos tab: 63 chips with a class, a label and a note", () => {
+    expect(BUILD_NOTES).toHaveLength(63);
     for (const n of BUILD_NOTES) {
       expect(["proven", "build", "later", "check"]).toContain(n.cls);
       expect(n.label.length).toBeGreaterThan(0);
@@ -159,20 +159,18 @@ describe("Panel and build status", () => {
     render(
       <>
         <Toggle />
-        <Panel id="cThreadsP" title="Threads" phase="P2" />
+        <Panel id="tLock" title="Test lock" phase="P2" />
       </>,
     );
-    expect(document.querySelector("#cThreadsP .phase")?.textContent).toBe("P2");
-    expect(document.querySelector("#cThreadsP .bs")).toBeNull();
+    expect(document.querySelector("#tLock .phase")?.textContent).toBe("P2");
+    expect(document.querySelector("#tLock .bs")).toBeNull();
     toggle();
-    expect(document.querySelector("#cThreadsP .phase")).toBeNull();
-    const chip = document.querySelector("#cThreadsP .ph .bs") as HTMLElement;
-    expect(chip.textContent).toBe("P2");
-    expect(chip.getAttribute("title")).toBe(
-      "send_message worked in the spike; threads need the mailbox. @CAPCOM is a prompt convention Mission Control parses.",
-    );
+    expect(document.querySelector("#tLock .phase")).toBeNull();
+    const chip = document.querySelector("#tLock .ph .bs") as HTMLElement;
+    expect(chip.textContent).toBe("Buildable");
+    expect(chip.getAttribute("title")).toBe("Lock runs recorded by Mission Control.");
     toggle();
-    expect(document.querySelector("#cThreadsP .phase")?.textContent).toBe("P2");
+    expect(document.querySelector("#tLock .phase")?.textContent).toBe("P2");
   });
 
   it("leaves the chips to the page for the Agent header", () => {

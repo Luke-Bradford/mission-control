@@ -15,7 +15,6 @@ import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { Agent } from "../src/pages/Agent.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
-import { Comms } from "../src/pages/Comms.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Loops } from "../src/setup/Loops.tsx";
 import { Sessions } from "../src/setup/Sessions.tsx";
@@ -82,7 +81,6 @@ describe("HUD chrome", () => {
   it.each([
     ["Overview Agents", () => <Overview />, "#agentsP"],
     ["Agent picker", () => <Agent id={null} />, "#picker"],
-    ["Comms threads", () => <Comms item={null} />, "#chanList"],
   ])("filters %s by the crew session rather than its shared repo", async (_, page, selector) => {
     const loop = crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app" });
     stub({
