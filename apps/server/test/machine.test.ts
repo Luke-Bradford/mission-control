@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   cpuPercent,
   type MachineDeps,
+  parseMemoryPressure,
   parsePs,
+  parseSwapUsage,
+  parseTopConsumers,
   parseVmStat,
   sampleMachine,
 } from "../src/collectors/machine.ts";
@@ -59,6 +62,9 @@ function deps(over: Partial<MachineDeps> = {}): MachineDeps {
     totalmem: () => TOTAL,
     freemem: () => 1024 ** 3,
     vmStat: async () => VM_STAT,
+    swapUsage: async () => "vm.swapusage: total = 22528.00M  used = 21500.50M  free = 1027.50M",
+    memoryPressure: async () => "System-wide memory free percentage: 9%\n",
+    loadavg: () => [1.25, 1, 0.5],
     statfs: async () => ({ bavail: 250, blocks: 1000, bsize: 4096 }),
     ps: async () => PS,
     psTree: async () => "",
@@ -71,6 +77,16 @@ function deps(over: Partial<MachineDeps> = {}): MachineDeps {
 }
 
 describe("parsers", () => {
+  it("reads macOS swap usage and memory-pressure free percentage", () => {
+    expect(
+      parseSwapUsage(
+        "vm.swapusage: total = 22528.00M  used = 21500.50M  free = 1027.50M  (encrypted)",
+      ),
+    ).toEqual({ totalBytes: 22528 * 1024 ** 2, usedBytes: 21500.5 * 1024 ** 2 });
+    expect(parseMemoryPressure("System-wide memory free percentage: 9%\n")).toBe(9);
+    expect(parseSwapUsage("unavailable")).toBeNull();
+    expect(parseMemoryPressure("unavailable")).toBeNull();
+  });
   it("computes memory used as total − (free + inactive + speculative) × page size", () => {
     const available = (20291 + 537706 + 3226) * PAGE;
     expect(parseVmStat(VM_STAT, TOTAL)).toBe(TOTAL - available);
@@ -81,6 +97,16 @@ describe("parsers", () => {
     // codex 31968 + claude 391520 + 243088 + 50000 (path with spaces) + 269344 KiB
     expect(parsePs(PS)).toEqual({ count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 });
     expect(parsePs("")).toEqual({ count: 0, rssBytes: 0, cpuPct: 0 });
+  });
+
+  it("keeps the highest-RSS process rows for a machine-capacity alert", () => {
+    expect(parseTopConsumers(PS)).toEqual([
+      { pid: 5899, command: "claude", rssBytes: 391520 * 1024, cpuPct: 2 },
+      { pid: 28102, command: "claude", rssBytes: 269344 * 1024, cpuPct: 0.5 },
+      { pid: 12812, command: "claude", rssBytes: 243088 * 1024, cpuPct: 2.3 },
+      { pid: 20003, command: "claude-code-guide", rssBytes: 70000 * 1024, cpuPct: 1 },
+      { pid: 20002, command: "Claude Helper (Renderer)", rssBytes: 60000 * 1024, cpuPct: 1 },
+    ]);
   });
 
   it("computes CPU % from the busy/total tick delta across all cores", () => {
@@ -149,7 +175,12 @@ describe("sampleMachine", () => {
       memTotalBytes: TOTAL,
       diskFreeBytes: 250 * 4096,
       diskTotalBytes: 1000 * 4096,
+      swapUsedBytes: 21500.5 * 1024 ** 2,
+      swapTotalBytes: 22528 * 1024 ** 2,
+      memoryPressureFreePct: 9,
+      load1: 1.25,
       agents: { count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 },
+      topConsumers: parseTopConsumers(PS),
       testRun: null,
     });
     expect(r.cpus).toHaveLength(2);

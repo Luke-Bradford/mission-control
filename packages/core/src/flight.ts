@@ -62,6 +62,7 @@ export const FLIGHT_DECISION_KINDS = [
   "card",
   "dismiss",
   "brief",
+  "hold",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -90,6 +91,23 @@ export interface FlightView {
     turns?: { n: number; max: number } | null;
   } | null;
   decisions: FlightDecision[];
+  /** The server always sets it with a seat; optional so older fixtures still type. */
+  wake?: FlightWakeStatus;
+}
+
+/** What a wake with no changed fact is called: a re-wake backstop. */
+export const FLIGHT_WAKE_REMINDER = "reminder";
+
+/** The setting that keeps FLIGHT's last wake across a hub restart. */
+export const FLIGHT_WAKE_SETTING = "flight.wake";
+
+/** When FLIGHT last woke and what woke it, and when it will next wake; null where unknown. */
+export interface FlightWakeStatus {
+  lastWakeAt: number | null;
+  /** The wake's reasons as the digest lists them, e.g. "q (1)"; "initial" for a fresh session. */
+  wokeOn: string[] | null;
+  /** From a real schedule only: the re-wake backstop while work is pending, or the next planned entry. */
+  nextWakeAt: number | null;
 }
 
 /** How far back `GET /api/flight` lists decisions, and the most it lists. */
@@ -1105,7 +1123,7 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

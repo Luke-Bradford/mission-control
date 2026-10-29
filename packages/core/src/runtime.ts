@@ -57,6 +57,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.acceptRuling,
   MC_TOOL_NAMES.mergePr,
   MC_TOOL_NAMES.settlePark,
+  MC_TOOL_NAMES.holdPr,
   MC_TOOL_NAMES.rerunCi,
   MC_TOOL_NAMES.editCard,
   MC_TOOL_NAMES.dismissItem,
@@ -65,6 +66,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
   MC_TOOL_NAMES.closeTicket,
+  MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.briefItem,
   MC_TOOL_NAMES.readPr,
   MC_TOOL_NAMES.readCiLog,
@@ -755,6 +757,8 @@ export const CREW_PNPM_ENV = {
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
+/** The folder beside a worktrees folder's worktrees holding each one's private pnpm store. */
+export const CODEX_PNPM_STORES_DIR = ".mc-pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**

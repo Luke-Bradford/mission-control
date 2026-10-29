@@ -9,10 +9,16 @@ import { MapConflicts } from "../src/map/conflicts.ts";
 let dir: string;
 const git = (...args: string[]) =>
   execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
-const pr = (branch: string, headSha: string | null, state: PullRequestView["state"] = "open") => ({
+const pr = (
+  branch: string,
+  headSha: string | null,
+  state: PullRequestView["state"] = "open",
+  number?: number,
+) => ({
   branch,
   headSha,
   state,
+  ...(number === undefined ? {} : { number }),
 });
 let base: string;
 let left: string;
@@ -69,7 +75,7 @@ it("reports computed conflicts naming both open PR branches and their stored tip
   // Branch refs deliberately differ from the stored PR tips.
   git("branch", "-f", "left", base);
   expect(await strict(new MapConflicts(), dir, [pr("left", left), pr("right", right)])).toEqual([
-    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
 });
 
@@ -102,7 +108,12 @@ it("caches by unordered SHA pair, retains current branch names and invalidates c
   expect(
     await strict(collector, dir, [pr("renamed-right", right), pr("renamed-left", left)]),
   ).toEqual([
-    { file: "file.txt", branches: ["renamed-right", "renamed-left"], shas: [right, left] },
+    {
+      file: "file.txt",
+      branches: ["renamed-right", "renamed-left"],
+      shas: [right, left],
+      prs: [null, null],
+    },
   ]);
   await expect(strict(collector, dir, [pr("left", left), pr("new", base)])).rejects.toThrow();
 });
@@ -120,7 +131,7 @@ it("reads linked worktree objects without changing either checkout", async () =>
   git("worktree", "add", "--detach", linked, base);
   const before = contents(dir);
   expect(await strict(new MapConflicts(), linked, [pr("left", left), pr("right", right)])).toEqual([
-    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
   expect(contents(dir)).toEqual(before);
 });
@@ -134,7 +145,7 @@ it("skips a pair whose head the checkout has not fetched, keeping the rest of th
   ]);
   expect(result.unchecked).toEqual([{ branch: "unfetched", reason: "head not fetched" }]);
   expect(result.conflicts).toEqual([
-    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
 });
 
@@ -165,7 +176,7 @@ it("blames only the unrelated tip, holds its failed pairs until a head changes, 
   const prs = [pr("left", left), pr("right", right), pr("orphan", orphan)];
   const first = await collector.check(dir, prs);
   expect(first.conflicts).toEqual([
-    { file: "file.txt", branches: ["left", "right"], shas: [left, right] },
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
   // left and right checked against each other, so only the tip common to the failures is unknown
   expect(first.unchecked).toEqual([{ branch: "orphan", reason: "merge check failed" }]);
@@ -221,7 +232,7 @@ it("checks a pair once its head is fetched, after the 10 s missing-head hold", a
     const fetched = await collector.check(dir, prs);
     expect(fetched.unchecked).toEqual([]);
     expect(fetched.conflicts).toEqual([
-      { file: "file.txt", branches: ["left", "late"], shas: [left, late] },
+      { file: "file.txt", branches: ["left", "late"], shas: [left, late], prs: [null, null] },
     ]);
   } finally {
     rmSync(other, { recursive: true, force: true });
@@ -237,4 +248,20 @@ it("fails when the checkout is an existing directory that is not a repo", async 
   } finally {
     rmSync(plain, { recursive: true, force: true });
   }
+});
+
+it("names each branch's PR number in the order of the pair, null when the row has none", async () => {
+  expect(
+    await strict(new MapConflicts(), dir, [
+      pr("left", left, "open", 11),
+      pr("right", right, "open", 12),
+    ]),
+  ).toEqual([
+    { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [11, 12] },
+  ]);
+  expect(
+    await strict(new MapConflicts(), dir, [pr("right", right, "open", 12), pr("left", left)]),
+  ).toEqual([
+    { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [12, null] },
+  ]);
 });

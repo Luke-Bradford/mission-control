@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PullRequestView, Run, RunPlan } from "@mc/core";
+import { NEW_LOOP, type PullRequestView, type Run, type RunPlan } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { runPrs, runTicket, runView } from "../src/runview.ts";
@@ -91,6 +91,24 @@ describe("runPrs", () => {
         ticket: null,
       },
     ]);
+  });
+
+  it("shows a hold on the merge, with its reason, on the held PR only", () => {
+    store.upsertPullRequests("shop-app", [pr({ state: "open" })], 0);
+    const r = run({
+      prs: [
+        { repo: "octo-org/shop-app", number: 41 },
+        { repo: "octo-org/shop-app", number: 42 },
+      ],
+      loop: {
+        ...NEW_LOOP,
+        prNumber: 41,
+        mergeHold: { by: "CAPCOM", reason: "design vetoed", at: 5 },
+      },
+    });
+    const [held, other] = runPrs(config, store, r);
+    expect(held?.hold).toEqual({ by: "CAPCOM", reason: "design vetoed" });
+    expect(other).not.toHaveProperty("hold");
   });
 
   it("reads each repo's PRs once per cache, not once per run", () => {

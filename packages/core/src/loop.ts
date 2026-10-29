@@ -170,6 +170,8 @@ export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, 
 export const RULING_PARK = "ruling";
 /** The park kind of a run whose ticket lists a controller check; only the operator settles it. */
 export const CONTROLLER_CHECK_PARK = "controller-check";
+/** The park kind of a run whose merge FLIGHT or the controller holds; released by the same route. */
+export const MERGE_HOLD_PARK = "merge-hold";
 /** The heading a ticket's controller-check section opens with (the canonical spelling). */
 export const CONTROLLER_CHECK_HEADING = "## Controller check";
 /** Any heading line (also quoted or in a list) that names a controller check holds the merge. */
@@ -212,6 +214,71 @@ export function controllerCheckOf(body: string | null | undefined): string | nul
   const start = m.index + m[0].length;
   return body.slice(start, next === null ? undefined : start + next.index).trim();
 }
+/** The checklist text of a bullet line (`- x`, `* x`, `- [ ] x`), else null. */
+const bulletText = (line: string): string | null =>
+  /^[-*+][ \t]+(?:\[[ xX]\][ \t]+)?(.*)$/.exec(line.trim())?.[1]?.trim() ?? null;
+const DONE_WHEN_RE = /^ {0,3}(#{1,6})[ \t]+done[ \t-]*when\b.*$/im;
+const SIZE_OR_SECURITY_RE = /^ {0,3}##[ \t]+(?:size|security)\b.*$/im;
+/** A heading line of `level` or above opens at `from`: the offset it starts at, or the end. */
+const sectionEnd = (plain: string, from: number, level: number): number => {
+  const next = new RegExp(`^ {0,3}#{1,${level}}(?:[ \\t]|$)`, "m").exec(plain.slice(from));
+  return next === null ? plain.length : from + next.index;
+};
+/**
+ * `body` with `item` added as a bullet under its controller-check section (made before `## Size`,
+ * `## Security` or the end when missing), and an identical line in the done-when section removed.
+ * Nothing else in the body changes. `added` and `removed` say which of the two happened.
+ */
+export function withControllerCheckItem(
+  body: string,
+  item: string,
+): { body: string; added: boolean; removed: boolean } {
+  const eol = body.includes("\r\n") ? "\r\n" : "\n";
+  const want = item.trim();
+  let out = body;
+  let removed = false;
+  const done = DONE_WHEN_RE.exec(withoutFences(out));
+  if (done !== null) {
+    const from = done.index + done[0].length;
+    const to = sectionEnd(withoutFences(out), from, done[1]?.length ?? 2);
+    const blanked = withoutFences(out)
+      .slice(from, to)
+      .split(/(?<=\n)/);
+    const kept = out
+      .slice(from, to)
+      .split(/(?<=\n)/)
+      .filter((line, i) => {
+        // a bullet inside a code fence is example text, not a done-when item
+        const same = bulletText(blanked[i] ?? "") === want;
+        removed ||= same;
+        return !same;
+      });
+    out = out.slice(0, from) + kept.join("") + out.slice(to);
+  }
+  const plain = withoutFences(out);
+  const m = CONTROLLER_CHECK_RE.exec(plain);
+  const line = `- ${want}`;
+  if (m !== null) {
+    const start = m.index + m[0].length;
+    const end = sectionEnd(plain, start, m[1]?.length ?? 2);
+    const section = out.slice(start, end);
+    if (section.split("\n").some((l) => bulletText(l) === want))
+      return { body: out, added: false, removed };
+    const at = start + section.trimEnd().length;
+    const lead = section.trim() === "" ? `${eol}${eol}` : eol;
+    return { body: out.slice(0, at) + lead + line + out.slice(at), added: true, removed };
+  }
+  const block = `${CONTROLLER_CHECK_HEADING}${eol}${eol}${line}${eol}`;
+  const before = SIZE_OR_SECURITY_RE.exec(plain);
+  if (before !== null)
+    return {
+      body: `${out.slice(0, before.index)}${block}${eol}${out.slice(before.index)}`,
+      added: true,
+      removed,
+    };
+  const gap = out === "" ? "" : out.endsWith("\n") ? eol : `${eol}${eol}`;
+  return { body: `${out}${gap}${block}`, added: true, removed };
+}
 /**
  * The controller check a read ticket carries: the section's text, "" when it has one with no text
  * or when the body was cut and the reader could not say, null for none. A ticket that cannot be
@@ -238,6 +305,12 @@ export const controllerCheckUnreadableText = (sha: string, why: string): string 
 /** Why a plain resume or message cannot lift this park. */
 export const CONTROLLER_CHECK_USE_ROUTE =
   "this run waits for the controller's verdict: POST /api/runs/:id/controller-check";
+/** The park reason of a held merge: who holds it and why. */
+export const mergeHoldParkText = (by: string, reason: string): string =>
+  `merge held by ${by}: ${reason}`;
+/** Why a plain resume or message cannot lift this park. */
+export const MERGE_HOLD_USE_ROUTE =
+  "this run's merge is held: release the hold with POST /api/runs/:id/merge-hold";
 /** The rework line for a failed controller check; `note` is the controller's. */
 export const controllerCheckFailText = (sha: string, note: string | undefined): string =>
   `The controller's check failed on ${sha.slice(0, 7)}.${note ? `\n\n${note}` : ""} Fix it, commit, and report again.`;
@@ -1163,6 +1236,10 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 
+/** A park that waits on someone's call, not on the seat: the seat may be free while it stands. */
+const isDecisionPark = (kind: string | undefined): boolean =>
+  kind === CONTROLLER_CHECK_PARK || kind === MERGE_HOLD_PARK;
+
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
@@ -1173,7 +1250,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     (loop.phase === "review" ||
       loop.phase === "ci" ||
       // the seat is free while the operator decides
-      (loop.phase === "parked" && loop.parked?.kind === CONTROLLER_CHECK_PARK)) &&
+      (loop.phase === "parked" && isDecisionPark(loop.parked?.kind))) &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -1457,7 +1534,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
       loop.aside.wake ||=
-        (loop.phase === "parked" && loop.parked?.kind !== CONTROLLER_CHECK_PARK) ||
+        (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
         loop.phase === "working" ||
         !s.asideOk ||
         fixDue(s, loop);

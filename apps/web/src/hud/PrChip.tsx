@@ -6,7 +6,7 @@ import "./PrChip.css";
 /**
  * A PR a run published: its repo chip and `PR #3240` linked to GitHub (plain text when no
  * https://github.com URL can be made), its title on hover, and a pill once it is merged or
- * closed. `bare` leaves the repo chip out, for a page that shows one repo.
+ * closed, and a "held" pill while FLIGHT or the controller holds its merge. `bare` leaves the repo chip out, for a page that shows one repo.
  */
 export function PrChip({ pr, bare }: { pr: RunPr; bare?: boolean }) {
   const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
@@ -21,6 +21,11 @@ export function PrChip({ pr, bare }: { pr: RunPr; bare?: boolean }) {
         url={pr.url}
       />
       {pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
+      {pr.hold && (
+        <Pill tone="warn" title={`merge held by ${pr.hold.by}: ${pr.hold.reason}`}>
+          held
+        </Pill>
+      )}
     </span>
   );
 }

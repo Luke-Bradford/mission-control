@@ -4,12 +4,12 @@
  *   - a Claude `get_context_usage` answer (30 KB of display grid) is dropped: the hub reads it live
  *     and caches the few numbers it uses;
  *   - a Codex `item/commandExecution/outputDelta` is dropped: the `item/completed` carries the same
- *     output once (but see the heartbeat below);
+ *     output once (but see the heartbeat below); a cumulative `turn/diff/updated` is likewise dropped;
  *   - a Codex `aggregatedOutput` and a Claude `tool_result` over `TRANSCRIPT_RESULT_MAX` keep their
  *     first and last `TRANSCRIPT_KEEP_BYTES`, with `outputTruncated: {originalBytes}` (the size before the cut) beside them.
- *   - a Codex `item/commandExecution/outputDelta` is not kept either, but one stripped heartbeat per
- *     item per `DELTA_HEARTBEAT_MS` is (no `delta`): the transcript's last event time keeps moving
- *     while a long command runs, and the HUD does not call the seat stalled.
+ *   - a Codex `item/commandExecution/outputDelta` and `turn/diff/updated` are not kept either, but
+ *     one stripped heartbeat per item or turn per `DELTA_HEARTBEAT_MS` is: the transcript's last event
+ *     time keeps moving while work runs, and the HUD does not call the seat stalled.
  * Also cut: a Codex JSON-RPC `result`'s `items` and `turns`, and an image's base64 `data`. Dropped
  * whole, because nothing reads them: a Claude line's `tool_use_result` (a second copy of the
  * result), and a resume answer's `thread.turns` (emptied, with `turnsDropped` counting them).
@@ -30,6 +30,7 @@ export const DELTA_HEARTBEAT_MS = 60 * 1000;
 
 const CONTROL_RESPONSE = '"control_response"';
 const COMMAND_OUTPUT_DELTA = "item/commandExecution/outputDelta";
+const TURN_DIFF_UPDATED = "turn/diff/updated";
 const ITEM_COMPLETED = "item/completed";
 const TRUNCATED = "outputTruncated";
 
@@ -174,6 +175,20 @@ function heartbeatOf(m: Json, heartbeats: DeltaHeartbeats | undefined): string |
   });
 }
 
+/** A cumulative turn diff's heartbeat: its turn, byte count, and event time, without the diff itself. */
+function turnDiffHeartbeatOf(m: Json, heartbeats: DeltaHeartbeats | undefined): string | null {
+  const p = isObj(m.params) ? m.params : {};
+  const turnId = typeof p.turnId === "string" ? p.turnId : null;
+  const at = typeof m.timestamp === "string" ? Date.parse(m.timestamp) : Number.NaN;
+  if (heartbeats === undefined || turnId === null || !Number.isFinite(at)) return null;
+  if (!heartbeats(`turn:${turnId}`, at)) return null;
+  const diff = p.diff;
+  const diffBytes = Buffer.byteLength(
+    typeof diff === "string" ? diff : JSON.stringify(diff ?? null),
+  );
+  return JSON.stringify({ method: TURN_DIFF_UPDATED, turnId, diffBytes, at });
+}
+
 /**
  * The line to persist: the same string when nothing changes, a shorter one when an output is cut,
  * null when the line is not kept at all. A line that is not JSON is kept as it is.
@@ -181,10 +196,11 @@ function heartbeatOf(m: Json, heartbeats: DeltaHeartbeats | undefined): string |
  */
 export function compactTranscriptLine(line: string, heartbeats?: DeltaHeartbeats): string | null {
   const dropsDelta = line.includes(COMMAND_OUTPUT_DELTA);
+  const dropsTurnDiff = line.includes(TURN_DIFF_UPDATED);
   const mayBeUsage = line.includes(CONTROL_RESPONSE);
   const mayBeBig = line.length > TRANSCRIPT_RESULT_MAX / 3;
   const completes = heartbeats !== undefined && line.includes(ITEM_COMPLETED);
-  if (!dropsDelta && !mayBeUsage && !mayBeBig && !completes) return line;
+  if (!dropsDelta && !dropsTurnDiff && !mayBeUsage && !mayBeBig && !completes) return line;
   let m: unknown;
   try {
     m = JSON.parse(line);
@@ -196,6 +212,11 @@ export function compactTranscriptLine(line: string, heartbeats?: DeltaHeartbeats
     // a heartbeat already (no delta in it) stays as it is
     if (isObj(m.params) && m.params.delta === undefined) return line;
     return heartbeatOf(m, heartbeats);
+  }
+  if (dropsTurnDiff && m.method === TURN_DIFF_UPDATED) {
+    // a stripped heartbeat already has no params and stays as it is
+    if (m.turnId !== undefined && m.diffBytes !== undefined && m.at !== undefined) return line;
+    return turnDiffHeartbeatOf(m, heartbeats);
   }
   if (mayBeUsage && m.type === "control_response" && isContextUsageResponse(m)) return null;
   if (heartbeats !== undefined && m.method === ITEM_COMPLETED && isObj(m.params)) {

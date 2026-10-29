@@ -59,11 +59,13 @@ export type FlightPowers = (typeof FLIGHT_POWERS)[number];
 export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "merge_pr",
   "settle_park",
+  "hold_pr",
   "rerun_ci",
   "edit_card",
   "dismiss_item",
   MC_TOOL_NAMES.ghRead,
   MC_TOOL_NAMES.closeTicket,
+  MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.screenshotHud,
 ];
 

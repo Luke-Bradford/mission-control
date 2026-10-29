@@ -35,13 +35,16 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DEFAULT_HARD_RULES,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
+  effectiveHardRules,
   type FileDiff,
   FLIGHT_HEADLINE,
   FLIGHT_LIST_MAX,
+  FLIGHT_WAKE_SETTING,
   type FlightBriefView,
   type FlightLedgerEntry,
   type FlightSummaryView,
@@ -1360,6 +1363,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
+  ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -2042,6 +2046,7 @@ describe("GET /api/machine", () => {
   it("answers { latest: null } before the first sample, then the scheduler's latest", async () => {
     expect((await get("/api/machine")).json()).toEqual({
       latest: null,
+      warning: null,
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
@@ -2059,7 +2064,13 @@ describe("GET /api/machine", () => {
     const a = buildApp({ config, store, bus, machine: () => latest });
     const r = await a.inject({ method: "GET", url: "/api/machine" });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ latest, maxSeats: 8, seats: 0, perSessionMax: 0 });
+    expect(r.json()).toEqual({
+      latest,
+      warning: "disk free is 0.0 GB (below 15 GB)",
+      maxSeats: 8,
+      seats: 0,
+      perSessionMax: 0,
+    });
     await a.close();
   });
 
@@ -4107,6 +4118,34 @@ describe("boards, escalations, health", () => {
     });
   });
 
+  it("carries each seat's area and the hard rules the engine enforces in the map snapshot", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    const repo = config.repos.find((r) => r.id === "shop-app");
+    const seat = session?.seats[0];
+    if (!session || !repo || !seat) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    seat.area = ["apps/web/**", "docs/**"];
+    repo.rules = { ...DEFAULT_REPO_RULES, hardRules: ["config.example.yaml"] };
+
+    // a standard repo's own list is the whole list
+    const standard = (await get("/api/repos/shop-app/map")).json();
+    expect(standard.seats[0].area).toEqual(["apps/web/**", "docs/**"]);
+    expect(standard.rules.hardRules).toEqual(["config.example.yaml"]);
+
+    // a superuser repo's narrower list still carries the defaults and the FLIGHT floor
+    repo.flightPowers = "superuser";
+    const superuser = (await get("/api/repos/shop-app/map")).json();
+    expect(superuser.rules.hardRules).toEqual(effectiveHardRules(repo.rules, "superuser"));
+    expect(superuser.rules.hardRules).toEqual(
+      expect.arrayContaining(["config.example.yaml", ...DEFAULT_HARD_RULES, "CLAUDE.md"]),
+    );
+
+    // a seat with no area sends an empty list
+    seat.area = [];
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].area).toEqual([]);
+  });
+
   for (const vendor of ["claude", "codex"] as const) {
     it(`scopes FLIGHT ${vendor} activity to the current turn and selected repo`, async () => {
       withCrew();
@@ -4545,7 +4584,9 @@ describe("boards, escalations, health", () => {
     const response = await get("/api/repos/shop-app/map/conflicts");
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      conflicts: [{ file: "file.txt", branches: ["right", "left"], shas: [right, left] }],
+      conflicts: [
+        { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [2, 1] },
+      ],
       unchecked: [],
     });
     expect(git("count-objects", "-v")).toBe(before);
@@ -6021,6 +6062,46 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      expect((await get("/api/flight")).json<FlightView>().wake).toEqual({
+        lastWakeAt: null,
+        wokeOn: null,
+        nextWakeAt: null,
+      });
+      const repo = config.crew?.sessions[0]?.repoId ?? "";
+      const at = NOW - 600e3;
+      store.setSetting(
+        FLIGHT_WAKE_SETTING,
+        JSON.stringify({ repo, at, wokeOn: ["q (1)", "prs (2)"], next: at + 3600e3 }),
+      );
+      store.upsertRun(run({ id: "rf", agentId: "flight-1", startedAt: NOW - 3600e3 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "rf",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      sessionAlive = true;
+      expect((await get("/api/flight")).json<FlightView>().wake).toEqual({
+        lastWakeAt: at,
+        wokeOn: ["q (1)", "prs (2)"],
+        nextWakeAt: at + 3600e3,
+      });
+      // no session, no schedule
+      sessionAlive = false;
+      expect((await get("/api/flight")).json<FlightView>().wake?.nextWakeAt).toBeNull();
     });
 
     it("counts the wakes of FLIGHT's current run as its turn", async () => {
@@ -7907,6 +7988,98 @@ describe("operator token", () => {
       });
       expect(r.statusCode).toBe(409);
       expect(r.json().error).toContain("controller-check");
+    });
+  });
+
+  describe("merge hold route", () => {
+    const calls: unknown[][] = [];
+    let noWrites = false;
+    let on = true;
+    let app: FastifyInstance;
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const post = (headers: Record<string, string>, payload: object, id = "mh") =>
+      app.inject({
+        method: "POST",
+        url: `/api/runs/${id}/merge-hold`,
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      calls.length = 0;
+      noWrites = false;
+      on = true;
+      store.upsertRun(
+        run({ id: "mh", agentId: "guido-1", loop: { ...NEW_LOOP, phase: "ci", prNumber: 12 } }),
+      );
+      store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        get noLoopWrites() {
+          return noWrites;
+        },
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on, note: null }),
+          holdMerge: async (...a) => {
+            calls.push(["hold", ...a]);
+            return { ok: true };
+          },
+          releaseMergeHold: async (...a) => {
+            calls.push(["release", ...a]);
+            return { ok: false, text: "the run's merge is not held" };
+          },
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { action: "release" })).statusCode).toBe(401);
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a bad body, an unknown run and a run without a loop", async () => {
+      for (const payload of [
+        {},
+        { action: "hold" },
+        { action: "hold", reason: "  " },
+        { action: "x" },
+      ])
+        expect((await post(key, payload)).statusCode, JSON.stringify(payload)).toBe(400);
+      expect((await post(key, { action: "release" }, "nope")).statusCode).toBe(404);
+      expect((await post(key, { action: "release" }, "plain")).statusCode).toBe(404);
+      expect(calls).toEqual([]);
+    });
+
+    it("holds and releases as the controller, and names a refusal", async () => {
+      expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
+      const refused = await post(key, { action: "release" });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain("not held");
+      expect(calls).toEqual([
+        ["hold", "mh", "CAPCOM", "design vetoed"],
+        ["release", "mh", "CAPCOM"],
+      ]);
+    });
+
+    it("answers 409 when loop writes or the engine are off", async () => {
+      noWrites = true;
+      expect((await post(key, { action: "release" })).statusCode).toBe(409);
+      noWrites = false;
+      on = false;
+      expect((await post(key, { action: "release" })).statusCode).toBe(409);
+      expect(calls).toEqual([]);
     });
   });
 

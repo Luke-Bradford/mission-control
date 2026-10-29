@@ -154,11 +154,13 @@ describe("scratch mode", () => {
   it.each([
     "merge_pr",
     "settle_park",
+    "hold_pr",
     "rerun_ci",
     "edit_card",
     "dismiss_item",
     "gh_read",
     "close_ticket",
+    "add_controller_check",
     "screenshot_hud",
   ])("guards %s with the live repo powers", (name) => {
     const event = { tool: `mcp__mc__${name}`, input: {} };

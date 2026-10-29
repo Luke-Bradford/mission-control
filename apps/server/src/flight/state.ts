@@ -25,6 +25,7 @@ import {
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
+  FLIGHT_REWAKE_MS,
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_STATE_DECISION_MAX,
@@ -33,6 +34,7 @@ import {
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  FLIGHT_WAKE_SETTING,
   type FlightArrivalDisposition,
   type FlightArrivalOperation,
   type FlightBriefSection,
@@ -47,6 +49,7 @@ import {
   type FlightView,
   type FlightWake,
   type FlightWakeList,
+  type FlightWakeStatus,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -231,6 +234,60 @@ export function flightWakes(store: Store, runId: string): number {
   return Object.keys(store.claimedKeys(runId)).filter((k) => k.startsWith(prefix)).length;
 }
 
+/** What the watch keeps of FLIGHT's wakes: the last one, and the next one while it is scheduled. */
+interface WakeRecord {
+  repo: string;
+  at: number;
+  wokeOn: string[];
+  next: number | null;
+}
+
+function readWakeRecord(store: Store, repo: string): WakeRecord | null {
+  try {
+    const r = JSON.parse(store.getSetting(FLIGHT_WAKE_SETTING) ?? "null") as WakeRecord | null;
+    return r !== null && r.repo === repo && Number.isFinite(r.at) && Array.isArray(r.wokeOn)
+      ? r
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Records a wake: its time, the session's repo and what woke FLIGHT. */
+export function recordFlightWake(store: Store, repo: string, at: number, wokeOn: string[]): void {
+  const record: WakeRecord = { repo, at, wokeOn, next: null };
+  store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
+}
+
+/** Records when FLIGHT will next wake (null when nothing is scheduled); only changes are written. */
+export function recordNextFlightWake(store: Store, repo: string, next: number | null): void {
+  const r = readWakeRecord(store, repo);
+  if (r === null || r.next === next) return;
+  store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify({ ...r, next }));
+}
+
+/** The next wake the state schedules: the re-wake backstop while work is pending, or a planned entry. */
+export function nextWakeAt(
+  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+  lastWakeAt: number,
+  now: number,
+): number | null {
+  const times: number[] = [];
+  if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
+  for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
+  return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
+}
+
+function flightWakeStatus(store: Store, repo: string, live: boolean): FlightWakeStatus {
+  const r = readWakeRecord(store, repo);
+  return {
+    lastWakeAt: r?.at ?? null,
+    wokeOn: r?.wokeOn ?? null,
+    // a stopped FLIGHT wakes on no schedule
+    nextWakeAt: live ? (r?.next ?? null) : null,
+  };
+}
+
 export function flightView(
   config: CcConfig,
   store: Store,
@@ -239,6 +296,7 @@ export function flightView(
 ): FlightView {
   const found = flightSeat(config);
   const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
+  const live = found === null ? false : flightLive(config, store, alive);
   return {
     seat:
       found === null
@@ -248,13 +306,14 @@ export function flightView(
             call: seatCallSign(found.seat.id),
             model: found.seat.model,
             state: store.seatSession(found.seat.id)?.state ?? null,
-            live: flightLive(config, store, alive),
+            live,
             turns:
               runId === null
                 ? null
                 : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
           },
     decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
+    ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
   };
 }
 

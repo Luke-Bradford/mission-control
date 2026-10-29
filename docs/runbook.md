@@ -257,12 +257,17 @@ the launchd job; do not install it for a manually started hub. Check the expande
 
 `/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
 branch's commit, the call ring's revision (deltas, aged-out calls, branch diff reads), the seats
-(crew rows and test-lock state), or the repo's PRs and board. Fields that age on their own
+(crew rows and test-lock state), the repo's PRs and board, or its rules or FLIGHT powers. Fields that age on their own
 (context usage, ages) are refreshed at most every 15 seconds. The call ring polls only seats with a
 live run (a finished run is read once more, then left), every second while a map client is
 connected and every five seconds otherwise. After a hub restart each transcript is read from the
 byte offset that covers the last `MAP_RECENT_MS` (15 minutes, scanning back at most 16 MB), not
 from the start, so the first map request after an Update no longer re-reads whole transcripts.
+
+The payload also carries what the Ownership and Conflicts lenses read: each seat's configured
+`area` globs (empty when it has none), `prs` on each conflict (the open PR number of each branch,
+in the order of `branches`, null when unknown), and `rules.hardRules` as the effective list the
+engine enforces (on a `superuser` repo the repo's own list plus the defaults and FLIGHT floor).
 
 The hourly maintenance sweep retains seat lines for seven days after their run ends, and
 loop events and run evidence for 30 days after their run ends. Findings stay for 90 days
@@ -857,6 +862,35 @@ pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rewo
 A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
+
+### Hold a run from merging
+
+To stop the engine merging a run's PR whatever its review and CI say (an unapproved design, a
+product call, a security question), put a hold on the run while it is in CI or review:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/merge-hold -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"hold","reason":"design not approved"}'
+```
+
+The hold and its reason show on the run and on its PR (`hold`). When the run would otherwise merge, it
+parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it merges only after
+`{"action":"release"}` on the same route, which returns it to the phase it left. A plain resume or
+message does not lift this park. A new push keeps the hold.
+
+FLIGHT has the same power on a superuser repo with `mc hold_pr { runId, action, reason, basis }`, logged
+as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
+may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
+to hold, or the hold is the controller's and the caller is FLIGHT.
+
+### FLIGHT adds a controller check to a ticket
+
+Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`
+itself (superuser repos): `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
+that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
+removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
+run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
+a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
+ever adds a hold, and is logged as a `card` decision.
 
 ## What it observes
 

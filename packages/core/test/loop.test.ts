@@ -34,6 +34,7 @@ import {
   RESUME_TEXT,
   reconcile,
   ticketControllerCheck,
+  withControllerCheckItem,
   wokenEventText,
 } from "../src/loop.ts";
 import {
@@ -3007,5 +3008,63 @@ describe("controllerCheckOf", () => {
     const r = controllerCheckParkText("a".repeat(40), "word ".repeat(200));
     expect(r.length).toBeLessThan(360);
     expect(r).toContain("see ticket");
+  });
+});
+
+describe("withControllerCheckItem", () => {
+  const item = "Screenshot the HUD";
+  it("appends under an existing section, leaving the rest alone", () => {
+    const body = "## Why\nx\n\n## Controller check\n- Open it.\n\n## Size\nS\n";
+    const r = withControllerCheckItem(body, item);
+    expect(r).toEqual({
+      body: `## Why\nx\n\n## Controller check\n- Open it.\n- ${item}\n\n## Size\nS\n`,
+      added: true,
+      removed: false,
+    });
+  });
+  it("fills an empty section", () => {
+    expect(withControllerCheckItem("## Controller check\n\n## Size\nS", item).body).toBe(
+      `## Controller check\n\n- ${item}\n\n## Size\nS`,
+    );
+  });
+  it("creates the section before Size, before Security, or at the end", () => {
+    expect(withControllerCheckItem("## Why\nx\n\n## Size\nS\n", item).body).toBe(
+      `## Why\nx\n\n## Controller check\n\n- ${item}\n\n## Size\nS\n`,
+    );
+    expect(withControllerCheckItem("## Why\nx\n## Security\nnone", item).body).toBe(
+      `## Why\nx\n## Controller check\n\n- ${item}\n\n## Security\nnone`,
+    );
+    expect(withControllerCheckItem("## Why\nx\n", item).body).toBe(
+      `## Why\nx\n\n## Controller check\n\n- ${item}\n`,
+    );
+    expect(withControllerCheckItem("## Why\nx", item).body).toBe(
+      `## Why\nx\n\n## Controller check\n\n- ${item}\n`,
+    );
+    expect(withControllerCheckItem("", item).body).toBe(`## Controller check\n\n- ${item}\n`);
+  });
+  it("moves an identical done-when line, and only that line", () => {
+    const body = `## Done when\n- Tests pass\n- [ ] ${item}\n- Lint\n\n## Size\nS\n`;
+    const r = withControllerCheckItem(body, item);
+    expect(r.removed).toBe(true);
+    expect(r.body).toBe(
+      `## Done when\n- Tests pass\n- Lint\n\n## Controller check\n\n- ${item}\n\n## Size\nS\n`,
+    );
+  });
+  it("does not touch a similar line, a fenced one, or another section's", () => {
+    const body = `## Why\n- ${item}\n\n## Done when\n- ${item} too\n\`\`\`\n- ${item}\n\`\`\`\n`;
+    const r = withControllerCheckItem(body, item);
+    expect(r.removed).toBe(false);
+    expect(r.body.startsWith(body)).toBe(true);
+  });
+  it("adds nothing twice, and the result holds the merge", () => {
+    const once = withControllerCheckItem("## Why\nx\n", item);
+    const twice = withControllerCheckItem(once.body, item);
+    expect(twice).toEqual({ body: once.body, added: false, removed: false });
+    expect(controllerCheckOf(once.body)).toBe(`- ${item}`);
+  });
+  it("keeps CRLF line ends", () => {
+    expect(withControllerCheckItem("## Why\r\nx\r\n", item).body).toBe(
+      `## Why\r\nx\r\n\r\n## Controller check\r\n\r\n- ${item}\r\n`,
+    );
   });
 });

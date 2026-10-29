@@ -55,6 +55,8 @@ export interface MapSeat {
    * runs set aside), which name the seat in conflicts and conflictsUnchecked.
    */
   branches: string[];
+  /** The seat's configured area globs; empty when it has none (the whole checkout). */
+  area: string[];
   /**
    * The ticket the seat's current run is on, when `ticket` is another: the ticket its changes are
    * on, while its current run has none yet. null otherwise.
@@ -114,10 +116,19 @@ export interface MapSnapshot {
   seats: MapSeat[];
   findings: (ReviewFinding & { seat: string; ticket: number; round: number })[];
   /** Computed merge conflicts between open PR heads, never read/write overlap. */
-  conflicts: { file: string; branches: [string, string]; shas: [string, string] }[];
+  conflicts: {
+    file: string;
+    branches: [string, string];
+    shas: [string, string];
+    /**
+     * The open PR number of each branch, in the same order; null when the PR row has none. The
+     * server always sets it; optional until the web fixtures carry it.
+     */
+    prs?: [number | null, number | null];
+  }[];
   /** Open PR branches with a pair that went unchecked: unknown, never reported clean. */
   conflictsUnchecked: MapUnchecked[];
-  /** The repo's resolved rules, as globs: the Ownership lens colours files by area and marks hard-rule files. */
+  /** The repo's resolved rules, as globs (hardRules is the effective list the engine enforces): the Ownership lens colours files by area and marks hard-rule files. */
   rules: { areas: Record<string, string[]>; hardRules: string[] };
   seq: number;
 }
