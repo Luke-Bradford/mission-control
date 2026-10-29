@@ -31,6 +31,8 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -151,6 +153,7 @@ const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const SHA_C = "c".repeat(40);
+const SHA_D = "d".repeat(40);
 const MIN = 60_000;
 
 let dir: string;
@@ -3851,6 +3854,15 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(h.steps).toContain("merge"));
       });
 
+      it("a pass by FLIGHT merges and the loop event names FLIGHT", async () => {
+        await parkedOnCheck();
+        expect(
+          await h.engine.controllerCheck(RUN, "pass", SHA.slice(0, 7), "hud-shot", "FLIGHT"),
+        ).toEqual({ lifted: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+        expect(loopTexts()).toContain(`controller check passed on ${SHA.slice(0, 7)} by FLIGHT`);
+      });
+
       it("a pass on a moved head or another sha is refused", async () => {
         await parkedOnCheck();
         expect(await h.engine.controllerCheck(RUN, "pass", SHA_B.slice(0, 7))).toEqual({
@@ -4820,7 +4832,7 @@ describe("the engine runs reviews", () => {
       },
     );
 
-    it("grants one capped rework per head and appends FLIGHT's fix list", async () => {
+    it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       await h.engine.reconcileRun(RUN);
@@ -4846,9 +4858,38 @@ describe("the engine runs reviews", () => {
         "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
       );
 
+      // further rounds are granted on the same head, up to the raised cap
+      for (let n = 2; n <= FLIGHT_REWORKS_PER_HEAD; n++) {
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf().flightReworks).toEqual({ [SHA]: n });
+      }
       setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
       expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
       expect(loopOf().parked).not.toBeNull();
+    });
+
+    const parkedForRework = async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
+    };
+
+    it("stops granting rework once the run has had its cap over all its heads", async () => {
+      await parkedForRework();
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "again", ended: false },
+        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: FLIGHT_REWORKS_PER_RUN - 6 },
+      });
+      const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        kinds: ["review"],
+        action: "rework",
+      });
+      expect(result).toEqual({ lifted: false, reason: "round-granted" });
     });
 
     it("lift verifies that the current head descends from the push", async () => {
@@ -4939,8 +4980,11 @@ describe("the engine runs reviews", () => {
 
       it("round already granted on this head", async () => {
         await parkedReview();
-        expect(await operate(RUN, "FLIGHT", { action: "rework" })).toBe(true);
-        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        setLoop({
+          phase: "parked",
+          parked: { kind: "review", reason: "again", ended: false },
+          flightReworks: { [SHA]: FLIGHT_REWORKS_PER_HEAD },
+        });
         expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
       });
 
@@ -5901,6 +5945,40 @@ describe("the engine runs reviews", () => {
       expect(loopOf().pendingLine ?? null).toBeNull();
       const noted = store.commsInbox(SEAT).filter((m) => m.text === text);
       expect(noted.every((m) => store.commsInboxRead(SEAT, m.id))).toBe(true);
+    });
+
+    it("queues FLIGHT's rework for a run set aside while its seat is on another run", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await setAside();
+      const other = "guido-1:other";
+      store.upsertRun(run({ id: other, seq: 2 }));
+      seatIdle(other);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "findings", ended: false } });
+      expect(
+        await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework", note: "do the thing" }),
+      ).toBe(true);
+      // refused before; now queued: it waits in Comms and the aside flag wakes it later
+      const rework = () => h.sent.filter((l) => l.key.includes("flight-rework"));
+      expect(rework()).toEqual([]);
+      expect(loopOf()).toMatchObject({
+        phase: "working",
+        aside: { worktree: WT, wake: true },
+        pendingLine: { text: expect.stringContaining("FLIGHT fix list: do the thing") },
+        flightReworks: { [SHA]: 1 },
+      });
+      expect(store.comms(0, RUN).at(-1)?.text).toContain("FLIGHT fix list: do the thing");
+      // the seat frees: the run is woken and sent the rework, once
+      h.wakeError = null;
+      h.asideOn = false;
+      store.setRunEnded(other, clock, "ok", "operator");
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+      emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
+      await vi.waitFor(() => expect(loopOf().aside).toBeNull());
+      await vi.waitFor(() => expect(rework()).toHaveLength(1));
+      expect(rework()[0]?.text).toContain("FLIGHT fix list: do the thing");
     });
 
     it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {

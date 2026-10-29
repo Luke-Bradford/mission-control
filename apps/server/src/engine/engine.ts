@@ -2488,9 +2488,20 @@ export function createEngine(deps: EngineDeps): Engine {
             const findings = reworkFindings(run.id, loop.parked.reason);
             const message =
               opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
-            if (next.aside && supervisor.busy().some((b) => b.seatId === run.agentId)) {
-              // its seat holds another run now: the rework waits in Comms for this run, and the
-              // engine wakes it, in working, once the seat is free (as a controller-check fail does)
+            // a run set aside is woken first; its seat on another run (a 409) queues the rework
+            let queue = false;
+            if (next.aside) {
+              try {
+                await supervisor.wakeRun(run.id);
+                next.aside = null;
+              } catch (e) {
+                if ((e as { status?: unknown }).status !== 409) return refuse("rework-undelivered");
+                queue = true;
+              }
+            }
+            if (queue && next.aside) {
+              // the rework waits in Comms for this run, and the engine wakes it, in working, once
+              // its seat is free (as a failed controller check does)
               const stored = store.addComms({
                 at,
                 from: COMMS_CAPCOM,
@@ -2505,14 +2516,6 @@ export function createEngine(deps: EngineDeps): Engine {
               next.pendingLine = { key: `${run.id}:flight-rework:${next.epoch}`, text: message };
               next.aside = { ...next.aside, wake: true };
             } else {
-              if (next.aside) {
-                try {
-                  await supervisor.wakeRun(run.id);
-                } catch {
-                  return refuse("rework-undelivered");
-                }
-                next.aside = null;
-              }
               const sent = await supervisor.send(
                 run.id,
                 `${run.id}:flight-rework:${next.epoch}`,

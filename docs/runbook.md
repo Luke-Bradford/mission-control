@@ -821,9 +821,10 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
-action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
-the configured review-round cap for a head, optionally adding a short fix list; a second grant for
-that head is left to the controller.
+action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
+configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
+cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
@@ -859,9 +860,16 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
+A plain resume or message does not lift this park. FLIGHT settles it with `settle_park` `pass-check` or
+`fail-check` (below); a paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
+
+FLIGHT passes a check only on evidence it produced: its `note` cites `hud-shot:<id>` (a screenshot it
+stored), `update:<sha>` (an Update in its own log) or `ci:<run id>` (a passing CI run on the checked
+head, read from GitHub), or every item of the check is screen-only (about what the screen shows). A
+check that needs evidence FLIGHT cannot produce stays with the controller. `fail-check` needs a note
+and sends it to the seat as rework. The engine logs the verdict "by FLIGHT".
 
 ### Hold a run from merging
 
@@ -891,6 +899,38 @@ removes an identical line from `## Done when`. Nothing else in the body changes.
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
+
+### FLIGHT's controller powers
+
+FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
+product direction, a security exception, an irreversible external action, and a floor approval the
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
+repo's FLIGHT; each is a logged decision (refused calls too), and none moves the safety floor:
+guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
+operator.
+
+| Tool | What it does |
+|---|---|
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat), `pass-check` / `fail-check` on a controller check |
+| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and a pause record is rewritten with `by: FLIGHT` |
+| `restart_ticket` | Start a seat on a ticket from any open column (Blocked too): the card goes to Ready first and the once-a-day restart limit is waived |
+| `end_run` | End a working, parked or stalled run; refused with uncommitted changes unless `discard: true` |
+| `sync_main` | Merge main into a run's branch |
+| `set_crew_pause`, `lift_crew_pause` | Pause the crew or named seats, or lift the pause (record: `by: FLIGHT`) |
+| `dismiss_item` | Dismiss any attention item except an operator approval, a budget or guard hold, or an Update hold |
+| `promote` | Reads the live card before refusing "no size" or "not on the board" |
+| `withdraw_decision` | Remove one of its own logged decisions; the log keeps a `withdraw` line |
+| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone. `always_ask` and other-lane tickets are refused; text is scanned for secrets and mentions |
+| `restart_engine` | Restart the loop engine once it has been silent past two of its ticks (once per ten minutes) |
+| `update_hub` | Run Update when every commit between the running code and main is a PR FLIGHT cleared with `merge_pr`; Update's own checks apply (on main, clean checkout, no seat starting, build) and the hub restarts |
+
+A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
+watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
+started before the set was recorded rotates on its wake count as before.
+
+`update_hub` makes FLIGHT the person who runs Update for the merges it cleared. The CLAUDE.md sentence
+that reserves Update to the operator or the controller is the operator's to change; until it is,
+treat the tool as the operator's clearance in advance.
 
 ## What it observes
 

@@ -56,6 +56,7 @@ export interface PowerHelpers {
   ) => McTool;
 }
 
+const RESTARTED_ENGINE_TEXT = "Restarted the loop engine.";
 const RESTART_ENGINE_GAP_MS = 10 * 60_000;
 const basis = z.string().min(1).max(500);
 const issueNumber = z.number().int().min(1).max(9_999_999);
@@ -456,10 +457,15 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         return fail("The engine is not silent: a tick completed within its last two intervals.");
       const recent = store
         .flightDecisions(at - RESTART_ENGINE_GAP_MS, 1000)
-        .filter((d) => d.kind === "hub" && d.about === MC_TOOL_NAMES.restartEngine);
+        .filter(
+          (d) =>
+            d.kind === "hub" &&
+            d.about === MC_TOOL_NAMES.restartEngine &&
+            d.decision === RESTARTED_ENGINE_TEXT,
+        );
       if (recent.length > 0) return fail("The engine was restarted in the last ten minutes.");
       await deps.restartEngine();
-      return { text: "Restarted the loop engine." };
+      return { text: RESTARTED_ENGINE_TEXT };
     },
     { engine: false },
   );

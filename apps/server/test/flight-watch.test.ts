@@ -20,6 +20,7 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
+  FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_STARTS_PER_HOUR,
@@ -61,7 +62,7 @@ import {
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
-import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
+import { createFlightWatch, type FlightWatch, flightToolsDigest } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -1869,6 +1870,30 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     expect(startCalls).toHaveLength(4);
     expect(notesOpen()).toHaveLength(1);
+  });
+
+  it("rotates a run whose tool set is older than FLIGHT's, and records the set a fresh run starts with", async () => {
+    liveCrew();
+    ask();
+    // no record (a run from before the set was kept): not rotated for it
+    await watch.check();
+    expect(endCalls).toEqual([]);
+    const sent = sendCalls.length;
+    // a record for this run from another tool set: rotated at its next idle pass
+    store.setSetting(
+      FLIGHT_RUN_TOOLS_SETTING,
+      JSON.stringify({ runId: "r-flight", tools: "an-older-set" }),
+    );
+    await watch.check();
+    expect(endCalls).toEqual(["r-flight"]);
+    expect(sendCalls).toHaveLength(sent);
+    // the fresh run is recorded with today's set, so it is not rotated again
+    noFlight();
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    expect(JSON.parse(store.getSetting(FLIGHT_RUN_TOOLS_SETTING) ?? "{}")).toMatchObject({
+      tools: flightToolsDigest(),
+    });
   });
 
   it("debounces checks after attention", async () => {

@@ -135,8 +135,9 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
+import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { observeFlightMain } from "../src/flight/signals.ts";
+import { flightLoopHeartbeat, observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
@@ -1291,7 +1292,7 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("respects an operator stop", async () => {
+  it("leaves an operator stop alone on a standard repo", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
     expect(await start()).toHaveProperty("isError", true);
     expect(startCalls).toEqual([]);
@@ -7656,5 +7657,414 @@ describe("add_controller_check", () => {
     const result = await addCall();
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/could not be confirmed/);
+  });
+});
+
+describe("an unrestricted FLIGHT (#1015)", () => {
+  const call = (name: string, a: object) =>
+    need(tools.find((t) => t.name === name)).call(ctx(), { basis: "Checked the state", ...a });
+  const elevated = () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    engineOn = true;
+  };
+  const DONE = "## Done when\n\n- it works\n";
+  const CHECK = (item: string) => `${DONE}\n## Controller check\n\n- ${item}\n`;
+  const parkOnCheck = (body: string) => {
+    live("guido-1", "r-pr", {
+      branch: "mc/7",
+      ticket: "mc#7",
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        prNumber: 12,
+        parked: { kind: "controller-check", reason: "held", ended: false },
+        controllerCheck: { sha: SHA, from: "review", pass: false },
+      },
+    });
+    fetchImpl = async (n) => ticket(n, { body });
+  };
+
+  describe("controller checks", () => {
+    const SHOT = "c".repeat(32);
+    beforeEach(elevated);
+    it("passes a check on a hud-shot FLIGHT stored, as FLIGHT", async () => {
+      parkOnCheck(CHECK("the rate table renders in the HUD with a red row"));
+      shotsKnown = [SHOT];
+      // not screen-only on its own words? a shot is evidence either way
+      expect(
+        await call("settle_park", {
+          runId: "r-pr",
+          action: "pass-check",
+          note: `hud-shot:${SHOT} shows it`,
+        }),
+      ).toEqual({ text: "Settled r-pr: pass-check." });
+      expect(checkCalls).toEqual([["r-pr", "pass", SHA, `hud-shot:${SHOT} shows it`, "FLIGHT"]]);
+      expect(decisions().filter((d) => d.kind === "settle")).toHaveLength(1);
+    });
+    it("refuses evidence FLIGHT did not produce and leaves the park to the controller", async () => {
+      parkOnCheck(CHECK("run the migration on the live database and watch the log"));
+      for (const note of [undefined, `hud-shot:${SHOT}`, "update:abcdef1", "ci:999"]) {
+        const r = await call("settle_park", {
+          runId: "r-pr",
+          action: "pass-check",
+          ...(note === undefined ? {} : { note }),
+        });
+        expect(r).toHaveProperty("isError", true);
+      }
+      expect(checkCalls).toEqual([]);
+    });
+    it("passes a screen-only check without evidence", async () => {
+      parkOnCheck(CHECK("the screenshot of the HUD looks right"));
+      expect((await call("settle_park", { runId: "r-pr", action: "pass-check" })).isError).toBe(
+        undefined,
+      );
+      expect(checkCalls).toHaveLength(1);
+    });
+    it("accepts an Update sha only when FLIGHT's log has that Update", async () => {
+      parkOnCheck(CHECK("the new hub restarts and serves the page"));
+      expect(
+        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }),
+      ).toHaveProperty("isError", true);
+      addDecision({ kind: "hub", decision: "Updated the hub to abcdef1, 1234567" });
+      expect(
+        (await call("settle_park", { runId: "r-pr", action: "pass-check", note: "update:abcdef1" }))
+          .isError,
+      ).toBeUndefined();
+      expect(checkCalls).toHaveLength(1);
+    });
+    it("accepts a CI run only when it passed on the checked head", async () => {
+      parkOnCheck(CHECK("CI is green on the final head"));
+      ghImpl = async () => ({
+        code: 0,
+        stdout: JSON.stringify({ conclusion: "success", headSha: SHA_B }),
+        stderr: "",
+      });
+      expect(
+        await call("settle_park", { runId: "r-pr", action: "pass-check", note: "ci:42" }),
+      ).toHaveProperty("isError", true);
+      ghImpl = async () => ({
+        code: 0,
+        stdout: JSON.stringify({ conclusion: "success", headSha: SHA }),
+        stderr: "",
+      });
+      expect(
+        (await call("settle_park", { runId: "r-pr", action: "pass-check", note: "ci:42" })).isError,
+      ).toBeUndefined();
+      expect(ghCalls.at(-1)).toEqual([
+        "run",
+        "view",
+        "42",
+        "--repo=o/mc",
+        "--json=conclusion,headSha",
+      ]);
+    });
+    it("fails a check with a note, and needs the note", async () => {
+      parkOnCheck(CHECK("the screenshot looks right"));
+      expect(await call("settle_park", { runId: "r-pr", action: "fail-check" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(
+        (
+          await call("settle_park", {
+            runId: "r-pr",
+            action: "fail-check",
+            note: "the row is blue",
+          })
+        ).isError,
+      ).toBeUndefined();
+      expect(checkCalls).toEqual([["r-pr", "fail", SHA, "the row is blue", "FLIGHT"]]);
+    });
+    it("keeps check actions off other parks", async () => {
+      live("guido-1", "r-pr", {
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "review", reason: "r", ended: false },
+        },
+      });
+      expect(await call("settle_park", { runId: "r-pr", action: "pass-check" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(checkCalls).toEqual([]);
+    });
+  });
+
+  describe("seats", () => {
+    const sc = (n: number, over: Partial<BoardItem> = {}) => card(n, { size: "S", ...over });
+    const start = (name = "start_seat", over: Record<string, unknown> = {}) =>
+      call(name, {
+        seat: "guido-1",
+        issue: 7,
+        basis: "operator is away; the ticket is urgent",
+        ...over,
+      });
+    beforeEach(() => {
+      elevated();
+      board(sc(7));
+      fetchImpl = async (n) => ticket(n, { body: DONE });
+    });
+    it("starts a seat the operator stopped, and says so in the decision", async () => {
+      store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
+      expect((await start()).isError).toBeUndefined();
+      expect(startCalls).toHaveLength(1);
+      expect(store.seatSession("guido-1")?.state).toBe("idle");
+      expect(decisions().find((d) => d.kind === "start")?.decision).toContain("stopped the seat");
+    });
+    it("starts a paused seat by letting it out of the pause, naming FLIGHT", async () => {
+      writeCrewPause(store, { seats: ["guido-1", "inco-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+      expect((await start()).isError).toBeUndefined();
+      expect(readCrewPause(store)).toMatchObject({ seats: ["inco-1"], by: "FLIGHT" });
+      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
+      startCalls.length = 0;
+      store.upsertRun(run("r-done", "guido-1", { endedAt: NOW, status: "ok" }));
+      store.setSeatSession({ ...row("guido-1", ""), runId: null });
+      expect((await start("start_seat", { issue: 8 })).isError).toBeDefined();
+      board(sc(7), sc(8));
+      expect((await start("start_seat", { issue: 8 })).isError).toBeUndefined();
+      expect(readCrewPause(store)?.seats).not.toContain("guido-1");
+      expect(readCrewPause(store)?.by).toBe("FLIGHT");
+    });
+    it("needs superuser to override a stop or a pause", async () => {
+      need(cfg.repos[0]).flightPowers = "standard";
+      writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+      expect(await start()).toHaveProperty("isError", true);
+      expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+      expect(startCalls).toEqual([]);
+    });
+    it("restarts a Blocked ticket: back to Ready, with no 24-hour limit", async () => {
+      board(sc(7, { status: "Blocked" }));
+      addDecision({ kind: "start", ref: "mc#7", seatId: "guido-1" });
+      expect(await start("start_seat")).toHaveProperty("isError", true);
+      expect((await start("restart_ticket")).isError).toBeUndefined();
+      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Ready" }]);
+      expect(startCalls).toHaveLength(1);
+      expect(
+        decisions().find((d) => d.kind === "start" && d.decision.includes("restart")),
+      ).toBeDefined();
+    });
+    it("restart_ticket refuses a closed ticket and a standard repo", async () => {
+      board(sc(7, { closed: true }));
+      expect(await start("restart_ticket")).toHaveProperty("isError", true);
+      need(cfg.repos[0]).flightPowers = "standard";
+      board(sc(7, { status: "Blocked" }));
+      expect(await start("restart_ticket")).toHaveProperty("isError", true);
+      expect(startCalls).toEqual([]);
+    });
+    it("sets and lifts a crew pause as FLIGHT, engine off or on", async () => {
+      engineOn = false;
+      expect(
+        (await call("set_crew_pause", { seats: ["guido-1"], reason: "CI is red" })).isError,
+      ).toBeUndefined();
+      expect(readCrewPause(store)).toMatchObject({
+        seats: ["guido-1"],
+        reason: "CI is red",
+        by: "FLIGHT",
+      });
+      expect(await call("set_crew_pause", { seats: ["nobody"], reason: "x" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect((await call("lift_crew_pause", {})).isError).toBeUndefined();
+      expect(readCrewPause(store)).toBeNull();
+      expect(await call("lift_crew_pause", {})).toHaveProperty("isError", true);
+      // every call is logged, a refused one too
+      expect(decisions().filter((d) => d.kind === "pause")).toHaveLength(4);
+    });
+    it("resumes a stopped, paused seat and its unfinished run", async () => {
+      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
+      live("guido-1", "r-g", { ticket: "mc#7" });
+      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
+      expect((await call("resume_seat", { seat: "guido-1" })).isError).toBeUndefined();
+      expect(resumeCalls).toEqual(["r-g"]);
+      expect(readCrewPause(store)?.seats).not.toContain("guido-1");
+      store.setSeatSession({ ...row("inco-1", ""), runId: null, state: "stopped" });
+      expect((await call("resume_seat", { seat: "inco-1" })).isError).toBeUndefined();
+      expect(store.seatSession("inco-1")?.state).toBe("idle");
+      expect(await call("resume_seat", { seat: "nobody-9" })).toHaveProperty("isError", true);
+    });
+  });
+
+  describe("board and decisions", () => {
+    beforeEach(elevated);
+    it("dismisses an operator-owned note, but never a guard, Update or operator-approval item", async () => {
+      live("guido-1", "r-info", { ticket: "mc#7" });
+      store.raiseNote({
+        key: "info:1",
+        kind: "ready",
+        runId: "r-info",
+        seatId: "guido-1",
+        repoId: "mc",
+        text: "FYI",
+        at: NOW,
+      });
+      expect(await call("dismiss_item", { key: "note:info:1" })).not.toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(store.notes().find((n) => n.key === "info:1")?.dismissedAt).toBe(NOW);
+      for (const key of [`${GUARD_ACK_PREFIX}1`, HUB_UPDATE_HELD_KEY, "approval:1"])
+        store.raiseNote({
+          key,
+          kind: key === "approval:1" ? "flag" : "blocked",
+          runId: null,
+          seatId: null,
+          repoId: "mc",
+          text: "Held",
+          at: NOW,
+        });
+      for (const key of [`${GUARD_ACK_PREFIX}1`, HUB_UPDATE_HELD_KEY, "approval:1"])
+        expect(await call("dismiss_item", { key: `note:${key}` })).toHaveProperty("isError", true);
+      expect(store.notes().filter((n) => n.dismissedAt !== null)).toHaveLength(1);
+    });
+    it("withdraws a logged decision and keeps a line saying so", async () => {
+      const id = addDecision({ kind: "note", about: "wrong call", decision: "d" });
+      expect((await call("withdraw_decision", { id })).isError).toBeUndefined();
+      expect(decisions().some((d) => d.id === id)).toBe(false);
+      expect(decisions().find((d) => d.kind === "withdraw")?.decision).toContain(`decision ${id}`);
+      expect(await call("withdraw_decision", { id })).toHaveProperty("isError", true);
+    });
+    it("closes and reopens an issue, confirming against GitHub", async () => {
+      board(card(7));
+      fetchImpl = async (n) =>
+        ticket(n, { state: ghCalls.some((c) => c[1] === "close") ? "closed" : "open" });
+      expect(
+        (await call("close_issue", { issue: 7, reason: "not-planned", comment: "Superseded." }))
+          .isError,
+      ).toBeUndefined();
+      expect(ghCalls[0]).toEqual([
+        "issue",
+        "close",
+        "7",
+        "--repo=o/mc",
+        "--reason=not planned",
+        "--comment=Superseded.",
+      ]);
+      ghCalls.length = 0;
+      fetchImpl = async (n) =>
+        ticket(n, { state: ghCalls.some((c) => c[1] === "reopen") ? "open" : "closed" });
+      expect((await call("reopen_issue", { issue: 7 })).isError).toBeUndefined();
+      expect(ghCalls[0]).toEqual(["issue", "reopen", "7", "--repo=o/mc"]);
+      expect(decisions().filter((d) => d.kind === "issue")).toHaveLength(2);
+    });
+    it("refuses to close an always_ask ticket or one that GitHub still shows open", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7, { labels: ["approval:operator"] }));
+      expect(await call("close_issue", { issue: 7 })).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+      rulesNow = DEFAULT_REPO_RULES;
+      board(card(7));
+      fetchImpl = async (n) => ticket(n);
+      expect(await call("close_issue", { issue: 7 })).toHaveProperty("isError", true);
+    });
+    it("edits a whole issue body and refuses a secret", async () => {
+      board(card(7));
+      fetchImpl = async (n) => ticket(n, { body: "new body" });
+      expect((await call("edit_issue", { issue: 7, body: "new body" })).isError).toBeUndefined();
+      expect(ghCalls[0]).toEqual(["issue", "edit", "7", "--repo=o/mc", "--body=new body"]);
+      secrets = ["s3cr3t-token-value"];
+      ghCalls.length = 0;
+      expect(
+        await call("edit_issue", { issue: 7, body: "the token is s3cr3t-token-value" }),
+      ).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+      expect(await call("edit_issue", { issue: 7 })).toHaveProperty("isError", true);
+    });
+    it("sets status, size, priority, labels and a milestone in one call", async () => {
+      board(card(7));
+      ghImpl = async (a) => ({
+        code: 0,
+        stdout: a[1]?.includes("milestones") ? JSON.stringify([{ number: 3, title: "M1" }]) : "",
+        stderr: "",
+      });
+      const r = await call("set_fields", {
+        issue: 7,
+        status: "Blocked",
+        size: "M",
+        priority: "P1",
+        labels: ["area:server", "lane:home"],
+        milestone: "M1",
+      });
+      expect(r.isError).toBeUndefined();
+      expect(editCalls).toEqual([["mc", 7, { size: "M", priority: "P1" }]]);
+      expect(moveCalls).toEqual([{ runId: "flight", repoId: "mc", issue: 7, column: "Blocked" }]);
+      expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({
+        labels: ["area:server", "lane:home"],
+        milestone: 3,
+      });
+      expect(await call("set_fields", { issue: 7 })).toHaveProperty("isError", true);
+    });
+    it("refuses set_fields on an always_ask card", async () => {
+      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
+      board(card(7, { labels: ["approval:operator"] }));
+      expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
+      expect(editCalls).toEqual([]);
+    });
+  });
+
+  describe("the hub", () => {
+    beforeEach(elevated);
+    it("restarts the engine only once it has been silent past its tick twice", async () => {
+      flightLoopHeartbeat(store, "engine", nowMs - 90_000, 60_000);
+      expect(await call("restart_engine", {})).toHaveProperty("isError", true);
+      expect(restartEngineCalls).toBe(0);
+      flightLoopHeartbeat(store, "engine", nowMs - 5 * 60_000, 60_000);
+      expect((await call("restart_engine", {})).isError).toBeUndefined();
+      expect(restartEngineCalls).toBe(1);
+      expect(await call("restart_engine", {})).toHaveProperty("isError", true);
+      expect(restartEngineCalls).toBe(1);
+      // one restart; the two refusals are logged too
+      expect(decisions().filter((d) => d.kind === "hub")).toHaveLength(3);
+      expect(decisions().filter((d) => d.decision === "Restarted the loop engine.")).toHaveLength(
+        1,
+      );
+    });
+    it("runs Update after merges FLIGHT cleared, and nothing else", async () => {
+      updaterImpl = {
+        changes: async () => ({
+          commits: ["1111111 Merge pull request #50 from o/b", "2222222 fix thing (#51)"],
+          paths: ["apps/server/src/x.ts"],
+        }),
+        update: async () => ({ restarting: true }),
+      };
+      addDecision({ kind: "merge", decision: "Cleared PR #50; the engine handles the merge." });
+      const refusal = await call("update_hub", {});
+      expect(refusal).toHaveProperty("isError", true);
+      expect(refusal.text).toContain("#51");
+      expect(updaterRestarts).toBe(0);
+      addDecision({ kind: "merge", decision: "Cleared PR #51; the engine handles the merge." });
+      expect((await call("update_hub", {})).isError).toBeUndefined();
+      await new Promise((r) => setImmediate(r));
+      expect(updaterRestarts).toBe(1);
+      expect(decisions().find((d) => d.kind === "hub")?.decision).toContain("1111111, 2222222");
+    });
+    it("surfaces an Update refusal and an empty range", async () => {
+      updaterImpl.changes = async () => ({ commits: [], paths: [] });
+      expect(await call("update_hub", {})).toHaveProperty("isError", true);
+      updaterImpl = {
+        changes: async () => ({ commits: ["1111111 x (#50)"], paths: [] }),
+        update: async () => {
+          throw new Error("the checkout has uncommitted changes");
+        },
+      };
+      addDecision({ kind: "merge", decision: "Cleared PR #50; x" });
+      const r = await call("update_hub", {});
+      expect(r.text).toContain("uncommitted");
+      expect(updaterRestarts).toBe(0);
+    });
+    it("needs superuser", async () => {
+      need(cfg.repos[0]).flightPowers = "standard";
+      for (const [name, a] of [
+        ["restart_engine", {}],
+        ["update_hub", {}],
+        ["set_crew_pause", { seats: "all", reason: "x" }],
+        ["withdraw_decision", { id: 1 }],
+      ] as const)
+        expect(await call(name, a)).toMatchObject({
+          isError: true,
+          text: expect.stringContaining("superuser"),
+        });
+    });
   });
 });
