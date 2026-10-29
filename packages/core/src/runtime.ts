@@ -757,6 +757,8 @@ export const CREW_PNPM_ENV = {
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
+/** The folder beside a worktrees folder's worktrees holding each one's private pnpm store. */
+export const CODEX_PNPM_STORES_DIR = ".mc-pnpm-store";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**

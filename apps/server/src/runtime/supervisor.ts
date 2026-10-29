@@ -179,6 +179,7 @@ import {
   prepareScratch,
   type RepoPeer,
   removeCheckout,
+  sweepPnpmStores,
   syncReusedWorktree,
   writeReviewInputs,
 } from "./checkouts.ts";
@@ -2061,6 +2062,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           }
         }
       }
+    }
+    // after the worktrees above are gone: a private pnpm store outlives a worktree that was
+    // removed some other way, and a crash leaves one behind
+    try {
+      const n = await sweepPnpmStores([
+        crew.worktrees,
+        ...crew.sessions.map((session) => join(crew.worktrees, session.id)),
+      ]);
+      if (n > 0) log(`crew: removed ${n} pnpm stores of worktrees that no longer exist`);
+    } catch (e) {
+      log(`could not sweep pnpm stores: ${errText(e)}`);
     }
   }
 

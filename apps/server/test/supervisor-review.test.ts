@@ -41,6 +41,7 @@ import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
+import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
@@ -938,14 +939,21 @@ describe("startReview", () => {
 
   it("a review run's worktree goes when it is stopped", async () => {
     const { sup, reviewId } = await started();
+    const pnpmStore = codexPnpmStoreDir(scratch(reviewId));
+    mkdirSync(pnpmStore, { recursive: true });
+    writeFileSync(join(pnpmStore, "marker"), "x\n");
     await sup.endRun("retro");
     await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
+    await until(() => expect(existsSync(pnpmStore)).toBe(false));
   });
 
   it("a review run's worktree goes when the engine ends it", async () => {
     const { sup, reviewId, runId } = await started();
+    const pnpmStore = codexPnpmStoreDir(scratch(reviewId));
+    mkdirSync(pnpmStore, { recursive: true });
     await sup.endRunByEngine(runId);
     expect(existsSync(scratch(reviewId))).toBe(false);
+    expect(existsSync(pnpmStore)).toBe(false);
   });
 
   it("a review run resumes in its scratch worktree", async () => {
@@ -987,6 +995,17 @@ describe("startReview", () => {
     sup.start();
     await until(() => expect(existsSync(scratch(r.reviewId))).toBe(false));
     expect(existsSync(join(root, "retro-review-notes"))).toBe(true);
+  });
+
+  it("sweepScratch removes a private pnpm store whose worktree is gone, and keeps a live one", async () => {
+    const stores = join(root, ".mc-pnpm-store");
+    mkdirSync(join(stores, "guido-1-gone"), { recursive: true });
+    mkdirSync(join(stores, "guido-1-live"), { recursive: true });
+    mkdirSync(join(root, "guido-1-live"));
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await until(() => expect(existsSync(join(stores, "guido-1-gone"))).toBe(false));
+    expect(existsSync(join(stores, "guido-1-live"))).toBe(true);
   });
 
   it("sweepScratch also removes a leftover review worktree still at the old flat path", async () => {
