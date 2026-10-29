@@ -29,8 +29,8 @@ export function DecisionCard({
   const option = item.brief?.options.find(
     (choice) => choice.id === item.brief?.recommendedOptionId,
   );
-  const countdown =
-    item.triageDueAt === undefined ? null : Math.max(0, Math.ceil((item.triageDueAt - now) / 1000));
+  const dueAt = item.defaultDueAt ?? item.triageDueAt;
+  const countdown = dueAt === undefined ? null : Math.max(0, Math.ceil((dueAt - now) / 1000));
   const clock =
     countdown === null
       ? null
@@ -103,9 +103,11 @@ export function Decisions({
   flightSeat: FlightSeat | null;
   onDiscuss: (item: AttentionItem) => void;
 }) {
-  // The decisions among the Needs-you set; the head counts the whole set and links to its home.
+  // Decisions and every operator item with an automatic default; the head counts the whole set.
   const needsYou = needsYouItems(items);
-  const decisions = needsYou.filter((item) => item.kind === "decision");
+  const decisions = needsYou.filter(
+    (item) => item.kind === "decision" || item.defaultDueAt !== undefined,
+  );
   return (
     <section className="comms-decisions" aria-label="Decisions">
       <div className="comms-section-head">

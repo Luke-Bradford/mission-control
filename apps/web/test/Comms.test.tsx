@@ -15,6 +15,7 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
+import { Decisions } from "../src/comms/Decisions.tsx";
 import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -2433,6 +2434,39 @@ describe("Needs you: the crew's items", () => {
     expect(within(row).getByRole("button", { name: "Ack" })).toBeTruthy();
     fireEvent.click(within(row).getByRole("button", { name: "Open" }));
     expect(window.location.pathname).toBe("/agent/shop-app-ta");
+  });
+});
+
+describe("Decisions", () => {
+  it("lists a briefed question with a default and counts down to that default", () => {
+    const defaultDueAt = NOW + 90_000;
+    render(
+      <Decisions
+        items={[
+          item({
+            key: "ask:default",
+            kind: "question",
+            text: "Which cache should we use?",
+            brief: brief(),
+            defaultDueAt,
+            triageDueAt: NOW + 10 * MIN,
+          }),
+          item({
+            key: "decision:triage",
+            text: "Current decision deadline",
+            triageDueAt: NOW + MIN,
+          }),
+        ]}
+        rows={ROWS}
+        flightSeat={null}
+        onDiscuss={() => {}}
+      />,
+    );
+
+    const decisions = screen.getByRole("region", { name: "Decisions" });
+    expect(within(decisions).getByText("Which cache should we use?")).toBeTruthy();
+    expect(within(decisions).getByText("default in 01:30")).toBeTruthy();
+    expect(within(decisions).getByText("default in 01:00")).toBeTruthy();
   });
 });
 
