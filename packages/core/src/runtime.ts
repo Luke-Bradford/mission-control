@@ -99,6 +99,7 @@ export const MC_TOOL_GRANTS: Readonly<
       MC_TOOL_NAMES.askFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsInbox,
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
@@ -109,6 +110,7 @@ export const MC_TOOL_GRANTS: Readonly<
       MC_TOOL_NAMES.askFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsInbox,
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
@@ -119,6 +121,7 @@ export const MC_TOOL_GRANTS: Readonly<
       MC_TOOL_NAMES.reportFindings,
       MC_TOOL_NAMES.restoreFile,
       MC_TOOL_NAMES.commsRead,
+      MC_TOOL_NAMES.commsInbox,
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
@@ -302,6 +305,7 @@ export const WRITER_TOOLS = [
   MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
+  MC_TOOLS.commsInbox,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;
@@ -315,6 +319,7 @@ export const READONLY_TOOLS = [
   MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
+  MC_TOOLS.commsInbox,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;
@@ -330,6 +335,7 @@ export const SCRATCH_TOOLS = [
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
   MC_TOOLS.commsRead,
+  MC_TOOLS.commsInbox,
   MC_TOOLS.commsSend,
   MC_TOOLS.commsReact,
 ] as const;

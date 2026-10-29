@@ -29,7 +29,6 @@ import {
   type CommsReaction,
   type CommsReactionKind,
   commsCutMarker,
-  DECISION_DEFAULT_WAIT_MS,
   type Escalation,
   type FindingResolution,
   type FLIGHT_HEADLINE,
@@ -176,11 +175,6 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- Acknowledged attention items. absent_since: when the key was first missing from the current
 -- items (null while present); the ack is dropped once it has been absent for ACK_ABSENT_MS.
 CREATE TABLE IF NOT EXISTS acks (key TEXT PRIMARY KEY, at INTEGER NOT NULL, absent_since INTEGER);
--- A decision's default, claimed once when its deadline passed unanswered; brief_at ties it to the ask.
-CREATE TABLE IF NOT EXISTS decision_defaults (
-  key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT, label TEXT NOT NULL,
-  due_at INTEGER NOT NULL, applied_at INTEGER NOT NULL, PRIMARY KEY (key, brief_at)
-);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -700,14 +694,6 @@ export interface NewCommsRow {
   mentions?: readonly string[];
 }
 
-/** A Comms text stored cut to COMMS_TEXT_MAX characters, with the cut marker. */
-function cutCommsText(text: string): string {
-  const chars = Array.from(text);
-  return chars.length > COMMS_TEXT_MAX
-    ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
-    : text;
-}
-
 /** Parse the sole external representation of a stored Comms message ID. */
 export function commsMessageNumber(id: string): number | null {
   const match = /^comms:(\d+)$/.exec(id);
@@ -1188,10 +1174,6 @@ export class Store {
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("holds", "told_state", "TEXT");
-    // where a default's answer goes and the answer; delivered_at stays null until it was handed over
-    this.addColumn("decision_defaults", "target", "TEXT");
-    this.addColumn("decision_defaults", "answer", "TEXT");
-    this.addColumn("decision_defaults", "delivered_at", "INTEGER");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
@@ -1279,6 +1261,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS comms_pins (
         message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS comms_inbox_reads (
+        seat_id TEXT NOT NULL, message_id INTEGER NOT NULL,
+        PRIMARY KEY (seat_id, message_id)
+      );
+      CREATE INDEX IF NOT EXISTS comms_inbox_reads_message ON comms_inbox_reads(message_id);
       CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_insert
       BEFORE INSERT ON comms_reactions
       WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
@@ -2758,80 +2745,6 @@ export class Store {
     });
   }
 
-  /**
-   * Claims a decision's default, stores its outcome message and acks the card, all in one
-   * transaction: a failed write rolls the claim back, so a later sweep applies it. False when the
-   * default was claimed before (a restart or a second sweep), so it applies at most once.
-   */
-  claimDecisionDefault(
-    d: {
-      key: string;
-      briefAt: number;
-      optionId: string | null;
-      label: string;
-      dueAt: number;
-      /** The seat that gets `answer`; null: nothing to deliver. */
-      target: string | null;
-      answer: string;
-    },
-    message: NewCommsRow,
-    at: number,
-  ): boolean {
-    let claimed = false;
-    this.transaction(() => {
-      const r = this.db
-        .prepare(
-          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          d.key,
-          d.briefAt,
-          d.optionId,
-          d.label,
-          d.dueAt,
-          at,
-          d.target,
-          d.answer,
-          d.target === null ? at : null,
-        );
-      if (r.changes === 0) return;
-      this.insertComms(message, cutCommsText(message.text), null);
-      this.db
-        .prepare(
-          `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
-           ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
-        )
-        .run(d.key, at);
-      claimed = true;
-    }, true);
-    return claimed;
-  }
-
-  /** Applied defaults whose answer has not reached its seat yet, oldest first. */
-  pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT key, brief_at, target, answer FROM decision_defaults
-           WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`,
-        )
-        .all() as Row[]
-    ).map((r) => ({
-      key: r.key as string,
-      briefAt: r.brief_at as number,
-      target: r.target as string,
-      answer: r.answer as string,
-    }));
-  }
-
-  /** Records that an applied default's answer was handed to its seat. */
-  markDecisionDeliveryDone(key: string, briefAt: number, at: number): void {
-    this.db
-      .prepare("UPDATE decision_defaults SET delivered_at = ? WHERE key = ? AND brief_at = ?")
-      .run(at, key, briefAt);
-  }
-
   /** Every ack: key → when it was acknowledged. */
   acks(): Map<string, number> {
     const rows = this.db.prepare("SELECT key, at FROM acks").all() as { key: string; at: number }[];
@@ -3626,7 +3539,11 @@ export class Store {
 
   /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
   addComms(row: NewCommsRow, rate?: { since: number; limit: number }): CommsRow | null {
-    const text = cutCommsText(row.text);
+    const chars = Array.from(row.text);
+    const text =
+      chars.length > COMMS_TEXT_MAX
+        ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
+        : row.text;
     const replyTo =
       row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
     if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
@@ -3639,34 +3556,28 @@ export class Store {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
-      id = this.insertComms(row, text, replyTo);
+      const inserted = this.db
+        .prepare(
+          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          row.at,
+          row.from,
+          row.to,
+          row.ticket,
+          text,
+          row.label ?? null,
+          row.ref ?? null,
+          replyTo,
+          row.targetRunId ?? null,
+        );
+      id = Number(inserted.lastInsertRowid);
+      const mention = this.db.prepare(
+        "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
+      );
+      for (const target of row.mentions ?? []) mention.run(id, target);
     }, true);
     return id === null ? null : this.commsMessage(`comms:${id}`);
-  }
-
-  /** Inserts one Comms row and its mentions; the caller holds the transaction. */
-  private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
-    const inserted = this.db
-      .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        row.at,
-        row.from,
-        row.to,
-        row.ticket,
-        text,
-        row.label ?? null,
-        row.ref ?? null,
-        replyTo,
-        row.targetRunId ?? null,
-      );
-    const id = Number(inserted.lastInsertRowid);
-    const mention = this.db.prepare(
-      "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
-    );
-    for (const target of row.mentions ?? []) mention.run(id, target);
-    return id;
   }
 
   private commsRow(r: Row): CommsRow {
@@ -3819,17 +3730,18 @@ export class Store {
     );
   }
   commsInboxRun(id: string, runId: string): CommsRow[] {
-    return this.commsForRunWhere(
-      runId,
-      `id IN (
+    return this.commsForWhere(
+      `(
+        (target_run_id IS NULL OR target_run_id = ?)
+        AND id IN (
         SELECT id FROM comms WHERE to_id=?
         UNION
         SELECT message_id FROM comms_mentions WHERE mentioned_id=?
         UNION
         SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
-        UNION
-        SELECT message_id FROM comms_pins
-      )`,
+        )
+      ) OR id IN (SELECT message_id FROM comms_pins)`,
+      runId,
       id,
       id,
       id,
@@ -4061,6 +3973,27 @@ export class Store {
       .prepare("SELECT offset FROM comms_reads WHERE thread_id=? AND source_id='comms'")
       .get(scope) as { offset: number } | undefined;
     return r ? `comms:${r.offset}` : null;
+  }
+  /** Seat delivery receipts, deliberately separate from the operator's UI cursor. */
+  commsInboxRead(seatId: string, messageId: string): boolean {
+    const id = commsMessageNumber(messageId);
+    if (id === null) return false;
+    return (
+      this.db
+        .prepare("SELECT 1 FROM comms_inbox_reads WHERE seat_id=? AND message_id=?")
+        .get(seatId, id) !== undefined
+    );
+  }
+  markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
+    );
+    this.transaction(() => {
+      for (const messageId of messageIds) {
+        const id = commsMessageNumber(messageId);
+        if (id !== null) insert.run(seatId, id);
+      }
+    }, true);
   }
 
   /** The hand-offs at or after `since`, oldest first. */
@@ -5594,13 +5527,6 @@ export class Store {
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
       if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
         structured.askAt = prior?.askAt ?? last.at;
-      // A recommended option for the operator carries the deadline its default applies at, fixed
-      // when the ask begins: a rebrief of the same ask keeps it, whatever the wait is by then.
-      delete structured.defaultAt;
-      if (structured.for !== "flight" && structured.recommendedOptionId) {
-        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
-        structured.defaultAt = kept ?? (structured.askAt ?? at) + DECISION_DEFAULT_WAIT_MS;
-      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

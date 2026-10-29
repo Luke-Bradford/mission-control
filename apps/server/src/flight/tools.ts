@@ -1348,11 +1348,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           knownSecrets: deps.knownSecrets,
           now: () => at,
           seatSender: false,
-          notify: async (to, text) => {
+          notify: async (to, _text) => {
             // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
             if (to !== seat || (lift !== null && !lift.onSeat)) return;
             try {
-              await deps.supervisor.message(seat, `FLIGHT: ${text}`, {
+              await deps.supervisor.message(seat, "", {
                 interrupt: false,
                 questions: "none",
               });
@@ -1362,7 +1362,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           },
         },
         ctx.seatId,
-        { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+        { to: seat, text: body, label: "handoff", ref: unendedRun(seat)?.ticket ?? undefined },
       );
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Message refused.");

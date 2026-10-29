@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMMS_CAPCOM, LOOPBACK_HOST, type RepoId, seatCallSign } from "@mc/core";
+import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
@@ -32,6 +32,7 @@ import {
   githubToken,
   makeGql,
 } from "./collectors/github.ts";
+import { commsInboxContext } from "./comms.ts";
 import {
   ConfigError,
   configuredAgents,
@@ -138,10 +139,6 @@ export async function main(): Promise<void> {
     lockState: () => lock.state(),
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
-    // lazy: the supervisor is built below; a default only applies once the scheduler runs
-    deliverDefault: async (seatId, text) => {
-      await supervisor.message(seatId, text, { interrupt: false });
-    },
   });
   const preview = isPreview(port, process.env);
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
@@ -184,6 +181,7 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
+    inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
   });
   // a seat that frees up is about to take new work: read the boards first
   refreshOnSeatFree(
@@ -202,15 +200,13 @@ export async function main(): Promise<void> {
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
-  const deliverComms = (seatId: string, text: string, from: string): void => {
-    const sender = from === COMMS_CAPCOM ? COMMS_CAPCOM : seatCallSign(from);
-    const envelope = `Comms from ${sender}: ${text}`;
-    void messageUnpausedSeat(store, supervisor, seatId, envelope, {
+  const deliverComms = (seatId: string, _text: string, _from: string): void => {
+    void messageUnpausedSeat(store, supervisor, seatId, "", {
       interrupt: false,
       questions: "none",
     }).catch((e: unknown) => {
       log(
-        `comms: could not deliver ${sender} to ${seatId}: ${e instanceof Error ? e.message : String(e)}`,
+        `comms: could not deliver inbox to ${seatId}: ${e instanceof Error ? e.message : String(e)}`,
       );
     });
   };
