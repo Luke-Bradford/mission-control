@@ -1027,6 +1027,8 @@ export interface AttentionBrief {
   ask?: string;
   /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
   askAt?: number;
+  /** Stored at briefing time; its absence means this brief predates decision defaults. */
+  defaultAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -1068,6 +1070,8 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /** When a recommended option applies; absent means no automatic default. */
+  defaultDueAt?: number;
   /**
    * Only on the one FLIGHT_NOT_TRIAGING_KEY item: why FLIGHT is not triaging, the keys of the items
    * waiting on it (FLIGHT's, listed under this one, oldest first) and when the oldest was raised.

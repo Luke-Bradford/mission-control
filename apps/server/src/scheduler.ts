@@ -84,6 +84,7 @@ import {
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
+import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
@@ -245,6 +246,8 @@ export interface SchedulerDeps {
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
   cliHold?: CliHold;
+  /** Hands an applied default to the seat that asked it. */
+  deliverDefault?: (seatId: string, text: string) => Promise<void>;
   /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
   waitedPrs?: (repoId: RepoId) => number[];
 }
@@ -410,6 +413,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   };
 
+  const applyDefaults = async () => {
+    try {
+      const n = await applyDecisionDefaults({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+        deliver: deps.deliverDefault,
+      });
+      if (n > 0) bus.emit("attention");
+    } catch (e) {
+      deps.log?.(`decision defaults: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   let triageTimer: NodeJS.Timeout | null = null;
   let triageAt = 0;
   const scheduleTriage = () => {
@@ -418,7 +436,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     if (triageTimer !== null) clearTimeout(triageTimer);
     triageTimer = null;
     const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
-      item.triageDueAt !== undefined && item.triageDueAt > at ? [item.triageDueAt] : [],
+      [item.triageDueAt, item.defaultDueAt].flatMap((t) => (t !== undefined && t > at ? [t] : [])),
     );
     // a FLIGHT that is not running shows as not triaging once its restart grace has passed
     const shows = flightNotTriagingDueAt(config, store, at);
@@ -427,6 +445,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     triageAt = Math.min(...due);
     triageTimer = setTimeout(() => {
       triageTimer = null;
+      void applyDefaults();
       bus.emit("attention");
     }, triageAt - at);
     triageTimer.unref();
@@ -460,6 +479,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       )
     )
       emit("attention");
+    void applyDefaults();
     store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
   };
 

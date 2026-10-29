@@ -29,6 +29,7 @@ import {
   type CommsReaction,
   type CommsReactionKind,
   commsCutMarker,
+  DECISION_DEFAULT_WAIT_MS,
   type Escalation,
   type FindingResolution,
   type FLIGHT_HEADLINE,
@@ -175,6 +176,11 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- Acknowledged attention items. absent_since: when the key was first missing from the current
 -- items (null while present); the ack is dropped once it has been absent for ACK_ABSENT_MS.
 CREATE TABLE IF NOT EXISTS acks (key TEXT PRIMARY KEY, at INTEGER NOT NULL, absent_since INTEGER);
+CREATE TABLE IF NOT EXISTS decision_defaults (
+  key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT, label TEXT NOT NULL,
+  due_at INTEGER NOT NULL, applied_at INTEGER NOT NULL, target TEXT, answer TEXT,
+  delivered_at INTEGER, PRIMARY KEY (key, brief_at)
+);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -694,6 +700,13 @@ export interface NewCommsRow {
   mentions?: readonly string[];
 }
 
+function cutCommsText(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > COMMS_TEXT_MAX
+    ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
+    : text;
+}
+
 /** Parse the sole external representation of a stored Comms message ID. */
 export function commsMessageNumber(id: string): number | null {
   const match = /^comms:(\d+)$/.exec(id);
@@ -1174,6 +1187,9 @@ export class Store {
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("holds", "told_state", "TEXT");
+    this.addColumn("decision_defaults", "target", "TEXT");
+    this.addColumn("decision_defaults", "answer", "TEXT");
+    this.addColumn("decision_defaults", "delivered_at", "INTEGER");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
@@ -2745,6 +2761,70 @@ export class Store {
     });
   }
 
+  claimDecisionDefault(
+    d: {
+      key: string;
+      briefAt: number;
+      optionId: string | null;
+      label: string;
+      dueAt: number;
+      target: string | null;
+      answer: string;
+    },
+    message: NewCommsRow,
+    at: number,
+  ): boolean {
+    let claimed = false;
+    this.transaction(() => {
+      const r = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          d.key,
+          d.briefAt,
+          d.optionId,
+          d.label,
+          d.dueAt,
+          at,
+          d.target,
+          d.answer,
+          d.target === null ? at : null,
+        );
+      if (r.changes === 0) return;
+      this.insertComms(message, cutCommsText(message.text), null);
+      this.db
+        .prepare(
+          `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
+           ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
+        )
+        .run(d.key, at);
+      claimed = true;
+    }, true);
+    return claimed;
+  }
+
+  pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
+    return (
+      this.db
+        .prepare(`SELECT key, brief_at, target, answer FROM decision_defaults
+      WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`)
+        .all() as Row[]
+    ).map((r) => ({
+      key: r.key as string,
+      briefAt: r.brief_at as number,
+      target: r.target as string,
+      answer: r.answer as string,
+    }));
+  }
+
+  markDecisionDeliveryDone(key: string, briefAt: number, at: number): void {
+    this.db
+      .prepare("UPDATE decision_defaults SET delivered_at = ? WHERE key = ? AND brief_at = ?")
+      .run(at, key, briefAt);
+  }
+
   /** Every ack: key → when it was acknowledged. */
   acks(): Map<string, number> {
     const rows = this.db.prepare("SELECT key, at FROM acks").all() as { key: string; at: number }[];
@@ -3539,11 +3619,7 @@ export class Store {
 
   /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
   addComms(row: NewCommsRow, rate?: { since: number; limit: number }): CommsRow | null {
-    const chars = Array.from(row.text);
-    const text =
-      chars.length > COMMS_TEXT_MAX
-        ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
-        : row.text;
+    const text = cutCommsText(row.text);
     const replyTo =
       row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
     if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
@@ -3556,28 +3632,33 @@ export class Store {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
-      const inserted = this.db
-        .prepare(
-          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          row.at,
-          row.from,
-          row.to,
-          row.ticket,
-          text,
-          row.label ?? null,
-          row.ref ?? null,
-          replyTo,
-          row.targetRunId ?? null,
-        );
-      id = Number(inserted.lastInsertRowid);
-      const mention = this.db.prepare(
-        "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
-      );
-      for (const target of row.mentions ?? []) mention.run(id, target);
+      id = this.insertComms(row, text, replyTo);
     }, true);
     return id === null ? null : this.commsMessage(`comms:${id}`);
+  }
+
+  private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    const inserted = this.db
+      .prepare(
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        row.at,
+        row.from,
+        row.to,
+        row.ticket,
+        text,
+        row.label ?? null,
+        row.ref ?? null,
+        replyTo,
+        row.targetRunId ?? null,
+      );
+    const id = Number(inserted.lastInsertRowid);
+    const mention = this.db.prepare(
+      "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
+    );
+    for (const target of row.mentions ?? []) mention.run(id, target);
+    return id;
   }
 
   private commsRow(r: Row): CommsRow {
@@ -5475,10 +5556,19 @@ export class Store {
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */
-  addBrief(b: AttentionBrief & { key: string }): number {
+  addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
     let id = 0;
     this.transaction(() => {
-      const { key, context, recommendation, options, basis, at, ...structured } = b;
+      const {
+        key,
+        context,
+        recommendation,
+        options,
+        basis,
+        at,
+        defaultEligible = true,
+        ...structured
+      } = b;
       if (structured.person) {
         const thread = /^person:(\d+):(\d+)$/.exec(key);
         const n = thread ? this.notification(thread[1] as string) : null;
@@ -5527,6 +5617,13 @@ export class Store {
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
       if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
         structured.askAt = prior?.askAt ?? last.at;
+      delete structured.defaultAt;
+      if (defaultEligible && structured.for !== "flight" && structured.recommendedOptionId) {
+        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
+        // The wait starts when a default is first stamped, never at an older ask's time: an ask
+        // briefed before defaults existed must not come due the moment it is briefed again.
+        structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
+      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
