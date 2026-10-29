@@ -237,7 +237,13 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
         ],
       };
       const before = snapshot([...targets.allowed, ...targets.denied]);
-      api = await startFakeAnthropic(probeScript([...targets.allowed, ...targets.denied]));
+      // the store write goes through the env var the supervisor sets, so a missing or different
+      // binding leaves store/ok.txt unwritten and fails the allowed check
+      const storeTarget = join(store, "ok.txt");
+      const probed = [...targets.allowed, ...targets.denied].filter((p) => p !== storeTarget);
+      api = await startFakeAnthropic(
+        `${probeScript(probed)}; ( printf x >> "$${PNPM_STORE_ENV}/ok.txt" ) 2>/dev/null; true`,
+      );
       const settings = crewSandboxSettings(input, mode, { command: "/usr/bin/true", timeoutS: 5 });
       const claude = spawn(
         claudeCli as string,
@@ -263,6 +269,7 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
             HOME: l.home,
             TMPDIR: tempRoot,
             CLAUDE_CODE_TMPDIR: tempRoot,
+            [PNPM_STORE_ENV]: store,
             ANTHROPIC_BASE_URL: api.url,
             ANTHROPIC_API_KEY: "sk-ant-fake",
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
