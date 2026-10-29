@@ -28,6 +28,18 @@ export interface RenderedPage {
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
   boxes(selector: string): Promise<Box[]>;
+  /**
+   * Per element matching `selector`, whether a person can bring all of its box into view: no
+   * ancestor clips it (`overflow: hidden`) without a scroller between them, and when the viewport
+   * itself cannot scroll it ends inside the window. With `within`, the nearest ancestor matching
+   * that selector must hold it too: its box encloses the element, or a scroller inside it does.
+   * Throws if there is none.
+   */
+  reachable(selector: string, within?: string): Promise<boolean[]>;
+  /** Per element matching `selector`, whether it is no taller than its own content needs. */
+  hugsContent(selector: string): Promise<boolean[]>;
+  /** Writes a PNG of the viewport to `path`. */
+  screenshot(path: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -37,6 +49,10 @@ export interface RenderOptions {
   /** The viewport width in CSS pixels. */
   width: number;
   height?: number;
+  /** The query string after the harness page, such as `?trace=run-1`. */
+  search?: string;
+  /** The `prefers-color-scheme` to emulate; the browser's own (light) when omitted. */
+  colorScheme?: "light" | "dark";
   /** JSON answers by request path and query (`/api/limits`); any other request is a 404. */
   api?: Record<string, unknown>;
 }
@@ -50,6 +66,8 @@ interface Page {
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   waitForSelector(selector: string): Promise<unknown>;
   evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  emulateMedia(options: { colorScheme: "light" | "dark" }): Promise<void>;
+  screenshot(options: { path: string }): Promise<unknown>;
   close(): Promise<void>;
 }
 interface Browser {
@@ -165,7 +183,14 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
   }, COLD_START_TIMEOUT_MS);
 
   return {
-    async renderAt({ page: entry, width, height = DEFAULT_HEIGHT, api = {} }) {
+    async renderAt({
+      page: entry,
+      width,
+      height = DEFAULT_HEIGHT,
+      search = "",
+      colorScheme,
+      api = {},
+    }) {
       if (!BROWSER || !outDir) throw new Error("the harness did not build");
       const root = outDir;
       // One browser per page: a single-process browser (the sandbox fallback) dies with its page.
@@ -192,7 +217,8 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
           body: JSON.stringify({ error: "not found" }),
         });
       });
-      await page.goto(`${ORIGIN}/${entry}`, { waitUntil: "load" });
+      if (colorScheme) await page.emulateMedia({ colorScheme });
+      await page.goto(`${ORIGIN}/${entry}${search}`, { waitUntil: "load" });
       const measure = (selector: string) =>
         page.evaluate(
           (css) =>
@@ -206,8 +232,56 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         await page.waitForSelector(selector);
         return measure(selector);
       };
+      const reachable = async (selector: string, within = "") => {
+        await page.waitForSelector(selector);
+        return page.evaluate(
+          ([css, container]) => {
+            const clips = (value: string) => value === "hidden" || value === "clip";
+            const scrolls = (value: string) => value === "auto" || value === "scroll";
+            return [...document.querySelectorAll(css)].map((element) => {
+              // The part of the element a person can reach: shrinks to a scroller's own box.
+              let bottom = element.getBoundingClientRect().bottom;
+              const holder = container ? element.closest(container) : null;
+              for (let up = element.parentElement; up; up = up.parentElement) {
+                const { overflowY } = getComputedStyle(up);
+                const rect = up.getBoundingClientRect();
+                if (scrolls(overflowY)) bottom = Math.min(bottom, rect.bottom);
+                else if (clips(overflowY) && bottom > rect.bottom + 0.5) return false;
+                if (up === holder && bottom > rect.bottom + 0.5) return false;
+              }
+              const root = document.scrollingElement ?? document.documentElement;
+              return root.scrollHeight > root.clientHeight || bottom <= window.innerHeight + 0.5;
+            });
+          },
+          [selector, within] as const,
+        );
+      };
+      const hugsContent = async (selector: string) => {
+        await page.waitForSelector(selector);
+        return page.evaluate(
+          (css) =>
+            [...document.querySelectorAll(css)].map((element) => {
+              const last = element.lastElementChild;
+              if (!last) return true;
+              const style = getComputedStyle(element);
+              const needed =
+                last.getBoundingClientRect().bottom -
+                element.getBoundingClientRect().top +
+                Number.parseFloat(getComputedStyle(last).marginBottom) +
+                Number.parseFloat(style.paddingBottom) +
+                Number.parseFloat(style.borderBottomWidth);
+              return element.getBoundingClientRect().height <= needed + 1;
+            }),
+          selector,
+        );
+      };
       return {
         boxes,
+        reachable,
+        hugsContent,
+        screenshot: async (path) => {
+          await page.screenshot({ path });
+        },
         async box(selector) {
           return (await boxes(selector))[0];
         },
