@@ -1039,6 +1039,8 @@ cancels it. Held stops the clock: nothing applies while held, and the 40 minutes
 hold is released. Each (item, ask) is claimed in the `decision_defaults` table in one transaction
 with its Comms message and ack, so a restart or a repeated sweep never applies it twice, a failed
 write leaves it to the next sweep, and an overdue default applies on the first sweep after a restart.
+The Comms Decisions card does not yet count down to `defaultDueAt` (it still reads the triage deadline);
+that web change is a separate follow-up ticket.
 
 ## Away mode
 
