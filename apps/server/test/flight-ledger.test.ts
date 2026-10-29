@@ -586,6 +586,20 @@ describe("retrospective measures", () => {
         { runId: "dev", costUsd: 3 },
         { runId: "cheap", costUsd: 1 },
       ],
+      productPass: {
+        pages: [
+          "/",
+          "/flight",
+          "/board",
+          "/map",
+          "/comms",
+          "/telemetry",
+          "/setup",
+          "/agent/flight-1",
+          "/agent/guido-1",
+        ],
+        instruction: expect.stringContaining("log pages checked and tickets filed or folded"),
+      },
     });
     await prepareRetrospective(config, store, NOW + MIN);
     expect(pendingRetrospective(store, "mc")).toEqual(report);

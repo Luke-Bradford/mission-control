@@ -80,6 +80,16 @@ const tools = (): McTool[] => [
       throw new TypeError(`secret ${token} stderr: hunter2`);
     },
   },
+  {
+    name: "image",
+    description: "returns an image",
+    inputSchema: { type: "object" },
+    modes: ["writer", "read-only"],
+    call: async () => ({
+      text: "HUD screenshot (1600×1000).",
+      image: { data: Buffer.from("png").toString("base64"), mimeType: "image/png" as const },
+    }),
+  },
 ];
 
 beforeEach(async () => {
@@ -286,7 +296,7 @@ describe("tools/list", () => {
   it("lists every tool to a writer seat", async () => {
     const r = await rpc(msg(1, "tools/list"));
     const names = r.json().result.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(["echo", "commit", "slow", "bad", "boom"]);
+    expect(names).toEqual(["echo", "commit", "slow", "bad", "boom", "image"]);
     expect(r.json().result.tools[0]).toEqual({
       name: "echo",
       description: "reads",
@@ -390,6 +400,15 @@ describe("tools/call", () => {
       isError: true,
     });
     expect(boom.body).not.toContain(token);
+  });
+
+  it("returns PNGs as MCP image content instead of text data URIs", async () => {
+    const answer = await rpc(msg(3, "tools/call", { name: "image", arguments: {} }));
+    expect(answer.json().result.content).toEqual([
+      { type: "text", text: "HUD screenshot (1600×1000)." },
+      { type: "image", mimeType: "image/png", data: Buffer.from("png").toString("base64") },
+    ]);
+    expect(answer.body).not.toContain("data:image/png");
   });
 
   it("refuses malformed params and an unknown tool as JSON-RPC errors", async () => {

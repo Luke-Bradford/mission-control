@@ -18,6 +18,18 @@ export const MC_LINE_PREFIX = "[Mission Control]";
 /** The checkout name of a watch seat's detached worktree. */
 export const watchCheckoutName = (seatId: string): string => `${seatId}-watch`;
 
+/** The canonical top-level HUD route catalogue, shared by the web router and product pass. */
+export const HUD_PAGE_PATHS = {
+  overview: "/",
+  flight: "/flight",
+  board: "/board",
+  agent: "/agent",
+  map: "/map",
+  comms: "/comms",
+  telemetry: "/telemetry",
+  setup: "/setup",
+} as const;
+
 export const watchStartRefusedText = (call: string): string =>
   `${call} runs the crew and is started without a ticket.`;
 export const notWatchSeatText = (call: string): string => `${call} is not a watch seat.`;
@@ -85,6 +97,8 @@ export const FLIGHT_VIEW_LIMIT = 100;
 /** The most `log_decision` notes FLIGHT may log in an hour. */
 export const FLIGHT_NOTES_PER_HOUR = 60;
 export const FLIGHT_HOUR_MS = 60 * 60_000;
+/** Chrome launches permitted per FLIGHT in a rolling hour. Failed launch attempts count. */
+export const FLIGHT_HUD_RENDERS_PER_HOUR = 4;
 
 /** Text shown to FLIGHT in state items and arrivals. */
 export const FLIGHT_STATE_TEXT_MAX = 300;

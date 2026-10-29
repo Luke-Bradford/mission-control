@@ -1,4 +1,4 @@
-import { COMMS_TICKET } from "@mc/core";
+import { COMMS_TICKET, HUD_PAGE_PATHS } from "@mc/core";
 import { type MouseEvent, useSyncExternalStore } from "react";
 
 /** A tiny History-API router: eight pages and a few ids do not justify a library. */
@@ -90,16 +90,7 @@ export type Route =
 export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["setup", "map"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
-export const PAGE_PATHS: Record<Page, string> = {
-  overview: "/",
-  flight: "/flight",
-  board: "/board",
-  agent: "/agent",
-  map: "/map",
-  comms: "/comms",
-  telemetry: "/telemetry",
-  setup: "/setup",
-};
+export const PAGE_PATHS: Record<Page, string> = HUD_PAGE_PATHS;
 
 const enc = encodeURIComponent;
 /** The panel that holds Needs you: Plan › Operator actions until #766 builds FLIGHT › Needs you. */

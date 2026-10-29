@@ -26,6 +26,15 @@ const at = (path: string) => {
 };
 
 describe("App", () => {
+  it("marks the document ready only after the shell's initial data has rendered", async () => {
+    delete document.documentElement.dataset.hudReady;
+    const { unmount } = at("/");
+    expect(document.documentElement.dataset.hudReady).toBeUndefined();
+    await waitFor(() => expect(document.documentElement.dataset.hudReady).toBe("1"));
+    unmount();
+    expect(document.documentElement.dataset.hudReady).toBeUndefined();
+  });
+
   it("does not re-render the application on a clock tick", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const renders = vi.fn();

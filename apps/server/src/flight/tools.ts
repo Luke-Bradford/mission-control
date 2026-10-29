@@ -105,6 +105,7 @@ import {
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
   FLIGHT_HOUR_MS,
+  FLIGHT_HUD_RENDERS_PER_HOUR,
   FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_KEEP_MS,
   FLIGHT_LEDGER_KEY,
@@ -325,7 +326,7 @@ import {
 } from "../hud.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
-import type { McTool, McToolContext } from "../mcp/server.ts";
+import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
 import {
   badArgs,
   evidenceProblemText,
@@ -345,7 +346,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
-import { hudRenderRequest } from "./hud-render.ts";
+import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
@@ -363,7 +364,7 @@ import {
 
 export interface FlightToolsDeps {
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
-  screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<string>;
+  screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
   focus?: (seatId: string, focus: string | null) => Promise<unknown>;
   queueReorder?: (
@@ -409,7 +410,7 @@ export interface FlightToolsDeps {
   now?: () => number;
 }
 
-type Result = { text: string; isError?: boolean };
+type Result = McToolResult;
 
 /** A decision text stored cut to `max`, ending `…` when it was cut. */
 export const cut = (s: string, max: number): string => {
@@ -852,6 +853,8 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
 
 /** Each repo's last create_ticket or comment_ticket call: one at a time, so the cap and the duplicate check hold. */
 const ticketQueue = new Map<string, Promise<unknown>>();
+/** Chrome is host-wide and expensive: every FLIGHT session shares one render slot. */
+const hudRenderQueue = new Map<string, Promise<unknown>>();
 
 /** Each tool: `modes: []`, `grantable: ["read-only"]`, so #222's grant filter shows it only to a seat whose role grants it (FLIGHT; `read_ticket` also a planner). */
 export function createFlightTools(deps: FlightToolsDeps): McTool[] {
@@ -859,19 +862,48 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const now = deps.now ?? Date.now;
   /** When each seat's read_ticket calls were made (not stored: a read leaves no decision). */
   const reads = new Map<string, number[]>();
+  /** Attempted Chrome launches per FLIGHT in the rolling hour. */
+  const hudRenders = new Map<string, number[]>();
   const fail = (t: string): Result => ({ text: t, isError: true });
   const screenshotHud = async (ctx: McToolContext, args: unknown): Promise<Result> => {
     const c = flightCall(deps, ctx, ScreenshotHudArgs, args);
     if (!c.ok) return c.result;
+    const repo = repoOf();
+    if (!repo) return fail(READ_NO_REPO);
+    const denied = requirePowers(config, repo.id, "superuser");
+    if (denied) return denied;
     if (!deps.screenshotHud || !deps.hubOrigin)
       return fail("HUD screenshots are unavailable on this hub.");
+    const guard = hudRenderRequest(deps.hubOrigin);
+    let target: string;
     try {
-      const guard = hudRenderRequest(deps.hubOrigin);
-      const reference = await deps.screenshotHud(guard.page(c.args.page), guard);
-      return { text: `HUD screenshot (1600×1000): ${reference}` };
+      target = guard.page(c.args.page);
     } catch (e) {
-      return fail(e instanceof Error ? e.message : "HUD screenshot failed.");
+      return fail(e instanceof Error ? e.message : "HUD page required.");
     }
+    const renderer = deps.screenshotHud;
+    const at = now();
+    const recent = (hudRenders.get(ctx.seatId) ?? []).filter((t) => at - t < FLIGHT_HOUR_MS);
+    if (recent.length >= FLIGHT_HUD_RENDERS_PER_HOUR)
+      return fail(capText("attempted HUD renders", recent.length));
+    recent.push(at); // Count the attempt before it can start Chrome.
+    hudRenders.set(ctx.seatId, recent);
+    return queued(hudRenderQueue, "host", async () => {
+      // The call may have waited for another FLIGHT; a live downgrade takes effect before launch.
+      const liveDenied = requirePowers(config, repo.id, "superuser");
+      if (liveDenied) return liveDenied;
+      try {
+        const png = await renderer(target, guard);
+        if (png.byteLength > HUD_SCREENSHOT_MAX_BYTES)
+          return fail(`HUD screenshot refused: PNG exceeds ${HUD_SCREENSHOT_MAX_BYTES} bytes.`);
+        return {
+          text: "HUD screenshot (1600×1000).",
+          image: { data: png.toString("base64"), mimeType: "image/png" },
+        };
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : "HUD screenshot failed.");
+      }
+    });
   };
 
   const repoOf = () => {
@@ -3133,8 +3165,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.screenshotHud,
-      description:
-        "Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. Compare the image with the mockup and direction, then file or fold the gap.",
+      description: `Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour; the host renders one at a time. Compare the image with the mockup and direction, then file or fold the gap.`,
       inputSchema: z.toJSONSchema(ScreenshotHudArgs),
       modes: [],
       grantable: ["read-only"],
