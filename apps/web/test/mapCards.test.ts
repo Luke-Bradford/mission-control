@@ -1,6 +1,5 @@
 import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { touchedNodes } from "../src/map/agents.ts";
 import {
   changeTotals,
   isWorking,
@@ -9,7 +8,6 @@ import {
   seatToken,
   workLine,
 } from "../src/map/cards.ts";
-import { layoutTree } from "../src/map/model.ts";
 
 const now = 1_000_000;
 function seat(id = "GUIDO-1"): MapSeat {
@@ -137,55 +135,5 @@ describe("who worked on a node", () => {
     expect(nodeWork(s, ["src/w.ts"])).toEqual([]);
     (s.seats[0] as MapSeat).recent = [{ file: "src/w.ts", at: 1 }];
     expect(nodeWork(s, ["src/w.ts"])).toEqual([{ seat: "GUIDO-1", changed: null, read: true }]);
-  });
-});
-
-describe("the colours on a node's disc", () => {
-  const tree = ["src/x.ts", "src/y.ts", "src/z.ts", "src/w.ts"].map((path) => ({ path, lines: 5 }));
-  const nodes = layoutTree(tree);
-  const of = (...seats: [string, Partial<MapSeat["scope"]>][]): MapSnapshot => ({
-    ...structuredClone(mapSnapshotFixture),
-    tree,
-    seats: seats.map(([id, scope]) => {
-      const s = seat(id);
-      s.recent = [];
-      s.scope = { read: [], modified: [], ...scope };
-      return s;
-    }),
-  });
-
-  it("gives a file one seat's colour when one seat touched it, read or changed alike", () => {
-    const touched = touchedNodes(
-      of(
-        ["GUIDO-1", { read: ["src/x.ts"] }],
-        ["GUIDO-2", { modified: [{ file: "src/y.ts", add: 1, rem: 0, source: "diff" }] }],
-      ),
-      nodes,
-    );
-    expect(touched.get("src/x.ts")).toEqual(["GUIDO-1"]);
-    expect(touched.get("src/y.ts")).toEqual(["GUIDO-2"]);
-    expect(touched.has("src/z.ts")).toBe(false);
-  });
-
-  it("splits a shared file between its seats in seat order, whoever touched it first", () => {
-    const shared = (order: string[]) =>
-      touchedNodes(
-        of(
-          ...order.map(
-            (id) =>
-              [
-                id,
-                id === "RETRO-1"
-                  ? { read: ["src/x.ts"] }
-                  : { modified: [{ file: "src/x.ts", add: 2, rem: 1, source: "diff" as const }] },
-              ] as [string, Partial<MapSeat["scope"]>],
-          ),
-        ),
-        nodes,
-      ).get("src/x.ts");
-    expect(shared(["GUIDO-1", "RETRO-1"])).toEqual(["GUIDO-1", "RETRO-1"]);
-    expect(shared(["GUIDO-1", "GUIDO-2", "RETRO-1"])).toEqual(["GUIDO-1", "GUIDO-2", "RETRO-1"]);
-    // the order is the snapshot's (the selector's), so a colour keeps its arc
-    expect(shared(["RETRO-1", "GUIDO-1"])).toEqual(["RETRO-1", "GUIDO-1"]);
   });
 });

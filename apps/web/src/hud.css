@@ -3814,9 +3814,6 @@ pre.diff .h {
   padding: 8px 14px;
   border-top: 1px solid var(--line);
 }
-#cNeeds {
-  max-height: 330px;
-}
 .nrow > .lamp {
   margin-top: 5px;
 }

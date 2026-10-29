@@ -1,5 +1,5 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
-import { applyDelta } from "./model.ts";
+import { applyDelta } from "./deltas.ts";
 
 /** One repo subscription; snapshot requests coalesce while deltas keep their order. */
 export class LiveMap {

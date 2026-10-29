@@ -4,37 +4,17 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Header } from "../src/agent/Header.tsx";
 import { Card } from "../src/board/Card.tsx";
-import { NeedsList } from "../src/comms/NeedsList.tsx";
 import { MC_LINE_PREFIX } from "../src/flight/flightTypes.ts";
 import { WorkingLog } from "../src/flight/WorkingLog.tsx";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, item, NOW, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, NOW, seatRow } from "./fixtures.ts";
 
 afterEach(() => vi.restoreAllMocks());
 const overflow = () => {
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(100);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(40);
 };
-it("expands a handled row without losing its tail", async () => {
-  overflow();
-  stubFetch({ "/api/config": CONFIG });
-  const text = `${"Full message ".repeat(40)}last word`;
-  const { container } = render(
-    <NeedsList
-      items={[item({ text, owner: "flight" })]}
-      rows={[]}
-      onAskFlight={() => {}}
-      onRead={() => {}}
-    />,
-  );
-  fireEvent.click(container.querySelector("#cHandled summary") as HTMLElement);
-  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
-  expect(container.querySelector("#cHandled")?.textContent).toContain(text);
-  expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe(
-    "true",
-  );
-});
 it("expands the complete multiline wake text", async () => {
   overflow();
   const text = `${"Wake details ".repeat(30)}\nsecond line`;

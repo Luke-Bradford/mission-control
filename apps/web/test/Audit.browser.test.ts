@@ -17,6 +17,8 @@ const CHROME = [
 
 // A cold Vite and Chrome start on a loaded CI runner can exceed Vitest's 10 s hook default.
 const COLD_START_TIMEOUT_MS = 60_000;
+// The test's first page load makes Vite transform the page cold, which outlasts Vitest's 5 s test default on a loaded runner.
+const BROWSER_TEST_TIMEOUT_MS = 60_000;
 
 interface Browser {
   newPage(): Promise<Page>;
@@ -24,7 +26,7 @@ interface Browser {
 }
 interface Page {
   route(url: string | RegExp, handler: (route: Route) => Promise<void>): Promise<void>;
-  goto(url: string, options: { waitUntil: "networkidle" }): Promise<unknown>;
+  goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
   locator(selector: string): Locator;
   close(): Promise<void>;
 }
@@ -32,7 +34,9 @@ interface Route {
   fulfill(options: { contentType: string; body: string }): Promise<void>;
 }
 interface Locator {
+  first(): Locator;
   nth(index: number): Locator;
+  waitFor(): Promise<void>;
   boundingBox(): Promise<{ width: number } | null>;
 }
 interface Chromium {
@@ -111,33 +115,38 @@ afterAll(async () => {
 }, COLD_START_TIMEOUT_MS);
 
 describe.skipIf(!CHROME)("Audit PR bars in a browser", () => {
-  it("uses the production stylesheet's logarithmic fill widths", async () => {
-    if (!browser || !origin) throw new Error("browser test did not start");
-    const page = await browser.newPage();
-    await page.route(/\/api\/audit\?range=30d$/, (route) =>
-      route.fulfill({ contentType: "application/json", body: JSON.stringify(audit) }),
-    );
-    await page.route(/\/api\/config$/, (route) =>
-      route.fulfill({ contentType: "application/json", body: JSON.stringify(config) }),
-    );
-    await page.goto(`${origin}/test/auditBarBrowser.html`, { waitUntil: "networkidle" });
+  it(
+    "uses the production stylesheet's logarithmic fill widths",
+    async () => {
+      if (!browser || !origin) throw new Error("browser test did not start");
+      const page = await browser.newPage();
+      await page.route(/\/api\/audit\?range=30d$/, (route) =>
+        route.fulfill({ contentType: "application/json", body: JSON.stringify(audit) }),
+      );
+      await page.route(/\/api\/config$/, (route) =>
+        route.fulfill({ contentType: "application/json", body: JSON.stringify(config) }),
+      );
+      await page.goto(`${origin}/test/auditBarBrowser.html`, { waitUntil: "load" });
+      await page.locator(".audit-bar").first().waitFor();
 
-    const fills = page.locator(".audit-bar");
-    const tracks = page.locator(".audit-bar-track");
-    const [largestFill, smallerFill, largestTrack, smallerTrack] = await Promise.all([
-      fills.nth(0).boundingBox(),
-      fills.nth(1).boundingBox(),
-      tracks.nth(0).boundingBox(),
-      tracks.nth(1).boundingBox(),
-    ]);
-    if (!largestFill || !smallerFill || !largestTrack || !smallerTrack)
-      throw new Error("expected rendered Audit PR bars");
+      const fills = page.locator(".audit-bar");
+      const tracks = page.locator(".audit-bar-track");
+      const [largestFill, smallerFill, largestTrack, smallerTrack] = await Promise.all([
+        fills.nth(0).boundingBox(),
+        fills.nth(1).boundingBox(),
+        tracks.nth(0).boundingBox(),
+        tracks.nth(1).boundingBox(),
+      ]);
+      if (!largestFill || !smallerFill || !largestTrack || !smallerTrack)
+        throw new Error("expected rendered Audit PR bars");
 
-    expect(largestFill.width / largestTrack.width).toBeCloseTo(1, 3);
-    expect(smallerFill.width / smallerTrack.width).toBeCloseTo(
-      Math.log1p(2_833) / Math.log1p(665_702),
-      3,
-    );
-    await page.close();
-  });
+      expect(largestFill.width / largestTrack.width).toBeCloseTo(1, 3);
+      expect(smallerFill.width / smallerTrack.width).toBeCloseTo(
+        Math.log1p(2_833) / Math.log1p(665_702),
+        3,
+      );
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

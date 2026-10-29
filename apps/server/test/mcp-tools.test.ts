@@ -59,6 +59,8 @@ import {
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
+  MC_PUSH_CHECKS,
+  MC_PUSH_FAILED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
   MC_PUSH_ROOT,
@@ -84,6 +86,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  pushChecksText,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -105,7 +108,7 @@ import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
 import { ProfilesError } from "../src/profiles.ts";
-import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
+import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
@@ -226,6 +229,7 @@ function deps(over: Partial<McToolsDeps> = {}): McToolsDeps {
     gh: noGh,
     dbPath: join(dir, "data", "mc.sqlite"),
     knownSecrets: async () => [],
+    checks: async () => [],
     log: (line) => logs.push(line),
     ...over,
   };
@@ -2340,6 +2344,203 @@ describe("push and draft_pr", () => {
         isError: true,
       });
       expect(remoteTip()).toBeNull();
+    });
+
+    describe("the configured checks", () => {
+      const LINT = "pnpm -s lint";
+      const TYPES = "pnpm -s typecheck";
+      const gated = (over: Partial<McToolsDeps> = {}) =>
+        ts({ checks: async () => [LINT, TYPES], ...over });
+      const ran = (command: string, headSha: string, ok: boolean, at = NOW) =>
+        store.addCheckRun({ runId: RUN, command, headSha, ok, at });
+      const refusal = (
+        head: string,
+        found: { command: string; state: "missing" | "failed" }[],
+      ) => ({
+        text: pushChecksText(head, found),
+        isError: true,
+      });
+
+      it("pushes a head on which every configured check passed", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        ran(TYPES, sha, true);
+        expect(await push(gated())).toEqual({ text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.` });
+        expect(remoteTip()).toBe(sha);
+      });
+
+      it("refuses a check that was never run, naming it and its command", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const r = await push(gated());
+        expect(r).toEqual(refusal(sha, [{ command: TYPES, state: "missing" }]));
+        expect(r.text).toContain(MC_PUSH_CHECKS);
+        expect(r.text).toContain(`not run: ${TYPES}`);
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("refuses a check that failed, naming it", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, false);
+        ran(TYPES, sha, true);
+        const r = await push(gated());
+        expect(r).toEqual(refusal(sha, [{ command: LINT, state: "failed" }]));
+        expect(r.text).toContain(`failed: ${LINT}`);
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("takes the newest run: a pass after a failure passes, a failure after a pass refuses", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, false, NOW);
+        ran(LINT, sha, true, NOW + 1);
+        ran(TYPES, sha, true, NOW);
+        ran(TYPES, sha, false, NOW + 1);
+        expect(await push(gated())).toEqual(refusal(sha, [{ command: TYPES, state: "failed" }]));
+      });
+
+      it("refuses checks that passed on an older head, and lists every missing one", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, old, true);
+        ran(TYPES, old, true);
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        expect(await push(gated())).toEqual(
+          refusal(sha, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("ignores another run's records", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({ runId: "other", command: LINT, headSha: sha, ok: true, at: NOW });
+        store.addCheckRun({ runId: "other", command: TYPES, headSha: sha, ok: true, at: NOW });
+        expect((await push(gated())).isError).toBe(true);
+      });
+
+      const asAuthor = (name: string) => ({
+        GIT_AUTHOR_NAME: name,
+        GIT_COMMITTER_NAME: name,
+        GIT_AUTHOR_EMAIL: "t@example.com",
+        GIT_COMMITTER_EMAIL: "t@example.com",
+      });
+      /**
+       * The branch's own commit (pushed first, its checks passed, unless `pushed` is false), then
+       * main merged in by `author` with `subject` (a clean merge).
+       */
+      const branchThenMerge = async (
+        author: string,
+        subject: string,
+        pushed = true,
+      ): Promise<string> => {
+        write("apps/a.ts", "branch\n");
+        git(wt, "commit", "-qam", "feat: branch");
+        const own = head();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: own, at: NOW });
+        if (pushed) {
+          ran(LINT, own, true);
+          ran(TYPES, own, true);
+          expect((await push(gated())).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+        }
+        operatorPushes("docs/main.md", "main");
+        git(clone, "fetch", "-q", "origin");
+        execFileSync("git", ["merge", "--no-ff", "-q", "-m", subject, "origin/main"], {
+          cwd: wt,
+          env: { ...process.env, ...asAuthor(author) },
+        });
+        const merge = head();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+        return merge;
+      };
+
+      it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
+        const next = await commitOk("apps/a.ts", "on top\n");
+        expect(await push(gated())).toEqual(
+          refusal(next, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
+      it("gates a merge whose first parent was never pushed, even under the engine's name", async () => {
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
+        expect(await push(gated())).toEqual(
+          refusal(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("gates a merge when the seat's unpushed commit sits under it, after an earlier push", async () => {
+        const first = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, first, true);
+        ran(TYPES, first, true);
+        await push(gated());
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
+        expect((await push(gated())).text).toBe(
+          pushChecksText(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
+      it("gates a seat's own merge of main", async () => {
+        const merge = await branchThenMerge("Seat", `Merge main into ${BRANCH}`);
+        expect(await push(gated())).toEqual(
+          refusal(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
+      it("gates a merge of main under the engine's name whose tree carries an edit", async () => {
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        write("apps/a.ts", "rides along\n");
+        git(wt, "add", "-A");
+        execFileSync("git", ["commit", "-q", "--amend", "--no-edit"], {
+          cwd: wt,
+          env: { ...process.env, ...asAuthor(MC_MERGE_AUTHOR) },
+        });
+        const amended = head();
+        expect(amended).not.toBe(merge);
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: amended, at: NOW });
+        expect((await push(gated())).isError).toBe(true);
+      });
+
+      it("fails the push, never ungates it, when the checks cannot be read", async () => {
+        await commitOk("apps/a.ts", "a2\n");
+        const r = await push(
+          ts({
+            checks: async () => {
+              throw new Error("rules unreadable");
+            },
+          }),
+        );
+        expect(r).toEqual({ text: MC_PUSH_FAILED, isError: true });
+      });
+
+      it("does not gate a repo that configures no checks", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        expect(await push(ts({ checks: async () => [] }))).toEqual({
+          text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+        });
+      });
+
+      it("answers Already on origin without asking for checks", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        ran(TYPES, sha, true);
+        await push(gated());
+        expect(await push(gated())).toEqual({ text: `Already on origin: ${sha.slice(0, 7)}.` });
+      });
     });
 
     describe("a merge of main", () => {

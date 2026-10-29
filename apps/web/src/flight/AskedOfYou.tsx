@@ -2,7 +2,7 @@ import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/co
 import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
-import { NEED_TEXT_MAX, needText } from "../comms/NeedsList.tsx";
+import { NEED_TEXT_MAX, needText } from "../comms/needText.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -17,6 +17,7 @@ import {
 } from "../notifications.ts";
 import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { HeldNeeds } from "./HeldNeeds.tsx";
 import { isNotTriaging, NotTriagingRow } from "./NotTriaging.tsx";
 
 const DASH = "—";
@@ -59,6 +60,7 @@ export function AskedOfYou() {
     return (
       <>
         <p className="pb note">{NOBODY_WAITING}</p>
+        <HeldNeeds />
         {footer}
       </>
     );
@@ -127,6 +129,7 @@ export function AskedOfYou() {
           )}
         </div>
       ))}
+      <HeldNeeds />
       {footer}
     </div>
   );

@@ -75,6 +75,7 @@ it("reads a fixture repo's committed tree and imports within the snapshot budget
     findings: [],
     conflicts: [],
     conflictsUnchecked: [],
+    rules: { areas: {}, hardRules: [] },
     seq: 0,
   };
   expect(snapshot.tree).toContainEqual(

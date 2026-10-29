@@ -28,6 +28,7 @@ import {
   CODEX_SHELL,
   CREW_DISABLED,
   CREW_GIT_ENV,
+  CREW_PNPM_ENV,
   claimedText,
   conflictKey,
   conflictText,
@@ -623,6 +624,7 @@ describe("startRun", () => {
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "DISABLE_AUTOUPDATER",
+      ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
       "UV_NO_SYNC",
       "UV_OFFLINE",
@@ -646,6 +648,9 @@ describe("startRun", () => {
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
     // a timed-out suite is killed, not moved to the background still holding the test lock
     expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    // pnpm stays on its installed version: the sandbox cannot fetch the repo's pin (#953)
+    expect(env).toMatchObject(CREW_PNPM_ENV);
+    expect(env.pnpm_config_pm_on_fail).toBe("ignore");
   });
 
   it.each([1000, 9999999999])(
@@ -1464,6 +1469,7 @@ describe("reused worktrees", () => {
         dbPath,
         inClone: sup.inClone,
         knownSecrets: async () => [],
+        checks: async () => [],
         gh: async () => ({ code: 0, stdout: "", stderr: "" }),
       }).find((t) => t.name === "commit");
       expect(commit).toBeDefined();
@@ -1626,6 +1632,54 @@ describe("contextUsage", () => {
       window: 200000,
     });
     expect(await sup.contextUsage("retro")).toBeNull();
+  });
+
+  it("asks the CLI once per turn and serves the cache in between (#934)", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    await until(() => expect(seatState("guido-1")).toBe("idle")); // the first turn has ended
+    const first = await sup.contextUsage("guido-1");
+    expect(first?.total).toBe(3340);
+    await Promise.all([sup.contextUsage("guido-1"), sup.contextUsage("guido-1")]);
+    expect(await sup.contextUsage("guido-1")).toEqual(first);
+    expect(asks()).toBe(1);
+    await sup.message("guido-1", "next", { interrupt: false });
+    // reads during the turn are the cache's; the one after it ends asks again, once
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(2);
+    });
+    await sup.contextUsage("guido-1");
+    await sup.contextUsage("guido-1");
+    expect(asks()).toBe(2);
+  });
+  it("after a failed ask the next read within 30 s is the cache's; 31 s on, or a turn later, it asks (#934)", async () => {
+    let t = Date.now();
+    const { sup } = make({ now: () => t });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "NOCONTROL", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const asks = () => recorded().filter((l) => l.request?.subtype === "get_context_usage").length;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // the ask times out
+    expect(asks()).toBe(1);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(1);
+    t += 31_000;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // asks again (and fails again)
+    expect(asks()).toBe(2);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(2);
+    // a turn that ends needs no wait
+    await sup.message("guido-1", "again", { interrupt: false });
+    await until(() => expect(userLines()).toHaveLength(3));
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(3);
+    });
   });
 });
 

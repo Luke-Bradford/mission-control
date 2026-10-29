@@ -354,6 +354,21 @@ export const commitReferenceText = (what: string): string =>
  */
 export const pushReferenceText = (sha: string, what: string): string =>
   `Not pushed: commit ${sha.slice(0, 7)}'s message would notify or close something on GitHub (${what}). The seat cannot rewrite a commit, so only you can reword it; then message the seat to carry on.`;
+/** The refusal's lead: a configured check has not passed on the head being pushed. */
+export const MC_PUSH_CHECKS =
+  "Not pushed: the repo's checks have not all passed on this exact commit in the seat's clone.";
+/** What `mc push` found for one configured check on the pushed head. */
+export type CheckState = "missing" | "failed";
+const CHECKS_ADVICE =
+  "Run each command exactly as written, alone or joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files), at this commit, then push again.";
+/** The checks refusal: each check that is missing or failed, with the exact command to run. */
+export const pushChecksText = (
+  head: string,
+  found: readonly { command: string; state: CheckState }[],
+): string => {
+  const lines = found.map((c) => `- ${c.state === "failed" ? "failed" : "not run"}: ${c.command}`);
+  return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;
+};
 /** The secret scan's log passed its output cap: nothing is pushed unread. */
 export const MC_PUSH_TOO_BIG =
   "Not pushed: the new commits are too large for the secret scan to read, so nothing was pushed unread. Push them yourself if they are fine, then message the seat.";

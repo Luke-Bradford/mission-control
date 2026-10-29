@@ -7,10 +7,6 @@ import { MAP_REPO_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { crewRow } from "./fixtures.ts";
 
-vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: () => <div>3D scene</div>,
-}));
-
 /** The app's routing for the Map alone: the page follows the URL it navigates. */
 function Harness() {
   const r = route(usePath());
@@ -69,7 +65,7 @@ describe("Map page", () => {
     });
     at("/map");
     await waitFor(() => expect(window.location.pathname).toBe("/map/sample"));
-    expect(await screen.findByText("3D scene")).toBeTruthy();
+    expect(await screen.findByRole("group", { name: "Changes treemap" })).toBeTruthy();
     expect(fetch).toHaveBeenCalledWith("/api/repos/sample/map", expect.anything());
     expect(fetch).not.toHaveBeenCalledWith("/api/repos/observed/map", expect.anything());
     const picker = screen.getByRole("combobox", { name: "Map repo" }) as HTMLSelectElement;
@@ -82,6 +78,18 @@ describe("Map page", () => {
       (within(picker).getByRole("option", { name: "sample · 0 crew seats" }) as HTMLOptionElement)
         .disabled,
     ).toBe(false);
+  });
+
+  it("/map keeps the link's hash when it goes to a repo", async () => {
+    stubFetch({
+      "/api/repos": repos,
+      "/api/config": config,
+      "/api/crew": { rows: [] },
+      "/api/repos/sample/map": mapSnapshotFixture,
+    });
+    at("/map#win=10,5");
+    await waitFor(() => expect(window.location.pathname).toBe("/map/sample"));
+    expect(window.location.hash).toBe("#win=10,5");
   });
 
   it("/map goes to the repo with running crew seats", async () => {
@@ -106,7 +114,7 @@ describe("Map page", () => {
       "/api/repos/second/map": { ...mapSnapshotFixture, repoId: "second" },
     });
     at("/map/sample");
-    await screen.findByText("3D scene");
+    await screen.findByRole("group", { name: "Changes treemap" });
     fireEvent.change(screen.getByRole("combobox", { name: "Map repo" }), {
       target: { value: "second" },
     });
@@ -157,7 +165,7 @@ describe("Map page", () => {
       "/api/repos/sample/map": idle,
     });
     at("/map/sample");
-    await screen.findByText("3D scene");
+    await screen.findByRole("group", { name: "Changes treemap" });
     expect(screen.getByText("No seat is working in this repo right now.")).toBeTruthy();
     expect(screen.getByText(/2 files/)).toBeTruthy();
   });
@@ -170,7 +178,7 @@ describe("Map page", () => {
       "/api/repos/sample/map": idle,
     });
     at("/map/sample");
-    await screen.findByText("3D scene");
+    await screen.findByRole("group", { name: "Changes treemap" });
     expect(screen.getByRole("heading", { level: 1, name: "Crew activity map" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Seats" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Selected" })).toBeTruthy();
@@ -199,7 +207,7 @@ describe("Map page", () => {
       "/api/repos/sample/map": live,
     });
     at("/map/sample");
-    await screen.findByText("3D scene");
+    await screen.findByRole("group", { name: "Changes treemap" });
     fireEvent.click(screen.getByRole("button", { name: "History" }));
     fireEvent.click(screen.getAllByRole("button", { name: "src/live.ts" })[0] as HTMLElement);
     expect(screen.getByRole("link", { name: "#837" }).getAttribute("href")).toBe(

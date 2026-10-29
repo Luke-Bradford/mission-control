@@ -42,7 +42,6 @@ import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
   CANNOT_START,
-  CODEX_CLI_ENV,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -50,6 +49,7 @@ import {
   CREW_CLI_ENV,
   CREW_DISABLED,
   CREW_GIT_ENV,
+  CREW_PNPM_ENV,
   carriedFrom,
   clockHm,
   compactUtc,
@@ -131,6 +131,7 @@ import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
+import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
@@ -402,6 +403,8 @@ export interface SupervisorDeps {
   tokens: RunTokens;
   /** The test lock: a run's hold goes when its call's tool_result comes, its turn ends or it exits. */
   lock: TestLock;
+  /** Records the configured checks a seat's shell calls run; absent: none. */
+  checks?: CheckRecorder;
   /** The hub's port on loopback: the seats' MCP and guard URLs. */
   hubPort: number;
   /** The hub's own checkout: the roles and the guard hook's entry (`HOOK_ENTRY`). */
@@ -672,8 +675,50 @@ function toContextUsage(v: unknown): ContextUsage | null {
   return { categories, total, window: num(r.maxTokens) };
 }
 
+/** After a failed context ask, how long before a read asks again (ms). */
+const CONTEXT_RETRY_MS = 30 * 1000;
+
+/**
+ * A seat's last context usage. The CLI is asked once per turn, after it ends, never per request:
+ * every answer is a 30 KB line in the CLI's output (#934).
+ */
+interface ContextCache {
+  usage: ContextUsage | null;
+  /** A turn has ended since `usage` was asked for (or it never was): the next read asks once. */
+  stale: boolean;
+  inflight: Promise<void> | null;
+  /** After a failed ask: the earliest time (ms) the next read may ask again, inside the same turn. */
+  retryAt: number;
+}
+
 export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const { config, store, bus } = deps;
+  const contextCaches = new WeakMap<Live, ContextCache>();
+  /** Asks the seat's CLI for its context usage and caches the answer; at most one ask at a time. */
+  const refreshContext = (l: Live): Promise<void> => {
+    let cache = contextCaches.get(l);
+    if (!cache) {
+      cache = { usage: null, stale: true, inflight: null, retryAt: 0 };
+      contextCaches.set(l, cache);
+    }
+    if (cache.inflight) return cache.inflight;
+    const c = cache;
+    c.stale = false;
+    c.inflight = (async () => {
+      try {
+        const usage = toContextUsage(await l.session.control("get_context_usage"));
+        if (usage === null) throw new Error("not the usage shape");
+        c.usage = usage;
+      } catch {
+        // keep the last answer (old, not wrong), and ask again soon rather than next turn
+        c.stale = true;
+        c.retryAt = now() + CONTEXT_RETRY_MS;
+      } finally {
+        c.inflight = null;
+      }
+    })();
+    return c.inflight;
+  };
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
@@ -1041,16 +1086,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "tool-result":
         // the call has ended, however it ended: its hold goes (a Post hook may never come)
         deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
+        // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
+        if (e.ok !== undefined) {
+          void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok);
+        }
         break;
       case "result": {
         // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
         // result replayed at an attach while a later turn is open: its hold is that turn's.
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
           deps.lock.releaseRun(l.run.id);
+          deps.checks?.dropRun(l.run.id);
         }
         const interrupted = l.interrupted;
         l.inTurn = false;
         l.interrupted = false;
+        const cache = contextCaches.get(l);
+        if (cache) {
+          cache.stale = true;
+          cache.retryAt = 0;
+        }
         fold(l);
         if (l.parkedTurn) {
           l.parkedTurn = false; // parked stays until the next line starts a turn
@@ -1165,7 +1220,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
-   * Python's caches likewise (`crewPythonEnv`).
+   * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
   function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
@@ -1180,7 +1235,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
     Object.assign(env, crewPythonEnv(tmp, seatId));
-    return { ...env, ...CREW_CLI_ENV, ...CREW_GIT_ENV };
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
   }
 
   /**
@@ -1557,7 +1612,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ),
         );
         Object.assign(env, {
-          ...CODEX_CLI_ENV,
           CODEX_HOME: home,
           [CODEX_SEAT_TOKEN_ENV]: token,
           SHELL: CODEX_SHELL,
@@ -1674,6 +1728,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       area: info.seat.area,
       cwd,
       lock: deps.lock,
+      ...(deps.checks === undefined ? {} : { checks: deps.checks }),
       superuserTools: deps.superuserTools,
       runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {
@@ -4170,11 +4225,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       need(seatId);
       const l = live.get(seatId);
       if (!l?.session.alive) return null;
-      try {
-        return toContextUsage(await l.session.control("get_context_usage"));
-      } catch {
-        return null;
+      // Codex answers from its own live token counts: nothing to ask, nothing written
+      if (l.run.vendor === "codex") {
+        try {
+          return toContextUsage(await l.session.control("get_context_usage"));
+        } catch {
+          return null;
+        }
       }
+      // from the cache; the CLI is asked once per turn (when a turn has ended since it last was),
+      // and again after a failed ask once CONTEXT_RETRY_MS has passed
+      const cache = contextCaches.get(l);
+      if (!cache || (cache.stale && now() >= cache.retryAt)) await refreshContext(l);
+      else if (cache.inflight) await cache.inflight;
+      return contextCaches.get(l)?.usage ?? null;
     },
 
     seat(seatId) {

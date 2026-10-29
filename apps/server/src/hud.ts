@@ -5,7 +5,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
 import {
   type AgentView,
   ATTENTION_KINDS,
@@ -83,6 +82,7 @@ import {
 import { runAccountId } from "./account-bindings.ts";
 import { decisionDefault, partitionAttention } from "./attention-holds.ts";
 import { claudeVersion } from "./cli-version.ts";
+import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
@@ -97,6 +97,7 @@ import {
 import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
+import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
 import {
@@ -126,7 +127,7 @@ export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
 export function transcriptMtime(path: string): number | null {
   if (path === "") return null;
   try {
-    return Math.floor(statSync(path).mtimeMs);
+    return Math.floor(statNoted(path).mtimeMs);
   } catch {
     return null;
   }
@@ -380,6 +381,90 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
   return null;
 }
 
+/**
+ * The views below are rebuilt from every run, PR and digest row, and several callers (the pages, the
+ * scheduler's ticks, FLIGHT's tools) ask for the same one many times a second. A view is reused
+ * while the second it was built in is unchanged, the store has not been written since (by this
+ * process or another), no file it read has changed, and the inputs that are in neither (config,
+ * lock, login, CLI version) match.
+ * The second is the coarsest bucket the age rules allow: they all compare whole seconds or
+ * minutes (stall and wait thresholds, "5m ago"), so a view up to a second old shows the same.
+ * Each caller gets its own copy, so one that sorts or edits what it was given cannot skew the others.
+ */
+const VIEW_MEMO_MS = 1_000;
+const MEMO_ENTRIES = 16;
+
+/** What a memoised view stands on: the store's write version and the files it read. */
+interface Basis {
+  version: string;
+  files: FileDeps;
+}
+interface ViewMemo {
+  bucket: number;
+  entries: Map<string, Basis & { value: unknown; token: string }>;
+}
+const viewMemos = new WeakMap<Store, ViewMemo>();
+const identities = new WeakMap<object, number>();
+let nextIdentity = 0;
+const identityOf = (o: object): number => {
+  const known = identities.get(o);
+  if (known !== undefined) return known;
+  const id = ++nextIdentity;
+  identities.set(o, id);
+  return id;
+};
+/** Crew rows handed out of the memo: the memo entry they are a copy of, and what it stands on. */
+const rowOrigins = new WeakMap<object, Basis & { token: string }>();
+
+/** The CLI version for callers that have no use for it: one function, so they share an entry. */
+export const NO_CLI_VERSION = (): string | null => null;
+
+function memoised<T>(
+  store: Store,
+  now: number,
+  key: unknown[],
+  build: () => T,
+  /** What the inputs of this view were built from, which it stands on too. */
+  inherited?: Basis,
+): { value: T } & Basis & { token: string } {
+  const bucket = Math.floor(now / VIEW_MEMO_MS);
+  let memo = viewMemos.get(store);
+  if (!memo || memo.bucket !== bucket) {
+    memo = { bucket, entries: new Map() };
+    viewMemos.set(store, memo);
+  }
+  const k = JSON.stringify(key);
+  const version = store.readVersion();
+  const hit = memo.entries.get(k);
+  if (hit?.version === version && filesUnchanged(hit.files))
+    return { ...hit, value: cloneData(hit.value as T) };
+  const built = collectFiles(build);
+  if (inherited)
+    for (const [f, seen] of inherited.files) if (!built.files.has(f)) built.files.set(f, seen);
+  // names this build, so a view made from its rows is reused only while it is
+  const token = `${bucket}/${++nextIdentity}`;
+  // A build that wrote (a read that keeps bookkeeping) left the store at a newer version: not reusable.
+  if (store.readVersion() === version) {
+    memo.entries.delete(k);
+    if (memo.entries.size >= MEMO_ENTRIES) {
+      const oldest = memo.entries.keys().next();
+      if (!oldest.done) memo.entries.delete(oldest.value);
+    }
+    memo.entries.set(k, {
+      value: cloneData(built.value),
+      version,
+      files: built.files,
+      token,
+    });
+  }
+  return { value: built.value, version, files: built.files, token };
+}
+
+/** Drops the store's memoised views: something outside the store changed (a bus topic was emitted). */
+export function forgetViews(store: Store): void {
+  viewMemos.delete(store);
+}
+
 export function crew(
   config: CcConfig,
   store: Store,
@@ -388,6 +473,23 @@ export function crew(
   lock: TestLockState = NO_LOCK,
   /** The CLI version; tests pass a stub. */
   cliVersion: () => string | null = claudeVersion,
+): Crew {
+  const { value, ...basis } = memoised(
+    store,
+    now,
+    ["crew", config, lock, identityOf(cliVersion)],
+    () => buildCrew(config, store, now, lock, cliVersion),
+  );
+  rowOrigins.set(value.rows, basis);
+  return value;
+}
+
+function buildCrew(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  lock: TestLockState,
+  cliVersion: () => string | null,
 ): Crew {
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
@@ -792,10 +894,30 @@ export function attentionItems(
   now: number,
   lock: TestLockState = NO_LOCK,
   /** The crew rows at `now` (built with `lock`), when the caller has already built them. */
-  rows: CrewRow[] = crew(config, store, now, lock).rows,
+  rows?: CrewRow[],
   /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
   hubLogin: string | null = null,
   includeHeld = false,
+): AttentionItem[] {
+  const given = rows ?? crew(config, store, now, lock).rows;
+  const origin = rowOrigins.get(given);
+  return memoised(
+    store,
+    now,
+    ["attention", config, lock, origin?.token ?? identityOf(given), hubLogin, includeHeld],
+    () => buildAttentionItems(config, store, now, lock, given, hubLogin, includeHeld),
+    origin,
+  ).value;
+}
+
+function buildAttentionItems(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  lock: TestLockState,
+  rows: CrewRow[],
+  hubLogin: string | null,
+  includeHeld: boolean,
 ): AttentionItem[] {
   const acks = store.acks();
   const briefs = store.briefs();

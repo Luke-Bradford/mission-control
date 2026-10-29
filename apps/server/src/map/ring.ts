@@ -14,6 +14,7 @@ import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
+import { originalBytes } from "../util.ts";
 import { SeatDiff } from "./diff.ts";
 
 /** How long the ring keeps a finished call: as long as the map shows it on a seat's path. */
@@ -98,6 +99,7 @@ export class CallRing {
   }
 
   private rows = new Map<string, RingCall[]>();
+  private stats = new Map<string, boolean>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
   private sequences = new Map<string, number>();
@@ -212,6 +214,7 @@ export class CallRing {
 
   poll(): void {
     const now = Date.now();
+    this.stats.clear();
     const sources = this.sources();
     for (const source of sources) {
       let tail = this.tails.get(source.id);
@@ -275,6 +278,20 @@ export class CallRing {
     );
   }
 
+  // one stat per path per poll: folders are never tracked, only files
+  private isFile(absolute: string): boolean {
+    let known = this.stats.get(absolute);
+    if (known === undefined) {
+      try {
+        known = statSync(absolute).isFile();
+      } catch {
+        known = false;
+      }
+      this.stats.set(absolute, known);
+    }
+    return known;
+  }
+
   private file(source: RingSource, value: unknown, existing = false): string | null {
     if (typeof value !== "string" || !value) return null;
     const absolute = resolve(source.cwd, value);
@@ -282,6 +299,7 @@ export class CallRing {
     if (!path || path === ".." || path.startsWith("../") || isAbsolute(path)) return null;
     if (existsSync(absolute)) {
       try {
+        if (!this.isFile(absolute)) return null;
         const real = relative(realpathSync(source.cwd), realpathSync(absolute));
         if (real === ".." || real.startsWith("../") || isAbsolute(real)) return null;
       } catch {
@@ -439,12 +457,15 @@ export class CallRing {
     error: boolean,
     refused: boolean,
     at: number,
+    original: number | null = null,
   ): void {
     const call = this.rows.get(source.seat)?.find((c) => c.runId === source.id && c.id === id);
     if (!call || call.end !== null) return;
     call.end = at;
-    call.resultSize = output.length;
-    call.resultTok = Math.ceil(output.length / 4);
+    // a result the transcript holds cut is as long as it was, not as long as what is kept
+    const size = original ?? output.length;
+    call.resultSize = size;
+    call.resultTok = Math.ceil(size / 4);
     call.refused = refused;
     call.error = error && !refused;
     call.why =
@@ -528,7 +549,15 @@ export class CallRing {
           item.type === "fileChange" ? item.changes : undefined,
         );
         if (ev.method === "item/completed")
-          this.finish(source, item.id, tool.result, tool.error, item.status === "declined", at);
+          this.finish(
+            source,
+            item.id,
+            tool.result,
+            tool.error,
+            item.status === "declined",
+            at,
+            tool.originalBytes,
+          );
       }
       return;
     }
@@ -549,15 +578,18 @@ export class CallRing {
     for (const block of message.content.filter(isObj)) {
       if (ev.type === "assistant" && block.type === "tool_use" && typeof block.id === "string")
         this.begin(source, block.id, text(block.name), isObj(block.input) ? block.input : {}, at);
-      if (ev.type === "user" && block.type === "tool_result")
+      if (ev.type === "user" && block.type === "tool_result") {
+        const output = resultText(block.content);
         this.finish(
           source,
           text(block.tool_use_id),
-          resultText(block.content),
+          output,
           block.is_error === true,
           false,
           at,
+          originalBytes(block, output.length),
         );
+      }
     }
   }
 }

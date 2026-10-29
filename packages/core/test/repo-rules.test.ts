@@ -41,6 +41,7 @@ describe("DEFAULT_REPO_RULES", () => {
       hardRulesSet: false,
       hardRulesBy: "operator",
       alwaysAsk: [],
+      checks: [],
     });
   });
 
@@ -91,6 +92,7 @@ describe("DEFAULT_REPO_RULES", () => {
     expect(() => DEFAULT_HARD_RULES.push("x")).toThrow(TypeError);
     expect(() => DEFAULT_REPO_RULES.pickFrom.push("x")).toThrow(TypeError);
     expect(() => DEFAULT_REPO_RULES.alwaysAsk.push("x")).toThrow(TypeError);
+    expect(() => DEFAULT_REPO_RULES.checks.push("x")).toThrow(TypeError);
     expect(() => {
       DEFAULT_REPO_RULES.promoteBacklog = true;
     }).toThrow(TypeError);

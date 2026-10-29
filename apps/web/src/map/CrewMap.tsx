@@ -1,21 +1,14 @@
 import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
-import {
-  type CSSProperties,
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
+  areaColour,
   ConflictsLens,
+  conflictPairs,
   downstream,
   graph,
   HistoryLens,
@@ -23,21 +16,20 @@ import {
   ImpactLens,
   impactFocusLinks,
   LensTabs,
+  type LensVisual,
   lensVisuals,
   type MapLens,
   OwnershipLens,
+  ownershipOf,
   ReviewLens,
-  rulesOf,
+  windowVisuals,
 } from "./Lenses.tsx";
-import { mainAreas } from "./layout.ts";
-import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
-import { historyHeat, MapTreemap } from "./MapTreemap.tsx";
-import { layoutTree } from "./model.ts";
+import { branchOnlyFiles, historyHeat, MapTreemap } from "./MapTreemap.tsx";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
+import { SessionTimeline } from "./SessionTimeline.tsx";
+import { useSessionTimeline } from "./timeline.ts";
 import "./map.css";
-
-const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -148,40 +140,7 @@ export function CrewMapView({
   const [selection, setSelection] = useState<Selection>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [lens, setLens] = useState<MapLens>("changes");
-  const [home, setHome] = useState(0);
-  const [overview, setOverview] = useState(0);
-  const [nodes, setNodes] = useState<ReturnType<typeof layoutTree>>([]);
-  const previousLayout = useRef<{ repo: string; nodes: ReturnType<typeof layoutTree> } | null>(
-    null,
-  );
-  const [rotate, setRotate] = useState(false);
-  const [seatFocus, setSeatFocus] = useState<{ seat: string; request: number } | null>(null);
   const now = useNow();
-  // The stage and the selector show working seats only, each with the part of its path the hub
-  // still keeps: the clock's tick ages a path out on an open page. Keyed on who is working and how
-  // much of each path is fresh, so a tick that changes neither doesn't redraw the scene.
-  const working = snapshot.seats
-    .filter((seat) => isWorking(seat, now))
-    .map((seat) => `${seat.seat}\t${freshRecent(seat, now).length}`)
-    .join("\n");
-  const stage = useMemo(() => {
-    const fresh = new Map(
-      working
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => line.split("\t") as [string, string]),
-    );
-    return {
-      ...snapshot,
-      seats: snapshot.seats.flatMap((seat) => {
-        const kept = fresh.get(seat.seat);
-        // recent is oldest first, so what is still fresh is its tail
-        return kept === undefined
-          ? []
-          : [{ ...seat, recent: seat.recent.slice(seat.recent.length - Number(kept)) }];
-      }),
-    };
-  }, [snapshot, working]);
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
       work[seat.seat] ?? { ticket: seat.ticket, title: seat.title, pr: null },
@@ -197,61 +156,51 @@ export function CrewMapView({
     [snapshot.seats, indices],
   );
   const selectedSeat =
-    selection?.kind === "seat" ? stage.seats.find((s) => s.seat === selection.seat) : undefined;
+    selection?.kind === "seat" ? snapshot.seats.find((s) => s.seat === selection.seat) : undefined;
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
-  // Layout stays out of React's render path, so a large tree cannot block orbiting or the live feed.
-  useEffect(() => {
-    let current = true;
-    const previous =
-      previousLayout.current?.repo === snapshot.repoId ? previousLayout.current.nodes : undefined;
-    void mapLayoutWorker.layout(snapshot.tree, snapshot.imports, previous).then((next) => {
-      if (!current) return;
-      previousLayout.current = { repo: snapshot.repoId, nodes: next };
-      setNodes(next);
-    });
-    return () => {
-      current = false;
-    };
-  }, [snapshot.repoId, snapshot.tree, snapshot.imports]);
-  const areas = useMemo(() => mainAreas(snapshot.tree), [snapshot.tree]);
-  const treePaths = useMemo(() => new Set(snapshot.tree.map((f) => f.path)), [snapshot.tree]);
-  // files a seat touched that origin/HEAD doesn't have yet (new on a branch)
-  const extraKey = [
-    ...new Set(
-      snapshot.seats.flatMap((s) => [...s.scope.read, ...s.scope.modified.map((c) => c.file)]),
-    ),
-  ]
-    .filter((f) => !treePaths.has(f))
-    .sort()
+  const workingSeats = useMemo(
+    () => snapshot.seats.filter((seat) => isWorking(seat, now)),
+    [snapshot.seats, now],
+  );
+  const timeline = useSessionTimeline(workingSeats, now);
+  // What Changes draws: the working seats and their fresh paths only. The clock ticks every few
+  // seconds; the drawing is redone only when a seat starts or stops working or its path changes.
+  const clock = useRef(now);
+  clock.current = now;
+  const freshKey = workingSeats
+    .map((seat) => `${seat.seat}\t${freshRecent(seat, now).length}`)
     .join("\n");
-  const extras = useMemo(() => (extraKey ? extraKey.split("\n") : []), [extraKey]);
-  const displayNodes = useMemo(
+  // biome-ignore lint/correctness/useExhaustiveDependencies: freshKey stands for the clock here
+  const changesSeats = useMemo(
     () =>
-      extras.length
-        ? layoutTree(
-            extras.map((path) => ({ path, lines: 0 })),
-            nodes,
-            false,
-          )
-        : nodes,
-    [extras, nodes],
+      snapshot.seats
+        .filter((seat) => isWorking(seat, clock.current))
+        .map((seat) => ({ ...seat, recent: freshRecent(seat, clock.current) })),
+    [snapshot.seats, freshKey],
+  );
+  const changesVisual = useMemo(
+    () => lensVisuals({ ...snapshot, seats: changesSeats }, "changes", null),
+    [snapshot, changesSeats],
+  );
+  // files in the tree or new on a branch; the layout stays put while a window dims what's outside it
+  const pathKey = Object.keys(changesVisual).sort().join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathKey is the paths of changesVisual
+  const extraFiles = useMemo(
+    () => branchOnlyFiles(snapshot.tree, changesVisual),
+    [snapshot.tree, pathKey],
   );
   const searchable = useMemo(
-    () => [...new Set([...displayNodes.map((n) => n.path), ...treePaths, ...extras])],
-    [displayNodes, treePaths, extras],
+    () => [...snapshot.tree.map((file) => file.path), ...extraFiles.map((file) => file.path)],
+    [snapshot.tree, extraFiles],
   );
   const needle = query.trim().toLowerCase();
   const matches = needle
     ? searchable.filter((path) => path !== "" && path.toLowerCase().includes(needle))
     : [];
-  const focusNode =
-    displayNodes.find((n) => n.path === focus) ??
-    displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const selectedPath = selection?.kind === "node" ? selection.path : null;
-  const selectedFiles = displayNodes.find((n) => n.path === selectedPath)?.files ?? [];
-  // stable callbacks, so the scene's props change only when what it shows does
+  // stable callbacks, so the treemap's props change only when what it shows does
   const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
   const selectFromScene = useCallback(
     (path: string) => {
@@ -262,21 +211,13 @@ export function CrewMapView({
   );
   const searchSelect = (path: string) => {
     selectNode(path);
-    setFocus(null);
-    queueMicrotask(() => setFocus(path));
+    setFocus(path);
   };
-  const selectSeat = useCallback((seat: string | null, frame: boolean) => {
+  const selectSeat = useCallback((seat: string | null) => {
     setSelection(seat === null ? null : { kind: "seat", seat });
-    if (seat === null || !frame) return;
-    setFocus(null);
-    setRotate(false);
-    setSeatFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
+    if (seat !== null) setFocus(null);
   }, []);
-  const followFromStage = useCallback(
-    (seat: string | null) => selectSeat(seat, false),
-    [selectSeat],
-  );
-  const named = { snapshot: stage, indices: colours, names };
+  const named = { snapshot, indices: colours, names };
   const focusLinks = useMemo(
     () =>
       lens === "impact"
@@ -286,7 +227,30 @@ export function CrewMapView({
           : [],
     [lens, snapshot, focus],
   );
-  const lensVisual = useMemo(() => lensVisuals(snapshot, lens, focus), [snapshot, lens, focus]);
+  const windowed = useMemo(
+    () => (timeline.win ? windowVisuals(changesVisual, changesSeats, timeline.win) : changesVisual),
+    [changesVisual, changesSeats, timeline.win],
+  );
+  const lensVisual = useMemo(
+    () => (lens === "changes" ? windowed : lensVisuals(snapshot, lens, focus)),
+    [snapshot, lens, focus, windowed],
+  );
+  const { playback, marks, current } = timeline;
+  // Play shows only the replayed seat's changes on the files it has reached so far
+  const visibleVisual = useMemo(() => {
+    if (lens !== "changes" || !playback) return lensVisual;
+    return Object.fromEntries(
+      [...marks.keys()].map((path): [string, LensVisual] => [
+        path,
+        {
+          changes: (changesVisual[path]?.changes ?? []).filter(
+            (change) => change.seat === playback.seat && change.changed,
+          ),
+        },
+      ]),
+    );
+  }, [lens, lensVisual, changesVisual, playback, marks]);
+  const replaying = lens === "changes" && playback !== null;
   useEffect(() => {
     const clearFocus = (event: KeyboardEvent) => {
       if (event.key === "Escape" && focus !== null) setFocus(null);
@@ -302,9 +266,12 @@ export function CrewMapView({
           onChange={(next) => {
             setLens(next);
             setFocus(null);
+            if (next !== "changes") timeline.stop();
           }}
         />
-        {lens !== "changes" ? (
+        {lens === "changes" ? (
+          <ChangesKey tree={snapshot.tree} />
+        ) : (
           <AnalyticalMapKey
             lens={lens}
             focus={focus}
@@ -313,47 +280,26 @@ export function CrewMapView({
             indices={colours}
             names={names}
           />
-        ) : null}
+        )}
         {lens === "impact" && focus !== null && (
           <span className="map-lens-trace">Focused file and its relationships are traced.</span>
         )}
       </div>
       <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
-          {lens === "changes" ? (
-            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-              <Scene
-                nodes={displayNodes}
-                areas={areas}
-                snapshot={stage}
-                names={names}
-                focus={focusNode?.path ?? null}
-                focusLinks={focusLinks}
-                lens={lens}
-                lensVisual={lensVisual}
-                home={home}
-                overview={overview}
-                rotate={rotate}
-                selected={selectedPath}
-                indices={colours}
-                onSelect={selectFromScene}
-                seat={selectedSeat?.seat ?? null}
-                seatFocus={seatFocus}
-                dockSeats={snapshot.seats.length}
-                onSeatSelect={followFromStage}
-              />
-            </Suspense>
-          ) : (
-            <MapTreemap
-              snapshot={snapshot}
-              lens={lens}
-              visual={lensVisual}
-              focus={focus}
-              focusLinks={focusLinks}
-              onSelect={selectFromScene}
-            />
-          )}
-          {lens === "changes" && <MapKey tree={snapshot.tree} />}
+          <MapTreemap
+            snapshot={snapshot}
+            lens={lens}
+            visual={visibleVisual}
+            indices={colours}
+            extraFiles={extraFiles}
+            marks={replaying ? marks : undefined}
+            currentMark={replaying ? (current?.file ?? null) : null}
+            markSeat={replaying ? playback.seat : null}
+            focus={focus}
+            focusLinks={focusLinks}
+            onSelect={selectFromScene}
+          />
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -365,7 +311,7 @@ export function CrewMapView({
           ) : lens === "review" ? (
             <ReviewLens snapshot={snapshot} onFocus={setFocus} />
           ) : lens === "conflicts" ? (
-            <ConflictsLens snapshot={snapshot} onFocus={setFocus} />
+            <ConflictsLens snapshot={snapshot} names={names} indices={colours} onFocus={setFocus} />
           ) : (
             <>
               <section className="map-card map-card-seats" aria-label="Seats">
@@ -373,9 +319,9 @@ export function CrewMapView({
                 <SeatSelector
                   {...named}
                   snapshot={snapshot}
-                  seats={stage.seats}
+                  seats={workingSeats}
                   selected={selectedSeat?.seat ?? null}
-                  onSelect={(seat) => selectSeat(seat, true)}
+                  onSelect={selectSeat}
                   work={seatWork}
                 />
               </section>
@@ -384,8 +330,8 @@ export function CrewMapView({
                 <input
                   type="search"
                   className="map-find"
-                  aria-label="Find a file or folder"
-                  placeholder="Find a file or folder"
+                  aria-label="Find a file"
+                  placeholder="Find a file"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -400,7 +346,7 @@ export function CrewMapView({
                       </button>
                     ))}
                     {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-                    {!matches.length && <p>No file or folder matches.</p>}
+                    {!matches.length && <p>No file matches.</p>}
                   </div>
                 )}
                 {/* Announces the selection only: the card's "Now" line ticks every few seconds. */}
@@ -421,26 +367,10 @@ export function CrewMapView({
                     />
                   ) : selectedPath !== null ? (
                     <>
-                      <NodeDetail
-                        {...named}
-                        path={selectedPath}
-                        files={
-                          selectedFiles.length
-                            ? selectedFiles
-                            : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                                f.startsWith(`${selectedPath}/`),
-                              )
-                        }
-                      />
+                      <NodeDetail {...named} path={selectedPath} files={[selectedPath]} />
                       <div className="map-detail-actions">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFocus(null);
-                            queueMicrotask(() => setFocus(selectedPath));
-                          }}
-                        >
-                          Zoom to it
+                        <button type="button" onClick={() => setFocus(selectedPath)}>
+                          Show on map
                         </button>
                         <button type="button" onClick={() => setSelection(null)}>
                           Close
@@ -449,7 +379,7 @@ export function CrewMapView({
                     </>
                   ) : (
                     <p className="map-note">
-                      Pick a seat to follow it, or click a node to see who changed or read it.
+                      Pick a seat for its card, or click a file to see who changed or read it.
                     </p>
                   )}
                 </aside>
@@ -458,6 +388,9 @@ export function CrewMapView({
           )}
         </div>
       </div>
+      {lens === "changes" && (
+        <SessionTimeline timeline={timeline} seats={workingSeats} indices={colours} names={names} />
+      )}
       <div className="map-deck">
         {status && (
           <span className={`map-live${status.live ? "" : " down"}`} role="status">
@@ -465,61 +398,28 @@ export function CrewMapView({
             {status.text}
           </span>
         )}
-        <span className="map-deck-controls">
-          <button
-            type="button"
-            title="Frame where the seats are working (the whole repo when nobody is)"
-            onClick={() => {
-              setHome(home + 1);
-              setFocus(null);
-              setSeatFocus(null);
-            }}
-          >
-            Home view
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOverview(overview + 1);
-              setFocus(null);
-              setSeatFocus(null);
-            }}
-          >
-            Whole repo
-          </button>
-          <label>
-            <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />{" "}
-            rotate
-          </label>
-        </span>
       </div>
     </div>
   );
 }
 
-/** The stage's key: what a light, a path and a disc are. */
-function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
+function ChangesKey({ tree }: { tree: MapSnapshot["tree"] }) {
   return (
-    <p className="map-legend">
+    <div className="map-changes-key" role="note" aria-label="Changes colour key">
       <span className="map-key-item">
-        <i className="key-light" aria-hidden="true" /> seat
+        changed <KeySteps tone="changes" />
+        <span className="map-key-muted">1–10 · –40 · –120 · 120+ lines</span>
       </span>
       <span className="map-key-item">
-        <i className="key-path" aria-hidden="true" /> its path
+        <i className="map-key-read" aria-hidden="true" /> read only
       </span>
-      <span className="map-key-item">
-        <i className="key-touched" aria-hidden="true" /> a file seats touched (split when shared) —
-        click for who read or changed it
-      </span>
-      <span className="map-key-item">
-        {tree.length.toLocaleString()} files
-        {tree.length > 2000 && ", every file shown as an individual point"}
-      </span>
-    </p>
+      <span className="map-key-item">click a file for its seats</span>
+      <span className="map-key-item">{tree.length.toLocaleString()} files</span>
+    </div>
   );
 }
 
-function KeySteps({ tone }: { tone: "impact" | "focus" | "history" }) {
+function KeySteps({ tone }: { tone: "impact" | "focus" | "history" | "changes" }) {
   const heatBands = tone === "history" ? [1, 3, 10, 30].map(historyHeat) : null;
   return (
     <span className={`map-key-steps map-key-steps-${tone}`} aria-hidden="true">
@@ -550,19 +450,29 @@ function AnalyticalMapKey({
   names: Record<string, string>;
 }) {
   if (lens === "ownership") {
-    const rules = rulesOf(snapshot);
+    const owner = ownershipOf(snapshot.rules);
+    const owned = owner ? snapshot.tree.filter((file) => owner.areaOf(file.path)).length : 0;
+    const hard = owner ? snapshot.tree.filter((file) => owner.isHardRule(file.path)).length : 0;
     return (
       <div className="map-analytical-key" role="note" aria-label="Ownership colour key">
-        {rules ? (
+        {owner ? (
           <>
             <span className="map-key-item">
-              <i className="map-key-swatch map-key-area" aria-hidden="true" /> area
+              <b>{owned}</b> of {snapshot.tree.length} files owned by an area · <b>{hard}</b>{" "}
+              hard-rule
             </span>
+            {owner.labels.map((label) => (
+              <span className="map-key-item" key={label}>
+                <i
+                  className="map-key-swatch map-key-area"
+                  style={{ "--map-key-area": areaColour(label) } as CSSProperties}
+                  aria-hidden="true"
+                />{" "}
+                {label}
+              </span>
+            ))}
             <span className="map-key-item">
-              <i className="map-key-swatch map-key-outline" aria-hidden="true" /> hard-rule
-            </span>
-            <span className="map-key-item">
-              {rules.areas.length} areas · {snapshot.tree.length} files
+              <i className="map-key-swatch map-key-hatch" aria-hidden="true" /> hard-rule
             </span>
           </>
         ) : (
@@ -580,10 +490,14 @@ function AnalyticalMapKey({
     );
     return (
       <div className="map-analytical-key" role="note" aria-label="Review severity key">
+        <span className="map-key-item">
+          <b>{snapshot.findings.length}</b> findings on{" "}
+          {new Set(snapshot.findings.map((finding) => finding.file)).size} files
+        </span>
         {(["Critical", "Important", "Minor"] as const).map((severity) => (
           <span className="map-key-item" key={severity}>
             <i
-              className={`map-key-swatch map-severity-${severity.toLowerCase()}`}
+              className={`map-key-swatch map-key-dot map-severity-${severity.toLowerCase()}`}
               aria-hidden="true"
             />{" "}
             {counts[severity]} {severity}
@@ -593,11 +507,13 @@ function AnalyticalMapKey({
     );
   }
   if (lens === "conflicts") {
+    const pairs = conflictPairs(snapshot.conflicts);
     return (
       <div className="map-analytical-key" role="note" aria-label="Conflicts colour key">
         <span className="map-key-item">
           <i className="map-key-swatch map-key-conflict" aria-hidden="true" />{" "}
-          {snapshot.conflicts.length} files changed on 2+ open branches
+          {snapshot.conflicts.length} files changed on 2+ open branches · {pairs} branch{" "}
+          {pairs === 1 ? "pair" : "pairs"}
         </span>
       </div>
     );

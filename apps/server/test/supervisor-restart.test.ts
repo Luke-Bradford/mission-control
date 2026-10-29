@@ -2004,6 +2004,23 @@ describe("Codex restart", () => {
   });
 });
 
+it("a Codex seat's context reads are the session's live totals, never a cache (#934)", async () => {
+  const usage = (last: number) => ({
+    total: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, totalTokens: 110 },
+    last: { totalTokens: last },
+    modelContextWindow: 10000,
+  });
+  const { sup } = codexSupervisor({ usage: usage(100) });
+  sup.start();
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  expect((await sup.contextUsage("guido-1"))?.total).toBe(100);
+  await sup.message("guido-1", JSON.stringify({ usage: usage(250) }), { interrupt: false });
+  // read through the turn: the first read that sees the new count is the live one
+  await until(async () => expect((await sup.contextUsage("guido-1"))?.total).toBe(250));
+  await sup.stopAll();
+});
+
 it("folds Codex usage exactly once across reattachment and subsequent cumulative updates", async () => {
   const usage = (inputTokens: number, cachedInputTokens: number, outputTokens: number) => ({
     total: {

@@ -1,10 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SupervisorDeps } from "../src/runtime/supervisor.ts";
 import { dir, make, recordFile } from "./supervisor-harness.ts";
 
 /** Direct supervisor deps only: configuration continues refusing Codex seats. */
-export function codexSupervisor(scenario: Record<string, unknown> = {}) {
+export function codexSupervisor(
+  scenario: Record<string, unknown> = {},
+  over: { checks?: SupervisorDeps["checks"] } = {},
+) {
   const command = join(dir, "codex");
   const fixture = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
   writeFileSync(
@@ -16,7 +20,7 @@ import(${JSON.stringify(fixture)});
 `,
     { mode: 0o700 },
   );
-  const made = make({ codexCommand: command, repo: { fullSuite: ["pnpm -s test"] } });
+  const made = make({ codexCommand: command, repo: { fullSuite: ["pnpm -s test"] }, ...over });
   const account = made.cfg.accounts[0];
   if (account) account.vendor = "codex";
   const seat = made.cfg.crew?.sessions[0]?.seats[0];

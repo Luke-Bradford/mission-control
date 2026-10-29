@@ -288,7 +288,7 @@ describe("Codex lifecycle without a socket", () => {
     h.caughtUp();
     await h.session.ready;
     expect(h.approve).not.toHaveBeenCalled();
-    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-resolved" });
+    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-resolved", ok: false });
     h.session.detach();
   });
 
@@ -352,7 +352,7 @@ describe("Codex lifecycle without a socket", () => {
       method: "item/completed",
       params: { item: { id: "item", type: "commandExecution" } },
     });
-    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-open" });
+    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-open", ok: false });
     h.session.detach();
   });
 });

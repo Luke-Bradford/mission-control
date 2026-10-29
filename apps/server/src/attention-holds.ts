@@ -1,5 +1,11 @@
-import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
+import type {
+  AttentionHold,
+  AttentionHoldCondition,
+  AttentionItem,
+  AttentionWaitCondition,
+} from "@mc/core";
 import {
+  BRIEF_KEY_MAX,
   type BriefOption,
   COMMS_OPEN_PREFIX,
   flightFloorBlocked,
@@ -18,17 +24,38 @@ export function holds(store: Store): Record<string, AttentionHold> {
   // null prototype, so a key such as `__proto__` is an ordinary entry
   return Object.assign(Object.create(null), JSON.parse(store.getSetting(SETTING) ?? "{}"));
 }
+/** Whether holding `key` on `condition` would close a chain of active item holds that never releases. */
+export function holdCycle(
+  store: Store,
+  key: string,
+  condition: AttentionHoldCondition | AttentionWaitCondition,
+): boolean {
+  if (condition.kind !== "item") return false;
+  const all = holds(store);
+  const seen = new Set<string>();
+  for (let next: string | undefined = condition.key; next !== undefined && !seen.has(next); ) {
+    if (next === key) return true;
+    seen.add(next);
+    const h: AttentionHold | undefined = all[next];
+    next =
+      h?.releasedAt === undefined && h?.condition.kind === "item" ? h.condition.key : undefined;
+  }
+  return false;
+}
+/** Files the hold; false, storing nothing, when it would close a cycle of item holds. */
 export function holdItem(
   store: Store,
   key: string,
   reason: string,
-  condition: AttentionHoldCondition,
+  condition: AttentionHoldCondition | AttentionWaitCondition,
   by: string,
   at: number,
-): void {
+): boolean {
+  if (holdCycle(store, key, condition)) return false;
   const all = holds(store);
   all[key] = { reason, condition, by, at };
   store.setSetting(SETTING, JSON.stringify(all));
+  return true;
 }
 export function releaseHold(store: Store, key: string, at: number): boolean {
   const all = holds(store);
@@ -38,7 +65,7 @@ export function releaseHold(store: Store, key: string, at: number): boolean {
   store.setSetting(SETTING, JSON.stringify(all));
   return true;
 }
-export function conditionText(c: AttentionHoldCondition): string {
+export function conditionText(c: AttentionHoldCondition | AttentionWaitCondition): string {
   switch (c.kind) {
     case "date":
       return new Date(c.at).toISOString();
@@ -48,6 +75,10 @@ export function conditionText(c: AttentionHoldCondition): string {
       return "until the crew resumes";
     case "manual":
       return "until I release it";
+    case "ci":
+      return `until ${c.pr} CI is ${c.state}`;
+    case "item":
+      return `until ${c.key} is resolved`;
   }
 }
 export function evaluateHolds(
@@ -55,6 +86,10 @@ export function evaluateHolds(
   at: number,
   merged: (ticket: string) => boolean,
   resumed: (since: number) => boolean,
+  /** The stored CI state of a PR (`repo#number`); null when unknown. */
+  ciOf: (pr: string) => "passing" | "failing" | "pending" | null = () => null,
+  /** Whether an item (held or not) has left Needs you for good. */
+  resolved: (key: string) => boolean = () => false,
 ): boolean {
   let changed = false;
   for (const [key, hold] of Object.entries(holds(store))) {
@@ -63,7 +98,9 @@ export function evaluateHolds(
     if (
       (c.kind === "date" && at >= c.at) ||
       (c.kind === "ticket" && merged(c.ticket)) ||
-      (c.kind === "crew" && resumed(hold.at))
+      (c.kind === "crew" && resumed(hold.at)) ||
+      (c.kind === "ci" && ciOf(c.pr) === c.state) ||
+      (c.kind === "item" && resolved(c.key))
     ) {
       changed = releaseHold(store, key, at) || changed;
     }
@@ -89,12 +126,15 @@ export function partitionAttention(
               owner: "operator",
               acked: (acks.get(item.key) ?? 0) >= hold.releasedAt,
               holdReleased: conditionText(hold.condition),
+              holdReleasedAt: hold.releasedAt,
             }
           : item,
       );
   }
   return { items: active, held };
 }
+
+const PR_REF = /^[^#\s]+#[1-9]\d*$/;
 
 export const AttentionHoldInput = z
   .object({
@@ -111,9 +151,17 @@ export const AttentionHoldInput = z
       z
         .object({
           kind: z.literal("ticket"),
-          ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+          ticket: z.string().regex(PR_REF),
         })
         .strict(),
+      z
+        .object({
+          kind: z.literal("ci"),
+          pr: z.string().regex(PR_REF),
+          state: z.enum(["passing", "failing"]),
+        })
+        .strict(),
+      z.object({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }).strict(),
     ]),
   })
   .strict();

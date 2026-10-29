@@ -302,6 +302,7 @@ import {
   AttentionHoldInput,
   attentionHoldError,
   heldRun,
+  holdCycle,
   holdItem,
   protectedDecisionItem,
   releaseHold,
@@ -323,6 +324,7 @@ import {
   attentionItems,
   crew,
   isOperatorCall,
+  NO_CLI_VERSION,
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
@@ -501,6 +503,8 @@ const StructuredBriefArgs = z.strictObject({
     })
     .optional(),
 });
+/** A hold on an item that waits, directly or through others, on the item being held. */
+const HOLD_CYCLE_REFUSED = "Not held: that item waits on this one, so neither would ever release.";
 const BriefItemArgs = z
   .strictObject({
     ...StructuredBriefArgs.shape,
@@ -521,6 +525,29 @@ const BriefItemArgs = z
     recommendation: text(BRIEF_INPUT_MAX),
     options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
     basis: basisArg,
+    // a wait recommendation: the item leaves Needs you until the condition is met
+    hold: z
+      .strictObject({
+        // the conditions that resurface on their own (AttentionHoldInput also takes manual)
+        condition: z.discriminatedUnion("kind", [
+          z.strictObject({ kind: z.literal("crew") }),
+          z.strictObject({
+            kind: z.literal("date"),
+            at: z.number().int().min(0).max(8640000000000000),
+          }),
+          z.strictObject({
+            kind: z.literal("ticket"),
+            ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+          }),
+          z.strictObject({
+            kind: z.literal("ci"),
+            pr: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+            state: z.enum(["passing", "failing"]),
+          }),
+          z.strictObject({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }),
+        ]),
+      })
+      .optional(),
   })
   .refine((args) => (args.assessment ?? args.context) !== undefined, {
     message: "Give assessment (or legacy context).",
@@ -2133,7 +2160,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function briefItem(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, BriefItemArgs, args);
     if (!c.ok) return c.result;
-    const { key, context, recommendation, options, basis, ...structured } = c.args;
+    const { key, context, recommendation, options, basis, hold, ...structured } = c.args;
+    // the operator's alone, as with hold_item: FLIGHT clears it by triaging, never by holding it
+    if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
     if (structured.for === "operator" && structured.ask === undefined)
@@ -2160,6 +2189,25 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (isOperatorCall(item, store))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
+        );
+    }
+    if (hold?.condition.kind === "item") {
+      const waitsOn = hold.condition.key;
+      const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
+      if (
+        holdCycle(store, key, hold.condition) ||
+        !attentionItems(
+          config,
+          store,
+          at,
+          deps.lockState?.() ?? NO_LOCK,
+          rows,
+          deps.login,
+          true,
+        ).some((i) => i.key === waitsOn)
+      )
+        return fail(
+          "Not held: the item to wait on is this one, waits on this one or is no longer waiting.",
         );
     }
     // whether the operator already had this item with FLIGHT's brief, before this one replaces it
@@ -2223,6 +2271,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           detail: recommendation,
         });
     }
+    if (hold) holdItem(store, key, recommendation.slice(0, 1000), hold.condition, "FLIGHT", at);
     bus.emit("attention");
     bus.emit("flight");
     return {
@@ -3021,7 +3070,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (a.key.startsWith("comms-open:")) {
           const messageId = a.key.slice("comms-open:".length);
           const message = store.openCommsItems().find((item) => item.id === messageId);
-          const rows = crew(config, store, now(), NO_LOCK, () => null).rows;
+          const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
             (candidate) => candidate.key === a.key && candidate.owner === "flight",
           );
@@ -3058,7 +3107,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           (pr !== undefined && pr.state !== "open") ||
           (run !== null && run.endedAt !== null) ||
           card?.closed === true;
-        const rows = crew(config, store, now(), NO_LOCK, () => null).rows;
+        const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
         const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
           (i) => i.key === a.key,
         );
@@ -3098,7 +3147,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const a = parsed.data;
         // the operator's alone: FLIGHT clears it by triaging what it counts, never by holding it
         if (a.key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
-        const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, () => null).rows;
+        const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
         if (
           !attentionItems(
             config,
@@ -3110,7 +3159,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           ).some((i) => i.key === a.key)
         )
           return fail("Item is no longer waiting.");
-        holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now());
+        if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
+          return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");
         return { text: `Held ${a.key}.` };
       },

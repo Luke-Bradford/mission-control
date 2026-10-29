@@ -124,6 +124,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import {
   type CcConfig,
@@ -134,7 +135,7 @@ import {
 } from "../src/config.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView, operatorItems } from "../src/flight/state.ts";
+import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -2342,6 +2343,7 @@ describe("sync_main", () => {
       gh: async () => ({ code: 0, stdout: "", stderr: "" }),
       dbPath: join(dir, "mc.sqlite"),
       knownSecrets: async () => [],
+      checks: async () => [],
       syncMain: writerSync,
     });
     const tokens = new RunTokens();
@@ -7174,11 +7176,183 @@ describe("attention hold tools", () => {
       await app.close();
     }
   });
+  it("refuses a hold_item that closes a cycle of item holds, storing nothing", async () => {
+    store.raiseNote({
+      key: "blocked:hold-other",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Other",
+      at: NOW - 1,
+    });
+    const other = "note:blocked:hold-other";
+    const on = (k: string) => ({ reason: "Waiting", condition: { kind: "item", key: k } });
+    expect((await call("hold_item", { key, ...on(other) })).isError).not.toBe(true);
+    expect((await call("hold_item", { key: other, ...on(key) })).isError).toBe(true);
+    expect(holds(store)[other]).toBeUndefined();
+  });
   it("refuses missing items and blank reasons", async () => {
     expect(await call("hold_item", { ...args, key: "missing" })).toEqual(
       refused("Item is no longer waiting."),
     );
     expect((await call("hold_item", { ...args, reason: " " })).isError).toBe(true);
     expect(store.getSetting("attention-holds")).toBeNull();
+  });
+});
+
+describe("brief_item with a hold (#760)", () => {
+  const key = "note:blocked:wait-test";
+  const brief = (over: Record<string, unknown> = {}) => ({
+    key,
+    assessment: "Nothing to do yet.",
+    ask: "Leave it parked?",
+    recommendation: "Leave it until the condition is met.",
+    basis: "read the park",
+    ...over,
+  });
+  const items = (at = NOW + 1) =>
+    flightTriageItems(config(), store, at, null).filter((i) => i.key === key);
+  const needsYou = (at = NOW + 1) =>
+    operatorItems(config(), store, at, null).filter((i) => i.key === key);
+  beforeEach(() => {
+    store.raiseNote({
+      key: "blocked:wait-test",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Choose",
+      at: NOW - 1,
+    });
+  });
+
+  it.each([
+    [{ kind: "date", at: NOW + 1000 }, NOW + 1000, false, false, null, false],
+    [{ kind: "ticket", ticket: "demo#12" }, NOW + 5, true, false, null, false],
+    [{ kind: "crew" }, NOW + 5, false, true, null, false],
+    [{ kind: "ci", pr: "demo#9", state: "passing" }, NOW + 5, false, false, "passing", false],
+    [{ kind: "item", key: "note:blocked:other" }, NOW + 5, false, false, null, true],
+  ] as const)(
+    "files a %j hold, drops the item from Needs you, and wakes FLIGHT when it is met",
+    async (condition, at, merged, resumed, ci, resolved) => {
+      store.raiseNote({
+        key: "blocked:other",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "Other",
+        at: NOW - 1,
+      });
+      expect(await call("brief_item", brief({ hold: { condition } }))).toEqual({
+        text: BRIEFED_TEXT,
+      });
+      expect(holds(store)[key]).toEqual({
+        reason: "Leave it until the condition is met.",
+        condition,
+        by: "FLIGHT",
+        at: NOW,
+      });
+      expect(needsYou()).toEqual([]);
+      expect(items()).toEqual([]);
+      // not met yet: still held
+      expect(
+        evaluateHolds(
+          store,
+          NOW + 1,
+          () => false,
+          () => false,
+          () => "pending",
+          () => false,
+        ),
+      ).toBe(false);
+      expect(items()).toEqual([]);
+      expect(
+        evaluateHolds(
+          store,
+          at,
+          () => merged,
+          () => resumed,
+          () => ci,
+          () => resolved,
+        ),
+      ).toBe(true);
+      // back, with FLIGHT asked to refresh a brief older than the release
+      expect(needsYou(at)).toHaveLength(1);
+      expect(items(at).map((i) => i.key)).toEqual([key]);
+      expect(items(at)[0]?.holdReleased).toBeTruthy();
+      // a fresh brief settles it
+      store.addBrief({
+        ...brief(),
+        original: "",
+        context: "x",
+        options: [],
+        did: [],
+        at: at + 1,
+        defaultEligible: false,
+      } as never);
+      expect(items(at + 2)).toEqual([]);
+    },
+  );
+
+  it.each([key, "note:gone"])("refuses to wait on item %s", async (waitsOn) => {
+    const r = await call(
+      "brief_item",
+      brief({ hold: { condition: { kind: "item", key: waitsOn } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[key]).toBeUndefined();
+    expect(store.briefs().has(key)).toBe(false);
+  });
+
+  it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {
+    store.raiseNote({
+      key: "blocked:other",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Other",
+      at: NOW - 1,
+    });
+    const other = "note:blocked:other";
+    expect(
+      (await call("brief_item", brief({ key, hold: { condition: { kind: "item", key: other } } })))
+        .isError,
+    ).not.toBe(true);
+    const r = await call(
+      "brief_item",
+      brief({ key: other, hold: { condition: { kind: "item", key } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[other]).toBeUndefined();
+    expect(store.briefs().has(other)).toBe(false);
+  });
+
+  it("refuses to hold the not-triaging item, as hold_item does (#758)", async () => {
+    const r = await call(
+      "brief_item",
+      brief({ key: FLIGHT_NOT_TRIAGING_KEY, hold: { condition: { kind: "crew" } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[FLIGHT_NOT_TRIAGING_KEY]).toBeUndefined();
+    expect(store.briefs().has(FLIGHT_NOT_TRIAGING_KEY)).toBe(false);
+  });
+
+  it("refuses a manual hold, which would never resurface", async () => {
+    const r = await call("brief_item", brief({ hold: { condition: { kind: "manual" } } }));
+    expect(r.isError).toBe(true);
+    expect(holds(store)[key]).toBeUndefined();
+    expect(store.briefs().has(key)).toBe(false);
+  });
+
+  it("files no hold when the brief is refused", async () => {
+    const r = await call("brief_item", {
+      ...brief({ hold: { condition: { kind: "crew" } } }),
+      key: "note:missing",
+    });
+    expect(r.isError).toBe(true);
+    expect(holds(store)).toEqual({});
   });
 });

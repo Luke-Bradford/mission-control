@@ -129,6 +129,7 @@ const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
   gh,
   dbPath: join(dir, "mc.sqlite"),
   knownSecrets: async () => [],
+  checks: async () => [],
   ...over,
 });
 

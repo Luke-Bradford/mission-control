@@ -117,6 +117,8 @@ export interface MapSnapshot {
   conflicts: { file: string; branches: [string, string]; shas: [string, string] }[];
   /** Open PR branches with a pair that went unchecked: unknown, never reported clean. */
   conflictsUnchecked: MapUnchecked[];
+  /** The repo's resolved rules, as globs: the Ownership lens colours files by area and marks hard-rule files. */
+  rules: { areas: Record<string, string[]>; hardRules: string[] };
   seq: number;
 }
 

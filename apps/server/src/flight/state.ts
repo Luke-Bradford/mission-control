@@ -68,7 +68,7 @@ import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { attentionItems, crew, NO_LOCK, questionWithOperator } from "../hud.ts";
+import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -107,7 +107,7 @@ export function operatorItems(
     store,
     now,
     lock,
-    rows ?? crew(config, store, now, lock, () => null).rows,
+    rows ?? crew(config, store, now, lock, NO_CLI_VERSION).rows,
     hubLogin,
   ).filter(
     (i) =>
@@ -136,7 +136,8 @@ export function flightTriageItems(
   return operatorItems(config, store, now, hubLogin, rows, lock)
     .filter(
       (x) =>
-        !x.brief &&
+        // a released hold returns the item for a fresh brief: the old one predates the wait
+        (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
         !ownReply(x, flightId) &&
         (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
     )
@@ -176,7 +177,7 @@ export function stalledSeats(
   config: CcConfig,
   store: Store,
   now: number,
-  rows = crew(config, store, now, NO_LOCK, () => null).rows,
+  rows = crew(config, store, now, NO_LOCK, NO_CLI_VERSION).rows,
 ): Set<string> {
   return new Set(rows.filter((r) => r.hudState === "stalled").map((r) => r.id));
 }
@@ -299,7 +300,7 @@ export function flightBriefView(
   store: Store,
   lock: TestLockState = NO_LOCK,
   now = Date.now(),
-  rows = crew(config, store, now, lock, () => null).rows,
+  rows = crew(config, store, now, lock, NO_CLI_VERSION).rows,
 ): FlightBriefView {
   const session = flightSeat(config)?.session.id ?? null;
   const drafts = store.drafts(true);
@@ -506,7 +507,7 @@ export function flightState(i: {
   const { session } = found;
   const repo = config.repos.find((r) => r.id === session.repoId);
   const board = store.board(session.repoId);
-  const crewRows = crew(config, store, now, i.lock ?? NO_LOCK, () => null).rows;
+  const crewRows = crew(config, store, now, i.lock ?? NO_LOCK, NO_CLI_VERSION).rows;
   const stalled = stalledSeats(config, store, now, crewRows);
   const mine = session.seats.filter((s) => s.id !== found.seat.id && !s.retiring);
   const unended = (seatId: string) => {
@@ -755,6 +756,7 @@ export function flightState(i: {
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
+      ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;

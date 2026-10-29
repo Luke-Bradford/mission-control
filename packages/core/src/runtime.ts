@@ -741,8 +741,14 @@ export const CREW_CLI_ENV = {
   DISABLE_AUTOUPDATER: "1",
 } as const;
 
-/** Keep pnpm on its installed version when a sandbox cannot fetch the project's pin. */
-export const CODEX_CLI_ENV = {
+/**
+ * Every crew seat (Claude and Codex): keep pnpm on its installed version when the sandbox cannot
+ * fetch the project's `packageManager` pin. Without it, pnpm in a repo whose pin differs from the
+ * installed pnpm retries the download with no network and hangs (#953). The cost: a pin
+ * mismatch is ignored in every repo a seat works in, so an install there runs on the installed
+ * pnpm, not the pinned one.
+ */
+export const CREW_PNPM_ENV = {
   pnpm_config_pm_on_fail: "ignore",
   npm_config_update_notifier: "false",
 } as const;
@@ -1099,7 +1105,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
  * - `rate-limit`: every `rate_limit_event` (the CLI sends one per turn, usually `allowed`);
  *   `resetsAt` is epoch ms.
  * - `tool-result`: one per `tool_result` in a `user` line: that tool call has ended, however it
- *   ended (done, failed, interrupted, or refused by the CLI after the guard let it through).
+ *   ended (done, failed, interrupted, or refused by the CLI after the guard let it through). A Codex
+ *   command's also says whether it exited 0.
  * - `output`: any complete stdout line. `stderr`: one cleaned line cut at STDERR_TEXT_MAX.
  * - `exit`: once, after the last line; `close()` resolves with its `code`.
  */
@@ -1110,7 +1117,8 @@ export type SessionEvent =
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
-  | { kind: "tool-result"; toolUseId: string }
+  /** `ok`: a Codex command's exit success (the Claude stream carries none; its Post hook does). */
+  | { kind: "tool-result"; toolUseId: string; ok?: boolean }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }

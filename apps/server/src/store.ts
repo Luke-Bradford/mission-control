@@ -354,6 +354,12 @@ CREATE TABLE IF NOT EXISTS test_lock_runs (
   ended_at INTEGER, outcome TEXT
 );
 CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
+-- A configured check a seat ran in its clone, on the head it ran against (the push gate reads it).
+CREATE TABLE IF NOT EXISTS check_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, command TEXT NOT NULL,
+  head_sha TEXT NOT NULL, ok INTEGER NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
 CREATE TABLE IF NOT EXISTS keeper_cursors (
   run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
@@ -548,9 +554,14 @@ export const ACTIVE_SEAT_STATES: readonly SeatState[] = ["idle", "starting", "ru
 
 /** `{dir of the DB}/crew/`: every crew run's files. Created with mode 0700. */
 export function crewDir(dbPath: string): string {
-  const dir = join(dirname(dbPath), "crew");
+  const dir = crewDirPath(dbPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+/** Where `crewDir` is, without making it. */
+export function crewDirPath(dbPath: string): string {
+  return join(dirname(dbPath), "crew");
 }
 
 /** A crew run's transcript: `{dir of the DB}/crew/{runId}.jsonl`. */
@@ -599,8 +610,14 @@ export function crewPrBodyPath(dbPath: string): string {
 
 /** A crew run's keeper folder: `{dir of the DB}/crew/k-<12 hex of sha256(runId)>`, short for its socket path. */
 export function crewKeeperDir(dbPath: string, runId: string): string {
+  crewDir(dbPath);
+  return crewKeeperDirPath(dbPath, runId);
+}
+
+/** Where `crewKeeperDir` is, without making `crew/`. */
+export function crewKeeperDirPath(dbPath: string, runId: string): string {
   const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return join(crewDir(dbPath), `k-${hex}`);
+  return join(crewDirPath(dbPath), `k-${hex}`);
 }
 
 /** Codex thread storage survives replacement of the run's keeper. */
@@ -1959,6 +1976,7 @@ export class Store {
       ["seat_lines", 7, "AND origin != 'engine'"],
       ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
       ["run_evidence", 30, ""],
+      ["check_runs", 30, ""],
       ["review_findings", QA_RETENTION_DAYS, ""],
       ["comms", COMMS_RETENTION_DAYS, ""],
       ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
@@ -4697,6 +4715,34 @@ export class Store {
       )`)
       .get(since) as Row;
     return row.n as number;
+  }
+
+  /** A configured check ran to its end on `headSha`: `ok` when the command exited successfully. */
+  addCheckRun(c: {
+    runId: string;
+    command: string;
+    headSha: string;
+    ok: boolean;
+    at: number;
+  }): void {
+    this.db
+      .prepare("INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)")
+      .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
+  }
+
+  /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */
+  latestCheckRun(
+    runId: string,
+    command: string,
+    headSha: string,
+  ): { ok: boolean; at: number } | null {
+    const r = this.db
+      .prepare(
+        `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?
+         ORDER BY at DESC, id DESC LIMIT 1`,
+      )
+      .get(runId, command, headSha) as Row | undefined;
+    return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
   }
 
   addLockHold(h: LockHoldRow): void {
