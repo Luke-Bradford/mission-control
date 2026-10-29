@@ -60,6 +60,7 @@ import {
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
   MC_PUSH_CHECKS,
+  MC_PUSH_FAILED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
   MC_PUSH_ROOT,
@@ -107,7 +108,7 @@ import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
 import { ProfilesError } from "../src/profiles.ts";
-import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
+import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
@@ -2417,15 +2418,30 @@ describe("push and draft_pr", () => {
         expect((await push(gated())).isError).toBe(true);
       });
 
-      it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
+      const asAuthor = (name: string) => ({
+        GIT_AUTHOR_NAME: name,
+        GIT_COMMITTER_NAME: name,
+        GIT_AUTHOR_EMAIL: "t@example.com",
+        GIT_COMMITTER_EMAIL: "t@example.com",
+      });
+      /** The branch's own commit, then main merged in by `author` with `subject` (a clean merge). */
+      const branchThenMerge = (author: string, subject: string): string => {
         write("apps/a.ts", "branch\n");
         git(wt, "commit", "-qam", "feat: branch");
         store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: head(), at: NOW });
         operatorPushes("docs/main.md", "main");
         git(clone, "fetch", "-q", "origin");
-        git(wt, "merge", "--no-ff", "-q", "-m", "merge main", "origin/main");
+        execFileSync("git", ["merge", "--no-ff", "-q", "-m", subject, "origin/main"], {
+          cwd: wt,
+          env: { ...process.env, ...asAuthor(author) },
+        });
         const merge = head();
         store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+        return merge;
+      };
+
+      it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
+        const merge = branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
         expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
         const next = await commitOk("apps/a.ts", "on top\n");
         expect(await push(gated())).toEqual(
@@ -2434,6 +2450,42 @@ describe("push and draft_pr", () => {
             { command: TYPES, state: "missing" },
           ]),
         );
+      });
+
+      it("gates a seat's own merge of main", async () => {
+        const merge = branchThenMerge("Seat", `Merge main into ${BRANCH}`);
+        expect(await push(gated())).toEqual(
+          refusal(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
+      it("gates a merge of main under the engine's name whose tree carries an edit", async () => {
+        const merge = branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        write("apps/a.ts", "rides along\n");
+        git(wt, "add", "-A");
+        execFileSync("git", ["commit", "-q", "--amend", "--no-edit"], {
+          cwd: wt,
+          env: { ...process.env, ...asAuthor(MC_MERGE_AUTHOR) },
+        });
+        const amended = head();
+        expect(amended).not.toBe(merge);
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: amended, at: NOW });
+        expect((await push(gated())).isError).toBe(true);
+      });
+
+      it("fails the push, never ungates it, when the checks cannot be read", async () => {
+        await commitOk("apps/a.ts", "a2\n");
+        const r = await push(
+          ts({
+            checks: async () => {
+              throw new Error("rules unreadable");
+            },
+          }),
+        );
+        expect(r).toEqual({ text: MC_PUSH_FAILED, isError: true });
       });
 
       it("does not gate a repo that configures no checks", async () => {

@@ -183,6 +183,7 @@ import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
   CREW_GIT_SLOW_MS,
+  MC_MERGE_AUTHOR,
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
@@ -691,24 +692,39 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       return unmet;
     }
 
-    /** Whether a commit with these parents merges origin's default branch in (every later parent is on it). */
-    async function mergesMain(
+    /**
+     * Whether `sha` is the engine's own clean merge of main: its author and subject, two parents,
+     * the second on origin's default branch, and a tree that is exactly the clean merge of the
+     * parents, so no edit rides along (the same test the engine's publish step applies).
+     */
+    async function engineMergeOfMain(
       g: (a: string[]) => Promise<string>,
+      sha: string,
       parents: readonly string[],
       defaultSha: string,
     ): Promise<boolean> {
-      if (parents.length < 2) return false;
-      for (const parent of parents.slice(1)) {
-        const onMain = await g(["merge-base", "--is-ancestor", parent, defaultSha]).then(
-          () => true,
-          (e: unknown) => {
-            if ((e as { code?: unknown } | null)?.code === 1) return false;
-            throw e;
-          },
-        );
-        if (!onMain) return false;
-      }
-      return true;
+      const [first, second] = parents;
+      if (parents.length !== 2 || first === undefined || second === undefined) return false;
+      const [author, subject] = (await g(["log", "-1", "--format=%an%x09%s", sha, "--"]))
+        .trim()
+        .split("\t");
+      if (author !== MC_MERGE_AUTHOR || subject !== `Merge main into ${branch}`) return false;
+      const onMain = await g(["merge-base", "--is-ancestor", second, defaultSha]).then(
+        () => true,
+        (e: unknown) => {
+          if ((e as { code?: unknown } | null)?.code === 1) return false;
+          throw e;
+        },
+      );
+      if (!onMain) return false;
+      const clean = await g(["merge-tree", "--write-tree", first, second]).then(
+        (out) => out.trim(),
+        (e: unknown) => {
+          if ((e as { code?: unknown } | null)?.code === 1) return null;
+          throw e;
+        },
+      );
+      return clean !== null && clean === (await g(["rev-parse", `${sha}^{tree}`])).trim();
     }
 
     async function steps(
@@ -796,9 +812,13 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       if (commits.some((c) => c.parents === 0)) return { text: MC_PUSH_ROOT, isError: true };
 
       // 3b. every configured check passed on exactly this commit (the hub saw the seat run it).
-      // A merge of main is the engine's own commit, not the seat's work: it is not gated.
+      // The engine's clean merge of main is not the seat's work: it is not gated. A seat's own
+      // merge (a resolved conflict) is.
       const tip = commits.find((c) => c.sha === sha);
-      if (tip === undefined || !(await mergesMain(g, tip.parentIds, heads.defaultSha))) {
+      if (
+        tip === undefined ||
+        !(await engineMergeOfMain(g, sha, tip.parentIds, heads.defaultSha))
+      ) {
         const unmet = await unmetChecks(sha);
         if (unmet.length > 0) return { text: pushChecksText(sha, unmet), isError: true };
       }

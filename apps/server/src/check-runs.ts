@@ -49,7 +49,7 @@ export interface CheckRecorder {
 
 export interface CheckRecorderDeps {
   store: Pick<Store, "addCheckRun">;
-  /** The run's repo's configured checks; empty when it has none (or its rules cannot be read). */
+  /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
   state: (runId: string) => Promise<CloneState | null>;
@@ -121,7 +121,7 @@ export function cloneState(
   };
 }
 
-/** A run's configured checks from the engine's rules reader; none when the rules cannot be read. */
+/** A run's configured checks from the engine's rules reader; throws when the rules cannot be read. */
 export function configuredChecks(
   store: Pick<Store, "run">,
   rules: (repoId: string) => Promise<RepoRules | Error | null>,
@@ -130,6 +130,8 @@ export function configuredChecks(
     const run = store.run(runId);
     if (run === null) return [];
     const r = await rules(run.repoId);
-    return r === null || r instanceof Error ? [] : r.checks;
+    // unreadable rules fail closed: the push fails (and is retried), it is never ungated
+    if (r instanceof Error) throw r;
+    return r === null ? [] : r.checks;
   };
 }
