@@ -343,8 +343,8 @@ What each seat's process starts with:
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
   After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
   FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
-  its required reason; only this Comms item kind is eligible for that path. Messages already older
-  than two hours do not enter the escalation, preventing a rollout backlog.
+  its required reason; only this Comms item kind is eligible for that path. Messages from before
+  the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
   If FLIGHT has neither settled nor briefed it 30 minutes later, it is counted by the existing
   single **FLIGHT is not triaging** item; the hub does not invent an operator recommendation or
   apply a default. The Comms graph also reports 24-hour run-token totals per link and flags a pair

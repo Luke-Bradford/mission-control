@@ -12,7 +12,7 @@
 
 - [ ] FLIGHT can use `dismiss_item` with a reason to settle only a `comms-open:` question or blocker.
 - [ ] A settled Comms item no longer appears in attention, does not contribute to the FLIGHT-not-triaging aggregate, and cannot re-escalate.
-- [ ] Labelled messages older than the rollout cutoff do not create a Comms-open item.
+- [ ] Labelled messages from before the fixed rollout boundary do not create a Comms-open item, while later items remain durable.
 - [ ] `dismiss_item` still refuses guard, budget, approval, operator-decision, and other protected item kinds.
 - [ ] The tool description and runbook explain the Comms settlement path.
 - [ ] Lint, typecheck, changed tests, and build pass.

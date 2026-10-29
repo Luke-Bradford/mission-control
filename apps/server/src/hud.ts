@@ -17,7 +17,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
-  COMMS_OPEN_ITEM_MAX_AGE_MS,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -839,7 +839,7 @@ export function attentionItems(
   // first fifteen minutes to react. After that it is a durable FLIGHT triage item, rather than an
   // unbounded stream of unread-chatter items.
   for (const message of store.openCommsItems()) {
-    if (now - message.at > COMMS_OPEN_ITEM_MAX_AGE_MS) continue;
+    if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     items.push({
       owner: OWNER_OPERATOR,
