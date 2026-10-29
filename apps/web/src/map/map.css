@@ -157,18 +157,36 @@
   touch-action: none;
 }
 .map-treemap {
+  --treemap-bg: var(--void);
+  --treemap-folder: var(--void-2);
+  --treemap-line: var(--void-line);
+  --treemap-ink: var(--void-ink);
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: var(--void);
+  background: var(--treemap-bg);
+}
+:root[data-theme="light"] .map-treemap {
+  --treemap-bg: var(--surface);
+  --treemap-folder: var(--surface-2);
+  --treemap-line: var(--line-2);
+  --treemap-ink: var(--fg);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .map-treemap {
+    --treemap-bg: var(--surface);
+    --treemap-folder: var(--surface-2);
+    --treemap-line: var(--line-2);
+    --treemap-ink: var(--fg);
+  }
 }
 .map-treemap-folder {
   position: absolute;
   box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid var(--void-line);
-  background: color-mix(in srgb, var(--void-2), transparent 30%);
-  color: var(--void-muted);
+  border: 1px solid var(--treemap-line);
+  background: var(--treemap-folder);
+  color: var(--muted);
   font: 10px var(--mono);
   pointer-events: none;
 }
@@ -186,23 +204,31 @@
   min-height: 0;
   padding: 4px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--void-line), white 20%);
+  border: 1px solid var(--treemap-line);
   border-radius: 1px;
   box-shadow: none;
   font: 10px var(--mono);
   text-align: left;
-  color: var(--void-ink);
+  color: var(--treemap-ink);
   opacity: calc(0.22 + var(--tile-intensity) * 0.78);
 }
 .map-treemap-impact .map-treemap-tile {
-  background: color-mix(in srgb, var(--tile-colour) calc(var(--tile-intensity) * 85%), var(--void));
+  background: color-mix(
+    in srgb,
+    var(--tile-colour) calc(var(--tile-intensity) * 85%),
+    var(--treemap-bg)
+  );
 }
 .map-treemap-tile[data-neutral] {
-  background: var(--void-2);
+  background: var(--treemap-folder);
   opacity: 0.2;
 }
 .map-treemap-history .map-treemap-tile {
-  background: color-mix(in srgb, var(--accent) calc(var(--tile-intensity) * 85%), var(--void));
+  background: color-mix(
+    in srgb,
+    var(--accent) calc(var(--tile-intensity) * 85%),
+    var(--treemap-bg)
+  );
 }
 .map-treemap-tile[data-overlap] {
   outline: 2px solid var(--rem);
@@ -222,7 +248,7 @@
   opacity: 0.12;
 }
 .map-treemap-tile[data-focused] {
-  outline: 2px solid var(--void-ink);
+  outline: 2px solid var(--treemap-ink);
   outline-offset: -2px;
   opacity: 1;
 }
@@ -239,7 +265,7 @@
   margin: 0;
   padding: 3px 5px;
   font: 10px var(--mono);
-  color: var(--void-ink);
+  color: var(--treemap-ink);
   background: var(--void-panel);
 }
 .map-treemap-links {
@@ -250,7 +276,7 @@
   pointer-events: none;
 }
 .map-treemap-links line {
-  stroke: var(--void-ink);
+  stroke: var(--treemap-ink);
   stroke-width: 0.45;
   opacity: 0.85;
 }
@@ -483,7 +509,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
 }
 .map-lens-filename {
   flex: none;

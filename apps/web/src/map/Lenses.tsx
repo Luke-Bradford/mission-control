@@ -252,11 +252,22 @@ function importOverlaps(seats: ReturnType<typeof changed>, forward: Graph["forwa
 }
 
 function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) => void }) {
-  const slash = path.lastIndexOf("/");
-  const directory = slash === -1 ? "" : path.slice(0, slash + 1);
-  const filename = slash === -1 ? path : path.slice(slash + 1);
+  const parts = path.split("/");
+  const filename = parts.at(-1) ?? path;
+  const directory =
+    parts.length > 3
+      ? `…/${parts.slice(-3, -1).join("/")}/`
+      : parts.length > 1
+        ? `${parts.slice(0, -1).join("/")}/`
+        : "";
   return (
-    <button type="button" className="map-lens-file" onClick={() => onFocus(path)} title={path}>
+    <button
+      type="button"
+      className="map-lens-file"
+      onClick={() => onFocus(path)}
+      title={path}
+      aria-label={path}
+    >
       <span className="map-lens-directory">{directory}</span>
       <span className="map-lens-filename">{filename}</span>
     </button>
@@ -291,7 +302,7 @@ export function ImpactLens({
   onFocus: (path: string | null) => void;
 }) {
   const { forward, reverse, cycles } = graph(snapshot);
-  const allChanged = changed(snapshot);
+  const allChanged = changed(snapshot).filter(({ files }) => files.length > 0);
   const allChangedCode = allChanged.map(({ seat, files }) => ({
     seat,
     files: files.filter((path) => isCode(path) && !isTest(path)),

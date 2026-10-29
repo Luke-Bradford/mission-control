@@ -225,6 +225,7 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   value.tree.push(
     { path: "test/history.test.ts", lines: 12 },
     { path: "src/unrelated.ts", lines: 12 },
+    { path: "apps/server/src/account-bindings.ts", lines: 12 },
   );
   value.hist.files["5"] = [20, 9, Date.UTC(2026, 9, 28), [838]];
   value.seats[1] = {
@@ -235,9 +236,15 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
         ...value.seats[1].scope.modified,
         { file: "src/contract.ts", add: 1, rem: 0, source: "diff" },
         { file: "test/consumer.test.ts", add: 1, rem: 0, source: "diff" },
+        { file: "apps/server/src/account-bindings.ts", add: 1, rem: 0, source: "diff" },
       ],
     },
   };
+  value.seats.push({
+    ...structuredClone(value.seats[0]),
+    seat: "IDLE-1",
+    scope: { read: [], modified: [] },
+  });
   render(<CrewMapView snapshot={value} />);
 
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
@@ -246,6 +253,12 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   expect(impact.textContent).toContain("tests · import · depend");
   expect(impact.textContent).toContain("Test files changed separately");
   expect(impact.textContent).not.toContain("test reaches it");
+  expect(
+    screen
+      .getAllByTitle("apps/server/src/account-bindings.ts")
+      .find((element) => element.classList.contains("map-lens-file"))?.textContent,
+  ).toBe("…/server/src/account-bindings.ts");
+  expect(screen.queryByRole("heading", { name: "IDLE-1" })).toBeNull();
   expect(
     document
       .querySelector(".map-treemap-tile[title='src/unrelated.ts']")
