@@ -83,6 +83,7 @@ import {
   latestTranscriptLimits,
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
+import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
@@ -415,6 +416,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const applyDefaults = async () => {
     try {
+      const raised = raiseStalledCommsDecisions({ config, store, now: now() });
+      if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,

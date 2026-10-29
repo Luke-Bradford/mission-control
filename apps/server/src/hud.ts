@@ -18,6 +18,7 @@ import {
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
+  COMMS_OPEN_PREFIX,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -843,7 +844,7 @@ export function attentionItems(
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     items.push({
       owner: OWNER_OPERATOR,
-      key: `comms-open:${message.id}`,
+      key: `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" ? "blocked" : "question",
       agentId: message.from,
       repoId: message.ticket?.split("#")[0] ?? null,
@@ -1016,7 +1017,7 @@ export function attentionItems(
     // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
-    const unansweredComms = i.key.startsWith("comms-open:");
+    const unansweredComms = i.key.startsWith(COMMS_OPEN_PREFIX);
     if (unansweredComms && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };

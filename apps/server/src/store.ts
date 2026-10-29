@@ -5851,6 +5851,17 @@ export class Store {
     return id;
   }
 
+  /** Whether the key was ever briefed for the operator (a brief with no reader predates routing). */
+  operatorBriefed(key: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM briefs WHERE key = ? AND (structured IS NULL OR json_extract(structured, '$.for') IS NOT 'flight') LIMIT 1",
+        )
+        .get(key) !== undefined
+    );
+  }
+
   /** The newest brief on each attention key. */
   briefs(): Map<string, AttentionBrief> {
     const rows = this.db
