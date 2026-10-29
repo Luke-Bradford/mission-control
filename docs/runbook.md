@@ -1036,13 +1036,13 @@ theme, Setup, and the dock toggle.
 | **Board** (`/board`, `/board/<repo>/<n>`) | One lane per repo plus All repos, with its GitHub query to copy; columns Backlog, Refinement, Blocked, Ready, In progress, In review, Ready for QA, Done (Status by name, else by `status_map`); filters Priority, Has an agent, Needs me, Done 7/14/30 days; the standup brief; a card opens its ticket beside the board (read live from GitHub) or the agent working it. |
 | **Agent** (`/agent/<id>`) | The agent's header and tiles (now, context, tokens, ~cost, work, quota), its activity stream (filters Messages, Thinking, Tools, Guard; the live call bar), its recent runs, and subagents and changed files. Pause/Resume only for a TA loop. |
 | **Comms** (`/comms`) | Needs you (acknowledge stops the pulse; it clears when you act) and one thread per agent; threads arrive with the mailbox (phase 2). |
+| **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, open and completed ticket Ready/start/merge/Done facts, timestamped range-bounded throughput, daily quality points (null means no evidence), and crew-pause, hub-Update and quota-reset annotations. Ticket cost retains both range-prorated cost and all-run cost for tickets merged in range. Charts take focus: ←/→ step the crosshair, Home/End jump. |
+| **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
 For a reversible operator decision, FLIGHT may brief a recommended option with a stored deadline.
 When that deadline passes, the hub records and delivers that recommendation once. Update holds,
 approvals, budget/account parks, guard acknowledgements, hard-rule flags, protected dismissal rows,
 observed-loop escalations, and briefs written before deadlines were stored are never defaulted.
-| **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, ticket Ready/start/merge/Done facts, and crew-pause, hub-Update and quota-reset annotations. Charts take focus: ←/→ step the crosshair, Home/End jump. |
-| **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
 **Overlays.** FLIGHT's dock is a column at 1200 px and wider, and a drawer with a scrim below
 that. The Item panel flies out from the right for one item; Away mode and Keys and lamps (`?`) are

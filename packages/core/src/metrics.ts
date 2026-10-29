@@ -123,6 +123,35 @@ export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
   },
 };
 
+/** Range-scoped chart figures. They live beside the shared KPI registry so definitions, units and
+ * windows remain a single source of truth without making them header metrics. */
+export const TELEMETRY_METRICS = {
+  throughput: {
+    label: "Throughput",
+    window: "selected range",
+    unit: "tickets",
+    definition: `Tickets with a pull request merged in the selected range, grouped into timestamped buckets. Empty buckets are zero. ${CREW_REPOS}`,
+    source: "GET /api/telemetry (series.throughput)",
+    from: "server",
+  },
+  quality: {
+    label: "Quality",
+    window: "selected range, daily",
+    unit: "PRs",
+    definition: `Daily CI first-pass rate, review pass rate and review rounds for merged pull requests. A day without evidence is null, never zero. ${CREW_REPOS}`,
+    source: "GET /api/telemetry (series.quality)",
+    from: "server",
+  },
+  costPerMergedTicket: {
+    label: "Cost per merged ticket",
+    window: "selected range",
+    unit: "USD",
+    definition: `All observed run cost for each ticket whose pull request merged in the selected range, including work before the range. The in-range cost remains available separately. ${CREW_REPOS}`,
+    source: "GET /api/telemetry (tokensByTicket.totalCostUsd)",
+    from: "server",
+  },
+} as const satisfies Readonly<Record<string, MetricDef>>;
+
 /** A figure's label with its window: "Merged · 24h". */
 export const metricLabel = (id: MetricId): string => `${METRICS[id].label} · ${METRICS[id].window}`;
 

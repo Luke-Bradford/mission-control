@@ -135,6 +135,59 @@ const since = NOW - FLOW_DAYS * DAY;
 const run = (gql: Gql) => collectFlow(repo, store, gql, NOW);
 
 describe("collectFlow issues", () => {
+  it("retains open Ready work with its state-entry time", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 3), ev("In Progress", 2)) });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        size: null,
+        startAt: Date.parse(at(3)),
+        doneAt: null,
+      },
+    ]);
+  });
+
+  it("retains open work when its board card becomes Blocked", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "Blocked", state: "blocked", closed: false }),
+    ]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 3), ev("In Progress", 2), ev("Blocked", 1)) });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toContainEqual({
+      repoId: "shop-app",
+      number: 1,
+      size: null,
+      startAt: Date.parse(at(3)),
+      doneAt: null,
+    });
+  });
+
+  it("clears an earlier Done timestamp when a ticket is active again", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 3), ev("Done", 2), ev("In Progress", 1)) });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toContainEqual({
+      repoId: "shop-app",
+      number: 1,
+      size: null,
+      startAt: Date.parse(at(3)),
+      doneAt: null,
+    });
+  });
+
   it("starts at Ready before In Progress, In Review and Done", async () => {
     store.replaceBoard("shop-app", [board(1, { size: "M" })]);
     const { gql } = stub({
@@ -268,7 +321,7 @@ describe("collectFlow issues", () => {
     expect(store.flowIssues(0)).toEqual([]);
   });
 
-  it("reads only Done items updated within FLOW_DAYS, batched 20 aliases per query", async () => {
+  it("reads recent Done and active flow items, batched 20 aliases per query", async () => {
     const items = Array.from({ length: 45 }, (_, k) => board(k + 1));
     store.replaceBoard("shop-app", [
       ...items,
@@ -280,12 +333,12 @@ describe("collectFlow issues", () => {
     const issueCalls = calls.filter((c) => c.q.includes("timelineItems"));
     const counts = issueCalls.map((c) => [...c.q.matchAll(/: issue\(number:/g)].length);
     expect(FLOW_BATCH).toBe(20);
-    expect(counts).toEqual([20, 20, 5]);
+    expect(counts).toEqual([20, 20, 6]);
     expect(issueCalls.every((c) => c.q.includes("PROJECT_V2_ITEM_STATUS_CHANGED_EVENT"))).toBe(
       true,
     );
     expect(calls.some((c) => c.q.includes("(number: 100)"))).toBe(false);
-    expect(calls.some((c) => c.q.includes("(number: 101)"))).toBe(false);
+    expect(calls.some((c) => c.q.includes("(number: 101)"))).toBe(true);
     expect(issueCalls[0]?.v).toEqual({ owner: "octo-org", name: "shop-app" });
   });
 });
