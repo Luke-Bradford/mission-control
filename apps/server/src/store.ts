@@ -22,6 +22,7 @@ import {
   type ChosenProfile,
   type CiRunView,
   COMMS_CAPCOM,
+  COMMS_CHATTER_ROUNDS,
   COMMS_CREW,
   COMMS_MC,
   COMMS_TEXT_MAX,
@@ -671,6 +672,7 @@ export interface CommsLinkCount {
   lastId: string;
   lastAt: number;
   lastText: string;
+  tokens: number;
 }
 
 /** Who a seat line is from. */
@@ -3991,7 +3993,7 @@ export class Store {
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
    */
-  commsLinkCounts(since: number): CommsLinkCount[] {
+  commsLinkCounts(since: number, until = Date.now()): CommsLinkCount[] {
     const rows = this.db
       .prepare(
         `SELECT c.from_id AS 'from', c.to_id AS 'to', g.count AS count, c.id AS lastId,
@@ -4009,6 +4011,7 @@ export class Store {
       lastId: `comms:${r.lastId as number}`,
       lastAt: r.lastAt as number,
       lastText: r.lastText as string,
+      tokens: this.commsTokenTotal(r.from as string, r.to as string, null, since, until),
     }));
   }
   /** Hourly direct-link counts for the Comms Traffic chart. */
@@ -4025,23 +4028,32 @@ export class Store {
   commsChatter(
     since: number,
     until = Number.MAX_SAFE_INTEGER,
-  ): { from: string; to: string; ticket: string; rounds: number }[] {
+    flightId?: string,
+  ): {
+    from: string;
+    to: string;
+    ticket: string;
+    rounds: number;
+    tokens: number;
+    flightSteppedInAt: number | null;
+  }[] {
     const rows = this.db
       .prepare(
-        `SELECT "from", "to", ticket,
+        `SELECT "from", "to", ticket, first_at, last_at,
           CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
         FROM (
           SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
             SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
-            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
+            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count,
+            MIN(at) AS first_at, MAX(at) AS last_at
           FROM comms
           WHERE at >= ? AND at <= ? AND ticket IS NOT NULL
             AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
           GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END
         )
-        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
+        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > ?
         ORDER BY rounds DESC, ticket, "from", "to"`,
       )
       .all(
@@ -4053,13 +4065,73 @@ export class Store {
         COMMS_CAPCOM,
         COMMS_MC,
         COMMS_CREW,
+        COMMS_CHATTER_ROUNDS,
       ) as Row[];
     return rows.map((row) => ({
       from: row.from as string,
       to: row.to as string,
       ticket: row.ticket as string,
       rounds: row.rounds as number,
+      tokens: this.commsTokenTotal(
+        row.from as string,
+        row.to as string,
+        row.ticket as string,
+        row.first_at as number,
+        row.last_at as number,
+      ),
+      flightSteppedInAt:
+        flightId === undefined
+          ? null
+          : ((
+              this.db
+                .prepare(
+                  "SELECT MIN(at) AS at FROM comms WHERE from_id = ? AND ticket = ? AND at >= ? AND at <= ?",
+                )
+                .get(flightId, row.ticket, row.first_at, until) as { at: number | null }
+            ).at ?? null),
     }));
+  }
+
+  /** Tokens consumed by either end's runs overlapping a Comms link's observed window. */
+  private commsTokenTotal(
+    from: string,
+    to: string,
+    ticket: string | null,
+    since: number,
+    until: number,
+  ): number {
+    const rows = this.db
+      .prepare(
+        `SELECT tokens FROM runs WHERE agent_id IN (?, ?) AND started_at <= ?
+         AND (ended_at IS NULL OR ended_at >= ?)${ticket === null ? "" : " AND ticket = ?"}`,
+      )
+      .all(
+        ...(ticket === null ? [from, to, until, since] : [from, to, until, since, ticket]),
+      ) as Row[];
+    return rows.reduce((total, row) => {
+      if (row.tokens === null) return total;
+      const tokens = JSON.parse(row.tokens as string) as TokenUsage;
+      return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
+    }, 0);
+  }
+
+  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
+  openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.* FROM comms c
+         WHERE c.label IN ('question', 'blocker') AND c.to_id != ?
+           AND NOT EXISTS (
+             SELECT 1 FROM comms_reactions r WHERE r.message_id = c.id AND r.actor_id = c.to_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM comms reply
+             WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
+           )
+         ORDER BY c.at ASC, c.id ASC`,
+      )
+      .all(COMMS_CREW) as Row[];
+    return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
   }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);

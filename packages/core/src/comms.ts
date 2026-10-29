@@ -5,6 +5,12 @@ export const COMMS_CREW = "crew";
 export const COMMS_RATE_LIMIT_COUNT = 30;
 export const COMMS_RATE_LIMIT_WINDOW_MS = 10 * 60_000;
 export const COMMS_CANT_REASON_MAX = 80;
+/** A labelled question or blocker waits this long for its addressee before FLIGHT is told. */
+export const COMMS_FLIGHT_ESCALATION_MS = 15 * 60_000;
+/** FLIGHT has this additional time to settle an escalated Comms item before CAPCOM decides. */
+export const COMMS_CAPCOM_ESCALATION_MS = 30 * 60_000;
+/** One ticket conversation is chatter once both participants have exceeded this many rounds. */
+export const COMMS_CHATTER_ROUNDS = 6;
 /** The only ticket references accepted at Comms boundaries. */
 export const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 /** A hub-set ticket keeps the repository alongside its issue number. */
@@ -63,6 +69,7 @@ export interface CommsLinkCount {
   from: string;
   to: string;
   count: number;
+  tokens: number;
 }
 export interface CommsTicketContext {
   ref: string;
@@ -97,4 +104,14 @@ export interface CommsPinsResponse {
 }
 export interface CommsLinksResponse {
   links: CommsLinkCount[];
+}
+export interface CommsOpenItem {
+  id: string;
+  label: "question" | "blocker";
+  from: string;
+  to: string;
+  ticket: string | null;
+  waitedMs: number;
+  nextStep: "flight" | "flight-not-triaging";
+  nextAt: number;
 }

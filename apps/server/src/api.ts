@@ -16,7 +16,9 @@ import {
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CAPCOM_ESCALATION_MS,
   COMMS_CREW,
+  COMMS_FLIGHT_ESCALATION_MS,
   COMMS_LABELS,
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
@@ -987,6 +989,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: apps/web/src/pages/Comms.tsx#Comms (unanswered questions and blockers)
+      api.get("/comms/open", () => {
+        const at = now();
+        return {
+          items: store.openCommsItems().map((item) => {
+            const flightAt = item.at + COMMS_FLIGHT_ESCALATION_MS;
+            const atFlight = at >= flightAt;
+            return {
+              id: item.id,
+              label: item.label,
+              from: item.from,
+              to: item.to,
+              ticket: item.ticket,
+              waitedMs: Math.max(0, at - item.at),
+              nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
+              nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+            };
+          }),
+        };
+      });
       // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
       api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
         if (!agentById(req.params.id)) return reply.code(404).send({ error: "unknown agent" });
@@ -1295,7 +1317,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const served = (id: string) => knownCommsAgent(id) || id === COMMS_CREW || id === COMMS_MC;
         return {
           links: store
-            .commsLinkCounts(now() - 24 * 60 * 60 * 1000)
+            .commsLinkCounts(now() - 24 * 60 * 60 * 1000, now())
             .map((link) =>
               served(link.from) && served(link.to)
                 ? link
@@ -1309,7 +1331,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }));
       // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
       api.get("/comms/chatter", () => ({
-        pairs: store.commsChatter(now() - 24 * 60 * 60 * 1000),
+        pairs: store.commsChatter(now() - 24 * 60 * 60 * 1000, now(), flightSeat(config)?.seat.id),
       }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
       api.post("/comms/read", (req, reply) => {

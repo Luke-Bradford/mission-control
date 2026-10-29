@@ -6,6 +6,8 @@ import {
   ATTENTION_LABEL,
   type BoardItem,
   COMMS_CAPCOM,
+  COMMS_CAPCOM_ESCALATION_MS,
+  COMMS_FLIGHT_ESCALATION_MS,
   DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
@@ -2755,6 +2757,35 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       flightTriage: "waiting",
     });
     noRawAsk();
+  });
+
+  it("sends an unanswered labelled Comms item to FLIGHT at 15 minutes, then counts it once", () => {
+    flight();
+    const openedAt = NOW - COMMS_FLIGHT_ESCALATION_MS;
+    const message = store.addComms({
+      at: openedAt,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#706",
+      text: "Which behaviour?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(all(NOW - 1).find((item) => item.key === key)).toBeUndefined();
+    expect(all(NOW).find((item) => item.key === key)).toMatchObject({
+      owner: "flight",
+      flightTriage: "waiting",
+      triageDueAt: NOW + COMMS_CAPCOM_ESCALATION_MS,
+    });
+    const late = NOW + COMMS_CAPCOM_ESCALATION_MS;
+    expect(all(late).find((item) => item.key === key)).toMatchObject({
+      owner: "flight",
+      flightTriage: "missed",
+    });
+    expect(aggregate(late)?.notTriaging?.keys).toEqual([key]);
+    store.addCommsReaction(message.id, "flight-1", "on_it", undefined, late);
+    expect(all(late).find((item) => item.key === key)).toBeUndefined();
   });
 
   it("appears when FLIGHT misses the window, counts the items, and clears once FLIGHT triages them", () => {
