@@ -851,6 +851,28 @@ describe("capacity", () => {
     expect(quota?.projectedExhaustionAt).toBeNull();
   });
 
+  it("does not project exhaustion after the current quota window resets", () => {
+    const resetAt = NOW + HOUR;
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW - 2 * HOUR,
+      pct: 10,
+      resetAt,
+      source: "x",
+    });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW - HOUR,
+      pct: 20,
+      resetAt,
+      source: "x",
+    });
+
+    expect(tel("6h").series?.quota[0]?.projectedExhaustionAt).toBeNull();
+  });
+
   it("counts spend from the sample immediately before the range", () => {
     const since = NOW - 6 * HOUR;
     store.addUsage({

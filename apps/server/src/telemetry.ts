@@ -632,11 +632,17 @@ export function telemetry(
         if (burnPoint) burnPoint.spendPct += spent;
       }
       const totalBurn = burn.reduce((sum, point) => sum + point.spendPct, 0);
-      const latest = points.at(-1);
-      const projectedExhaustionAt =
+      const latest = rangeSamples.at(-1);
+      const candidateExhaustionAt =
         totalBurn === 0 || latest === undefined || latest.pct >= 100
           ? null
           : now + ((100 - latest.pct) * rangeMs) / totalBurn;
+      const projectedExhaustionAt =
+        candidateExhaustionAt !== null &&
+        latest !== undefined &&
+        candidateExhaustionAt < latest.resetAt
+          ? candidateExhaustionAt
+          : null;
       const resets = samples.flatMap((sample, index) => {
         const previous = samples[index - 1];
         if (
