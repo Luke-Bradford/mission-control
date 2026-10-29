@@ -693,6 +693,16 @@ button.f[aria-pressed="true"] {
   color: var(--fg-2);
 }
 
+/* the whole of a long reason: wrapped, and bounded so one refusal cannot fill the panel */
+.run-checklist-full {
+  display: block;
+  max-height: 12em;
+  overflow: auto;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .run-checklist-total {
   color: var(--fg-2);
 }
@@ -705,7 +715,7 @@ button.f[aria-pressed="true"] {
 }
 
 .run-trace {
-  max-width: 1100px;
+  max-width: none;
 }
 
 .trace-head {
@@ -727,7 +737,7 @@ button.f[aria-pressed="true"] {
 /* rows size to their content; each column's sections stack from the top */
 .trace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr);
   grid-auto-rows: auto;
   align-items: start;
   gap: 14px;

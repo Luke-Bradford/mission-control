@@ -1,11 +1,12 @@
 import {
   type LoopTry,
+  pushChecksText,
   REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_RUNNING,
   type RunLoopView,
   type RunView,
 } from "@mc/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RunChecklist, RunTrace } from "../src/agent/RunTrace.tsx";
 
@@ -188,5 +189,33 @@ describe("Run trace", () => {
       />,
     );
     expect(screen.getByText(REVIEW_STATUS_BLOCKED)).toBeTruthy();
+  });
+
+  it("shows a parked step's refusal as one line, whole on one click and only once", () => {
+    const refusal = pushChecksText("80001f8abcdef", [
+      { command: "pnpm -s test", state: "missing" },
+    ]);
+    const parked = {
+      ...view,
+      events: [
+        { key: "p", runId: "run/alpha", text: `parked: ${refusal}`, at: NOW - 1_000 },
+        { key: "q", runId: "run/alpha", text: "CI started", at: NOW - 3_000 },
+      ],
+      tries: [{ ...tries[1], endedAt: null, outcome: "parked" as const, reason: refusal }],
+    };
+    const { container } = render(
+      <RunTrace runId="parked" view={parked} startedAt={NOW - 9_000} endedAt={null} now={NOW} />,
+    );
+    const line = "push refused: `pnpm -s test` not run on 80001f8";
+    // the timeline, Next and the event each say the short line; none carries the whole text
+    expect(screen.getAllByText(new RegExp(line.replace(/[`$()]/g, "\\$&"))).length).toBe(3);
+    const whole = (el: Element) => el.textContent?.includes("have not all passed");
+    expect([...container.querySelectorAll("details")].filter(whole)).toHaveLength(1);
+    expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
+    fireEvent.click(container.querySelector("summary") as HTMLElement);
+    const opened = container.querySelector("details") as HTMLDetailsElement;
+    expect(opened.textContent).toContain("have not all passed on this exact commit");
+    // the complete refusal appears in one place only
+    expect(container.textContent?.split("have not all passed")).toHaveLength(2);
   });
 });
