@@ -207,10 +207,10 @@ CREATE TABLE IF NOT EXISTS review_resolutions (
 );
 -- One row per check run of a PR head, kept as the hub polled it: updated in place as it concludes.
 CREATE TABLE IF NOT EXISTS ci_runs (
-  repo_id TEXT NOT NULL, sha TEXT NOT NULL, name TEXT NOT NULL, attempt INTEGER NOT NULL,
-  pr_number INTEGER NOT NULL, workflow TEXT, state TEXT NOT NULL, conclusion TEXT NOT NULL, url TEXT,
-  first_seen_at INTEGER NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (repo_id, sha, name, attempt)
+  repo_id TEXT NOT NULL, run_key TEXT NOT NULL, sha TEXT NOT NULL, name TEXT NOT NULL,
+  attempt INTEGER NOT NULL, pr_number INTEGER NOT NULL, workflow TEXT, state TEXT NOT NULL,
+  conclusion TEXT NOT NULL, url TEXT, first_seen_at INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, run_key)
 );
 CREATE INDEX IF NOT EXISTS ci_runs_at ON ci_runs(at);
 -- A repo's milestones as GitHub last answered, replaced whole on each read.
@@ -2182,10 +2182,10 @@ export class Store {
          (json_extract(record, '$.changedFiles') IS NULL AND ? IS NOT NULL))`,
     );
     const addCiRun = this.db.prepare(
-      `INSERT INTO ci_runs (repo_id, sha, name, attempt, pr_number, workflow, state, conclusion, url,
-         first_seen_at, at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(repo_id, sha, name, attempt) DO UPDATE SET pr_number = excluded.pr_number,
+      `INSERT INTO ci_runs (repo_id, run_key, sha, name, attempt, pr_number, workflow, state,
+         conclusion, url, first_seen_at, at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(repo_id, run_key) DO UPDATE SET pr_number = excluded.pr_number,
          workflow = excluded.workflow, state = excluded.state, conclusion = excluded.conclusion,
          url = excluded.url, at = excluded.at`,
     );
@@ -2194,6 +2194,11 @@ export class Store {
         for (const c of p.checks ?? [])
           addCiRun.run(
             repoId,
+            // a check run is its GraphQL id; a status (or a row stored without one) is told apart
+            // by what names it on this commit
+            c.id !== undefined
+              ? `run:${c.id}`
+              : [c.kind, p.headSha, c.workflow ?? "", c.name, c.attempt ?? 0].join(":"),
             p.headSha,
             c.name,
             c.attempt ?? 0,
@@ -4219,7 +4224,7 @@ export class Store {
     this.db.prepare("DELETE FROM test_lock_holds WHERE run_id = ?").run(runId);
     this.db
       .prepare(
-        "UPDATE test_lock_runs SET ended_at = ?, outcome = 'freed' WHERE run_id = ? AND ended_at IS NULL",
+        "UPDATE test_lock_runs SET ended_at = ?, outcome = CASE WHEN outcome = 'fail' THEN 'fail' ELSE 'freed' END WHERE run_id = ? AND ended_at IS NULL",
       )
       .run(at, runId);
   }

@@ -14,6 +14,7 @@ import {
   isTransient,
   makeGql,
   missingScopeLine,
+  parseChecks,
   projectUrlOf,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
@@ -1389,6 +1390,17 @@ describe("collectGithub size", () => {
     });
     await collectGithub(repo, store, gql, NOW);
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+  });
+});
+
+describe("parseChecks", () => {
+  it("carries a check run's node id, and none for a status", () => {
+    const rollup = {
+      contexts: {
+        nodes: [{ ...checkRun("test", "SUCCESS"), id: "CR_1" }, statusContext("ci/x", "SUCCESS")],
+      },
+    };
+    expect(parseChecks(rollup).map((c) => c.id)).toEqual(["CR_1", undefined]);
   });
 });
 

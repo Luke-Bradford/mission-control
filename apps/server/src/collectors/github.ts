@@ -202,7 +202,7 @@ export const TICKET_BODY_MAX = 20_000;
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
-export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state targetUrl } } } }`;
+export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state targetUrl } } } }`;
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
@@ -1044,6 +1044,7 @@ export function parseChecks(rollup: unknown): PrCheck[] {
       if (name === "") continue;
       const attempt = path(n, "checkSuite", "workflowRun", "runAttempt");
       out.push({
+        ...(typeof n.id === "string" ? { id: n.id } : {}),
         name,
         ...(typeof path(n, "checkSuite", "workflowRun", "workflow", "name") === "string"
           ? { workflow: path(n, "checkSuite", "workflowRun", "workflow", "name") as string }

@@ -746,6 +746,73 @@ describe("Store", () => {
     expect(store.ciRuns(2500).map((r) => r.name)).toEqual(["lint", "test"]);
   });
 
+  it("keeps two same-name, same-attempt check runs of different workflows apart", () => {
+    const check = (id: string | undefined, workflow: string, over: object = {}) => ({
+      ...(id === undefined ? {} : { id }),
+      workflow,
+      name: "test",
+      kind: "check" as const,
+      state: "passing" as const,
+      conclusion: "SUCCESS",
+      attempt: 1,
+      url: `https://example.test/${workflow}`,
+      ...over,
+    });
+    const pr = {
+      repoId: "r1",
+      number: 5,
+      title: "t",
+      url: "u",
+      branch: "b",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: "sha1",
+      mergeable: null,
+    };
+    // same id-less shape, different workflow; and same workflow under two ids
+    store.upsertPullRequests(
+      "r1",
+      [
+        {
+          ...pr,
+          checks: [
+            check("A", "CI"),
+            check("B", "CI", { state: "failing", conclusion: "FAILURE" }),
+            check(undefined, "Docs"),
+          ],
+        },
+      ],
+      1000,
+    );
+    store.upsertPullRequests(
+      "r1",
+      [
+        {
+          ...pr,
+          checks: [
+            check("A", "CI"),
+            check("B", "CI", { state: "failing", conclusion: "FAILURE" }),
+            check(undefined, "Docs"),
+          ],
+        },
+      ],
+      2000,
+    );
+    const rows = store.ciRuns(0);
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => [r.workflow, r.state]).sort()).toEqual([
+      ["CI", "failing"],
+      ["CI", "passing"],
+      ["Docs", "passing"],
+    ]);
+  });
+
   it("keeps ci_runs ninety days", async () => {
     const pr = {
       repoId: "r1",
@@ -2448,6 +2515,15 @@ describe("test lock history", () => {
     expect(store.lockRuns(0)[0]).toMatchObject({ runId: "r3", endedAt: null, outcome: "fail" });
     store.deleteLockHold("r3", "two", 7000, false);
     expect(store.lockRuns(0)[0]).toMatchObject({ runId: "r3", endedAt: 7000, outcome: "fail" });
+  });
+
+  it("keeps a recorded failure when the run ends before its other call posts", () => {
+    const h = { runId: "r1", seatId: "a1", command: "pnpm test", toolUseId: "one", since: 1000 };
+    store.addLockHold(h);
+    store.addLockHold({ ...h, toolUseId: "two", since: 1001 });
+    store.deleteLockHold("r1", "one", 2000, true);
+    store.deleteLockHolds("r1", 3000);
+    expect(store.lockRuns(0)[0]).toMatchObject({ endedAt: 3000, outcome: "fail" });
   });
 
   it("prunes history strictly older than ninety days on the next insert", () => {
