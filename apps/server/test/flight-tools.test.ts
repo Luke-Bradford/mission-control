@@ -7289,6 +7289,30 @@ describe("brief_item with a hold (#760)", () => {
     expect(store.briefs().has(key)).toBe(false);
   });
 
+  it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {
+    store.raiseNote({
+      key: "blocked:other",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Other",
+      at: NOW - 1,
+    });
+    const other = "note:blocked:other";
+    expect(
+      (await call("brief_item", brief({ key, hold: { condition: { kind: "item", key: other } } })))
+        .isError,
+    ).not.toBe(true);
+    const r = await call(
+      "brief_item",
+      brief({ key: other, hold: { condition: { kind: "item", key } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[other]).toBeUndefined();
+    expect(store.briefs().has(other)).toBe(false);
+  });
+
   it("refuses a manual hold, which would never resurface", async () => {
     const r = await call("brief_item", brief({ hold: { condition: { kind: "manual" } } }));
     expect(r.isError).toBe(true);

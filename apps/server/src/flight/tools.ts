@@ -303,6 +303,7 @@ import {
   attentionHoldError,
   heldRun,
   holdItem,
+  holds,
   protectedDecisionItem,
   releaseHold,
 } from "../attention-holds.ts";
@@ -2187,9 +2188,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (hold?.condition.kind === "item") {
       const waitsOn = hold.condition.key;
+      // an active chain of item holds that leads back here would never release
+      const all = holds(store);
+      const seen = new Set<string>();
+      let cycle = false;
+      for (let next: string | undefined = waitsOn; next !== undefined && !seen.has(next); ) {
+        if (next === key) cycle = true;
+        seen.add(next);
+        const h: (typeof all)[string] | undefined = all[next];
+        next =
+          h?.releasedAt === undefined && h?.condition.kind === "item" ? h.condition.key : undefined;
+      }
       const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, () => null).rows;
       if (
-        waitsOn === key ||
+        cycle ||
         !attentionItems(
           config,
           store,
@@ -2200,7 +2212,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           true,
         ).some((i) => i.key === waitsOn)
       )
-        return fail("Not held: the item to wait on is this one or is no longer waiting.");
+        return fail(
+          "Not held: the item to wait on is this one, waits on this one or is no longer waiting.",
+        );
     }
     // whether the operator already had this item with FLIGHT's brief, before this one replaces it
     const prior = store.briefs().get(key);
