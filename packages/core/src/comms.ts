@@ -9,6 +9,8 @@ export const COMMS_CANT_REASON_MAX = 80;
 export const COMMS_FLIGHT_ESCALATION_MS = 15 * 60_000;
 /** FLIGHT has this additional time to settle an escalated Comms item before CAPCOM decides. */
 export const COMMS_CAPCOM_ESCALATION_MS = 30 * 60_000;
+/** The Needs-you key prefix of an unanswered labelled question or blocker; the Comms id follows. */
+export const COMMS_OPEN_PREFIX = "comms-open:";
 /** Unanswered Comms from before this feature shipped do not enter FLIGHT triage. */
 export const COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT = Date.parse("2026-10-29T07:26:35Z");
 /** One ticket conversation is chatter once both participants have exceeded this many rounds. */
