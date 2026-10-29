@@ -19,7 +19,7 @@ import {
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
-import { MapTreemap } from "./MapTreemap.tsx";
+import { historyHeat, MapTreemap } from "./MapTreemap.tsx";
 import { layoutTree } from "./model.ts";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
 import "./map.css";
@@ -493,11 +493,17 @@ function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
   );
 }
 
-function KeySteps({ tone }: { tone: "impact" | "history" }) {
+function KeySteps({ tone }: { tone: "impact" | "focus" | "history" }) {
+  const heatBands = tone === "history" ? [1, 3, 10, 30].map(historyHeat) : null;
   return (
     <span className={`map-key-steps map-key-steps-${tone}`} aria-hidden="true">
       {[1, 2, 3, 4].map((step) => (
-        <i className={`map-key-swatch map-key-swatch-${step}`} key={step} />
+        <i
+          className={`map-key-swatch map-key-swatch-${step}`}
+          data-opacity={heatBands?.[step - 1]}
+          key={step}
+          style={heatBands ? { opacity: heatBands[step - 1] } : undefined}
+        />
       ))}
     </span>
   );
@@ -522,7 +528,7 @@ function AnalyticalMapKey({
           {reach.size} depend on it
         </span>
         <span className="map-key-item">
-          <KeySteps tone="history" /> 1 · 2 · 3 · 4+ steps away
+          <KeySteps tone="focus" /> 1 · 2 · 3 · 4+ steps away
         </span>
         <span className="map-key-item">
           <i className="map-key-swatch map-key-outline" aria-hidden="true" /> it imports (
@@ -550,9 +556,6 @@ function AnalyticalMapKey({
       </span>
       <span className="map-key-item">
         <i className="map-key-swatch map-key-fix" aria-hidden="true" /> fixed often
-      </span>
-      <span className="map-key-item">
-        <i className="map-key-swatch map-key-outline" aria-hidden="true" /> changing now
       </span>
     </div>
   );

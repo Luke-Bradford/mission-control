@@ -312,9 +312,13 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
   expect(document.body.textContent).toContain("1–2 PRs");
   expect(document.body.textContent).toContain("30+ PRs");
+  const historyKey = screen.getByRole("note", { name: "History PR heat scale" });
+  expect(historyKey.querySelectorAll(".map-key-swatch")).toHaveLength(5);
   expect(
-    screen.getByRole("note", { name: "History PR heat scale" }).querySelectorAll(".map-key-swatch"),
-  ).toHaveLength(6);
+    [...historyKey.querySelectorAll(".map-key-steps-history .map-key-swatch")].map((swatch) =>
+      Number(swatch.getAttribute("data-opacity")),
+    ),
+  ).toEqual([0.16, 0.36, 0.6, 0.85]);
   const history = screen.getByRole("region", { name: "History lens" });
   expect(history.textContent).toContain("PRs · fixes");
   expect(document.body.textContent).toContain("hidden change coupling");

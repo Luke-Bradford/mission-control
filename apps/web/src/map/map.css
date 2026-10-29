@@ -356,6 +356,7 @@
 .map-key-steps-impact {
   --key-colour: var(--seat-1);
 }
+.map-key-steps-focus,
 .map-key-steps-history {
   --key-colour: var(--accent);
 }
