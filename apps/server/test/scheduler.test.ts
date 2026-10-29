@@ -1046,6 +1046,44 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it.each([
+      ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
+      [
+        "percentage disk",
+        { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
+        "disk free is 4.0%",
+      ],
+      ["swap", { swapUsedBytes: 86, swapTotalBytes: 100 }, "swap is 86.0% used"],
+      ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
+    ])("raises exactly one capacity item for %s", async (_name, over, reason) => {
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: 20 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              swapUsedBytes: 1,
+              swapTotalBytes: 100,
+              memoryPressureFreePct: 20,
+              load1: 1,
+              ...over,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      const notes = store.notes().filter((n) => n.key === "machine-capacity");
+      expect(notes).toHaveLength(1);
+      expect(notes[0]?.text).toContain(reason);
+    });
+
     it("writes collector status when ok/error changes and otherwise once a minute", async () => {
       let t = NOW;
       let errors: string[] = [];

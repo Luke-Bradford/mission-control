@@ -22,7 +22,11 @@ const sample = (over: Partial<MachineSample> = {}): MachineSample => ({
 describe("machineCapacity", () => {
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free"],
-    ["percentage disk", { diskFreeBytes: 4 * 1024 ** 3 }, "disk free"],
+    [
+      "percentage disk",
+      { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
+      "disk free",
+    ],
     ["swap", { swapUsedBytes: 86 }, "swap"],
     ["memory", { memoryPressureFreePct: 9 }, "memory free"],
   ])("blocks on %s", (_name, over, reason) => {
