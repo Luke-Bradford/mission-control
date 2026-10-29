@@ -198,6 +198,119 @@ describe("Instrument charts", () => {
     expect(container.querySelector("#tFlow svg")?.getAttribute("aria-label")).toContain(
       "in progress latest 1",
     );
+    expect(container.querySelector("#tFlow path.line")?.getAttribute("d")).toContain("556.0");
+  });
+
+  it("carries work that entered before the range through the flow chart to now", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={10}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#open", readyAt: 5, startedAt: 5, mergedAt: null, doneAt: null },
+          ],
+        }}
+      />,
+    );
+    const path = container.querySelector("#tFlow path.line")?.getAttribute("d") ?? "";
+    expect(path).toContain("38.0");
+    expect(path).toContain("556.0");
+  });
+
+  it("plots the served open-work, daily quality, full ticket cost, and bounded forecast series", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <InstrumentCharts
+          scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+          from={0}
+          to={60}
+          series={{
+            stateSpans: [],
+            quota: [],
+            annotations: [{ at: 30, kind: "hub-update", cause: "Updated Mission Control" }],
+            tickets: [
+              { ticket: "repo#open", readyAt: 10, startedAt: 10, mergedAt: null, doneAt: null },
+              { ticket: "repo#merged", readyAt: -5, startedAt: -5, mergedAt: 40, doneAt: 45 },
+            ],
+            quality: [
+              {
+                at: 10,
+                ciGreenFirstPushPct: 80,
+                reviewRoundsPerPr: 1,
+                firstPassReviewPct: 100,
+              },
+              {
+                at: 30,
+                ciGreenFirstPushPct: null,
+                reviewRoundsPerPr: null,
+                firstPassReviewPct: null,
+              },
+              {
+                at: 50,
+                ciGreenFirstPushPct: 90,
+                reviewRoundsPerPr: 2,
+                firstPassReviewPct: 50,
+              },
+            ],
+            throughput: [
+              { at: 0, merged: 1 },
+              { at: 30, merged: 3 },
+            ],
+          }}
+          ticketCosts={[{ ticket: "repo#merged", tokens: 0, costUsd: 0.25, totalCostUsd: 1.5 }]}
+        />
+      </ChartCursorProvider>,
+    );
+    expect(container.querySelector("#tFlow svg")?.getAttribute("aria-label")).toContain(
+      "in progress latest 1",
+    );
+    expect(container.querySelectorAll("#tQualityTrend path.line")).toHaveLength(3);
+    expect(
+      container.querySelector("#tQualityTrend path.line")?.getAttribute("d")?.match(/M/g),
+    ).toHaveLength(2);
+    expect(container.querySelector("#tQualityTrend .annotation")).not.toBeNull();
+    expect(container.querySelector("#tCostMerged svg")?.getAttribute("aria-label")).toContain(
+      "cost per merged ticket latest $1.50",
+    );
+    expect(container.querySelector("#tCostMerged")?.textContent).toContain("In range: $0.25");
+    expect(container.querySelector("#tForecast svg")?.getAttribute("aria-label")).toContain(
+      "throughput latest 3",
+    );
+    const quality = container.querySelector("#tQualityTrend svg") as SVGSVGElement;
+    fireEvent.focus(quality);
+    fireEvent.keyDown(quality, { key: "ArrowLeft" });
+    expect(quality.parentElement?.querySelector(".tip")?.textContent).toContain(
+      "Updated Mission Control",
+    );
+  });
+
+  it("does not substitute a range cost when full ticket cost is explicitly unavailable", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#merged", readyAt: 10, startedAt: 10, mergedAt: 40, doneAt: 45 },
+          ],
+        }}
+        ticketCosts={[{ ticket: "repo#merged", tokens: 0, costUsd: 0.25, totalCostUsd: null }]}
+      />,
+    );
+    expect(container.querySelector("#tCostMerged")?.textContent).toContain(
+      "No API-equivalent cost was reported for merged tickets.",
+    );
+    expect(container.querySelector("#tCostMerged svg")).toBeNull();
+    expect(container.querySelector("#tCostMerged")?.textContent).toContain("In range: $0.25");
   });
 
   it("renders only the supplied server observations, retaining their timestamps", () => {
@@ -232,7 +345,7 @@ describe("Instrument charts", () => {
     expect(container.querySelectorAll("#tFlow path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
-    expect(getByRole("heading", { name: "Cost in range per merged ticket" })).toBeTruthy();
+    expect(getByRole("heading", { name: "Full cost per merged ticket" })).toBeTruthy();
     expect(container.querySelectorAll("#tCrewState .legend span")).toHaveLength(4);
     expect(container.querySelectorAll("#tFlow .legend span")).toHaveLength(2);
     const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
