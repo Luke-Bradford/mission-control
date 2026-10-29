@@ -4,11 +4,13 @@ import { Header } from "../agent/Header.tsx";
 import { NeedBanner } from "../agent/NeedBanner.tsx";
 import { Picker } from "../agent/Picker.tsx";
 import { RunsPanel } from "../agent/RunsPanel.tsx";
+import { RunTracePanel } from "../agent/RunTrace.tsx";
 import { SideTabs } from "../agent/SideTabs.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
@@ -26,6 +28,7 @@ export function Agent({ id }: { id: string | null }) {
   const tz = useTz();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
+  const traceRun = new URLSearchParams(useSearch()).get("trace");
 
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
   const inView = all?.filter((r) => matchesSession(r)) ?? [];
@@ -74,13 +77,17 @@ export function Agent({ id }: { id: string | null }) {
         <>
           <NeedBanner row={row} items={items} />
           <Header row={row} limits={limits} />
-          <div className="agrid">
-            <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-            <div className="side">
-              <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
-              <SideTabs key={`t:${row.id}`} row={row} />
+          {traceRun ? (
+            <RunTracePanel agentId={row.id} runId={traceRun} />
+          ) : (
+            <div className="agrid">
+              <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+              <div className="side">
+                <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
+                <SideTabs key={`t:${row.id}`} row={row} />
+              </div>
             </div>
-          </div>
+          )}
         </>
       ) : (
         <p className={crew.error && !crew.data ? "pb crit-t" : "pb muted"}>{missing}</p>

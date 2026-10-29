@@ -18,10 +18,11 @@ import { Pill } from "../hud/Pill.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { navigate, useSearch } from "../router.ts";
+import { followLink, navigate, tracePath, useSearch } from "../router.ts";
 import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
 import { LoopTimeline } from "./LoopTimeline.tsx";
 import { type LoopLimits, runLimits } from "./loopView.ts";
+import { RunChecklist } from "./RunTrace.tsx";
 import { reviewPark, WaiveReviewFindings } from "./reviewPark.tsx";
 
 const DASH = "—";
@@ -159,6 +160,15 @@ export const RunRow = memo(function RunRow({
       <RunTimes run={run} tz={tz} onRender={onTimeRender} />
       <span className="num right">{tokens}</span>
       <span className="num right">{cost(run.costUsd)}</span>
+      {run.loop && (
+        <a
+          className="xs"
+          href={tracePath(row.id, run.id)}
+          onClick={(e) => followLink(e, tracePath(row.id, run.id))}
+        >
+          Trace
+        </a>
+      )}
       {run.endedAt === null && run.loop?.aside && run.id !== row.run?.id && (
         // a set-aside run the seat has moved on from; the wrapper keeps the click off the row
         // biome-ignore lint/a11y/useKeyWithClickEvents: the button inside is the keyboard route
@@ -300,12 +310,16 @@ export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   const budget = loopView.data?.loop && loopView.data.round != null && (
     <Budget view={loopView.data} tokens={row.run?.tokens} limits={limits} />
   );
+  const trace = row.loop && row.run ? tracePath(row.id, row.run.id) : null;
 
   let body: ReactNode;
   if (view === "steps") {
     body = (
       <>
         {budget}
+        {loopView.data && Array.isArray(loopView.data.tries) && (
+          <RunChecklist view={loopView.data} now={Date.now()} />
+        )}
         <TimedLoopBody row={row} view={loopView.data} prs={repoPrs} limits={limits} kind="steps" />
       </>
     );
@@ -362,12 +376,19 @@ export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
             : undefined
       }
       actions={
-        <Seg
-          label="Runs view"
-          options={VIEWS}
-          value={view}
-          onChange={(v) => setPicked({ view: v, inFlight, runId })}
-        />
+        <>
+          {trace && (
+            <a className="xs" href={trace} onClick={(e) => followLink(e, trace)}>
+              Trace
+            </a>
+          )}
+          <Seg
+            label="Runs view"
+            options={VIEWS}
+            value={view}
+            onChange={(v) => setPicked({ view: v, inFlight, runId })}
+          />
+        </>
       }
     >
       <div className="pb scroll" id="loopBody">

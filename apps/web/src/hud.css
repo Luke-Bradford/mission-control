@@ -2870,6 +2870,61 @@ pre.diff .h {
 .runrow .rticket > * {
   flex: none;
 }
+.run-checklist {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.run-checklist > li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+.run-checklist-note,
+.run-checklist-next {
+  display: block;
+  font-size: var(--type-sm);
+  color: var(--fg-2);
+}
+.run-checklist-total {
+  color: var(--fg-2);
+}
+.run-trace {
+  max-width: 1100px;
+}
+.trace-head {
+  margin-bottom: 16px;
+}
+.trace-head h1 {
+  margin: 2px 0;
+  font-size: var(--type-xl);
+}
+.trace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 16px;
+}
+.trace-section {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.trace-section h2 {
+  margin: 0 0 7px;
+  font-size: var(--type-md);
+}
+.trace-section p {
+  margin: 4px 0;
+}
+@media (max-width: 700px) {
+  .trace-grid {
+    grid-template-columns: 1fr;
+  }
+}
 /* a PR chip's link and its Merged/Closed pill wrap as one */
 .rpr {
   display: inline-flex;

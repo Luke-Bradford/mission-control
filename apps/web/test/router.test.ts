@@ -17,6 +17,7 @@ import {
   SETUP_TABS,
   setupPath,
   ticketPath,
+  tracePath,
   withoutAddAgentParam,
 } from "../src/router.ts";
 
@@ -140,6 +141,7 @@ describe("isPopout()", () => {
 describe("path helpers", () => {
   it("encode every part and round-trip through route()", () => {
     expect(agentPath("a b")).toBe("/agent/a%20b");
+    expect(tracePath("a b", "run/x")).toBe("/agent/a%20b?trace=run%2Fx");
     expect(boardPath("a/b")).toBe("/board/a%2Fb");
     expect(ticketPath("shop-app", 3227)).toBe("/board/shop-app/3227");
     expect(itemPath("esc:shop-app#3227")).toBe("/comms/esc%3Ashop-app%233227");

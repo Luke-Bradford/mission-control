@@ -140,21 +140,21 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   }
   expect(
     screen.getByRole("link", { name: "Long runner · 9h 0m · run/alpha" }).getAttribute("href"),
-  ).toBe("/agent/inco-cx?run=run%2Falpha");
+  ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(screen.getByRole("link", { name: /PR #701/i }).getAttribute("href")).toBe(
     "/board/mission-control",
   );
   expect(
     screen.getByRole("link", { name: "Death loop · 4 parks · run/death" }).getAttribute("href"),
-  ).toBe("/agent/retro-cx?run=run%2Fdeath");
+  ).toBe("/agent/retro-cx?trace=run%2Fdeath");
   expect(
     screen.getByRole("link", { name: "Rework · 3 rounds · run/rework" }).getAttribute("href"),
-  ).toBe("/agent/guido-cx?run=run%2Frework");
+  ).toBe("/agent/guido-cx?trace=run%2Frework");
   expect(screen.getByRole("link", { name: "Trace run/large" }).getAttribute("href")).toBe(
-    "/agent/surgeon-cx?run=run%2Flarge",
+    "/agent/surgeon-cx?trace=run%2Flarge",
   );
   expect(screen.getByRole("link", { name: /Flake · web test/i }).getAttribute("href")).toBe(
-    "/agent/guido-cx?run=run%2Fflaky",
+    "/agent/guido-cx?trace=run%2Fflaky",
   );
   expect(screen.getByText("Use smaller PRs")).toBeTruthy();
   expect(screen.getByText("changed · cycle 1h 0m → 30m · cost $2.00 → $1.00")).toBeTruthy();

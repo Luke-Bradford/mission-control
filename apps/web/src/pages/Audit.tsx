@@ -3,6 +3,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { tracePath } from "../router.ts";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];
@@ -113,11 +114,7 @@ function RunLink({
   children: string;
 }) {
   if (!row.runId || !row.agentId) return <span>{children}</span>;
-  return (
-    <a href={`/agent/${encodeURIComponent(row.agentId)}?run=${encodeURIComponent(row.runId)}`}>
-      {children}
-    </a>
-  );
+  return <a href={tracePath(row.agentId, row.runId)}>{children}</a>;
 }
 function Empty({ collected = true }: { collected?: boolean }) {
   return <p className="s fg2">{collected ? "No findings in this range." : "Not collected yet."}</p>;
