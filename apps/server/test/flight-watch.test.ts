@@ -829,6 +829,16 @@ describe("FLIGHT's brief in the digest", () => {
       expect(status()).toEqual({ ...woke, nextWakeAt: woke?.nextWakeAt ?? null });
     });
 
+    it("calls a backstop re-wake a reminder, as the digest does", async () => {
+      liveCrew();
+      ask();
+      await watch.check();
+      nowMs += FLIGHT_REWAKE_MS + MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      expect(status()?.wokeOn).toEqual(["reminder"]);
+    });
+
     it("leaves a failed send unrecorded", async () => {
       liveCrew();
       ask();

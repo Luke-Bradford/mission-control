@@ -17,6 +17,7 @@ import {
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
+  FLIGHT_WAKE_REMINDER,
   type FlightState,
   flightDownText,
   flightStartFailedText,
@@ -421,7 +422,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        recordFlightWake(store, found.session.repoId, t, causes);
+        recordFlightWake(
+          store,
+          found.session.repoId,
+          t,
+          causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER],
+        );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {
