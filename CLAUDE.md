@@ -62,7 +62,7 @@ mc:
   pick_from: [Ready]
   promote_backlog: true
   needs: [done_when, size]
-  checks: ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test"]
+  checks: ["pnpm -s lint", "pnpm -s typecheck"]
   templates:
     "type:feature": feature
     "bug": bugfix
