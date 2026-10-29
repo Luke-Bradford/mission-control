@@ -324,6 +324,7 @@ import {
   attentionItems,
   crew,
   isOperatorCall,
+  NO_CLI_VERSION,
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
@@ -2192,7 +2193,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (hold?.condition.kind === "item") {
       const waitsOn = hold.condition.key;
-      const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, () => null).rows;
+      const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
       if (
         holdCycle(store, key, hold.condition) ||
         !attentionItems(
@@ -3069,7 +3070,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (a.key.startsWith("comms-open:")) {
           const messageId = a.key.slice("comms-open:".length);
           const message = store.openCommsItems().find((item) => item.id === messageId);
-          const rows = crew(config, store, now(), NO_LOCK, () => null).rows;
+          const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
             (candidate) => candidate.key === a.key && candidate.owner === "flight",
           );
@@ -3106,7 +3107,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           (pr !== undefined && pr.state !== "open") ||
           (run !== null && run.endedAt !== null) ||
           card?.closed === true;
-        const rows = crew(config, store, now(), NO_LOCK, () => null).rows;
+        const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
         const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
           (i) => i.key === a.key,
         );
@@ -3146,7 +3147,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const a = parsed.data;
         // the operator's alone: FLIGHT clears it by triaging what it counts, never by holding it
         if (a.key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
-        const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, () => null).rows;
+        const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, NO_CLI_VERSION).rows;
         if (
           !attentionItems(
             config,
