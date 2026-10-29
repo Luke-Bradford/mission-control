@@ -19,11 +19,11 @@
   --seat-1: #3987e5;
   --seat-2: #d95926;
   --seat-3: #199e70;
-  --seat-4: #c98500;
+  --seat-4: #a36a00;
   --seat-5: #d55181;
   --seat-6: #008300;
-  --seat-7: #9085e9;
-  --seat-flight: #aab2bf;
+  --seat-7: #7567cb;
+  --seat-flight: #707b8c;
   display: flex;
   flex-direction: column;
   gap: 10px;
