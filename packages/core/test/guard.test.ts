@@ -154,6 +154,7 @@ describe("scratch mode", () => {
   it.each([
     "merge_pr",
     "settle_park",
+    "hold_pr",
     "rerun_ci",
     "edit_card",
     "dismiss_item",

@@ -1354,6 +1354,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
+  ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -7775,6 +7776,98 @@ describe("operator token", () => {
       });
       expect(r.statusCode).toBe(409);
       expect(r.json().error).toContain("controller-check");
+    });
+  });
+
+  describe("merge hold route", () => {
+    const calls: unknown[][] = [];
+    let noWrites = false;
+    let on = true;
+    let app: FastifyInstance;
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const post = (headers: Record<string, string>, payload: object, id = "mh") =>
+      app.inject({
+        method: "POST",
+        url: `/api/runs/${id}/merge-hold`,
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      calls.length = 0;
+      noWrites = false;
+      on = true;
+      store.upsertRun(
+        run({ id: "mh", agentId: "guido-1", loop: { ...NEW_LOOP, phase: "ci", prNumber: 12 } }),
+      );
+      store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        get noLoopWrites() {
+          return noWrites;
+        },
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on, note: null }),
+          holdMerge: async (...a) => {
+            calls.push(["hold", ...a]);
+            return { ok: true };
+          },
+          releaseMergeHold: async (...a) => {
+            calls.push(["release", ...a]);
+            return { ok: false, text: "the run's merge is not held" };
+          },
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { action: "release" })).statusCode).toBe(401);
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a bad body, an unknown run and a run without a loop", async () => {
+      for (const payload of [
+        {},
+        { action: "hold" },
+        { action: "hold", reason: "  " },
+        { action: "x" },
+      ])
+        expect((await post(key, payload)).statusCode, JSON.stringify(payload)).toBe(400);
+      expect((await post(key, { action: "release" }, "nope")).statusCode).toBe(404);
+      expect((await post(key, { action: "release" }, "plain")).statusCode).toBe(404);
+      expect(calls).toEqual([]);
+    });
+
+    it("holds and releases as the controller, and names a refusal", async () => {
+      expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
+      const refused = await post(key, { action: "release" });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain("not held");
+      expect(calls).toEqual([
+        ["hold", "mh", "CAPCOM", "design vetoed"],
+        ["release", "mh", "CAPCOM"],
+      ]);
+    });
+
+    it("answers 409 when loop writes or the engine are off", async () => {
+      noWrites = true;
+      expect((await post(key, { action: "release" })).statusCode).toBe(409);
+      noWrites = false;
+      on = false;
+      expect((await post(key, { action: "release" })).statusCode).toBe(409);
+      expect(calls).toEqual([]);
     });
   });
 

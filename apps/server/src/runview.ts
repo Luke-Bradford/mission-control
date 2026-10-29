@@ -45,6 +45,9 @@ export function runPrs(
       url: row?.url ?? `https://github.com/${configured.github}/pull/${number}`,
       state: row?.state ?? null,
       ticket: row?.ticket ?? null,
+      ...(run.loop?.mergeHold && run.loop.prNumber === number
+        ? { hold: { by: run.loop.mergeHold.by, reason: run.loop.mergeHold.reason } }
+        : {}),
     });
   }
   return out;

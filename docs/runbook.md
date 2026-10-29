@@ -845,6 +845,25 @@ A plain resume or message does not lift this park, and neither does FLIGHT. A pa
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
+### Hold a run from merging
+
+To stop the engine merging a run's PR whatever its review and CI say (an unapproved design, a
+product call, a security question), put a hold on the run while it is in CI or review:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/merge-hold -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"action":"hold","reason":"design not approved"}'
+```
+
+The hold and its reason show on the run and on its PR (`hold`). When the run would otherwise merge, it
+parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it merges only after
+`{"action":"release"}` on the same route, which returns it to the phase it left. A plain resume or
+message does not lift this park. A new push keeps the hold.
+
+FLIGHT has the same power on a superuser repo with `mc hold_pr { runId, action, reason, basis }`, logged
+as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
+may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
+to hold, or the hold is the controller's and the caller is FLIGHT.
+
 ## What it observes
 
 | Collector | Source | Cadence |

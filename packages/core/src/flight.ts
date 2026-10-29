@@ -62,6 +62,7 @@ export const FLIGHT_DECISION_KINDS = [
   "card",
   "dismiss",
   "brief",
+  "hold",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
