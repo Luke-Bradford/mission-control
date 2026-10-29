@@ -1,5 +1,5 @@
 import type { MapSnapshot } from "@mc/core";
-import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LensVisual, MapLens } from "./Lenses.tsx";
 
 const colours = [
@@ -14,7 +14,13 @@ const colours = [
 type Rect = { x: number; y: number; width: number; height: number };
 export type TreemapTile = Rect & { path: string; center: [number, number] };
 export type TreemapFolder = Rect & { path: string; name: string };
-type Branch = { path: string; name: string; children: Branch[]; lines?: number };
+type Branch = {
+  path: string;
+  name: string;
+  children: Branch[];
+  lines?: number;
+  byName?: Map<string, Branch>;
+};
 const weight = (node: Branch): number =>
   node.lines === undefined
     ? Math.max(
@@ -30,19 +36,28 @@ export const isFixHeavy = (fixes: number, prs: number) =>
 /** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
 export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
   const root: Branch = { path: "", name: "", children: [] };
+  // a path is a file or a folder, never both: a file whose path runs through a file, or onto a
+  // folder, is left out rather than collapsing the folder's subtree into one tile
   for (const file of files) {
     let node = root,
-      path = "";
+      path = "",
+      clash = false;
     for (const part of file.path.split("/")) {
+      if (node.lines !== undefined) {
+        clash = true;
+        break;
+      }
       path = path ? `${path}/${part}` : part;
-      let child = node.children.find((x) => x.name === part);
+      node.byName ??= new Map();
+      let child = node.byName.get(part);
       if (!child) {
         child = { path, name: part, children: [] };
         node.children.push(child);
+        node.byName.set(part, child);
       }
       node = child;
     }
-    node.lines = file.lines;
+    if (!clash && node.children.length === 0) node.lines = file.lines;
   }
   const collapse = (node: Branch, root = false): Branch => {
     node.children = node.children.map((child) => collapse(child));
@@ -170,32 +185,151 @@ const style = (r: Rect): CSSProperties => ({
   height: `${r.height}px`,
 });
 
-export function MapTreemap({
+const noFiles: MapSnapshot["tree"] = [];
+const noIndices: Record<string, number> = {};
+const noMarks = new Map<string, number>();
+
+/**
+ * Files changed or read on a seat's branch but absent from the main-branch tree, sized by their
+ * changed lines, so a new file still gets a tile. A path that is a folder (a seat read a
+ * directory, or listed it) is not a file and never gets one.
+ */
+export function branchOnlyFiles(
+  tree: MapSnapshot["tree"],
+  visual: Record<string, LensVisual>,
+): MapSnapshot["tree"] {
+  const known = new Set(tree.map((file) => file.path));
+  const candidates = Object.keys(visual).filter((path) => path !== "" && !known.has(path));
+  const folders = new Set<string>();
+  for (const path of [...known, ...candidates]) {
+    for (let i = path.indexOf("/"); i >= 0; i = path.indexOf("/", i + 1))
+      folders.add(path.slice(0, i));
+  }
+  return candidates
+    .filter((path) => !folders.has(path))
+    .map((path) => ({
+      path,
+      lines: Math.max(1, ...(visual[path]?.changes ?? []).map((change) => change.lines)),
+    }));
+}
+
+type TileProps = {
+  path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  focused: boolean;
+  dim: boolean;
+  neutral: boolean;
+  overlap: boolean;
+  directImport: boolean;
+  fixHeavy: boolean;
+  changed: string;
+  read: string;
+  strong: boolean;
+  playCurrent: boolean;
+  lines: string;
+  intensity: number;
+  intensity2: number;
+  colour: string;
+  colour2: string;
+  readColour: string;
+  readColour2: string;
+  onSelect: (path: string) => void;
+};
+
+/** One file's tile; primitive props only, so a tile nothing changed for is not drawn again. */
+const Tile = memo(function Tile(t: TileProps) {
+  return (
+    <button
+      type="button"
+      className="map-treemap-tile"
+      data-focused={t.focused || undefined}
+      data-dim={t.dim || undefined}
+      data-neutral={t.neutral || undefined}
+      data-overlap={t.overlap || undefined}
+      data-direct-import={t.directImport || undefined}
+      data-fix-heavy={t.fixHeavy || undefined}
+      data-changed={t.changed || undefined}
+      data-read={t.read || undefined}
+      data-strong={t.strong || undefined}
+      data-play-current={t.playCurrent || undefined}
+      style={
+        {
+          ...style({ x: t.x, y: t.y, width: t.width, height: t.height }),
+          "--tile-intensity": t.intensity,
+          "--tile-intensity-2": t.intensity2,
+          "--tile-colour": t.colour,
+          "--tile-colour-2": t.colour2,
+          "--tile-split": t.width >= t.height ? "90deg" : "180deg",
+          "--tile-read-colour": t.readColour,
+          "--tile-read-colour-2": t.readColour2,
+        } as CSSProperties
+      }
+      onClick={() => t.onSelect(t.path)}
+      title={t.path}
+    >
+      <span className="map-treemap-label">{t.path.split("/").at(-1)}</span>
+      {t.lines && t.width >= 58 && t.height >= 26 && (
+        <span className="map-treemap-lines">{t.lines}</span>
+      )}
+    </button>
+  );
+});
+
+export const MapTreemap = memo(function MapTreemap({
   snapshot,
   lens,
   visual,
   focus,
   focusLinks = [],
   onSelect,
+  indices = noIndices,
+  extraFiles = noFiles,
+  marks = noMarks,
+  currentMark = null,
+  markSeat = null,
 }: {
   snapshot: MapSnapshot;
-  lens: Exclude<MapLens, "changes">;
+  lens: MapLens;
   visual: Record<string, LensVisual>;
   focus: string | null;
   focusLinks?: { from: string; to: string; unlinked?: boolean }[];
   onSelect: (path: string) => void;
+  /** Each seat's colour, its place in config order; a seat not listed takes its place in the snapshot. */
+  indices?: Record<string, number>;
+  /** Changes: files absent from the tree that still get a tile (see branchOnlyFiles). */
+  extraFiles?: MapSnapshot["tree"];
+  /** Changes, playing: the step number of each file revealed so far, the latest one, and whose. */
+  marks?: Map<string, number>;
+  currentMark?: string | null;
+  markSeat?: string | null;
 }) {
   const [ref, size] = useSize();
-  const layout = useMemo(
-    () => treemapLayout(snapshot.tree, size.width, size.height),
-    [snapshot.tree, size],
+  const files = useMemo(
+    () => (lens === "changes" ? [...snapshot.tree, ...extraFiles] : snapshot.tree),
+    [lens, snapshot.tree, extraFiles],
   );
+  const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
+  const colour = (seat: string) =>
+    colours[
+      Math.max(0, indices[seat] ?? snapshot.seats.findIndex((item) => item.seat === seat)) %
+        colours.length
+    ];
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a group, not an image (its tiles are buttons); a fieldset is not a positioned canvas
     <div
       ref={ref}
+      role="group"
       className={`map-treemap map-treemap-${lens}`}
-      role="img"
-      aria-label={lens === "impact" ? "Impact reach treemap" : "History PR heat treemap"}
+      aria-label={
+        lens === "changes"
+          ? "Changes treemap"
+          : lens === "impact"
+            ? "Impact reach treemap"
+            : "History PR heat treemap"
+      }
     >
       {layout.folders.map((folder) => (
         <div key={folder.path} className="map-treemap-folder" style={style(folder)}>
@@ -204,46 +338,101 @@ export function MapTreemap({
       ))}
       {layout.tiles.map((tile) => {
         const v = visual[tile.path];
+        const changes = v?.changes ?? [];
+        const changed = changes.filter((change) => change.changed);
+        const reads = changes.filter((change) => change.read && !change.changed);
+        const first = changed[0],
+          second = changed[1];
+        const strength = (change?: { lines: number }) =>
+          change ? changeIntensity(change.lines) : 0;
         const directImport = lens === "impact" && v?.directImport === true;
         const active =
-          lens === "history"
-            ? v?.hotspot !== undefined
-            : directImport || (v?.seat !== undefined && v.distance !== undefined);
+          lens === "changes"
+            ? changed.length > 0
+            : lens === "history"
+              ? v?.hotspot !== undefined
+              : directImport || (v?.seat !== undefined && v.distance !== undefined);
         const intensity = active
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
-            : 1 / ((v?.distance ?? 0) + 1)
+            : lens === "changes"
+              ? strength(first)
+              : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
+        const tileColour = first
+          ? colour(first.seat)
+          : active
+            ? lens === "history"
+              ? "var(--accent)"
+              : (colours[(v?.seat ?? 0) % colours.length] as string)
+            : "var(--void-line)";
         return (
-          <button
-            type="button"
-            className="map-treemap-tile"
+          <Tile
             key={tile.path}
-            data-focused={focus === tile.path || undefined}
-            data-dim={v?.dim || undefined}
-            data-neutral={!active || undefined}
-            data-overlap={v?.overlap || undefined}
-            data-direct-import={directImport || undefined}
-            data-fix-heavy={fixHeavy || undefined}
-            style={
-              {
-                ...style(tile),
-                "--tile-intensity": intensity,
-                "--tile-colour": active
-                  ? lens === "history"
-                    ? "var(--accent)"
-                    : colours[(v?.seat ?? 0) % colours.length]
-                  : "var(--void-line)",
-              } as CSSProperties
+            path={tile.path}
+            x={tile.x}
+            y={tile.y}
+            width={tile.width}
+            height={tile.height}
+            focused={focus === tile.path}
+            dim={v?.dim === true}
+            neutral={!active}
+            overlap={v?.overlap === true}
+            directImport={directImport}
+            fixHeavy={fixHeavy}
+            changed={changed.map((change) => change.seat).join(" ")}
+            read={reads.map((change) => change.seat).join(" ")}
+            strong={lens === "changes" && Math.max(strength(first), strength(second)) >= 0.8}
+            playCurrent={currentMark === tile.path && marks.has(tile.path)}
+            lines={
+              lens === "changes" && changed.length
+                ? `+${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
+                : ""
             }
-            onClick={() => onSelect(tile.path)}
-            title={tile.path}
-          >
-            <span className="map-treemap-label">{tile.path.split("/").at(-1)}</span>
-          </button>
+            intensity={intensity}
+            intensity2={second ? strength(second) : strength(first)}
+            colour={tileColour}
+            colour2={second ? colour(second.seat) : first ? colour(first.seat) : "transparent"}
+            readColour={reads[0] ? colour(reads[0].seat) : "transparent"}
+            readColour2={reads[1] ? colour(reads[1].seat) : "transparent"}
+            onSelect={onSelect}
+          />
         );
       })}
+      {marks.size > 0 && (
+        <div
+          className="map-treemap-marks"
+          style={
+            { "--mark-colour": markSeat ? colour(markSeat) : "var(--treemap-ink)" } as CSSProperties
+          }
+        >
+          {[...marks].map(([path, n]) => {
+            const tile = layout.byPath.get(path);
+            if (!tile) return null;
+            // on the tile's top edge, kept inside both the tile's reach and the map
+            const x = Math.min(
+              Math.max(tile.x + tile.width / 2, tile.x + 9),
+              tile.x + tile.width + 2,
+            );
+            const y = Math.min(tile.y + tile.height / 2, tile.y + 20);
+            return (
+              <span
+                className="map-treemap-mark"
+                data-for={path}
+                data-current={currentMark === path || undefined}
+                key={path}
+                style={{
+                  left: `${Math.min(Math.max(x, 10), size.width - 10)}px`,
+                  top: `${Math.min(Math.max(y, 10), size.height - 10)}px`,
+                }}
+              >
+                {n}
+              </span>
+            );
+          })}
+        </div>
+      )}
       {focusLinks.length > 0 && (
         <svg
           className="map-treemap-links"
@@ -268,4 +457,8 @@ export function MapTreemap({
       )}
     </div>
   );
-}
+});
+
+/** The mockup's change magnitude bands: up to 10 lines, 40, 120, and more. */
+export const changeIntensity = (lines: number) =>
+  lines <= 10 ? 0.42 : lines <= 40 ? 0.6 : lines <= 120 ? 0.8 : 1;

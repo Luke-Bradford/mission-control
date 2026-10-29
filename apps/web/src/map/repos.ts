@@ -1,5 +1,4 @@
 import type { ConfigView, Crew, RepoView } from "@mc/core";
-import { pickRepo } from "./model.ts";
 
 /** One entry in the Map's repo picker: only a repo with a crew session can be mapped. */
 export interface MapRepoOption {
@@ -11,6 +10,20 @@ export interface MapRepoOption {
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+export const pickRepo = (
+  ids: string[],
+  running: { repoId: string; started: number }[],
+  last: string,
+): string => {
+  const ranked = ids.map((id) => ({ id, rows: running.filter((row) => row.repoId === id) }));
+  ranked.sort(
+    (left, right) =>
+      right.rows.length - left.rows.length ||
+      Math.max(0, ...right.rows.map((row) => row.started)) -
+        Math.max(0, ...left.rows.map((row) => row.started)),
+  );
+  return ranked[0]?.rows.length ? ranked[0].id : ids.includes(last) ? last : (ids[0] ?? "");
+};
 
 /**
  * Every configured repo, in config order. The hub maps a repo from its crew session's checkout, so

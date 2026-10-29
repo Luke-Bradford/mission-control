@@ -8,8 +8,8 @@ import { useSessionScope } from "../shell/session.ts";
 import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
 
 /**
- * The Crew Activity Map, one repo at a time (`/map/:repo`): the repo's files in 3D with the crew
- * working in them, live. `/map` alone goes to the session's repo, the busiest, the last one picked
+ * The Crew Activity Map, one repo at a time (`/map/:repo`): the repo's files as a treemap with the
+ * crew's work on them, live. `/map` alone goes to the session's repo, the busiest, the last one picked
  * or the first with a crew session.
  */
 export function MapPage({ repoId }: { repoId: string | null }) {
@@ -30,7 +30,9 @@ export function MapPage({ repoId }: { repoId: string | null }) {
       ? defaultMapRepo(options, crew, scope.repo ?? "", readKey(MAP_REPO_KEY) ?? "")
       : null;
   useEffect(() => {
-    if (target) navigate(mapPath(target), { replace: true });
+    // keep the deep link's query and hash (`#lens=…&win=…`) across the redirect
+    if (target)
+      navigate(mapPath(target) + window.location.search + window.location.hash, { replace: true });
   }, [target]);
   const option = options.find((o) => o.id === repoId);
   const remembered = option?.mapped ? option.id : null;

@@ -1,15 +1,35 @@
 import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
 import type { CSSProperties } from "react";
-import { stateLabel } from "./agents.ts";
 import {
   type ChangeCount,
   changeTotals,
+  duration,
   nodeWork,
   readCount,
   type SeatWork,
   seatToken,
   workLine,
 } from "./cards.ts";
+
+export function stateLabel(seat: MapSeat, now: number): string {
+  if (seat.state === "stalled") return `stalled ${duration(now - seat.since)}`;
+  const call = [...seat.calls].sort((left, right) => left.since - right.since)[0];
+  if (call) {
+    const verb =
+      {
+        Read: "reading",
+        Edit: "editing",
+        MultiEdit: "editing",
+        NotebookEdit: "editing",
+        Write: "writing",
+        Grep: "searching",
+        Glob: "searching",
+        Bash: "running",
+      }[call.tool] ?? (call.tool.startsWith("mcp__mc__") ? "using" : call.tool);
+    return `${verb} ${call.detail.replace(/^cd \S+ && /, "").slice(0, 80)} ${duration(now - call.since)}`;
+  }
+  return seat.state === "running" ? "thinking" : `${seat.state} ${duration(now - seat.since)}`;
+}
 
 /** What the rail is showing: a node (a file, or a collapsed folder), or a seat. */
 export type Selection = { kind: "node"; path: string } | { kind: "seat"; seat: string } | null;
