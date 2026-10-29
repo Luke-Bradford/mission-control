@@ -456,6 +456,59 @@ describe("audit", () => {
     expect(response.json()).toEqual(emptyAudit(days));
   });
 
+  it("labels long runners with their seat's loop kind and whether the operator can act", async () => {
+    const seat = (id: string, role: string) => ({
+      id,
+      role,
+      accountId: "claude-main",
+      model: "sonnet",
+      area: [],
+    });
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 4,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "clone"),
+          seats: [seat("guido-1", "GUIDO"), seat("flight", "FLIGHT")],
+        },
+      ],
+    };
+    const start = NOW - 2 * HOUR;
+    store.upsertRun(run({ id: "live", agentId: "guido-1", startedAt: start }));
+    store.upsertRun(
+      run({ id: "done", agentId: "guido-1", startedAt: start, endedAt: NOW - HOUR, status: "ok" }),
+    );
+    store.upsertRun(run({ id: "stale", agentId: "guido-1", startedAt: start }));
+    store.upsertRun(run({ id: "watch", agentId: "flight", startedAt: start }));
+    store.upsertRun(run({ id: "loop", agentId: "shop-app-ta", startedAt: start }));
+    for (const [seatId, runId] of [
+      ["guido-1", "live"],
+      ["flight", "watch"],
+    ] as const) {
+      store.setSeatSession({
+        seatId,
+        runId,
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+        lastTurnEndedAt: null,
+        lastTurnStartedAt: null,
+      });
+    }
+    const rows = (await get("/api/audit")).json<AuditView>().longRunners;
+    const byId = Object.fromEntries(rows.map((r) => [r.runId, r]));
+    expect(byId.live).toMatchObject({ endedAt: null, kind: "build", actionable: true });
+    expect(byId.done).toMatchObject({ endedAt: NOW - HOUR, kind: "build", actionable: true });
+    expect(byId.stale).toMatchObject({ endedAt: null, kind: "build", actionable: false });
+    expect(byId.watch).toMatchObject({ endedAt: null, kind: "watch", actionable: false });
+    expect(byId.loop).toMatchObject({ endedAt: null, kind: "observed", actionable: false });
+  });
+
   it("rejects an invalid range", async () => {
     const response = await get("/api/audit?range=14d");
     expect(response.statusCode).toBe(400);
