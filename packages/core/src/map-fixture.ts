@@ -59,6 +59,7 @@ export const mapSnapshotFixture = {
   ],
   conflicts: [],
   conflictsUnchecked: [],
+  rules: { areas: { "area:app": ["src/**"] }, hardRules: ["src/main.ts"] },
   seq: 0,
 } satisfies MapSnapshot;
 

@@ -36,6 +36,7 @@ import {
   type CrewSessionFolders,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
+  DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
@@ -3878,6 +3879,7 @@ describe("boards, escalations, health", () => {
       seq: 0,
       conflicts: [],
       conflictsUnchecked: [],
+      rules: { areas: DEFAULT_REPO_RULES.areas, hardRules: DEFAULT_REPO_RULES.hardRules },
       hist: expect.objectContaining({
         since: expect.any(Number),
         prCount: 0,
@@ -3901,6 +3903,26 @@ describe("boards, escalations, health", () => {
     });
     expect((await get("/api/repos/shop-app/map")).json().hist).toEqual(response.json().hist);
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
+  });
+
+  it("carries the repo's resolved area and hard-rule globs in the map snapshot", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    const repo = config.repos.find((r) => r.id === "shop-app");
+    if (!session || !repo) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    repo.rules = {
+      ...DEFAULT_REPO_RULES,
+      areas: { "area:core": ["packages/core/**"] },
+      hardRules: ["CLAUDE.md"],
+    };
+    const set = (await get("/api/repos/shop-app/map")).json();
+    expect(set.rules).toEqual({
+      areas: { "area:core": ["packages/core/**"] },
+      hardRules: ["CLAUDE.md"],
+    });
+    repo.rules = { ...DEFAULT_REPO_RULES, hardRules: [] };
+    expect((await get("/api/repos/shop-app/map")).json().rules.hardRules).toEqual([]);
   });
 
   for (const vendor of ["claude", "codex"] as const) {
