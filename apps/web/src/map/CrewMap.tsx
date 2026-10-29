@@ -1,5 +1,14 @@
 import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
@@ -558,7 +567,11 @@ function AnalyticalMapKey({
           <span
             className="map-key-seat-chip"
             key={seat.seat}
-            style={{ "--map-key-seat": `var(${seatToken(seat.seat, indices[seat.seat] ?? 0)})` }}
+            style={
+              {
+                "--map-key-seat": `var(${seatToken(seat.seat, indices[seat.seat] ?? 0)})`,
+              } as CSSProperties
+            }
           >
             <i aria-hidden="true" />
             {names[seat.seat] ?? seat.seat}
