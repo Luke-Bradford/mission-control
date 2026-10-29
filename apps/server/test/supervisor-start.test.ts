@@ -2337,7 +2337,13 @@ describe("Codex launch through a test-only account", () => {
     vi.mocked(homedir).mockReset();
   });
 
-  function codex(scenario: Record<string, unknown> = {}, version = "codex-cli 0.154.0") {
+  // A real child's handshake can take seconds on a loaded machine; only the test that
+  // needs a turn/start timeout shortens this.
+  function codex(
+    scenario: Record<string, unknown> = {},
+    version = "codex-cli 0.154.0",
+    controlTimeoutMs = 20_000,
+  ) {
     const home = join(dir, "home");
     writeCodexHostileFiles(home);
     writeFileSync(join(home, ".codex", "auth.json"), '{"fake":"account"}', { mode: 0o600 });
@@ -2358,6 +2364,7 @@ import(${JSON.stringify(fixture)});
       codexCommand: command,
       codexAuthPath: join(home, ".codex", "auth.json"),
       repo: { fullSuite: ["pnpm -s test"] },
+      controlTimeoutMs,
     });
     const account = made.cfg.accounts[0];
     if (account) account.vendor = "codex";
@@ -2718,14 +2725,18 @@ import(${JSON.stringify(fixture)});
   });
 
   it("keeps a timed-out turn's test lock until process exit, even after completion notifications", async () => {
-    const { sup, lock, log } = codex({
-      command: "pnpm -s test",
-      holdItem: true,
-      ackDelayMs: 750,
-      lateAckOnClose: true,
-      completeOnClose: true,
-      closeDelayMs: 250,
-    });
+    const { sup, lock, log } = codex(
+      {
+        command: "pnpm -s test",
+        holdItem: true,
+        ackDelayMs: 60_000,
+        lateAckOnClose: true,
+        completeOnClose: true,
+        closeDelayMs: 250,
+      },
+      "codex-cli 0.154.0",
+      4000,
+    );
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("accept"));
