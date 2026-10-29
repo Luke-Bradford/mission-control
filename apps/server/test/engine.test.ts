@@ -13,10 +13,14 @@ import {
   type BoardItem,
   CI_EXCERPT_MAX,
   COMMS_TEXT_MAX,
+  CONTROLLER_CHECK_HEADING,
+  CONTROLLER_CHECK_PARK,
   cleanupBranchNoteKey,
   closedIssueText,
   commsCutMarker,
   conflictKey,
+  controllerCheckFailText,
+  controllerCheckParkText,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
@@ -85,6 +89,7 @@ import {
   syncFailedText,
   syncMergedText,
   syncTooSoonText,
+  type TicketView,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -3666,6 +3671,80 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       reported(first().id, []);
     }
+
+    describe("a ticket's controller check", () => {
+      const CHECK = "Open the swatches in a browser, light and dark.";
+      const body = (text: string) =>
+        ({ number: 7, title: "t", body: text, labels: [] }) as unknown as TicketView;
+      const withTicket = (text: string) => {
+        h.engine.stop();
+        h.engine = h.make({ fetchTicket: async () => body(text) });
+        h.engine.start();
+      };
+      const parkedOnCheck = async () => {
+        withTicket(`## Done when\n- x\n\n${CONTROLLER_CHECK_HEADING}\n${CHECK}\n\n## Other\ny`);
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(CONTROLLER_CHECK_PARK));
+      };
+
+      it("parks the merge with the section's text", async () => {
+        await parkedOnCheck();
+        expect(h.steps).not.toContain("merge");
+        expect(loopOf().parked?.reason).toBe(controllerCheckParkText(SHA, CHECK));
+        expect(loopOf().controllerCheck).toEqual({ sha: SHA, from: "review", pass: false });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("a pass merges", async () => {
+        await parkedOnCheck();
+        expect(await h.engine.controllerCheck(RUN, "pass")).toEqual({ lifted: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("a pass on a moved head is refused", async () => {
+        await parkedOnCheck();
+        setPr({ headSha: "f".repeat(40) });
+        expect(await h.engine.controllerCheck(RUN, "pass")).toEqual({
+          lifted: false,
+          reason: "head-moved",
+        });
+        expect(loopOf().parked?.kind).toBe(CONTROLLER_CHECK_PARK);
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("a fail sends the note to the seat as rework and ends the park", async () => {
+        await parkedOnCheck();
+        expect(await h.engine.controllerCheck(RUN, "fail", "swatch 3 is unreadable")).toEqual({
+          lifted: true,
+        });
+        expect(h.sent.at(-1)?.text).toBe(controllerCheckFailText(SHA, "swatch 3 is unreadable"));
+        expect(loopOf().phase).toBe("working");
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it("a verdict on a run that is not parked on a check is refused", async () => {
+        await gateOpen();
+        expect(await h.engine.controllerCheck(RUN, "pass")).toMatchObject({ lifted: false });
+      });
+
+      it("FLIGHT cannot lift it", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await parkedOnCheck();
+        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toEqual({
+          lifted: false,
+          reason: "not-permitted",
+        });
+        expect(loopOf().parked?.kind).toBe(CONTROLLER_CHECK_PARK);
+      });
+
+      it("a ticket without the heading merges as before", async () => {
+        withTicket("## Done when\n- x\n\n### Controller check\nnot a heading match");
+        await gateOpen();
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+        expect(loopOf().parked).toBeNull();
+      });
+    });
 
     it.each([false, true])(
       "away never merges a ready PR; off or expiry restores merging (%s)",

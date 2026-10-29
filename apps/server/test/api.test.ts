@@ -1352,6 +1352,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
+  ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/held"],
@@ -7566,6 +7567,101 @@ describe("operator token", () => {
     );
     expect(crewPause.statusCode).toBe(401);
     expect(store.getSetting("crew.paused")).toBeNull();
+  });
+
+  describe("controller check route", () => {
+    const calls: [string, string, string | undefined][] = [];
+    let app: FastifyInstance;
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const post = (headers: Record<string, string>, payload: object) =>
+      app.inject({
+        method: "POST",
+        url: "/api/runs/cc/controller-check",
+        headers: { ...json, ...headers },
+        payload,
+      });
+
+    beforeEach(async () => {
+      withCrew();
+      calls.length = 0;
+      store.upsertRun(
+        run({
+          id: "cc",
+          agentId: "guido-1",
+          loop: {
+            phase: "parked",
+            reportedEvidenceId: 0,
+            prNumber: 12,
+            pushStartedAt: null,
+            pushFor: null,
+            unparkedAt: null,
+            ciFails: 0,
+            ciFailedSha: null,
+            relayedSha: null,
+            transient: 0,
+            lastRefusal: null,
+            epoch: 0,
+            budgetExtra: 0,
+            parked: { kind: "controller-check", reason: "check", ended: false },
+            touches: null,
+            cardFor: null,
+          },
+        }),
+      );
+      app = buildApp({
+        config,
+        store,
+        bus,
+        now: () => clock,
+        configPath,
+        supervisor: stubSupervisor(),
+        operatorToken: "tok-1",
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+          controllerCheck: async (id, verdict, note) => {
+            calls.push([id, verdict, note]);
+            return verdict === "pass" ? { lifted: true } : { lifted: false, reason: "head-moved" };
+          },
+        },
+      });
+      await app.ready();
+    });
+    afterEach(async () => {
+      await app.close();
+    });
+
+    it("needs the operator token", async () => {
+      expect((await post({}, { verdict: "pass" })).statusCode).toBe(401);
+      expect((await post({ [OPERATOR_HEADER]: "wrong" }, { verdict: "pass" })).statusCode).toBe(
+        401,
+      );
+      expect(calls).toEqual([]);
+    });
+
+    it("rejects a bad body", async () => {
+      for (const payload of [
+        {},
+        { verdict: "maybe" },
+        { verdict: "pass", extra: 1 },
+        { verdict: "fail", note: 3 },
+      ]) {
+        expect((await post(key, payload)).statusCode).toBe(400);
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it("records a verdict through the engine and names a refusal", async () => {
+      const first = await post(key, { verdict: "pass" });
+      expect(first.statusCode).toBe(200);
+      const refused = await post(key, { verdict: "fail", note: "unreadable" });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toContain("head moved");
+      expect(calls).toEqual([
+        ["cc", "pass", undefined],
+        ["cc", "fail", "unreadable"],
+      ]);
+    });
   });
 
   it("leaves GET routes and the guard check as they were", async () => {

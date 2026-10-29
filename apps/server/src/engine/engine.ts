@@ -31,6 +31,7 @@ import {
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
+  CONTROLLER_CHECK_PARK,
   cardMark,
   carriedFrom,
   checkState,
@@ -39,6 +40,9 @@ import {
   closedIssueText,
   conflictKey,
   conflictText,
+  controllerCheckFailText,
+  controllerCheckOf,
+  controllerCheckParkText,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -111,6 +115,7 @@ import {
   syncMergedText,
   syncTooSoonText,
   TAKE_STALE_MS,
+  type TicketView,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -172,6 +177,8 @@ export interface EngineDeps {
   publisher: Publisher;
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
   board: { move: (m: Move) => Promise<MoveResult> };
+  /** Reads a ticket (its body holds an optional `## Controller check`); without it no merge is held. */
+  fetchTicket?: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
   pollGithub?: () => void;
   /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
@@ -261,6 +268,12 @@ export interface Engine {
    * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
    * author the failure.
    */
+  /**
+   * The operator's verdict on a run parked on its ticket's controller check. `pass` (only while the
+   * PR head is still the parked head) lets the next pass merge; `fail` sends the note to the seat
+   * as rework and ends the park.
+   */
+  controllerCheck(runId: string, verdict: "pass" | "fail", note?: string): Promise<OperatorResult>;
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
@@ -860,6 +873,32 @@ export function createEngine(deps: EngineDeps): Engine {
     "update-branch",
   ]);
 
+  /**
+   * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
+   * the reason to park with, or undefined when the ticket could not be read (tried next pass).
+   */
+  async function controllerCheckHold(
+    run: Run,
+    cur: RunLoop,
+    sha: string,
+  ): Promise<{ park?: string } | null> {
+    const repo = config.repos.find((r) => r.id === run.repoId);
+    const issue = issueOf(run);
+    if (!deps.fetchTicket || repo === undefined || issue === null) return null;
+    if (cur.controllerCheck?.sha === sha && cur.controllerCheck.pass) return null;
+    let ticket: TicketView | null;
+    try {
+      ticket = await deps.fetchTicket(repo, issue);
+    } catch (e) {
+      log(
+        `${run.id}: could not read the ticket for its controller check: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return {};
+    }
+    const check = controllerCheckOf(ticket?.body);
+    return check === null ? null : { park: controllerCheckParkText(sha, check) };
+  }
+
   async function act(
     a: LoopAction,
     run: Run,
@@ -1235,6 +1274,23 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "merge": {
+        // a ticket's `## Controller check` holds the merge until the operator's pass on this head
+        const check = await controllerCheckHold(run, cur, a.sha);
+        if (check !== null) {
+          out.parked = true;
+          if (check.park === undefined) return;
+          cur.controllerCheck = { sha: a.sha, from: cur.phase, pass: false };
+          cur.phase = "parked";
+          cur.parked = { kind: CONTROLLER_CHECK_PARK, reason: check.park, ended: false };
+          store.addLoopEvent(
+            `${run.id}:${cur.epoch}:parked:controller-check:${a.sha}`,
+            run.id,
+            parkedEventText(check.park),
+            at,
+          );
+          out.again = true;
+          return;
+        }
         const r = await publisher.merge(live(), a.sha);
         if (!r.ok && r.text === AWAY_WRITES_REFUSED) return;
         if (!r.ok && r.text === MERGE_HEAD_MOVED) {
@@ -2217,6 +2273,8 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("not-parked");
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
+        // the controller's verdict alone settles a controller check
+        if (by === "FLIGHT" && kind === CONTROLLER_CHECK_PARK) return refuse("not-permitted");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
@@ -2352,6 +2410,90 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
+        result = { lifted: true };
+        await pass(run.id);
+      }).then(() => result);
+    },
+
+    controllerCheck(runId, verdict, note) {
+      let result: OperatorResult = { lifted: false, reason: "engine-error" };
+      const refuse = (reason: OperatorRefusal): void => {
+        result = { lifted: false, reason };
+      };
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      return onChain(runId, async () => {
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run === null || !loop) return refuse("not-parked");
+        const held = loop.controllerCheck;
+        if (
+          run.endedAt !== null ||
+          loop.phase !== "parked" ||
+          loop.parked?.kind !== CONTROLLER_CHECK_PARK ||
+          loop.parked.ended ||
+          !held
+        )
+          return refuse("not-parked");
+        if (pausedSeat(store, run.agentId)) return refuse("held");
+        const pushed = store.runPush(run.id);
+        const pr = findPr(run, loop);
+        if (pr?.state !== "open") return refuse("pr-not-open");
+        if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
+        const at = now();
+        if (verdict === "pass") {
+          store.setRunLoop(run.id, {
+            ...loop,
+            phase: held.from,
+            parked: null,
+            controllerCheck: { ...held, pass: true },
+          });
+          store.addLoopEvent(
+            `${run.id}:controller-check:${held.sha}:pass`,
+            run.id,
+            `controller check passed on ${held.sha.slice(0, 7)}`,
+            at,
+          );
+        } else {
+          const next: RunLoop = {
+            ...loop,
+            epoch: loop.epoch + 1,
+            phase: "working",
+            parked: null,
+            controllerCheck: null,
+            ciFails: 0,
+            transient: 0,
+            lastRefusal: null,
+            unparkedAt: at,
+            reviewWaivedSha: null,
+            flightClearedSha: null,
+          };
+          if (next.aside) {
+            try {
+              await supervisor.wakeRun(run.id);
+            } catch {
+              return refuse("rework-undelivered");
+            }
+            next.aside = null;
+          }
+          const text = controllerCheckFailText(held.sha, note);
+          store.addComms({ at, from: "CAPCOM", to: run.agentId, ticket: run.ticket ?? null, text });
+          const sent = await supervisor.send(
+            run.id,
+            `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
+            text,
+          );
+          if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+          store.setRunLoop(run.id, next);
+          store.addLoopEvent(
+            `${run.id}:controller-check:${held.sha}:fail`,
+            run.id,
+            `controller check failed on ${held.sha.slice(0, 7)}: sent back for rework`,
+            at,
+          );
+        }
+        lastTransient.delete(run.id);
+        bus.emit("agents");
+        bus.emit("attention");
         result = { lifted: true };
         await pass(run.id);
       }).then(() => result);

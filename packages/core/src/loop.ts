@@ -167,6 +167,26 @@ export function isCiFailureEvent(text: string): boolean {
 export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 /** The park kind of a run whose author ruled on a CI failure instead of fixing it. */
 export const RULING_PARK = "ruling";
+/** The park kind of a run whose ticket lists a controller check; only the operator settles it. */
+export const CONTROLLER_CHECK_PARK = "controller-check";
+/** The heading (at line start, case-sensitive) that opens a ticket's controller-check section. */
+export const CONTROLLER_CHECK_HEADING = "## Controller check";
+const CONTROLLER_CHECK_RE = new RegExp(`^${CONTROLLER_CHECK_HEADING}[ \\t]*\\r?$`, "m");
+/** The text of a ticket's controller-check section (up to the next heading); null without one. */
+export function controllerCheckOf(body: string | null | undefined): string | null {
+  if (!body) return null;
+  const m = CONTROLLER_CHECK_RE.exec(body);
+  if (m === null) return null;
+  const rest = body.slice(m.index + m[0].length);
+  const next = rest.search(/^#{1,2} /m);
+  return (next < 0 ? rest : rest.slice(0, next)).trim();
+}
+/** The park reason: the sha held and the ticket's controller-check text. */
+export const controllerCheckParkText = (sha: string, check: string): string =>
+  `controller check on ${sha.slice(0, 7)}${check === "" ? "" : `: ${check}`}`;
+/** The rework line for a failed controller check; `note` is the controller's. */
+export const controllerCheckFailText = (sha: string, note: string | undefined): string =>
+  `The controller's check failed on ${sha.slice(0, 7)}.${note ? `\n\n${note}` : ""} Fix it, commit, and report again.`;
 /** The key of the line sent when FLIGHT's re-run of the failed jobs on `sha` failed too. */
 export const rerunFailedKey = (runId: string, sha: string): string => `rerun:${runId}:${sha}`;
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt of the re-run's failure follows. */

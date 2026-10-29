@@ -286,6 +286,7 @@ export async function main(): Promise<void> {
     publisher: createPublisher(mcDeps),
     board: engineBoard,
     pollGithub: () => scheduler.refreshBoards(),
+    fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     rules: engineRules,
     refillQueues: () =>
       refillQueues({

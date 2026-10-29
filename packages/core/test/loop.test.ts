@@ -7,6 +7,7 @@ import {
   CI_PENDING_MAX_MS,
   CI_TRIES,
   ciVerdict,
+  controllerCheckOf,
   fillLoopText,
   hardRulesFlagKey,
   isHardRulesFlagKey,
@@ -2933,5 +2934,24 @@ describe("isHardRulesFlagKey", () => {
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash.slice(1)}`)).toBe(false);
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}0`)).toBe(false);
     expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}:x`)).toBe(false);
+  });
+});
+
+describe("controllerCheckOf", () => {
+  it("reads the section up to the next heading", () => {
+    const body = "## Done when\n- a\n\n## Controller check\nOpen it.\n- light\n\n## Security\nx";
+    expect(controllerCheckOf(body)).toBe("Open it.\n- light");
+    expect(controllerCheckOf("## Controller check\r\nLook.\r\n")).toBe("Look.");
+  });
+  it("needs the heading at line start, spelled exactly", () => {
+    expect(controllerCheckOf("")).toBeNull();
+    expect(controllerCheckOf("## Done when\n- a")).toBeNull();
+    expect(controllerCheckOf("## controller check\nx")).toBeNull();
+    expect(controllerCheckOf("### Controller check\nx")).toBeNull();
+    expect(controllerCheckOf("text ## Controller check\nx")).toBeNull();
+    expect(controllerCheckOf("## Controller checks\nx")).toBeNull();
+  });
+  it("an empty section is still a check", () => {
+    expect(controllerCheckOf("## Controller check\n## Next")).toBe("");
   });
 });

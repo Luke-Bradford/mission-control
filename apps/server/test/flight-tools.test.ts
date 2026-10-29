@@ -5600,6 +5600,22 @@ describe("superuser housekeeping", () => {
     expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
   });
+  it.each(["lift", "accept", "rework", "rereview"] as const)(
+    "settle_park cannot settle a controller check (%s)",
+    async (action) => {
+      elevated();
+      runPr();
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind: "controller-check", reason: "held", ended: false },
+      });
+      const refused = await call("settle_park", { runId: "r-pr", action });
+      expect(refused).toHaveProperty("isError", true);
+      expect(JSON.stringify(refused)).toContain("This action cannot settle this park.");
+      expect(engineCalls).toEqual([]);
+    },
+  );
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
     elevated();
     runPr();

@@ -825,6 +825,20 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Record a controller check
+
+A ticket with a `## Controller check` section is never merged by the engine until you pass it. When
+the run's review is clean and CI is green, the run parks as `controller-check` with that section's
+text, and it shows in Needs you. Do the check, then record the verdict:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"verdict":"pass"}'
+```
+
+`pass` lets the engine merge on its next pass, but only while the PR head is still the head that
+parked; a moved head is refused and needs a fresh check. `fail` (optionally with `"note"`) sends the
+note to the seat as rework and ends the park. FLIGHT cannot settle this park.
+
 ## What it observes
 
 | Collector | Source | Cadence |
