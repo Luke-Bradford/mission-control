@@ -140,7 +140,7 @@ export function Telemetry() {
         <h2 className="grp">Flow of work</h2>
         <FlowOfWork t={t} scope={scope} />
         <h2 className="grp">Instrument charts</h2>
-        <InstrumentCharts scope={scope} series={t?.series} />
+        <InstrumentCharts scope={scope} series={t?.series} ticketCosts={t?.tokensByTicket} />
         <h2 className="grp">Agents</h2>
         <AgentsGroup t={t} scope={scope} turnAgent={turnAgent} />
         <h2 className="grp">Capacity</h2>

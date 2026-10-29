@@ -810,7 +810,7 @@ describe("Capacity and cost", () => {
     expect(tip.textContent).toContain("codex-main 7d—");
   });
 
-  it("labels an observed quota drop as a reset instead of fabricating zero usage", async () => {
+  it("keeps an unexplained quota drop as a gap rather than inventing a reset", async () => {
     await loaded(
       tel({
         quota: [
@@ -825,7 +825,35 @@ describe("Capacity and cost", () => {
         ],
       }),
     );
-    expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("claude-main 5h reset");
+    expect(panel("tQuota").querySelector(".annotation")).toBeNull();
+  });
+
+  it("labels only a provider-recorded quota reset", async () => {
+    await loaded(
+      tel({
+        series: {
+          stateSpans: [],
+          tickets: [],
+          annotations: [],
+          quota: [
+            {
+              accountId: "claude-main",
+              window: "5h",
+              alertAt: 80,
+              stopAt: 95,
+              points: [
+                { at: NOW - HOUR, pct: 80 },
+                { at: NOW - MIN, pct: 12 },
+              ],
+              resets: [{ at: NOW - MIN, resetAt: NOW, cause: "provider" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(panel("tQuota").querySelector(".annotation")?.textContent).toContain(
+      "claude-main 5h reset",
+    );
   });
 
   it("breaks a reset and labels the configured alert and stop thresholds", async () => {

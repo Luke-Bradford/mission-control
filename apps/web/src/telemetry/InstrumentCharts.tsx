@@ -1,6 +1,6 @@
 import { TELEMETRY_RANGES, type Telemetry } from "@mc/core";
 import { useState } from "react";
-import { keyStep, useChartCursor, useChartWidth } from "../hud/charts/Hover.tsx";
+import { keyStep, pointerX, Tip, useChartCursor, useChartWidth } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { minutesAgo, type Scope } from "./common.ts";
@@ -24,9 +24,9 @@ const STATE_COLOUR: Record<Series["stateSpans"][number]["state"], string> = {
   idle: "var(--fg-2)",
 };
 
-function percentile(values: number[], pct: number): number | null {
+export function nearestRank(values: number[], pct: number): number | null {
   if (!values.length) return null;
-  return values[Math.ceil((values.length - 1) * pct) - 1] ?? null;
+  return values[Math.ceil(values.length * pct) - 1] ?? null;
 }
 
 function CrewStateTimeline({
@@ -62,6 +62,15 @@ function CrewStateTimeline({
   };
   if (!agents.length)
     return <p className="pb s muted">No crew state observations in this range.</p>;
+  const stateAt = (agent: string, time: number) =>
+    spans.find((span) => span.agentId === agent && span.startedAt <= time && span.endedAt >= time)
+      ?.state ?? "—";
+  const nearest = (time: number) =>
+    times.reduce<number | null>(
+      (best, candidate) =>
+        best === null || Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best,
+      null,
+    );
   return (
     <div className="chart crew-state-chart" ref={ref}>
       <svg
@@ -122,7 +131,38 @@ function CrewStateTimeline({
             strokeDasharray="3 3"
           />
         )}
+        <rect
+          className="hit"
+          x={x0}
+          y={0}
+          width={x1 - x0}
+          height={height - 18}
+          fill="transparent"
+          onPointerMove={(event) => {
+            const time =
+              from + ((pointerX(event, width) - x0) / Math.max(1, x1 - x0)) * (to - from);
+            setAt(nearest(time));
+          }}
+          onPointerLeave={() => setAt(null)}
+        />
       </svg>
+      {at !== null && (
+        <Tip
+          x={x(at)}
+          width={width}
+          title={new Date(at).toLocaleString()}
+          rows={[
+            ...agents.map((agent) => ({ key: agent, name: agent, value: stateAt(agent, at) })),
+            ...annotations
+              .filter((event) => event.at === at)
+              .map((event) => ({
+                key: `${event.at}:${event.kind}`,
+                name: "Event",
+                value: event.cause,
+              })),
+          ]}
+        />
+      )}
     </div>
   );
 }
@@ -131,11 +171,13 @@ function CrewStateTimeline({
 export function InstrumentCharts({
   scope,
   series,
+  ticketCosts = [],
   from = Date.now() - TELEMETRY_RANGES[scope.range] * MINUTE_MS,
   to = Date.now(),
 }: {
   scope: Scope;
   series?: Series;
+  ticketCosts?: Telemetry["tokensByTicket"];
   from?: number;
   to?: number;
 }) {
@@ -154,11 +196,14 @@ export function InstrumentCharts({
   let inProgress = 0;
   let merged = 0;
   const flowEvents = tickets
-    .flatMap((ticket) => [
-      ticket.readyAt === null ? null : { at: ticket.readyAt, delta: 1 },
-      ticket.doneAt === null ? null : { at: ticket.doneAt, delta: -1 },
-    ])
-    .filter((event): event is { at: number; delta: number } => event !== null)
+    .flatMap((ticket) =>
+      ticket.readyAt === null || ticket.doneAt === null || ticket.doneAt < ticket.readyAt
+        ? []
+        : [
+            { at: ticket.readyAt, delta: 1 },
+            { at: ticket.doneAt, delta: -1 },
+          ],
+    )
     .sort((a, b) => a.at - b.at);
   const activePoints = flowEvents.map((event) => {
     inProgress += event.delta;
@@ -174,7 +219,7 @@ export function InstrumentCharts({
     color: p === 50 ? "var(--accent)" : "var(--warn)",
     points: completed.map((ticket, i) => ({
       at: ticket.doneAt,
-      v: percentile(
+      v: nearestRank(
         completed
           .slice(0, i + 1)
           .map((row) => (row.doneAt - row.readyAt) / HOUR_MS)
@@ -183,6 +228,11 @@ export function InstrumentCharts({
       ),
     })),
   }));
+  const costByTicket = new Map(ticketCosts.map((row) => [row.ticket, row.costUsd]));
+  const mergedCosts = tickets
+    .filter((ticket): ticket is typeof ticket & { mergedAt: number } => ticket.mergedAt !== null)
+    .sort((a, b) => a.mergedAt - b.mergedAt)
+    .map((ticket) => ({ at: ticket.mergedAt, v: costByTicket.get(ticket.ticket) ?? null }));
   const labels = [`-${scope.range}`, "now"] as [string, string];
   return (
     <div className="tgrid">
@@ -254,7 +304,35 @@ export function InstrumentCharts({
         {unavailable("Daily quality history", scope.range)}
       </Panel>
       <Panel id="tCostMerged" title="Cost per merged ticket" sub="API-equivalent estimate">
-        {unavailable("Merged-ticket cost history", scope.range)}
+        {!series ? (
+          unavailable("Merged-ticket cost history", scope.range)
+        ) : !mergedCosts.length ? (
+          <p className="pb s muted">No merged tickets in this range.</p>
+        ) : !mergedCosts.some((point) => point.v !== null) ? (
+          <p className="pb s muted">No API-equivalent cost was reported for merged tickets.</p>
+        ) : (
+          <LineChart
+            series={[
+              {
+                id: "cost-per-merged-ticket",
+                name: "cost per merged ticket",
+                color: "var(--accent)",
+                points: mergedCosts,
+              },
+            ]}
+            from={from}
+            to={to}
+            max={
+              Math.max(1, ...mergedCosts.flatMap((point) => (point.v === null ? [] : [point.v]))) *
+              1.1
+            }
+            label="Cost per merged ticket"
+            xLabels={labels}
+            at={at}
+            annotations={annotations}
+            format={(v) => `$${v.toFixed(2)}`}
+          />
+        )}
       </Panel>
     </div>
   );

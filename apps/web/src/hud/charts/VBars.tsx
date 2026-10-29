@@ -65,8 +65,17 @@ export function VBars({
   const slot = (x1 - x0) / n;
   const bw = Math.max(1, Math.min(BAR_MAX, slot * BAR_SHARE));
   const left = (i: number): number => x0 + i * slot + (slot - bw) / 2;
+  const cursorAt = cursor?.at;
   const selected =
-    times && cursor?.at !== null && cursor?.at !== undefined ? times.indexOf(cursor.at) : hover;
+    times && cursorAt !== null && cursorAt !== undefined
+      ? cursorAt < times[0] || cursorAt > (times.at(-1) ?? cursorAt)
+        ? null
+        : times.reduce(
+            (best, time, i) =>
+              Math.abs(time - cursorAt) < Math.abs((times[best] ?? time) - cursorAt) ? i : best,
+            0,
+          )
+      : hover;
   const setSelected = (index: number | null) => {
     setHover(index);
     if (times) cursor?.setAt(index === null ? null : (times[index] ?? null));

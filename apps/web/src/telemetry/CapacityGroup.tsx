@@ -65,8 +65,12 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     live: scope.live,
   };
 
+  // New telemetry carries explicit provider reset observations. Legacy rows remain readable, but
+  // never manufacture a reset from a falling percentage.
+  const quotaRows =
+    t?.series?.quota ?? (t?.quota ?? []).map((row) => ({ ...row, resets: [] as const }));
   // A window keeps its colour whichever account is picked: its place among all the windows.
-  const quota = (t?.quota ?? [])
+  const quota = quotaRows
     .map((q, i) => ({ q, color: agentColor(i) }))
     .filter(({ q }) => scope.account === "" || q.accountId === scope.account);
   const quotaLines: LineSeries[] = quota.map(({ q, color }) => ({
@@ -75,9 +79,9 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     color,
     points: q.points.flatMap((point, index) => {
       const previous = q.points[index - 1];
-      // A fall starts a new provider window; make the discontinuity visible rather than plotting
-      // a fictitious burn reversal.
-      return previous && point.pct < previous.pct
+      const reset = q.resets.some((event) => event.at === point.at);
+      // Both an observed reset and an unexplained fall break continuity; only the former is named.
+      return reset || (previous && point.pct < previous.pct)
         ? [
             { at: point.at, v: null },
             { at: point.at, v: point.pct },
@@ -85,15 +89,9 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         : [{ at: point.at, v: point.pct }];
     }),
   }));
-  // Usage is cumulative within a provider window. A lower subsequent reading is a reset, not a
-  // spent-usage value of zero; mark the discontinuity so operators do not read it as a burn drop.
+  // Only the provider's explicit reset record earns a reset annotation.
   const quotaResets = quota.flatMap(({ q }) =>
-    q.points.flatMap((point, index) => {
-      const previous = q.points[index - 1];
-      return previous && point.pct < previous.pct
-        ? [{ at: point.at, label: `${q.accountId} ${q.window} reset` }]
-        : [];
-    }),
+    q.resets.map((reset) => ({ at: reset.at, label: `${q.accountId} ${q.window} reset` })),
   );
   const quotaLegend = quota.map(({ q, color }) => {
     const latest = q.points.at(-1);

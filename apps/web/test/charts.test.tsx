@@ -5,7 +5,7 @@ import { ChartCursorProvider } from "../src/hud/charts/Hover.tsx";
 import { LineChart } from "../src/hud/charts/LineChart.tsx";
 import { StackedArea } from "../src/hud/charts/StackedArea.tsx";
 import { VBars } from "../src/hud/charts/VBars.tsx";
-import { InstrumentCharts } from "../src/telemetry/InstrumentCharts.tsx";
+import { InstrumentCharts, nearestRank } from "../src/telemetry/InstrumentCharts.tsx";
 
 const k = (v: number): string => `${Math.round(v)}`;
 
@@ -111,9 +111,41 @@ describe("VBars time workspace", () => {
     expect(other?.parentElement?.querySelector(".tip")?.textContent).toContain("x2%");
     expect(throughput?.querySelector(".annotation")?.textContent).toBe("hub Update");
   });
+
+  it("snaps an external time cursor to the nearest dated bar", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart
+          label="source"
+          from={0}
+          to={300}
+          xLabels={["start", "now"]}
+          at={String}
+          series={[{ id: "x", name: "x", color: "red", points: [{ at: 160, v: 1 }] }]}
+        />
+        <VBars
+          label="Throughput"
+          bars={[
+            { key: "a", label: "Mon", tip: "Monday", segments: [{ name: "merged", value: 1 }] },
+            { key: "b", label: "Tue", tip: "Tuesday", segments: [{ name: "merged", value: 3 }] },
+          ]}
+          times={[100, 200]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [source, throughput] = container.querySelectorAll("svg");
+    fireEvent.focus(source as SVGSVGElement);
+    expect(throughput?.parentElement?.querySelector(".tip")?.textContent).toContain("Tuesday");
+  });
 });
 
 describe("Instrument charts", () => {
+  it("uses nearest-rank cycle percentiles without dropping a single observation", () => {
+    expect(nearestRank([2], 0.5)).toBe(2);
+    expect(nearestRank([1, 2, 9], 0.5)).toBe(2);
+    expect(nearestRank([1, 2, 9], 0.85)).toBe(9);
+  });
+
   it("renders only the supplied server observations, retaining their timestamps", () => {
     const { container } = render(
       <ChartCursorProvider>
@@ -131,6 +163,7 @@ describe("Instrument charts", () => {
             ],
             annotations: [{ at: 30, kind: "hub-update", cause: "Updated Mission Control" }],
           }}
+          ticketCosts={[{ ticket: "repo#1", tokens: 100, costUsd: 1.25 }]}
           from={0}
           to={60}
         />
@@ -138,9 +171,13 @@ describe("Instrument charts", () => {
     );
     expect(container.querySelectorAll(".crew-state-span")).toHaveLength(2);
     expect(container.querySelector(".crew-state-span")?.getAttribute("data-ended-at")).toBe("20");
-    expect(container.querySelectorAll(".annotation")).toHaveLength(3);
+    expect(container.querySelectorAll(".annotation")).toHaveLength(4);
     expect(container.querySelectorAll("#tFlow path.line").length).toBeGreaterThan(0);
     expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
+    const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
+    fireEvent.focus(timeline);
+    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain("crewrunning");
   });
 });
 
