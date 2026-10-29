@@ -67,6 +67,7 @@ import {
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_PROMOTES_PER_HOUR,
   FLIGHT_RETROSPECTIVE_SETTING,
+  FLIGHT_REWORKS_PER_HEAD,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
@@ -109,6 +110,7 @@ import {
   type RunLoop,
   researchText,
   retiredBriefText,
+  reworkCapText,
   type SeatSessionRow,
   startMissingNeedsText,
   type TestLockState,
@@ -256,6 +258,15 @@ let screenshotCalls: string[];
 let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
+let shotsKnown: string[];
+let checkCalls: unknown[][];
+let resumeCalls: string[];
+let restartEngineCalls: number;
+let updaterImpl: {
+  changes: () => Promise<{ commits: string[]; paths: string[] } | null>;
+  update: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
+};
+let updaterRestarts: number;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -353,6 +364,15 @@ beforeEach(() => {
   logs = [];
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
+  shotsKnown = [];
+  checkCalls = [];
+  resumeCalls = [];
+  restartEngineCalls = 0;
+  updaterRestarts = 0;
+  updaterImpl = {
+    changes: async () => ({ commits: [], paths: [] }),
+    update: async () => ({ upToDate: true }),
+  };
   shotsSaved = [];
   shotsSaveImpl = (png) => {
     shotsSaved.push(png);
@@ -361,7 +381,20 @@ beforeEach(() => {
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
-    hudShots: { save: (png) => shotsSaveImpl(png), read: () => null },
+    hudShots: {
+      save: (png) => shotsSaveImpl(png),
+      read: (id) => (shotsKnown.includes(id) ? Buffer.from("png") : null),
+    },
+    restartEngine: async () => {
+      restartEngineCalls += 1;
+    },
+    updater: () => ({
+      changes: () => updaterImpl.changes(),
+      update: () => updaterImpl.update(),
+      restart: () => {
+        updaterRestarts += 1;
+      },
+    }),
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
@@ -405,6 +438,9 @@ beforeEach(() => {
         startCalls.push(a);
         return startImpl();
       },
+      resumeRun: async (runId) => {
+        resumeCalls.push(runId);
+      },
     },
     engine: {
       clearFlight: async (...args) => {
@@ -426,6 +462,10 @@ beforeEach(() => {
         return syncImpl();
       },
       uncommitted: async () => dirty,
+      controllerCheck: async (...a) => {
+        checkCalls.push(a);
+        return lifts ? { lifted: true } : { lifted: false, reason: refuseWith ?? "not-parked" };
+      },
       holdMerge: async (...a) => {
         holdCalls.push(["hold", ...a]);
         return { ok: true };
@@ -629,6 +669,7 @@ describe("tool list", () => {
       "read_ticket",
       "answer_question",
       "start_seat",
+      "restart_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -653,6 +694,16 @@ describe("tool list", () => {
       "rerun_ci",
       "edit_card",
       "dismiss_item",
+      "set_crew_pause",
+      "lift_crew_pause",
+      "resume_seat",
+      "withdraw_decision",
+      "close_issue",
+      "reopen_issue",
+      "edit_issue",
+      "set_fields",
+      "restart_engine",
+      "update_hub",
       "draft_reply",
       "track",
       "untrack",
@@ -2110,33 +2161,25 @@ describe("end_run", () => {
     expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
   });
 
-  it("refuses a run that is still working, and a run that has ended", async () => {
+  it("ends a working run with its reason, and refuses a run that has ended", async () => {
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
-    expect(await call("end_run", E())).toEqual(
-      refused("Not ended: GUIDO-1's run is not parked or stalled."),
-    );
-    store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
-    expect(await call("end_run", E())).toEqual(refused("Not done: r-g is not an unended run."));
-    expect(endCalls).toEqual([]);
-    expect(decisions()).toEqual([]);
-  });
-
-  it("ends a stalled run: its seat running with no output for ten minutes", async () => {
-    live("guido-1", "r-g", { ticket: "mc#7" });
-    store.setRunLoop("r-g", NEW_LOOP);
-    store.setSeatSession({
-      ...row("guido-1", "r-g"),
-      state: "running",
-      updatedAt: NOW - 11 * 60_000,
-    });
     expect((await call("end_run", E())).isError).toBeUndefined();
     expect(endCalls).toEqual(["guido-1"]);
-    // a seat that wrote just now is not stalled
-    live("inco-1", "r-i", { ticket: "mc#8" });
-    store.setRunLoop("r-i", NEW_LOOP);
-    store.setSeatSession({ ...row("inco-1", "r-i"), state: "running", updatedAt: NOW });
-    expect((await call("end_run", E({ runId: "r-i" }))).isError).toBe(true);
+    expect(decisions()).toMatchObject([{ kind: "end", targetRunId: "r-g" }]);
+    store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
+    expect(await call("end_run", E())).toEqual(refused("Not done: r-g is not an unended run."));
+    expect(endCalls).toEqual(["guido-1"]);
+  });
+
+  it("ends a working run with uncommitted changes only when told to discard them", async () => {
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    dirty = ["apps/a.ts"];
+    expect((await call("end_run", E())).isError).toBe(true);
+    expect(endCalls).toEqual([]);
+    expect((await call("end_run", E({ discard: true }))).isError).toBeUndefined();
+    expect(endCalls).toEqual(["guido-1"]);
   });
 
   it("refuses FLIGHT's own run, a run outside the session and a non-developer seat's run", async () => {
@@ -3094,9 +3137,19 @@ describe("promote", () => {
     expect(store.board("mc").map((c) => c.issueNumber)).toContain(7);
   });
 
-  it("does not read the project for a card the cache holds", async () => {
+  it("reads the live card even when the cache holds it, and the live card wins", async () => {
+    // the cache has no size (the poll is behind an edit_card); the project has it now
+    board(backlog({ size: null }));
+    readImpl = (n) => backlog({ issueNumber: n, size: "S" });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(readCalls).toEqual([7]);
+    expect(store.board("mc").find((c) => c.issueNumber === 7)?.size).toBe("S");
+  });
+
+  it("falls back to the cached card when the live read gives nothing", async () => {
     await call("promote", P());
-    expect(readCalls).toEqual([]);
+    expect(readCalls).toEqual([7]);
+    expect(moveCalls).toHaveLength(1);
   });
 
   it("refuses a card whose re-read fails", async () => {
@@ -5536,6 +5589,13 @@ describe("superuser housekeeping", () => {
     expect(moveCalls).toEqual([]);
   });
 
+  const parkOnCheck = () =>
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "controller-check", reason: "held", ended: false },
+      controllerCheck: { sha: SHA, from: "review", pass: false },
+    });
   const runPr = () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
@@ -5641,19 +5701,16 @@ describe("superuser housekeeping", () => {
     expect(engineCalls).toEqual([]);
   });
   it.each(["lift", "accept", "rework", "rereview"] as const)(
-    "settle_park cannot settle a controller check (%s)",
+    "settle_park cannot settle a controller check with a review action (%s)",
     async (action) => {
       elevated();
       runPr();
-      store.setRunLoop("r-pr", {
-        ...need(store.run("r-pr")?.loop),
-        phase: "parked",
-        parked: { kind: "controller-check", reason: "held", ended: false },
-      });
+      parkOnCheck();
       const refused = await call("settle_park", { runId: "r-pr", action });
       expect(refused).toHaveProperty("isError", true);
-      expect(JSON.stringify(refused)).toContain("This action cannot settle this park.");
+      expect(JSON.stringify(refused)).toContain("settle it with pass-check or fail-check");
       expect(engineCalls).toEqual([]);
+      expect(checkCalls).toEqual([]);
     },
   );
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
@@ -5702,7 +5759,7 @@ describe("superuser housekeeping", () => {
     expect(result).toHaveProperty("isError", true);
     expect(JSON.stringify(result)).toContain(text);
   });
-  it("grants one capped review rework with a fix list, then leaves a repeat to the controller", async () => {
+  it("grants capped review reworks with a fix list: more per head and run, never unlimited", async () => {
     elevated();
     runPr();
     const park = (flightReworks?: Record<string, number>) =>
@@ -5733,11 +5790,22 @@ describe("superuser housekeeping", () => {
       ],
     ]);
 
-    park({ [SHA]: 1 });
+    // a head that already had one round may have more, up to the raised cap
+    park({ [SHA]: FLIGHT_REWORKS_PER_HEAD - 1 });
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual({
+      text: "Settled r-pr: rework.",
+    });
+    park({ [SHA]: FLIGHT_REWORKS_PER_HEAD });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
-      refused("This head already had FLIGHT's extra rework round; ask the controller."),
+      refused(reworkCapText(FLIGHT_REWORKS_PER_HEAD, FLIGHT_REWORKS_PER_HEAD)),
     );
-    expect(engineCalls).toHaveLength(1);
+    // the whole run is capped too, over its heads
+    park({ a: 3, b: 3, c: 3 });
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(engineCalls).toHaveLength(2);
   });
   it("keeps budget, ruling and operator-held parks out of rework", async () => {
     elevated();

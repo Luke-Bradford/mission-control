@@ -5563,6 +5563,14 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
 
+  /** Removes one of FLIGHT's decisions from the log; the decision, or null when there is none. */
+  withdrawFlightDecision(id: number): FlightDecision | null {
+    const found = this.flightDecisions(0, 100_000).find((d) => d.id === id) ?? null;
+    if (found === null) return null;
+    this.db.prepare("DELETE FROM flight_decisions WHERE id = ?").run(id);
+    return found;
+  }
+
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
     const rows = this.db

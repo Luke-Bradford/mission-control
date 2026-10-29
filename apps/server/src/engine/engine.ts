@@ -54,6 +54,8 @@ import {
   evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
   fixSentText,
   fixText,
@@ -285,6 +287,7 @@ export interface Engine {
     verdict: "pass" | "fail",
     sha: string,
     note?: string,
+    by?: "CAPCOM" | "FLIGHT",
   ): Promise<OperatorResult>;
   /**
    * Holds the run's merge: the engine does not merge it, even after a clean review and green CI,
@@ -926,6 +929,21 @@ export function createEngine(deps: EngineDeps): Engine {
    * Fails closed: a ticket that is missing or unreadable parks after REFUSAL_TRIES, so the
    * operator can pass it. Once a run's ticket has listed a check, a pass is needed whatever it says later.
    */
+  /** RETRO's latest reported findings as the author's fix list, else FLIGHT's own request. */
+  function reworkFindings(runId: string, reason: string): string {
+    const review = store
+      .reviewsOfRun(runId)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    return review
+      ? fixText({
+          retro: seatCallSign(review.seatId),
+          sha: review.sha,
+          findings: store.findingsOf(review.id),
+        })
+      : `FLIGHT requests rework: ${reason}`;
+  }
+
   async function controllerCheckHold(
     run: Run,
     cur: RunLoop,
@@ -2390,7 +2408,12 @@ export function createEngine(deps: EngineDeps): Engine {
             return refuse("wrong-action");
           if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
             return refuse("round-granted");
-          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1)
+          if (
+            opts.action === "rework" &&
+            ((loop.flightReworks?.[pushed.sha] ?? 0) >= FLIGHT_REWORKS_PER_HEAD ||
+              Object.values(loop.flightReworks ?? {}).reduce((n, v) => n + v, 0) >=
+                FLIGHT_REWORKS_PER_RUN)
+          )
             return refuse("round-granted");
           if (opts.action === "accept") {
             const review = store
@@ -2462,33 +2485,41 @@ export function createEngine(deps: EngineDeps): Engine {
                 ...loop.flightReworks,
                 [pushed.sha]: (loop.flightReworks?.[pushed.sha] ?? 0) + 1,
               };
-            if (next.aside) {
-              try {
-                await supervisor.wakeRun(run.id);
-              } catch {
-                return refuse("rework-undelivered");
-              }
-              next.aside = null;
-            }
-            const review = store
-              .reviewsOfRun(run.id)
-              .filter((r) => r.state === "reported")
-              .at(-1);
-            const findings = review
-              ? fixText({
-                  retro: seatCallSign(review.seatId),
-                  sha: review.sha,
-                  findings: store.findingsOf(review.id),
-                })
-              : `FLIGHT requests rework: ${loop.parked.reason}`;
+            const findings = reworkFindings(run.id, loop.parked.reason);
             const message =
               opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
-            const sent = await supervisor.send(
-              run.id,
-              `${run.id}:flight-rework:${next.epoch}`,
-              message,
-            );
-            if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            if (next.aside && supervisor.busy().some((b) => b.seatId === run.agentId)) {
+              // its seat holds another run now: the rework waits in Comms for this run, and the
+              // engine wakes it, in working, once the seat is free (as a controller-check fail does)
+              const stored = store.addComms({
+                at,
+                from: COMMS_CAPCOM,
+                to: run.agentId,
+                ticket: run.ticket ?? null,
+                ref: run.ticket ?? null,
+                targetRunId: run.id,
+                text: message,
+              });
+              if (stored === null) return refuse("rework-undelivered");
+              store.markCommsInboxRead(run.agentId, [stored.id]);
+              next.pendingLine = { key: `${run.id}:flight-rework:${next.epoch}`, text: message };
+              next.aside = { ...next.aside, wake: true };
+            } else {
+              if (next.aside) {
+                try {
+                  await supervisor.wakeRun(run.id);
+                } catch {
+                  return refuse("rework-undelivered");
+                }
+                next.aside = null;
+              }
+              const sent = await supervisor.send(
+                run.id,
+                `${run.id}:flight-rework:${next.epoch}`,
+                message,
+              );
+              if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            }
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
@@ -2501,7 +2532,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }).then(() => result);
     },
 
-    controllerCheck(runId, verdict, sha, note) {
+    controllerCheck(runId, verdict, sha, note, by = "CAPCOM") {
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
         result = { lifted: false, reason };
@@ -2538,7 +2569,9 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:pass`,
             run.id,
-            `controller check passed on ${short}`,
+            by === "FLIGHT"
+              ? `controller check passed on ${short} by FLIGHT`
+              : `controller check passed on ${short}`,
             at,
           );
         } else {
@@ -2595,7 +2628,9 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
             run.id,
-            `controller check failed on ${short}: sent back for rework`,
+            by === "FLIGHT"
+              ? `controller check failed on ${short} by FLIGHT: sent back for rework`
+              : `controller check failed on ${short}: sent back for rework`,
             at,
           );
         }

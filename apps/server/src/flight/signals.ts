@@ -51,7 +51,7 @@ export interface MainCi {
   checks?: { name: string; url: string | null }[];
   episode?: string | null;
 }
-interface LoopHeartbeat {
+export interface LoopHeartbeat {
   at: number;
   interval: number;
   completed: boolean;
@@ -232,6 +232,11 @@ function heartbeats(store: Store) {
     heartbeatCache.set(store, cache);
   }
   return cache;
+}
+
+/** A hub loop's last completion (or first due time) and its interval; null when it has none. */
+export function loopHeartbeat(store: Store, source: string): LoopHeartbeat | null {
+  return heartbeats(store).loops[source] ?? null;
 }
 
 /** A scheduled hub loop's first due time or last completion, and its interval. */
