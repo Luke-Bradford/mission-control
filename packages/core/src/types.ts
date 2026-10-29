@@ -1049,6 +1049,8 @@ export interface AttentionBrief {
 export interface AttentionItem {
   hold?: AttentionHold;
   holdReleased?: string;
+  /** When that hold was released; FLIGHT's brief older than this is stale. */
+  holdReleasedAt?: number;
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;

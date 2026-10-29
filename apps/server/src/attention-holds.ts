@@ -84,6 +84,7 @@ export function partitionAttention(
               owner: "operator",
               acked: (acks.get(item.key) ?? 0) >= hold.releasedAt,
               holdReleased: conditionText(hold.condition),
+              holdReleasedAt: hold.releasedAt,
             }
           : item,
       );

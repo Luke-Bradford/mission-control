@@ -521,6 +521,23 @@ const BriefItemArgs = z
     recommendation: text(BRIEF_INPUT_MAX),
     options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
     basis: basisArg,
+    // a wait recommendation: the item leaves Needs you until the condition is met
+    hold: z
+      .strictObject({
+        // the conditions that resurface on their own (AttentionHoldInput also takes manual)
+        condition: z.discriminatedUnion("kind", [
+          z.strictObject({ kind: z.literal("crew") }),
+          z.strictObject({
+            kind: z.literal("date"),
+            at: z.number().int().min(0).max(8640000000000000),
+          }),
+          z.strictObject({
+            kind: z.literal("ticket"),
+            ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+          }),
+        ]),
+      })
+      .optional(),
   })
   .refine((args) => (args.assessment ?? args.context) !== undefined, {
     message: "Give assessment (or legacy context).",
@@ -2131,7 +2148,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function briefItem(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, BriefItemArgs, args);
     if (!c.ok) return c.result;
-    const { key, context, recommendation, options, basis, ...structured } = c.args;
+    const { key, context, recommendation, options, basis, hold, ...structured } = c.args;
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
     if (structured.for === "operator" && structured.ask === undefined)
@@ -2221,6 +2238,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           detail: recommendation,
         });
     }
+    if (hold) holdItem(store, key, recommendation.slice(0, 1000), hold.condition, "FLIGHT", at);
     bus.emit("attention");
     bus.emit("flight");
     return {

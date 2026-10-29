@@ -136,7 +136,8 @@ export function flightTriageItems(
   return operatorItems(config, store, now, hubLogin, rows, lock)
     .filter(
       (x) =>
-        !x.brief &&
+        // a released hold returns the item for a fresh brief: the old one predates the wait
+        (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
         !ownReply(x, flightId) &&
         (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
     )
@@ -755,6 +756,7 @@ export function flightState(i: {
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
+      ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
