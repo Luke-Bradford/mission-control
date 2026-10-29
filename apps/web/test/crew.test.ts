@@ -758,7 +758,12 @@ describe("stepMarks", () => {
   it("without profile steps it is loopMarks", () => {
     const fallback = { ...loop, phase: "ci" as const, steps: undefined };
     expect(stepMarks(fallback, "idle")).toEqual(["done", "cur", "todo", "todo"]);
-    expect(loopSteps(fallback).map((s) => s.name)).toEqual(["Working", "Checks", "In review", "Done"]);
+    expect(loopSteps(fallback).map((s) => s.name)).toEqual([
+      "Working",
+      "Checks",
+      "In review",
+      "Done",
+    ]);
   });
 
   it("draft PR is done once a PR is open", () => {
