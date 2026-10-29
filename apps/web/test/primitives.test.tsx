@@ -1,11 +1,26 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentTag, agentColor } from "../src/hud/AgentTag.tsx";
+import { EmptyState } from "../src/hud/EmptyState.tsx";
 import { Lamp } from "../src/hud/Lamp.tsx";
 import { Meter } from "../src/hud/Meter.tsx";
 import { Panel } from "../src/hud/Panel.tsx";
 import { Pill } from "../src/hud/Pill.tsx";
 import { Seg } from "../src/hud/Seg.tsx";
+import { Skeleton } from "../src/hud/Skeleton.tsx";
+
+describe("empty/loading primitives", () => {
+  it("announces an empty state and names a loading skeleton", () => {
+    render(
+      <>
+        <EmptyState>No data yet.</EmptyState>
+        <Skeleton label="Loading board" />
+      </>,
+    );
+    expect(screen.getAllByRole("status")[0]?.textContent).toBe("No data yet.");
+    expect(screen.getByRole("status", { name: "Loading board" })).toBeTruthy();
+  });
+});
 
 describe("Lamp", () => {
   it("is an image named by its label, titled by default with the label", () => {

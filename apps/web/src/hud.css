@@ -40,11 +40,11 @@
   --s1: #4f8fe8;
   --s2: #9c62e2;
   --s3: #d35bab;
-  --s4: #5350bf;
+  --s4: #c5a0f5;
   --s5: #e989e9;
-  --s6: #4384af;
+  --s6: #5ea3d0;
   --s7: #2eafc4;
-  --s8: #6c639d;
+  --s8: #a4b9ff;
   --r1: #3fd0e8;
   --r2: #e6dc6e;
   --r3: #f5b5d0;
@@ -179,11 +179,11 @@
   --s1: #4f8fe8;
   --s2: #9c62e2;
   --s3: #d35bab;
-  --s4: #5350bf;
+  --s4: #c5a0f5;
   --s5: #e989e9;
-  --s6: #4384af;
+  --s6: #5ea3d0;
   --s7: #2eafc4;
-  --s8: #6c639d;
+  --s8: #a4b9ff;
   --r1: #3fd0e8;
   --r2: #e6dc6e;
   --r3: #f5b5d0;
@@ -208,7 +208,7 @@ body {
   margin: 0;
   background: var(--glow), var(--bg);
   color: var(--fg);
-  font: 400 var(--fs) / 1.45 var(--sans);
+  font: 400 var(--type-base) / 1.45 var(--sans);
   font-variant-numeric: tabular-nums;
 }
 .app {
@@ -228,10 +228,10 @@ h3 {
   text-wrap: balance;
 }
 h2 {
-  font-size: 13px;
+  font-size: var(--type-base);
 }
 h3 {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--fg-2);
 }
 p {
@@ -301,7 +301,7 @@ button.ghost:hover {
 }
 button.sm {
   padding: 2px 8px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 /* Selection is an edge, not a box (flight-deck.md). */
 button.on {
@@ -350,10 +350,10 @@ input[type="radio"] {
   font-family: var(--mono);
 }
 .s {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .xs {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .muted {
   color: var(--muted);
@@ -407,11 +407,11 @@ input[type="radio"] {
 }
 .note {
   color: var(--muted);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   max-width: 80ch;
 }
 .phase {
-  font-size: 10px;
+  font-size: var(--type-xs);
   color: var(--muted);
   border: 1px solid var(--line-2);
   border-radius: 2px;
@@ -420,7 +420,7 @@ input[type="radio"] {
   font-weight: 500;
 }
 .lbl {
-  font-size: 10.5px;
+  font-size: var(--type-xs);
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -434,7 +434,7 @@ input[type="radio"] {
   gap: 6px;
   padding: 1px 8px 1px 7px;
   border-radius: 2px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 500;
   background: var(--surface-2);
   color: var(--fg-2);
@@ -471,7 +471,7 @@ input[type="radio"] {
   border-radius: 50%;
   display: inline-grid;
   place-items: center;
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 600;
   background: var(--surface-2);
   color: var(--muted);
@@ -481,7 +481,7 @@ input[type="radio"] {
 .tdot.sm {
   width: 20px;
   height: 20px;
-  font-size: 10px;
+  font-size: var(--type-xs);
 }
 .vsteps {
   display: grid;
@@ -549,16 +549,16 @@ input[type="radio"] {
   align-items: center;
 }
 .vmeta {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 .vfail {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--crit);
 }
 .vrule {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
 }
 .atts {
@@ -572,11 +572,11 @@ input[type="radio"] {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) auto 34px;
   gap: 6px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   align-items: baseline;
 }
 .titer {
-  font-size: 10px;
+  font-size: var(--type-xs);
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-soft);
@@ -609,7 +609,7 @@ input[type="radio"] {
   gap: 8px;
   align-items: center;
   padding: 4px 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .tlbars {
   position: relative;
@@ -644,7 +644,7 @@ input[type="radio"] {
   grid-template-columns: 70px minmax(0, 1fr);
   gap: 8px;
   padding: 3px 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   align-items: baseline;
 }
 #sideBody .check > :last-child {
@@ -667,7 +667,7 @@ input[type="radio"] {
 }
 .qsec {
   margin-top: 8px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -679,7 +679,7 @@ input[type="radio"] {
   gap: 8px;
   padding: 4px 0;
   align-items: center;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .vnow,
 .vhold > span:last-child {
@@ -687,7 +687,7 @@ input[type="radio"] {
   overflow-wrap: anywhere;
 }
 .vnow {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--fg-2);
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -716,7 +716,7 @@ input[type="radio"] {
   gap: 6px;
   font-family: var(--display);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--type-md);
   letter-spacing: 0.02em;
   white-space: nowrap;
   color: var(--fg);
@@ -729,18 +729,18 @@ input[type="radio"] {
   flex: none;
 }
 .ag.sm {
-  font-size: 13px;
+  font-size: var(--type-base);
 }
 .ag .rt,
 .idrow .big .rt {
   font-family: var(--sans, inherit);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 400;
   color: var(--fg-2);
 }
 .rref {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   white-space: nowrap;
 }
 .rchip {
@@ -750,12 +750,12 @@ input[type="radio"] {
   border-radius: 2px;
   padding: 0 5px;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   letter-spacing: 0.02em;
 }
 .chipref {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
   background: var(--surface-2);
   border-radius: 2px;
@@ -874,14 +874,14 @@ input[type="radio"] {
 #sess {
   max-width: 132px;
   min-height: 30px;
-  font-size: 12px;
+  font-size: var(--type-sm);
 }
 .brand {
   display: inline-flex;
   align-items: center;
   font-family: var(--display);
   font-weight: 700;
-  font-size: 18px;
+  font-size: var(--type-lg);
   letter-spacing: 0.14em;
   white-space: nowrap;
 }
@@ -905,7 +905,7 @@ input[type="radio"] {
   color: var(--fg-2);
   text-decoration: none;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--type-sm);
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -937,7 +937,7 @@ input[type="radio"] {
   display: inline-flex;
   gap: 14px;
   color: var(--fg-2);
-  font: 11px var(--mono);
+  font: var(--type-xs) var(--mono);
   white-space: nowrap;
 }
 .usage b {
@@ -951,7 +951,7 @@ input[type="radio"] {
 }
 .top-clock {
   color: var(--fg);
-  font: 11px var(--mono);
+  font: var(--type-xs) var(--mono);
   line-height: 16px;
   height: 16px;
   min-width: 5ch;
@@ -960,7 +960,7 @@ input[type="radio"] {
 }
 .met {
   font-family: var(--display);
-  font-size: 13px;
+  font-size: var(--type-base);
   color: var(--fg-2);
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -996,7 +996,7 @@ input[type="radio"] {
   max-width: min(320px, calc(100vw - 28px));
   padding: 6px 8px;
   color: var(--fg);
-  font: 11px var(--mono);
+  font: var(--type-xs) var(--mono);
   line-height: 1.35;
   text-align: left;
   white-space: normal;
@@ -1050,7 +1050,7 @@ input[type="radio"] {
   background: transparent;
   padding: 2px 10px;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   letter-spacing: 0.04em;
   color: var(--fg-2);
   border-radius: 0;
@@ -1135,7 +1135,7 @@ main > section {
     transparent
   );
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--type-xs);
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1148,7 +1148,7 @@ main > section {
 .ph select,
 .ph input {
   font-family: var(--sans);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -1162,7 +1162,7 @@ th {
 .ph .sub {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -1177,7 +1177,7 @@ th {
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -1223,7 +1223,7 @@ th {
 }
 .toolbar-heading {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--type-base);
   font-weight: 600;
 }
 
@@ -1301,7 +1301,7 @@ th {
   gap: 6px 14px;
   flex-wrap: wrap;
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .nbanner.clear {
   border-color: var(--line);
@@ -1534,7 +1534,7 @@ th {
 }
 .trow.head {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   cursor: default;
   border-top: 0;
   padding-block: 2px 6px;
@@ -1595,7 +1595,7 @@ th {
   flex-wrap: nowrap;
   overflow: hidden;
   color: var(--warn);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .trow .needpart {
   display: inline-flex;
@@ -1931,7 +1931,7 @@ th {
   gap: 4px;
   padding: 1px 7px;
   border-radius: 4px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
   background: var(--surface-2);
   border-bottom: 2px solid var(--line-2);
@@ -2057,7 +2057,7 @@ th {
   gap: 6px 14px;
   flex-wrap: wrap;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .legend span {
   display: inline-flex;
@@ -2101,7 +2101,7 @@ th {
   grid-template-columns: 18px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .quotarow {
   display: grid;
@@ -2109,7 +2109,7 @@ th {
   gap: 12px;
   align-items: center;
   padding: 3px 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 #machP .ph {
   padding: 8px 10px;
@@ -2186,7 +2186,7 @@ th {
   font-size: var(--type-xs);
 }
 #machP .resrow .num {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   white-space: nowrap;
 }
 #machP .agentslots {
@@ -2227,7 +2227,7 @@ th {
   margin-top: 4px;
 }
 #quotaP .githubrate {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .arow {
   display: grid;
@@ -2236,11 +2236,11 @@ th {
   align-items: baseline;
   padding: 5px 14px;
   border-top: 1px solid var(--line);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .arow .t {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .arow .g {
   color: var(--muted);
@@ -2306,7 +2306,7 @@ th {
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--fg-2);
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2408,7 +2408,7 @@ th {
 }
 .done-more {
   justify-self: start;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .board-placeholder {
   min-height: 70vh;
@@ -2475,7 +2475,7 @@ th {
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
 }
 .kref .p {
@@ -2499,7 +2499,7 @@ th {
 }
 .lb {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
   border: 0;
   border-radius: 2px;
   padding: 0 6px;
@@ -2514,7 +2514,7 @@ th {
   flex-wrap: wrap;
   gap: 4px 8px;
   align-items: center;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--fg-2);
 }
 .boardsplit {
@@ -2580,7 +2580,7 @@ th {
   max-width: 100%;
   overflow-wrap: anywhere;
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--type-xl);
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -2604,7 +2604,7 @@ th {
 /* a long chip (a branch, an area) is cut at the row's width rather than widening the page */
 .idrow .chips span {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
   background: var(--surface-2);
   border-radius: 2px;
@@ -2638,7 +2638,7 @@ th {
 }
 .tile2 .v {
   font-family: var(--display);
-  font-size: 21px;
+  font-size: var(--type-xl);
   font-weight: 600;
   line-height: 1.1;
   white-space: nowrap;
@@ -2647,13 +2647,13 @@ th {
 }
 .tile2 .v small {
   font-family: var(--sans);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   font-weight: 400;
   color: var(--fg-2);
   margin-left: 4px;
 }
 .tile2 .d {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
   min-width: 0;
 }
@@ -2720,7 +2720,7 @@ th {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .livecall.stuck {
   background: var(--warn-soft);
@@ -2740,16 +2740,16 @@ th {
   gap: 10px;
   padding: 5px 14px;
   border-top: 1px solid var(--line);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   align-items: baseline;
 }
 .ev .at {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .ev .who {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 500;
 }
 .ev .txt {
@@ -2762,7 +2762,7 @@ th {
 }
 .ev.tool .txt {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .ev.tool .tres {
   color: var(--muted);
@@ -2796,7 +2796,7 @@ th {
   white-space: pre-wrap;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .side {
   display: flex;
@@ -2822,7 +2822,7 @@ th {
   gap: 2px 10px;
   padding: 7px 0;
   border-top: 1px solid var(--line);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .subrow:first-child {
   border-top: 0;
@@ -2832,7 +2832,7 @@ th {
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   padding: 3px 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 /* A file row is a button: it opens the file's diff below the list. */
 button.f {
@@ -2864,7 +2864,7 @@ pre.diff {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  font: 11px / 1.5 var(--mono);
+  font: var(--type-xs) / 1.5 var(--mono);
   overflow-x: auto;
   white-space: pre;
 }
@@ -2985,7 +2985,7 @@ pre.diff .h {
 }
 .composer .hint {
   width: 100%;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
 }
 
@@ -3015,7 +3015,7 @@ pre.diff .h {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--muted);
 }
 .msg .body {
@@ -3023,7 +3023,7 @@ pre.diff .h {
 }
 .msg.sys .body {
   color: var(--muted);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .msg.peer {
   padding-left: 32px;
@@ -3084,7 +3084,7 @@ pre.diff .h {
   padding: 10px 12px;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--type-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3094,7 +3094,7 @@ pre.diff .h {
 }
 .comms-section-head span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -3102,7 +3102,7 @@ pre.diff .h {
 /* The Needs-you count beside Decisions: the whole inbox, linked to its home on FLIGHT. */
 .comms-section-head .comms-needs-link {
   color: var(--accent);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -3172,7 +3172,7 @@ pre.diff .h {
 }
 .comms-nav-row .comms-nav-agent b {
   font-family: var(--mono);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   letter-spacing: 0.04em;
 }
 .comms-nav-agent {
@@ -3194,7 +3194,7 @@ pre.diff .h {
   min-width: 2ch;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -3213,7 +3213,7 @@ pre.diff .h {
   height: 16px;
   padding: 0 4px;
   color: var(--accent);
-  font: 600 10px / 16px var(--mono);
+  font: 600 var(--type-xs) / 1.45 var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: center;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -3281,7 +3281,7 @@ pre.diff .h {
   min-width: 0;
   color: var(--accent);
   font-family: var(--display);
-  font-size: 20px;
+  font-size: var(--type-xl);
   font-weight: 500;
   letter-spacing: 0.02em;
   text-transform: none;
@@ -3332,7 +3332,7 @@ pre.diff .h {
   overflow: hidden;
   color: var(--muted);
   font-family: var(--sans);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   font-weight: 400;
   letter-spacing: 0;
   text-align: right;
@@ -3380,7 +3380,7 @@ pre.diff .h {
   min-width: 17px;
   padding: 0 4px;
   color: var(--bg);
-  font: 600 10px / 16px var(--mono);
+  font: 600 var(--type-xs) / 1.45 var(--mono);
   background: var(--warn);
   border-radius: 999px;
 }
@@ -3410,11 +3410,11 @@ pre.diff .h {
 }
 .comms-mentions-panel header span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .comms-mentions-panel header button {
   margin-left: auto;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .comms-mentions-panel > button {
   display: grid;
@@ -3433,7 +3433,7 @@ pre.diff .h {
 }
 .comms-mentions-panel > button span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .comms-mentions-panel > button em {
   grid-column: 1 / -1;
@@ -3450,11 +3450,11 @@ pre.diff .h {
   padding: 8px 14px;
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .comms-pins b {
   color: var(--warn);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   text-transform: uppercase;
 }
 .comms-ticket-strip {
@@ -3494,7 +3494,7 @@ pre.diff .h {
   gap: 6px;
   flex-wrap: wrap;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 /* Bubbles: hairlines only. Who spoke is told by side and tint, never by a coloured outline. */
 .comms-bubble-body {
@@ -3513,7 +3513,7 @@ pre.diff .h {
 }
 .comms-message-meta > span:first-child {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
@@ -3548,7 +3548,7 @@ pre.diff .h {
   padding: 1px 6px;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
   background: transparent;
   border: 0;
   border-radius: 2px;
@@ -3573,7 +3573,7 @@ pre.diff .h {
   padding: 3px 8px;
   overflow: hidden;
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3591,7 +3591,7 @@ pre.diff .h {
   gap: 6px;
   align-items: center;
   margin-bottom: 7px;
-  font: var(--fs-xs) var(--mono);
+  font: var(--type-xs) var(--mono);
 }
 .decision-from {
   padding: 1px 6px;
@@ -3612,7 +3612,7 @@ pre.diff .h {
 }
 .decision-recommendation {
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .decision-card .acts button.primary {
   color: var(--bg);
@@ -3632,7 +3632,7 @@ pre.diff .h {
 .comms-ref {
   padding: 1px 6px;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   background: color-mix(in srgb, var(--fg) 7%, transparent);
   border: 0;
   border-radius: 2px;
@@ -3643,7 +3643,7 @@ pre.diff .h {
   padding: 0 4px;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   line-height: 1.5;
   vertical-align: baseline;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -3663,7 +3663,7 @@ pre.diff .h {
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .comms-composer > div:last-of-type {
   display: flex;
@@ -3706,7 +3706,7 @@ pre.diff .h {
   border: 0;
   border-left: 2px solid var(--accent);
   border-radius: 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .comms-replying button {
   margin-left: auto;
@@ -3823,7 +3823,7 @@ pre.diff .h {
   gap: 4px;
 }
 .kind {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 600;
   color: var(--warn);
   margin-right: 6px;
@@ -3858,7 +3858,7 @@ button.nrow.thread.tagged {
 .chan .s2 {
   grid-column: 1 / -1;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3883,7 +3883,7 @@ button.nrow.thread.tagged {
 .dock .dh .meta {
   width: 100%;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .dmsgs {
   flex: 1;
@@ -3905,7 +3905,7 @@ button.nrow.thread.tagged {
 }
 .dmsg .who {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   font-weight: 500;
 }
 .dmsg .txt {
@@ -3918,7 +3918,7 @@ button.nrow.thread.tagged {
 }
 .dmsg.hub .txt {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .dmsg.pending {
   opacity: 0.7;
@@ -3951,7 +3951,7 @@ button.nrow.thread.tagged {
   z-index: 1;
   padding: 8px 0 4px;
   color: var(--warn);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: inherit;
@@ -3962,7 +3962,7 @@ button.nrow.thread.tagged {
   gap: 8px;
   min-width: 0;
   min-height: 26px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .dask > button.sm {
   padding: 1px 8px;
@@ -3979,7 +3979,7 @@ button.nrow.thread.tagged {
 }
 .briefsec h3 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--type-base);
   font-weight: 600;
 }
 .dock-unread {
@@ -3987,7 +3987,7 @@ button.nrow.thread.tagged {
   color: var(--bg);
   border-radius: 9px;
   padding: 0 6px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   line-height: 16px;
 }
 .iconbtn .dock-unread {
@@ -4071,7 +4071,7 @@ button.nrow.thread.tagged {
 }
 .audit-status {
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: var(--type-xs);
   letter-spacing: 0.06em;
 }
 .audit-status-open {
@@ -4118,13 +4118,13 @@ button.nrow.thread.tagged {
 }
 .kpi .v {
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--type-xl);
   font-weight: 600;
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
 }
 .kpi .d {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -4167,7 +4167,7 @@ button.nrow.thread.tagged {
   align-items: center;
   gap: 10px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -4194,7 +4194,7 @@ button.nrow.thread.tagged {
 /* instruments: mono ticks, dashed grid, a solid axis and a "now" cursor (hud/charts) */
 .ct {
   fill: var(--muted);
-  font: 10px var(--mono);
+  font: var(--type-xs) var(--mono);
 }
 .ct.now {
   fill: var(--accent);
@@ -4227,7 +4227,7 @@ button.nrow.thread.tagged {
   border: 1px solid var(--line-2);
   border-radius: var(--r-s);
   padding: 6px 9px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   box-shadow: var(--shadow);
   z-index: 3;
   white-space: nowrap;
@@ -4264,11 +4264,11 @@ button.nrow.thread.tagged {
 }
 .stat2 b {
   font-family: var(--display);
-  font-size: 20px;
+  font-size: var(--type-xl);
   font-weight: 600;
 }
 .stat2 span {
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg-2);
 }
 .hrow {
@@ -4277,7 +4277,7 @@ button.nrow.thread.tagged {
   gap: 8px;
   align-items: center;
   padding: 3px 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 /* a bar row's track: thin, square, ruled in quarters so the length reads against a scale */
 .hrow .track {
@@ -4341,7 +4341,7 @@ button.nrow.thread.tagged {
 table {
   border-collapse: collapse;
   width: 100%;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 th,
 td {
@@ -4353,7 +4353,7 @@ td {
 th {
   color: var(--muted);
   font-weight: 500;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   border-top: 0;
 }
 td.r,
@@ -4382,7 +4382,7 @@ td.wrap {
 }
 .accounts-table th {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--type-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -4431,7 +4431,7 @@ td.wrap {
   padding: 8px;
   background: var(--panel2);
   border: 1px solid var(--line);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .account-signin-panel code {
   overflow-wrap: anywhere;
@@ -4460,7 +4460,7 @@ td.wrap {
   display: block;
   margin-top: 3px;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -4553,7 +4553,7 @@ td.wrap {
   margin-bottom: 14px;
 }
 .setup-title h2 {
-  font: 600 22px var(--display);
+  font: 600 var(--type-xl) var(--display);
 }
 
 /* Kept out of the normal tab sequence until a keyboard user asks to bypass the chrome. */
@@ -4676,7 +4676,7 @@ td.wrap {
 }
 .repo-card-title span {
   float: right;
-  font-size: 18px;
+  font-size: var(--type-lg);
   line-height: 12px;
 }
 .repo-fields,
@@ -4692,7 +4692,7 @@ td.wrap {
 .repo-seat-editor label {
   display: grid;
   gap: 4px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--muted);
 }
 .repo-guidance-title {
@@ -4703,7 +4703,7 @@ td.wrap {
   margin: 0;
   padding: 0;
   border: 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--muted);
 }
 .repo-guidance legend {
@@ -4772,7 +4772,7 @@ td.wrap {
 .repo-stepper label {
   display: grid;
   gap: 4px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--muted);
 }
 @media (max-width: 800px) {
@@ -4822,10 +4822,10 @@ td.wrap {
 
 /* decision briefs and the Item panel */
 .btitle {
-  font-size: 14px;
+  font-size: var(--type-md);
 }
 .bsec {
-  font-size: 10.5px;
+  font-size: var(--type-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4907,7 +4907,7 @@ div.opt {
   gap: 8px;
   align-items: baseline;
   flex-wrap: wrap;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 
 /* FLIGHT page */
@@ -4940,7 +4940,7 @@ div.opt {
   min-height: 34px;
   padding: 8px 16px 9px;
   color: var(--muted);
-  font: 600 var(--fs-s) / 1 var(--mono);
+  font: 600 var(--type-sm) / 1 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: transparent;
@@ -4975,7 +4975,7 @@ div.opt {
 }
 .flight-tab-index {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--type-xs);
   font-weight: 500;
   letter-spacing: 0.04em;
 }
@@ -5031,7 +5031,7 @@ div.opt {
 .flight-source {
   margin: 0;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -5046,14 +5046,14 @@ div.opt {
 .flight-mono,
 .flight-count {
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .flight-subhead {
   margin: 0;
   padding: 12px 14px 6px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -5063,7 +5063,7 @@ div.opt {
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .flight-gap::before {
   content: "";
@@ -5076,7 +5076,7 @@ div.opt {
 button.flight-link {
   padding: 2px 6px;
   color: var(--accent);
-  font: 600 10.5px / 1.4 var(--mono);
+  font: 600 var(--type-xs) / 1.4 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -5122,7 +5122,7 @@ button.flight-link:hover {
   max-width: 96ch;
   margin: 0;
   color: var(--fg);
-  font: 600 clamp(17px, 1.35vw, 21px) / 1.35 var(--display);
+  font: 600 var(--type-lg) / 1.35 var(--display);
   letter-spacing: 0.005em;
   text-wrap: pretty;
 }
@@ -5133,7 +5133,7 @@ button.flight-link:hover {
   align-items: center;
   margin: 0;
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .flight-contact {
@@ -5157,7 +5157,7 @@ button.flight-link:hover {
   margin: 0;
   overflow: hidden;
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   line-height: 1.45;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -5208,7 +5208,7 @@ button.flight-pulse:hover {
   grid-area: label;
   overflow: hidden;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -5217,7 +5217,7 @@ button.flight-pulse:hover {
 .flight-pulse-window {
   grid-area: window;
   color: var(--muted);
-  font: 500 10px / 1.2 var(--mono);
+  font: 500 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -5225,7 +5225,7 @@ button.flight-pulse:hover {
   grid-area: value;
   overflow: hidden;
   color: var(--fg);
-  font: 600 clamp(18px, 1.5vw, 24px) / 1.1 var(--mono);
+  font: 600 var(--type-xl) / 1.1 var(--mono);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5233,7 +5233,7 @@ button.flight-pulse:hover {
 .flight-unit {
   margin-left: 0.06em;
   color: var(--muted);
-  font-size: 0.6em;
+  font-size: var(--type-xs);
   font-weight: 500;
 }
 .flight-pulse.idle .flight-pulse-value {
@@ -5249,7 +5249,7 @@ button.flight-pulse:hover {
   grid-area: detail;
   overflow: hidden;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5296,7 +5296,7 @@ button.flight-pulse:hover {
 .wif-table-head {
   padding: 8px 14px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -5329,7 +5329,7 @@ button.flight-pulse:hover {
 .wif-title {
   display: block;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--type-base);
   font-weight: 600;
 }
 .wif-meta {
@@ -5338,7 +5338,7 @@ button.flight-pulse:hover {
   align-items: baseline;
   min-width: 0;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .wif-meta > .rref {
   flex: none;
@@ -5349,7 +5349,7 @@ button.flight-pulse:hover {
 .wif-branch {
   display: block;
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
 }
 .wif-stage {
   display: grid;
@@ -5358,13 +5358,13 @@ button.flight-pulse:hover {
   min-width: 0;
 }
 .wif-stage > .rref {
-  font-size: 10.5px;
+  font-size: var(--type-xs);
 }
 .wif-next {
   display: grid;
   gap: 4px;
   min-width: 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .wif-next-text {
   display: -webkit-box;
@@ -5377,12 +5377,12 @@ button.flight-pulse:hover {
 }
 .wif-checkpoint {
   color: var(--fg-2);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .wif-elapsed {
   color: var(--fg-2);
-  font: 500 var(--fs-s) / 1.4 var(--mono);
+  font: 500 var(--type-sm) / 1.4 var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -5402,7 +5402,7 @@ button.flight-pulse:hover {
   padding: 7px 1px 0 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--type-xs);
   font-weight: 500;
   line-height: 1.3;
   text-overflow: ellipsis;
@@ -5448,7 +5448,7 @@ button.flight-pulse:hover {
 #wifP .wstep .titer {
   padding: 0 0 0 1px;
   color: var(--accent);
-  font: 600 9px / 0 var(--mono);
+  font: 600 var(--type-xs) / 0 var(--mono);
   vertical-align: super;
   background: none;
 }
@@ -5471,13 +5471,13 @@ button.flight-pulse:hover {
 .flight-control-heading h3 {
   margin: 0;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 .flight-control-heading > span {
   color: var(--muted);
-  font: var(--fs-xs) / 1.2 var(--mono);
+  font: var(--type-xs) / 1.2 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .flight-control-heading > span.warn-t {
@@ -5517,7 +5517,7 @@ button.flight-pulse:hover {
   flex: none;
   padding-top: 2px;
   color: var(--accent);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   content: counter(flight-next, decimal-leading-zero);
   counter-increment: flight-next;
 }
@@ -5534,7 +5534,7 @@ button.flight-pulse:hover {
   white-space: nowrap;
 }
 .flight-control-list li > div > b {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .flight-control-list li > div > span.s {
   color: var(--muted);
@@ -5542,7 +5542,7 @@ button.flight-pulse:hover {
 .flight-control-text {
   display: -webkit-box;
   overflow: hidden;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -5556,11 +5556,11 @@ button.flight-pulse:hover {
   gap: 8px;
   align-items: center;
   color: var(--muted);
-  font: var(--fs-xs) / 1.2 var(--mono);
+  font: var(--type-xs) / 1.2 var(--mono);
 }
 .flight-owner {
   color: var(--fg-2);
-  font: 600 10px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -5614,7 +5614,7 @@ button.flight-pulse:hover {
   flex: none;
   margin: 0;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -5624,14 +5624,14 @@ button.flight-pulse:hover {
   margin: 0;
   overflow: hidden;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .flight-plan-count {
   flex: none;
   color: var(--fg-2);
-  font: var(--fs-xs) / 1.2 var(--mono);
+  font: var(--type-xs) / 1.2 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .flight-plan-table {
@@ -5656,7 +5656,7 @@ button.flight-pulse:hover {
 .flight-outcome-head {
   padding: 8px 14px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -5669,7 +5669,7 @@ button.flight-pulse:hover {
 .flight-plan-row,
 .flight-outcome-row {
   padding: 11px 14px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   border-bottom: 1px solid var(--line);
   transition: background-color 150ms ease;
 }
@@ -5683,7 +5683,7 @@ button.flight-pulse:hover {
 }
 .flight-plan-horizon {
   color: var(--fg-2);
-  font: 600 10.5px / 1.7 var(--mono);
+  font: 600 var(--type-xs) / 1.7 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -5696,7 +5696,7 @@ button.flight-pulse:hover {
 .flight-plan-work > b,
 .flight-outcome-row b {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--type-base);
   line-height: 1.35;
 }
 .flight-plan-next {
@@ -5705,7 +5705,7 @@ button.flight-pulse:hover {
 }
 .flight-plan-checkpoint {
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   line-height: 1.4;
 }
 .flight-plan-refs,
@@ -5718,7 +5718,7 @@ button.flight-pulse:hover {
 .flight-plan-age,
 .flight-outcome-at {
   color: var(--fg-2);
-  font: 500 var(--fs-xs) / 1.6 var(--mono);
+  font: 500 var(--type-xs) / 1.6 var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -5749,7 +5749,7 @@ button.flight-pulse:hover {
 }
 #askP .drow .row > .min0 {
   flex: 1 1 auto;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   line-height: 1.45;
 }
 #askP .drow .row > .spacer {
@@ -5781,7 +5781,7 @@ button.flight-pulse:hover {
   margin: 0;
   padding: 9px 16px;
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
   border-bottom: 1px solid var(--line);
 }
 .flight-notebook-index {
@@ -5799,7 +5799,7 @@ button.flight-pulse:hover {
   position: relative;
   padding: 9px 10px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-decoration: none;
   text-transform: uppercase;
@@ -5837,7 +5837,7 @@ button.flight-pulse:hover {
 }
 .flight-note-heading h3 {
   margin: 0;
-  font: 600 11px / 1.3 var(--mono);
+  font: 600 var(--type-xs) / 1.3 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -5851,18 +5851,18 @@ button.flight-pulse:hover {
 }
 .flight-note-heading .s {
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
 }
 .flight-notebook .briefsec .md-txt {
   max-width: 80ch;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--type-base);
   line-height: 1.55;
 }
 .flight-markdown-source summary {
   padding-top: 4px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -5875,7 +5875,7 @@ button.flight-pulse:hover {
   margin: 8px 0 0;
   padding: 10px 12px;
   overflow: auto;
-  font: 12px / 1.5 var(--mono);
+  font: var(--type-sm) / 1.5 var(--mono);
   white-space: pre-wrap;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -5887,26 +5887,26 @@ button.flight-pulse:hover {
 .flight-memory .flight-knowledge-scroll > .pb > .note:first-child {
   margin: 0 0 10px;
   color: var(--muted);
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
 }
 #page-flight .memory-repo {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 #page-flight .memory-repo select {
-  font: 13px var(--sans, inherit);
+  font: var(--type-base) var(--sans, inherit);
   letter-spacing: 0;
   text-transform: none;
 }
 .flight-memory section > h3 {
   margin: 14px 0 0;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -5943,7 +5943,7 @@ button.flight-pulse:hover {
   min-width: 0;
   margin: 0;
   font-family: var(--display);
-  font-size: 22px;
+  font-size: var(--type-xl);
 }
 #outcomesP .flight-tiles {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5964,7 +5964,7 @@ button.flight-pulse:hover {
 }
 #outcomesP .flight-tiles dt {
   overflow: hidden;
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 var(--type-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -5972,7 +5972,7 @@ button.flight-pulse:hover {
 }
 #outcomesP .flight-tiles dd {
   color: var(--fg);
-  font: 600 clamp(18px, 1.5vw, 22px) / 1.1 var(--mono);
+  font: 600 var(--type-xl) / 1.1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .flight-outcome-table {
@@ -5996,7 +5996,7 @@ button.flight-pulse:hover {
   border-bottom: 1px solid var(--line);
 }
 .flight-log .dmsg .who {
-  font: var(--fs-xs) / 1.3 var(--mono);
+  font: var(--type-xs) / 1.3 var(--mono);
 }
 
 @media (max-width: 1439px) {
@@ -6049,7 +6049,7 @@ button.flight-pulse:hover {
   }
 }
 .sittext {
-  font-size: 15px;
+  font-size: var(--type-md);
   line-height: 1.55;
   max-width: 110ch;
 }
@@ -6064,7 +6064,7 @@ button.flight-pulse:hover {
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   border-radius: var(--r);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   margin-bottom: 8px;
 }
 .modal .panel.awaypanel {
@@ -6081,7 +6081,7 @@ button.flight-pulse:hover {
   margin-top: 8px;
 }
 .sw {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   display: flex;
   gap: 8px;
   align-items: flex-start;
@@ -6095,7 +6095,7 @@ button.flight-pulse:hover {
 }
 .sw.locked::before {
   content: "Always";
-  font-size: 10px;
+  font-size: var(--type-xs);
   font-weight: 600;
   color: var(--muted);
   border: 1px solid var(--line-2);
@@ -6107,14 +6107,14 @@ button.flight-pulse:hover {
 .rules {
   margin: 8px 0 0;
   padding-left: 18px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   display: grid;
   gap: 4px;
 }
 
 /* build status overlay */
 .bs {
-  font-size: 10.5px;
+  font-size: var(--type-xs);
   font-weight: 600;
   border-radius: 4px;
   padding: 0 6px;
@@ -6182,7 +6182,7 @@ button.flight-pulse:hover {
 }
 .modal pre {
   white-space: pre-wrap;
-  font: var(--fs-s) / 1.5 var(--mono);
+  font: var(--type-sm) / 1.5 var(--mono);
   margin: 0;
   color: var(--fg);
 }
@@ -6192,7 +6192,7 @@ button.flight-pulse:hover {
 }
 kbd {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
   border-radius: 4px;
@@ -6201,7 +6201,7 @@ kbd {
 }
 .keys {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
@@ -6215,7 +6215,7 @@ kbd {
 }
 .tdetail > .ph a {
   text-decoration: none;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .tart {
   display: grid;
@@ -6237,7 +6237,7 @@ kbd {
   background: var(--surface-2);
   border-radius: var(--r-s);
   padding: 8px 10px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .notif {
   display: grid;
@@ -6256,7 +6256,7 @@ kbd {
   padding: 0;
   display: grid;
   gap: 4px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 /* in a panel body the list keeps .pb's padding */
 .pb.tlist {
@@ -6284,7 +6284,7 @@ kbd {
   background: var(--surface-2);
   border-radius: var(--r-s);
   padding: 2px 8px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .pcards {
   display: grid;
@@ -6364,7 +6364,7 @@ kbd {
   border-radius: 999px;
   background: var(--surface);
   color: var(--warn);
-  font: var(--fs-xs) var(--mono);
+  font: var(--type-xs) var(--mono);
   white-space: nowrap;
 }
 .ci-label {
@@ -6404,13 +6404,13 @@ kbd {
 }
 .loop-chain-step span {
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .loop-chain-step small,
 .loop-flight small {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .loop-flight {
   position: absolute;
@@ -6427,7 +6427,7 @@ kbd {
 }
 .loop-flight span {
   color: var(--fg-2);
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .loop-details {
   display: grid;
@@ -6440,12 +6440,12 @@ kbd {
   gap: 7px 12px;
   margin: 0;
   padding: 12px 14px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .loop-inspector dt {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
 }
 .loop-inspector dd {
   min-width: 0;
@@ -6455,7 +6455,7 @@ kbd {
   display: grid;
   gap: 7px;
   padding: 12px 14px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 @media (max-width: 700px) {
   .loop-details {
@@ -6484,7 +6484,7 @@ kbd {
 /* a tile whose figure is not stored */
 .kpi .v.nt,
 .stat2 b.nt {
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--muted);
   font-weight: 400;
 }
@@ -6502,7 +6502,7 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   background: var(--bg);
-  font: var(--fs-s) / 1.6 var(--mono);
+  font: var(--type-sm) / 1.6 var(--mono);
 }
 /* a row is transparent to the grid: every number shares one column, each beside its own line */
 .yaml .yrow {
@@ -6536,7 +6536,7 @@ kbd {
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 14px;
   margin: 0;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
 }
 .gloss dt {
   font-weight: 600;
@@ -6548,7 +6548,7 @@ kbd {
 }
 .gloss code {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--fg);
   background: var(--surface-2);
   border-radius: 4px;
@@ -6908,7 +6908,7 @@ kbd {
 .btitle code,
 .opt code {
   font-family: var(--mono);
-  font-size: 0.92em;
+  font-size: var(--type-sm);
 }
 .md pre.md-code {
   margin: 0 0 6px;
@@ -6954,7 +6954,7 @@ button.nrow.thread.sel {
 details.guard > summary {
   cursor: pointer;
   padding: 8px 14px;
-  font-size: var(--fs-s);
+  font-size: var(--type-sm);
   color: var(--muted);
 }
 
@@ -7276,7 +7276,7 @@ button.nrow.thread.tagged {
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   padding: 1px 5px;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   width: fit-content;
   overflow-wrap: anywhere;
 }
@@ -7524,7 +7524,7 @@ button.nrow.thread.tagged {
   left: 0;
   padding-right: 4px;
   background: var(--surface);
-  font: 9px / 9px var(--mono);
+  font: var(--type-xs) / 1 var(--mono);
   color: var(--muted);
 }
 .kpi-quiet {
@@ -7535,12 +7535,12 @@ button.nrow.thread.tagged {
 .kpi-axis {
   display: flex;
   justify-content: space-between;
-  font: 9px / 9px var(--mono);
+  font: var(--type-xs) / 1 var(--mono);
   color: var(--muted);
 }
 .kpi-secondary {
   grid-row: 3 / 5;
-  font-size: 11px;
+  font-size: var(--type-xs);
   color: var(--fg-2);
   align-self: end;
   line-height: 1.4;
@@ -7617,7 +7617,7 @@ button.nrow.thread.tagged {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  font-size: var(--fs-xs);
+  font-size: var(--type-xs);
   color: var(--ok);
 }
 .live-indicator.connecting {

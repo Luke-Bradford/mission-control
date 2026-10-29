@@ -15,7 +15,9 @@ import { hhmm, mss } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
+import { EmptyState } from "../hud/EmptyState.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { useSeatName } from "../seatName.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 
@@ -93,9 +95,13 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     <div className="tgrid">
       <Panel id="tQuota" title="Quota used" sub="each account window, 100% is the limit">
         {!t ? (
-          <p className="pb s muted">{scope.wait}</p>
+          <div className="pb s muted">
+            <Skeleton label={scope.wait} />
+          </div>
         ) : quotaLines.length === 0 ? (
-          <p className="pb s muted">No quota readings in the last {scope.range}.</p>
+          <EmptyState className="pb s muted">
+            No quota readings in the last {scope.range}.
+          </EmptyState>
         ) : (
           <div className="pb">
             <LineChart
@@ -122,9 +128,13 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         sub="% of capacity · shaded while the test lock is held"
       >
         {!t ? (
-          <p className="pb s muted">{scope.wait}</p>
+          <div className="pb s muted">
+            <Skeleton label={scope.wait} />
+          </div>
         ) : machine.length === 0 ? (
-          <p className="pb s muted">No machine samples in the last {scope.range}.</p>
+          <EmptyState className="pb s muted">
+            No machine samples in the last {scope.range}.
+          </EmptyState>
         ) : (
           <div className="pb">
             <LineChart
@@ -153,11 +163,13 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         className="wide"
       >
         {!history && !h ? (
-          <p className="pb s muted">{NOT_TRACKED}</p>
+          <EmptyState className="pb s muted">{NOT_TRACKED}</EmptyState>
         ) : tz === null ? (
-          <p className="pb s muted">{scope.wait}</p>
+          <div className="pb s muted">
+            <Skeleton label={scope.wait} />
+          </div>
         ) : today.length === 0 ? (
-          <p className="pb s muted">No full-suite runs today.</p>
+          <EmptyState className="pb s muted">No full-suite runs today.</EmptyState>
         ) : (
           <div className="pb tw">
             <table>

@@ -59,7 +59,7 @@ describe("visual system v2", () => {
         expect(
           contrast(agent, theme["--surface"]),
           AGENT_TOKEN_NAMES[index],
-        ).toBeGreaterThanOrEqual(2);
+        ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -81,5 +81,15 @@ describe("visual system v2", () => {
     expect(css).toMatch(/\.ov\s*>\s*\.col\s*>\s*\.panel\s*>\s*\.pb\s*\{[^}]*overflow:\s*auto/s);
     expect(css).toMatch(/select\s*\{[^}]*appearance:/s);
     expect(css).toMatch(/input\[type="radio"\]\s*\{[^}]*accent-color:/s);
+  });
+
+  it("uses only the six shared type tokens for HUD font sizes", () => {
+    const declarations = css.matchAll(/(?:font-size|font):\s*([^;]+);/g);
+    for (const declaration of declarations) {
+      const value = declaration[1] ?? "";
+      if (value.includes("inherit")) continue;
+      expect(value).toMatch(/var\(--type-(?:xs|sm|base|md|lg|xl)\)/);
+      expect(value).not.toMatch(/\d+(?:\.\d+)?(?:px|em|rem)|clamp\(/);
+    }
   });
 });

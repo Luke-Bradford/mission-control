@@ -8,5 +8,9 @@ export function EmptyState({
   children: ReactNode;
   className?: string;
 }) {
-  return <p className={`empty-state ${className}`.trim()}>{children}</p>;
+  return (
+    <p className={`empty-state ${className}`.trim()} role="status">
+      {children}
+    </p>
+  );
 }

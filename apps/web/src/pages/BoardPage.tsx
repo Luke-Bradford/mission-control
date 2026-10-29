@@ -32,6 +32,7 @@ import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx"
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
+import { Skeleton } from "../hud/Skeleton.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import {
   PIPELINE_LANE_STAGES,
@@ -251,7 +252,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         layout={layoutOn ? layout : null}
         onLayout={pickLayout}
       />
-      {loading && <p className="muted s">Loading the board…</p>}
+      {loading && <Skeleton className="muted s" label="Loading the board" />}
       {errors.map((e) => (
         <p key={e} className="crit-t s">
           Could not load the board — {e}
