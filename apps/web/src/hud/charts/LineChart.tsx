@@ -90,9 +90,6 @@ export function LineChart({
 
   const valued = (s: LineSeries) =>
     s.points.filter((p): p is { at: number; v: number } => p.v !== null);
-  const times = [...new Set(series.flatMap((s) => valued(s).map((p) => p.at)))].sort(
-    (a, b) => a - b,
-  );
   const nearest = <T extends { at: number }>(list: T[], t: number): T | undefined =>
     list.reduce<T | undefined>(
       (best, p) => (best === undefined || Math.abs(p.at - t) < Math.abs(best.at - t) ? p : best),
@@ -146,6 +143,12 @@ export function LineChart({
   const visibleAnnotations = annotations
     .filter((annotation) => annotation.at >= from && annotation.at <= to)
     .sort((a, b) => a.at - b.at);
+  const times = [
+    ...new Set([
+      ...series.flatMap((s) => valued(s).map((p) => p.at)),
+      ...visibleAnnotations.map((annotation) => annotation.at),
+    ]),
+  ].sort((a, b) => a - b);
   const annotationMarkers: typeof visibleAnnotations = [];
   for (const annotation of visibleAnnotations) {
     const previous = annotationMarkers.at(-1);

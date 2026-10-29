@@ -67,15 +67,6 @@ function CrewStateTimeline({
   const visibleTo = visibleFrom + span;
   const x = (time: number) =>
     x0 + ((time - visibleFrom) / Math.max(1, visibleTo - visibleFrom)) * (x1 - x0);
-  const times = [
-    ...new Set(
-      spans
-        .filter((state) => state.endedAt >= visibleFrom && state.startedAt <= visibleTo)
-        .flatMap((state) => [state.startedAt, state.endedAt]),
-    ),
-  ]
-    .filter((time) => time >= visibleFrom && time <= visibleTo)
-    .sort((a, b) => a - b);
   const setAt = (time: number | null) => {
     setLocal(time);
     cursor?.setAt(time);
@@ -99,6 +90,16 @@ function CrewStateTimeline({
   const visibleAnnotations = annotations
     .filter((event) => event.at >= visibleFrom && event.at <= visibleTo)
     .sort((a, b) => a.at - b.at);
+  const times = [
+    ...new Set([
+      ...spans
+        .filter((state) => state.endedAt >= visibleFrom && state.startedAt <= visibleTo)
+        .flatMap((state) => [state.startedAt, state.endedAt]),
+      ...visibleAnnotations.map((event) => event.at),
+    ]),
+  ]
+    .filter((time) => time >= visibleFrom && time <= visibleTo)
+    .sort((a, b) => a - b);
   const annotationMarkers: typeof visibleAnnotations = [];
   for (const event of visibleAnnotations) {
     const previous = annotationMarkers.at(-1);

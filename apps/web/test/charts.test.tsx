@@ -239,6 +239,9 @@ describe("Instrument charts", () => {
     fireEvent.focus(timeline);
     fireEvent.keyDown(timeline, { key: "ArrowLeft" });
     expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain("crewparked");
+    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain(
+      "Updated Mission Control",
+    );
     const before = timeline.getAttribute("data-from");
     fireEvent.click(getByRole("button", { name: "Zoom in crew state" }));
     expect(timeline.getAttribute("data-from")).not.toBe(before);
@@ -405,6 +408,36 @@ describe("LineChart", () => {
     fireEvent.focus(svg);
     expect(container.querySelector(".tip")?.textContent).toContain("Eventquota reset");
     expect(container.querySelector(".tip")?.textContent).toContain("Thresholdalert 80%");
+  });
+
+  it("stops the shared cursor at an annotation between observed samples", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "flow",
+            name: "in progress",
+            color: "var(--accent)",
+            points: [
+              { at: 0, v: 1 },
+              { at: 100, v: 2 },
+            ],
+          },
+        ]}
+        from={0}
+        to={100}
+        label="Flow"
+        xLabels={["start", "now"]}
+        at={String}
+        annotations={[{ at: 50, label: "Crew paused" }]}
+      />,
+    );
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    fireEvent.focus(svg);
+    fireEvent.keyDown(svg, { key: "Home" });
+    fireEvent.keyDown(svg, { key: "ArrowRight" });
+    expect(container.querySelector(".tip")?.textContent).toContain("Crew paused");
+    expect(container.querySelector(".tip")?.textContent).toContain("in progress—");
   });
 
   it("shares a keyboard crosshair with the other time charts in its workspace", () => {
