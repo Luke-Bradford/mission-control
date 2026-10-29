@@ -1220,7 +1220,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
-   * Python's caches likewise (`crewPythonEnv`).
+   * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
   function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
