@@ -65,6 +65,7 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "dismiss_item",
   MC_TOOL_NAMES.ghRead,
   MC_TOOL_NAMES.closeTicket,
+  MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.screenshotHud,
 ];
 

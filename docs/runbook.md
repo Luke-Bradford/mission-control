@@ -882,6 +882,16 @@ as a decision. FLIGHT may release only its own hold: one set here is released on
 may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
 to hold, or the hold is the controller's and the caller is FLIGHT.
 
+### FLIGHT adds a controller check to a ticket
+
+Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket's `## Controller check`
+itself (superuser repos): `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
+that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
+removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
+run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
+a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
+ever adds a hold, and is logged as a `card` decision.
+
 ## What it observes
 
 | Collector | Source | Cadence |

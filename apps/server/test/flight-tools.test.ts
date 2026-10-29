@@ -640,6 +640,7 @@ describe("tool list", () => {
       "create_ticket",
       "comment_ticket",
       "close_ticket",
+      "add_controller_check",
       "brief_item",
       "read_pr",
       "read_ci_log",
@@ -7472,5 +7473,93 @@ describe("brief_item with a hold (#760)", () => {
     });
     expect(r.isError).toBe(true);
     expect(holds(store)).toEqual({});
+  });
+});
+
+describe("add_controller_check", () => {
+  const item = "Screenshot the HUD";
+  const original = `## Why\nx\n\n## Done when\n- Tests pass\n- ${item}\n\n## Size\nS\n`;
+  let live: string;
+  let state: "open" | "closed";
+  const addCall = (over: Record<string, unknown> = {}) =>
+    call("add_controller_check", { issue: 7, item, basis: "The controller asked for it", ...over });
+
+  beforeEach(() => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    board(card(7));
+    live = original;
+    state = "open";
+    fetchImpl = async (n) => ticket(n, { body: live, state });
+    // gh issue edit writes the body, as GitHub would
+    ghImpl = async (a) => {
+      const body = a.find((x) => x.startsWith("--body="));
+      if (a[1] === "edit" && body !== undefined) live = body.slice("--body=".length);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    engineOn = true;
+  });
+
+  it("creates the section when missing and moves the identical done-when line", async () => {
+    const result = await addCall();
+    expect(result.isError).not.toBe(true);
+    expect(ghCalls).toHaveLength(1);
+    expect(ghCalls[0]?.slice(0, 4)).toEqual(["issue", "edit", "7", "--repo=o/mc"]);
+    expect(live).toBe(
+      `## Why\nx\n\n## Done when\n- Tests pass\n\n## Controller check\n\n- ${item}\n\n## Size\nS\n`,
+    );
+    expect(decisions().filter((d) => d.kind === "card")).toHaveLength(1);
+  });
+
+  it("appends to a section that is there, changing nothing else", async () => {
+    live = `## Why\nx\n\n## Controller check\n- Open it.\n\n## Size\nS\n`;
+    expect((await addCall()).isError).not.toBe(true);
+    expect(live).toBe(`## Why\nx\n\n## Controller check\n- Open it.\n- ${item}\n\n## Size\nS\n`);
+  });
+
+  it("writes nothing when the item is already a check", async () => {
+    live = `## Controller check\n- ${item}\n`;
+    const result = await addCall();
+    expect(result.isError).not.toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses a closed ticket, on GitHub or on the board", async () => {
+    state = "closed";
+    const result = await addCall();
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/closed/);
+    board(card(7, { closed: true }));
+    state = "open";
+    expect((await addCall()).text).toMatch(/closed/);
+    expect(ghCalls).toEqual([]);
+    expect(live).toBe(original);
+  });
+
+  it("refuses a cut body, a standard repo, the engine off and Away", async () => {
+    fetchImpl = async (n) => ticket(n, { body: live, bodyTruncated: true });
+    expect((await addCall()).text).toMatch(/too long/);
+    fetchImpl = async (n) => ticket(n, { body: live });
+    engineOn = false;
+    expect(await addCall()).toEqual(refused(GITHUB_WRITES_OFF));
+    engineOn = true;
+    need(cfg.repos[0]).flightPowers = "standard";
+    expect((await addCall()).text).toMatch(/superuser/i);
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await addCall()).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses a multi-line item and a heading", async () => {
+    expect((await addCall({ item: "a\n## Size" })).isError).toBe(true);
+    expect((await addCall({ item: "## Size" })).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("says so when the edit does not show on GitHub", async () => {
+    ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
+    const result = await addCall();
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/could not be confirmed/);
   });
 });

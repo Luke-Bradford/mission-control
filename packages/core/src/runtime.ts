@@ -66,6 +66,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
   MC_TOOL_NAMES.closeTicket,
+  MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.briefItem,
   MC_TOOL_NAMES.readPr,
   MC_TOOL_NAMES.readCiLog,
