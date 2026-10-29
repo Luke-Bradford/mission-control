@@ -717,6 +717,9 @@ const giveProfile = (over: Partial<Profile>): void => {
 };
 const setPr = (over: Partial<PullRequestView> = {}) =>
   store.upsertPullRequests(REPO, [prRow(over)], clock);
+/** Whether the operator message lifted the park; `h.engine.onOperatorMessage` itself says why not. */
+const operate = async (...args: Parameters<typeof h.engine.onOperatorMessage>) =>
+  (await h.engine.onOperatorMessage(...args)).lifted;
 /** CI fails on the pushed sha, is re-run once, and fails again on a later poll: the real failure. */
 async function failCi(): Promise<void> {
   setPr({ ci: "failing" });
@@ -1815,16 +1818,16 @@ describe("The operator's message", () => {
   it("FLIGHT's un-park is limited to the kinds it names, re-checked after waiting", async () => {
     await parkOnCi();
     // the park changes to budget while the call waits its turn on the run's chain
-    const waiting = h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["ci"] });
+    const waiting = operate(RUN, "FLIGHT", { kinds: ["ci"] });
     setLoop({ phase: "parked", parked: { kind: "budget", reason: "over", ended: false } });
     expect(await waiting).toBe(false);
     expect(loopOf()).toMatchObject({ phase: "parked", epoch: 0, budgetExtra: 0 });
     // FLIGHT never lifts a budget park, even when it names no kinds
-    expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toBe(false);
+    expect(await operate(RUN, "FLIGHT")).toBe(false);
     expect(loopOf().phase).toBe("parked");
     // a kind it names is lifted, and the call says so
     setLoop({ phase: "parked", parked: { kind: "ci", reason: "x", ended: false } });
-    expect(await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["ci"] })).toBe(true);
+    expect(await operate(RUN, "FLIGHT", { kinds: ["ci"] })).toBe(true);
     expect(loopOf().parked).toBeNull();
   });
 
@@ -4295,7 +4298,7 @@ describe("the engine runs reviews", () => {
           phase: "parked",
           parked: { kind: "review", reason: "Blocked review", ended: false },
         });
-        const accepted = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        const accepted = await operate(RUN, "FLIGHT", {
           kinds: ["review"],
           action: "accept",
         });
@@ -4333,9 +4336,7 @@ describe("the engine runs reviews", () => {
         await toReview();
         await h.engine.reconcileRun(RUN);
         setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
-        expect(
-          await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: [kind], action: "accept" }),
-        ).toBe(false);
+        expect(await operate(RUN, "FLIGHT", { kinds: [kind], action: "accept" })).toBe(false);
       },
     );
     it.each(["ruling", "review-failed"])(
@@ -4348,9 +4349,7 @@ describe("the engine runs reviews", () => {
         reported(first().id, []);
         await h.engine.reconcileRun(RUN);
         setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
-        expect(
-          await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: [kind], action: "accept" }),
-        ).toBe(false);
+        expect(await operate(RUN, "FLIGHT", { kinds: [kind], action: "accept" })).toBe(false);
       },
     );
     it("accept permits floor code after a reported unblocked RETRO review", async () => {
@@ -4361,9 +4360,7 @@ describe("the engine runs reviews", () => {
       reported(first().id, []);
       await h.engine.reconcileRun(RUN);
       setLoop({ phase: "parked", parked: { kind: "review", reason: "held", ended: false } });
-      expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "accept" }),
-      ).toBe(true);
+      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
     });
 
     it("a plain FLIGHT message cannot lift a failed review", async () => {
@@ -4374,7 +4371,7 @@ describe("the engine runs reviews", () => {
         phase: "parked",
         parked: { kind: "review-failed", reason: "failed", ended: false },
       });
-      expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toBe(false);
+      expect(await operate(RUN, "FLIGHT")).toBe(false);
     });
 
     it("caps fresh RETRO requests at two per head", async () => {
@@ -4386,7 +4383,7 @@ describe("the engine runs reviews", () => {
           phase: "parked",
           parked: { kind: "review-failed", reason: "failed", ended: false },
         });
-        const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        const result = await operate(RUN, "FLIGHT", {
           kinds: ["review-failed"],
           action: "rereview",
         });
@@ -4423,9 +4420,7 @@ describe("the engine runs reviews", () => {
         ],
       });
       h.statusThrows = new Error("GitHub unavailable");
-      expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "accept" }),
-      ).toBe(true);
+      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
       expect(h.steps).not.toContain("merge");
       h.statusThrows = null;
       await h.engine.reconcileRun(RUN);
@@ -4445,9 +4440,7 @@ describe("the engine runs reviews", () => {
         reported(first().id, [finding("Important")]);
         await h.engine.reconcileRun(RUN);
         setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
-        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action })).toBe(
-          true,
-        );
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action })).toBe(true);
         expect(loopOf().reviewWaivedSha).toBeNull();
         if (action === "rereview") expect(reviewRows().some((r) => r.epoch === 1)).toBe(true);
         else
@@ -4471,7 +4464,7 @@ describe("the engine runs reviews", () => {
       });
 
       expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        await operate(RUN, "FLIGHT", {
           kinds: ["review"],
           action: "rework",
           note: "Exercise the invalid input branch before reporting again.",
@@ -4486,9 +4479,7 @@ describe("the engine runs reviews", () => {
       );
 
       setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
-      expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "rework" }),
-      ).toBe(false);
+      expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
       expect(loopOf().parked).not.toBeNull();
     });
 
@@ -4499,13 +4490,9 @@ describe("the engine runs reviews", () => {
       setLoop({ phase: "parked", parked: { kind: "stuck", reason: "stuck", ended: false } });
       clock += 1000;
       commit(SHA_B);
-      expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" }),
-      ).toBe(false);
+      expect(await operate(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe(false);
       h.descends = true;
-      expect(
-        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" }),
-      ).toBe(true);
+      expect(await operate(RUN, "FLIGHT", { kinds: ["stuck"], action: "lift" })).toBe(true);
     });
 
     describe("names the check that refused", () => {
@@ -4513,15 +4500,9 @@ describe("the engine runs reviews", () => {
         by: "CAPCOM" | "FLIGHT",
         opts: NonNullable<Parameters<typeof h.engine.onOperatorMessage>[2]>,
       ) => {
-        let reason: string | null = null;
-        const lifted = await h.engine.onOperatorMessage(RUN, by, {
-          ...opts,
-          onRefused: (r) => {
-            reason = r;
-          },
-        });
-        expect(lifted).toBe(false);
-        return reason;
+        const result = await h.engine.onOperatorMessage(RUN, by, opts);
+        expect(result.lifted).toBe(false);
+        return result.lifted ? null : result.reason;
       };
       const parkedReview = async () => {
         need(config.repos[0]).flightPowers = "superuser";
@@ -4590,7 +4571,7 @@ describe("the engine runs reviews", () => {
 
       it("round already granted on this head", async () => {
         await parkedReview();
-        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT", { action: "rework" })).toBe(true);
+        expect(await operate(RUN, "FLIGHT", { action: "rework" })).toBe(true);
         setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
         expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
       });
@@ -4611,6 +4592,24 @@ describe("the engine runs reviews", () => {
       it("the operator's message could not be stored", async () => {
         await parkedReview();
         expect(await refusal("CAPCOM", { beforeLift: async () => false })).toBe("before-lift");
+      });
+
+      it("the rework could not be delivered, and the run stays parked", async () => {
+        await parkedReview();
+        h.busy = true;
+        expect(await refusal("FLIGHT", { kinds: ["review"], action: "rework" })).toBe(
+          "rework-undelivered",
+        );
+        expect(loopOf().parked).not.toBeNull();
+      });
+
+      it("the engine failed while lifting", async () => {
+        await parkedReview();
+        const spy = vi.spyOn(store, "setRunLoop").mockImplementationOnce(() => {
+          throw new Error("disk full");
+        });
+        expect(await refusal("CAPCOM", {})).toBe("engine-error");
+        spy.mockRestore();
       });
 
       it("the engine is off", async () => {
@@ -5504,7 +5503,7 @@ describe("the engine runs reviews", () => {
       });
       let storedWhileParked = false;
       expect(
-        await h.engine.onOperatorMessage(RUN, "CAPCOM", {
+        await operate(RUN, "CAPCOM", {
           kinds: ["review"],
           beforeLift: async () => {
             storedWhileParked = loopOf().phase === "parked";
@@ -5530,7 +5529,7 @@ describe("the engine runs reviews", () => {
         parked: { kind: "review", reason: "review findings", ended: false },
       });
       expect(
-        await h.engine.onOperatorMessage(RUN, "CAPCOM", {
+        await operate(RUN, "CAPCOM", {
           kinds: ["review"],
           beforeLift: async () => false,
         }),

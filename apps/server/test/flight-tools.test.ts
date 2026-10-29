@@ -410,8 +410,7 @@ beforeEach(() => {
       rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
         engineCalls.push(a);
-        if (!lifts && refuseWith !== null) a[2]?.onRefused?.(refuseWith);
-        return lifts;
+        return lifts ? { lifted: true } : { lifted: false, reason: refuseWith ?? "not-parked" };
       },
       status: () => ({ on: engineOn, note: null }),
       acceptRuling: async (runId, opts) => {
@@ -5584,10 +5583,18 @@ describe("superuser housekeeping", () => {
       phase: "parked",
       parked: { kind: "review", reason: "held", ended: false },
     });
-    expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
-      "isError",
-      true,
-    );
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is in another lane.");
+    expect(engineCalls).toEqual([]);
+  });
+  it("settle_park says when the run is not parked", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), phase: "working", parked: null });
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
   });
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
@@ -5663,7 +5670,6 @@ describe("superuser housekeeping", () => {
           kinds: ["review", "review-ruling"],
           action: "rework",
           note: "Fix the validation branch and add its regression test.",
-          onRefused: expect.any(Function),
         },
       ],
     ]);

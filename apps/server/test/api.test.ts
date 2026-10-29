@@ -5352,7 +5352,7 @@ describe("crew routes", () => {
           ? {}
           : {
               engine: {
-                onOperatorMessage: async () => false,
+                onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
                 status: () => ({ on: engineOn, note: null }),
               },
             }),
@@ -6486,8 +6486,8 @@ describe("the first loop's engine", () => {
           told.push(runId);
           calls.push(args);
           if (lifts && args[2]?.beforeLift !== undefined && !(await args[2].beforeLift()))
-            return false;
-          return lifts;
+            return { lifted: false, reason: "before-lift" };
+          return lifts ? { lifted: true } : { lifted: false, reason: "not-parked" };
         },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
       },
@@ -6533,7 +6533,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(told).toEqual(["aside"]);
-    expect(calls).toEqual([["aside", "CAPCOM", { onRefused: expect.any(Function) }]]);
+    expect(calls).toEqual([["aside", "CAPCOM"]]);
     expect(r.statusCode).toBe(409);
     expect(
       (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
@@ -6559,7 +6559,7 @@ describe("the first loop's engine", () => {
         headers: json,
         payload: {},
       });
-      expect(calls).toEqual([["aside", "CAPCOM", { onRefused: expect.any(Function) }]]);
+      expect(calls).toEqual([["aside", "CAPCOM"]]);
       expect(r.statusCode).toBe(409);
       await a.close();
     },
@@ -6582,9 +6582,7 @@ describe("the first loop's engine", () => {
         headers: json,
         payload: {},
       });
-      expect(calls).toEqual([
-        ["aside", "CAPCOM", { action: "accept", onRefused: expect.any(Function) }],
-      ]);
+      expect(calls).toEqual([["aside", "CAPCOM", { action: "accept" }]]);
       expect(r.statusCode).toBe(409);
       await a.close();
     },
@@ -6604,7 +6602,10 @@ describe("the first loop's engine", () => {
       supervisor: stubSupervisor(),
       ...(withEngine
         ? {
-            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+            engine: {
+              onOperatorMessage: async () => ({ lifted: true }),
+              status: () => ({ on: true, note: "" }),
+            },
           }
         : {}),
     });
@@ -6625,7 +6626,10 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const r = await a.inject({
       method: "POST",
@@ -6646,10 +6650,7 @@ describe("the first loop's engine", () => {
       bus,
       supervisor: stubSupervisor(),
       engine: {
-        onOperatorMessage: async (_id, _by, opts) => {
-          opts?.onRefused?.("floor-enforced");
-          return false;
-        },
+        onOperatorMessage: async () => ({ lifted: false, reason: "floor-enforced" }),
         status: () => ({ on: true, note: "" }),
       },
     });
@@ -6775,7 +6776,10 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const invalid = await bounded.inject({
       method: "POST",
@@ -6792,7 +6796,10 @@ describe("the first loop's engine", () => {
       bus,
       noLoopWrites: true,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const refused = await preview.inject({
       method: "POST",

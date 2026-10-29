@@ -183,7 +183,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
-import { type Engine, type OperatorRefusal, operatorRefusalText } from "./engine/engine.ts";
+import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import {
   changedFiles,
   committedLines,
@@ -3229,17 +3229,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
-        let refusal: OperatorRefusal | null = null;
-        const onRefused = (reason: OperatorRefusal) => {
-          refusal = reason;
-        };
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept", onRefused })
-          : await deps.engine.onOperatorMessage(run.id, "CAPCOM", { onRefused });
-        if (!lifted) {
-          return reply.code(409).send({
-            error: `nothing to resume: ${operatorRefusalText(refusal) ?? "the run is not parked, or its park is not lifted this way"}`,
-          });
+          ? await deps.engine.onOperatorMessage(run.id, "CAPCOM", { action: "accept" })
+          : await deps.engine.onOperatorMessage(run.id, "CAPCOM");
+        if (!lifted.lifted) {
+          return reply
+            .code(409)
+            .send({ error: `nothing to resume: ${operatorRefusalText(lifted.reason)}` });
         }
         return { ok: true };
       });
@@ -3272,7 +3268,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           let commsError: unknown = null;
-          const lifted = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
+          const result = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
             kinds: [kind],
             beforeLift: async () => {
               try {
@@ -3297,10 +3293,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ),
               reply,
             );
-          if (!lifted)
-            return reply
-              .code(409)
-              .send({ error: "the review park could not be resumed for rework" });
+          if (!result.lifted)
+            return reply.code(409).send({
+              error: `the review park could not be resumed for rework: ${operatorRefusalText(result.reason)}`,
+            });
           return { ok: true };
         },
       );

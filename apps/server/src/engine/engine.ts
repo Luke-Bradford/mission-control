@@ -201,7 +201,10 @@ export type OperatorRefusal =
   | "round-granted"
   | "floor-enforced"
   | "before-lift"
-  | "rework-undelivered";
+  | "rework-undelivered"
+  | "engine-error";
+
+export type OperatorResult = { lifted: true } | { lifted: false; reason: OperatorRefusal };
 
 const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "engine-off": "the loop engine is off",
@@ -217,10 +220,11 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
+  "engine-error": "the engine hit an error; see the hub log",
 };
 
-export function operatorRefusalText(reason: OperatorRefusal | null): string | null {
-  return reason === null ? null : OPERATOR_REFUSAL_TEXT[reason];
+export function operatorRefusalText(reason: OperatorRefusal): string {
+  return OPERATOR_REFUSAL_TEXT[reason];
 }
 
 export interface Engine {
@@ -236,7 +240,7 @@ export interface Engine {
    * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
    * A message after review findings sends the author back to working; only an explicit `accept` waives them.
    * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
-   * never lifts a budget park. Resolves true only when it un-parked the run.
+   * never lifts a budget park. Resolves `lifted: true` only when it un-parked the run; otherwise `reason` is the first check that refused.
    */
   onOperatorMessage(
     runId: string,
@@ -248,10 +252,8 @@ export interface Engine {
       beforeLift?: () => Promise<boolean>;
       /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
       note?: string;
-      /** Called with the first check that refused, before the promise resolves false. */
-      onRefused?: (reason: OperatorRefusal) => void;
     },
-  ): Promise<boolean>;
+  ): Promise<OperatorResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
    * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
@@ -2179,12 +2181,12 @@ export function createEngine(deps: EngineDeps): Engine {
     },
 
     onOperatorMessage(runId, by = "CAPCOM", opts) {
-      const refuse = (reason: OperatorRefusal): void => opts?.onRefused?.(reason);
-      if (!live()) {
-        refuse("engine-off");
-        return Promise.resolve(false);
-      }
-      let lifted = false;
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      // a pass that throws before deciding leaves this: the error is logged by the chain
+      let result: OperatorResult = { lifted: false, reason: "engine-error" };
+      const refuse = (reason: OperatorRefusal): void => {
+        result = { lifted: false, reason };
+      };
       return onChain(runId, async () => {
         const run = store.run(runId);
         const loop = run?.loop;
@@ -2335,9 +2337,9 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
-        lifted = true;
+        result = { lifted: true };
         await pass(run.id);
-      }).then(() => lifted);
+      }).then(() => result);
     },
 
     clearFlight(runId, expectedSha) {
