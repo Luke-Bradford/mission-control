@@ -21,7 +21,7 @@ it("keeps eight compact columns with needs on the second Work line", () => {
     /#agentsList \.trow \{[^}]*padding: 2px 8px;[^}]*grid-template-rows: minmax\(0, 1fr\)/,
   );
   expect(css).toMatch(/#agentsList \.trow > \* \{\s*grid-row: 1/);
-  expect(css).toMatch(/#agentsList \.need \{[^}]*font-size: 11px/);
+  expect(css).toMatch(/#agentsList \.need \{[^}]*font-size: var\(--type-xs\)/);
   expect(css).toMatch(/#agentsList \.agent-model \{[^}]*white-space: nowrap/);
   expect(css).not.toContain("#agentsList.no-steps");
   expect(css).toContain("animation: activity-pulse");
