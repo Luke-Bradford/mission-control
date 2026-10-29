@@ -204,7 +204,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       .filter(
         (i) =>
           !i.closed &&
-          ["Ready", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
+          ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
       );
     const flowIssues = [
       ...done,

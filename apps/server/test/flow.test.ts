@@ -154,6 +154,23 @@ describe("collectFlow issues", () => {
     ]);
   });
 
+  it("retains open work when its board card becomes Blocked", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "Blocked", state: "blocked", closed: false }),
+    ]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 3), ev("In Progress", 2), ev("Blocked", 1)) });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toContainEqual({
+      repoId: "shop-app",
+      number: 1,
+      size: null,
+      startAt: Date.parse(at(3)),
+      doneAt: null,
+    });
+  });
+
   it("clears an earlier Done timestamp when a ticket is active again", async () => {
     store.replaceBoard("shop-app", [
       board(1, { status: "In Progress", state: "in progress", closed: false }),
