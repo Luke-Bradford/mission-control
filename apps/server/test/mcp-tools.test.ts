@@ -1315,6 +1315,31 @@ describe("Comms seat tools", () => {
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
   });
 
+  it("keeps rework targeted at an aside run from a newer run on the same seat", async () => {
+    store.addComms({
+      at: NOW - 1,
+      from: "CAPCOM",
+      to: "guido-1",
+      ticket: "mc#42",
+      text: "Rework the review findings.",
+      targetRunId: RUN,
+    });
+    const newer = "guido-1:newer";
+    liveSeat("guido-1", newer);
+    const current = JSON.parse((await read({}, tools, { ...CTX, runId: newer })).text) as {
+      messages: { text: string }[];
+    };
+    expect(current.messages.map((message) => message.text)).not.toContain(
+      "Rework the review findings.",
+    );
+
+    liveSeat("guido-1", RUN);
+    const resumed = JSON.parse((await read()).text) as { messages: { text: string }[] };
+    expect(resumed.messages.map((message) => message.text)).toContain(
+      "Rework the review findings.",
+    );
+  });
+
   it("shows crew messages, pinned rows and replies to the seat's own messages, and no others", async () => {
     const own = store.addComms({
       at: NOW - 6,
@@ -3249,8 +3274,60 @@ describe("report_evidence", () => {
     expect(await report("done")).toEqual({ text: EVIDENCE_RECORDED });
   });
 
+  it("records build-seat test runs and tests added", async () => {
+    await committed();
+    expect(
+      await tool("report_evidence", ev).call(CTX, {
+        note: "tested",
+        tests: [
+          {
+            command: "pnpm -s vitest run apps/a.test.ts",
+            file: "apps/a.test.ts",
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            duration: 12,
+          },
+        ],
+        testsAdded: [{ file: "apps/a.test.ts", failedOnBase: true }],
+      }),
+    ).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.latestEvidence(RUN)).toMatchObject({
+      tests: [expect.objectContaining({ passed: 1, duration: 12 })],
+      testsAdded: [{ file: "apps/a.test.ts", failedOnBase: true }],
+    });
+  });
+
   it("is offered to every mode", () => {
     expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
+  });
+
+  it("describes structured test evidence to MCP clients", () => {
+    expect(tool("report_evidence", ev).inputSchema).toMatchObject({
+      properties: {
+        tests: {
+          items: {
+            properties: {
+              command: { type: "string", minLength: 1 },
+              passed: { type: "integer", minimum: 0 },
+              duration: { type: "integer", minimum: 0 },
+            },
+            required: ["command", "passed", "failed", "skipped", "duration"],
+            additionalProperties: false,
+          },
+        },
+        testsAdded: {
+          items: {
+            properties: {
+              file: { type: "string", minLength: 1 },
+              failedOnBase: { type: "boolean" },
+            },
+            required: ["file", "failedOnBase"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
   });
 
   it("describes a no-commit response as a blocking-review reply", () => {
@@ -3539,6 +3616,8 @@ describe("report_evidence", () => {
       runId: RUN,
       note: "Fixed the race.\n\nDeploy: restart the hub.",
       at: clock,
+      tests: [],
+      testsAdded: [],
     });
     expect(told).toEqual([["guido-1", RUN]]);
     expect(emitted).toContain("agents");
@@ -3669,6 +3748,152 @@ describe("report_findings", () => {
       required: ["verdict", "summary", "findings"],
       additionalProperties: false,
     });
+  });
+
+  it("describes every structured review field to MCP clients", () => {
+    expect(tool("report_findings", rt).inputSchema).toMatchObject({
+      properties: {
+        checked: {
+          items: {
+            properties: {
+              check: { type: "string" },
+              result: { type: "string" },
+              note: { type: "string" },
+            },
+            required: ["check", "result"],
+            additionalProperties: false,
+          },
+        },
+        tests: {
+          items: {
+            properties: { command: { type: "string" }, failed: { type: "integer", minimum: 0 } },
+            required: ["command", "passed", "failed", "skipped", "duration"],
+            additionalProperties: false,
+          },
+        },
+        resolutions: {
+          items: {
+            properties: {
+              findingRef: {
+                properties: {
+                  reviewId: { type: "integer", minimum: 1 },
+                  pos: { type: "integer", minimum: 0 },
+                },
+                required: ["reviewId", "pos"],
+                additionalProperties: false,
+              },
+              outcome: { type: "string" },
+            },
+            required: ["findingRef", "outcome"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+  });
+
+  it("records structured checks, test runs, categories and prior-round resolutions", async () => {
+    const first = await report(
+      args({
+        checked: [{ check: "new-behaviour-tests", result: "pass", note: "covered" }],
+        tests: [
+          {
+            command: "pnpm -s vitest run a.test.ts",
+            passed: 2,
+            failed: 0,
+            skipped: 1,
+            duration: 30,
+          },
+        ],
+        findings: [finding({ category: "correctness" })],
+      }),
+    );
+    expect(first).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    reviewRun("retro:round-2", second);
+    expect(
+      await report(
+        args({
+          verdict: passing,
+          findings: [],
+          resolutions: [{ findingRef: { reviewId, pos: 0 }, outcome: "fixed" }],
+        }),
+        { seatId: "retro", runId: "retro:round-2" },
+      ),
+    ).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.reviewChecks(reviewId)).toEqual([
+      { check: "new-behaviour-tests", result: "pass", note: "covered" },
+    ]);
+    expect(store.reviewTests(reviewId)).toEqual([
+      {
+        command: "pnpm -s vitest run a.test.ts",
+        file: null,
+        passed: 2,
+        failed: 0,
+        skipped: 1,
+        duration: 30,
+      },
+    ]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({ category: "correctness" });
+    expect(store.reviewResolutions(second)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+  });
+
+  it("validates structured report fields and only accepts prior-round resolutions", async () => {
+    expect((await report(args({ checked: [{ check: "nope", result: "pass" }] }))).isError).toBe(
+      true,
+    );
+    expect(
+      (
+        await report(
+          args({ tests: [{ command: "x", passed: -1, failed: 0, skipped: 0, duration: 1 }] }),
+        )
+      ).isError,
+    ).toBe(true);
+    expect((await report(args({ findings: [finding({ category: "nope" })] }))).isError).toBe(true);
+    expect(
+      (
+        await report(
+          args({ resolutions: [{ findingRef: { reviewId, pos: 0 }, outcome: "fixed" }] }),
+        )
+      ).isError,
+    ).toBe(true);
+  });
+
+  it("rejects duplicate prior-round resolution references before storage", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const resolution = { findingRef: { reviewId, pos: 0 }, outcome: "fixed" } as const;
+    const result = await report(
+      args({ verdict: passing, findings: [], resolutions: [resolution, resolution] }),
+      roundTwo,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Invalid arguments: resolutions:/);
+    expect(store.review(second)?.state).toBe("running");
+    expect(store.reviewResolutions(second)).toEqual([]);
   });
 
   it("answers bad arguments", async () => {

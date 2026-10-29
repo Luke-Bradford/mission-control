@@ -1,10 +1,19 @@
-import type { Crew, MapSeat, MapSnapshot } from "@mc/core";
+import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
+import {
+  HistoryLens,
+  historyFocusLinks,
+  ImpactLens,
+  impactFocusLinks,
+  LensTabs,
+  lensVisuals,
+  type MapLens,
+} from "./Lenses.tsx";
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
@@ -23,6 +32,7 @@ export interface MapStatus {
 /** One repo's live map: the snapshot, then its deltas, until the page leaves the repo. */
 export function LiveCrewMap({ repo }: { repo: string }) {
   const crew = useResource<Crew>(RESOURCES.crew).data;
+  const repos = useResource<RepoView[]>(RESOURCES.repos).data;
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
   useEffect(() => {
@@ -81,6 +91,7 @@ export function LiveCrewMap({ repo }: { repo: string }) {
       names={names}
       work={work}
       status={status}
+      github={repos?.find((entry) => entry.id === repo)?.github}
     />
   );
 }
@@ -105,6 +116,7 @@ export function CrewMapView({
   names = noNames,
   work = noWork,
   status,
+  github,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
@@ -113,10 +125,13 @@ export function CrewMapView({
   /** What each crew seat is on (its crew row's ticket, title and PR); the map's own otherwise. */
   work?: Record<string, SeatWork>;
   status?: MapStatus;
+  /** The configured owner/name, used only after URL validation for PR links. */
+  github?: string;
 }) {
   const [query, setQuery] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  const [lens, setLens] = useState<MapLens>("changes");
   const [home, setHome] = useState(0);
   const [overview, setOverview] = useState(0);
   const [nodes, setNodes] = useState<ReturnType<typeof layoutTree>>([]);
@@ -222,6 +237,13 @@ export function CrewMapView({
   const selectedFiles = displayNodes.find((n) => n.path === selectedPath)?.files ?? [];
   // stable callbacks, so the scene's props change only when what it shows does
   const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
+  const selectFromScene = useCallback(
+    (path: string) => {
+      if (lens === "changes") selectNode(path);
+      else setFocus((current) => (current === path ? null : path));
+    },
+    [lens, selectNode],
+  );
   const searchSelect = (path: string) => {
     selectNode(path);
     setFocus(null);
@@ -239,8 +261,36 @@ export function CrewMapView({
     [selectSeat],
   );
   const named = { snapshot: stage, indices: colours, names };
+  const focusLinks = useMemo(
+    () =>
+      lens === "impact"
+        ? impactFocusLinks(snapshot, focus)
+        : lens === "history"
+          ? historyFocusLinks(snapshot, focus)
+          : [],
+    [lens, snapshot, focus],
+  );
+  const lensVisual = useMemo(() => lensVisuals(snapshot, lens, focus), [snapshot, lens, focus]);
+  useEffect(() => {
+    const clearFocus = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && focus !== null) setFocus(null);
+    };
+    window.addEventListener("keydown", clearFocus);
+    return () => window.removeEventListener("keydown", clearFocus);
+  }, [focus]);
   return (
     <div className="map-body">
+      <div className="map-lens-toolbar">
+        <LensTabs
+          lens={lens}
+          onChange={(next) => {
+            setLens(next);
+            setFocus(null);
+          }}
+        />
+        {lens === "impact" && <span>Click a file to trace its importers, tests, and imports.</span>}
+        {lens === "history" && <span>Hotspots and hidden change contracts from merged PRs.</span>}
+      </div>
       <div className="map-main">
         <div className="map-stage-wrap">
           <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
@@ -250,12 +300,15 @@ export function CrewMapView({
               snapshot={stage}
               names={names}
               focus={focusNode?.path ?? null}
+              focusLinks={focusLinks}
+              lens={lens}
+              lensVisual={lensVisual}
               home={home}
               overview={overview}
               rotate={rotate}
               selected={selectedPath}
               indices={colours}
-              onSelect={selectNode}
+              onSelect={selectFromScene}
               seat={selectedSeat?.seat ?? null}
               seatFocus={seatFocus}
               dockSeats={snapshot.seats.length}
@@ -265,92 +318,100 @@ export function CrewMapView({
           <MapKey tree={snapshot.tree} />
         </div>
         <div className="map-rail">
-          <section className="map-card map-card-seats" aria-label="Seats">
-            <h2>Seats</h2>
-            <SeatSelector
-              {...named}
-              snapshot={snapshot}
-              seats={stage.seats}
-              selected={selectedSeat?.seat ?? null}
-              onSelect={(seat) => selectSeat(seat, true)}
-              work={seatWork}
-            />
-          </section>
-          <section className="map-card map-card-selected" aria-label="Selected">
-            <h2>Selected</h2>
-            <input
-              type="search"
-              className="map-find"
-              aria-label="Find a file or folder"
-              placeholder="Find a file or folder"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && matches[0]) searchSelect(matches[0]);
-              }}
-            />
-            {query && (
-              <div className="map-results">
-                {matches.slice(0, 60).map((n) => (
-                  <button type="button" key={n} onClick={() => searchSelect(n)}>
-                    {n}
-                  </button>
-                ))}
-                {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-                {!matches.length && <p>No file or folder matches.</p>}
-              </div>
-            )}
-            {/* Announces the selection only: the card's "Now" line ticks every few seconds. */}
-            <p className="sr-only" role="status">
-              {selectedSeat
-                ? `Selected ${named.names?.[selectedSeat.seat] ?? selectedSeat.seat}`
-                : selectedPath !== null
-                  ? `Selected ${selectedPath}`
-                  : ""}
-            </p>
-            <aside className="map-detail" aria-label="Selection detail">
-              {selectedSeat ? (
-                <SeatDetail
+          {lens === "impact" ? (
+            <ImpactLens snapshot={snapshot} focus={focus} onFocus={setFocus} />
+          ) : lens === "history" ? (
+            <HistoryLens snapshot={snapshot} focus={focus} onFocus={setFocus} github={github} />
+          ) : (
+            <>
+              <section className="map-card map-card-seats" aria-label="Seats">
+                <h2>Seats</h2>
+                <SeatSelector
                   {...named}
-                  seat={selectedSeat}
-                  now={now}
-                  work={seatWork(selectedSeat)}
+                  snapshot={snapshot}
+                  seats={stage.seats}
+                  selected={selectedSeat?.seat ?? null}
+                  onSelect={(seat) => selectSeat(seat, true)}
+                  work={seatWork}
                 />
-              ) : selectedPath !== null ? (
-                <>
-                  <NodeDetail
-                    {...named}
-                    path={selectedPath}
-                    files={
-                      selectedFiles.length
-                        ? selectedFiles
-                        : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                            f.startsWith(`${selectedPath}/`),
-                          )
-                    }
-                  />
-                  <div className="map-detail-actions">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocus(null);
-                        queueMicrotask(() => setFocus(selectedPath));
-                      }}
-                    >
-                      Zoom to it
-                    </button>
-                    <button type="button" onClick={() => setSelection(null)}>
-                      Close
-                    </button>
+              </section>
+              <section className="map-card map-card-selected" aria-label="Selected">
+                <h2>Selected</h2>
+                <input
+                  type="search"
+                  className="map-find"
+                  aria-label="Find a file or folder"
+                  placeholder="Find a file or folder"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && matches[0]) searchSelect(matches[0]);
+                  }}
+                />
+                {query && (
+                  <div className="map-results">
+                    {matches.slice(0, 60).map((n) => (
+                      <button type="button" key={n} onClick={() => searchSelect(n)}>
+                        {n}
+                      </button>
+                    ))}
+                    {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
+                    {!matches.length && <p>No file or folder matches.</p>}
                   </div>
-                </>
-              ) : (
-                <p className="map-note">
-                  Pick a seat to follow it, or click a node to see who changed or read it.
+                )}
+                {/* Announces the selection only: the card's "Now" line ticks every few seconds. */}
+                <p className="sr-only" role="status">
+                  {selectedSeat
+                    ? `Selected ${named.names?.[selectedSeat.seat] ?? selectedSeat.seat}`
+                    : selectedPath !== null
+                      ? `Selected ${selectedPath}`
+                      : ""}
                 </p>
-              )}
-            </aside>
-          </section>
+                <aside className="map-detail" aria-label="Selection detail">
+                  {selectedSeat ? (
+                    <SeatDetail
+                      {...named}
+                      seat={selectedSeat}
+                      now={now}
+                      work={seatWork(selectedSeat)}
+                    />
+                  ) : selectedPath !== null ? (
+                    <>
+                      <NodeDetail
+                        {...named}
+                        path={selectedPath}
+                        files={
+                          selectedFiles.length
+                            ? selectedFiles
+                            : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
+                                f.startsWith(`${selectedPath}/`),
+                              )
+                        }
+                      />
+                      <div className="map-detail-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFocus(null);
+                            queueMicrotask(() => setFocus(selectedPath));
+                          }}
+                        >
+                          Zoom to it
+                        </button>
+                        <button type="button" onClick={() => setSelection(null)}>
+                          Close
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="map-note">
+                      Pick a seat to follow it, or click a node to see who changed or read it.
+                    </p>
+                  )}
+                </aside>
+              </section>
+            </>
+          )}
         </div>
       </div>
       <div className="map-deck">

@@ -8,6 +8,14 @@ import {
   type AgentId,
   type AttentionBrief,
   type AttentionKind,
+  AUDIT_CHANGE_WINDOW_MS,
+  AUDIT_PR_OUTLIER_LINES,
+  AUDIT_REFUSAL_SPIKE,
+  AUDIT_SPEND_OUTLIER_FACTOR,
+  type AuditChange,
+  type AuditMetrics,
+  type AuditPrSize,
+  type AuditView,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -21,6 +29,7 @@ import {
   type CommsReactionKind,
   commsCutMarker,
   type Escalation,
+  type FindingResolution,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_LEDGER_OPEN,
@@ -28,6 +37,7 @@ import {
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
   FLIGHT_RETROSPECTIVE_SETTING,
+  FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
   FLIGHT_WATCH_LIMIT,
@@ -61,6 +71,8 @@ import {
   type PullRequestView,
   type ReplyDraft,
   type RepoId,
+  type ReportedTest,
+  type ReviewCheck,
   type ReviewFinding,
   type ReviewRequest,
   type ReviewRow,
@@ -167,7 +179,8 @@ CREATE TABLE IF NOT EXISTS board_moves (
 CREATE INDEX IF NOT EXISTS board_moves_at ON board_moves(at);
 -- What a run's seat reported (append-only); the loop's reconciler reads the latest.
 CREATE TABLE IF NOT EXISTS run_evidence (
-  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL
+  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL,
+  tests TEXT NOT NULL DEFAULT '[]', tests_added TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS run_evidence_run ON run_evidence(run_id);
 -- One review of a run's pushed sha (7b-1); attempt counts the tries of one sha within a loop epoch.
@@ -183,7 +196,19 @@ CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
   severity TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, summary TEXT NOT NULL,
-  scenario TEXT NOT NULL, fix TEXT NOT NULL, state TEXT NOT NULL, UNIQUE (review_id, pos)
+  scenario TEXT NOT NULL, fix TEXT NOT NULL, category TEXT, state TEXT NOT NULL, UNIQUE (review_id, pos)
+);
+CREATE TABLE IF NOT EXISTS review_checks (
+  review_id INTEGER NOT NULL, check_id TEXT NOT NULL, result TEXT NOT NULL, note TEXT,
+  PRIMARY KEY (review_id, check_id)
+);
+CREATE TABLE IF NOT EXISTS review_tests (
+  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, command TEXT NOT NULL, file TEXT,
+  passed INTEGER NOT NULL, failed INTEGER NOT NULL, skipped INTEGER NOT NULL, duration INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_resolutions (
+  review_id INTEGER NOT NULL, prior_review_id INTEGER NOT NULL, finding_pos INTEGER NOT NULL,
+  outcome TEXT NOT NULL, PRIMARY KEY (review_id, prior_review_id, finding_pos)
 );
 -- Lines sent to a seat, one row per key: a claimed key is never sent twice.
 CREATE TABLE IF NOT EXISTS seat_lines (
@@ -370,6 +395,16 @@ CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER 
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+const DAY_MS = 86_400_000;
+
+/** The median of the values, or null when there are none. */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 /** One notification thread, as stored. */
 export interface NotificationRow {
@@ -638,6 +673,7 @@ export interface NewCommsRow {
   label?: CommsLabel | null;
   ref?: string | null;
   replyTo?: string | null;
+  targetRunId?: string | null;
   mentions?: readonly string[];
 }
 
@@ -681,6 +717,8 @@ export interface Evidence {
   runId: string;
   note: string;
   at: number;
+  tests: ReportedTest[];
+  testsAdded: { file: string; failedOnBase: boolean }[];
 }
 
 /** One issue in a seat's queue; `takenAt` is set while the seat holds it. */
@@ -1126,6 +1164,9 @@ export class Store {
     this.addColumn("pull_requests", "author", "TEXT");
     this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("review_findings", "category", "TEXT");
     // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
     this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "additions", "INTEGER");
@@ -1180,6 +1221,7 @@ export class Store {
     );
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
+    this.addColumn("comms", "target_run_id", "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
@@ -2231,9 +2273,18 @@ export class Store {
   }
 
   /** Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP. */
-  audit(since: number, until: number): Record<string, unknown> {
+  audit(since: number, until: number): AuditView {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
+    const prs = this.auditPrSizes(since, until);
+    const spend = rows(
+      `SELECT id AS runId, agent_id AS agentId, ticket, cost_usd AS costUsd FROM runs
+       WHERE started_at >= ? AND started_at <= ? AND cost_usd IS NOT NULL
+       ORDER BY cost_usd DESC, id`,
+      since,
+      until,
+    ) as unknown as AuditView["spendOutliers"];
+    const medianSpend = median(spend.map((r) => r.costUsd));
     return {
       range: { since, until },
       longRunners: rows(
@@ -2244,34 +2295,56 @@ export class Store {
         until,
         until,
         since,
-      ),
+      ) as unknown as AuditView["longRunners"],
       deathLoops: rows(
-        `SELECT run_id AS runId, COUNT(*) AS parks FROM run_attempts
-         WHERE kind = 'loop' AND at >= ? AND at <= ?
-           AND json_extract(data, '$.parked') IS NOT NULL GROUP BY run_id ORDER BY parks DESC`,
+        `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
+          COUNT(*) AS parks FROM run_attempts a
+         WHERE a.kind = 'loop' AND a.at >= ? AND a.at <= ?
+           AND json_extract(a.data, '$.parked') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["deathLoops"],
       reworkRounds: rows(
-        `SELECT author_run_id AS runId, MAX(0, MAX(round) - 1) AS rounds,
-          MAX(round) AS maxRound FROM reviews
+        `SELECT author_run_id AS runId, (SELECT agent_id FROM runs WHERE id = author_run_id) AS agentId,
+          MAX(0, MAX(round) - 1) AS rounds, MAX(round) AS maxRound FROM reviews
          WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
          GROUP BY author_run_id ORDER BY rounds DESC, runId`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["reworkRounds"],
       refusalsByRule: rows(
         `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
         since,
         until,
-      ),
-      questions: rows(
+      ) as unknown as AuditView["refusalsByRule"],
+      refusals: rows(
+        `SELECT agent_id AS agentId, run_id AS runId, rule, COUNT(*) AS count FROM guard_hits
+         WHERE at >= ? AND at <= ? GROUP BY agent_id, run_id, rule
+         ORDER BY count DESC, agent_id, run_id, rule`,
+        since,
+        until,
+      ) as unknown as AuditView["refusals"],
+      refusalSpikes: rows(
+        `SELECT agent_id AS agentId, (at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS count
+         FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY agent_id, day HAVING count >= ?
+         ORDER BY count DESC, day, agent_id`,
+        since,
+        until,
+        AUDIT_REFUSAL_SPIKE,
+      ) as unknown as AuditView["refusalSpikes"],
+      spendOutliers:
+        medianSpend === null
+          ? []
+          : spend.filter(
+              (r) => r.costUsd > 0 && r.costUsd >= medianSpend * AUDIT_SPEND_OUTLIER_FACTOR,
+            ),
+      questions: (rows(
         `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
           AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
          FROM seat_questions WHERE at >= ? AND at <= ?`,
         since,
         until,
-      )[0] ?? { asked: 0, answered: 0, answerMs: null },
+      )[0] ?? { asked: 0, answered: 0, answerMs: null }) as unknown as AuditView["questions"],
       costPerMergedTicket: rows(
         `WITH merged_tickets AS (
            SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
@@ -2281,13 +2354,153 @@ export class Store {
          GROUP BY t.repo_id, t.ticket ORDER BY t.ticket`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["costPerMergedTicket"],
       modelPromptTimeline: rows(
         `SELECT started_at AS at, model, account_id AS accountId, effort, prompt_hash AS promptHash
          FROM runs WHERE started_at >= ? AND started_at <= ? ORDER BY started_at`,
         since,
         until,
-      ),
+      ) as unknown as AuditView["modelPromptTimeline"],
+      prSizes: {
+        prs,
+        outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
+      },
+      chatter: this.commsChatter(since, until),
+      flakes: this.auditFlakes(since, until),
+      changes: this.auditChanges(since, until),
+      surgeonProposals: [],
+    };
+  }
+
+  /** Merged PRs in range that have a recorded size, largest first. */
+  private auditPrSizes(since: number, until: number): AuditPrSize[] {
+    const sized: AuditPrSize[] = [];
+    for (const row of this.db
+      .prepare("SELECT repo_id, record FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .all(since, until) as { repo_id: string; record: string }[]) {
+      const pr = JSON.parse(row.record) as PullRequestView;
+      if (pr.additions == null || pr.deletions == null || pr.changedFiles == null) continue;
+      sized.push({
+        repoId: row.repo_id,
+        number: pr.number,
+        ticket: pr.ticket,
+        mergedAt: pr.mergedAt ?? 0,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changedFiles: pr.changedFiles,
+      });
+    }
+    return sized.sort(
+      (a, b) =>
+        b.additions + b.deletions - (a.additions + a.deletions) ||
+        a.repoId.localeCompare(b.repoId) ||
+        a.number - b.number,
+    );
+  }
+
+  /** Failed-then-passed-on-same-head observations FLIGHT kept per repo, grouped by check. */
+  private auditFlakes(since: number, until: number): AuditView["flakes"] {
+    const byKey = new Map<string, { count: number; lastAt: number }>();
+    const prefix = `${FLIGHT_SIGNALS_SETTING}:`;
+    const stored = this.db
+      .prepare("SELECT value FROM settings WHERE substr(key, 1, ?) = ?")
+      .all(prefix.length, prefix) as { value: string }[];
+    for (const { value } of stored) {
+      let flakes: Record<string, { key?: unknown; at?: unknown }> = {};
+      try {
+        flakes = JSON.parse(value)?.flakes ?? {};
+      } catch {}
+      for (const flake of Object.values(flakes ?? {})) {
+        if (typeof flake?.key !== "string" || typeof flake.at !== "number") continue;
+        if (flake.at < since || flake.at > until) continue;
+        const entry = byKey.get(flake.key) ?? { count: 0, lastAt: 0 };
+        entry.count += 1;
+        entry.lastAt = Math.max(entry.lastAt, flake.at);
+        byKey.set(flake.key, entry);
+      }
+    }
+    return [...byKey]
+      .map(([key, v]) => ({ key, ...v }))
+      .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  }
+
+  /** Each seat's first run on a new prompt or model in range, with metrics either side of it. */
+  private auditChanges(since: number, until: number): AuditChange[] {
+    const runs = this.db
+      .prepare(
+        `SELECT agent_id, started_at, model, prompt_hash FROM runs
+         WHERE started_at <= ? ORDER BY agent_id, started_at, id`,
+      )
+      .all(until) as {
+      agent_id: string;
+      started_at: number;
+      model: string | null;
+      prompt_hash: string | null;
+    }[];
+    const changes: AuditChange[] = [];
+    const previous = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) {
+      const last = previous.get(run.agent_id);
+      previous.set(run.agent_id, run);
+      if (!last || run.started_at < since) continue;
+      for (const [kind, from, to] of [
+        ["prompt", last.prompt_hash, run.prompt_hash],
+        ["model", last.model, run.model],
+      ] as const) {
+        if (to === null || to === from) continue;
+        const windowMs = Math.min(
+          AUDIT_CHANGE_WINDOW_MS,
+          run.started_at - since,
+          until - run.started_at,
+        );
+        changes.push({
+          kind,
+          agentId: run.agent_id,
+          at: run.started_at,
+          from,
+          to,
+          windowMs,
+          before: this.auditMetrics(run.started_at - windowMs, run.started_at - 1),
+          after: this.auditMetrics(run.started_at, run.started_at + windowMs - 1),
+        });
+      }
+    }
+    return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
+  }
+
+  /** Crew-wide metrics over one window, both ends inclusive. */
+  private auditMetrics(from: number, to: number): AuditMetrics {
+    const merged = this.db
+      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .get(from, to) as { n: number };
+    const reviews = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(blocking > 0), 0) AS failed FROM reviews
+         WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?`,
+      )
+      .get(from, to) as { n: number; failed: number };
+    const costs = this.db
+      .prepare(
+        `WITH merged_tickets AS (
+           SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
+           WHERE merged_at >= ? AND merged_at <= ?
+         ) SELECT SUM(r.cost_usd) AS costUsd FROM merged_tickets t
+         JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
+         GROUP BY t.repo_id, t.ticket HAVING costUsd IS NOT NULL`,
+      )
+      .all(from, to) as { costUsd: number }[];
+    const rework = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(rounds), 0) AS n FROM (
+           SELECT MAX(0, MAX(round) - 1) AS rounds FROM reviews
+           WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? GROUP BY author_run_id)`,
+      )
+      .get(from, to) as { n: number };
+    return {
+      merged: merged.n,
+      reviewFailRate: reviews.n === 0 ? null : reviews.failed / reviews.n,
+      medianCostPerMergedTicket: median(costs.map((c) => c.costUsd)),
+      reworkRounds: rework.n,
     };
   }
 
@@ -2784,10 +2997,26 @@ export class Store {
   }
 
   /** Appends a note the run's seat reported; returns its id. */
-  addEvidence(runId: string, note: string, at: number): number {
+  addEvidence(
+    runId: string,
+    note: string,
+    at: number,
+    details: {
+      tests?: ReportedTest[];
+      testsAdded?: { file: string; failedOnBase: boolean }[];
+    } = {},
+  ): number {
     const r = this.db
-      .prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, ?, ?)")
-      .run(runId, note, at);
+      .prepare(
+        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        runId,
+        note,
+        at,
+        JSON.stringify(details.tests ?? []),
+        JSON.stringify(details.testsAdded ?? []),
+      );
     this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
   }
@@ -2802,6 +3031,8 @@ export class Store {
           runId: r.run_id as string,
           note: r.note as string,
           at: r.at as number,
+          tests: JSON.parse(r.tests as string) as ReportedTest[],
+          testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
         }
       : null;
   }
@@ -2816,6 +3047,8 @@ export class Store {
       runId: r.run_id as string,
       note: r.note as string,
       at: r.at as number,
+      tests: JSON.parse(r.tests as string) as ReportedTest[],
+      testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
     }));
   }
 
@@ -2927,7 +3160,15 @@ export class Store {
   recordFindings(
     reviewId: number,
     runId: string,
-    r: { verdict: ReviewVerdict; summary: string; findings: ReviewFinding[]; at: number },
+    r: {
+      verdict: ReviewVerdict;
+      summary: string;
+      findings: ReviewFinding[];
+      checked?: ReviewCheck[];
+      tests?: ReportedTest[];
+      resolutions?: FindingResolution[];
+      at: number;
+    },
   ): boolean {
     const isBlocking = (f: ReviewFinding) => BLOCKING_SEVERITIES.includes(f.severity);
     const blocking = r.findings.filter(isBlocking).length;
@@ -2954,8 +3195,8 @@ export class Store {
       ).author_run_id as string;
       const insert = this.db.prepare(
         `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
-           scenario, fix, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           scenario, fix, category, state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       r.findings.forEach((f, pos) => {
         insert.run(
@@ -2968,9 +3209,40 @@ export class Store {
           f.summary,
           f.scenario,
           f.fix,
+          f.category ?? null,
           isBlocking(f) ? "open" : "logged",
         );
       });
+      const insertCheck = this.db.prepare(
+        "INSERT INTO review_checks (review_id, check_id, result, note) VALUES (?, ?, ?, ?)",
+      );
+      for (const check of r.checked ?? [])
+        insertCheck.run(reviewId, check.check, check.result, check.note ?? null);
+      const insertTest = this.db.prepare(
+        `INSERT INTO review_tests (review_id, command, file, passed, failed, skipped, duration)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const test of r.tests ?? [])
+        insertTest.run(
+          reviewId,
+          test.command,
+          test.file ?? null,
+          test.passed,
+          test.failed,
+          test.skipped,
+          test.duration,
+        );
+      const insertResolution = this.db.prepare(
+        `INSERT INTO review_resolutions (review_id, prior_review_id, finding_pos, outcome)
+         VALUES (?, ?, ?, ?)`,
+      );
+      for (const resolution of r.resolutions ?? [])
+        insertResolution.run(
+          reviewId,
+          resolution.findingRef.reviewId,
+          resolution.findingRef.pos,
+          resolution.outcome,
+        );
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),
         findings: r.findings,
@@ -2993,7 +3265,55 @@ export class Store {
       summary: r.summary as string,
       scenario: r.scenario as string,
       fix: r.fix as string,
+      category: (r.category as StoredFinding["category"]) ?? undefined,
       state: r.state as StoredFinding["state"],
+    }));
+  }
+
+  reviewChecks(reviewId: number): ReviewCheck[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT check_id, result, note FROM review_checks WHERE review_id = ? ORDER BY check_id",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      check: r.check_id as ReviewCheck["check"],
+      result: r.result as ReviewCheck["result"],
+      ...(r.note === null ? {} : { note: r.note as string }),
+    }));
+  }
+
+  reviewTests(reviewId: number): (Omit<ReportedTest, "file"> & { file: string | null })[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT command, file, passed, failed, skipped, duration FROM review_tests WHERE review_id = ? ORDER BY id",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      command: r.command as string,
+      file: r.file as string | null,
+      passed: r.passed as number,
+      failed: r.failed as number,
+      skipped: r.skipped as number,
+      duration: r.duration as number,
+    }));
+  }
+
+  reviewResolutions(
+    reviewId: number,
+  ): { reviewId: number; pos: number; outcome: FindingResolution["outcome"] }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT prior_review_id, finding_pos, outcome FROM review_resolutions WHERE review_id = ? ORDER BY prior_review_id, finding_pos",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      reviewId: r.prior_review_id as number,
+      pos: r.finding_pos as number,
+      outcome: r.outcome as FindingResolution["outcome"],
     }));
   }
 
@@ -3132,7 +3452,7 @@ export class Store {
       }
       const inserted = this.db
         .prepare(
-          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           row.at,
@@ -3143,6 +3463,7 @@ export class Store {
           row.label ?? null,
           row.ref ?? null,
           replyTo,
+          row.targetRunId ?? null,
         );
       id = Number(inserted.lastInsertRowid);
       const mention = this.db.prepare(
@@ -3274,13 +3595,37 @@ export class Store {
   commsForCrew(): CommsRow[] {
     return this.commsForWhere("to_id = 'crew'");
   }
+  /** Seat-side reads include only general Comms and rows targeted at its live run. */
+  commsForCrewRun(runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "to_id = 'crew'");
+  }
   commsForAgent(id: string, contact?: string): CommsRow[] {
     return contact === undefined
       ? this.commsForWhere("from_id=? OR to_id=?", id, id)
       : this.commsForPair(id, contact);
   }
+  commsForAgentRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(runId, "from_id=? OR to_id=?", id, id);
+  }
   commsInbox(id: string): CommsRow[] {
     return this.commsForWhere(
+      `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      id,
+      id,
+      id,
+    );
+  }
+  commsInboxRun(id: string, runId: string): CommsRow[] {
+    return this.commsForRunWhere(
+      runId,
       `id IN (
         SELECT id FROM comms WHERE to_id=?
         UNION
@@ -3426,6 +3771,13 @@ export class Store {
       this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
     ).map((r) => this.commsRow(r));
   }
+  private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
+    return this.commsForWhere(
+      `(${where}) AND (target_run_id IS NULL OR target_run_id = ?)`,
+      ...args,
+      runId,
+    );
+  }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
@@ -3461,7 +3813,10 @@ export class Store {
       .all(since) as { hour: number; from: string; to: string; count: number }[];
   }
   /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
-  commsChatter(since: number): { from: string; to: string; ticket: string; rounds: number }[] {
+  commsChatter(
+    since: number,
+    until = Number.MAX_SAFE_INTEGER,
+  ): { from: string; to: string; ticket: string; rounds: number }[] {
     const rows = this.db
       .prepare(
         `SELECT "from", "to", ticket,
@@ -3472,7 +3827,7 @@ export class Store {
             SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
             SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
           FROM comms
-          WHERE at >= ? AND ticket IS NOT NULL
+          WHERE at >= ? AND at <= ? AND ticket IS NOT NULL
             AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
           GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END
@@ -3480,7 +3835,16 @@ export class Store {
         WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
         ORDER BY rounds DESC, ticket, "from", "to"`,
       )
-      .all(since, COMMS_CAPCOM, COMMS_MC, COMMS_CREW, COMMS_CAPCOM, COMMS_MC, COMMS_CREW) as Row[];
+      .all(
+        since,
+        until,
+        COMMS_CAPCOM,
+        COMMS_MC,
+        COMMS_CREW,
+        COMMS_CAPCOM,
+        COMMS_MC,
+        COMMS_CREW,
+      ) as Row[];
     return rows.map((row) => ({
       from: row.from as string,
       to: row.to as string,
@@ -3505,10 +3869,14 @@ export class Store {
   }
 
   /** The hand-offs at or after `since`, oldest first. */
-  comms(since: number): CommsRow[] {
+  comms(since: number, targetRunId?: string): CommsRow[] {
     const rows = this.db
-      .prepare("SELECT * FROM comms WHERE at >= ? ORDER BY at, id")
-      .all(since) as Row[];
+      .prepare(
+        targetRunId === undefined
+          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id"
+          : "SELECT * FROM comms WHERE at >= ? AND (target_run_id IS NULL OR target_run_id = ?) ORDER BY at, id",
+      )
+      .all(since, ...(targetRunId === undefined ? [] : [targetRunId])) as Row[];
     // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
     // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({

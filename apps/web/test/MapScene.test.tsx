@@ -77,6 +77,47 @@ it("provides a searchable-file fallback when WebGL is unavailable", () => {
   expect(screen.getByRole("status").textContent).toContain("Use file search");
 });
 
+it("draws linked focus relationships solid, hidden ones dashed, and redraws when classification changes", () => {
+  const links = [
+    { from: "src/main.ts", to: "src/util.ts" },
+    { from: "src/util.ts", to: "src/main.ts", unlinked: true },
+  ];
+  const { rerender } = render(<MapScene {...props} focusLinks={links} />);
+  act(() => vi.advanceTimersByTime(100));
+  const scene = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const focusLines = scene.children.filter((child) => child instanceof THREE.LineSegments);
+  expect(
+    focusLines.some(
+      (line) => (line as THREE.LineSegments).material instanceof THREE.LineDashedMaterial,
+    ),
+  ).toBe(true);
+  expect(
+    focusLines.some(
+      (line) =>
+        (line as THREE.LineSegments).material instanceof THREE.LineBasicMaterial &&
+        !((line as THREE.LineSegments).material instanceof THREE.LineDashedMaterial),
+    ),
+  ).toBe(true);
+
+  rerender(<MapScene {...props} focusLinks={[{ from: "src/main.ts", to: "src/util.ts" }]} />);
+  act(() => vi.advanceTimersByTime(100));
+  rerender(
+    <MapScene
+      {...props}
+      focusLinks={[{ from: "src/main.ts", to: "src/util.ts", unlinked: true }]}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(100));
+  const redrawn = renderer.render.mock.lastCall?.[0] as THREE.Scene;
+  const redrawnFocus = redrawn.children.filter(
+    (child) =>
+      child instanceof THREE.LineSegments &&
+      (child as THREE.LineSegments).geometry.getAttribute("position").count === 2,
+  );
+  expect(redrawnFocus).toHaveLength(1);
+  expect((redrawnFocus[0] as THREE.LineSegments).material).toBeInstanceOf(THREE.LineDashedMaterial);
+});
+
 it("uses point LOD for a 5,000-file 1440×900 overview without aggregating file nodes", () => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);

@@ -87,6 +87,7 @@ export async function sendComms(
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
+        targetRunId: input.targetRunId,
         mentions: [...mentions],
       },
       deps.seatSender

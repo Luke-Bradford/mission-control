@@ -3979,6 +3979,77 @@ button.nrow.thread.tagged {
   width: 100%;
 }
 
+/* audit */
+#page-audit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.audit-panel:last-child {
+  grid-column: 1 / -1;
+}
+.audit-list {
+  display: grid;
+  gap: 7px;
+}
+.audit-list > a,
+.audit-list > span,
+.audit-change,
+.audit-proposal,
+.audit-size {
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.audit-list > :last-child {
+  border-bottom: 0;
+}
+.audit-size,
+.audit-proposal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.audit-bar {
+  flex: 1;
+  min-width: 36px;
+  height: 8px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.audit-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+}
+.audit-change {
+  display: grid;
+  gap: 3px;
+}
+.audit-proposal > :first-child {
+  flex: 1;
+}
+.audit-status {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.audit-status-open {
+  color: var(--amber);
+}
+.audit-status-verified {
+  color: var(--green);
+}
+.audit-status-dismissed {
+  color: var(--fg2);
+}
 /* telemetry */
 #page-telemetry {
   display: flex;
@@ -6626,6 +6697,9 @@ kbd {
   }
 }
 @media (max-width: 760px) {
+  .audit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .top {
     padding: 10px 14px;
     gap: 8px 12px;

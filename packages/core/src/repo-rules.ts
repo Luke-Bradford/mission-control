@@ -47,6 +47,8 @@ export interface RepoRules {
   hardRulesSet: boolean;
   /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
   hardRulesBy: HardRulesBy | "flight";
+  /** The open issue that collects minor findings from merged PRs, when this repo names one. */
+  techDebtIssue?: number;
   alwaysAsk: string[];
 }
 

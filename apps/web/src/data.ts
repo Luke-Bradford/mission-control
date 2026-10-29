@@ -119,6 +119,10 @@ export const RESOURCES = {
       (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
   }),
+  audit: (range: string): ResourceRef => ({
+    path: `/api/audit?range=${enc(range)}`,
+    topic: "agents",
+  }),
   comms: (agentId: string): ResourceRef => ({
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",

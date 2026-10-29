@@ -1399,6 +1399,7 @@ describe("Setup is read-only (except Repos, Sessions and Accounts)", () => {
       });
       const body = document.querySelector(".sgrid") as HTMLElement;
       for (const el of body.querySelectorAll("input, select, textarea")) {
+        if (tab === "loops" && el.id === "loop-run-picker") continue;
         expect((el as HTMLInputElement).disabled).toBe(true);
       }
       for (const b of body.querySelectorAll("button")) fireEvent.click(b);

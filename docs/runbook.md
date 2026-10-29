@@ -800,6 +800,18 @@ This accepts the parked run:
 
 The route answers 409 when the engine is off, or when nothing was lifted.
 
+### Rework a parked run
+
+To send rework text to a set-aside run that is parked on review findings, use:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/message -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"text":"Please address the findings."}'
+```
+
+The text waits for that run (it is not sent to a newer run on the same seat). The route resumes only
+`review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
+refused; use the explicitly named resume route above only when accepting a review waiver is intended.
+
 ## What it observes
 
 | Collector | Source | Cadence |
@@ -889,6 +901,10 @@ empty lists and `false`; the block may fill omitted keys. The block may replace 
 inherits. An explicit hard-rule list in either source,
 including `[]`, sets `hardRulesSet`. Without a list in either source the hub never auto-merges and
 posts a Needs you note pointing to `repos[].rules.hard_rules` in user config.
+
+Set `tech_debt_issue` to an open issue number to collect merged PR minor findings as one headed
+comment per PR. Without it, the hub uses the one open issue whose title starts `Tech debt: the
+rolling list`; when neither is available, it files the existing per-PR Backlog issue instead.
 
 An unknown key or invalid value is refused with the key named. `pick_from: []` and an area with no
 globs are refused, and area globs must be repo-relative with `**` only as a trailing `/**`. No
@@ -1460,3 +1476,15 @@ If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery
 Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
+
+## Audit API
+
+`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
+
+- `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.
+- `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).
+- `chatter` (seat pairs with a long back-and-forth on one ticket), `refusalSpikes` (a seat with `AUDIT_REFUSAL_SPIKE` refusals in a UTC day) and `flakes` (checks that failed, then passed on the same head). Flakes come from FLIGHT's signal state, which keeps seven days, so a longer range shows at most the last seven.
+- `changes`: each seat's first run on a new prompt hash or model, with crew-wide merged count, review fail rate, median cost per merged ticket and rework rounds over equal windows before and after (up to seven days each; the window shrinks when the change is recent).
+- `surgeonProposals`: always empty until SURGEON proposals are stored.
+
+The route only reads data the hub already stores.

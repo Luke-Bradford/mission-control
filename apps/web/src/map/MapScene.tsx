@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { dockPosition } from "./agents.ts";
 import { nodeWork } from "./cards.ts";
+import type { LensVisual, MapLens } from "./Lenses.tsx";
 import { declutter, type LabelBox, labelKind } from "./labels.ts";
 import { type LightProps, lightLayer } from "./lights.ts";
 import type { MapNode } from "./model.ts";
@@ -21,6 +22,10 @@ type Props = LightProps & {
   /** The main areas, biggest first (layout.ts): their names label the stage. */
   areas?: string[];
   focus: string | null;
+  /** Direct import relationships around the focused file, highlighted on the map. */
+  focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
+  lens?: MapLens;
+  lensVisual?: Record<string, LensVisual>;
   home: number;
   rotate: boolean;
   /** Every seat on the repo, on stage or not, for the dock's size; the stage's count if absent. */
@@ -75,6 +80,9 @@ export function MapScene(props: Props) {
     onSeatSelect,
     areas,
     focus,
+    focusLinks,
+    lens,
+    lensVisual,
     home,
     rotate,
     dockSeats,
@@ -93,6 +101,9 @@ export function MapScene(props: Props) {
       onSeatSelect,
       areas,
       focus,
+      focusLinks,
+      lens,
+      lensVisual,
       home,
       rotate,
       dockSeats,
@@ -110,6 +121,9 @@ export function MapScene(props: Props) {
     onSeatSelect,
     areas,
     focus,
+    focusLinks,
+    lens,
+    lensVisual,
     home,
     rotate,
     dockSeats,
@@ -322,6 +336,16 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   let overviewSeen = false; // the first update records the counter; later bumps frame the tree
   let workKey = "";
   let previousFocus: string | null = null;
+  let focusLinkKey = "";
+  let focusLines: THREE.LineSegments[] = [];
+  const clearFocusLines = () => {
+    for (const line of focusLines) {
+      scene.remove(line);
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    }
+    focusLines = [];
+  };
   let previousSeatFocus: Props["seatFocus"];
   /** The followed light's position at the last frame: the camera moves with it from there. */
   let followed: { seat: string; at: THREE.Vector3 } | null = null;
@@ -453,7 +477,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   const update = (next: Props) => {
     current = next;
     if (!g) return;
-    const { lights, mesh, points, spheres, positions } = g;
+    const { lights, mesh, points, spheres, positions, filePositions } = g;
     tokens.clear();
     lights.update(next, reduced.matches, Date.now());
     controls.autoRotate = next.rotate && !reduced.matches;
@@ -486,6 +510,50 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
       if (p) frame3d(p, 0.38);
       previousFocus = next.focus;
     }
+    const nextLinkKey = (next.focusLinks ?? [])
+      .map((edge) => `${edge.from}\t${edge.to}\t${edge.unlinked ? "hidden" : "import"}`)
+      .join("\n");
+    if (nextLinkKey !== focusLinkKey) {
+      clearFocusLines();
+      for (const [unlinked, color] of [
+        [false, SIGNAL],
+        [true, "#ff826f"],
+      ] as const) {
+        const vertices = (next.focusLinks ?? [])
+          .filter((edge) => Boolean(edge.unlinked) === unlinked)
+          .flatMap(({ from, to }) => {
+            const start = filePositions.get(from);
+            const end = filePositions.get(to);
+            return start && end ? [...start.toArray(), ...end.toArray()] : [];
+          });
+        if (!vertices.length) continue;
+        const line = new THREE.LineSegments(
+          new THREE.BufferGeometry().setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(vertices, 3),
+          ),
+          unlinked
+            ? new THREE.LineDashedMaterial({
+                color,
+                dashSize: 0.18,
+                gapSize: 0.1,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+              })
+            : new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+              }),
+        );
+        if (unlinked) line.computeLineDistances();
+        scene.add(line);
+        focusLines.push(line);
+      }
+      focusLinkKey = nextLinkKey;
+    }
     if (next.seatFocus !== previousSeatFocus) {
       const p = next.seatFocus ? lights.goal(next.seatFocus.seat) : undefined;
       if (p) {
@@ -509,14 +577,40 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
     const matrix = new THREE.Matrix4();
     const plain = new THREE.Color(NODE);
     const picked = new THREE.Color(SIGNAL);
+    const impactSeats = ["#75c8ff", "#ff9d6a", "#a1e2a6", "#e3c16f", "#df9bc7"];
+    const historyLow = new THREE.Color("#5b7894");
+    const historyHigh = new THREE.Color("#ffad65");
     spheres.forEach((node, i) => {
       const chosen = node.path === next.selected;
-      // every file is an individual node; selection is the only reason to enlarge one
-      const size = (node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4) * (chosen ? 1.8 : 1);
+      const visual = next.lensVisual?.[node.path];
+      let lensColor = plain.clone();
+      if (next.lens === "impact" && visual?.distance !== undefined) {
+        lensColor.set(impactSeats[(visual.seat ?? 0) % impactSeats.length] ?? SIGNAL);
+        // Changed seeds are strongest; each dependency hop becomes quieter without losing its seat.
+        lensColor.lerp(plain, Math.min(visual.distance, 4) * 0.16);
+        if (visual.overlap) lensColor.lerp(new THREE.Color("#ffd166"), 0.42);
+      }
+      if (next.lens === "history" && visual?.hotspot !== undefined) {
+        lensColor = historyLow
+          .clone()
+          .lerp(historyHigh, Math.min(1, Math.log2(visual.hotspot + 1) / 5));
+        // A high fix share makes a hotspot visibly more urgent than pure churn.
+        if (visual.fixes && visual.fixes / visual.hotspot >= 0.2)
+          lensColor.lerp(new THREE.Color("#ff6f7d"), 0.45);
+      }
+      if (visual?.dim) lensColor.lerp(plain, 0.72);
+      if (visual?.focused) lensColor = picked.clone();
+      const baseSize = node.count > 1 ? 0.4 + Math.log2(node.count) * 0.14 : 0.4;
+      const size =
+        baseSize *
+        (chosen ? 1.8 : 1) *
+        (visual?.focused ? 1.45 : 1) *
+        (visual?.overlap || (visual?.fixes ?? 0) > 0 ? 1.15 : 1) *
+        (visual?.confidence ? 1 + visual.confidence * 0.45 : 1);
       matrix.makeScale(size, size, size).setPosition(...node.position);
       mesh.setMatrixAt(i, matrix);
-      mesh.setColorAt(i, chosen ? picked : plain);
-      const color = chosen ? picked : plain;
+      mesh.setColorAt(i, chosen ? picked : lensColor);
+      const color = chosen ? picked : lensColor;
       (points.geometry.getAttribute("color") as THREE.BufferAttribute).setXYZ(
         i,
         color.r,
@@ -558,6 +652,8 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
   };
 
   const rebuild = (nodes: MapNode[], seatCount: number, areas: string[]) => {
+    clearFocusLines();
+    focusLinkKey = "";
     if (g) {
       g.lights.dispose();
       g.dispose();
@@ -700,6 +796,7 @@ function mountStage(el: HTMLDivElement, unavailable: () => void): Stage | null {
         g.dispose();
         g = null;
       }
+      clearFocusLines();
       el.removeEventListener("focusin", focusIn);
       el.removeEventListener("focusout", focusOut);
       document.removeEventListener("visibilitychange", visibility);
