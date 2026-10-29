@@ -350,19 +350,45 @@ const START_STOP_DAEMON_VALUED_OPTIONS = new Set([
   "u",
   "x",
 ]);
+/** start-stop-daemon long options that consume the next argv element. */
+const START_STOP_DAEMON_VALUED_LONG_OPTIONS = new Set([
+  "--startas",
+  "--chuid",
+  "--chdir",
+  "--chroot",
+  "--group",
+  "--name",
+  "--nicelevel",
+  "--pidfile",
+  "--retry",
+  "--signal",
+  "--user",
+  "--exec",
+]);
 
-/** Whether start-stop-daemon's short option clusters contain `option`, outside option values. */
-function startStopDaemonHasOption(args: readonly string[], option: string): boolean {
-  for (const arg of args) {
-    if (arg === "--") return false;
-    if (!/^-[A-Za-z]+$/.test(arg)) continue;
-    for (let at = 1; at < arg.length; at++) {
-      const current = arg.charAt(at);
-      if (current === option) return true;
-      if (START_STOP_DAEMON_VALUED_OPTIONS.has(current)) break;
+/** Whether start-stop-daemon starts its requested process in the background. */
+function startStopDaemonLaunches(args: readonly string[]): boolean {
+  let start = false;
+  let background = false;
+  for (let argAt = 0; argAt < args.length; argAt++) {
+    const arg = args[argAt] ?? "";
+    if (arg === "--") break;
+    if (arg === "--start") start = true;
+    else if (arg === "--background") background = true;
+    else if (START_STOP_DAEMON_VALUED_LONG_OPTIONS.has(arg)) argAt++;
+    else if (/^-[A-Za-z]+$/.test(arg)) {
+      for (let optionAt = 1; optionAt < arg.length; optionAt++) {
+        const option = arg.charAt(optionAt);
+        if (option === "S") start = true;
+        else if (option === "b") background = true;
+        if (START_STOP_DAEMON_VALUED_OPTIONS.has(option)) {
+          if (optionAt + 1 === arg.length) argAt++;
+          break;
+        }
+      }
     }
   }
-  return false;
+  return start && background;
 }
 
 /** Whether `program` with `args` hands work to something that outlives this tool call. */
@@ -370,13 +396,7 @@ function launches(program: string, args: readonly string[]): boolean {
   if (BACKGROUND_LAUNCHERS.has(program)) return true;
   // ssh and autossh fork into the background under -f (including `ssh -Nf`).
   if ((program === "ssh" || program === "autossh") && sshBackgrounds(program, args)) return true;
-  // start-stop-daemon only detaches the started process when both options are present.
-  if (
-    program === "start-stop-daemon" &&
-    (args.includes("--start") || startStopDaemonHasOption(args, "S")) &&
-    (args.includes("--background") || startStopDaemonHasOption(args, "b"))
-  )
-    return true;
+  if (program === "start-stop-daemon" && startStopDaemonLaunches(args)) return true;
   const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
     ? BACKGROUND_LAUNCH_OPTIONS[program]
     : undefined;

@@ -2455,8 +2455,12 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     expect(ruleOf(bash("ssh host printf -- -foo"))).toBe("allow");
   });
 
-  it("allows start-stop-daemon option values that contain a background flag letter", () => {
-    expect(ruleOf(bash("start-stop-daemon -Snbob --exec /bin/sleep -- 9"))).toBe("allow");
+  it.each([
+    "start-stop-daemon -Snbob --exec /bin/sleep -- 9",
+    "start-stop-daemon --start --exec /bin/sleep -- --background",
+    "start-stop-daemon -S -n -bob",
+  ])("allows start-stop-daemon option values that contain a background flag letter: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
   });
 
   it.each([
