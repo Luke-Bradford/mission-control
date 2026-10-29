@@ -47,6 +47,7 @@ import {
   type GuardHitsView,
   guardAckKey,
   guardDenyOutput,
+  HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   type LimitRow,
   LOCK_WAIT_MS,
@@ -2217,7 +2218,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         api.get(OPERATOR_BOOTSTRAP_PATH.slice(API_PREFIX.length), async (req, reply) => {
           if (
             !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
-            req.headers["sec-fetch-site"] !== "same-origin"
+            req.headers["sec-fetch-site"] !== "same-origin" ||
+            req.headers[HUD_RENDERER_HEADER] !== undefined
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }

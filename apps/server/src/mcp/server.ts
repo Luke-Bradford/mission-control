@@ -22,6 +22,12 @@ export interface McToolContext {
   toolUseId?: string;
 }
 
+export interface McToolResult {
+  text: string;
+  isError?: boolean;
+  image?: { data: string; mimeType: "image/png" };
+}
+
 export interface McTool {
   name: string;
   description: string;
@@ -32,7 +38,7 @@ export interface McTool {
   grantable?: readonly CrewMode[];
   /** When set, a seat this returns false for is never offered the tool, whatever its mode. */
   offeredTo?: (seatId: string) => boolean;
-  call(ctx: McToolContext, args: unknown): Promise<{ text: string; isError?: boolean }>;
+  call(ctx: McToolContext, args: unknown): Promise<McToolResult>;
 }
 
 /**
@@ -167,7 +173,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       runId: who.runId,
       ...(typeof meta === "string" ? { toolUseId: meta } : {}),
     };
-    let result: { text: string; isError?: boolean };
+    let result: McToolResult;
     try {
       result = await serialise(who.runId, async () => {
         // the run may have ended while this call waited its turn
@@ -185,7 +191,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       jsonrpc: "2.0",
       id: id ?? null,
       result: {
-        content: [{ type: "text", text: result.text }],
+        content: [
+          { type: "text", text: result.text },
+          ...(result.image === undefined ? [] : [{ type: "image" as const, ...result.image }]),
+        ],
         ...(result.isError ? { isError: true } : {}),
       },
     };

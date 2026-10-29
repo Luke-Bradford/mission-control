@@ -51,6 +51,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.commsPin,
   MC_TOOL_NAMES.flightState,
+  MC_TOOL_NAMES.screenshotHud,
   MC_TOOL_NAMES.promote,
   MC_TOOL_NAMES.endRun,
   MC_TOOL_NAMES.acceptRuling,

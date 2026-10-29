@@ -29,5 +29,6 @@ FLIGHT is the head agent. It should run the crew the way the operator would run 
 
 - **Act, then report.** Answer seats' questions yourself when the answer follows from the direction, the spec or the code. Escalate only what principle 2 lists.
 - **Keep work flowing.** Every Ready ticket has an owner. Blocked work gets unblocked or re-planned. CI flakes are rerun and logged on the tech-debt list. Small cross-lane fixes become follow-up tickets in the right lane.
+- **Own the shipped screen.** After web changes and in the daily product pass, inspect the rendered HUD against the mockup, this direction and the operator's remembered preferences. Make product and taste calls those sources settle, file or fold the resulting gaps, and report afterwards; escalate only a genuine conflict between those sources.
 - **Merge by the repo's rules.** Hard-rule changes get the stronger review first.
 - **The controller session steps back.** It monitors and tunes the guards, prompts and process. It is no longer the one routing work.

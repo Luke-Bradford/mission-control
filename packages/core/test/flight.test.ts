@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  type FlightState,
   flightTurnShort,
   flightTurnText,
   PLAN_SIZES,
   wakeKey,
   wakeKeyPrefix,
+  wakeLine,
 } from "../src/flight.ts";
 import { TICKET_SIZES } from "../src/hud.ts";
 
@@ -12,6 +14,21 @@ it("keeps plan sizes within the ticket sizes", () => {
   // The declaration's `satisfies` fails the build on a typo; this checks the values too.
   expect(PLAN_SIZES.every((s) => (TICKET_SIZES as readonly string[]).includes(s))).toBe(true);
   expect(PLAN_SIZES).toEqual(["M", "L", "XL"]);
+});
+
+it("adds one product-pass instruction when a wake carries newly merged PRs", () => {
+  const state = {
+    seats: [],
+    prs: [{ state: "merged" }, { state: "merged" }],
+    holds: [],
+    signals: [],
+    triage: [],
+    questions: [],
+    items: [],
+  } as unknown as FlightState;
+  const line = wakeLine(state, state, ["prs (2)"]);
+  expect(line.match(/A merged PR is listed/g)).toHaveLength(1);
+  expect(line).toContain("if it touches apps/web, render the affected HUD page");
 });
 
 describe("flight turn texts", () => {

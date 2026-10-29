@@ -45,6 +45,7 @@ import {
   type FlightSummaryView,
   type FlightView,
   fullAt5h,
+  HUD_RENDERER_HEADER,
   type MachineSample,
   NEW_LOOP,
   OPERATOR_BOOTSTRAP_PATH,
@@ -7196,6 +7197,18 @@ describe("operator token", () => {
     expect(remote.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect((await fromAddress("::1")).statusCode).toBe(200);
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
+  });
+
+  it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
+    for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
+      const shot = await guarded.inject({
+        method: "GET",
+        url,
+        headers: { "sec-fetch-site": "same-origin", [HUD_RENDERER_HEADER]: "1" },
+      });
+      expect(shot.statusCode).toBe(403);
+      expect(shot.body).not.toContain("tok-1");
+    }
   });
 });
 

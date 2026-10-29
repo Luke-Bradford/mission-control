@@ -53,6 +53,7 @@ export const MC_TOOL_NAMES = {
   recall: "recall",
   holdItem: "hold_item",
   releaseHold: "release_hold",
+  screenshotHud: "screenshot_hud",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -108,6 +109,7 @@ export const MC_TOOLS = {
   recall: mcTool(MC_TOOL_NAMES.recall),
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
+  screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -251,6 +253,8 @@ export const API_PREFIX = "/api";
 export const OPERATOR_HEADER = "x-mc-operator";
 /** Where the HUD reads the operator token at page load. */
 export const OPERATOR_BOOTSTRAP_PATH = "/api/operator/bootstrap";
+/** Set by the HUD screenshot browser on every request; the bootstrap route refuses it. */
+export const HUD_RENDERER_HEADER = "x-mc-hud-renderer";
 /** The 401 answer to a mutating /api request without the operator token. */
 export const OPERATOR_TOKEN_REQUIRED = "operator token required";
 /** The hub's MCP endpoint. */

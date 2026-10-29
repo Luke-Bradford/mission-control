@@ -77,6 +77,7 @@ export function App({
   onPageRender?: ProfilerOnRenderCallback;
 } = {}) {
   onRender?.();
+  useHudReady();
   const path = usePath();
   const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.
@@ -171,6 +172,24 @@ export function App({
       <ItemPanel />
     </div>
   );
+}
+
+/** Screenshot automation waits for initial shell data and fonts, never network idleness. */
+function useHudReady() {
+  const crew = useResource<Crew>(RESOURCES.crew);
+  const config = useResource<ConfigView>(RESOURCES.config);
+  const ready = !crew.loading && !config.loading;
+  useEffect(() => {
+    if (!ready) return;
+    let current = true;
+    void (document.fonts?.ready ?? Promise.resolve()).then(() => {
+      if (current) document.documentElement.dataset.hudReady = "1";
+    });
+    return () => {
+      current = false;
+      delete document.documentElement.dataset.hudReady;
+    };
+  }, [ready]);
 }
 
 /**

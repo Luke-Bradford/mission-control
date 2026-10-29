@@ -18,6 +18,19 @@ export const MC_LINE_PREFIX = "[Mission Control]";
 /** The checkout name of a watch seat's detached worktree. */
 export const watchCheckoutName = (seatId: string): string => `${seatId}-watch`;
 
+/** The canonical top-level HUD route catalogue, shared by the web router and product pass. */
+export const HUD_PAGE_PATHS = {
+  overview: "/",
+  flight: "/flight",
+  board: "/board",
+  agent: "/agent",
+  map: "/map",
+  comms: "/comms",
+  telemetry: "/telemetry",
+  audit: "/audit",
+  setup: "/setup",
+} as const;
+
 export const watchStartRefusedText = (call: string): string =>
   `${call} runs the crew and is started without a ticket.`;
 export const notWatchSeatText = (call: string): string => `${call} is not a watch seat.`;
@@ -85,6 +98,8 @@ export const FLIGHT_VIEW_LIMIT = 100;
 /** The most `log_decision` notes FLIGHT may log in an hour. */
 export const FLIGHT_NOTES_PER_HOUR = 60;
 export const FLIGHT_HOUR_MS = 60 * 60_000;
+/** Chrome launches permitted per FLIGHT in a rolling hour. Failed launch attempts count. */
+export const FLIGHT_HUD_RENDERS_PER_HOUR = 4;
 
 /** Text shown to FLIGHT in state items and arrivals. */
 export const FLIGHT_STATE_TEXT_MAX = 300;
@@ -302,6 +317,8 @@ export interface FlightRetrospective {
   parkReasons: { reason: string; n: number }[];
   redMain: FlightSignal[];
   costlyRuns: { runId: string; seat: string; ticket: string | null; costUsd: number | null }[];
+  /** Daily visual-quality work for FLIGHT, delivered with the retrospective wake. */
+  productPass: { pages: string[]; instruction: string };
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -1077,7 +1094,10 @@ export function wakeLine(
   digest: FlightWake | FlightState = s,
   causes: string[] = ["initial"],
 ): string {
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}\n${JSON.stringify(digest)}`;
+  const productPass = s.prs.some((p) => p.state === "merged")
+    ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap with the screenshot reference."
+    : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

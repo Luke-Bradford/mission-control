@@ -45,6 +45,8 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
   FLIGHT_HEADLINE_TITLE,
+  FLIGHT_HOUR_MS,
+  FLIGHT_HUD_RENDERS_PER_HOUR,
   FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_MAX,
@@ -242,6 +244,8 @@ let reorderImpl: (
 let secrets: string[];
 let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
+let screenshotCalls: string[];
+let screenshotImpl: (url: string) => Promise<Buffer>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -331,8 +335,15 @@ beforeEach(() => {
   secrets = [];
   secretSource = async () => secrets;
   logs = [];
+  screenshotCalls = [];
+  screenshotImpl = async () => Buffer.from("png");
   stateSeen.mockClear();
   tools = createFlightTools({
+    hubOrigin: "http://127.0.0.1:7420",
+    screenshotHud: async (url) => {
+      screenshotCalls.push(url);
+      return screenshotImpl(url);
+    },
     focus: async (seatId, focus) => {
       const seat = cfg.crew?.sessions[0]?.seats.find((s) => s.id === seatId);
       if (!seat) throw new Error("Missing seat");
@@ -583,6 +594,7 @@ describe("tool list", () => {
       "message_seat",
       "comms_pin",
       "flight_state",
+      "screenshot_hud",
       "promote",
       "end_run",
       "accept_ruling",
@@ -615,6 +627,65 @@ describe("tool list", () => {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
       expect(t.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
     }
+  });
+});
+
+describe("screenshot_hud", () => {
+  it("refuses standard powers before rendering and rechecks a live downgrade", async () => {
+    const refusal = { text: needsSuperuserText("o/mc"), isError: true };
+    expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
+    expect(screenshotCalls).toEqual([]);
+
+    need(cfg.repos[0]).flightPowers = "superuser";
+    expect(await call("screenshot_hud", { page: "/map" })).toMatchObject({
+      image: { mimeType: "image/png", data: Buffer.from("png").toString("base64") },
+    });
+    need(cfg.repos[0]).flightPowers = "standard";
+    expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
+    expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  });
+
+  it("counts attempted launches, expires the hourly cap, and describes the limit", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    screenshotImpl = async () => {
+      throw new Error("Chrome refused");
+    };
+    for (let n = 0; n < FLIGHT_HUD_RENDERS_PER_HOUR; n++)
+      expect((await call("screenshot_hud", { page: "/" })).text).toBe("Chrome refused");
+    expect(await call("screenshot_hud", { page: "/" })).toEqual({
+      text: capText("attempted HUD renders", FLIGHT_HUD_RENDERS_PER_HOUR),
+      isError: true,
+    });
+    expect(screenshotCalls).toHaveLength(FLIGHT_HUD_RENDERS_PER_HOUR);
+    expect(named("screenshot_hud").description).toContain(
+      `At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour`,
+    );
+
+    nowMs += FLIGHT_HOUR_MS + 1;
+    expect((await call("screenshot_hud", { page: "/" })).text).toBe("Chrome refused");
+    expect(screenshotCalls).toHaveLength(FLIGHT_HUD_RENDERS_PER_HOUR + 1);
+  });
+
+  it("permits only one render globally at a time", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    let active = 0;
+    let peak = 0;
+    const releases: (() => void)[] = [];
+    screenshotImpl = async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active--;
+      return Buffer.from("png");
+    };
+    const first = call("screenshot_hud", { page: "/map" });
+    const second = call("screenshot_hud", { page: "/board" });
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases.shift()?.();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases.shift()?.();
+    await Promise.all([first, second]);
+    expect(peak).toBe(1);
   });
 });
 
