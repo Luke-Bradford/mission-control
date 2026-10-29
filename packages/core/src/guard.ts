@@ -293,6 +293,7 @@ const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; short
 /** SSH options whose value consumes the rest of a short-option cluster, or the next word. */
 const SSH_VALUED_OPTIONS = new Set([
   "b",
+  "B",
   "c",
   "D",
   "E",
@@ -307,6 +308,7 @@ const SSH_VALUED_OPTIONS = new Set([
   "O",
   "o",
   "p",
+  "P",
   "Q",
   "R",
   "S",
