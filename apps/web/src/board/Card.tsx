@@ -13,7 +13,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
-import { agentPath, followLink, navigate, ticketPath } from "../router.ts";
+import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
 import {
   type CardSeat,
@@ -112,6 +112,7 @@ export const Card = memo(function Card({
   const worked = !mine && (agent?.hudState === "running" || reviewer?.hudState === "running");
   const blocker = col === "Done" ? null : firstBlocker(item);
   const to = agent ? agentPath(agent.id) : ticketPath(item.repoId, item.issueNumber);
+  const trace = agent?.loop && agent.run ? tracePath(agent.id, agent.run.id) : null;
   const go = () => navigate(to);
   // The title is the link that opens the card (its ::after covers the card); a click on the rest
   // of the card is a mouse shortcut to it. A link inside the card goes elsewhere (GitHub), and
@@ -127,6 +128,11 @@ export const Card = memo(function Card({
           <Pill tone={seatStatus(agent).tone}>{seatStatus(agent).label}</Pill>
         </span>
         {step && <span className="xs">{step}</span>}
+        {trace && (
+          <a className="xs" href={trace} onClick={(e) => followLink(e, trace)}>
+            Trace
+          </a>
+        )}
       </span>
     ),
     !agent &&

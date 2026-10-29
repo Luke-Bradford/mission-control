@@ -191,6 +191,61 @@ afterEach(() => {
 const $ = (c: HTMLElement, sel: string) => c.querySelector<HTMLElement>(sel);
 const loaded = () => screen.findByText("Work on shop-app#3349");
 
+const traceView = (): RunLoopView => ({
+  runId: "r-12",
+  loop: { phase: "working", ciFails: 0, parked: null } as RunLoop,
+  events: [],
+  tries: [
+    {
+      step: "working",
+      fix: false,
+      n: 1,
+      tokens: 100,
+      startedAt: NOW - MIN,
+      endedAt: null,
+      outcome: "running",
+      reason: null,
+    },
+  ],
+  round: 1,
+  budget: null,
+  review: null,
+});
+
+describe("Agent run trace", () => {
+  it("opens the active run trace from its checklist and returns to the agent", async () => {
+    const row = crewRow({
+      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+    });
+    stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
+    const view = render(<Agent id={row.id} />);
+    await screen.findByText("Loop total");
+    expect(view.container.querySelector(".vsteps")).toBeNull();
+    const trace = screen.getByRole("link", { name: "Trace" });
+    expect(trace.getAttribute("href")).toBe(`/agent/${row.id}?trace=r-12`);
+    fireEvent.click(trace);
+    expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Back to agent" }));
+    await screen.findByText("Loop total");
+    view.unmount();
+  });
+
+  it("opens a stored trace after its agent has left the current crew", async () => {
+    window.history.replaceState(null, "", "/agent/removed?trace=old-run");
+    stub({
+      rows: [],
+      extra: {
+        "/api/runs/old-run/loop": { ...traceView(), runId: "old-run" },
+        "/api/agents/removed/runs?limit=50": [],
+      },
+    });
+    render(<Agent id="removed" />);
+    expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
+    expect(screen.getByText("CI fixes 0 / unavailable")).toBeTruthy();
+    expect(screen.queryByText("CI fixes 0 / 3")).toBeNull();
+  });
+});
+
 describe("Agent page: header before the timezone loads", () => {
   it("shows the doing line without waiting for the config", async () => {
     stub({ extra: { "/api/config": () => ({ status: 503, body: { error: "loading" } }) } });
@@ -2036,24 +2091,17 @@ describe("Agent page: loop steps", () => {
       await loaded();
       return $(container, "#loopP") as HTMLElement;
     };
-    const marks = (panel: HTMLElement) =>
-      dots(panel)
-        .map((d) => d[1])
-        .join(" ");
-    const checks = (panel: HTMLElement) =>
-      [...panel.querySelectorAll<HTMLElement>(".check")].map((c) => c.textContent);
-
     it("a run in CI", async () => {
       const ci = loopOf({ phase: "ci", text: "CI is running", prNumber: 77 });
       const tries = [triesAt("working", 1, "pass"), triesAt("ci", 1, "running", { endedAt: null })];
       const panel = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: "pending" })] });
-      await waitFor(() => expect(checks(panel)).toEqual(["◌ runningCI on abc1234"]));
-      expect(marks(panel)).toBe("✓ ● 3 4");
+      await screen.findByText("Loop total");
+      expect(panel.querySelector(".vsteps")).toBeNull();
+      expect(panel.textContent).toContain("Checks");
       cleanup();
       const quiet = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: null })] });
-      await waitFor(() =>
-        expect(checks(quiet)).toEqual(["· waitingCI on abc1234: no CI reported yet"]),
-      );
+      await screen.findByText("Loop total");
+      expect(quiet.querySelector(".vsteps")).toBeNull();
     });
 
     it("review round 2 of 3", async () => {
@@ -2070,17 +2118,9 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "review", text: "In review", prNumber: 77 }),
         viewOf("review", tries, { round: 2, review }),
       );
-      await waitFor(() => expect(panel.textContent).toContain("Round 2 of 3"));
-      const step = [...panel.querySelectorAll<HTMLElement>(".vstep")][2] as HTMLElement;
-      expect($(step, ".titer")?.textContent).toBe("×2");
-      expect($(step, ".vfail")?.textContent).toBe(`Last failure: ${reason}`);
-      expect([...step.querySelectorAll(".att")].map((a) => a.firstChild?.textContent)).toEqual([
-        "try 1",
-        "fix",
-        "try 2",
-      ]);
-      expect(checks(step)).toEqual(["◌ runningQA review running", "· waitingPR #77 merged"]);
-      expect(panel.textContent).not.toContain("—");
+      await screen.findByText("Loop total");
+      expect(panel.querySelector(".vsteps")).toBeNull();
+      expect(panel.textContent).toContain("In review");
     });
 
     it("parked", async () => {
@@ -2095,11 +2135,9 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "parked", text: `Blocked: ${why}`, parked: why, prNumber: 77 }),
         viewOf("parked", tries),
       );
-      await waitFor(() => expect(marks(panel)).toBe("✓ ! 3 4"));
-      const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
-      expect(ci.textContent).toContain(`Blocked: ${why}`);
-      expect(ci.textContent).toContain(`parked: ${why}`);
-      expect(panel.querySelector(".vhold")).toBeNull();
+      await screen.findByText("Loop total");
+      expect(panel.querySelector(".vsteps")).toBeNull();
+      expect(panel.textContent).toContain(`parked: ${why}`);
     });
 
     it.each(["review", "review-ruling"])(
@@ -2207,11 +2245,8 @@ describe("Agent page: loop steps", () => {
           ],
         },
       );
-      await waitFor(() => expect(panel.textContent).toContain("Round 1 of 2"));
-      const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
-      expect($(ci, ".vrule")?.textContent).toBe(
-        "↻ fail → back to Working · parks after 2 failures",
-      );
+      await screen.findByText("Loop total");
+      expect(panel.querySelector(".vsteps")).toBeNull();
     });
 
     it("the loop's own counter", async () => {

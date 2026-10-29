@@ -4,6 +4,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { agentPath, tracePath } from "../router.ts";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];
@@ -72,11 +73,7 @@ function RunLink({
 }) {
   if (!row.agentId) return <span>{children}</span>;
   return (
-    <a
-      href={`/agent/${encodeURIComponent(row.agentId)}${row.runId ? `?run=${encodeURIComponent(row.runId)}` : ""}`}
-    >
-      {children}
-    </a>
+    <a href={row.runId ? tracePath(row.agentId, row.runId) : agentPath(row.agentId)}>{children}</a>
   );
 }
 function Empty({ collected = true }: { collected?: boolean }) {

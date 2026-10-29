@@ -102,6 +102,9 @@ export const NEEDS_YOU_PANEL = "askP";
 export const NEEDS_YOU_PATH = `${PAGE_PATHS.flight}#${NEEDS_YOU_PANEL}`;
 
 export const agentPath = (id: string): string => `/agent/${enc(id)}`;
+/** Full loop diagnostics for one agent run, opened from Agent, Board and Audit evidence. */
+export const tracePath = (agentId: string, runId: string): string =>
+  `${agentPath(agentId)}?trace=${enc(runId)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
 export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
 export const ticketPath = (repoId: string, issueNumber: number): string =>
