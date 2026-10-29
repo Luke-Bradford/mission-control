@@ -24,6 +24,25 @@ export function holds(store: Store): Record<string, AttentionHold> {
   // null prototype, so a key such as `__proto__` is an ordinary entry
   return Object.assign(Object.create(null), JSON.parse(store.getSetting(SETTING) ?? "{}"));
 }
+/** Whether holding `key` on `condition` would close a chain of active item holds that never releases. */
+export function holdCycle(
+  store: Store,
+  key: string,
+  condition: AttentionHoldCondition | AttentionWaitCondition,
+): boolean {
+  if (condition.kind !== "item") return false;
+  const all = holds(store);
+  const seen = new Set<string>();
+  for (let next: string | undefined = condition.key; next !== undefined && !seen.has(next); ) {
+    if (next === key) return true;
+    seen.add(next);
+    const h: AttentionHold | undefined = all[next];
+    next =
+      h?.releasedAt === undefined && h?.condition.kind === "item" ? h.condition.key : undefined;
+  }
+  return false;
+}
+/** Files the hold; false, storing nothing, when it would close a cycle of item holds. */
 export function holdItem(
   store: Store,
   key: string,
@@ -31,10 +50,12 @@ export function holdItem(
   condition: AttentionHoldCondition | AttentionWaitCondition,
   by: string,
   at: number,
-): void {
+): boolean {
+  if (holdCycle(store, key, condition)) return false;
   const all = holds(store);
   all[key] = { reason, condition, by, at };
   store.setSetting(SETTING, JSON.stringify(all));
+  return true;
 }
 export function releaseHold(store: Store, key: string, at: number): boolean {
   const all = holds(store);

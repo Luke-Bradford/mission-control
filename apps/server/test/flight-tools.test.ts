@@ -7175,6 +7175,22 @@ describe("attention hold tools", () => {
       await app.close();
     }
   });
+  it("refuses a hold_item that closes a cycle of item holds, storing nothing", async () => {
+    store.raiseNote({
+      key: "blocked:hold-other",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Other",
+      at: NOW - 1,
+    });
+    const other = "note:blocked:hold-other";
+    const on = (k: string) => ({ reason: "Waiting", condition: { kind: "item", key: k } });
+    expect((await call("hold_item", { key, ...on(other) })).isError).not.toBe(true);
+    expect((await call("hold_item", { key: other, ...on(key) })).isError).toBe(true);
+    expect(holds(store)[other]).toBeUndefined();
+  });
   it("refuses missing items and blank reasons", async () => {
     expect(await call("hold_item", { ...args, key: "missing" })).toEqual(
       refused("Item is no longer waiting."),

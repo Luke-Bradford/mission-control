@@ -302,8 +302,8 @@ import {
   AttentionHoldInput,
   attentionHoldError,
   heldRun,
+  holdCycle,
   holdItem,
-  holds,
   protectedDecisionItem,
   releaseHold,
 } from "../attention-holds.ts";
@@ -502,6 +502,8 @@ const StructuredBriefArgs = z.strictObject({
     })
     .optional(),
 });
+/** A hold on an item that waits, directly or through others, on the item being held. */
+const HOLD_CYCLE_REFUSED = "Not held: that item waits on this one, so neither would ever release.";
 const BriefItemArgs = z
   .strictObject({
     ...StructuredBriefArgs.shape,
@@ -2188,20 +2190,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (hold?.condition.kind === "item") {
       const waitsOn = hold.condition.key;
-      // an active chain of item holds that leads back here would never release
-      const all = holds(store);
-      const seen = new Set<string>();
-      let cycle = false;
-      for (let next: string | undefined = waitsOn; next !== undefined && !seen.has(next); ) {
-        if (next === key) cycle = true;
-        seen.add(next);
-        const h: (typeof all)[string] | undefined = all[next];
-        next =
-          h?.releasedAt === undefined && h?.condition.kind === "item" ? h.condition.key : undefined;
-      }
       const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, () => null).rows;
       if (
-        cycle ||
+        holdCycle(store, key, hold.condition) ||
         !attentionItems(
           config,
           store,
@@ -3165,7 +3156,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           ).some((i) => i.key === a.key)
         )
           return fail("Item is no longer waiting.");
-        holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now());
+        if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
+          return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");
         return { text: `Held ${a.key}.` };
       },

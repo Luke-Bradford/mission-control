@@ -3515,7 +3515,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
         if (!sharedAttention().some((i) => i.key === req.params.key))
           return reply.code(404).send({ error: "Item is no longer waiting." });
-        holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now());
+        if (
+          !holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now())
+        )
+          return reply
+            .code(409)
+            .send({ error: "That item waits on this one, so neither would ever release." });
         bus.emit("attention");
         return { ok: true };
       });
