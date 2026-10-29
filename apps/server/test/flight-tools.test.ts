@@ -1658,11 +1658,9 @@ describe("message_seat", () => {
     ...over,
   });
 
-  it("sends with the FLIGHT prefix and records it", async () => {
+  it("wakes through the supervisor inbox boundary and records it", async () => {
     expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Please push", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(decisions()).toMatchObject([
       {
         kind: "message",
@@ -1675,12 +1673,17 @@ describe("message_seat", () => {
     expect(seen).toContain("flight");
   });
 
-  it("records the message as FLIGHT to the seat, without the prefix, about its run's ticket", async () => {
+  it("records the message as a labelled handoff from FLIGHT, without the prefix, about its run's ticket", async () => {
     live("guido-1", "r-guido", { ticket: "mc#7" });
     await call("message_seat", M());
-    expect(store.comms(0)).toEqual([
-      { at: NOW, from: "flight-1", to: "guido-1", ticket: "mc#7", text: "Please push" },
-    ]);
+    expect(store.commsMessage("comms:1")).toMatchObject({
+      at: NOW,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "mc#7",
+      label: "handoff",
+      text: "Please push",
+    });
     expect(seen).toContain("agents");
   });
 
@@ -1730,7 +1733,9 @@ describe("message_seat", () => {
     };
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
-    expect(store.comms(0)).toEqual([]);
+    expect(store.comms(0)).toMatchObject([
+      { from: "flight-1", to: "guido-1", text: "Please push" },
+    ]);
   });
 
   it("does not deliver or store when the seat leaves during secret scanning", async () => {
@@ -1829,9 +1834,7 @@ describe("message_seat unpark", () => {
     expect(await call("message_seat", U())).toEqual({
       text: "Sent to GUIDO-1, and its run is un-parked.",
     });
-    expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Carry on", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
     expect(decisions()).toMatchObject([
       {

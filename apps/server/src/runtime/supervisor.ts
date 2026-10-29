@@ -422,6 +422,13 @@ export interface SupervisorDeps {
   /** Tests shorten the session's timeouts. */
   controlTimeoutMs?: number;
   stopGraceMs?: number;
+  /** Bounded Comms context appended to each user line that starts a seat turn. */
+  inbox?: (seatId: string, runId: string) => InboxContext;
+}
+
+export interface InboxContext {
+  text: string;
+  messageIds: readonly string[];
 }
 
 /** Who ended a run. */
@@ -669,6 +676,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
+  const withInbox = (seatId: string, runId: string, text: string): InboxContext => {
+    const inbox = deps.inbox?.(seatId, runId) ?? { text: "", messageIds: [] };
+    return {
+      text: inbox.text === "" ? text : text === "" ? inbox.text : `${text}\n\n${inbox.text}`,
+      messageIds: inbox.messageIds,
+    };
+  };
+  const markInboxRead = (seatId: string, inbox: InboxContext) =>
+    store.markCommsInboxRead(seatId, inbox.messageIds);
   const crew = config.crew;
 
   function seatForAccount(seat: CrewSeatConfig, accountId: string): CrewSeatConfig {
@@ -3046,6 +3062,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
+      const inbox = withInbox(seatId, runId, brief);
+      brief = inbox.text;
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3101,7 +3119,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      await enqueue(l, () => writeLine(l, brief)).catch(() => {});
+      await enqueue(l, () => {
+        writeLine(l, brief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
       // answered: wait for that, so the exit that marks the run failed and the seat in error
       // comes before a start is claimed.
@@ -3188,8 +3209,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
         fullSuite: info.repo.fullSuite ?? [],
       });
-      const firstBrief =
-        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief;
+      const inbox = withInbox(
+        seatId,
+        runId,
+        first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief,
+      );
+      const firstBrief = inbox.text;
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3244,7 +3269,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: checkout.path,
       });
-      await enqueue(l, () => writeLine(l, firstBrief)).catch(() => {});
+      await enqueue(l, () => {
+        writeLine(l, firstBrief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
@@ -3391,7 +3419,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prev === null
           ? null
           : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
-      const brief = reviewBrief({
+      let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
         issue,
@@ -3415,6 +3443,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
       });
+      const inbox = withInbox(seatId, runId, brief);
+      brief = inbox.text;
       let l: Live;
       try {
         l = await checkedLaunch(
@@ -3470,7 +3500,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: scratch.path,
       });
-      await enqueue(l, () => writeLine(l, brief)).catch(() => {});
+      await enqueue(l, () => {
+        writeLine(l, brief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
@@ -3851,7 +3884,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
       try {
-        writeLine(l, text);
+        const inbox = withInbox(seatId, runId, text);
+        writeLine(l, inbox.text);
+        markInboxRead(seatId, inbox);
       } catch {
         store.dropLine(key);
         return l.session.alive ? "busy" : "no-session";
@@ -4047,6 +4082,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (moving) await moving;
       const l = liveOrRefuse(need(seatId));
       return enqueue(l, async () => {
+        const inbox = l.inTurn ? { text, messageIds: [] } : withInbox(seatId, l.run.id, text);
         if (opts.interrupt && l.inTurn) {
           if (l.run.vendor === "codex") await sendInterrupt(l);
           else await sendInterrupt(l).catch(rethrowIfDead);
@@ -4055,7 +4091,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           const pause = pausedSeat(store, seatId);
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
-        writeLine(l, text);
+        writeLine(l, inbox.text);
+        markInboxRead(seatId, inbox);
         // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's
         // reply to FLIGHT's brief)
         try {

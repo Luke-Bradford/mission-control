@@ -30,6 +30,7 @@ import {
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
+  hardRulesFlagKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   localNotDeletedText,
@@ -140,6 +141,7 @@ const RUN = "guido-1:20261021T100000Z";
 const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
 const SHA_B = "b".repeat(40);
+const SHA_C = "c".repeat(40);
 const MIN = 60_000;
 
 let dir: string;
@@ -1052,7 +1054,7 @@ describe("report to a draft PR", () => {
     expect(loopOf()).toMatchObject({ transient: 0, lastRefusal: null, prNumber: 12 });
   });
 
-  it("stores the hard-rule files of a new pushed sha and flags them", async () => {
+  it("raises one hard-rule flag per file set across pushes, replacing it when files change", async () => {
     h.touches = [".github/ci.yml"];
     report();
     await h.engine.reconcileRun(RUN);
@@ -1064,17 +1066,34 @@ describe("report to a draft PR", () => {
         .update(JSON.stringify(DEFAULT_REPO_RULES.hardRules))
         .digest("hex"),
     });
-    expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
+    const firstFlag = hardRulesFlagKey(RUN, h.touches);
+    expect(noteKeys()).toContain(firstFlag);
+
+    report("A second commit", SHA_B);
+    await h.engine.reconcileRun(RUN);
+    expect(noteKeys().filter((key) => key.startsWith(`flag:${RUN}:hard-rules:`))).toEqual([
+      firstFlag,
+    ]);
+
+    h.touches = [".github/ci.yml", ".github/workflows/ci.yml"];
+    report("A third commit", SHA_C);
+    await h.engine.reconcileRun(RUN);
+    expect(noteKeys().filter((key) => key.startsWith(`flag:${RUN}:hard-rules:`))).toEqual([
+      hardRulesFlagKey(RUN, h.touches),
+    ]);
+    expect(store.notes().find((note) => note.key === hardRulesFlagKey(RUN, h.touches))?.text).toBe(
+      `${REPO}#7 touches hard-rule files: .github/ci.yml, .github/workflows/ci.yml`,
+    );
   });
 
   it("clears the hard-rule flag once its run has ended", async () => {
     h.touches = [".github/ci.yml"];
     report();
     await h.engine.reconcileRun(RUN);
-    expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
+    expect(noteKeys()).toContain(hardRulesFlagKey(RUN, h.touches));
     store.setRunEnded(RUN, clock, "ok", "engine");
     await h.engine.tick();
-    expect(noteKeys()).not.toContain(`flag:${RUN}:hard-rules:${SHA}`);
+    expect(noteKeys()).not.toContain(hardRulesFlagKey(RUN, h.touches));
   });
 
   it("keeps the repo's hard_rules_by for Needs you", async () => {

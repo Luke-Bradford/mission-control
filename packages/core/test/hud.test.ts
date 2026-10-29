@@ -595,5 +595,10 @@ describe("guard and test lock copy", () => {
 it("describes the usual lock time and how a hold ended", () => {
   expect(lockUsualText(9, false)).toBe("usually about 9 min");
   expect(lockUsualText(9, true)).toBe("usually about 9 min · over its usual time");
-  expect(LOCK_OUTCOME_TEXT).toEqual({ done: "finished", freed: "freed with its run" });
+  expect(LOCK_OUTCOME_TEXT).toEqual({
+    done: "finished",
+    pass: "passed",
+    fail: "failed",
+    freed: "freed with its run",
+  });
 });

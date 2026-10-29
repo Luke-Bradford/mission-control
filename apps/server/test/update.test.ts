@@ -35,6 +35,7 @@ import {
   type Exec,
   HUB_CODE_NEEDS_PERSON,
   HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
   headSha,
   hubCodeHeldText,
@@ -94,7 +95,7 @@ beforeEach(() => {
   mkdirSync(dev);
   git(dev, "init", "-q", "-b", "main");
   git(dev, "remote", "add", "origin", origin);
-  writeFileSync(join(dev, ".gitignore"), "dist/\ndist-next/\ndist-prev/\n");
+  writeFileSync(join(dev, ".gitignore"), "dist/\ndist-next/\ndist-prev/\nnode_modules/\n");
   writeFileSync(join(dev, "a.txt"), "a\n");
   git(dev, "add", "-A");
   git(dev, "commit", "-qm", "init");
@@ -663,6 +664,91 @@ describe("update", () => {
     expect(((await fetch.u.update().catch((x: unknown) => x)) as Error).message).toBe(
       "update failed at fetch; see update.log",
     );
+    expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
+  });
+
+  it("installs a package added by a lockfile update through node_modules' store", async () => {
+    const store = join(dir, "operator-store");
+    const pnpmEnv = {
+      ...process.env,
+      CI: "false",
+      NPM_CONFIG_WORKSPACE_DIR: dev,
+      pnpm_config_store_dir: store,
+    };
+    const packageJson = (dependencies: Record<string, string>) =>
+      `${JSON.stringify({ name: "hub", version: "1.0.0", private: true, dependencies })}\n`;
+
+    mkdirSync(join(dev, "vendor", "base-package"), { recursive: true });
+    writeFileSync(
+      join(dev, "vendor", "base-package", "package.json"),
+      JSON.stringify({ name: "base-package", version: "1.0.0" }),
+    );
+    writeFileSync(
+      join(dev, "package.json"),
+      packageJson({ "base-package": "file:vendor/base-package" }),
+    );
+    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/base-package/package.json");
+    git(dev, "commit", "-qm", "initial pnpm workspace");
+    git(dev, "push", "-q", "origin", "main");
+    git(hub, "pull", "--ff-only", "origin", "main");
+    execFileSync("pnpm", ["install", "--frozen-lockfile"], {
+      cwd: hub,
+      env: { ...pnpmEnv, NPM_CONFIG_WORKSPACE_DIR: hub },
+    });
+
+    mkdirSync(join(dev, "vendor", "added-package"), { recursive: true });
+    writeFileSync(
+      join(dev, "vendor", "added-package", "package.json"),
+      JSON.stringify({ name: "added-package", version: "1.0.0" }),
+    );
+    writeFileSync(
+      join(dev, "package.json"),
+      packageJson({
+        "base-package": "file:vendor/base-package",
+        "added-package": "file:vendor/added-package",
+      }),
+    );
+    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/added-package/package.json");
+    git(dev, "commit", "-qm", "add package");
+    git(dev, "push", "-q", "origin", "main");
+
+    const fake = fakeExec();
+    const exec: Exec = (file, args, options) =>
+      file === "pnpm" && args[0] === "install"
+        ? execFileP(file, [...args], { cwd: options.cwd, env: options.env, encoding: "utf8" })
+        : fake.exec(file, args, options);
+    const { u } = updater({ exec });
+    await expect(u.update()).resolves.toEqual({ restarting: true });
+
+    expect(
+      readFileSync(join(hub, "node_modules", "added-package", "package.json"), "utf8"),
+    ).toContain('"added-package"');
+  });
+
+  it("leaves node_modules alone when pnpm says it needs a non-interactive purge", async () => {
+    upstreamCommit("pnpm-lock.yaml");
+    mkdirSync(join(hub, "node_modules"));
+    const sentinel = join(hub, "node_modules", "preserve-on-purge-refusal");
+    writeFileSync(sentinel, "keep\n");
+    const fake = fakeExec();
+    const exec: Exec = (file, args, options) =>
+      file === "pnpm" && args[0] === "install"
+        ? Promise.reject(
+            Object.assign(new Error("exit 1"), {
+              stdout: "",
+              stderr: "ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY\n",
+            }),
+          )
+        : fake.exec(file, args, options);
+    const { u } = updater({ exec });
+
+    await expect(u.update()).rejects.toMatchObject({
+      status: 409,
+      message: HUB_INSTALL_NEEDS_PERSON,
+    });
+    expect(readFileSync(sentinel, "utf8")).toBe("keep\n");
     expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
   });
 

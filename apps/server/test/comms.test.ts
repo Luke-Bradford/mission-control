@@ -3,7 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { reactComms, sendComms, threadMessages } from "../src/comms.ts";
+import {
+  COMMS_INBOX_PROMPT_MAX,
+  COMMS_INBOX_PROMPT_ROWS,
+  commsInboxContext,
+  commsInboxPrompt,
+  reactComms,
+  sendComms,
+  threadMessages,
+} from "../src/comms.ts";
 import { Store } from "../src/store.ts";
 import * as stream from "../src/stream.ts";
 
@@ -79,7 +87,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
     mentions: ["other"],
   });
   reactComms(store, "other", first.id, "seen", undefined, 12);
-  expect(notify).toHaveBeenCalledTimes(2);
+  expect(notify).toHaveBeenCalledTimes(1);
 });
 
 it("notifies direct recipients, mentions and reply authors once each", async () => {
@@ -92,11 +100,16 @@ it("notifies direct recipients, mentions and reply authors once each", async () 
     notify,
     seatSender: true,
   };
-  const original = await sendComms(deps, "seat", { to: "crew", text: "@other please look" });
+  const original = await sendComms(deps, "seat", {
+    to: "crew",
+    text: "@other please look",
+    label: "handoff",
+  });
   await sendComms(deps, "other", {
     to: "crew",
     text: "@seat acknowledged",
     replyTo: original.id,
+    label: "handoff",
   });
 
   expect(notify).toHaveBeenNthCalledWith(1, "other", "@other please look", "seat");
@@ -104,7 +117,7 @@ it("notifies direct recipients, mentions and reply authors once each", async () 
   expect(notify).toHaveBeenCalledTimes(2);
 });
 
-it("delivers CAPCOM direct Comms but never wakes for the CAPCOM channel or a reaction", async () => {
+it("wakes for labelled CAPCOM direct Comms but not FYI, channel posts or reactions", async () => {
   const notify = vi.fn();
   const deps = {
     store,
@@ -113,7 +126,8 @@ it("delivers CAPCOM direct Comms but never wakes for the CAPCOM channel or a rea
     notify,
     seatSender: false,
   };
-  const direct = await sendComms(deps, "CAPCOM", { to: "seat", text: "direct" });
+  const direct = await sendComms(deps, "CAPCOM", { to: "seat", text: "direct", label: "handoff" });
+  await sendComms(deps, "CAPCOM", { to: "seat", text: "FYI" });
   await sendComms(deps, "seat", { to: "CAPCOM", text: "channel" });
   reactComms(store, "seat", direct.id, "seen", undefined, 12);
 
@@ -193,6 +207,75 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
     reply.id,
     pinned.id,
   ]);
+});
+
+it("caps a turn inbox at 40 messages or 8k characters, keeping the newest", () => {
+  const ids: string[] = [];
+  for (let n = 0; n < COMMS_INBOX_PROMPT_ROWS + 8; n++)
+    ids.push(
+      store.addComms({
+        at: n,
+        from: "other",
+        to: "seat",
+        ticket: null,
+        text: `${n} ${"x".repeat(500)}`,
+        targetRunId: "r",
+      })?.id ?? "",
+    );
+  const inbox = commsInboxContext(store, "seat", "r");
+  const prompt = inbox.text;
+  expect(prompt.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
+  expect(prompt).toContain("older: use comms_inbox");
+  expect(prompt).toContain('"text":"47 ');
+  expect(prompt).not.toContain('"text":"0 ');
+  expect(store.commsInboxRead("seat", ids[0] ?? "")).toBe(false);
+  store.markCommsInboxRead("seat", inbox.messageIds);
+  expect(store.commsInboxRead("seat", ids.at(-1) ?? "")).toBe(true);
+});
+
+it("keeps a current pin in an inbox across target runs", () => {
+  const pinned = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "pinned old run",
+    targetRunId: "old-run",
+  });
+  if (pinned === null) throw new Error("expected pinned Comms row");
+  expect(store.setCommsPinned(pinned.id, true, "CAPCOM", 2)).toBe(true);
+  expect(store.commsInboxRun("seat", "r").map((row) => row.id)).toContain(pinned.id);
+});
+
+it("keeps the newest oversized inbox row and marks delivered rows read", () => {
+  const first = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "first",
+    targetRunId: "r",
+  });
+  const newest = store.addComms({
+    at: 2,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "newest ".repeat(2_000),
+    targetRunId: "r",
+  });
+  if (first === null || newest === null) throw new Error("expected stored Comms rows");
+
+  const inbox = commsInboxContext(store, "seat", "r");
+  const delivered = inbox.text;
+  expect(delivered.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
+  expect(delivered).toContain(newest.id);
+  expect(delivered).toContain("stored text cut");
+  expect(delivered).toContain('"unread":true');
+  store.markCommsInboxRead("seat", inbox.messageIds);
+
+  const later = commsInboxPrompt(store, "seat", "r");
+  expect(later).toContain('"unread":false');
 });
 
 it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", async () => {

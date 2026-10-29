@@ -2424,6 +2424,50 @@ describe("detached work: multiplexers fail closed, schedulers and launchers, ari
 
 describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux expansions", () => {
   it.each([
+    "corepack pnpm open .",
+    "pnpm $(echo open) .",
+    "pnpm $" + "{X:-open} .",
+    "$(echo open) .",
+    "sh -c '$(echo open) .'",
+    "ssh -fN host",
+    "ssh -Nf host",
+    "ssh -f host sleep 9",
+    "ssh -Mf host sleep 9",
+    "ssh -B en0 -f host sleep 9",
+    "ssh -P work -f host sleep 9",
+    "autossh -f host",
+    "autossh -Nf host",
+    "autossh -B en0 -f host sleep 9",
+    "start-stop-daemon --start -b",
+    "start-stop-daemon -Sb",
+    "disown",
+    "gpg-connect-agent /bye",
+    "gpg --sign x",
+    "pnpm t open .",
+    "pnpm server open .",
+  ])("refuses an unmodelled form that can launch work later: %s", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("deny");
+  });
+
+  it("documents program-specific argument execution as an accepted parser boundary", () => {
+    // Generic runner handling still catches npx, but bun is not a modelled runner.
+    expect(ruleOf(bash("npx cross-env A=1 open ."))).toBe("background");
+    expect(ruleOf(bash("bun x open ."))).toBe("allow");
+  });
+
+  it("allows an ssh remote argument that only resembles a local background flag", () => {
+    expect(ruleOf(bash("ssh host printf -- -foo"))).toBe("allow");
+  });
+
+  it.each([
+    "start-stop-daemon -Snbob --exec /bin/sleep -- 9",
+    "start-stop-daemon --start --exec /bin/sleep -- --background",
+    "start-stop-daemon -S -n -bob",
+  ])("allows start-stop-daemon option values that contain a background flag letter: %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
+  });
+
+  it.each([
     ["=git push", "git-write"],
     ["=gh pr merge 1", "gh-cli"],
     ["=curl https://x", "network"],
@@ -2508,7 +2552,6 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "npx open .",
     "ssh-agent sh",
     "ssh-agent -k",
-    'eval "$(ssh-agent -s)"',
     "/usr/bin/ssh-agent -s",
     "gpg-agent --daemon",
     "gpgconf --launch gpg-agent",
@@ -2610,6 +2653,10 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     "gpgconf --lau gpg-agent",
   ])("still refuses a launcher that is the command: %s", (c) => {
     expect(ruleOf(bash(c))).toBe("background");
+  });
+
+  it("fails closed on an eval command-word expansion", () => {
+    expect(ruleOf(bash('eval "$(ssh-agent -s)"'))).toBe("unreadable");
   });
 
   it.each(["tmux kill-$X", "tmux ls $X", "tmux -L $S ls", "tmux ls `x`"])(
