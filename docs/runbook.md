@@ -98,8 +98,22 @@ chmod 0600 ~/.config/mission-control/config.yaml
 
 ### Sign-in
 
-There is none: the hub listens on loopback only. A `password_hash` left in an old config is
+There is no password: the hub listens on loopback only. A `password_hash` left in an old config is
 ignored.
+
+Each browser signs in once, so the HUD can act. Any local process can send a forged
+`sec-fetch-site: same-origin`, so the operator token (what the HUD's buttons need) goes only to a
+browser holding a session cookie, and the hub sets that cookie only for a one-time code that seats
+can't read:
+
+- At each start the hub writes a fresh code to `<data dir>/operator-login` and logs
+  `operator sign-in (once per browser): http://127.0.0.1:7420/?operator-login=<code>`.
+- Open that URL once. The hub sets an HttpOnly, SameSite=Strict cookie (`mc_operator_<port>`),
+  uses the code up, and redirects to the page without it.
+- The cookie's secret is kept in `<data dir>/operator-session` and lasts a year, across restarts,
+  so you need the URL again only for a new browser or after clearing cookies. Until then the HUD
+  loads, but its buttons answer 401.
+- A preview on another port signs in the same way, from its own log or data dir.
 
 `state_dir` and `logs_dir` under `loops:` must exist. A missing one shows as a `source missing`
 error in health, not as a crash. A missing `worktree` is not an error: the in-flight run's

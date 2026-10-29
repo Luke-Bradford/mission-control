@@ -222,7 +222,12 @@ import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
-import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
+import {
+  BOOTSTRAP_REFUSED,
+  OPERATOR_LOGIN_PARAM,
+  type OperatorLogin,
+  operatorTokenMatches,
+} from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
@@ -329,6 +334,8 @@ export interface AppDeps {
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
+  /** The browser sign-in the bootstrap route needs; absent beside a token: the route refuses all. */
+  operatorLogin?: OperatorLogin;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -769,6 +776,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ) {
         return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
       }
+    });
+  }
+
+  // The operator signs in once, with the URL the hub logs: the right one-time code on a page load
+  // sets the session cookie the bootstrap route asks for, and the redirect drops the code from
+  // the address bar. A wrong or used code is ignored, so the page loads as it would without.
+  const operatorLogin = deps.operatorLogin;
+  if (operatorLogin !== undefined) {
+    app.addHook("onRequest", async (req, reply) => {
+      if (req.method !== "GET" || !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "")) return;
+      const url = new URL(req.url, "http://127.0.0.1");
+      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/mcp")) return;
+      const cookie = operatorLogin.redeem(url.searchParams.get(OPERATOR_LOGIN_PARAM));
+      if (cookie === null) return;
+      url.searchParams.delete(OPERATOR_LOGIN_PARAM);
+      return reply
+        .header("set-cookie", cookie)
+        .header("cache-control", "no-store")
+        .redirect(`${url.pathname}${url.search}`);
     });
   }
 
@@ -2329,8 +2355,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (operatorToken !== undefined) {
         // Reader: apps/web/src/api.ts#loadOperatorToken (the HUD reads the token at page load)
         api.get(OPERATOR_BOOTSTRAP_PATH.slice(API_PREFIX.length), async (req, reply) => {
+          // sec-fetch-site is only a hint: a local process can send any value. The session cookie,
+          // set for the sign-in code that only the operator can read, is what proves the browser.
           if (
             !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
+            operatorLogin?.signedIn(req.headers.cookie) !== true ||
             req.headers["sec-fetch-site"] !== "same-origin" ||
             req.headers[HUD_RENDERER_HEADER] !== undefined
           ) {

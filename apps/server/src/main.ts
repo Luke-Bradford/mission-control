@@ -67,7 +67,12 @@ import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
-import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import {
+  newOperatorToken,
+  openOperatorLogin,
+  operatorLoginUrl,
+  writeOperatorToken,
+} from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
@@ -114,6 +119,8 @@ export async function main(): Promise<void> {
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
   writeOperatorToken(dirname(dbPath), operatorToken);
+  // the HUD gets the token only in a browser signed in with the code written here and logged below
+  const operatorLogin = openOperatorLogin(dirname(dbPath), port);
   const hubStartedAt = Date.now();
   markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
@@ -485,6 +492,7 @@ export async function main(): Promise<void> {
     queueReorder,
     mapRing,
     operatorToken,
+    operatorLogin,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
@@ -546,6 +554,11 @@ export async function main(): Promise<void> {
     }
   }
   await app.listen({ host: HOST, port });
+  if (operatorLogin.code !== null) {
+    app.log.warn(
+      `operator sign-in (once per browser): ${operatorLoginUrl(port, operatorLogin.code)}`,
+    );
+  }
   // newsyslog sends SIGTERM to this pid; launchd reopens the rotated log on restart.
   if (!preview) {
     const pidPath = join(dirname(dbPath), "server.pid");

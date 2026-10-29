@@ -93,7 +93,7 @@ import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CallRing } from "../src/map/ring.ts";
-import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
+import { BOOTSTRAP_REFUSED, OperatorLogin } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -7524,8 +7524,10 @@ it("builds without Fastify's request-logging deprecation warning", async () => {
 
 describe("operator token", () => {
   let guarded: FastifyInstance;
+  let login: OperatorLogin;
 
   beforeEach(async () => {
+    login = new OperatorLogin(7420, "session-secret-0123456789-0123456789-0123456789", "code-1");
     guarded = buildApp({
       config,
       store,
@@ -7536,6 +7538,7 @@ describe("operator token", () => {
       supervisor: stubSupervisor(),
       updater: stubUpdater(),
       operatorToken: "tok-1",
+      operatorLogin: login,
     });
     await guarded.ready();
   });
@@ -7590,22 +7593,25 @@ describe("operator token", () => {
     expect(read.json()).toMatchObject({ on: true });
   });
 
-  it("hands the token to a same-origin page only", async () => {
+  const SESSION = "mc_operator_7420=session-secret-0123456789-0123456789-0123456789";
+
+  it("hands the token to a signed-in same-origin page only", async () => {
     const boot = (headers: Record<string, string>) =>
       guarded.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers });
-    const ok = await boot({ "sec-fetch-site": "same-origin" });
+    const ok = await boot({ "sec-fetch-site": "same-origin", cookie: SESSION });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual({ token: "tok-1" });
     expect(ok.headers["cache-control"]).toBe("no-store");
-    const bare = await boot({});
+    const bare = await boot({ cookie: SESSION });
     expect(bare.statusCode).toBe(403);
     expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
-    expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    const cross = await boot({ "sec-fetch-site": "cross-site", cookie: SESSION });
+    expect(cross.statusCode).toBe(403);
     const fromAddress = (remoteAddress: string) =>
       guarded.inject({
         method: "GET",
         url: OPERATOR_BOOTSTRAP_PATH,
-        headers: { "sec-fetch-site": "same-origin" },
+        headers: { "sec-fetch-site": "same-origin", cookie: SESSION },
         remoteAddress,
       });
     const remote = await fromAddress("10.0.0.5");
@@ -7615,12 +7621,79 @@ describe("operator token", () => {
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
   });
 
+  it("refuses the token to a forged sec-fetch-site without the session cookie", async () => {
+    const forged = { "sec-fetch-site": "same-origin" };
+    for (const cookie of [
+      undefined,
+      "",
+      "other=1",
+      "mc_operator_7420=wrong",
+      "mc_operator_7421=x",
+    ]) {
+      const res = await guarded.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: cookie === undefined ? forged : { ...forged, cookie },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.body).not.toContain("tok-1");
+    }
+  });
+
+  it("signs a browser in with the one-time code, and only once", async () => {
+    const wrong = await guarded.inject({ method: "GET", url: "/?operator-login=nope" });
+    expect(wrong.headers["set-cookie"]).toBeUndefined();
+    expect(wrong.statusCode).not.toBe(302);
+    const signIn = await guarded.inject({
+      method: "GET",
+      url: "/boards?operator-login=code-1&x=1",
+    });
+    expect(signIn.statusCode).toBe(302);
+    expect(signIn.headers.location).toBe("/boards?x=1");
+    const cookie = String(signIn.headers["set-cookie"]);
+    expect(cookie).toContain(SESSION);
+    expect(cookie).toMatch(/HttpOnly/);
+    expect(cookie).toMatch(/SameSite=Strict/);
+    const boot = await guarded.inject({
+      method: "GET",
+      url: OPERATOR_BOOTSTRAP_PATH,
+      headers: { "sec-fetch-site": "same-origin", cookie: cookie.split(";")[0] ?? "" },
+    });
+    expect(boot.json()).toEqual({ token: "tok-1" });
+    const again = await guarded.inject({ method: "GET", url: "/?operator-login=code-1" });
+    expect(again.headers["set-cookie"]).toBeUndefined();
+    const viaApi = await guarded.inject({ method: "GET", url: "/api/health?operator-login=x" });
+    expect(viaApi.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("does not take a code from a non-loopback address", async () => {
+    const res = await guarded.inject({
+      method: "GET",
+      url: "/?operator-login=code-1",
+      remoteAddress: "10.0.0.5",
+    });
+    expect(res.headers["set-cookie"]).toBeUndefined();
+    expect(login.code).toBe("code-1");
+  });
+
+  it("refuses every bootstrap when a token has no login behind it", async () => {
+    const bare = buildApp({ config, store, bus, operatorToken: "tok-1" });
+    await bare.ready();
+    const res = await bare.inject({
+      method: "GET",
+      url: OPERATOR_BOOTSTRAP_PATH,
+      headers: { "sec-fetch-site": "same-origin", cookie: SESSION },
+    });
+    expect(res.statusCode).toBe(403);
+    await bare.close();
+  });
+
   it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
     for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
       const shot = await guarded.inject({
         method: "GET",
         url,
-        headers: { "sec-fetch-site": "same-origin", [HUD_RENDERER_HEADER]: "1" },
+        headers: { "sec-fetch-site": "same-origin", cookie: SESSION, [HUD_RENDERER_HEADER]: "1" },
       });
       expect(shot.statusCode).toBe(403);
       expect(shot.body).not.toContain("tok-1");
