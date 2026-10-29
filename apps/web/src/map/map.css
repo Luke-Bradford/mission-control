@@ -233,10 +233,16 @@
   );
 }
 .map-treemap-changes .map-treemap-tile {
-  background: color-mix(in srgb, var(--tile-colour) 76%, var(--treemap-bg));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tile-colour) 76%, var(--treemap-bg)) 50%,
+    color-mix(in srgb, var(--tile-colour-2) 76%, var(--treemap-bg)) 50%
+  );
 }
 .map-treemap-changes .map-treemap-tile[data-read] {
-  box-shadow: inset 0 0 0 2px var(--tile-read-colour);
+  box-shadow:
+    inset 0 0 0 2px var(--tile-read-colour),
+    inset 0 0 0 4px var(--tile-read-colour-2);
 }
 .map-treemap-tile[data-neutral] {
   background: var(--treemap-folder);
@@ -487,6 +493,17 @@
   box-sizing: border-box;
   border: 1px solid var(--timeline-seat);
   background: var(--surface);
+}
+.map-timeline-tick[data-current] {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+.map-timeline-seat {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 .map-page .add {
   color: var(--add);

@@ -186,10 +186,19 @@ export function MapTreemap({
   onSelect: (path: string) => void;
 }) {
   const [ref, size] = useSize();
-  const layout = useMemo(
-    () => treemapLayout(snapshot.tree, size.width, size.height),
-    [snapshot.tree, size],
+  const files = useMemo(
+    () =>
+      lens === "changes"
+        ? [
+            ...snapshot.tree,
+            ...Object.keys(visual)
+              .filter((path) => !snapshot.tree.some((file) => file.path === path))
+              .map((path) => ({ path, lines: 1 })),
+          ]
+        : snapshot.tree,
+    [lens, snapshot.tree, visual],
   );
+  const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
   return (
     <div
       ref={ref}
@@ -211,6 +220,15 @@ export function MapTreemap({
       {layout.tiles.map((tile) => {
         const v = visual[tile.path];
         const changes = v?.changes ?? [];
+        const changed = changes.filter((change) => change.changed);
+        const reads = changes.filter((change) => change.read && !change.changed);
+        const colour = (seat: string) =>
+          colours[
+            Math.max(
+              0,
+              snapshot.seats.findIndex((item) => item.seat === seat),
+            ) % colours.length
+          ];
         const directImport = lens === "impact" && v?.directImport === true;
         const active =
           lens === "changes"
@@ -222,7 +240,7 @@ export function MapTreemap({
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
             : lens === "changes"
-              ? 1
+              ? changeIntensity(Math.max(0, ...changed.map((change) => change.lines)))
               : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
@@ -237,18 +255,8 @@ export function MapTreemap({
             data-overlap={v?.overlap || undefined}
             data-direct-import={directImport || undefined}
             data-fix-heavy={fixHeavy || undefined}
-            data-changed={
-              changes
-                .filter((change) => change.changed)
-                .map((change) => change.seat)
-                .join(" ") || undefined
-            }
-            data-read={
-              changes
-                .filter((change) => change.read && !change.changed)
-                .map((change) => change.seat)
-                .join(" ") || undefined
-            }
+            data-changed={changed.map((change) => change.seat).join(" ") || undefined}
+            data-read={reads.map((change) => change.seat).join(" ") || undefined}
             style={
               {
                 ...style(tile),
@@ -256,21 +264,13 @@ export function MapTreemap({
                 "--tile-colour": active
                   ? lens === "history"
                     ? "var(--accent)"
-                    : colours[
-                        (lens === "changes"
-                          ? snapshot.seats.findIndex((seat) => seat.seat === changes[0]?.seat)
-                          : (v?.seat ?? 0)) % colours.length
-                      ]
+                    : lens === "changes"
+                      ? colour(changed[0]?.seat ?? reads[0]?.seat ?? "")
+                      : colours[(v?.seat ?? 0) % colours.length]
                   : "var(--void-line)",
-                "--tile-read-colour": changes.some((change) => !change.changed && change.read)
-                  ? colours[
-                      snapshot.seats.findIndex(
-                        (seat) =>
-                          seat.seat ===
-                          changes.find((change) => !change.changed && change.read)?.seat,
-                      ) % colours.length
-                    ]
-                  : "transparent",
+                "--tile-colour-2": changed[1] ? colour(changed[1].seat) : "transparent",
+                "--tile-read-colour": reads[0] ? colour(reads[0].seat) : "transparent",
+                "--tile-read-colour-2": reads[1] ? colour(reads[1].seat) : "transparent",
               } as CSSProperties
             }
             onClick={() => onSelect(tile.path)}
@@ -305,3 +305,6 @@ export function MapTreemap({
     </div>
   );
 }
+
+const changeIntensity = (lines: number) =>
+  lines <= 10 ? 0.42 : lines <= 40 ? 0.6 : lines <= 120 ? 0.8 : 1;

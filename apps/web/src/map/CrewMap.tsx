@@ -130,6 +130,7 @@ export function CrewMapView({
   const [selection, setSelection] = useState<Selection>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [lens, setLens] = useState<MapLens>("changes");
+  const [playback, setPlayback] = useState<{ seat: string; step: number } | null>(null);
   const now = useNow();
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
@@ -150,7 +151,15 @@ export function CrewMapView({
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
-  const searchable = useMemo(() => snapshot.tree.map((file) => file.path), [snapshot.tree]);
+  const searchable = useMemo(
+    () => [
+      ...new Set([
+        ...snapshot.tree.map((file) => file.path),
+        ...Object.keys(lensVisuals(snapshot, "changes", null)),
+      ]),
+    ],
+    [snapshot],
+  );
   const needle = query.trim().toLowerCase();
   const matches = needle
     ? searchable.filter((path) => path !== "" && path.toLowerCase().includes(needle))
@@ -187,6 +196,12 @@ export function CrewMapView({
     [lens, snapshot, focus],
   );
   const lensVisual = useMemo(() => lensVisuals(snapshot, lens, focus), [snapshot, lens, focus]);
+  const visibleVisual = useMemo(() => {
+    if (lens !== "changes" || !playback) return lensVisual;
+    const seat = snapshot.seats.find((item) => item.seat === playback.seat);
+    const revealed = new Set(seat?.recent.slice(0, playback.step).map((tick) => tick.file));
+    return Object.fromEntries(Object.entries(lensVisual).filter(([path]) => revealed.has(path)));
+  }, [lens, lensVisual, playback, snapshot.seats]);
   useEffect(() => {
     const clearFocus = (event: KeyboardEvent) => {
       if (event.key === "Escape" && focus !== null) setFocus(null);
@@ -218,7 +233,7 @@ export function CrewMapView({
           <MapTreemap
             snapshot={snapshot}
             lens={lens}
-            visual={lensVisual}
+            visual={visibleVisual}
             focus={focus}
             focusLinks={focusLinks}
             onSelect={selectFromScene}
@@ -321,7 +336,9 @@ export function CrewMapView({
           )}
         </div>
       </div>
-      {lens === "changes" && <SessionTimeline snapshot={snapshot} now={now} />}
+      {lens === "changes" && (
+        <SessionTimeline snapshot={snapshot} now={now} onPlayback={setPlayback} />
+      )}
       <div className="map-deck">
         {status && (
           <span className={`map-live${status.live ? "" : " down"}`} role="status">
@@ -365,15 +382,26 @@ function writeHash(values: URLSearchParams) {
   );
 }
 
-function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number }) {
+function SessionTimeline({
+  snapshot,
+  now,
+  onPlayback,
+}: {
+  snapshot: MapSnapshot;
+  now: number;
+  onPlayback: (playback: { seat: string; step: number } | null) => void;
+}) {
   const [windowRange, setWindowRange] = useState<[number, number] | null>(() => {
     const value = hashValues().get("win");
-    const parts = value?.split(":").map(Number);
-    return parts?.length === 2 && parts.every(Number.isFinite) ? [parts[0], parts[1]] : null;
+    const parts = value?.split(",").map(Number);
+    return parts?.length === 2 && parts.every(Number.isFinite)
+      ? [now - TIMELINE_WINDOW_MS + parts[0] * 60_000, now - TIMELINE_WINDOW_MS + parts[1] * 60_000]
+      : null;
   });
   const [playing, setPlaying] = useState<{ seat: string; step: number } | null>(() => {
-    const [seat, step] = (hashValues().get("play") ?? "").split(":");
-    return seat && Number.isInteger(Number(step)) ? { seat, step: Number(step) } : null;
+    const seat = hashValues().get("play") ?? "";
+    const step = Number(hashValues().get("step") ?? 0);
+    return seat && Number.isInteger(step) ? { seat, step } : null;
   });
   const seats = snapshot.seats.filter((seat) => isWorking(seat, now));
   const selectedSeat = playing?.seat ?? seats[0]?.seat ?? "";
@@ -390,13 +418,15 @@ function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number
       }));
   const playSeat = seats.find((seat) => seat.seat === selectedSeat) ?? seats[0];
   const sequence = playSeat ? ticks(playSeat) : [];
+  useEffect(() => onPlayback(playing), [onPlayback, playing]);
   useEffect(() => {
     if (!playing || playing.step >= sequence.length) return;
     const timer = window.setTimeout(() => {
       const next = { ...playing, step: playing.step + 1 };
       setPlaying(next);
       const values = hashValues();
-      values.set("play", `${next.seat}:${next.step}`);
+      values.set("play", next.seat);
+      values.set("step", String(next.step));
       writeHash(values);
     }, PLAY_STEP_MS);
     return () => window.clearTimeout(timer);
@@ -412,13 +442,15 @@ function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number
       setPlaying(null);
       const values = hashValues();
       values.delete("play");
+      values.delete("step");
       writeHash(values);
       return;
     }
     const next = { seat: selectedSeat, step: 1 };
     setPlaying(next);
     const values = hashValues();
-    values.set("play", `${next.seat}:${next.step}`);
+    values.set("play", next.seat);
+    values.set("step", String(next.step));
     writeHash(values);
   };
   const status = playing && sequence[playing.step - 1];
@@ -431,7 +463,11 @@ function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number
           Clear window
         </button>
         <button type="button" disabled={!sequence.length} onClick={play}>
-          {playing ? "■ Stop" : `▶ Play ${selectedSeat}`}
+          {playing && playing.step >= sequence.length
+            ? "↺ Reset"
+            : playing
+              ? "■ Stop"
+              : `▶ Play ${selectedSeat}`}
         </button>
         <span role="status" aria-label="Playback">
           {status
@@ -442,7 +478,20 @@ function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number
       <ul className="map-timeline-list" aria-label="Working seat timelines">
         {seats.map((seat, index) => (
           <li className="map-timeline-row" aria-label={`Timeline for ${seat.seat}`} key={seat.seat}>
-            <span className="map-timeline-seat">{namesOnlySeat(seat.seat)}</span>
+            <button
+              type="button"
+              className="map-timeline-seat"
+              onClick={() => {
+                const next = { seat: seat.seat, step: 0 };
+                setPlaying(next);
+                const values = hashValues();
+                values.set("play", seat.seat);
+                values.set("step", "0");
+                writeHash(values);
+              }}
+            >
+              {namesOnlySeat(seat.seat)}
+            </button>
             <span
               className="map-timeline-track"
               style={{ "--timeline-seat": `var(--seat-${(index % 7) + 1})` } as CSSProperties}
@@ -456,6 +505,10 @@ function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number
                     left: `${Math.max(0, Math.min(100, ((tick.at - (now - TIMELINE_WINDOW_MS)) / TIMELINE_WINDOW_MS) * 100))}%`,
                   }}
                   title={`${tick.changed ? "changed" : "read"} ${tick.file}`}
+                  data-current={
+                    (playing?.seat === seat.seat && sequence[playing.step - 1] === tick) ||
+                    undefined
+                  }
                 />
               ))}
             </span>

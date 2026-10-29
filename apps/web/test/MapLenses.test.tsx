@@ -382,28 +382,49 @@ it("draws Changes as a coloured treemap and gives every working seat a timeline 
   expect(screen.getAllByRole("listitem", { name: /timeline for/i })).toHaveLength(2);
 });
 
+it("keeps branch-only files and recent reads visible, including shared seat colours", () => {
+  const value = snapshot();
+  value.seats[0].scope.modified.push({ file: "src/new.ts", add: 1, rem: 0, source: "diff" });
+  value.seats[1].scope.modified.push({ file: "src/contract.ts", add: 180, rem: 0, source: "diff" });
+  value.seats[1].scope.read = [];
+  value.seats[1].recent = [{ file: "src/isolated-read.ts", at: Date.now() }];
+  render(<CrewMapView snapshot={value} />);
+  const shared = document.querySelector(
+    ".map-treemap-tile[title='src/contract.ts']",
+  ) as HTMLElement;
+  expect(shared.dataset.changed).toBe("GUIDO-1 INCO-1");
+  expect(shared.style.getPropertyValue("--tile-colour-2")).toBe("var(--seat-2)");
+  expect(shared.style.getPropertyValue("--tile-intensity")).toBe("1");
+  expect(document.querySelector(".map-treemap-tile[title='src/new.ts']")).toBeTruthy();
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/isolated-read.ts']")
+      ?.getAttribute("data-read"),
+  ).toBe("INCO-1");
+});
+
 it("clears the selected timeline window and advances Play through the selected seat's ticks", () => {
   vi.useFakeTimers();
   try {
     const value = snapshot();
     const now = Date.now();
     value.seats[0].recent = [
-      { file: "src/contract.ts", at: now - 10_000 },
-      { file: "src/untested.ts", at: now - 5_000 },
+      { file: "src/contract.ts", at: now - 50 * 60_000 },
+      { file: "src/untested.ts", at: now - 45 * 60_000 },
     ];
-    window.history.replaceState(null, "", "#win=1:2");
+    window.history.replaceState(null, "", "#win=10,20&play=GUIDO-1&step=1");
     render(<CrewMapView snapshot={value} />);
 
     expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
       false,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Clear window" }));
-    expect(window.location.hash).not.toContain("win=");
-    fireEvent.click(screen.getByRole("button", { name: /Play GUIDO-1/ }));
     expect(screen.getByRole("status", { name: "Playback" }).textContent).toContain("step 1 of 2");
     act(() => vi.advanceTimersByTime(400));
     expect(screen.getByRole("status", { name: "Playback" }).textContent).toContain("step 2 of 2");
-    expect(window.location.hash).toContain("play=GUIDO-1%3A2");
+    expect(window.location.hash).toContain("play=GUIDO-1");
+    expect(window.location.hash).toContain("step=2");
+    fireEvent.click(screen.getByRole("button", { name: "Clear window" }));
+    expect(window.location.hash).not.toContain("win=");
   } finally {
     vi.useRealTimers();
     window.history.replaceState(null, "", window.location.pathname);

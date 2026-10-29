@@ -1,10 +1,11 @@
 import type { MapSnapshot } from "@mc/core";
 import { githubItemHref } from "../links.ts";
+import { touchedFiles } from "./cards.ts";
 
 export type MapLens = "changes" | "impact" | "history";
 export interface LensVisual {
   /** Changes: every seat that currently changed or read this file. */
-  changes?: { seat: string; changed: boolean; read: boolean }[];
+  changes?: { seat: string; changed: boolean; read: boolean; lines: number }[];
   /** Impact: seat colour index and dependency distance (zero is a changed seed). */
   seat?: number;
   distance?: number;
@@ -174,7 +175,7 @@ export function lensVisuals(
           .filter((change) => change.add + change.rem > 0)
           .map((change) => change.file),
       );
-      const read = new Set(seat.scope.read);
+      const read = new Set([...seat.scope.read, ...touchedFiles(seat)]);
       for (const path of new Set([...changed, ...read])) {
         const visual = out[path] ?? { changes: [] };
         out[path] = visual;
@@ -182,6 +183,10 @@ export function lensVisuals(
           seat: seat.seat,
           changed: changed.has(path),
           read: read.has(path),
+          lines: (() => {
+            const change = seat.scope.modified.find((item) => item.file === path);
+            return (change?.add ?? 0) + (change?.rem ?? 0);
+          })(),
         });
       }
     });
