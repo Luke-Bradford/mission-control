@@ -635,6 +635,12 @@ export const createdText = (ref: string, inBacklog: boolean): string =>
   `Filed ${ref}, on the project${inBacklog ? " in Backlog" : ", but not confirmed in Backlog"}. Recorded in Decided without you.`;
 export const createdDraftText = (ref: string, repoId: string): string =>
   `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
+export const FIELDS_NEED_SUPERUSER =
+  "Not filed: size and priority are set on a superuser repo's merge board only.";
+export const createFieldOptionText = (why: string): string =>
+  `Not filed: the board cannot take that size or priority (${why})`;
+export const createdFieldsFailedText = (ref: string): string =>
+  `Filed ${ref}, on the project, but Size and Priority were not set; set them with edit_card. Recorded in Decided without you.`;
 export const notOnProjectText = (ref: string): string =>
   `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with an @CAPCOM line in your reply.`;
 export const COMMENTED_DECISION = "Commented";
