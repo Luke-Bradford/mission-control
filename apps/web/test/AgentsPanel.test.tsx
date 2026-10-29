@@ -136,6 +136,23 @@ it("shows FLIGHT, four crew and two observed loops in eight columns with a live 
   expect(container.querySelector("#agentsP .ph .meter")).toBeNull();
 });
 
+it("keeps a long latest message clipped inside its Crew Work cell", async () => {
+  const latestMessage = "evidence note ".repeat(55);
+  stub([seatRow({ hudState: "blocked", note: latestMessage })]);
+  const { container } = render(<AgentsPanel />);
+
+  await screen.findByText("guido-1");
+  const work = [...container.querySelectorAll<HTMLElement>(".ticket-cell")].find(
+    (cell) => cell.querySelector<HTMLElement>("[title]")?.title === latestMessage,
+  );
+  expect(work?.classList.contains("ticket-cell")).toBe(true);
+  expect(work?.classList.contains("work-cell")).toBe(true);
+  expect(work?.querySelector("[title]")?.classList.contains("ellip")).toBe(true);
+  expect(
+    screen.getByRole("table", { name: "Crew" }).querySelectorAll("[role=columnheader]"),
+  ).toHaveLength(8);
+});
+
 it("names and confirms the waiver for a review-parked seat", async () => {
   const loop = {
     phase: "parked" as const,
