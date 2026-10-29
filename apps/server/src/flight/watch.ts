@@ -17,6 +17,7 @@ import {
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
+  FLIGHT_WAKE_REMINDER,
   type FlightState,
   flightDownText,
   flightStartFailedText,
@@ -44,8 +45,11 @@ import {
   flightWake,
   flightWakes,
   markPrsShown,
+  nextWakeAt,
   operatorItems,
   pending,
+  recordFlightWake,
+  recordNextFlightWake,
   wakeFacts,
 } from "./state.ts";
 
@@ -336,6 +340,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
+        recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
@@ -392,6 +398,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
+    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
@@ -405,12 +412,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
       );
+      const causes = changedWakeFacts(lastFacts, wake);
       if (
-        (await supervisor.send(
-          runId,
-          wakeKey(runId, n + 1),
-          wakeLine(state, digest, changedWakeFacts(lastFacts, wake)),
-        )) === "sent"
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
+        "sent"
       ) {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
@@ -418,6 +423,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
+        recordFlightWake(
+          store,
+          found.session.repoId,
+          t,
+          causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER],
+        );
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {
       lastFacts = wake;
@@ -480,6 +492,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     start() {
       if (interval !== null) return;
       stopped = false;
+      // a schedule kept from before a restart is not this watch's; idle passes recompute it
+      const found = flightSeat(config);
+      if (found !== null) recordNextFlightWake(store, found.session.repoId, null);
       offSupervisor = supervisor.on((e) => {
         if (e.seatId === flightSeat(config)?.seat.id) {
           if (e.kind === "idle") lastTurnEndAt = now();
