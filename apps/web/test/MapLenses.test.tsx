@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
-import { historyHeat, treemapLayout } from "../src/map/MapTreemap.tsx";
+import { historyHeat, isFixHeavy, treemapLayout } from "../src/map/MapTreemap.tsx";
 
 const scenes = vi.hoisted(
   () =>
@@ -70,16 +70,20 @@ it("traces and colours an indirect test when focused outside the changed reach",
   value.tree.push(
     { path: "src/isolated.ts", lines: 12 },
     { path: "src/isolated-consumer.ts", lines: 12 },
+    { path: "src/direct-import.ts", lines: 12 },
     { path: "test/isolated.test.ts", lines: 12 },
   );
   value.imports.push(
     { from: "src/isolated-consumer.ts", to: "src/isolated.ts" },
     { from: "test/isolated.test.ts", to: "src/isolated-consumer.ts" },
+    { from: "src/isolated.ts", to: "src/direct-import.ts" },
   );
 
   const visuals = lensVisuals(value, "impact", "src/isolated.ts");
   expect(visuals["src/isolated.ts"]).toMatchObject({ seat: 0, distance: 0, dim: false });
   expect(visuals["test/isolated.test.ts"]).toMatchObject({ seat: 0, distance: 2, dim: false });
+  expect(visuals["src/direct-import.ts"]).toMatchObject({ directImport: true, dim: false });
+  expect(visuals["src/direct-import.ts"]?.distance).toBeUndefined();
   expect(impactFocusLinks(value, "src/isolated.ts")).toContainEqual({
     from: "src/isolated.ts",
     to: "test/isolated.test.ts",
@@ -90,7 +94,12 @@ it("traces and colours an indirect test when focused outside the changed reach",
   fireEvent.click(document.querySelector(".map-treemap-tile[title='src/isolated.ts']") as Element);
   const lens = screen.getByRole("region", { name: "Impact lens" });
   expect(within(lens).getAllByRole("button", { name: "test/isolated.test.ts" })).toHaveLength(1);
-  expect(document.querySelectorAll(".map-treemap-links line")).toHaveLength(2);
+  expect(document.querySelectorAll(".map-treemap-links line")).toHaveLength(3);
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/direct-import.ts']")
+      ?.hasAttribute("data-direct-import"),
+  ).toBe(true);
 });
 
 it("keeps non-code changes out of Impact code rows and untested findings", () => {
@@ -385,6 +394,14 @@ it("uses fixed PR heat bands rather than scaling to the hottest file", () => {
     historyHeat(29),
     historyHeat(30),
   ]).toEqual([0.16, 0.16, 0.36, 0.36, 0.6, 0.6, 0.85]);
+});
+
+it("marks files fixed often at the v3 absolute or proportional thresholds", () => {
+  expect(isFixHeavy(5, 100)).toBe(true);
+  expect(isFixHeavy(3, 6)).toBe(true);
+  expect(isFixHeavy(4, 8)).toBe(true);
+  expect(isFixHeavy(3, 7)).toBe(false);
+  expect(isFixHeavy(4, 0)).toBe(false);
 });
 
 it("squarifies equal root files at the 1600×1000 reference size", () => {

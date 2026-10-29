@@ -24,6 +24,8 @@ const weight = (node: Branch): number =>
     : Math.max(4, node.lines);
 export const historyHeat = (prs: number) =>
   prs >= 30 ? 0.85 : prs >= 10 ? 0.6 : prs >= 3 ? 0.36 : prs > 0 ? 0.16 : 0;
+export const isFixHeavy = (fixes: number, prs: number) =>
+  fixes >= 5 || (fixes >= 3 && prs > 0 && fixes / prs >= 0.5);
 
 /** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
 export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
@@ -202,16 +204,17 @@ export function MapTreemap({
       ))}
       {layout.tiles.map((tile) => {
         const v = visual[tile.path];
+        const directImport = lens === "impact" && v?.directImport === true;
         const active =
           lens === "history"
             ? v?.hotspot !== undefined
-            : v?.seat !== undefined && v.distance !== undefined;
+            : directImport || (v?.seat !== undefined && v.distance !== undefined);
         const intensity = active
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
             : 1 / ((v?.distance ?? 0) + 1)
           : 0;
-        const fixHeavy = lens === "history" && (v?.fixes ?? 0) >= 5;
+        const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
         return (
           <button
             type="button"
@@ -221,6 +224,7 @@ export function MapTreemap({
             data-dim={v?.dim || undefined}
             data-neutral={!active || undefined}
             data-overlap={v?.overlap || undefined}
+            data-direct-import={directImport || undefined}
             data-fix-heavy={fixHeavy || undefined}
             style={
               {

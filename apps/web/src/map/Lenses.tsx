@@ -7,6 +7,8 @@ export interface LensVisual {
   seat?: number;
   distance?: number;
   overlap?: boolean;
+  /** Focused Impact: the file the focused file imports directly. */
+  directImport?: boolean;
   /** History: merged-PR heat and a conspicuous bug-fix signal. */
   hotspot?: number;
   fixes?: number;
@@ -198,14 +200,19 @@ export function lensVisuals(
       const related = new Set([focus, ...reaches.keys(), ...imports]);
       for (const path of related) {
         const prior = out[path];
-        const focusDistance = path === focus ? 0 : (reaches.get(path) ?? 1);
-        out[path] = {
-          ...prior,
-          seat: prior?.seat ?? 0,
-          distance: Math.min(prior?.distance ?? Infinity, focusDistance),
-          focused: path === focus,
-          dim: false,
-        };
+        if (path === focus || reaches.has(path)) {
+          const focusDistance = path === focus ? 0 : (reaches.get(path) as number);
+          out[path] = {
+            ...prior,
+            seat: prior?.seat ?? 0,
+            distance: Math.min(prior?.distance ?? Infinity, focusDistance),
+            focused: path === focus,
+            dim: false,
+          };
+        } else {
+          const { distance: _distance, seat: _seat, ...rest } = prior ?? {};
+          out[path] = { ...rest, directImport: true, focused: false, dim: false };
+        }
       }
       for (const { path } of snapshot.tree)
         out[path] = { ...(out[path] ?? {}), focused: path === focus, dim: !related.has(path) };

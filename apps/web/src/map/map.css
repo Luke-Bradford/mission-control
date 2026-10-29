@@ -241,6 +241,11 @@
   outline: 2px solid var(--rem);
   outline-offset: -2px;
 }
+.map-treemap-impact .map-treemap-tile[data-direct-import] {
+  border: 2px solid var(--treemap-ink);
+  background: var(--treemap-folder);
+  opacity: 0.9;
+}
 .map-treemap-tile[data-fix-heavy]::after {
   position: absolute;
   top: 0;
