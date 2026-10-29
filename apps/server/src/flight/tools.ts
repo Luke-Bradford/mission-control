@@ -301,6 +301,7 @@ import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
+  protectedDecisionItem,
   releaseHold,
 } from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
@@ -1845,7 +1846,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function closeTicket(
     a: z.output<typeof CloseTicketArgs>,
     repo: CcConfig["repos"][number],
-    ctx: McToolContext,
+    _ctx: McToolContext,
   ): Promise<Result> {
     const refuse = (why: string) => fail(closeRefusedText(why));
     const at = now();
@@ -2128,6 +2129,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         options: options ?? [],
         basis,
         at,
+        defaultEligible: !protectedDecisionItem(store, item),
       });
     } catch {
       return fail("Source changed; refresh the item before drafting.");
@@ -3002,6 +3004,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
           (i) => i.key === a.key,
         );
+        if (item && protectedDecisionItem(store, item))
+          return fail("This item is protected or unavailable.");
         // an item FLIGHT holds for triage (owner "flight") is still the operator's underneath
         if (
           !resolved &&

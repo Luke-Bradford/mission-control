@@ -1,6 +1,9 @@
 import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
+import { type BriefOption, flightFloorBlocked, GUARD_ACK_PREFIX } from "@mc/core";
 import { z } from "zod";
+import { NOTE_KEY } from "./hud.ts";
 import type { Store } from "./store.ts";
+import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 
 const SETTING = "attention-holds";
 export function holds(store: Store): Record<string, AttentionHold> {
@@ -112,4 +115,48 @@ export function attentionHoldError(e: z.ZodError): string {
   if (!issue) return "invalid body";
   const path = issue.path.map(String).join(".");
   return path === "" ? issue.message : `${path}: ${issue.message}`;
+}
+
+/** Items whose authority belongs to the operator and which a timer must never settle. */
+export function protectedDecisionItem(store: Store, item: AttentionItem): boolean {
+  if (item.key.startsWith("esc:")) return true;
+  if (item.kind === "approval" || item.kind === "flag" || item.kind === "ratelimit") return true;
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.key.startsWith(`${NOTE_KEY}${GUARD_ACK_PREFIX}`)) return true;
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  const run = note?.runId ? store.run(note.runId) : null;
+  if (item.kind === "decision" && run?.loop && flightFloorBlocked(run.loop)) return true;
+  if (item.kind !== "blocked") return false;
+  const parked = run?.loop?.parked?.kind;
+  // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked
+  // note. Missing source rows are deliberately treated as protected rather than defaulted.
+  return note === undefined || note.runId === null || parked === "budget" || parked === "account";
+}
+
+/** A recommended reversible decision and the stored point at which it may apply. */
+export function decisionDefault(
+  store: Store,
+  item: AttentionItem,
+): { option: BriefOption; briefAt: number; dueAt: number } | null {
+  const brief = item.brief;
+  if (
+    item.owner !== "operator" ||
+    !brief ||
+    brief.for === "flight" ||
+    brief.defaultAt === undefined ||
+    protectedDecisionItem(store, item)
+  )
+    return null;
+  const option = brief.options.find(
+    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
+  );
+  if (!option) return null;
+  const briefAt = brief.askAt ?? brief.at;
+  const hold = holds(store)[item.key];
+  const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
+  return {
+    option,
+    briefAt,
+    dueAt: Math.max(brief.defaultAt, released + (brief.defaultAt - briefAt)),
+  };
 }

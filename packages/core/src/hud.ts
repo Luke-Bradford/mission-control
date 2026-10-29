@@ -564,3 +564,10 @@ export const LOCK_OUTCOME_TEXT = {
 /** Overview timeline window and maximum tool ticks per lane. */
 export const TIMELINE_WINDOW_MS = 60 * 60_000;
 export const TIMELINE_TICKS_MAX = 300;
+
+/** How long a reversible decision waits before its recommended option applies. */
+export const DECISION_DEFAULT_WAIT_MS = 40 * 60_000;
+
+/** The Comms line recording an automatically applied decision. */
+export const defaultAppliedText = (label: string, ask: string): string =>
+  `Default applied: ${label} (${ask})`;
