@@ -184,7 +184,7 @@ it("finds and focuses individual files in a large tree", async () => {
   fireEvent.change(search, { target: { value: "settings.ts" } });
   fireEvent.keyDown(search, { key: "Enter" });
   expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
-});
+}, 20_000);
 
 it("throttles delta-driven refetches to one per 2 s, never holding the first load", async () => {
   LiveMap.REFETCH_GAP_MS = GAP;

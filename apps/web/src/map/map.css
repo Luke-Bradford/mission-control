@@ -233,16 +233,47 @@
   );
 }
 .map-treemap-changes .map-treemap-tile {
+  opacity: 1;
   background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--tile-colour) 76%, var(--treemap-bg)) 50%,
-    color-mix(in srgb, var(--tile-colour-2) 76%, var(--treemap-bg)) 50%
+    var(--tile-split, 90deg),
+    color-mix(in srgb, var(--tile-colour) calc(var(--tile-intensity) * 100%), var(--treemap-folder))
+      50%,
+    color-mix(
+        in srgb,
+        var(--tile-colour-2) calc(var(--tile-intensity-2) * 100%),
+        var(--treemap-folder)
+      )
+      50%
   );
+}
+.map-treemap-changes .map-treemap-tile[data-strong] {
+  color: #fff;
 }
 .map-treemap-changes .map-treemap-tile[data-read] {
   box-shadow:
     inset 0 0 0 2px var(--tile-read-colour),
     inset 0 0 0 4px var(--tile-read-colour-2);
+}
+.map-treemap-tile[data-play-current] {
+  outline: 2px solid var(--treemap-ink);
+  outline-offset: -2px;
+}
+.map-treemap-mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  padding: 0 3px;
+  border: 1.5px solid var(--treemap-ink);
+  border-radius: 8px;
+  background: var(--treemap-bg);
+  color: var(--treemap-ink);
+  font: 600 9.5px / 13px var(--mono);
+  text-align: center;
+}
+.map-treemap-tile[data-play-current] > .map-treemap-mark {
+  background: var(--treemap-ink);
+  color: var(--treemap-bg);
 }
 .map-treemap-tile[data-neutral] {
   background: var(--treemap-folder);
@@ -250,6 +281,7 @@
 }
 .map-treemap-changes .map-treemap-tile[data-neutral] {
   background: var(--treemap-folder);
+  opacity: 1;
 }
 .map-treemap-history .map-treemap-tile {
   background: color-mix(
@@ -452,6 +484,24 @@
 .map-key-overlap {
   box-shadow: inset 0 0 0 1.5px var(--rem);
 }
+.map-key-steps-changes .map-key-swatch {
+  background: var(--seat-1);
+}
+.map-key-steps-changes .map-key-swatch-1 {
+  opacity: 0.42;
+}
+.map-key-steps-changes .map-key-swatch-2 {
+  opacity: 0.6;
+}
+.map-key-steps-changes .map-key-swatch-3 {
+  opacity: 0.8;
+}
+.map-key-steps-changes .map-key-swatch-4 {
+  opacity: 1;
+}
+.map-changes-key .map-key-muted {
+  color: var(--muted);
+}
 .map-key-fix {
   background: linear-gradient(135deg, var(--rem) 0 50%, transparent 50%);
 }
@@ -534,6 +584,18 @@
   box-sizing: border-box;
   border: 1px solid var(--timeline-seat);
   background: var(--surface);
+}
+.map-timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--fg);
+  pointer-events: none;
+}
+.map-timeline-seat[aria-pressed="true"] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .map-timeline-tick[data-current] {
   outline: 2px solid var(--fg);

@@ -1,5 +1,5 @@
 import type { MapSnapshot } from "@mc/core";
-import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LensVisual, MapLens } from "./Lenses.tsx";
 
 const colours = [
@@ -170,13 +170,38 @@ const style = (r: Rect): CSSProperties => ({
   height: `${r.height}px`,
 });
 
-export function MapTreemap({
+const noFiles: MapSnapshot["tree"] = [];
+const noIndices: Record<string, number> = {};
+const noMarks = new Map<string, number>();
+
+/**
+ * Files changed or read on a seat's branch but absent from the main-branch tree, sized by their
+ * changed lines, so a new file still gets a tile.
+ */
+export function branchOnlyFiles(
+  tree: MapSnapshot["tree"],
+  visual: Record<string, LensVisual>,
+): MapSnapshot["tree"] {
+  const known = new Set(tree.map((file) => file.path));
+  return Object.entries(visual)
+    .filter(([path]) => path !== "" && !known.has(path))
+    .map(([path, v]) => ({
+      path,
+      lines: Math.max(1, ...(v.changes ?? []).map((change) => change.lines)),
+    }));
+}
+
+export const MapTreemap = memo(function MapTreemap({
   snapshot,
   lens,
   visual,
   focus,
   focusLinks = [],
   onSelect,
+  indices = noIndices,
+  extraFiles = noFiles,
+  marks = noMarks,
+  currentMark = null,
 }: {
   snapshot: MapSnapshot;
   lens: MapLens;
@@ -184,19 +209,18 @@ export function MapTreemap({
   focus: string | null;
   focusLinks?: { from: string; to: string; unlinked?: boolean }[];
   onSelect: (path: string) => void;
+  /** Each seat's colour, its place in config order; a seat not listed takes its place in the snapshot. */
+  indices?: Record<string, number>;
+  /** Changes: files absent from the tree that still get a tile (see branchOnlyFiles). */
+  extraFiles?: MapSnapshot["tree"];
+  /** Changes, playing: the step number of each file revealed so far, and the latest one. */
+  marks?: Map<string, number>;
+  currentMark?: string | null;
 }) {
   const [ref, size] = useSize();
   const files = useMemo(
-    () =>
-      lens === "changes"
-        ? [
-            ...snapshot.tree,
-            ...Object.keys(visual)
-              .filter((path) => !snapshot.tree.some((file) => file.path === path))
-              .map((path) => ({ path, lines: 1 })),
-          ]
-        : snapshot.tree,
-    [lens, snapshot.tree, visual],
+    () => (lens === "changes" ? [...snapshot.tree, ...extraFiles] : snapshot.tree),
+    [lens, snapshot.tree, extraFiles],
   );
   const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
   return (
@@ -224,15 +248,18 @@ export function MapTreemap({
         const reads = changes.filter((change) => change.read && !change.changed);
         const colour = (seat: string) =>
           colours[
-            Math.max(
-              0,
-              snapshot.seats.findIndex((item) => item.seat === seat),
-            ) % colours.length
+            Math.max(0, indices[seat] ?? snapshot.seats.findIndex((item) => item.seat === seat)) %
+              colours.length
           ];
+        const mark = marks.get(tile.path);
+        const first = changed[0],
+          second = changed[1];
+        const strength = (change?: { lines: number }) =>
+          change ? changeIntensity(change.lines) : 0;
         const directImport = lens === "impact" && v?.directImport === true;
         const active =
           lens === "changes"
-            ? changes.length > 0
+            ? changed.length > 0
             : lens === "history"
               ? v?.hotspot !== undefined
               : directImport || (v?.seat !== undefined && v.distance !== undefined);
@@ -240,7 +267,7 @@ export function MapTreemap({
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
             : lens === "changes"
-              ? changeIntensity(Math.max(0, ...changed.map((change) => change.lines)))
+              ? strength(first)
               : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
@@ -256,19 +283,30 @@ export function MapTreemap({
             data-direct-import={directImport || undefined}
             data-fix-heavy={fixHeavy || undefined}
             data-changed={changed.map((change) => change.seat).join(" ") || undefined}
+            data-strong={
+              (lens === "changes" && Math.max(strength(first), strength(second)) >= 0.8) ||
+              undefined
+            }
+            data-play-current={(currentMark === tile.path && mark !== undefined) || undefined}
             data-read={reads.map((change) => change.seat).join(" ") || undefined}
             style={
               {
                 ...style(tile),
                 "--tile-intensity": intensity,
-                "--tile-colour": active
-                  ? lens === "history"
-                    ? "var(--accent)"
-                    : lens === "changes"
-                      ? colour(changed[0]?.seat ?? reads[0]?.seat ?? "")
+                "--tile-colour": first
+                  ? colour(first.seat)
+                  : active
+                    ? lens === "history"
+                      ? "var(--accent)"
                       : colours[(v?.seat ?? 0) % colours.length]
-                  : "var(--void-line)",
-                "--tile-colour-2": changed[1] ? colour(changed[1].seat) : "transparent",
+                    : "var(--void-line)",
+                "--tile-colour-2": second
+                  ? colour(second.seat)
+                  : first
+                    ? colour(first.seat)
+                    : "transparent",
+                "--tile-intensity-2": second ? strength(second) : strength(first),
+                "--tile-split": tile.width >= tile.height ? "90deg" : "180deg",
                 "--tile-read-colour": reads[0] ? colour(reads[0].seat) : "transparent",
                 "--tile-read-colour-2": reads[1] ? colour(reads[1].seat) : "transparent",
               } as CSSProperties
@@ -277,6 +315,7 @@ export function MapTreemap({
             title={tile.path}
           >
             <span className="map-treemap-label">{tile.path.split("/").at(-1)}</span>
+            {mark !== undefined && <span className="map-treemap-mark">{mark}</span>}
           </button>
         );
       })}
@@ -304,7 +343,8 @@ export function MapTreemap({
       )}
     </div>
   );
-}
+});
 
-const changeIntensity = (lines: number) =>
+/** The mockup's change magnitude bands: up to 10 lines, 40, 120, and more. */
+export const changeIntensity = (lines: number) =>
   lines <= 10 ? 0.42 : lines <= 40 ? 0.6 : lines <= 120 ? 0.8 : 1;
