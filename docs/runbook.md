@@ -602,7 +602,7 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
-- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time.
+- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time. So do the repo's `mc.checks` commands (lint, typecheck): a check waits its turn like the suite, so the push gate never puts more than one heavy check on the Mac at once. A check that waited is not recorded as failed.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 

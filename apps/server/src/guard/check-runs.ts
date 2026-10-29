@@ -5,7 +5,7 @@
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import type { RepoRules } from "@mc/core";
+import { type RepoRules, splitCommands } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
 import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
@@ -28,6 +28,23 @@ export function checksRun(command: string, checks: readonly string[]): string[] 
   return checks.filter((c) => segments.includes(c));
 }
 
+/**
+ * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
+ * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
+ * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
+ */
+export function lockedCheck(command: string, checks: readonly string[]): string | null {
+  const ran = splitCommands(command);
+  for (const check of checks) {
+    const want = splitCommands(check)[0];
+    if (want === undefined) continue;
+    if (ran.some((argv) => argv.length === want.length && argv.every((w, i) => w === want[i]))) {
+      return check;
+    }
+  }
+  return null;
+}
+
 /** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */
 export interface CloneState {
   head: string;
@@ -45,6 +62,8 @@ export interface CheckRecorder {
   begin(key: CallKey, command: string): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean): Promise<void>;
+  /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
+  lockedBy(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
 }
@@ -66,6 +85,14 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, { runId: string; matched: string[]; head: string }>();
   return {
+    async lockedBy(runId, command) {
+      try {
+        return lockedCheck(command, await d.checks(runId));
+      } catch (e) {
+        d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
     async begin(key, command) {
       try {
         const matched = checksRun(command, await d.checks(key.runId));
