@@ -188,6 +188,45 @@ export interface EngineDeps {
   log?: (line: string) => void;
 }
 
+/** Which check refused `onOperatorMessage`; `operatorRefusalText` says it in words. */
+export type OperatorRefusal =
+  | "engine-off"
+  | "not-parked"
+  | "pr-closed"
+  | "held"
+  | "wrong-action"
+  | "not-permitted"
+  | "head-moved"
+  | "pr-not-open"
+  | "round-granted"
+  | "floor-enforced"
+  | "before-lift"
+  | "rework-undelivered"
+  | "engine-error";
+
+export type OperatorResult = { lifted: true } | { lifted: false; reason: OperatorRefusal };
+
+const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
+  "engine-off": "the loop engine is off",
+  "not-parked": "the run is not parked, or its park has ended",
+  "pr-closed": "the PR is closed, so the park cannot be lifted",
+  held: "the run is held: its seat is stopped or paused, the park is a budget park, a question is overdue, or its account is at its stop",
+  "wrong-action": "this action cannot settle this kind of park",
+  "not-permitted": "this action is not allowed for the caller",
+  "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
+  "pr-not-open": "the PR is not open",
+  "round-granted": "the extra review or rework round was already granted on this head",
+  "floor-enforced":
+    "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
+  "before-lift": "the operator's message could not be stored",
+  "rework-undelivered": "the rework request could not be delivered to the seat",
+  "engine-error": "the engine hit an error; see the hub log",
+};
+
+export function operatorRefusalText(reason: OperatorRefusal): string {
+  return OPERATOR_REFUSAL_TEXT[reason];
+}
+
 export interface Engine {
   /** Untakes stale queue rows, subscribes to the supervisor and reconciles every looped run. */
   start(): void;
@@ -201,7 +240,7 @@ export interface Engine {
    * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
    * A message after review findings sends the author back to working; only an explicit `accept` waives them.
    * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
-   * never lifts a budget park. Resolves true only when it un-parked the run.
+   * never lifts a budget park. Resolves `lifted: true` only when it un-parked the run; otherwise `reason` is the first check that refused.
    */
   onOperatorMessage(
     runId: string,
@@ -214,7 +253,7 @@ export interface Engine {
       /** A short FLIGHT fix list, appended after RETRO's findings for the author. */
       note?: string;
     },
-  ): Promise<boolean>;
+  ): Promise<OperatorResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
    * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
@@ -2142,54 +2181,59 @@ export function createEngine(deps: EngineDeps): Engine {
     },
 
     onOperatorMessage(runId, by = "CAPCOM", opts) {
-      if (!live()) return Promise.resolve(false);
-      let lifted = false;
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      // a pass that throws before deciding leaves this: the error is logged by the chain
+      let result: OperatorResult = { lifted: false, reason: "engine-error" };
+      const refuse = (reason: OperatorRefusal): void => {
+        result = { lifted: false, reason };
+      };
       return onChain(runId, async () => {
         const run = store.run(runId);
         const loop = run?.loop;
-        if (run === null || loop === undefined || loop === null) return;
-        if (pausedSeat(store, run.agentId)) return;
+        if (run === null || loop === undefined || loop === null) return refuse("not-parked");
+        if (pausedSeat(store, run.agentId)) return refuse("held");
         const kind = loop.parked?.kind;
         if (
           run.endedAt !== null ||
           loop.phase !== "parked" ||
           loop.parked === null ||
-          loop.parked.ended ||
-          kind === "pr-closed" ||
-          (by === "FLIGHT" &&
-            (kind === "budget" || (kind === "review-failed" && opts?.action !== "rereview"))) ||
-          (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
-        ) {
-          return;
-        }
-        if (by === "FLIGHT" && flightHeld(run)) return;
+          loop.parked.ended
+        )
+          return refuse("not-parked");
+        if (kind === "pr-closed") return refuse("pr-closed");
+        if (by === "FLIGHT" && kind === "budget") return refuse("held");
+        if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
+          return refuse("wrong-action");
+        if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
+          return refuse("wrong-action");
+        if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
         if (opts?.action !== undefined) {
           if (
             (by === "CAPCOM" && opts.action !== "accept") ||
             (by === "FLIGHT" && flightPowersOf(config, run.repoId) !== "superuser")
           )
-            return;
+            return refuse("not-permitted");
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
-          if (
-            !pushed ||
-            (opts.action !== "lift" && (pr?.state !== "open" || pr.headSha !== pushed.sha))
-          )
-            return;
+          if (!pushed) return refuse("head-moved");
+          if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
+          if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
-            if (kind !== "stuck") return;
+            if (kind !== "stuck") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
-            if (!head || !(await publisher.isDescendant(run, pushed.sha, head))) return;
+            if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
+              return refuse("head-moved");
           } else if (
             kind !== "review" &&
             kind !== "review-ruling" &&
             !(kind === "review-failed" && opts.action === "rereview")
           )
-            return;
-          if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2) return;
-          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1) return;
+            return refuse("wrong-action");
+          if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
+            return refuse("round-granted");
+          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1)
+            return refuse("round-granted");
           if (opts.action === "accept") {
-            if (pr?.state !== "open" || pr.headSha !== pushed.sha) return;
             const review = store
               .reviewsOfRun(run.id)
               .filter((r) => r.sha === pushed.sha && r.state === "reported")
@@ -2200,12 +2244,13 @@ export function createEngine(deps: EngineDeps): Engine {
                 pushed.sha,
                 FLIGHT_FLOOR_ENFORCING_PATHS,
               );
-              if (paths.length > 0) return;
+              if (paths.length > 0) return refuse("floor-enforced");
             }
           }
-          if (flightHeld(store.run(run.id) ?? run)) return;
+          if (flightHeld(store.run(run.id) ?? run)) return refuse("held");
         }
-        if (opts?.beforeLift !== undefined && !(await opts.beforeLift())) return;
+        if (opts?.beforeLift !== undefined && !(await opts.beforeLift()))
+          return refuse("before-lift");
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -2262,7 +2307,7 @@ export function createEngine(deps: EngineDeps): Engine {
               try {
                 await supervisor.wakeRun(run.id);
               } catch {
-                return;
+                return refuse("rework-undelivered");
               }
               next.aside = null;
             }
@@ -2284,7 +2329,7 @@ export function createEngine(deps: EngineDeps): Engine {
               `${run.id}:flight-rework:${next.epoch}`,
               message,
             );
-            if (sent !== "sent" && sent !== "dup") return;
+            if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
@@ -2292,9 +2337,9 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
-        lifted = true;
+        result = { lifted: true };
         await pass(run.id);
-      }).then(() => lifted);
+      }).then(() => result);
     },
 
     clearFlight(runId, expectedSha) {

@@ -5405,7 +5405,7 @@ describe("crew routes", () => {
           ? {}
           : {
               engine: {
-                onOperatorMessage: async () => false,
+                onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
                 status: () => ({ on: engineOn, note: null }),
               },
             }),
@@ -6539,8 +6539,8 @@ describe("the first loop's engine", () => {
           told.push(runId);
           calls.push(args);
           if (lifts && args[2]?.beforeLift !== undefined && !(await args[2].beforeLift()))
-            return false;
-          return lifts;
+            return { lifted: false, reason: "before-lift" };
+          return lifts ? { lifted: true } : { lifted: false, reason: "not-parked" };
         },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
       },
@@ -6655,7 +6655,10 @@ describe("the first loop's engine", () => {
       supervisor: stubSupervisor(),
       ...(withEngine
         ? {
-            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+            engine: {
+              onOperatorMessage: async () => ({ lifted: true }),
+              status: () => ({ on: true, note: "" }),
+            },
           }
         : {}),
     });
@@ -6676,7 +6679,10 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const r = await a.inject({
       method: "POST",
@@ -6686,6 +6692,29 @@ describe("the first loop's engine", () => {
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ ok: true });
+    await a.close();
+  });
+
+  it("names the check that refused the resume", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: {
+        onOperatorMessage: async () => ({ lifted: false, reason: "floor-enforced" }),
+        status: () => ({ on: true, note: "" }),
+      },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toContain("only the controller can merge it");
     await a.close();
   });
 
@@ -6800,7 +6829,10 @@ describe("the first loop's engine", () => {
       store,
       bus,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const invalid = await bounded.inject({
       method: "POST",
@@ -6817,7 +6849,10 @@ describe("the first loop's engine", () => {
       bus,
       noLoopWrites: true,
       supervisor: stubSupervisor(),
-      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+      engine: {
+        onOperatorMessage: async () => ({ lifted: true }),
+        status: () => ({ on: true, note: "" }),
+      },
     });
     const refused = await preview.inject({
       method: "POST",

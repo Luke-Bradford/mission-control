@@ -7,7 +7,6 @@ import { TicketDetail } from "../src/components/TicketDetail.tsx";
 import { githubHref } from "../src/links.ts";
 import { Agent } from "../src/pages/Agent.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
-import { Comms } from "../src/pages/Comms.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -221,46 +220,6 @@ describe("untrusted text renders literally", () => {
     expect(container.querySelector("#sideBody")?.textContent).toContain(PAYLOAD);
     expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
     expect(container.querySelector("img, script")).toBeNull();
-  });
-
-  it("comms: escalation titles and error text in Needs you, tool names, the threads' doing line", async () => {
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "esc:shop-app#4001",
-          kind: "decision",
-          text: PAYLOAD,
-          url: "javascript:alert(4)",
-        }),
-        item({
-          key: "stall:shop-app-ta:r-12",
-          kind: "stalled",
-          escalationId: null,
-          tool: PAYLOAD,
-          url: null,
-        }),
-        item({
-          key: "err:shop-app-ta",
-          kind: "error",
-          escalationId: null,
-          text: SCRIPT,
-          url: null,
-        }),
-      ],
-      "/api/crew": {
-        rows: [crewRow({ hudState: "error", sourceError: PAYLOAD + SCRIPT })],
-        firstRunToday: null,
-      },
-      "/api/config": CONFIG,
-    });
-    const { container } = render(<Comms item={null} />);
-    await screen.findByText(PAYLOAD);
-    await vi.waitFor(() => expect(container.textContent).toContain(PAYLOAD + SCRIPT));
-    expect(container.textContent).toContain(SCRIPT);
-    expect(container.querySelector("img, script")).toBeNull();
-    for (const a of container.querySelectorAll("a")) {
-      expect(a.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
-    }
   });
 });
 

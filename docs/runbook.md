@@ -345,9 +345,12 @@ What each seat's process starts with:
   FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
   its required reason; only this Comms item kind is eligible for that path. Messages from before
   the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
-  If FLIGHT has neither settled nor briefed it 30 minutes later, it is counted by the existing
-  single **FLIGHT is not triaging** item; the hub does not invent an operator recommendation or
-  apply a default. The Comms graph also reports 24-hour run-token totals per link and flags a pair
+  If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
+  on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
+  and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
+  decision-default sweep 40 minutes later unless you answer, delivered to the sending seat. A
+  message to CAPCOM, one before the rollout boundary, and one whose sender's run is held
+  (budget park, stopped seat, account at its stop) never get a decision. The Comms graph also reports 24-hour run-token totals per link and flags a pair
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
@@ -808,7 +811,7 @@ This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
-The route answers 409 when the engine is off, or when nothing was lifted.
+The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that only the controller can merge past. FLIGHT's `settle_park` refusals name the same reasons.
 
 ### Rework a parked run
 

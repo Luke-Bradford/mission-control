@@ -313,7 +313,7 @@ import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
-import type { Engine } from "../engine/engine.ts";
+import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -1405,9 +1405,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     bus.emit("agents");
     const lifted =
       lift !== null &&
-      (await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT", {
-        kinds: FLIGHT_UNPARK_KINDS,
-      })) === true;
+      (
+        await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT", {
+          kinds: FLIGHT_UNPARK_KINDS,
+        })
+      )?.lifted === true;
     if (lift === null || !lifted) {
       record(at, {
         kind: "message",
@@ -2930,8 +2932,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const found = devRun(a.runId);
         if (isRefusal(found)) return found;
         const run = found.run;
-        if (held(run) || !inRunLane(run) || !run.loop?.parked)
-          return fail("Run is held, in another lane or not parked.");
+        if (held(run)) return fail("Run is held.");
+        if (!inRunLane(run)) return fail("Run is in another lane.");
+        if (!run.loop?.parked) return fail("Run is not parked.");
         const kinds =
           a.action === "lift"
             ? ["stuck"]
@@ -2951,14 +2954,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           });
           if (n >= FLIGHT_UNPARKS_PER_RUN) return fail(unparkCapText(n));
         }
-        if (
-          !(await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
-            kinds,
-            action: a.action,
-            ...(a.note === undefined ? {} : { note: a.note }),
-          }))
-        )
-          return fail("Park cannot be settled: check the head, hold or independent RETRO review.");
+        const settled = await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
+          kinds,
+          action: a.action,
+          ...(a.note === undefined ? {} : { note: a.note }),
+        });
+        if (settled === undefined)
+          return fail("Park cannot be settled: the engine is unavailable.");
+        if (!settled.lifted)
+          return fail(`Park cannot be settled: ${operatorRefusalText(settled.reason)}.`);
         if (a.action === "lift")
           record(now(), {
             kind: "unpark",

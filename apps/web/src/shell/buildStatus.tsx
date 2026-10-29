@@ -228,18 +228,6 @@ export const BUILD_NOTES: BuildNote[] = [
     note: "Queues come from FLIGHT and the board.",
   },
   {
-    panel: "cNeedsP",
-    cls: "build",
-    label: "Buildable",
-    note: "Built from stored items; decisions and approvals need FLIGHT (P2).",
-  },
-  {
-    panel: "cThreadsP",
-    cls: "later",
-    label: "P2",
-    note: "send_message worked in the spike; threads need the mailbox. @CAPCOM is a prompt convention Mission Control parses.",
-  },
-  {
     panel: "dock",
     cls: "later",
     label: "P2",

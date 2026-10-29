@@ -133,7 +133,7 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
+import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
@@ -226,6 +226,7 @@ let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
 let lifts: boolean;
+let refuseWith: OperatorRefusal | null = null;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
@@ -321,6 +322,7 @@ beforeEach(() => {
   busyNow = [];
   engineOn = false;
   lifts = true;
+  refuseWith = null;
   rulesNow = DEFAULT_REPO_RULES;
   reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
@@ -410,7 +412,7 @@ beforeEach(() => {
       rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
         engineCalls.push(a);
-        return lifts;
+        return lifts ? { lifted: true } : { lifted: false, reason: refuseWith ?? "not-parked" };
       },
       status: () => ({ on: engineOn, note: null }),
       acceptRuling: async (runId, opts) => {
@@ -5583,10 +5585,18 @@ describe("superuser housekeeping", () => {
       phase: "parked",
       parked: { kind: "review", reason: "held", ended: false },
     });
-    expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
-      "isError",
-      true,
-    );
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is in another lane.");
+    expect(engineCalls).toEqual([]);
+  });
+  it("settle_park says when the run is not parked", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), phase: "working", parked: null });
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
   });
   it("lift only settles stuck parks and shares message_seat's run cap", async () => {
@@ -5614,6 +5624,26 @@ describe("superuser housekeeping", () => {
       true,
     );
     expect(engineCalls).toHaveLength(1);
+  });
+  it.each([
+    ["head-moved", "the pushed head moved"],
+    ["pr-not-open", "the PR is not open"],
+    ["held", "the run is held"],
+    ["round-granted", "already granted on this head"],
+    ["floor-enforced", "only the controller can merge it"],
+  ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "review", reason: "held", ended: false },
+    });
+    lifts = false;
+    refuseWith = reason;
+    const result = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(result).toHaveProperty("isError", true);
+    expect(JSON.stringify(result)).toContain(text);
   });
   it("grants one capped review rework with a fix list, then leaves a repeat to the controller", async () => {
     elevated();
@@ -5679,10 +5709,9 @@ describe("superuser housekeeping", () => {
       text: "Operator decision",
       at: NOW - 20 * 60_000,
     });
-    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
-      "isError",
-      true,
-    );
+    const overdue = await call("settle_park", { runId: "r-pr", action: "rework" });
+    expect(overdue).toHaveProperty("isError", true);
+    expect(overdue).toEqual(refused("Run is held."));
     expect(engineCalls).toEqual([]);
   });
   it("refused reruns cost no shared budget", async () => {

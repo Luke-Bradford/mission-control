@@ -15,3 +15,14 @@ it("keeps the populated Audit dashboard readable at desktop and phone widths", (
   expect(phone).toContain(".audit-grid");
   expect(phone).toContain("grid-template-columns: minmax(0, 1fr)");
 });
+
+it("keeps a PR fill independent from its fixed-width track", () => {
+  const track = rule(".audit-bar-track");
+  const fill = rule(".audit-bar");
+
+  expect(track).toContain("flex: 1");
+  expect(track).toContain("min-width: 36px");
+  expect(fill).toContain("display: block");
+  expect(fill).not.toMatch(/(?:min-)?width:/);
+  expect(fill).not.toContain("flex:");
+});

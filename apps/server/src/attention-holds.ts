@@ -4,7 +4,13 @@ import type {
   AttentionItem,
   AttentionWaitCondition,
 } from "@mc/core";
-import { BRIEF_KEY_MAX, type BriefOption, flightFloorBlocked, GUARD_ACK_PREFIX } from "@mc/core";
+import {
+  BRIEF_KEY_MAX,
+  type BriefOption,
+  COMMS_OPEN_PREFIX,
+  flightFloorBlocked,
+  GUARD_ACK_PREFIX,
+} from "@mc/core";
 import { z } from "zod";
 import { runAccountId } from "./account-bindings.ts";
 import type { CcConfig } from "./config.ts";
@@ -178,7 +184,15 @@ export function protectedDecisionItem(
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key.startsWith(`${NOTE_KEY}${GUARD_ACK_PREFIX}`)) return true;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  const run = note?.runId ? store.run(note.runId) : null;
+  // A Comms question or blocker has no note: it is held when its sender's run is.
+  const commsOpen = item.key.startsWith(COMMS_OPEN_PREFIX);
+  const run = commsOpen
+    ? item.agentId === null
+      ? null
+      : (store.seatRun(item.agentId) ?? null)
+    : note?.runId
+      ? store.run(note.runId)
+      : null;
   if (
     run &&
     config !== undefined &&
@@ -199,7 +213,7 @@ export function protectedDecisionItem(
       )
   )
     return true;
-  if (item.kind !== "blocked") return false;
+  if (item.kind !== "blocked" || commsOpen) return false;
   const parked = run?.loop?.parked?.kind;
   // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked
   // note. Missing source rows are deliberately treated as protected rather than defaulted.
