@@ -107,6 +107,12 @@
   color: var(--fg-2);
   font-size: 11px;
 }
+.map-lens-trace {
+  padding: 3px 5px;
+  font: 10px var(--mono);
+  color: var(--fg-2);
+  background: var(--surface-2);
+}
 .map-lens-tabs {
   display: inline-flex;
   margin: 0;
@@ -136,6 +142,13 @@
   gap: 10px;
   min-height: 0;
 }
+.map-main-impact {
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
+}
+
+.map-main-history {
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
+}
 .map-stage-wrap {
   position: relative;
   min-width: 0;
@@ -155,6 +168,129 @@
   width: 100%;
   height: 100%;
   touch-action: none;
+}
+.map-treemap {
+  --treemap-bg: var(--void);
+  --treemap-folder: var(--void-2);
+  --treemap-line: var(--void-line);
+  --treemap-ink: var(--void-ink);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--treemap-bg);
+}
+:root[data-theme="light"] .map-treemap {
+  --treemap-bg: var(--surface);
+  --treemap-folder: var(--surface-2);
+  --treemap-line: var(--line-2);
+  --treemap-ink: var(--fg);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .map-treemap {
+    --treemap-bg: var(--surface);
+    --treemap-folder: var(--surface-2);
+    --treemap-line: var(--line-2);
+    --treemap-ink: var(--fg);
+  }
+}
+.map-treemap-folder {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--treemap-line);
+  background: var(--treemap-folder);
+  color: var(--muted);
+  font: 10px var(--mono);
+  pointer-events: none;
+}
+.map-treemap-folder > .map-treemap-folder-label {
+  display: block;
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-treemap-tile {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+  overflow: hidden;
+  border: 1px solid var(--treemap-line);
+  border-radius: 1px;
+  box-shadow: none;
+  font: 10px var(--mono);
+  text-align: left;
+  color: var(--treemap-ink);
+  opacity: calc(0.22 + var(--tile-intensity) * 0.78);
+}
+.map-treemap-impact .map-treemap-tile {
+  background: color-mix(
+    in srgb,
+    var(--tile-colour) calc(var(--tile-intensity) * 85%),
+    var(--treemap-bg)
+  );
+}
+.map-treemap-tile[data-neutral] {
+  background: var(--treemap-folder);
+  opacity: 0.2;
+}
+.map-treemap-history .map-treemap-tile {
+  background: color-mix(
+    in srgb,
+    var(--accent) calc(var(--tile-intensity) * 85%),
+    var(--treemap-bg)
+  );
+}
+.map-treemap-tile[data-overlap] {
+  outline: 2px solid var(--rem);
+  outline-offset: -2px;
+}
+.map-treemap-impact .map-treemap-tile[data-direct-import] {
+  border: 2px dashed var(--treemap-ink);
+  background: var(--treemap-folder);
+  opacity: 0.9;
+}
+.map-treemap-tile[data-fix-heavy]::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 7px solid var(--rem);
+  border-left: 7px solid transparent;
+  content: "";
+}
+.map-treemap-tile[data-dim] {
+  opacity: 0.12;
+}
+.map-treemap-tile[data-focused] {
+  outline: 2px solid var(--treemap-ink);
+  outline-offset: -2px;
+  opacity: 1;
+}
+.map-treemap-tile > .map-treemap-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-treemap-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.map-treemap-links line {
+  stroke: var(--treemap-ink);
+  stroke-width: 0.45;
+  opacity: 0.85;
+}
+.map-treemap-links line[data-hidden] {
+  stroke-dasharray: 1.5 1.5;
+  opacity: 0.5;
 }
 .map-stage > p[role="status"],
 .map-wait-note {
@@ -183,12 +319,26 @@
   pointer-events: none;
   z-index: 1;
 }
+.map-analytical-key {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-2);
+  pointer-events: none;
+}
 .map-key-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.map-legend i {
+.map-legend i,
+.map-analytical-key i {
   display: inline-block;
   background: var(--void-ink);
 }
@@ -207,6 +357,47 @@
   height: 7px;
   border-radius: 50%;
   background: linear-gradient(90deg, var(--void-ink) 50%, var(--void-muted) 50%);
+}
+.map-key-steps {
+  display: inline-flex;
+  gap: 1px;
+}
+.map-key-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 1px;
+  background: var(--key-colour, var(--accent));
+}
+.map-key-steps-impact {
+  --key-colour: var(--seat-1);
+}
+.map-key-steps-focus,
+.map-key-steps-history {
+  --key-colour: var(--accent);
+}
+.map-key-swatch-1 {
+  opacity: 0.85;
+}
+.map-key-swatch-2 {
+  opacity: 0.45;
+}
+.map-key-swatch-3 {
+  opacity: 0.27;
+}
+.map-key-swatch-4 {
+  opacity: 0.14;
+}
+.map-legend .map-key-outline,
+.map-analytical-key .map-key-outline {
+  box-sizing: border-box;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-2);
+}
+.map-key-overlap {
+  box-shadow: inset 0 0 0 1.5px var(--rem);
+}
+.map-key-fix {
+  background: linear-gradient(135deg, var(--rem) 0 50%, transparent 50%);
 }
 .map-page .add {
   color: var(--add);
@@ -373,9 +564,33 @@
   color: var(--fg);
   font: inherit;
   text-align: left;
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.map-lens-directory {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.map-lens-filename {
+  flex: none;
+  white-space: nowrap;
+}
+.map-lens-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.map-lens-columns span:last-child {
+  text-align: right;
+}
+.map-lens-note {
+  color: var(--muted);
 }
 .map-lens-file:hover,
 .map-lens-back:hover {

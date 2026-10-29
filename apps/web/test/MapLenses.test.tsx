@@ -1,8 +1,9 @@
 import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { graph, lensVisuals } from "../src/map/Lenses.tsx";
+import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
+import { historyHeat, isFixHeavy, treemapLayout } from "../src/map/MapTreemap.tsx";
 
 const scenes = vi.hoisted(
   () =>
@@ -64,6 +65,43 @@ it("marks only changed code files that import another seat's changed code as Imp
   expect(lensVisuals(sameFile, "impact", null)["src/contract.ts"]?.overlap).toBeFalsy();
 });
 
+it("traces and colours an indirect test when focused outside the changed reach", () => {
+  const value = snapshot();
+  value.tree.push(
+    { path: "src/isolated.ts", lines: 12 },
+    { path: "src/isolated-consumer.ts", lines: 12 },
+    { path: "src/direct-import.ts", lines: 12 },
+    { path: "test/isolated.test.ts", lines: 12 },
+  );
+  value.imports.push(
+    { from: "src/isolated-consumer.ts", to: "src/isolated.ts" },
+    { from: "test/isolated.test.ts", to: "src/isolated-consumer.ts" },
+    { from: "src/isolated.ts", to: "src/direct-import.ts" },
+  );
+
+  const visuals = lensVisuals(value, "impact", "src/isolated.ts");
+  expect(visuals["src/isolated.ts"]).toMatchObject({ seat: 0, distance: 0, dim: false });
+  expect(visuals["test/isolated.test.ts"]).toMatchObject({ seat: 0, distance: 2, dim: false });
+  expect(visuals["src/direct-import.ts"]).toMatchObject({ directImport: true, dim: false });
+  expect(visuals["src/direct-import.ts"]?.distance).toBeUndefined();
+  expect(impactFocusLinks(value, "src/isolated.ts")).toContainEqual({
+    from: "src/isolated.ts",
+    to: "test/isolated.test.ts",
+  });
+
+  render(<CrewMapView snapshot={value} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  fireEvent.click(document.querySelector(".map-treemap-tile[title='src/isolated.ts']") as Element);
+  const lens = screen.getByRole("region", { name: "Impact lens" });
+  expect(within(lens).getAllByRole("button", { name: "test/isolated.test.ts" })).toHaveLength(1);
+  expect(document.querySelectorAll(".map-treemap-links line")).toHaveLength(3);
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/direct-import.ts']")
+      ?.hasAttribute("data-direct-import"),
+  ).toBe(true);
+});
+
 it("keeps non-code changes out of Impact code rows and untested findings", () => {
   const value = snapshot();
   value.tree.push({ path: "README.md", lines: 4 }, { path: "config/map.yaml", lines: 4 });
@@ -101,6 +139,7 @@ it("does not report a changed test file as untested code", () => {
     },
   };
   value.seats[1] = { ...value.seats[1], scope: { read: [], modified: [] } };
+  expect(lensVisuals(value, "impact", null)["test/consumer.test.ts"]).toBeUndefined();
   render(<CrewMapView snapshot={value} />);
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
   const heading = screen.getByRole("heading", { name: "Changed, and no test imports them" });
@@ -176,15 +215,13 @@ it("shows Impact tallies, dependency overlap, untested changes, cycles, and a fo
   expect(lens.textContent).toContain("It imports");
   expect(lens.textContent).toContain("3depend on it");
   expect(lens.textContent).not.toContain("Further downstreamsrc/contract.ts");
-  await waitFor(() =>
-    expect(
-      scenes.some((scene) =>
-        scene.focusLinks?.some(
-          (edge) => edge.from === "src/contract.ts" && edge.to === "src/cycle.ts",
-        ),
-      ),
-    ).toBe(true),
-  );
+  const focusedKey = screen.getByRole("note", { name: "Impact colour scale" });
+  expect(focusedKey.textContent).toContain("contract.ts");
+  expect(focusedKey.textContent).toContain("1 · 2 · 3 · 4+ steps away");
+  expect(focusedKey.textContent).toContain("it imports");
+  expect(focusedKey.textContent).toContain("Esc to clear");
+  expect(focusedKey.querySelectorAll(".map-key-swatch")).toHaveLength(5);
+  expect(document.querySelectorAll(".map-treemap-links line")).not.toHaveLength(0);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(lens.textContent).toContain("Changes overlap through imports");
 });
@@ -201,11 +238,9 @@ it("treats a branching import SCC as one audit unit and map clicks toggle lens f
   expect(graph(value).cycles).toEqual([["src/consumer.ts", "src/contract.ts", "src/cycle.ts"]]);
   render(<CrewMapView snapshot={snapshot()} />);
   fireEvent.click(screen.getByRole("button", { name: "History" }));
-  const select = scenes.findLast((entry) => entry.onSelect !== undefined)?.onSelect;
-  if (select === undefined) throw new Error("expected a scene selection callback");
-  act(() => select("src/contract.ts"));
+  fireEvent.click(document.querySelector(".map-treemap-tile[title='src/contract.ts']") as Element);
   expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Latest PRs");
-  act(() => select("src/contract.ts"));
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
   expect(screen.getByRole("region", { name: "History lens" }).textContent).toContain("Hotspots");
 });
 
@@ -217,7 +252,7 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
   expect(lens.textContent).toContain("Hotspots the seats are changing");
   expect(lens.textContent).toContain("Fixed most often");
   expect(lens.textContent).toContain("Change together, no import between them");
-  expect(lens.textContent).toContain("22 of 59");
+  expect(lens.textContent).toContain("59 · 22");
   const historyContract = within(lens).getAllByRole("button", { name: "src/contract.ts" })[0];
   if (historyContract === undefined) throw new Error("expected the changed contract file");
   fireEvent.click(historyContract);
@@ -226,11 +261,159 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
     "https://github.com/Luke-Bradford/mission-control/pull/837",
   );
   expect(lens.textContent).toContain("Changes together with");
+  expect(document.querySelectorAll(".map-treemap-links line")).not.toHaveLength(0);
+});
+
+it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
+  const value = snapshot();
+  value.tree.push(
+    { path: "test/history.test.ts", lines: 12 },
+    { path: "src/unrelated.ts", lines: 12 },
+    { path: "apps/server/src/account-bindings.ts", lines: 12 },
+  );
+  value.hist.files["5"] = [20, 9, Date.UTC(2026, 9, 28), [838]];
+  value.seats[1] = {
+    ...value.seats[1],
+    scope: {
+      read: [],
+      modified: [
+        ...value.seats[1].scope.modified,
+        { file: "src/contract.ts", add: 1, rem: 0, source: "diff" },
+        { file: "test/consumer.test.ts", add: 1, rem: 0, source: "diff" },
+        { file: "apps/server/src/account-bindings.ts", add: 1, rem: 0, source: "diff" },
+      ],
+    },
+  };
+  value.seats.push({
+    ...structuredClone(value.seats[0]),
+    seat: "IDLE-1",
+    scope: { read: [], modified: [] },
+  });
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("img", { name: "Impact reach treemap" })).toBeTruthy();
+  expect(document.body.textContent).toContain("changed · imports it · 2 · 3+ steps");
   expect(
-    scenes.some((scene) =>
-      scene.focusLinks?.some(
-        (edge) => edge.from === "src/contract.ts" && edge.to === "src/untested.ts",
-      ),
-    ),
+    screen.getByRole("note", { name: "Impact colour scale" }).querySelectorAll(".map-key-swatch"),
+  ).toHaveLength(5);
+  const impact = screen.getByRole("region", { name: "Impact lens" });
+  expect(impact.textContent).toContain("tests · import · depend");
+  expect(impact.textContent).toContain("Test files changed separately");
+  expect(impact.textContent).not.toContain("test reaches it");
+  expect(
+    screen
+      .getAllByTitle("apps/server/src/account-bindings.ts")
+      .find((element) => element.classList.contains("map-lens-file"))?.textContent,
+  ).toBe("…/server/src/account-bindings.ts");
+  expect(screen.queryByRole("heading", { name: "IDLE-1" })).toBeNull();
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/unrelated.ts']")
+      ?.hasAttribute("data-neutral"),
   ).toBe(true);
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/consumer.ts']")
+      ?.hasAttribute("data-overlap"),
+  ).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
+  expect(document.body.textContent).toContain("1–2 PRs");
+  expect(document.body.textContent).toContain("30+ PRs");
+  const historyKey = screen.getByRole("note", { name: "History PR heat scale" });
+  expect(historyKey.querySelectorAll(".map-key-swatch")).toHaveLength(5);
+  expect(
+    [...historyKey.querySelectorAll(".map-key-steps-history .map-key-swatch")].map((swatch) =>
+      Number(swatch.getAttribute("data-opacity")),
+    ),
+  ).toEqual([0.16, 0.36, 0.6, 0.85]);
+  const history = screen.getByRole("region", { name: "History lens" });
+  expect(history.textContent).toContain("PRs · fixes");
+  expect(document.body.textContent).toContain("hidden change coupling");
+  const hotspots = screen.getByRole("heading", {
+    name: "Hotspots the seats are changing",
+  }).parentElement;
+  expect(
+    within(hotspots as HTMLElement).getAllByRole("button", { name: "src/contract.ts" }),
+  ).toHaveLength(1);
+  expect(history.textContent).not.toContain("history.test.ts");
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/contract.ts']")
+      ?.hasAttribute("data-fix-heavy"),
+  ).toBe(true);
+});
+
+it("packs the complete hierarchy inside the viewport and anchors links to tile centres", () => {
+  const layout = treemapLayout(
+    [
+      { path: "apps/web/src/large.ts", lines: 500 },
+      { path: "apps/web/src/small.ts", lines: 5 },
+      { path: "packages/core/src/index.ts", lines: 100 },
+    ],
+    1600,
+    1000,
+  );
+  expect(layout.folders.some((folder) => folder.path === "apps/web/src")).toBe(true);
+  for (const tile of layout.tiles) {
+    expect(tile.x).toBeGreaterThanOrEqual(0);
+    expect(tile.y).toBeGreaterThanOrEqual(0);
+    expect(tile.x + tile.width).toBeLessThanOrEqual(1600.001);
+    expect(tile.y + tile.height).toBeLessThanOrEqual(1000.001);
+  }
+  const large = layout.byPath.get("apps/web/src/large.ts");
+  const small = layout.byPath.get("apps/web/src/small.ts");
+  if (!large || !small) throw new Error("expected treemap leaves");
+  expect(large.center).toEqual([large.x + large.width / 2, large.y + large.height / 2]);
+  expect(small.center).toEqual([small.x + small.width / 2, small.y + small.height / 2]);
+});
+
+it("keeps every file tile positive in a mockup-sized nested repository", () => {
+  const files = Array.from({ length: 753 }, (_, index) => ({
+    path: `apps/server/src/area-${index % 19}/deep/nested/file-${index}.ts`,
+    lines: 1 + (index % 80),
+  }));
+  const layout = treemapLayout(files, 1600, 1000);
+  expect(layout.tiles).toHaveLength(753);
+  expect(layout.tiles.every((tile) => tile.width > 0 && tile.height > 0)).toBe(true);
+  expect(
+    Math.max(
+      ...layout.tiles.map((tile) => Math.max(tile.width / tile.height, tile.height / tile.width)),
+    ),
+  ).toBeLessThan(20_000);
+});
+
+it("uses fixed PR heat bands rather than scaling to the hottest file", () => {
+  expect([
+    historyHeat(1),
+    historyHeat(2),
+    historyHeat(3),
+    historyHeat(9),
+    historyHeat(10),
+    historyHeat(29),
+    historyHeat(30),
+  ]).toEqual([0.16, 0.16, 0.36, 0.36, 0.6, 0.6, 0.85]);
+});
+
+it("marks files fixed often at the v3 absolute or proportional thresholds", () => {
+  expect(isFixHeavy(5, 100)).toBe(true);
+  expect(isFixHeavy(3, 6)).toBe(true);
+  expect(isFixHeavy(4, 8)).toBe(true);
+  expect(isFixHeavy(3, 7)).toBe(false);
+  expect(isFixHeavy(4, 0)).toBe(false);
+});
+
+it("squarifies equal root files at the 1600×1000 reference size", () => {
+  const layout = treemapLayout(
+    Array.from({ length: 4 }, (_, index) => ({ path: `file-${index}.ts`, lines: 10 })),
+    1600,
+    1000,
+  );
+  expect(
+    Math.max(
+      ...layout.tiles.map((tile) => Math.max(tile.width / tile.height, tile.height / tile.width)),
+    ),
+  ).toBeLessThanOrEqual(2);
 });

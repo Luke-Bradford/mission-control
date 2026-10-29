@@ -6,6 +6,8 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
 import {
+  downstream,
+  graph,
   HistoryLens,
   historyFocusLinks,
   ImpactLens,
@@ -17,6 +19,7 @@ import {
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
+import { historyHeat, MapTreemap } from "./MapTreemap.tsx";
 import { layoutTree } from "./model.ts";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
 import "./map.css";
@@ -288,34 +291,49 @@ export function CrewMapView({
             setFocus(null);
           }}
         />
-        {lens === "impact" && <span>Click a file to trace its importers, tests, and imports.</span>}
-        {lens === "history" && <span>Hotspots and hidden change contracts from merged PRs.</span>}
+        {lens === "impact" || lens === "history" ? (
+          <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
+        ) : null}
+        {lens === "impact" && focus !== null && (
+          <span className="map-lens-trace">Focused file and its relationships are traced.</span>
+        )}
       </div>
-      <div className="map-main">
+      <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
-          <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-            <Scene
-              nodes={displayNodes}
-              areas={areas}
-              snapshot={stage}
-              names={names}
-              focus={focusNode?.path ?? null}
-              focusLinks={focusLinks}
+          {lens === "changes" ? (
+            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
+              <Scene
+                nodes={displayNodes}
+                areas={areas}
+                snapshot={stage}
+                names={names}
+                focus={focusNode?.path ?? null}
+                focusLinks={focusLinks}
+                lens={lens}
+                lensVisual={lensVisual}
+                home={home}
+                overview={overview}
+                rotate={rotate}
+                selected={selectedPath}
+                indices={colours}
+                onSelect={selectFromScene}
+                seat={selectedSeat?.seat ?? null}
+                seatFocus={seatFocus}
+                dockSeats={snapshot.seats.length}
+                onSeatSelect={followFromStage}
+              />
+            </Suspense>
+          ) : (
+            <MapTreemap
+              snapshot={snapshot}
               lens={lens}
-              lensVisual={lensVisual}
-              home={home}
-              overview={overview}
-              rotate={rotate}
-              selected={selectedPath}
-              indices={colours}
+              visual={lensVisual}
+              focus={focus}
+              focusLinks={focusLinks}
               onSelect={selectFromScene}
-              seat={selectedSeat?.seat ?? null}
-              seatFocus={seatFocus}
-              dockSeats={snapshot.seats.length}
-              onSeatSelect={followFromStage}
             />
-          </Suspense>
-          <MapKey tree={snapshot.tree} />
+          )}
+          {lens === "changes" && <MapKey tree={snapshot.tree} />}
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -472,5 +490,74 @@ function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
         {tree.length > 2000 && ", every file shown as an individual point"}
       </span>
     </p>
+  );
+}
+
+function KeySteps({ tone }: { tone: "impact" | "focus" | "history" }) {
+  const heatBands = tone === "history" ? [1, 3, 10, 30].map(historyHeat) : null;
+  return (
+    <span className={`map-key-steps map-key-steps-${tone}`} aria-hidden="true">
+      {[1, 2, 3, 4].map((step) => (
+        <i
+          className={`map-key-swatch map-key-swatch-${step}`}
+          data-opacity={heatBands?.[step - 1]}
+          key={step}
+          style={heatBands ? { opacity: heatBands[step - 1] } : undefined}
+        />
+      ))}
+    </span>
+  );
+}
+
+function AnalyticalMapKey({
+  lens,
+  focus,
+  snapshot,
+}: {
+  lens: Exclude<MapLens, "changes">;
+  focus: string | null;
+  snapshot: MapSnapshot;
+}) {
+  if (lens === "impact" && focus !== null) {
+    const { forward, reverse } = graph(snapshot);
+    const reach = downstream(focus, reverse);
+    return (
+      <div className="map-analytical-key" role="note" aria-label="Impact colour scale">
+        <span className="map-key-item">
+          <b>{focus.split("/").at(-1)}</b> · {reverse.get(focus)?.size ?? 0} import it ·{" "}
+          {reach.size} depend on it
+        </span>
+        <span className="map-key-item">
+          <KeySteps tone="focus" /> 1 · 2 · 3 · 4+ steps away
+        </span>
+        <span className="map-key-item">
+          <i className="map-key-swatch map-key-outline" aria-hidden="true" /> it imports (
+          {forward.get(focus)?.size ?? 0})
+        </span>
+        <span className="map-key-item">Esc to clear</span>
+      </div>
+    );
+  }
+  return lens === "impact" ? (
+    <div className="map-analytical-key" role="note" aria-label="Impact colour scale">
+      <span className="map-key-item">
+        <KeySteps tone="impact" /> changed · imports it · 2 · 3+ steps
+      </span>
+      <span className="map-key-item">
+        <i className="map-key-swatch map-key-outline map-key-overlap" aria-hidden="true" /> changed,
+        and depends on another seat’s change
+      </span>
+      <span className="map-key-item">click a file to trace it</span>
+    </div>
+  ) : (
+    <div className="map-analytical-key" role="note" aria-label="History PR heat scale">
+      <span className="map-key-item">
+        <KeySteps tone="history" /> 1–2 PRs · 3–9 PRs · 10–29 PRs · 30+ PRs
+      </span>
+      <span className="map-key-item">
+        <i className="map-key-swatch map-key-fix" aria-hidden="true" /> fixed often
+      </span>
+      <span className="map-key-item">hotspots and hidden change coupling</span>
+    </div>
   );
 }
