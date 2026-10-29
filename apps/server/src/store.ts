@@ -4707,16 +4707,24 @@ export class Store {
   }
 
   /** A configured check ran to its end on `headSha`: `ok` when the command exited successfully. */
-  addCheckRun(c: { runId: string; command: string; headSha: string; ok: boolean; at: number }): void {
+  addCheckRun(c: {
+    runId: string;
+    command: string;
+    headSha: string;
+    ok: boolean;
+    at: number;
+  }): void {
     this.db
-      .prepare(
-        "INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)",
-      )
+      .prepare("INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)")
       .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
   }
 
   /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */
-  latestCheckRun(runId: string, command: string, headSha: string): { ok: boolean; at: number } | null {
+  latestCheckRun(
+    runId: string,
+    command: string,
+    headSha: string,
+  ): { ok: boolean; at: number } | null {
     const r = this.db
       .prepare(
         `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?

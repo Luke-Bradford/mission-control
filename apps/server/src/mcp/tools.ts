@@ -15,6 +15,7 @@ import {
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  type CheckState,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_LABELS,
@@ -142,6 +143,7 @@ import {
   prOpenedByLine,
   protectedPathsText,
   prSecretText,
+  pushChecksText,
   pushedText,
   pushForeignText,
   pushReferenceText,
@@ -224,6 +226,11 @@ export interface McToolsDeps {
   profiles?: () => readonly Profile[] | ProfilesError;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
+  /**
+   * The run's repo's configured checks (`mc.checks`), read for each push; none (or absent): the push
+   * is not gated on them.
+   */
+  checks?: (runId: string) => Promise<readonly string[]>;
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -673,6 +680,37 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       return { text: MC_PUSH_FAILED, isError: true };
     }
 
+    /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
+    async function unmetChecks(sha: string): Promise<{ command: string; state: CheckState }[]> {
+      const unmet: { command: string; state: CheckState }[] = [];
+      for (const command of (await deps.checks?.(runId)) ?? []) {
+        const last = store.latestCheckRun(runId, command, sha);
+        if (last === null) unmet.push({ command, state: "missing" });
+        else if (!last.ok) unmet.push({ command, state: "failed" });
+      }
+      return unmet;
+    }
+
+    /** Whether a commit with these parents merges origin's default branch in (every later parent is on it). */
+    async function mergesMain(
+      g: (a: string[]) => Promise<string>,
+      parents: readonly string[],
+      defaultSha: string,
+    ): Promise<boolean> {
+      if (parents.length < 2) return false;
+      for (const parent of parents.slice(1)) {
+        const onMain = await g(["merge-base", "--is-ancestor", parent, defaultSha]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+        if (!onMain) return false;
+      }
+      return true;
+    }
+
     async function steps(
       run: Run,
       g: (a: string[], o?: { maxBuffer?: number }) => Promise<string>,
@@ -741,7 +779,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         .filter((l) => l !== "")
         .map((l) => {
           const [id = "", ...parents] = l.split(" ");
-          return { sha: id, parents: parents.length };
+          return { sha: id, parents: parents.length, parentIds: parents };
         });
       if (commits.length === 0) return { text: NOTHING_TO_PUSH };
 
@@ -756,6 +794,14 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       // no Needs-you item of its own here.
       if (foreign.length > 0) return { text: pushForeignText(foreign), isError: true };
       if (commits.some((c) => c.parents === 0)) return { text: MC_PUSH_ROOT, isError: true };
+
+      // 3b. every configured check passed on exactly this commit (the hub saw the seat run it).
+      // A merge of main is the engine's own commit, not the seat's work: it is not gated.
+      const tip = commits.find((c) => c.sha === sha);
+      if (tip === undefined || !(await mergesMain(g, tip.parentIds, heads.defaultSha))) {
+        const unmet = await unmetChecks(sha);
+        if (unmet.length > 0) return { text: pushChecksText(sha, unmet), isError: true };
+      }
 
       // 4. the clone's objects are sound
       try {

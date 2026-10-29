@@ -98,5 +98,6 @@ mc:
     - ".codex/**"
     - ".claude/**"
   ci: null
+  checks: ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s vitest run --changed origin/main"]
   always_ask: []
 ```

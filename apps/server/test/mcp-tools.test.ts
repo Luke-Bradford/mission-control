@@ -59,6 +59,7 @@ import {
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_UNCLOSED,
+  MC_PUSH_CHECKS,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
   MC_PUSH_ROOT,
@@ -84,6 +85,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  pushChecksText,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -2340,6 +2342,119 @@ describe("push and draft_pr", () => {
         isError: true,
       });
       expect(remoteTip()).toBeNull();
+    });
+
+    describe("the configured checks", () => {
+      const LINT = "pnpm -s lint";
+      const TYPES = "pnpm -s typecheck";
+      const gated = (over: Partial<McToolsDeps> = {}) =>
+        ts({ checks: async () => [LINT, TYPES], ...over });
+      const ran = (command: string, headSha: string, ok: boolean, at = NOW) =>
+        store.addCheckRun({ runId: RUN, command, headSha, ok, at });
+      const refusal = (
+        head: string,
+        found: { command: string; state: "missing" | "failed" }[],
+      ) => ({
+        text: pushChecksText(head, found),
+        isError: true,
+      });
+
+      it("pushes a head on which every configured check passed", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        ran(TYPES, sha, true);
+        expect(await push(gated())).toEqual({ text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.` });
+        expect(remoteTip()).toBe(sha);
+      });
+
+      it("refuses a check that was never run, naming it and its command", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        const r = await push(gated());
+        expect(r).toEqual(refusal(sha, [{ command: TYPES, state: "missing" }]));
+        expect(r.text).toContain(MC_PUSH_CHECKS);
+        expect(r.text).toContain(`not run: ${TYPES}`);
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("refuses a check that failed, naming it", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, false);
+        ran(TYPES, sha, true);
+        const r = await push(gated());
+        expect(r).toEqual(refusal(sha, [{ command: LINT, state: "failed" }]));
+        expect(r.text).toContain(`failed: ${LINT}`);
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("takes the newest run: a pass after a failure passes, a failure after a pass refuses", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, false, NOW);
+        ran(LINT, sha, true, NOW + 1);
+        ran(TYPES, sha, true, NOW);
+        ran(TYPES, sha, false, NOW + 1);
+        expect(await push(gated())).toEqual(refusal(sha, [{ command: TYPES, state: "failed" }]));
+      });
+
+      it("refuses checks that passed on an older head, and lists every missing one", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, old, true);
+        ran(TYPES, old, true);
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        expect(await push(gated())).toEqual(
+          refusal(sha, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("ignores another run's records", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({ runId: "other", command: LINT, headSha: sha, ok: true, at: NOW });
+        store.addCheckRun({ runId: "other", command: TYPES, headSha: sha, ok: true, at: NOW });
+        expect((await push(gated())).isError).toBe(true);
+      });
+
+      it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
+        write("apps/a.ts", "branch\n");
+        git(wt, "commit", "-qam", "feat: branch");
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: head(), at: NOW });
+        operatorPushes("docs/main.md", "main");
+        git(clone, "fetch", "-q", "origin");
+        git(wt, "merge", "--no-ff", "-q", "-m", "merge main", "origin/main");
+        const merge = head();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+        expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
+        const next = await commitOk("apps/a.ts", "on top\n");
+        expect(await push(gated())).toEqual(
+          refusal(next, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
+      it("does not gate a repo that configures no checks", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        expect(await push(ts({ checks: async () => [] }))).toEqual({
+          text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+        });
+      });
+
+      it("does not gate when the hub has no way to read checks", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      });
+
+      it("answers Already on origin without asking for checks", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, sha, true);
+        ran(TYPES, sha, true);
+        await push(gated());
+        expect(await push(gated())).toEqual({ text: `Already on origin: ${sha.slice(0, 7)}.` });
+      });
     });
 
     describe("a merge of main", () => {

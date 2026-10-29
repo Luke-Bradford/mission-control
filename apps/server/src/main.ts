@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
+import { cloneState, configuredChecks, createCheckRecorder } from "./check-runs.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
 import {
@@ -160,6 +161,15 @@ export async function main(): Promise<void> {
     for (const note of notes) log(`engine: ${note}`);
     return rules;
   };
+  // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
+  // they ran on, and `mc push` asks for the record.
+  const runChecks = configuredChecks(store, engineRules);
+  const checkRecorder = createCheckRecorder({
+    store,
+    checks: runChecks,
+    state: cloneState(config, store),
+    log: (line) => log(line),
+  });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.
   const crewEnabled =
@@ -175,6 +185,7 @@ export async function main(): Promise<void> {
     rules: engineRules,
     login: () => hubLogin,
     profiles,
+    checks: checkRecorder,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
@@ -219,6 +230,7 @@ export async function main(): Promise<void> {
     bus,
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     profiles,
+    checks: runChecks,
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
@@ -497,6 +509,7 @@ export async function main(): Promise<void> {
     updater,
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
     ...crewGuardDeps(config, tokens, lock, store),
+    checks: checkRecorder,
     mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],
   });
