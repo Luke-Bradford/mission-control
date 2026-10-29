@@ -27,6 +27,7 @@ import {
   type AwaySettings,
   type BoardItem,
   type ChangedFiles,
+  CI_TRIES,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
   type ConfigView,
@@ -56,6 +57,7 @@ import {
   type PullRequestView,
   projectAtReset,
   READONLY_FILES_NOTE,
+  REVIEW_ROUNDS,
   type ReloadResult,
   type Run,
   type RunDigest,
@@ -6809,6 +6811,37 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/profiled/loop")).json().round).toBe(2);
   });
 
+  it("serves an older run's timestamps and profile limits from its loop view", async () => {
+    const profile = { ...DEFAULT_PROFILES[0], tries: 5, rounds: 2 };
+    store.upsertRun(
+      run({
+        id: "older-loop",
+        agentId: "guido-1",
+        loop,
+        startedAt: NOW - 2 * HOUR,
+        endedAt: NOW - HOUR,
+        status: "ok",
+        profile: {
+          profile,
+          route: { by: "size", size: "S" },
+          hash: "older-profile",
+        },
+      }),
+    );
+    store.upsertRun(run({ id: "newer-run", agentId: "guido-1", startedAt: NOW }));
+
+    expect((await get("/api/agents/guido-1/runs?limit=1")).json<RunView[]>()).toEqual([
+      expect.objectContaining({ id: "newer-run" }),
+    ]);
+    expect((await get("/api/runs/older-loop/loop")).json()).toMatchObject({
+      runId: "older-loop",
+      startedAt: NOW - 2 * HOUR,
+      endedAt: NOW - HOUR,
+      limits: { tries: 5, rounds: 2 },
+    });
+    expect((await get("/api/runs/newer-run/loop")).json().endedAt).toBeNull();
+  });
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -6842,6 +6875,9 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
     expect((await get("/api/runs/plain/loop")).json()).toEqual({
       runId: "plain",
+      startedAt: NOW - HOUR,
+      endedAt: null,
+      limits: { tries: CI_TRIES, rounds: REVIEW_ROUNDS },
       usage: {
         input: null,
         output: null,

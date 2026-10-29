@@ -256,6 +256,12 @@ export interface LoopTry {
 /** `GET /api/runs/:id/loop`. */
 export interface RunLoopView {
   runId: string;
+  /** The run's own timing, retained even after it leaves an agent's recent-runs list. */
+  startedAt?: number;
+  /** null while the run is still running. */
+  endedAt?: number | null;
+  /** The CI and rework caps selected when this run started. */
+  limits?: { tries: number; rounds: number };
   /** Full diagnostics for the operator's single-run view only. */
   noReport?: NoReport | null;
   usage?: RunUsage;

@@ -12,6 +12,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  CI_TRIES,
   type CiRunsView,
   type CliAccountStatus,
   COMMS_CANT_REASON_MAX,
@@ -3295,6 +3296,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
         const view: RunLoopView = {
           runId: run.id,
+          startedAt: run.startedAt,
+          endedAt: run.endedAt,
+          limits: {
+            tries: run.profile?.profile.tries ?? CI_TRIES,
+            rounds: run.profile?.profile.rounds ?? REVIEW_ROUNDS,
+          },
           usage: runUsage(store, run, now()),
           noReport: run.noReport ?? null,
           loop,
