@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, lensVisuals } from "../src/map/Lenses.tsx";
+import { treemapLayout } from "../src/map/MapTreemap.tsx";
 
 const scenes = vi.hoisted(
   () =>
@@ -221,6 +222,8 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
 
 it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   const value = snapshot();
+  value.tree.push({ path: "test/history.test.ts", lines: 12 });
+  value.hist.files["5"] = [20, 9, Date.UTC(2026, 9, 28), [838]];
   value.seats[1] = {
     ...value.seats[1],
     scope: {
@@ -245,6 +248,35 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   const history = screen.getByRole("region", { name: "History lens" });
   expect(history.textContent).toContain("PRs · fixes");
   expect(document.body.textContent).toContain("hidden change coupling");
-  expect(within(history).getAllByRole("button", { name: "src/contract.ts" })).toHaveLength(1);
-  expect(history.textContent).not.toContain("test/consumer.test.ts");
+  const hotspots = screen.getByRole("heading", {
+    name: "Hotspots the seats are changing",
+  }).parentElement;
+  expect(
+    within(hotspots as HTMLElement).getAllByRole("button", { name: "src/contract.ts" }),
+  ).toHaveLength(1);
+  expect(history.textContent).not.toContain("history.test.ts");
+});
+
+it("packs the complete hierarchy inside the viewport and anchors links to tile centres", () => {
+  const layout = treemapLayout(
+    [
+      { path: "apps/web/src/large.ts", lines: 500 },
+      { path: "apps/web/src/small.ts", lines: 5 },
+      { path: "packages/core/src/index.ts", lines: 100 },
+    ],
+    1600,
+    1000,
+  );
+  expect(layout.folders.some((folder) => folder.path === "apps/web")).toBe(true);
+  for (const tile of layout.tiles) {
+    expect(tile.x).toBeGreaterThanOrEqual(0);
+    expect(tile.y).toBeGreaterThanOrEqual(0);
+    expect(tile.x + tile.width).toBeLessThanOrEqual(1600);
+    expect(tile.y + tile.height).toBeLessThanOrEqual(1000);
+  }
+  const large = layout.byPath.get("apps/web/src/large.ts");
+  const small = layout.byPath.get("apps/web/src/small.ts");
+  if (!large || !small) throw new Error("expected treemap leaves");
+  expect(large.center).toEqual([large.x + large.width / 2, large.y + large.height / 2]);
+  expect(small.center).toEqual([small.x + small.width / 2, small.y + small.height / 2]);
 });

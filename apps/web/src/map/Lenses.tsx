@@ -577,7 +577,7 @@ export function HistoryLens({
     })
     .sort((a, b) => b.history[0] - a.history[0]);
   const fixed = [...histories.entries()]
-    .filter(([path, history]) => history[1] > 0 && !hotspots.some((row) => row.path === path))
+    .filter(([path, history]) => history[1] > 0 && !isTest(path))
     .sort((a, b) => b[1][1] - a[1][1] || b[1][0] - a[1][0])
     .slice(0, 10);
   const unlinked = [...partners.entries()]

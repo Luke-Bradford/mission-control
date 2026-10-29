@@ -1,8 +1,8 @@
 import type { MapSnapshot } from "@mc/core";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LensVisual, MapLens } from "./Lenses.tsx";
 
-const seatColours = [
+const colours = [
   "var(--seat-1)",
   "var(--seat-2)",
   "var(--seat-3)",
@@ -11,8 +11,99 @@ const seatColours = [
   "var(--seat-6)",
   "var(--seat-7)",
 ];
+type Rect = { x: number; y: number; width: number; height: number };
+export type TreemapTile = Rect & { path: string; center: [number, number] };
+export type TreemapFolder = Rect & { path: string; name: string };
+type Branch = { path: string; name: string; children: Branch[]; lines?: number };
+const weight = (node: Branch): number =>
+  node.lines === undefined
+    ? Math.max(
+        1,
+        node.children.reduce((n, c) => n + weight(c), 0),
+      )
+    : Math.max(4, node.lines);
 
-/** A compact, file-sized overview used by the analytical Map lenses. */
+/** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
+export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
+  const root: Branch = { path: "", name: "", children: [] };
+  for (const file of files) {
+    let node = root,
+      path = "";
+    for (const part of file.path.split("/")) {
+      path = path ? `${path}/${part}` : part;
+      let child = node.children.find((x) => x.name === part);
+      if (!child) {
+        child = { path, name: part, children: [] };
+        node.children.push(child);
+      }
+      node = child;
+    }
+    node.lines = file.lines;
+  }
+  const tiles: TreemapTile[] = [],
+    folders: TreemapFolder[] = [],
+    byPath = new Map<string, TreemapTile>();
+  const place = (node: Branch, box: Rect, depth: number) => {
+    if (node.lines !== undefined) {
+      const tile = {
+        ...box,
+        path: node.path,
+        center: [box.x + box.width / 2, box.y + box.height / 2] as [number, number],
+      };
+      tiles.push(tile);
+      byPath.set(tile.path, tile);
+      return;
+    }
+    if (depth) folders.push({ ...box, path: node.path, name: node.name });
+    const content = depth
+      ? {
+          x: box.x + 3,
+          y: box.y + 15,
+          width: Math.max(0, box.width - 6),
+          height: Math.max(0, box.height - 18),
+        }
+      : box;
+    const horizontal = content.width >= content.height,
+      total = node.children.reduce((n, c) => n + weight(c), 0);
+    let cursor = horizontal ? content.x : content.y;
+    for (const child of node.children) {
+      const size = ((horizontal ? content.width : content.height) * weight(child)) / total;
+      const childBox = horizontal
+        ? { x: cursor, y: content.y, width: size, height: content.height }
+        : { x: content.x, y: cursor, width: content.width, height: size };
+      cursor += size;
+      place(child, childBox, depth + 1);
+    }
+  };
+  place(root, { x: 0, y: 0, width, height }, 0);
+  return { tiles, folders, byPath };
+}
+
+function useSize() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 1000, height: 700 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height) setSize({ width: r.width, height: r.height });
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+const style = (r: Rect): CSSProperties => ({
+  left: `${r.x}px`,
+  top: `${r.y}px`,
+  width: `${r.width}px`,
+  height: `${r.height}px`,
+});
+
 export function MapTreemap({
   snapshot,
   lens,
@@ -28,63 +119,75 @@ export function MapTreemap({
   focusLinks?: { from: string; to: string; unlinked?: boolean }[];
   onSelect: (path: string) => void;
 }) {
-  const files = [...snapshot.tree].sort(
-    (a, b) => b.lines - a.lines || a.path.localeCompare(b.path),
+  const [ref, size] = useSize();
+  const layout = useMemo(
+    () => treemapLayout(snapshot.tree, size.width, size.height),
+    [snapshot.tree, size],
   );
-  const max = Math.max(
-    1,
-    ...files.map((file) => (lens === "history" ? (visual[file.path]?.hotspot ?? 0) : 1)),
-  );
-  const labelled = lens === "impact" ? "Impact reach treemap" : "History PR heat treemap";
-  const positions = new Map(
-    files.map((file, index) => [
-      file.path,
-      [5 + (index % 10) * 10, 7 + (Math.floor(index / 10) % 10) * 10],
-    ]),
-  );
+  const max = Math.max(1, ...layout.tiles.map((tile) => visual[tile.path]?.hotspot ?? 0));
   return (
-    <div className={`map-treemap map-treemap-${lens}`} role="img" aria-label={labelled}>
-      <div className="map-treemap-grid">
-        {files.map((file, index) => {
-          const value = visual[file.path];
-          const intensity =
-            lens === "history" ? (value?.hotspot ?? 0) / max : 1 / ((value?.distance ?? 3) + 1);
-          const span = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(Math.max(file.lines, 1)) / 10)));
-          return (
-            <button
-              type="button"
-              className="map-treemap-tile"
-              key={file.path}
-              data-focused={focus === file.path || undefined}
-              data-dim={value?.dim || undefined}
-              style={
-                {
-                  "--tile-intensity": intensity,
-                  "--tile-colour": seatColours[(value?.seat ?? index) % seatColours.length],
-                  gridColumn: `span ${span}`,
-                  gridRow: `span ${span}`,
-                } as CSSProperties
-              }
-              onClick={() => onSelect(file.path)}
-              title={file.path}
-            >
-              <span className="map-treemap-label">{file.path.split("/").at(-1)}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div
+      ref={ref}
+      className={`map-treemap map-treemap-${lens}`}
+      role="img"
+      aria-label={lens === "impact" ? "Impact reach treemap" : "History PR heat treemap"}
+    >
+      {layout.folders.map((folder) => (
+        <div key={folder.path} className="map-treemap-folder" style={style(folder)}>
+          <span className="map-treemap-folder-label">{folder.name}</span>
+        </div>
+      ))}
+      {layout.tiles.map((tile) => {
+        const v = visual[tile.path];
+        const active =
+          lens === "history"
+            ? v?.hotspot !== undefined
+            : v?.seat !== undefined && v.distance !== undefined;
+        const intensity = active
+          ? lens === "history"
+            ? (v?.hotspot ?? 0) / max
+            : 1 / ((v?.distance ?? 0) + 1)
+          : 0;
+        return (
+          <button
+            type="button"
+            className="map-treemap-tile"
+            key={tile.path}
+            data-focused={focus === tile.path || undefined}
+            data-dim={v?.dim || undefined}
+            data-neutral={!active || undefined}
+            style={
+              {
+                ...style(tile),
+                "--tile-intensity": intensity,
+                "--tile-colour": active
+                  ? colours[(v?.seat ?? 0) % colours.length]
+                  : "var(--void-line)",
+              } as CSSProperties
+            }
+            onClick={() => onSelect(tile.path)}
+            title={tile.path}
+          >
+            <span className="map-treemap-label">{tile.path.split("/").at(-1)}</span>
+          </button>
+        );
+      })}
       {focusLinks.length > 0 && (
-        <svg className="map-treemap-links" viewBox="0 0 100 100" aria-hidden="true">
+        <svg
+          className="map-treemap-links"
+          viewBox={`0 0 ${size.width} ${size.height}`}
+          aria-hidden="true"
+        >
           {focusLinks.map((link) => {
-            const from = positions.get(link.from);
-            const to = positions.get(link.to);
+            const from = layout.byPath.get(link.from),
+              to = layout.byPath.get(link.to);
             return from && to ? (
               <line
                 key={`${link.from}:${link.to}`}
-                x1={from[0]}
-                y1={from[1]}
-                x2={to[0]}
-                y2={to[1]}
+                x1={from.center[0]}
+                y1={from.center[1]}
+                x2={to.center[0]}
+                y2={to.center[1]}
                 data-hidden={link.unlinked || undefined}
               />
             ) : null;
