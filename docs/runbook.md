@@ -546,6 +546,34 @@ machine's hub also works. Do them in this order; the sections they name have the
    The branch check in 3 above sees a run the other hub started only once that run has pushed. If it
    could have started the ticket in the minute before you moved the card, ask whoever runs it.
 
+8. **The controller session.** The Claude Code session you run the crew from (the controller).
+   `REPO` below is the folder you open Claude Code in (here, `~/Dev/mission-control`); start the
+   session at the repo root.
+   - **From the repo, nothing to do:** `.claude/settings.json` allows `Edit(/CLAUDE.md)`, so the
+     controller can fix or revert its own crew-block changes without being refused as
+     self-modification (operator-approved 2026-10-29; the rule itself is in `CLAUDE.md`). The
+     leading `/` means the repo root on any machine. Claude Code applies a committed allow rule
+     only after you accept the workspace trust prompt for `REPO`.
+   - **Copy across by hand:** the rest lives on the machine.
+   - **Your auto-mode allowances**, the `autoMode` block in `~/.claude/settings.json`. Claude Code
+     reads `autoMode` only from user or managed settings, never from a repo's `.claude/` files,
+     so copy that block from the other Mac's `~/.claude/settings.json`.
+   - **`REPO/CLAUDE.local.md`** (git-ignored): this machine's live loops, the hub's launchd job
+     and port, and the preview port. Copy the other machine's and edit the names; never list the
+     other machine's loops as this one's.
+   - **The controller's memory**, `~/.claude/projects/<REPO with / as ->/memory/`: the operator's
+     standing preferences and lessons (desktop only, no phone, machine headroom first, FLIGHT
+     unrestricted, the delegated change set, the design system, and the rest). Copy the folder
+     across once, then keep the two in step by hand or by a sync folder:
+
+     ```sh
+     SRC=~/.claude/projects/-Users-<you>-Dev-mission-control/memory
+     rsync -a "$SRC/" work-mac:"$SRC/"   # or copy the folder by any means; adjust both paths if REPO differs
+     ```
+
+     `~/.claude/CLAUDE.md` (your global engineering standards) is per-machine too; copy it the
+     same way.
+
 ## Crew pushes and PRs
 
 The seat-tool path (a seat calling push and draft PR) was checked end to end on the real CLI on
