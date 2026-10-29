@@ -931,6 +931,7 @@ started before the set was recorded rotates on its wake count as before.
 `update_hub` makes FLIGHT the person who runs Update for the merges it cleared. The CLAUDE.md sentence
 that reserves Update to the operator or the controller is the operator's to change; until it is,
 treat the tool as the operator's clearance in advance.
+A refused or failed call to any of these tools is logged as a decision too, so the log shows what FLIGHT tried.
 
 ## What it observes
 
