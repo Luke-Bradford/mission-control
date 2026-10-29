@@ -40,6 +40,18 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
     }
     node.lines = file.lines;
   }
+  const collapse = (node: Branch, root = false): Branch => {
+    node.children = node.children.map((child) => collapse(child));
+    while (!root && node.lines === undefined && node.children.length === 1) {
+      const child = node.children[0] as Branch;
+      node.name = `${node.name}/${child.name}`;
+      node.path = child.path;
+      node.lines = child.lines;
+      node.children = child.children;
+    }
+    return node;
+  };
+  collapse(root, true);
   const tiles: TreemapTile[] = [],
     folders: TreemapFolder[] = [],
     byPath = new Map<string, TreemapTile>();
@@ -54,13 +66,15 @@ export function treemapLayout(files: MapSnapshot["tree"], width: number, height:
       byPath.set(tile.path, tile);
       return;
     }
+    const showHeader = depth > 0 && box.width >= 64 && box.height >= 40;
     if (depth) folders.push({ ...box, path: node.path, name: node.name });
+    const inset = showHeader && box.width >= 12 && box.height >= 24 ? 3 : 0;
     const content = depth
       ? {
-          x: box.x + 3,
-          y: box.y + 15,
-          width: Math.max(0, box.width - 6),
-          height: Math.max(0, box.height - 18),
+          x: box.x + inset,
+          y: box.y + (showHeader ? 15 : 0),
+          width: box.width - inset * 2,
+          height: box.height - (showHeader ? 15 : 0) - inset,
         }
       : box;
     const horizontal = content.width >= content.height,

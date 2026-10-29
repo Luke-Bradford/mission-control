@@ -299,7 +299,7 @@ it("packs the complete hierarchy inside the viewport and anchors links to tile c
     1600,
     1000,
   );
-  expect(layout.folders.some((folder) => folder.path === "apps/web")).toBe(true);
+  expect(layout.folders.some((folder) => folder.path === "apps/web/src")).toBe(true);
   for (const tile of layout.tiles) {
     expect(tile.x).toBeGreaterThanOrEqual(0);
     expect(tile.y).toBeGreaterThanOrEqual(0);
@@ -311,4 +311,14 @@ it("packs the complete hierarchy inside the viewport and anchors links to tile c
   if (!large || !small) throw new Error("expected treemap leaves");
   expect(large.center).toEqual([large.x + large.width / 2, large.y + large.height / 2]);
   expect(small.center).toEqual([small.x + small.width / 2, small.y + small.height / 2]);
+});
+
+it("keeps every file tile positive in a mockup-sized nested repository", () => {
+  const files = Array.from({ length: 753 }, (_, index) => ({
+    path: `apps/server/src/area-${index % 19}/deep/nested/file-${index}.ts`,
+    lines: 1 + (index % 80),
+  }));
+  const layout = treemapLayout(files, 1600, 1000);
+  expect(layout.tiles).toHaveLength(753);
+  expect(layout.tiles.every((tile) => tile.width > 0 && tile.height > 0)).toBe(true);
 });
