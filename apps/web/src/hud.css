@@ -4074,7 +4074,7 @@ button.nrow.thread.tagged {
   align-items: center;
   gap: 8px;
 }
-.audit-bar {
+.audit-bar-track {
   flex: 1;
   min-width: 36px;
   height: 8px;
@@ -4082,7 +4082,7 @@ button.nrow.thread.tagged {
   border-radius: 4px;
   overflow: hidden;
 }
-.audit-bar > i {
+.audit-bar {
   display: block;
   height: 100%;
   background: var(--cyan);
