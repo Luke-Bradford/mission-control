@@ -21,6 +21,7 @@ import {
   type CommsReactionKind,
   commsCutMarker,
   type Escalation,
+  type FindingResolution,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_LEDGER_OPEN,
@@ -61,6 +62,8 @@ import {
   type PullRequestView,
   type ReplyDraft,
   type RepoId,
+  type ReportedTest,
+  type ReviewCheck,
   type ReviewFinding,
   type ReviewRequest,
   type ReviewRow,
@@ -167,7 +170,8 @@ CREATE TABLE IF NOT EXISTS board_moves (
 CREATE INDEX IF NOT EXISTS board_moves_at ON board_moves(at);
 -- What a run's seat reported (append-only); the loop's reconciler reads the latest.
 CREATE TABLE IF NOT EXISTS run_evidence (
-  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL
+  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL,
+  tests TEXT NOT NULL DEFAULT '[]', tests_added TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS run_evidence_run ON run_evidence(run_id);
 -- One review of a run's pushed sha (7b-1); attempt counts the tries of one sha within a loop epoch.
@@ -183,7 +187,19 @@ CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
   severity TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, summary TEXT NOT NULL,
-  scenario TEXT NOT NULL, fix TEXT NOT NULL, state TEXT NOT NULL, UNIQUE (review_id, pos)
+  scenario TEXT NOT NULL, fix TEXT NOT NULL, category TEXT, state TEXT NOT NULL, UNIQUE (review_id, pos)
+);
+CREATE TABLE IF NOT EXISTS review_checks (
+  review_id INTEGER NOT NULL, check_id TEXT NOT NULL, result TEXT NOT NULL, note TEXT,
+  PRIMARY KEY (review_id, check_id)
+);
+CREATE TABLE IF NOT EXISTS review_tests (
+  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, command TEXT NOT NULL, file TEXT,
+  passed INTEGER NOT NULL, failed INTEGER NOT NULL, skipped INTEGER NOT NULL, duration INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_resolutions (
+  review_id INTEGER NOT NULL, prior_review_id INTEGER NOT NULL, finding_pos INTEGER NOT NULL,
+  outcome TEXT NOT NULL, PRIMARY KEY (review_id, prior_review_id, finding_pos)
 );
 -- Lines sent to a seat, one row per key: a claimed key is never sent twice.
 CREATE TABLE IF NOT EXISTS seat_lines (
@@ -682,6 +698,8 @@ export interface Evidence {
   runId: string;
   note: string;
   at: number;
+  tests: ReportedTest[];
+  testsAdded: { file: string; failedOnBase: boolean }[];
 }
 
 /** One issue in a seat's queue; `takenAt` is set while the seat holds it. */
@@ -1127,6 +1145,9 @@ export class Store {
     this.addColumn("pull_requests", "author", "TEXT");
     this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("review_findings", "category", "TEXT");
     // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
     this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "additions", "INTEGER");
@@ -2786,10 +2807,26 @@ export class Store {
   }
 
   /** Appends a note the run's seat reported; returns its id. */
-  addEvidence(runId: string, note: string, at: number): number {
+  addEvidence(
+    runId: string,
+    note: string,
+    at: number,
+    details: {
+      tests?: ReportedTest[];
+      testsAdded?: { file: string; failedOnBase: boolean }[];
+    } = {},
+  ): number {
     const r = this.db
-      .prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, ?, ?)")
-      .run(runId, note, at);
+      .prepare(
+        "INSERT INTO run_evidence (run_id, note, at, tests, tests_added) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        runId,
+        note,
+        at,
+        JSON.stringify(details.tests ?? []),
+        JSON.stringify(details.testsAdded ?? []),
+      );
     this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
   }
@@ -2804,6 +2841,8 @@ export class Store {
           runId: r.run_id as string,
           note: r.note as string,
           at: r.at as number,
+          tests: JSON.parse(r.tests as string) as ReportedTest[],
+          testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
         }
       : null;
   }
@@ -2818,6 +2857,8 @@ export class Store {
       runId: r.run_id as string,
       note: r.note as string,
       at: r.at as number,
+      tests: JSON.parse(r.tests as string) as ReportedTest[],
+      testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
     }));
   }
 
@@ -2929,7 +2970,15 @@ export class Store {
   recordFindings(
     reviewId: number,
     runId: string,
-    r: { verdict: ReviewVerdict; summary: string; findings: ReviewFinding[]; at: number },
+    r: {
+      verdict: ReviewVerdict;
+      summary: string;
+      findings: ReviewFinding[];
+      checked?: ReviewCheck[];
+      tests?: ReportedTest[];
+      resolutions?: FindingResolution[];
+      at: number;
+    },
   ): boolean {
     const isBlocking = (f: ReviewFinding) => BLOCKING_SEVERITIES.includes(f.severity);
     const blocking = r.findings.filter(isBlocking).length;
@@ -2956,8 +3005,8 @@ export class Store {
       ).author_run_id as string;
       const insert = this.db.prepare(
         `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
-           scenario, fix, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           scenario, fix, category, state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       r.findings.forEach((f, pos) => {
         insert.run(
@@ -2970,9 +3019,40 @@ export class Store {
           f.summary,
           f.scenario,
           f.fix,
+          f.category ?? null,
           isBlocking(f) ? "open" : "logged",
         );
       });
+      const insertCheck = this.db.prepare(
+        "INSERT INTO review_checks (review_id, check_id, result, note) VALUES (?, ?, ?, ?)",
+      );
+      for (const check of r.checked ?? [])
+        insertCheck.run(reviewId, check.check, check.result, check.note ?? null);
+      const insertTest = this.db.prepare(
+        `INSERT INTO review_tests (review_id, command, file, passed, failed, skipped, duration)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const test of r.tests ?? [])
+        insertTest.run(
+          reviewId,
+          test.command,
+          test.file ?? null,
+          test.passed,
+          test.failed,
+          test.skipped,
+          test.duration,
+        );
+      const insertResolution = this.db.prepare(
+        `INSERT INTO review_resolutions (review_id, prior_review_id, finding_pos, outcome)
+         VALUES (?, ?, ?, ?)`,
+      );
+      for (const resolution of r.resolutions ?? [])
+        insertResolution.run(
+          reviewId,
+          resolution.findingRef.reviewId,
+          resolution.findingRef.pos,
+          resolution.outcome,
+        );
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),
         findings: r.findings,
@@ -2995,7 +3075,55 @@ export class Store {
       summary: r.summary as string,
       scenario: r.scenario as string,
       fix: r.fix as string,
+      category: (r.category as StoredFinding["category"]) ?? undefined,
       state: r.state as StoredFinding["state"],
+    }));
+  }
+
+  reviewChecks(reviewId: number): ReviewCheck[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT check_id, result, note FROM review_checks WHERE review_id = ? ORDER BY check_id",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      check: r.check_id as ReviewCheck["check"],
+      result: r.result as ReviewCheck["result"],
+      ...(r.note === null ? {} : { note: r.note as string }),
+    }));
+  }
+
+  reviewTests(reviewId: number): (Omit<ReportedTest, "file"> & { file: string | null })[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT command, file, passed, failed, skipped, duration FROM review_tests WHERE review_id = ? ORDER BY id",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      command: r.command as string,
+      file: r.file as string | null,
+      passed: r.passed as number,
+      failed: r.failed as number,
+      skipped: r.skipped as number,
+      duration: r.duration as number,
+    }));
+  }
+
+  reviewResolutions(
+    reviewId: number,
+  ): { reviewId: number; pos: number; outcome: FindingResolution["outcome"] }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT prior_review_id, finding_pos, outcome FROM review_resolutions WHERE review_id = ? ORDER BY prior_review_id, finding_pos",
+        )
+        .all(reviewId) as Row[]
+    ).map((r) => ({
+      reviewId: r.prior_review_id as number,
+      pos: r.finding_pos as number,
+      outcome: r.outcome as FindingResolution["outcome"],
     }));
   }
 
