@@ -296,10 +296,38 @@ export function InstrumentCharts({
     })),
   }));
   const costByTicket = new Map(ticketCosts.map((row) => [row.ticket, row.costUsd]));
+  const totalCostByTicket = new Map(
+    ticketCosts.map((row) => [row.ticket, row.totalCostUsd ?? row.costUsd]),
+  );
   const mergedCosts = tickets
     .filter((ticket): ticket is typeof ticket & { mergedAt: number } => ticket.mergedAt !== null)
     .sort((a, b) => a.mergedAt - b.mergedAt)
-    .map((ticket) => ({ at: ticket.mergedAt, v: costByTicket.get(ticket.ticket) ?? null }));
+    .map((ticket) => ({ at: ticket.mergedAt, v: totalCostByTicket.get(ticket.ticket) ?? null }));
+  const inRangeCost = tickets
+    .filter((ticket): ticket is typeof ticket & { mergedAt: number } => ticket.mergedAt !== null)
+    .reduce((sum, ticket) => sum + (costByTicket.get(ticket.ticket) ?? 0), 0);
+  const quality = series?.quality ?? [];
+  const qualitySeries: LineSeries[] = [
+    {
+      id: "ci-green-first-push",
+      name: "CI green first push",
+      color: "var(--accent)",
+      points: quality.map((point) => ({ at: point.at, v: point.ciGreenFirstPushPct })),
+    },
+    {
+      id: "review-rounds",
+      name: "review rounds per PR",
+      color: "var(--warn)",
+      points: quality.map((point) => ({ at: point.at, v: point.reviewRoundsPerPr })),
+    },
+    {
+      id: "first-pass-review",
+      name: "first pass review",
+      color: "var(--s2)",
+      points: quality.map((point) => ({ at: point.at, v: point.firstPassReviewPct })),
+    },
+  ];
+  const forecast = series?.throughput ?? [];
   const labels = [`-${scope.range}`, "now"] as [string, string];
   return (
     <div className="tgrid">
@@ -385,9 +413,49 @@ export function InstrumentCharts({
         )}
       </Panel>
       <Panel id="tQualityTrend" title="Quality trends" sub="daily small multiples">
-        {unavailable("Daily quality history", scope.range)}
+        {!series ? (
+          unavailable("Daily quality history", scope.range)
+        ) : !quality.length ||
+          !qualitySeries.some((line) => line.points.some((point) => point.v !== null)) ? (
+          <p className="pb s muted">No daily quality observations in this range.</p>
+        ) : (
+          <>
+            {qualitySeries.map((line) => {
+              const isPct = line.id !== "review-rounds";
+              return (
+                <LineChart
+                  key={line.id}
+                  series={[line]}
+                  from={from}
+                  to={to}
+                  max={
+                    isPct
+                      ? 100
+                      : Math.max(
+                          1,
+                          ...line.points.flatMap((point) => (point.v === null ? [] : [point.v])),
+                        ) * 1.1
+                  }
+                  label={line.name}
+                  xLabels={labels}
+                  at={at}
+                  annotations={annotations}
+                  format={(v) => (isPct ? `${Math.round(v)}%` : v.toFixed(1))}
+                  height={116}
+                />
+              );
+            })}
+            <Legend
+              items={qualitySeries.map(({ id, name, color }) => ({ key: id, name, color }))}
+            />
+          </>
+        )}
       </Panel>
-      <Panel id="tCostMerged" title="Cost in range per merged ticket" sub="API-equivalent estimate">
+      <Panel
+        id="tCostMerged"
+        title="Full cost per merged ticket"
+        sub="all observed runs · API-equivalent estimate"
+      >
         {!series ? (
           unavailable("Merged-ticket cost history", scope.range)
         ) : !mergedCosts.length ? (
@@ -395,27 +463,63 @@ export function InstrumentCharts({
         ) : !mergedCosts.some((point) => point.v !== null) ? (
           <p className="pb s muted">No API-equivalent cost was reported for merged tickets.</p>
         ) : (
-          <LineChart
-            series={[
-              {
-                id: "cost-per-merged-ticket",
-                name: "cost per merged ticket",
-                color: "var(--accent)",
-                points: mergedCosts,
-              },
-            ]}
-            from={from}
-            to={to}
-            max={
-              Math.max(1, ...mergedCosts.flatMap((point) => (point.v === null ? [] : [point.v]))) *
-              1.1
-            }
-            label="Cost in range per merged ticket"
-            xLabels={labels}
-            at={at}
-            annotations={annotations}
-            format={(v) => `$${v.toFixed(2)}`}
-          />
+          <>
+            <LineChart
+              series={[
+                {
+                  id: "cost-per-merged-ticket",
+                  name: "cost per merged ticket",
+                  color: "var(--accent)",
+                  points: mergedCosts,
+                },
+              ]}
+              from={from}
+              to={to}
+              max={
+                Math.max(
+                  1,
+                  ...mergedCosts.flatMap((point) => (point.v === null ? [] : [point.v])),
+                ) * 1.1
+              }
+              label="Full cost per merged ticket"
+              xLabels={labels}
+              at={at}
+              annotations={annotations}
+              format={(v) => `$${v.toFixed(2)}`}
+            />
+            <p className="note xs">In range: ${inRangeCost.toFixed(2)}</p>
+          </>
+        )}
+      </Panel>
+      <Panel id="tForecast" title="Forecast" sub="range-bounded throughput">
+        {!series ? (
+          unavailable("Timestamped throughput", scope.range)
+        ) : !forecast.length ? (
+          <p className="pb s muted">No throughput observations in this range.</p>
+        ) : (
+          <>
+            <LineChart
+              series={[
+                {
+                  id: "throughput",
+                  name: "throughput",
+                  color: "var(--accent)",
+                  points: forecast.map((point) => ({ at: point.at, v: point.merged })),
+                },
+              ]}
+              from={from}
+              to={to}
+              max={Math.max(1, ...forecast.map((point) => point.merged)) * 1.1}
+              label="Forecast"
+              xLabels={labels}
+              at={at}
+              annotations={annotations}
+              format={(v) => String(Math.round(v))}
+            />
+            <Legend
+              items={[{ key: "throughput", name: "merged per bucket", color: "var(--accent)" }]}
+            />
+          </>
         )}
       </Panel>
     </div>
