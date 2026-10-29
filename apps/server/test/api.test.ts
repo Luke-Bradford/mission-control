@@ -763,6 +763,26 @@ describe("Comms API", () => {
     expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toEqual([]);
   });
 
+  it("only records FLIGHT stepping into the flagged pair after it crosses the threshold", async () => {
+    const ticket = "shop-app#706";
+    commsRow("flight", "gamma", "unrelated", clock, ticket);
+    for (let round = 0; round < 7; round++) {
+      commsRow("alpha", "beta", `question ${round}`, clock, ticket);
+      commsRow("beta", "alpha", `reply ${round}`, clock, ticket);
+    }
+    await withCommsApp(async (comms) => {
+      const pairs = (await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json().pairs;
+      expect(pairs[0]).toMatchObject({ flightSteppedInAt: null });
+      const steppedInAt = clock;
+      commsRow("flight", "beta", "Use the existing contract.", steppedInAt, ticket);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json().pairs[0],
+      ).toMatchObject({
+        flightSteppedInAt: steppedInAt,
+      });
+    });
+  });
+
   it("reports the wait and FLIGHT deadline for unanswered questions and blockers", async () => {
     const question = commsRow(
       "alpha",

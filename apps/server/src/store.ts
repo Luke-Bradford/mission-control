@@ -4098,29 +4098,59 @@ export class Store {
         COMMS_CREW,
         COMMS_CHATTER_ROUNDS,
       ) as Row[];
-    return rows.map((row) => ({
-      from: row.from as string,
-      to: row.to as string,
-      ticket: row.ticket as string,
-      rounds: row.rounds as number,
-      tokens: this.commsTokenTotal(
-        row.from as string,
-        row.to as string,
-        row.ticket as string,
-        row.first_at as number,
-        row.last_at as number,
-      ),
-      flightSteppedInAt:
-        flightId === undefined
-          ? null
-          : ((
-              this.db
-                .prepare(
-                  "SELECT MIN(at) AS at FROM comms WHERE from_id = ? AND ticket = ? AND at >= ? AND at <= ?",
-                )
-                .get(flightId, row.ticket, row.first_at, until) as { at: number | null }
-            ).at ?? null),
-    }));
+    return rows.map((row) => {
+      const from = row.from as string;
+      const to = row.to as string;
+      const ticket = row.ticket as string;
+      const thresholdAt = this.chatterThresholdAt(from, to, ticket, since, until);
+      return {
+        from,
+        to,
+        ticket,
+        rounds: row.rounds as number,
+        tokens: this.commsTokenTotal(
+          from,
+          to,
+          ticket,
+          row.first_at as number,
+          row.last_at as number,
+        ),
+        flightSteppedInAt:
+          flightId === undefined || thresholdAt === null
+            ? null
+            : ((
+                this.db
+                  .prepare(
+                    "SELECT MIN(at) AS at FROM comms WHERE from_id = ? AND to_id IN (?, ?) AND ticket = ? AND at >= ? AND at <= ?",
+                  )
+                  .get(flightId, from, to, ticket, thresholdAt, until) as { at: number | null }
+              ).at ?? null),
+      };
+    });
+  }
+
+  /** The message which first completes the over-limit reciprocal exchange in this rolling window. */
+  private chatterThresholdAt(
+    from: string,
+    to: string,
+    ticket: string,
+    since: number,
+    until: number,
+  ): number | null {
+    const messages = this.db
+      .prepare(
+        `SELECT at, from_id FROM comms WHERE ticket = ? AND at >= ? AND at <= ?
+         AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)) ORDER BY at, id`,
+      )
+      .all(ticket, since, until, from, to, to, from) as { at: number; from_id: string }[];
+    let forward = 0;
+    let reverse = 0;
+    for (const message of messages) {
+      if (message.from_id === from) forward++;
+      else reverse++;
+      if (Math.min(forward, reverse) > COMMS_CHATTER_ROUNDS) return message.at;
+    }
+    return null;
   }
 
   /** Tokens consumed by either end's runs overlapping a Comms link's observed window. */
