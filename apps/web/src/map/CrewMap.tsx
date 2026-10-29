@@ -1,10 +1,10 @@
 import type { Crew, MapSeat, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
+import { isWorking, type SeatWork } from "./cards.ts";
 import {
   downstream,
   graph,
@@ -16,15 +16,10 @@ import {
   lensVisuals,
   type MapLens,
 } from "./Lenses.tsx";
-import { mainAreas } from "./layout.ts";
-import { mapLayoutWorker } from "./layoutClient.ts";
 import { LiveMap } from "./live.ts";
 import { historyHeat, MapTreemap } from "./MapTreemap.tsx";
-import { layoutTree } from "./model.ts";
 import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector.tsx";
 import "./map.css";
-
-const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -135,40 +130,7 @@ export function CrewMapView({
   const [selection, setSelection] = useState<Selection>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [lens, setLens] = useState<MapLens>("changes");
-  const [home, setHome] = useState(0);
-  const [overview, setOverview] = useState(0);
-  const [nodes, setNodes] = useState<ReturnType<typeof layoutTree>>([]);
-  const previousLayout = useRef<{ repo: string; nodes: ReturnType<typeof layoutTree> } | null>(
-    null,
-  );
-  const [rotate, setRotate] = useState(false);
-  const [seatFocus, setSeatFocus] = useState<{ seat: string; request: number } | null>(null);
   const now = useNow();
-  // The stage and the selector show working seats only, each with the part of its path the hub
-  // still keeps: the clock's tick ages a path out on an open page. Keyed on who is working and how
-  // much of each path is fresh, so a tick that changes neither doesn't redraw the scene.
-  const working = snapshot.seats
-    .filter((seat) => isWorking(seat, now))
-    .map((seat) => `${seat.seat}\t${freshRecent(seat, now).length}`)
-    .join("\n");
-  const stage = useMemo(() => {
-    const fresh = new Map(
-      working
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => line.split("\t") as [string, string]),
-    );
-    return {
-      ...snapshot,
-      seats: snapshot.seats.flatMap((seat) => {
-        const kept = fresh.get(seat.seat);
-        // recent is oldest first, so what is still fresh is its tail
-        return kept === undefined
-          ? []
-          : [{ ...seat, recent: seat.recent.slice(seat.recent.length - Number(kept)) }];
-      }),
-    };
-  }, [snapshot, working]);
   const seatWork = useCallback(
     (seat: MapSeat): SeatWork =>
       work[seat.seat] ?? { ticket: seat.ticket, title: seat.title, pr: null },
@@ -184,60 +146,17 @@ export function CrewMapView({
     [snapshot.seats, indices],
   );
   const selectedSeat =
-    selection?.kind === "seat" ? stage.seats.find((s) => s.seat === selection.seat) : undefined;
+    selection?.kind === "seat" ? snapshot.seats.find((s) => s.seat === selection.seat) : undefined;
   useEffect(() => {
     if (selection?.kind === "seat" && !selectedSeat) setSelection(null);
   }, [selection, selectedSeat]);
-  // Layout stays out of React's render path, so a large tree cannot block orbiting or the live feed.
-  useEffect(() => {
-    let current = true;
-    const previous =
-      previousLayout.current?.repo === snapshot.repoId ? previousLayout.current.nodes : undefined;
-    void mapLayoutWorker.layout(snapshot.tree, snapshot.imports, previous).then((next) => {
-      if (!current) return;
-      previousLayout.current = { repo: snapshot.repoId, nodes: next };
-      setNodes(next);
-    });
-    return () => {
-      current = false;
-    };
-  }, [snapshot.repoId, snapshot.tree, snapshot.imports]);
-  const areas = useMemo(() => mainAreas(snapshot.tree), [snapshot.tree]);
-  const treePaths = useMemo(() => new Set(snapshot.tree.map((f) => f.path)), [snapshot.tree]);
-  // files a seat touched that origin/HEAD doesn't have yet (new on a branch)
-  const extraKey = [
-    ...new Set(
-      snapshot.seats.flatMap((s) => [...s.scope.read, ...s.scope.modified.map((c) => c.file)]),
-    ),
-  ]
-    .filter((f) => !treePaths.has(f))
-    .sort()
-    .join("\n");
-  const extras = useMemo(() => (extraKey ? extraKey.split("\n") : []), [extraKey]);
-  const displayNodes = useMemo(
-    () =>
-      extras.length
-        ? layoutTree(
-            extras.map((path) => ({ path, lines: 0 })),
-            nodes,
-            false,
-          )
-        : nodes,
-    [extras, nodes],
-  );
-  const searchable = useMemo(
-    () => [...new Set([...displayNodes.map((n) => n.path), ...treePaths, ...extras])],
-    [displayNodes, treePaths, extras],
-  );
+  const searchable = useMemo(() => snapshot.tree.map((file) => file.path), [snapshot.tree]);
   const needle = query.trim().toLowerCase();
   const matches = needle
     ? searchable.filter((path) => path !== "" && path.toLowerCase().includes(needle))
     : [];
-  const focusNode =
-    displayNodes.find((n) => n.path === focus) ??
-    displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const selectedPath = selection?.kind === "node" ? selection.path : null;
-  const selectedFiles = displayNodes.find((n) => n.path === selectedPath)?.files ?? [];
+  const selectedFiles = selectedPath === null ? [] : [selectedPath];
   // stable callbacks, so the scene's props change only when what it shows does
   const selectNode = useCallback((path: string) => setSelection({ kind: "node", path }), []);
   const selectFromScene = useCallback(
@@ -256,14 +175,8 @@ export function CrewMapView({
     setSelection(seat === null ? null : { kind: "seat", seat });
     if (seat === null || !frame) return;
     setFocus(null);
-    setRotate(false);
-    setSeatFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
   }, []);
-  const followFromStage = useCallback(
-    (seat: string | null) => selectSeat(seat, false),
-    [selectSeat],
-  );
-  const named = { snapshot: stage, indices: colours, names };
+  const named = { snapshot, indices: colours, names };
   const focusLinks = useMemo(
     () =>
       lens === "impact"
@@ -291,7 +204,9 @@ export function CrewMapView({
             setFocus(null);
           }}
         />
-        {lens === "impact" || lens === "history" ? (
+        {lens === "changes" ? (
+          <ChangesKey tree={snapshot.tree} />
+        ) : lens === "impact" || lens === "history" ? (
           <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
         ) : null}
         {lens === "impact" && focus !== null && (
@@ -300,40 +215,14 @@ export function CrewMapView({
       </div>
       <div className={`map-main map-main-${lens}`}>
         <div className="map-stage-wrap">
-          {lens === "changes" ? (
-            <Suspense fallback={<p className="map-wait-note">Loading 3D map…</p>}>
-              <Scene
-                nodes={displayNodes}
-                areas={areas}
-                snapshot={stage}
-                names={names}
-                focus={focusNode?.path ?? null}
-                focusLinks={focusLinks}
-                lens={lens}
-                lensVisual={lensVisual}
-                home={home}
-                overview={overview}
-                rotate={rotate}
-                selected={selectedPath}
-                indices={colours}
-                onSelect={selectFromScene}
-                seat={selectedSeat?.seat ?? null}
-                seatFocus={seatFocus}
-                dockSeats={snapshot.seats.length}
-                onSeatSelect={followFromStage}
-              />
-            </Suspense>
-          ) : (
-            <MapTreemap
-              snapshot={snapshot}
-              lens={lens}
-              visual={lensVisual}
-              focus={focus}
-              focusLinks={focusLinks}
-              onSelect={selectFromScene}
-            />
-          )}
-          {lens === "changes" && <MapKey tree={snapshot.tree} />}
+          <MapTreemap
+            snapshot={snapshot}
+            lens={lens}
+            visual={lensVisual}
+            focus={focus}
+            focusLinks={focusLinks}
+            onSelect={selectFromScene}
+          />
         </div>
         <div className="map-rail">
           {lens === "impact" ? (
@@ -347,7 +236,7 @@ export function CrewMapView({
                 <SeatSelector
                   {...named}
                   snapshot={snapshot}
-                  seats={stage.seats}
+                  seats={snapshot.seats.filter((seat) => isWorking(seat, now))}
                   selected={selectedSeat?.seat ?? null}
                   onSelect={(seat) => selectSeat(seat, true)}
                   work={seatWork}
@@ -401,9 +290,9 @@ export function CrewMapView({
                         files={
                           selectedFiles.length
                             ? selectedFiles
-                            : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                                f.startsWith(`${selectedPath}/`),
-                              )
+                            : snapshot.tree
+                                .map((f) => f.path)
+                                .filter((f) => f.startsWith(`${selectedPath}/`))
                         }
                       />
                       <div className="map-detail-actions">
@@ -432,6 +321,7 @@ export function CrewMapView({
           )}
         </div>
       </div>
+      {lens === "changes" && <SessionTimeline snapshot={snapshot} now={now} />}
       <div className="map-deck">
         {status && (
           <span className={`map-live${status.live ? "" : " down"}`} role="status">
@@ -439,59 +329,144 @@ export function CrewMapView({
             {status.text}
           </span>
         )}
-        <span className="map-deck-controls">
-          <button
-            type="button"
-            title="Frame where the seats are working (the whole repo when nobody is)"
-            onClick={() => {
-              setHome(home + 1);
-              setFocus(null);
-              setSeatFocus(null);
-            }}
-          >
-            Home view
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOverview(overview + 1);
-              setFocus(null);
-              setSeatFocus(null);
-            }}
-          >
-            Whole repo
-          </button>
-          <label>
-            <input type="checkbox" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />{" "}
-            rotate
-          </label>
-        </span>
       </div>
     </div>
   );
 }
 
-/** The stage's key: what a light, a path and a disc are. */
-function MapKey({ tree }: { tree: MapSnapshot["tree"] }) {
+function ChangesKey({ tree }: { tree: MapSnapshot["tree"] }) {
   return (
-    <p className="map-legend">
+    <div className="map-changes-key" role="note" aria-label="Changes colour key">
       <span className="map-key-item">
-        <i className="key-light" aria-hidden="true" /> seat
+        <KeySteps tone="impact" /> changed
       </span>
       <span className="map-key-item">
-        <i className="key-path" aria-hidden="true" /> its path
+        <i className="map-key-read" aria-hidden="true" /> read only
       </span>
-      <span className="map-key-item">
-        <i className="key-touched" aria-hidden="true" /> a file seats touched (split when shared) —
-        click for who read or changed it
-      </span>
-      <span className="map-key-item">
-        {tree.length.toLocaleString()} files
-        {tree.length > 2000 && ", every file shown as an individual point"}
-      </span>
-    </p>
+      <span className="map-key-item">click a file for its seats</span>
+      <span className="map-key-item">{tree.length.toLocaleString()} files</span>
+    </div>
   );
 }
+
+const TIMELINE_WINDOW_MS = 60 * 60_000;
+const PLAY_STEP_MS = 380;
+
+function hashValues() {
+  return new URLSearchParams(window.location.hash.slice(1));
+}
+
+function writeHash(values: URLSearchParams) {
+  const hash = values.toString();
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${hash ? `#${hash}` : ""}`,
+  );
+}
+
+function SessionTimeline({ snapshot, now }: { snapshot: MapSnapshot; now: number }) {
+  const [windowRange, setWindowRange] = useState<[number, number] | null>(() => {
+    const value = hashValues().get("win");
+    const parts = value?.split(":").map(Number);
+    return parts?.length === 2 && parts.every(Number.isFinite) ? [parts[0], parts[1]] : null;
+  });
+  const [playing, setPlaying] = useState<{ seat: string; step: number } | null>(() => {
+    const [seat, step] = (hashValues().get("play") ?? "").split(":");
+    return seat && Number.isInteger(Number(step)) ? { seat, step: Number(step) } : null;
+  });
+  const seats = snapshot.seats.filter((seat) => isWorking(seat, now));
+  const selectedSeat = playing?.seat ?? seats[0]?.seat ?? "";
+  const ticks = (seat: MapSeat) =>
+    seat.recent
+      .filter(
+        (tick) =>
+          tick.at >= now - TIMELINE_WINDOW_MS &&
+          (!windowRange || (tick.at >= windowRange[0] && tick.at <= windowRange[1])),
+      )
+      .map((tick) => ({
+        ...tick,
+        changed: seat.scope.modified.some((change) => change.file === tick.file),
+      }));
+  const playSeat = seats.find((seat) => seat.seat === selectedSeat) ?? seats[0];
+  const sequence = playSeat ? ticks(playSeat) : [];
+  useEffect(() => {
+    if (!playing || playing.step >= sequence.length) return;
+    const timer = window.setTimeout(() => {
+      const next = { ...playing, step: playing.step + 1 };
+      setPlaying(next);
+      const values = hashValues();
+      values.set("play", `${next.seat}:${next.step}`);
+      writeHash(values);
+    }, PLAY_STEP_MS);
+    return () => window.clearTimeout(timer);
+  }, [playing, sequence.length]);
+  const clearWindow = () => {
+    setWindowRange(null);
+    const values = hashValues();
+    values.delete("win");
+    writeHash(values);
+  };
+  const play = () => {
+    if (playing) {
+      setPlaying(null);
+      const values = hashValues();
+      values.delete("play");
+      writeHash(values);
+      return;
+    }
+    const next = { seat: selectedSeat, step: 1 };
+    setPlaying(next);
+    const values = hashValues();
+    values.set("play", `${next.seat}:${next.step}`);
+    writeHash(values);
+  };
+  const status = playing && sequence[playing.step - 1];
+  return (
+    <section className="map-timeline" aria-label="Session timeline">
+      <div className="map-timeline-controls">
+        <strong>Session</strong>
+        <span>{windowRange ? "selected window" : "last 60 min"}</span>
+        <button type="button" disabled={!windowRange} onClick={clearWindow}>
+          Clear window
+        </button>
+        <button type="button" disabled={!sequence.length} onClick={play}>
+          {playing ? "■ Stop" : `▶ Play ${selectedSeat}`}
+        </button>
+        <span role="status" aria-label="Playback">
+          {status
+            ? `${playing?.seat} step ${playing?.step} of ${sequence.length} · ${status.changed ? "changed" : "read"} ${status.file}`
+            : ""}
+        </span>
+      </div>
+      <ul className="map-timeline-list" aria-label="Working seat timelines">
+        {seats.map((seat, index) => (
+          <li className="map-timeline-row" aria-label={`Timeline for ${seat.seat}`} key={seat.seat}>
+            <span className="map-timeline-seat">{namesOnlySeat(seat.seat)}</span>
+            <span
+              className="map-timeline-track"
+              style={{ "--timeline-seat": `var(--seat-${(index % 7) + 1})` } as CSSProperties}
+            >
+              {ticks(seat).map((tick) => (
+                <i
+                  className="map-timeline-tick"
+                  data-read={!tick.changed || undefined}
+                  key={`${tick.file}:${tick.at}`}
+                  style={{
+                    left: `${Math.max(0, Math.min(100, ((tick.at - (now - TIMELINE_WINDOW_MS)) / TIMELINE_WINDOW_MS) * 100))}%`,
+                  }}
+                  title={`${tick.changed ? "changed" : "read"} ${tick.file}`}
+                />
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const namesOnlySeat = (seat: string) => seat;
 
 function KeySteps({ tone }: { tone: "impact" | "focus" | "history" }) {
   const heatBands = tone === "history" ? [1, 3, 10, 30].map(historyHeat) : null;

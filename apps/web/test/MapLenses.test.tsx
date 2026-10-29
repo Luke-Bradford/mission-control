@@ -1,36 +1,9 @@
 import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
 import { historyHeat, isFixHeavy, treemapLayout } from "../src/map/MapTreemap.tsx";
-
-const scenes = vi.hoisted(
-  () =>
-    [] as {
-      focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
-      lens?: "changes" | "impact" | "history";
-      lensVisual?: Record<
-        string,
-        { distance?: number; hotspot?: number; fixes?: number; dim?: boolean }
-      >;
-      onSelect?: (path: string) => void;
-    }[],
-);
-vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: (props: {
-    focusLinks?: { from: string; to: string; unlinked?: boolean; confidence?: number }[];
-    lens?: "changes" | "impact" | "history";
-    lensVisual?: Record<
-      string,
-      { distance?: number; hotspot?: number; fixes?: number; dim?: boolean }
-    >;
-    onSelect?: (path: string) => void;
-  }) => {
-    scenes.push(props);
-    return <div>3D scene</div>;
-  },
-}));
 
 it("derives seed reach, history heat and focused partner confidence from the map payload", () => {
   const value = snapshot();
@@ -383,6 +356,58 @@ it("keeps every file tile positive in a mockup-sized nested repository", () => {
       ...layout.tiles.map((tile) => Math.max(tile.width / tile.height, tile.height / tile.width)),
     ),
   ).toBeLessThan(20_000);
+});
+
+it("draws Changes as a coloured treemap and gives every working seat a timeline row", () => {
+  const value = snapshot();
+  const now = Date.now();
+  value.seats[0].recent = [{ file: "src/contract.ts", at: now - 10_000 }];
+  value.seats[1].recent = [{ file: "src/consumer.ts", at: now - 5_000 }];
+  render(<CrewMapView snapshot={value} />);
+
+  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
+  expect(screen.getByRole("note", { name: "Changes colour key" }).textContent).toContain(
+    "read only",
+  );
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/contract.ts']")
+      ?.getAttribute("data-changed"),
+  ).toBe("GUIDO-1");
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/consumer.ts']")
+      ?.getAttribute("data-changed"),
+  ).toBe("INCO-1");
+  expect(screen.getAllByRole("listitem", { name: /timeline for/i })).toHaveLength(2);
+});
+
+it("clears the selected timeline window and advances Play through the selected seat's ticks", () => {
+  vi.useFakeTimers();
+  try {
+    const value = snapshot();
+    const now = Date.now();
+    value.seats[0].recent = [
+      { file: "src/contract.ts", at: now - 10_000 },
+      { file: "src/untested.ts", at: now - 5_000 },
+    ];
+    window.history.replaceState(null, "", "#win=1:2");
+    render(<CrewMapView snapshot={value} />);
+
+    expect(screen.getByRole("button", { name: "Clear window" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear window" }));
+    expect(window.location.hash).not.toContain("win=");
+    fireEvent.click(screen.getByRole("button", { name: /Play GUIDO-1/ }));
+    expect(screen.getByRole("status", { name: "Playback" }).textContent).toContain("step 1 of 2");
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("status", { name: "Playback" }).textContent).toContain("step 2 of 2");
+    expect(window.location.hash).toContain("play=GUIDO-1%3A2");
+  } finally {
+    vi.useRealTimers();
+    window.history.replaceState(null, "", window.location.pathname);
+  }
 });
 
 it("uses fixed PR heat bands rather than scaling to the hottest file", () => {

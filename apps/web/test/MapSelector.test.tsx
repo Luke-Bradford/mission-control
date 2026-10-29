@@ -3,22 +3,6 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 
-const scenes = vi.hoisted(() => [] as Record<string, unknown>[]);
-vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: (props: { seat: string | null; seatFocus: { seat: string } | null }) => {
-    scenes.push(props);
-    return (
-      <div
-        data-testid="scene"
-        data-seat={props.seat ?? ""}
-        data-seat-focus={props.seatFocus?.seat ?? ""}
-      >
-        3D scene
-      </div>
-    );
-  },
-}));
-
 const quiet = (seat: string, over: Partial<MapSeat> = {}): MapSeat => ({
   ...structuredClone(mapSnapshotFixture.seats[0]),
   seat,
@@ -75,7 +59,7 @@ it("lists one row per working seat: its light, call sign and what it is on, and 
   expect(light(rows[1])).toBe("var(--seat-flight)");
   // nothing else on a row: no state, counts, badges or notes
   expect(rows[0]?.children).toHaveLength(3);
-  expect(await screen.findByTestId("scene")).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
 });
 
 it("selects and follows a seat from its row, shows its card, and lets go on a second click", () => {
@@ -88,9 +72,6 @@ it("selects and follows a seat from its row, shows its card, and lets go on a se
   const row = screen.getByRole("button", { name: /^GUIDO-1/ });
   fireEvent.click(row);
   expect(row.getAttribute("aria-pressed")).toBe("true");
-  const scene = screen.getByTestId("scene");
-  expect(scene.dataset.seat).toBe("GUIDO-1");
-  expect(scene.dataset.seatFocus).toBe("GUIDO-1");
   const card = screen.getByRole("complementary", { name: "Selection detail" });
   expect(within(card).getByRole("heading", { level: 3, name: "GUIDO-1" })).toBeTruthy();
   expect(card.textContent).toContain("#7 · PR #31 · Handle empty input");
@@ -105,7 +86,6 @@ it("selects and follows a seat from its row, shows its card, and lets go on a se
   expect(facts.Now).toBe("thinking");
   fireEvent.click(row);
   expect(row.getAttribute("aria-pressed")).toBe("false");
-  expect(screen.getByTestId("scene").dataset.seat).toBe("");
   expect(card.textContent).toContain("Pick a seat to follow it");
 });
 
@@ -195,23 +175,4 @@ it("lets a resting seat's path age out on an open page as the clock ticks", () =
   expect(screen.getByRole("button", { name: /^GUIDO-2/ })).toBeTruthy();
   act(() => vi.advanceTimersByTime(MAP_RECENT_MS - 60_000 + 6000));
   expect(screen.queryByRole("button", { name: /^GUIDO-2/ })).toBeNull();
-});
-
-it("hands the scene the same props on a clock tick that changed nothing, so it rebuilds nothing", async () => {
-  vi.useFakeTimers();
-  render(<CrewMapView snapshot={crew()} names={{}} />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  const before = scenes.at(-1) as Record<string, unknown>;
-  const count = scenes.length;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(5000);
-  });
-  expect(scenes.length).toBeGreaterThan(count);
-  const after = scenes.at(-1) as Record<string, unknown>;
-  for (const key of Object.keys(before)) expect([key, after[key]]).toEqual([key, before[key]]);
-  for (const key of Object.keys(before))
-    if (typeof before[key] === "object" || typeof before[key] === "function")
-      expect(Object.is(after[key], before[key]), key).toBe(true);
 });

@@ -1,5 +1,7 @@
 import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
-import { isDocked } from "./model.ts";
+
+const isDocked = (seat: MapSeat, now: number): boolean =>
+  seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
 
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));

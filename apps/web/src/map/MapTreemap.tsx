@@ -179,7 +179,7 @@ export function MapTreemap({
   onSelect,
 }: {
   snapshot: MapSnapshot;
-  lens: Exclude<MapLens, "changes">;
+  lens: MapLens;
   visual: Record<string, LensVisual>;
   focus: string | null;
   focusLinks?: { from: string; to: string; unlinked?: boolean }[];
@@ -195,7 +195,13 @@ export function MapTreemap({
       ref={ref}
       className={`map-treemap map-treemap-${lens}`}
       role="img"
-      aria-label={lens === "impact" ? "Impact reach treemap" : "History PR heat treemap"}
+      aria-label={
+        lens === "changes"
+          ? "Changes treemap"
+          : lens === "impact"
+            ? "Impact reach treemap"
+            : "History PR heat treemap"
+      }
     >
       {layout.folders.map((folder) => (
         <div key={folder.path} className="map-treemap-folder" style={style(folder)}>
@@ -204,15 +210,20 @@ export function MapTreemap({
       ))}
       {layout.tiles.map((tile) => {
         const v = visual[tile.path];
+        const changes = v?.changes ?? [];
         const directImport = lens === "impact" && v?.directImport === true;
         const active =
-          lens === "history"
-            ? v?.hotspot !== undefined
-            : directImport || (v?.seat !== undefined && v.distance !== undefined);
+          lens === "changes"
+            ? changes.length > 0
+            : lens === "history"
+              ? v?.hotspot !== undefined
+              : directImport || (v?.seat !== undefined && v.distance !== undefined);
         const intensity = active
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
-            : 1 / ((v?.distance ?? 0) + 1)
+            : lens === "changes"
+              ? 1
+              : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
         return (
@@ -226,6 +237,18 @@ export function MapTreemap({
             data-overlap={v?.overlap || undefined}
             data-direct-import={directImport || undefined}
             data-fix-heavy={fixHeavy || undefined}
+            data-changed={
+              changes
+                .filter((change) => change.changed)
+                .map((change) => change.seat)
+                .join(" ") || undefined
+            }
+            data-read={
+              changes
+                .filter((change) => change.read && !change.changed)
+                .map((change) => change.seat)
+                .join(" ") || undefined
+            }
             style={
               {
                 ...style(tile),
@@ -233,8 +256,21 @@ export function MapTreemap({
                 "--tile-colour": active
                   ? lens === "history"
                     ? "var(--accent)"
-                    : colours[(v?.seat ?? 0) % colours.length]
+                    : colours[
+                        (lens === "changes"
+                          ? snapshot.seats.findIndex((seat) => seat.seat === changes[0]?.seat)
+                          : (v?.seat ?? 0)) % colours.length
+                      ]
                   : "var(--void-line)",
+                "--tile-read-colour": changes.some((change) => !change.changed && change.read)
+                  ? colours[
+                      snapshot.seats.findIndex(
+                        (seat) =>
+                          seat.seat ===
+                          changes.find((change) => !change.changed && change.read)?.seat,
+                      ) % colours.length
+                    ]
+                  : "transparent",
               } as CSSProperties
             }
             onClick={() => onSelect(tile.path)}

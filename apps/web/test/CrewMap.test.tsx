@@ -5,21 +5,6 @@ import { CrewMapView, LiveCrewMap } from "../src/map/CrewMap.tsx";
 import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
 
-vi.mock("../src/map/MapScene.tsx", () => ({
-  MapScene: ({
-    focus,
-    seat,
-    seatFocus,
-  }: {
-    focus: string | null;
-    seat: string | null;
-    seatFocus: { seat: string; request: number } | null;
-  }) => (
-    <div data-focus={focus} data-seat={seat ?? ""} data-seat-focus={JSON.stringify(seatFocus)}>
-      3D scene
-    </div>
-  ),
-}));
 const GAP = LiveMap.REFETCH_GAP_MS;
 // these exercise ordering and resync; the throttle has its own test below
 beforeEach(() => {
@@ -60,7 +45,7 @@ it("finds a file and shows each seat that touched it: changed with its +/−, re
     "RETRO-1read",
   ]);
   expect(within(card).getByRole("button", { name: "Zoom to it" })).toBeTruthy();
-  expect(await screen.findByText("3D scene")).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Changes treemap" })).toBeTruthy();
 });
 it("loads live data, resyncs a gap and reconnect, and closes its subscription", async () => {
   const sources: {
@@ -196,15 +181,9 @@ it("finds and focuses individual files in a large tree", async () => {
   fireEvent.change(search, { target: { value: "file-2000" } });
   fireEvent.click(screen.getByRole("button", { name: "src/file-2000.ts" }));
   expect(screen.getByRole("heading", { name: "src/file-2000.ts" })).toBeTruthy();
-  await waitFor(() =>
-    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("src/file-2000.ts"),
-  );
   fireEvent.change(search, { target: { value: "settings.ts" } });
   fireEvent.keyDown(search, { key: "Enter" });
   expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
-  await waitFor(() =>
-    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("settings.ts"),
-  );
 });
 
 it("throttles delta-driven refetches to one per 2 s, never holding the first load", async () => {

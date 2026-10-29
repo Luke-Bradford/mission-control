@@ -3,6 +3,8 @@ import { githubItemHref } from "../links.ts";
 
 export type MapLens = "changes" | "impact" | "history";
 export interface LensVisual {
+  /** Changes: every seat that currently changed or read this file. */
+  changes?: { seat: string; changed: boolean; read: boolean }[];
   /** Impact: seat colour index and dependency distance (zero is a changed seed). */
   seat?: number;
   distance?: number;
@@ -164,7 +166,27 @@ export function lensVisuals(
   lens: MapLens,
   focus: string | null,
 ): Record<string, LensVisual> {
-  if (lens === "changes") return {};
+  if (lens === "changes") {
+    const out: Record<string, LensVisual> = {};
+    snapshot.seats.forEach((seat) => {
+      const changed = new Set(
+        seat.scope.modified
+          .filter((change) => change.add + change.rem > 0)
+          .map((change) => change.file),
+      );
+      const read = new Set(seat.scope.read);
+      for (const path of new Set([...changed, ...read])) {
+        const visual = out[path] ?? { changes: [] };
+        out[path] = visual;
+        visual.changes?.push({
+          seat: seat.seat,
+          changed: changed.has(path),
+          read: read.has(path),
+        });
+      }
+    });
+    return out;
+  }
   if (lens === "impact") {
     const { forward, reverse } = graph(snapshot);
     const out: Record<string, LensVisual> = {};
