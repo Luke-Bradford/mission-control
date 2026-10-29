@@ -251,6 +251,12 @@ export async function main(): Promise<void> {
   const engineBoard = {
     edit: async (repoId: string, issue: number, fields: { size?: string; priority?: string }) =>
       editCardFields({ gql: makeGql(await githubToken()), store, config }, repoId, issue, fields),
+    read: async (repoId: string, issue: number) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      return repo === undefined
+        ? null
+        : fetchQueueCard(repo, issue, makeGql(await githubToken()), Date.now());
+    },
     move: async (m: Move) => {
       const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
       // a card that moved shows on the boards now, not at the next poll

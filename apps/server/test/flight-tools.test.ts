@@ -215,6 +215,9 @@ let clearanceCalls: unknown[][];
 let clearanceOk: boolean;
 let rerunOk: boolean;
 let editCalls: unknown[][];
+let readImpl: (issue: number) => BoardItem | null;
+let readCalls: number[];
+let failEdit: boolean;
 let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
@@ -304,6 +307,9 @@ beforeEach(() => {
   clearanceOk = true;
   rerunOk = true;
   editCalls = [];
+  readImpl = () => null;
+  readCalls = [];
+  failEdit = false;
   fetchCalls = [];
   fetchRepos = [];
   busyNow = [];
@@ -409,7 +415,11 @@ beforeEach(() => {
     board: {
       edit: async (...args) => {
         editCalls.push(args);
-        return { ok: true, changed: true };
+        return failEdit ? { ok: false, reason: "boom" } : { ok: true, changed: true };
+      },
+      read: async (_repoId, issue) => {
+        readCalls.push(issue);
+        return readImpl(issue);
       },
       move: async (m) => {
         moveCalls.push(m);
@@ -3415,6 +3425,39 @@ describe("create_ticket", () => {
     expect(decisions()).toHaveLength(1);
   });
 
+  describe("with a size and priority", () => {
+    beforeEach(() => {
+      need(cfg.repos[0]).flightPowers = "superuser";
+    });
+    it("sets them on the project item it added, then moves it to Backlog", async () => {
+      expect(await call("create_ticket", C({ size: "S", priority: "P1" }))).toEqual({
+        text: "Filed mc#42, on the project in Backlog. Recorded in Decided without you.",
+      });
+      expect(editCalls).toEqual([["mc", 42, { size: "S", priority: "P1" }]]);
+      expect(moveCalls).toHaveLength(1);
+    });
+    it("refuses an invalid size or priority before any write", async () => {
+      for (const over of [{ size: "HUGE" }, { priority: "P9" }])
+        expect((await call("create_ticket", C(over))).isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+      expect(editCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+    it("refuses before any write on a repo that is not superuser", async () => {
+      need(cfg.repos[0]).flightPowers = "standard";
+      expect((await call("create_ticket", C({ size: "S" }))).isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+    });
+    it("says so when the fields could not be set, and still records the ticket", async () => {
+      failEdit = true;
+      const r = await call("create_ticket", C({ size: "S" }));
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("Filed mc#42");
+      expect(r.text).toContain("Size and Priority");
+      expect(decisions()).toHaveLength(1);
+    });
+  });
+
   it("refuses an unparseable gh answer, and records nothing", async () => {
     ghImpl = async (a) =>
       a[1] === "list"
@@ -5660,6 +5703,22 @@ describe("superuser housekeeping", () => {
     ).not.toHaveProperty("isError", true);
     expect(editCalls).toEqual([["mc", 7, { size: "S", priority: "P0" }]]);
     expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({ assignees: ["work-account"] });
+  });
+  it("reads a card the board cache has not seen yet, instead of refusing", async () => {
+    elevated();
+    readImpl = (n) => card(n);
+    expect(await call("edit_card", { issue: 42, size: "S" })).not.toHaveProperty("isError", true);
+    expect(readCalls).toEqual([42]);
+    expect(editCalls).toEqual([["mc", 42, { size: "S" }]]);
+  });
+  it("refuses a card that is on no board even after the re-read", async () => {
+    elevated();
+    expect(await call("edit_card", { issue: 42, size: "S" })).toMatchObject({
+      isError: true,
+      text: "Card is not on this repo's board.",
+    });
+    expect(readCalls).toEqual([42]);
+    expect(editCalls).toEqual([]);
   });
   it("never dismisses operator items or guard acknowledgements", async () => {
     elevated();
