@@ -160,6 +160,7 @@ describe("scratch mode", () => {
     "dismiss_item",
     "gh_read",
     "close_ticket",
+    "add_controller_check",
     "screenshot_hud",
   ])("guards %s with the live repo powers", (name) => {
     const event = { tool: `mcp__mc__${name}`, input: {} };

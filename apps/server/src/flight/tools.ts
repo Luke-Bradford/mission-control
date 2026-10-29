@@ -39,6 +39,7 @@ import {
   CLOSE_UNCONFIRMED_DECISION,
   CLOSED_PREFIX,
   COMMENTED_DECISION,
+  CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
   capText,
@@ -56,6 +57,7 @@ import {
   commentedText,
   commentFailedText,
   commentTextText,
+  controllerCheckOf,
   createBodyText,
   createdDecision,
   createdDraftText,
@@ -295,6 +297,7 @@ import {
   unparkCapText,
   untrackedText,
   WAITS_ON_ONLY_BACKLOG,
+  withControllerCheckItem,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
@@ -736,6 +739,13 @@ const CloseTicketArgs = z.strictObject({
   issue: issueNumber,
   replacement: issueNumber,
   reason: z.enum(["duplicate", "not-planned"]),
+  basis: basisArg,
+});
+const AddControllerCheckArgs = z.strictObject({
+  issue: issueNumber,
+  item: text(500).refine((s) => !/[\r\n]/.test(s) && !s.trimStart().startsWith("#"), {
+    message: "must be one line and not a heading",
+  }),
   basis: basisArg,
 });
 const GhReadArgs = z.strictObject({ path: z.string().min(1).max(FLIGHT_GH_PATH_MAX) });
@@ -1924,6 +1934,86 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
   }
 
+  /** The always_ask and lane refusals of edit_card, for any card a tool names. */
+  function cardProblem(card: BoardItem, rules: RepoRules): string | null {
+    const lane = config.crew?.lane;
+    if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
+      return "this is an always_ask ticket";
+    const lanes = card.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX));
+    if (lanes.length > 1 || (lane && lanes.length === 1 && lanes[0] !== `lane:${lane}`))
+      return "this ticket belongs to another lane or has conflicting lanes";
+    return null;
+  }
+
+  /** add_controller_check's act (see superTool): the powers, Away and engine checks are made. */
+  async function addControllerCheck(
+    a: z.output<typeof AddControllerCheckArgs>,
+    repo: CcConfig["repos"][number],
+    ctx: McToolContext,
+  ): Promise<Result> {
+    const refuse = (why: string) => fail(`Cannot add the controller check: ${why}.`);
+    const ref = `${repo.id}#${a.issue}`;
+    const card =
+      store.board(repo.id).find((c) => c.issueNumber === a.issue) ??
+      (await deps.board.read?.(repo.id, a.issue).catch(() => null));
+    if (!card) return refuse("the issue is not on this repo's board");
+    if (card.closed) return refuse("the ticket is closed");
+    const rules = await deps.rules(repo.id);
+    if (rules instanceof Error) return refuse("cannot read repo rules");
+    const problem = cardProblem(card, rules);
+    if (problem !== null) return refuse(problem);
+    const known = await readKnown(deps, "add_controller_check");
+    const unfit = await textProblem(
+      ctx,
+      "add_controller_check",
+      repo.github,
+      a.issue,
+      [
+        { label: "item", text: a.item },
+        { label: "basis", text: a.basis },
+      ],
+      known,
+    );
+    if (unfit !== null) return refuse(unfit);
+    const read = async (): Promise<TicketView | null> => {
+      try {
+        return await deps.fetchTicket(repo, a.issue);
+      } catch {
+        return null;
+      }
+    };
+    const before = await read();
+    if (before === null) return refuse("the ticket could not be read");
+    if (before.state !== "open") return refuse("the ticket is closed");
+    if (before.bodyTruncated) return refuse("the ticket body is too long to edit safely");
+    const edit = withControllerCheckItem(before.body, a.item);
+    if (!edit.added && !edit.removed)
+      return { text: `${ref} already lists that item under ${CONTROLLER_CHECK_HEADING}.` };
+    // the reads took time: Away may have begun since superTool's check
+    if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+    const r = await deps.gh(
+      ["issue", "edit", String(a.issue), `--repo=${repo.github}`, `--body=${edit.body}`],
+      { cwd: crewDir(deps.dbPath) },
+    );
+    if (r.code !== 0) {
+      deps.log?.(
+        redact(
+          `mc add_controller_check: gh issue edit failed (${String(r.code)}): ${r.stderr}`,
+          known,
+        ),
+      );
+      return refuse("GitHub refused the edit");
+    }
+    // Exit 0 is not proof: trust only the live body, which must now hold the item as a check.
+    const after = await read();
+    const held = after === null ? null : controllerCheckOf(after.body);
+    if (held === null || !held.split("\n").some((l) => l.trim() === `- ${a.item.trim()}`))
+      return refuse("the edit could not be confirmed on GitHub; read the ticket");
+    return {
+      text: `Added to ${CONTROLLER_CHECK_HEADING} on ${ref}: ${cut(a.item, 120)}${edit.removed ? " (moved from Done when)" : ""}. The engine now holds its PR for the controller.`,
+    };
+  }
+
   /** close_ticket's act (see superTool): the powers, Away and engine checks are already made. */
   async function closeTicket(
     a: z.output<typeof CloseTicketArgs>,
@@ -1947,16 +2037,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return refuse("cannot read repo rules");
     const cards = store.board(repo.id);
-    const lane = config.crew?.lane;
-    /** The always_ask and lane refusals of edit_card, for any card this tool names. */
-    const unfit = (card: BoardItem): string | null => {
-      if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
-        return "this is an always_ask ticket";
-      const lanes = card.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX));
-      if (lanes.length > 1 || (lane && lanes.length === 1 && lanes[0] !== `lane:${lane}`))
-        return "this ticket belongs to another lane or has conflicting lanes";
-      return null;
-    };
+    const unfit = (card: BoardItem): string | null => cardProblem(card, rules);
     const card = cards.find((c) => c.issueNumber === a.issue);
     if (!card) return refuse("the issue is not on this repo's board");
     const problem = unfit(card);
@@ -3419,6 +3500,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         },
         ["issue", "basis"],
       ),
+    ),
+    superTool(
+      MC_TOOL_NAMES.addControllerCheck,
+      `Add one item under a ticket's ${CONTROLLER_CHECK_HEADING} so the engine holds its PR for the controller (creating the section when missing); an identical Done when line moves there. Only that section and line change. Refuses a closed ticket. It can only add a hold.`,
+      AddControllerCheckArgs,
+      "card",
+      addControllerCheck,
     ),
     {
       name: MC_TOOL_NAMES.briefItem,
