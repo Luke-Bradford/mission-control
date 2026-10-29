@@ -1302,7 +1302,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           },
         },
         ctx.seatId,
-        { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+        { to: seat, text: body, label: "handoff", ref: unendedRun(seat)?.ticket ?? undefined },
       );
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Message refused.");

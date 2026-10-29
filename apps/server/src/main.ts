@@ -32,6 +32,7 @@ import {
   githubToken,
   makeGql,
 } from "./collectors/github.ts";
+import { commsInboxPrompt } from "./comms.ts";
 import {
   ConfigError,
   configuredAgents,
@@ -198,7 +199,10 @@ export async function main(): Promise<void> {
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
   const deliverComms = (seatId: string, text: string, from: string): void => {
     const sender = from === COMMS_CAPCOM ? COMMS_CAPCOM : seatCallSign(from);
-    const envelope = `Comms from ${sender}: ${text}`;
+    const runId = store.seatSession(seatId)?.runId;
+    const inbox =
+      runId === null || runId === undefined ? "" : `\n\n${commsInboxPrompt(store, seatId, runId)}`;
+    const envelope = `Comms from ${sender}: ${text}${inbox}`;
     void messageUnpausedSeat(store, supervisor, seatId, envelope, {
       interrupt: false,
       questions: "none",

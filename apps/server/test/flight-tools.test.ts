@@ -1604,12 +1604,17 @@ describe("message_seat", () => {
     expect(seen).toContain("flight");
   });
 
-  it("records the message as FLIGHT to the seat, without the prefix, about its run's ticket", async () => {
+  it("records the message as a labelled handoff from FLIGHT, without the prefix, about its run's ticket", async () => {
     live("guido-1", "r-guido", { ticket: "mc#7" });
     await call("message_seat", M());
-    expect(store.comms(0)).toEqual([
-      { at: NOW, from: "flight-1", to: "guido-1", ticket: "mc#7", text: "Please push" },
-    ]);
+    expect(store.commsMessage("comms:1")).toMatchObject({
+      at: NOW,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "mc#7",
+      label: "handoff",
+      text: "Please push",
+    });
     expect(seen).toContain("agents");
   });
 
@@ -1659,7 +1664,9 @@ describe("message_seat", () => {
     };
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
-    expect(store.comms(0)).toEqual([]);
+    expect(store.comms(0)).toMatchObject([
+      { from: "flight-1", to: "guido-1", text: "Please push" },
+    ]);
   });
 
   it("does not deliver or store when the seat leaves during secret scanning", async () => {

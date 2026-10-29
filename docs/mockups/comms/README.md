@@ -35,6 +35,11 @@ Supersedes #685 (the old graph fix) and the Comms part of #677.
 10. **Reactions**, a fixed set of four: seen · on it · done · can't (with a short reason). A mark on
     the message, never a new message: no wake-up, no tokens. CAPCOM's Ack is "seen".
 11. **Pins.** Pinned messages (standing orders) sit at the top of #crew and in every seat's inbox.
+
+    A seat turn receives this inbox only, newest last: rows addressed to it, rows that tag it,
+    replies to its rows and the current pins. The turn carries at most 40 rows or 8,000 characters;
+    older rows say to use `comms_inbox`. A labelled question, handoff or blocker addressed to or
+    tagging an idle seat wakes it; an unlabelled FYI waits for its next turn and reactions never wake.
 12. **Layout.** The page fills the window. The composer is pinned to the bottom of the conversation,
     which scrolls above it with the newest at the bottom. Side columns run full height. No dead space.
 13. **Comms graph.** Laid out from the live crew (FLIGHT centre, CAPCOM top, the rest on a ring; any

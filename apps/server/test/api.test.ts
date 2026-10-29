@@ -5242,7 +5242,7 @@ describe("crew routes", () => {
     });
   });
 
-  it("message, interrupt and end answer 200 { ok: true } and emit agents", async () => {
+  it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
     const m = await post5("message", { text: "hi" });
@@ -5254,8 +5254,6 @@ describe("crew routes", () => {
       expect(r.json()).toEqual({ ok: true });
     }
     expect(supervisorCalls).toEqual([
-      ["message", "guido-1", "hi", { interrupt: false }],
-      ["message", "guido-1", "now", { interrupt: true }],
       ["interrupt", "guido-1"],
       ["end", "guido-1", { hold: undefined }],
     ]);
@@ -5412,11 +5410,11 @@ describe("crew routes", () => {
     expect(r.json<{ error: string }>().error).toBe("text: must not be blank");
   });
 
-  it.each(["x", "\u0001"])("delivers and stores a message at the cap whole (%j)", async (char) => {
+  it.each(["x", "\u0001"])("stores an FYI at the cap whole without waking (%j)", async (char) => {
     const text = char.repeat(COMMS_MESSAGE_MAX);
     const r = await post5("message", { text });
     expect(r.statusCode).toBe(200);
-    expect(supervisorCalls).toEqual([["message", "guido-1", text, { interrupt: false }]]);
+    expect(supervisorCalls).toEqual([]);
     expect(store.comms(0).map((m) => m.text)).toEqual([text]);
   });
 
@@ -5430,9 +5428,9 @@ describe("crew routes", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
-  it("passes message text on as typed, indentation included", async () => {
+  it("stores FYI message text as typed, indentation included", async () => {
     expect((await post5("message", { text: "  - item\n" })).statusCode).toBe(200);
-    expect(supervisorCalls).toEqual([["message", "guido-1", "  - item\n", { interrupt: false }]]);
+    expect(supervisorCalls).toEqual([]);
   });
 
   describe("the watch seat", () => {
@@ -6335,12 +6333,12 @@ describe("the first loop's engine", () => {
       payload: { text: "go on" },
     });
 
-  it("tells the engine of a message to a seat whose run is looped", async () => {
+  it("does not tell the engine about an unlabelled FYI to a looped seat", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     const { a, told, calls } = engineApp("looped");
     expect((await message(a)).statusCode).toBe(200);
-    expect(told).toEqual(["looped"]);
-    expect(calls).toEqual([["looped"]]);
+    expect(told).toEqual([]);
+    expect(calls).toEqual([]);
     await a.close();
   });
 
@@ -6626,13 +6624,13 @@ describe("the first loop's engine", () => {
     await a.close();
   });
 
-  it("records a message to a seat with no run against no ticket, and a refused one not at all", async () => {
+  it("records an FYI to a seat with no run against no ticket", async () => {
     const none = engineApp(null);
     expect((await message(none.a)).statusCode).toBe(200);
     expect(store.comms(0).map((c) => c.ticket)).toEqual([null]);
     supervisorFail = new SupervisorError(409, "GUIDO-1 has no live session");
-    expect((await message(none.a)).statusCode).toBe(409);
-    expect(store.comms(0)).toHaveLength(1);
+    expect((await message(none.a)).statusCode).toBe(200);
+    expect(store.comms(0)).toHaveLength(2);
     await none.a.close();
   });
 
@@ -6659,11 +6657,11 @@ describe("the first loop's engine", () => {
     await a.close();
   });
 
-  it("does not when the message is refused", async () => {
+  it("does not wake a looped run for an unlabelled FYI", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     const { a, told } = engineApp("looped");
     supervisorFail = new SupervisorError(409, "GUIDO-1 has no live session");
-    expect((await message(a)).statusCode).toBe(409);
+    expect((await message(a)).statusCode).toBe(200);
     expect(told).toEqual([]);
     await a.close();
   });

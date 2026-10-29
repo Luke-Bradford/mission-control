@@ -221,6 +221,7 @@ describe("the allowlist in phase 2b", () => {
       "mcp__mc__ask_flight",
       "mcp__mc__report_evidence",
       "mcp__mc__comms_read",
+      "mcp__mc__comms_inbox",
       "mcp__mc__comms_send",
       "mcp__mc__comms_react",
     ]);
@@ -265,6 +266,7 @@ describe("the allowlist in phase 2b", () => {
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
       commsRead: "mcp__mc__comms_read",
+      commsInbox: "mcp__mc__comms_inbox",
       commsSend: "mcp__mc__comms_send",
       commsReact: "mcp__mc__comms_react",
       commsPin: "mcp__mc__comms_pin",
@@ -781,6 +783,7 @@ describe("scratch mode", () => {
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",
+      "mcp__mc__comms_inbox",
       "mcp__mc__comms_send",
       "mcp__mc__comms_react",
     ]);

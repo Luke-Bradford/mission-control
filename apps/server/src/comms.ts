@@ -16,12 +16,15 @@ import {
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";
 
+export const COMMS_INBOX_PROMPT_MAX = 8_000;
+export const COMMS_INBOX_PROMPT_ROWS = 40;
+
 export interface CommsServiceDeps {
   store: Store;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
   now?: () => number;
-  /** Only direct seat delivery wakes a worker; reactions never use it. */
+  /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
 }
@@ -98,10 +101,46 @@ export async function sendComms(
   let stored = deps.seatSender ? storeMessage() : null;
   if (deps.seatSender && stored === null)
     throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  for (const to of notify) await deps.notify?.(to, input.text, from);
   if (!deps.seatSender) stored = storeMessage();
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  return message(stored);
+  const sent = message(stored);
+  // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat.
+  if (sent.label !== null) for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+  return sent;
+}
+
+/** The bounded Comms context supplied when a seat starts a turn. */
+export function commsInboxPrompt(store: Store, seatId: string, runId: string): string {
+  const pins = new Set(store.commsPins().map((row) => row.id));
+  const rows = store
+    .commsInboxRun(seatId, runId)
+    .filter((row) => canReadComms(store, seatId, row, pins))
+    .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)));
+  let omitted = Math.max(0, rows.length - COMMS_INBOX_PROMPT_ROWS);
+  const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) =>
+    JSON.stringify({
+      id: row.id,
+      at: row.at,
+      from: row.from,
+      to: row.to,
+      text: row.text,
+      label: row.label,
+      ref: row.ref,
+      replyTo: row.replyTo,
+      mentions: row.mentions,
+      pinned: pins.has(row.id),
+      unread: true,
+    }),
+  );
+  const heading =
+    "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
+  const render = () =>
+    [heading, omitted === 0 ? "" : `${omitted} older: use comms_inbox`, ...lines].join("\n");
+  while (lines.length > 0 && render().length > COMMS_INBOX_PROMPT_MAX) {
+    lines.shift();
+    omitted++;
+  }
+  return render();
 }
 
 export function canReadComms(

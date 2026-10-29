@@ -2752,8 +2752,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               e instanceof Error ? e.message : "Comms message refused.",
             );
           }
-          // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
-          if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
           return { ok: true };
         },
         // Bound the encoded request before parsing; accepted messages stay whole.
