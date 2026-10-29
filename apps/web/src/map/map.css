@@ -418,19 +418,19 @@
   --map-key-swatch-3: #328796;
   --map-key-swatch-4: #4195a3;
 }
-.map-key-swatch-1 {
+.map-key-steps .map-key-swatch-1 {
   background: var(--map-key-swatch-1);
   opacity: 1;
 }
-.map-key-swatch-2 {
+.map-key-steps .map-key-swatch-2 {
   background: var(--map-key-swatch-2);
   opacity: 1;
 }
-.map-key-swatch-3 {
+.map-key-steps .map-key-swatch-3 {
   background: var(--map-key-swatch-3);
   opacity: 1;
 }
-.map-key-swatch-4 {
+.map-key-steps .map-key-swatch-4 {
   background: var(--map-key-swatch-4);
   opacity: 1;
 }
