@@ -325,6 +325,10 @@ export interface Telemetry {
       alertAt: number;
       stopAt: number;
       points: { at: number; pct: number }[];
+      /** Percentage points consumed in each selected-range interval; interval starts match throughput. */
+      burn?: { at: number; spendPct: number }[];
+      /** Estimated time usage reaches 100% at the selected range's observed pace, or null without spend. */
+      projectedExhaustionAt?: number | null;
       resets: { at: number; resetAt: number; cause: string }[];
     }[];
     /** The board and run facts used to plot a ticket's cycle in hours. Null means that fact was not observed. */

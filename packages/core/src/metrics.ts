@@ -21,7 +21,14 @@ export type MetricId = (typeof METRIC_IDS)[number];
 
 /** "now", "today", "24h" or a day count such as "14d". */
 export type MetricWindow = string;
-export type MetricUnit = "tickets" | "agents" | "PRs" | "hours" | "items" | "USD";
+export type MetricUnit =
+  | "tickets"
+  | "agents"
+  | "PRs"
+  | "hours"
+  | "items"
+  | "USD"
+  | "quota percentage points per interval";
 
 export interface MetricDef {
   label: string;
@@ -140,6 +147,14 @@ export const TELEMETRY_METRICS = {
     unit: "PRs",
     definition: `Daily CI first-pass rate, review pass rate and review rounds for merged pull requests. A day without evidence is null, never zero. ${CREW_REPOS}`,
     source: "GET /api/telemetry (series.quality)",
+    from: "server",
+  },
+  quotaBurn: {
+    label: "Quota burn",
+    window: "selected range",
+    unit: "quota percentage points per interval",
+    definition: `Positive changes in an account window's used percentage, grouped into the selected range's timestamped intervals. Projected exhaustion uses that range's total burn pace; no spend means no projection. ${CREW_REPOS}`,
+    source: "GET /api/telemetry (series.quota.burn, series.quota.projectedExhaustionAt)",
     from: "server",
   },
   costPerMergedTicket: {

@@ -971,9 +971,10 @@ poll (the collector's `lastOkAt` in `/api/health`). A loop whose own collector f
 **Error** with the reason, and as an error item in Needs you; a failure after a recovery pulses
 again.
 
-The 7-day projection uses the pace over the last 24 h of the current window's samples, or over
-the hours the samples cover when that is less. Under 3 h of samples (just after a reset) there
-is no projection: the Quota panel shows used % with no "full in … at this rate" line.
+Telemetry's quota series retains raw usage observations and also sends range-aligned burn buckets:
+positive percentage-point changes in each throughput interval. Its projected exhaustion time uses
+the selected range's total burn pace and latest observed usage; with no spend it is null. A reset
+is never counted as spend.
 
 ### Known limits
 
@@ -984,8 +985,6 @@ is no projection: the Quota panel shows used % with no "full in … at this rate
   Plan 2 standardises this.
 - **Studio pause arrives with cutover.** Only the TA loop has a `PAUSE` sentinel. The studio
   agent's page has no Pause, and the API returns 409.
-- **The 5h windows have no projection.** Projection and stop forecast apply to 7-day windows.
-  5h rows show only usage and reset time.
 - Board items with no Status, or a Status missing from `status_map`, are not shown (skipped).
   Health names how many were skipped, e.g. "skipped 53 board item(s) with unmapped status".
 - The codex app-server, which is the codex usage source, creates its own SQLite sidecar files

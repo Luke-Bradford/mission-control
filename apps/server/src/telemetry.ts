@@ -608,10 +608,41 @@ export function telemetry(
   const chartQuota: TelemetrySeries["quota"] = config.accounts.flatMap((account) =>
     WINDOWS.flatMap((window) => {
       const samples = store.usage(account.id, window, 0);
-      const points = samples
-        .filter((sample) => sample.at >= since && sample.at <= now)
-        .map((sample) => ({ at: sample.at, pct: sample.pct }));
+      const rangeSamples = samples.filter((sample) => sample.at >= since && sample.at <= now);
+      const points = rangeSamples.map((sample) => ({ at: sample.at, pct: sample.pct }));
       if (points.length === 0) return [];
+      const burn = Array.from({ length: throughputPoints.length }, (_, index) => ({
+        at: since + index * throughputBucketMs,
+        spendPct: 0,
+      }));
+      const baseline = samples.filter((sample) => sample.at < since).at(-1);
+      const burnSamples = baseline ? [baseline, ...rangeSamples] : rangeSamples;
+      for (let index = 1; index < burnSamples.length; index++) {
+        const previous = burnSamples[index - 1];
+        const point = burnSamples[index];
+        if (!previous || !point) continue;
+        if (previous.resetAt !== point.resetAt) continue;
+        const spent = point.pct - previous.pct;
+        if (spent <= 0) continue;
+        const bucket = Math.min(
+          burn.length - 1,
+          Math.floor((point.at - since) / throughputBucketMs),
+        );
+        const burnPoint = burn[bucket];
+        if (burnPoint) burnPoint.spendPct += spent;
+      }
+      const totalBurn = burn.reduce((sum, point) => sum + point.spendPct, 0);
+      const latest = rangeSamples.at(-1);
+      const candidateExhaustionAt =
+        totalBurn === 0 || latest === undefined || latest.pct >= 100
+          ? null
+          : now + ((100 - latest.pct) * rangeMs) / totalBurn;
+      const projectedExhaustionAt =
+        candidateExhaustionAt !== null &&
+        latest !== undefined &&
+        candidateExhaustionAt < latest.resetAt
+          ? candidateExhaustionAt
+          : null;
       const resets = samples.flatMap((sample, index) => {
         const previous = samples[index - 1];
         if (
@@ -630,6 +661,8 @@ export function telemetry(
           alertAt: account.alertAt,
           stopAt: account.stopAt,
           points,
+          burn,
+          projectedExhaustionAt,
           resets,
         },
       ];
