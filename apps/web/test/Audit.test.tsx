@@ -1,6 +1,7 @@
 import { AUDIT_PR_OUTLIER_LINES, type AuditView, type ConfigView } from "@mc/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import "../src/hud.css";
 import { hub } from "../src/data.ts";
 import { Audit } from "../src/pages/Audit.tsx";
 import { stubFetch } from "./fetchStub.ts";
