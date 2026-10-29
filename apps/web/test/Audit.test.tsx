@@ -129,9 +129,48 @@ it("shows loading until the initial range arrives", async () => {
   expect(await screen.findByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
 });
 
+it("fails closed while crew classification is loading or unavailable", async () => {
+  hub.clear();
+  let resolveConfig: (response: Response) => void = () => {};
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string) =>
+      input === "/api/config"
+        ? new Promise<Response>((done) => {
+            resolveConfig = done;
+          })
+        : Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...AUDIT,
+                longRunners: [
+                  ...AUDIT.longRunners,
+                  { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
+                  { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
+                ],
+              }),
+              { status: 200 },
+            ),
+          ),
+    ),
+  );
+  render(<Audit />);
+
+  expect(await screen.findByText("Loading crew classification…")).toBeTruthy();
+  expect(screen.queryByText(/run\/(observed|watch)/)).toBeNull();
+  await act(async () =>
+    resolveConfig(new Response(JSON.stringify({ error: "config unavailable" }), { status: 500 })),
+  );
+  expect(
+    await screen.findByText("Could not load crew classification: config unavailable"),
+  ).toBeTruthy();
+  expect(screen.queryByText(/run\/(observed|watch)/)).toBeNull();
+});
+
 it("renders empty audit panels and an initial API failure", async () => {
   hub.clear();
   stubFetch({
+    "/api/config": CONFIG,
     "/api/audit?range=30d": {
       range: { since: NOW - 30 * 24 * HOUR, until: NOW },
       longRunners: [],

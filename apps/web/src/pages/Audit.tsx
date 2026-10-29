@@ -34,7 +34,7 @@ const percent = (n: number | null): string => (n === null ? "—" : `${Math.roun
 export function Audit() {
   const [range, setRange] = useState<AuditRange>("30d");
   const res = useResource<Audit>(RESOURCES.audit(range));
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
   const [last, setLast] = useState<{ range: AuditRange; data: Audit }>();
   useEffect(() => {
     if (res.data) setLast({ range, data: res.data });
@@ -62,7 +62,7 @@ export function Audit() {
       )}
       {audit && (
         <div className="audit-grid">
-          <Improvements audit={audit} config={config} />
+          <Improvements audit={audit} config={configRes.data} configError={configRes.error} />
           <PrSizes sizes={audit.prSizes} />
           <Changes changes={audit.changes} />
           <Checks audit={audit} />
@@ -93,10 +93,31 @@ function Empty({ collected = true }: { collected?: boolean }) {
   return <p className="s fg2">{collected ? "No findings in this range." : "Not collected yet."}</p>;
 }
 
-function Improvements({ audit, config }: { audit: Audit; config: ConfigView | undefined }) {
+function Improvements({
+  audit,
+  config,
+  configError,
+}: {
+  audit: Audit;
+  config: ConfigView | undefined;
+  configError: Error | null;
+}) {
+  if (!config) {
+    return (
+      <Panel title="Improvements to consider" className="audit-panel">
+        <div className="pb audit-list">
+          <p className="s fg2">
+            {configError
+              ? `Could not load crew classification: ${configError.message}`
+              : "Loading crew classification…"}
+          </p>
+        </div>
+      </Panel>
+    );
+  }
   const excludedAgents = new Set([
-    ...(config?.loops.map((loop) => loop.id) ?? []),
-    ...(config?.crew?.sessions.flatMap((session) =>
+    ...config.loops.map((loop) => loop.id),
+    ...(config.crew?.sessions.flatMap((session) =>
       session.seats.filter((seat) => seat.loop === "watch").map((seat) => seat.id),
     ) ?? []),
   ]);
