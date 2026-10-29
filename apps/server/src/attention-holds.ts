@@ -1,4 +1,10 @@
-import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
+import {
+  type AttentionHold,
+  type AttentionHoldCondition,
+  type AttentionItem,
+  type BriefOption,
+  DECISION_DEFAULT_WAIT_MS,
+} from "@mc/core";
 import { z } from "zod";
 import type { Store } from "./store.ts";
 
@@ -112,4 +118,28 @@ export function attentionHoldError(e: z.ZodError): string {
   if (!issue) return "invalid body";
   const path = issue.path.map(String).join(".");
   return path === "" ? issue.message : `${path}: ${issue.message}`;
+}
+
+/**
+ * A decision's default: its recommended option and when it applies if nobody has answered. The
+ * wait runs from the ask, and from the hold's release when the operator held it meanwhile (a hold
+ * stops the clock). Null for anything that is not an operator decision with a recommendation (an escalation is answered on GitHub, which the hub does not write to).
+ */
+export function decisionDefault(
+  store: Store,
+  item: AttentionItem,
+): { option: BriefOption; briefAt: number; dueAt: number } | null {
+  const brief = item.brief;
+  if (item.owner !== "operator" || !brief || brief.for === "flight") return null;
+  const option = brief.options.find(
+    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
+  );
+  if (!option) return null;
+  if (item.escalationId !== null) return null;
+  const briefAt = brief.askAt ?? brief.at;
+  const hold = holds(store)[item.key];
+  const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
+  // the stored deadline; a brief from before it was stored gets the current wait from the ask
+  const dueAt = brief.defaultAt ?? briefAt + DECISION_DEFAULT_WAIT_MS;
+  return { option, briefAt, dueAt: Math.max(dueAt, released + (dueAt - briefAt)) };
 }
