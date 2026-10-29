@@ -56,7 +56,7 @@ import { refreshAuthors } from "./flight/collaborators.ts";
 import { renderHudWithPlaywright } from "./flight/hud-render.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { editCardFields, type Move, moveCard } from "./github-board.ts";
+import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -251,6 +251,8 @@ export async function main(): Promise<void> {
   const engineBoard = {
     edit: async (repoId: string, issue: number, fields: { size?: string; priority?: string }) =>
       editCardFields({ gql: makeGql(await githubToken()), store, config }, repoId, issue, fields),
+    checkFields: async (repoId: string, fields: { size?: string; priority?: string }) =>
+      checkCardFieldOptions({ gql: makeGql(await githubToken()), config }, repoId, fields),
     read: async (repoId: string, issue: number) => {
       const repo = config.repos.find((r) => r.id === repoId);
       return repo === undefined

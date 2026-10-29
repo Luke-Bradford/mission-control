@@ -62,6 +62,7 @@ import {
   createdFieldsFailedText,
   createdText,
   createFailedText,
+  createFieldOptionText,
   createLabelsText,
   createTextText,
   DEFAULT_PROFILES,
@@ -399,6 +400,11 @@ export interface FlightToolsDeps {
     edit?: (
       repoId: string,
       issue: number,
+      fields: { size?: string; priority?: string },
+    ) => Promise<MoveResult>;
+    /** Whether the project has these Size and Priority options; reads, writes nothing. */
+    checkFields?: (
+      repoId: string,
       fields: { size?: string; priority?: string },
     ) => Promise<MoveResult>;
     /** One issue's board item read fresh, for a card the cached board has not seen yet. */
@@ -1705,7 +1711,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const setsFields = size !== undefined || priority !== undefined;
     if (
       setsFields &&
-      (repo.flightPowers !== "superuser" || repo.autonomy !== "merge" || !deps.board.edit)
+      (repo.flightPowers !== "superuser" ||
+        repo.autonomy !== "merge" ||
+        !deps.board.edit ||
+        !deps.board.checkFields)
     )
       return fail(FIELDS_NEED_SUPERUSER);
     const bad = labelsProblem(labels);
@@ -1757,6 +1766,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
+      if (setsFields) {
+        // before the issue exists: a board without the option refuses the call, files nothing
+        const checked = await deps.board.checkFields?.(repo.id, fields);
+        if (!checked?.ok) return fail(createFieldOptionText(checked?.reason ?? ""));
+      }
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const created = await deps.gh(
         [

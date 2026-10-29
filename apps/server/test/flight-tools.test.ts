@@ -218,6 +218,7 @@ let editCalls: unknown[][];
 let readImpl: (issue: number) => BoardItem | null;
 let readCalls: number[];
 let failEdit: boolean;
+let optionsImpl: () => { ok: boolean; reason?: string };
 let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
@@ -310,6 +311,7 @@ beforeEach(() => {
   readImpl = () => null;
   readCalls = [];
   failEdit = false;
+  optionsImpl = () => ({ ok: true });
   fetchCalls = [];
   fetchRepos = [];
   busyNow = [];
@@ -416,6 +418,10 @@ beforeEach(() => {
       edit: async (...args) => {
         editCalls.push(args);
         return failEdit ? { ok: false, reason: "boom" } : { ok: true, changed: true };
+      },
+      checkFields: async () => {
+        const r = optionsImpl();
+        return r.ok ? { ok: true, changed: false } : { ok: false, reason: r.reason ?? "" };
       },
       read: async (_repoId, issue) => {
         readCalls.push(issue);
@@ -3440,6 +3446,15 @@ describe("create_ticket", () => {
       for (const over of [{ size: "HUGE" }, { priority: "P9" }])
         expect((await call("create_ticket", C(over))).isError).toBe(true);
       expect(ghCalls).toEqual([]);
+      expect(editCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+    it("refuses before any write when the board lacks the option", async () => {
+      optionsImpl = () => ({ ok: false, reason: "No Size option S." });
+      const r = await call("create_ticket", C({ size: "S" }));
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("No Size option S.");
+      expect(ghCalls.some((a) => a[1] === "create")).toBe(false);
       expect(editCalls).toEqual([]);
       expect(decisions()).toEqual([]);
     });

@@ -272,6 +272,35 @@ export async function moveCard(deps: MoveDeps, m: Move): Promise<MoveResult> {
   }
 }
 
+/** Read-only: whether the project has each Size and Priority option asked for. Writes nothing. */
+export async function checkCardFieldOptions(
+  deps: Pick<MoveDeps, "gql" | "config">,
+  repoId: string,
+  fields: { size?: string; priority?: string },
+): Promise<MoveResult> {
+  const repo = deps.config.repos.find((r) => r.id === repoId);
+  if (repo?.flightPowers !== "superuser") return { ok: false, reason: "Superuser required." };
+  try {
+    for (const [name, value] of [
+      ["Size", fields.size],
+      ["Priority", fields.priority],
+    ] as const) {
+      if (value === undefined) continue;
+      const field = await readStatusField(
+        deps.gql,
+        repo.github.split("/")[0] ?? "",
+        repo.project,
+        name,
+      );
+      if (!field.options.some((o) => o.name === value))
+        return { ok: false, reason: `No ${name} option ${value}.` };
+    }
+    return { ok: true, changed: false };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Size and Priority use the same project-field read and mutation as Status. */
 export async function editCardFields(
   deps: MoveDeps,
