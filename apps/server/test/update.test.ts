@@ -35,6 +35,7 @@ import {
   type Exec,
   HUB_CODE_NEEDS_PERSON,
   HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
   headSha,
   hubCodeHeldText,
@@ -94,7 +95,7 @@ beforeEach(() => {
   mkdirSync(dev);
   git(dev, "init", "-q", "-b", "main");
   git(dev, "remote", "add", "origin", origin);
-  writeFileSync(join(dev, ".gitignore"), "dist/\ndist-next/\ndist-prev/\n");
+  writeFileSync(join(dev, ".gitignore"), "dist/\ndist-next/\ndist-prev/\nnode_modules/\n");
   writeFileSync(join(dev, "a.txt"), "a\n");
   git(dev, "add", "-A");
   git(dev, "commit", "-qm", "init");
@@ -663,6 +664,42 @@ describe("update", () => {
     expect(((await fetch.u.update().catch((x: unknown) => x)) as Error).message).toBe(
       "update failed at fetch; see update.log",
     );
+    expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
+  });
+
+  it("installs a lockfile update through the store recorded by node_modules", async () => {
+    upstreamCommit("pnpm-lock.yaml");
+    mkdirSync(join(hub, "node_modules"));
+    writeFileSync(
+      join(hub, "node_modules", ".modules.yaml"),
+      JSON.stringify({ storeDir: "/interactive/pnpm-store/v11" }),
+    );
+
+    const update = updater();
+    await expect(update.u.update()).resolves.toEqual({ restarting: true });
+
+    const install = update.calls.find((call) => call.cmd === UPDATE_CMDS[1]);
+    expect(install?.env.pnpm_config_store_dir).toBe("/interactive/pnpm-store");
+  });
+
+  it("leaves node_modules alone when pnpm says it needs a non-interactive purge", async () => {
+    upstreamCommit("pnpm-lock.yaml");
+    const fake = fakeExec();
+    const exec: Exec = (file, args, options) =>
+      file === "pnpm" && args[0] === "install"
+        ? Promise.reject(
+            Object.assign(new Error("exit 1"), {
+              stdout: "",
+              stderr: "ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY\n",
+            }),
+          )
+        : fake.exec(file, args, options);
+    const { u } = updater({ exec });
+
+    await expect(u.update()).rejects.toMatchObject({
+      status: 409,
+      message: HUB_INSTALL_NEEDS_PERSON,
+    });
     expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
   });
 

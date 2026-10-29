@@ -19,11 +19,12 @@
  * `GIT_*` settings, like every other git call the server makes.
  */
 import { spawn } from "node:child_process";
-import { access, appendFile, chmod, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, appendFile, chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   errorText as errText,
   globMatches,
+  PNPM_STORE_ENV,
   PREVIEW_SERVER,
   type SeatSessionRow,
   seatCallSign,
@@ -87,6 +88,9 @@ export const HUB_UPDATE_HELD_KEY = "hub-update-held";
 /** The 409 `update({ auto: true })` answers for a range that is not all on the allowlist. */
 export const HUB_CODE_NEEDS_PERSON =
   "main changes more than the page and docs; a person runs this Update";
+/** Update refuses rather than letting pnpm remove the running hub's modules directory. */
+export const HUB_INSTALL_NEEDS_PERSON =
+  "Update waits for you: pnpm needs to rebuild node_modules. The running hub will not purge its modules; stop the hub and run pnpm install --frozen-lockfile from an interactive shell, then start it again.";
 const HELD_NAMED = 5;
 const named = (xs: readonly string[]) =>
   xs.length > HELD_NAMED
@@ -617,6 +621,28 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     return `${String(x?.stdout ?? "")}${String(x?.stderr ?? "")}${x?.killed ? "timed out\n" : ""}`;
   };
 
+  /**
+   * The hub's modules were normally installed from an operator shell, not from a crew checkout.
+   * Reusing the crew's private store makes pnpm regard them as incompatible and offer to purge
+   * them. `.modules.yaml` records the exact store pnpm used; its `storeDir` ends in `v<major>`,
+   * while pnpm's setting names its parent directory.
+   */
+  async function hubInstallEnv(): Promise<NodeJS.ProcessEnv> {
+    const env = installEnv(root);
+    try {
+      const modules = JSON.parse(
+        await readFile(join(root, "node_modules", ".modules.yaml"), "utf8"),
+      ) as { storeDir?: unknown };
+      if (typeof modules.storeDir === "string" && /[/\\]v\d+$/.test(modules.storeDir)) {
+        env[PNPM_STORE_ENV] = dirname(modules.storeDir);
+      }
+    } catch {
+      // A first install has no modules metadata. pnpm uses its normal configured store.
+      delete env[PNPM_STORE_ENV];
+    }
+    return env;
+  }
+
   /** Runs one fixed command, logging it and its output; a failure becomes "update failed at …". */
   async function step(
     name: UpdateStep,
@@ -817,7 +843,18 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         } else {
           await log(`\nHEAD is already origin/${MAIN}'s; not restarted since: no pull\n`);
         }
-        await step("install", "pnpm", ["install", "--frozen-lockfile"], installEnv(root));
+        try {
+          await step("install", "pnpm", ["install", "--frozen-lockfile"], await hubInstallEnv());
+        } catch (e) {
+          if (
+            e instanceof UpdateError &&
+            outputOf(e.cause).includes("ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY")
+          ) {
+            await log(`held for a person: pnpm asked to purge node_modules\n`);
+            throw new UpdateError(409, HUB_INSTALL_NEEDS_PERSON, { cause: e });
+          }
+          throw e;
+        }
         await build();
         await swap();
         if (webChange) {
