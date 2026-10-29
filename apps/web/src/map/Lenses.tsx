@@ -18,6 +18,7 @@ export interface LensVisual {
 
 const isTest = (path: string) =>
   /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(path);
+const isCode = (path: string) => /\.[cm]?[jt]sx?$/.test(path);
 const name = (path: string) => path.split("/").at(-1) ?? path;
 
 interface Graph {
@@ -166,14 +167,19 @@ export function lensVisuals(
   if (lens === "impact") {
     const { forward, reverse } = graph(snapshot);
     const out: Record<string, LensVisual> = {};
-    changed(snapshot).forEach(({ files }, seat) => {
+    const codeChanged = changed(snapshot).map(({ seat, files }) => ({
+      seat,
+      files: files.filter(isCode),
+    }));
+    const overlap = importOverlaps(codeChanged, forward);
+    codeChanged.forEach(({ files }, seat) => {
       const code = files.filter((path) => reverse.has(path));
       for (const path of code) {
         const prior = out[path];
         out[path] = {
           seat: prior?.seat ?? seat,
           distance: 0,
-          overlap: prior !== undefined && prior.seat !== seat,
+          overlap: overlap.has(path),
           focused: focus === path,
         };
       }
@@ -182,7 +188,7 @@ export function lensVisuals(
         out[path] = {
           seat: prior?.seat ?? seat,
           distance: Math.min(prior?.distance ?? Infinity, distance),
-          overlap: prior !== undefined && prior.seat !== seat,
+          overlap: false,
           focused: focus === path,
         };
       }
@@ -230,6 +236,21 @@ function changed(snapshot: MapSnapshot) {
   }));
 }
 
+function importOverlaps(seats: ReturnType<typeof changed>, forward: Graph["forward"]): Set<string> {
+  const paths = new Set<string>();
+  for (const other of seats) {
+    for (const owner of seats) {
+      if (owner.seat.seat === other.seat.seat) continue;
+      for (const path of other.files) {
+        // A shared file is a normal edit conflict, not an import-chain overlap.
+        const targets = new Set(owner.files.filter((target) => target !== path));
+        if (targets.size && importChain(path, targets, forward)) paths.add(path);
+      }
+    }
+  }
+  return paths;
+}
+
 function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) => void }) {
   return (
     <button type="button" className="map-lens-file" onClick={() => onFocus(path)}>
@@ -267,6 +288,10 @@ export function ImpactLens({
 }) {
   const { forward, reverse, cycles } = graph(snapshot);
   const allChanged = changed(snapshot);
+  const allChangedCode = allChanged.map(({ seat, files }) => ({
+    seat,
+    files: files.filter(isCode),
+  }));
   if (focus !== null) {
     const reaches = downstream(focus, reverse);
     const tests = [...reaches.keys()].filter(isTest).sort();
@@ -310,17 +335,21 @@ export function ImpactLens({
       </section>
     );
   }
-  const untested = allChanged.flatMap(({ seat, files }) =>
+  const untested = allChangedCode.flatMap(({ seat, files }) =>
     files
-      .filter((path) => !isTest(path) && ![...downstream(path, reverse).keys()].some(isTest))
+      .filter((path) => ![...downstream(path, reverse).keys()].some(isTest))
       .map((path) => ({ seat: seat.seat, path })),
   );
-  const overlap = allChanged.flatMap((owner) =>
-    allChanged
+  const overlap = allChangedCode.flatMap((owner) =>
+    allChangedCode
       .filter((other) => other.seat.seat !== owner.seat.seat)
       .flatMap((other) =>
         other.files.flatMap((path) => {
-          const chain = importChain(path, new Set(owner.files), forward);
+          const chain = importChain(
+            path,
+            new Set(owner.files.filter((target) => target !== path)),
+            forward,
+          );
           return chain ? [{ owner: owner.seat.seat, other: other.seat.seat, path, chain }] : [];
         }),
       ),
@@ -331,8 +360,8 @@ export function ImpactLens({
         <h2>Impact</h2>
         <p>what the seats’ changes reach through imports</p>
       </header>
-      {allChanged.map(({ seat, files }) => {
-        const code = files.filter((path) => forward.has(path));
+      {allChanged.map(({ seat, files }, index) => {
+        const code = allChangedCode[index]?.files.filter((path) => forward.has(path)) ?? [];
         const reached = downstreamFrom(code, reverse);
         const direct = [...reached.values()].filter((distance) => distance === 1).length;
         return (

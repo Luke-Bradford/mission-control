@@ -45,6 +45,52 @@ it("derives seed reach, history heat and focused partner confidence from the map
   expect(history["src/consumer.ts"]).toMatchObject({ hotspot: 12, fixes: 2, dim: true });
 });
 
+it("marks only changed code files that import another seat's changed code as Impact overlap", () => {
+  const sharedImporter = snapshot();
+  sharedImporter.imports = [
+    { from: "test/consumer.test.ts", to: "src/contract.ts" },
+    { from: "test/consumer.test.ts", to: "src/consumer.ts" },
+  ];
+  expect(lensVisuals(sharedImporter, "impact", null)["test/consumer.test.ts"]?.overlap).toBeFalsy();
+
+  const sameFile = snapshot();
+  sameFile.seats[1] = {
+    ...sameFile.seats[1],
+    scope: {
+      read: [],
+      modified: [{ file: "src/contract.ts", add: 4, rem: 0, source: "diff" }],
+    },
+  };
+  expect(lensVisuals(sameFile, "impact", null)["src/contract.ts"]?.overlap).toBeFalsy();
+});
+
+it("keeps non-code changes out of Impact code rows and untested findings", () => {
+  const value = snapshot();
+  value.tree.push({ path: "README.md", lines: 4 }, { path: "config/map.yaml", lines: 4 });
+  value.seats[0] = {
+    ...value.seats[0],
+    scope: {
+      read: [],
+      modified: [
+        ...value.seats[0].scope.modified,
+        { file: "README.md", add: 1, rem: 0, source: "diff" },
+        { file: "config/map.yaml", add: 1, rem: 0, source: "diff" },
+      ],
+    },
+  };
+  const visuals = lensVisuals(value, "impact", null);
+  expect(visuals["README.md"]).toBeUndefined();
+  expect(visuals["config/map.yaml"]).toBeUndefined();
+  render(<CrewMapView snapshot={value} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).not.toContain(
+    "README.md",
+  );
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).not.toContain(
+    "config/map.yaml",
+  );
+});
+
 function snapshot(): MapSnapshot {
   const value: MapSnapshot = structuredClone(mapSnapshotFixture);
   value.tree = [
