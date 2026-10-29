@@ -148,6 +148,7 @@ export function MapTreemap({
             ? (v?.hotspot ?? 0) / max
             : 1 / ((v?.distance ?? 0) + 1)
           : 0;
+        const fixHeavy = lens === "history" && (v?.fixes ?? 0) >= 5;
         return (
           <button
             type="button"
@@ -156,12 +157,16 @@ export function MapTreemap({
             data-focused={focus === tile.path || undefined}
             data-dim={v?.dim || undefined}
             data-neutral={!active || undefined}
+            data-overlap={v?.overlap || undefined}
+            data-fix-heavy={fixHeavy || undefined}
             style={
               {
                 ...style(tile),
                 "--tile-intensity": intensity,
                 "--tile-colour": active
-                  ? colours[(v?.seat ?? 0) % colours.length]
+                  ? lens === "history"
+                    ? "var(--accent)"
+                    : colours[(v?.seat ?? 0) % colours.length]
                   : "var(--void-line)",
               } as CSSProperties
             }

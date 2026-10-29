@@ -222,7 +222,10 @@ it("shows History hotspots, frequent fixes, unlinked change partners, and linked
 
 it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   const value = snapshot();
-  value.tree.push({ path: "test/history.test.ts", lines: 12 });
+  value.tree.push(
+    { path: "test/history.test.ts", lines: 12 },
+    { path: "src/unrelated.ts", lines: 12 },
+  );
   value.hist.files["5"] = [20, 9, Date.UTC(2026, 9, 28), [838]];
   value.seats[1] = {
     ...value.seats[1],
@@ -242,6 +245,17 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
   const impact = screen.getByRole("region", { name: "Impact lens" });
   expect(impact.textContent).toContain("tests · import · depend");
   expect(impact.textContent).toContain("Test files changed separately");
+  expect(impact.textContent).not.toContain("test reaches it");
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/unrelated.ts']")
+      ?.hasAttribute("data-neutral"),
+  ).toBe(true);
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/consumer.ts']")
+      ?.hasAttribute("data-overlap"),
+  ).toBe(true);
 
   fireEvent.click(screen.getByRole("button", { name: "History" }));
   expect(screen.getByRole("img", { name: "History PR heat treemap" })).toBeTruthy();
@@ -255,6 +269,11 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
     within(hotspots as HTMLElement).getAllByRole("button", { name: "src/contract.ts" }),
   ).toHaveLength(1);
   expect(history.textContent).not.toContain("history.test.ts");
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/contract.ts']")
+      ?.hasAttribute("data-fix-heavy"),
+  ).toBe(true);
 });
 
 it("packs the complete hierarchy inside the viewport and anchors links to tile centres", () => {

@@ -199,10 +199,24 @@
 }
 .map-treemap-tile[data-neutral] {
   background: var(--void-2);
-  opacity: 0.55;
+  opacity: 0.2;
 }
 .map-treemap-history .map-treemap-tile {
-  background: color-mix(in srgb, var(--rem) calc(var(--tile-intensity) * 85%), var(--void));
+  background: color-mix(in srgb, var(--accent) calc(var(--tile-intensity) * 85%), var(--void));
+}
+.map-treemap-tile[data-overlap] {
+  outline: 2px solid var(--rem);
+  outline-offset: -2px;
+}
+.map-treemap-tile[data-fix-heavy]::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 7px solid var(--rem);
+  border-left: 7px solid transparent;
+  content: "";
 }
 .map-treemap-tile[data-dim] {
   opacity: 0.12;

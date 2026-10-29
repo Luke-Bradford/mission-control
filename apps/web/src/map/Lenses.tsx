@@ -387,11 +387,7 @@ export function ImpactLens({
             {code.map((path) => (
               <div className="map-lens-row" key={path}>
                 <FileButton path={path} onFocus={onFocus} />
-                <span>
-                  {[...downstream(path, reverse).keys()].filter(isTest).length
-                    ? "test reaches it"
-                    : "no test"}
-                </span>
+                <span>{[...downstream(path, reverse).keys()].filter(isTest).length}</span>
                 <span>
                   {reverse.get(path)?.size ?? 0} · {downstream(path, reverse).size}
                 </span>
