@@ -29,3 +29,9 @@ it("keeps analytical keys in the toolbar without changing the Changes stage layo
   expect(rule(String.raw`\.map-stage-wrap`)).not.toContain("grid-template-rows");
   expect(rule(String.raw`\.map-analytical-key`)).toContain("display: flex");
 });
+
+it("keeps every analytical scale swatch opaque against either theme's page background", () => {
+  for (const step of [1, 2, 3, 4]) {
+    expect(rule(`\\.map-key-swatch-${step}`)).toContain("opacity: 1");
+  }
+});

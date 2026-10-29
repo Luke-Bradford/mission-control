@@ -4,7 +4,7 @@ import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { freshRecent, isWorking, type SeatWork } from "./cards.ts";
+import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
   downstream,
   graph,
@@ -292,7 +292,14 @@ export function CrewMapView({
           }}
         />
         {lens === "impact" || lens === "history" ? (
-          <AnalyticalMapKey lens={lens} focus={focus} snapshot={snapshot} />
+          <AnalyticalMapKey
+            lens={lens}
+            focus={focus}
+            snapshot={snapshot}
+            now={now}
+            indices={colours}
+            names={names}
+          />
         ) : null}
         {lens === "impact" && focus !== null && (
           <span className="map-lens-trace">Focused file and its relationships are traced.</span>
@@ -502,7 +509,6 @@ function KeySteps({ tone }: { tone: "impact" | "focus" | "history" }) {
           className={`map-key-swatch map-key-swatch-${step}`}
           data-opacity={heatBands?.[step - 1]}
           key={step}
-          style={heatBands ? { opacity: heatBands[step - 1] } : undefined}
         />
       ))}
     </span>
@@ -513,10 +519,16 @@ function AnalyticalMapKey({
   lens,
   focus,
   snapshot,
+  now,
+  indices,
+  names,
 }: {
   lens: Exclude<MapLens, "changes">;
   focus: string | null;
   snapshot: MapSnapshot;
+  now: number;
+  indices: Record<string, number>;
+  names: Record<string, string>;
 }) {
   if (lens === "impact" && focus !== null) {
     const { forward, reverse } = graph(snapshot);
@@ -540,6 +552,21 @@ function AnalyticalMapKey({
   }
   return lens === "impact" ? (
     <div className="map-analytical-key" role="note" aria-label="Impact colour scale">
+      {snapshot.seats
+        .filter((seat) => isWorking(seat, now))
+        .map((seat) => (
+          <span
+            className="map-key-seat-chip"
+            key={seat.seat}
+            style={{ "--map-key-seat": `var(${seatToken(seat.seat, indices[seat.seat] ?? 0)})` }}
+          >
+            <i aria-hidden="true" />
+            {names[seat.seat] ?? seat.seat}
+          </span>
+        ))}
+      <span className="map-key-idle">
+        {snapshot.seats.filter((seat) => !isWorking(seat, now)).length} idle
+      </span>
       <span className="map-key-item">
         <KeySteps tone="impact" /> changed · imports it · 2 · 3+ steps
       </span>
