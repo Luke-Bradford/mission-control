@@ -1662,7 +1662,7 @@ th {
 }
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 120px 118px minmax(0, 1fr) 96px 128px 56px 64px;
+  grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
   gap: 0 6px;
   padding: 2px 8px;
   grid-template-rows: minmax(0, 1fr);
@@ -1712,6 +1712,9 @@ th {
   flex-direction: column;
   align-items: flex-start;
   gap: 0;
+}
+#agentsList .work-cell {
+  overflow: hidden;
 }
 #agentsList .ticket-cell > * {
   max-width: 100%;
@@ -1775,7 +1778,7 @@ th {
 }
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 120px 118px minmax(0, 1fr) 96px 50px 56px 64px;
+    grid-template-columns: 150px 120px 118px 180px 96px 50px 56px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -1790,7 +1793,7 @@ th {
 }
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px minmax(0, 1fr) 64px 50px 44px 46px;
+    grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
     column-gap: 4px;
   }
 }

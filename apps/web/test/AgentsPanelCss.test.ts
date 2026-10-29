@@ -28,6 +28,13 @@ it("keeps eight compact columns with needs on the second Work line", () => {
   expect(css).toContain("prefers-reduced-motion: reduce");
 });
 
+it("uses a fixed Work track and clips its free text", () => {
+  expect(css).toMatch(
+    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px/,
+  );
+  expect(css).toMatch(/#agentsList \.work-cell \{[^}]*overflow: hidden/);
+});
+
 it("keeps State pills and their age from shrinking", () => {
   expect(css).toMatch(/#agentsList \.state-cell \.pill \{\s*flex: none/);
   expect(css).toMatch(/\.state-cell > \.xs \{\s*flex: none/);

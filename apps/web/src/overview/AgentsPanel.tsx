@@ -121,7 +121,7 @@ function WorkCell({
       .filter(Boolean)
       .join(" · ");
     return (
-      <span role="cell" className="ellip s ticket-cell muted">
+      <span role="cell" className="ellip s ticket-cell work-cell muted">
         <span className="ellip">{refs ? `last ${refs}` : DASH}</span>
         {note ?? (
           <span className="ellip xs muted" title={doing}>
@@ -144,7 +144,7 @@ function WorkCell({
       .filter(Boolean)
       .join(" · ") || DASH;
   return (
-    <span role="cell" className="ellip s ticket-cell" title={text}>
+    <span role="cell" className="ellip s ticket-cell work-cell" title={text}>
       <span className="ellip">
         {row?.ticket && <TicketRef ticket={row.ticket} bare />}
         {prNumber && row && (
