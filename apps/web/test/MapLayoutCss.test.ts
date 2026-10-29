@@ -53,7 +53,28 @@ it("keeps analytical keys in the toolbar without changing the Changes stage layo
 
 it("keeps every analytical scale swatch opaque against either theme's page background", () => {
   for (const step of [1, 2, 3, 4]) {
-    expect(rule(`\\.map-key-swatch-${step}`)).toContain("opacity: 1");
+    expect(rule(`\\.map-key-steps \\.map-key-swatch-${step}`)).toContain("opacity: 1");
+  }
+});
+
+it("lets the step swatch rules outrank the generic key-icon background", () => {
+  for (const step of [1, 2, 3, 4]) {
+    const body = rule(`\\.map-key-steps \\.map-key-swatch-${step}`);
+    expect(body).toContain(`background: var(--map-key-swatch-${step})`);
+  }
+  // `.map-legend i` / `.map-analytical-key i` is (0,1,1); a bare `.map-key-swatch-N` is (0,1,0) and loses.
+  expect(css).not.toMatch(/^\.map-key-swatch-\d \{/m);
+});
+
+it("gives each key's four step swatches four distinct colours", () => {
+  const seat1 = token("--seat-1");
+  for (const block of [String.raw`\.map-key-steps`, String.raw`\.map-key-steps-impact`]) {
+    const colours = [1, 2, 3, 4].map((step) => {
+      const value = new RegExp(`--map-key-swatch-${step}: ([^;]+);`).exec(rule(block))?.[1];
+      if (!value) throw new Error(`Missing step ${step} in ${block}`);
+      return value === "var(--seat-1)" ? seat1 : value;
+    });
+    expect(new Set(colours).size, block).toBe(4);
   }
 });
 
