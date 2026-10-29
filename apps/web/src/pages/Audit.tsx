@@ -1,4 +1,10 @@
-import type { AuditChange, AuditPrSize, AuditView } from "@mc/core";
+import {
+  AUDIT_PR_OUTLIER_LINES,
+  type AuditChange,
+  type AuditPrSize,
+  type AuditView,
+  type ConfigView,
+} from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
@@ -25,6 +31,7 @@ const percent = (n: number | null): string => (n === null ? "—" : `${Math.roun
 export function Audit() {
   const [range, setRange] = useState<AuditRange>("30d");
   const res = useResource<Audit>(RESOURCES.audit(range));
+  const config = useResource<ConfigView>(RESOURCES.config).data;
   const [last, setLast] = useState<{ range: AuditRange; data: Audit }>();
   useEffect(() => {
     if (res.data) setLast({ range, data: res.data });
@@ -52,7 +59,7 @@ export function Audit() {
       )}
       {audit && (
         <div className="audit-grid">
-          <Improvements audit={audit} />
+          <Improvements audit={audit} config={config} />
           <PrSizes sizes={audit.prSizes} />
           <Changes changes={audit.changes} />
           <Checks audit={audit} />
@@ -83,17 +90,25 @@ function Empty({ collected = true }: { collected?: boolean }) {
   return <p className="s fg2">{collected ? "No findings in this range." : "Not collected yet."}</p>;
 }
 
-function Improvements({ audit }: { audit: Audit }) {
+function Improvements({ audit, config }: { audit: Audit; config: ConfigView | undefined }) {
+  const excludedAgents = new Set([
+    ...(config?.loops.map((loop) => loop.id) ?? []),
+    ...(config?.crew?.sessions.flatMap((session) =>
+      session.seats.filter((seat) => seat.loop === "watch").map((seat) => seat.id),
+    ) ?? []),
+  ]);
+  const actionable = <T extends { agentId: string | null }>(rows: T[]) =>
+    rows.filter((row) => row.agentId !== null && !excludedAgents.has(row.agentId));
   const findings = [
-    ...audit.longRunners.map((x) => ({
+    ...actionable(audit.longRunners).map((x) => ({
       label: `Long runner · ${duration(x.durationMs)}`,
       row: x,
     })),
-    ...audit.deathLoops.map((x) => ({
+    ...actionable(audit.deathLoops).map((x) => ({
       label: `Death loop · ${x.parks ?? 0} parks`,
       row: x,
     })),
-    ...audit.reworkRounds.map((x) => ({
+    ...actionable(audit.reworkRounds).map((x) => ({
       label: `Rework · ${x.rounds ?? 0} rounds`,
       row: x,
     })),
@@ -107,18 +122,21 @@ function Improvements({ audit }: { audit: Audit }) {
             row={x.row}
           >{`${x.label} · ${x.row.runId}`}</RunLink>
         ))}
-        {audit.refusals.map((x) => (
+        {actionable(audit.refusals).map((x) => (
           <RunLink key={`${x.agentId}:${x.runId}:${x.rule}`} row={x}>
             {`Guard refusal · ${x.rule} · ${x.count}${x.runId ? ` · ${x.runId}` : ""}`}
           </RunLink>
         ))}
-        {audit.spendOutliers.map((x) => (
+        {actionable(audit.spendOutliers).map((x) => (
           <RunLink
             key={x.runId}
             row={x}
           >{`Spend outlier · ${x.ticket ?? "no ticket"} · ${cost(x.costUsd)} · ${x.runId}`}</RunLink>
         ))}
-        {findings.length + audit.refusals.length + audit.spendOutliers.length === 0 && <Empty />}
+        {findings.length +
+          actionable(audit.refusals).length +
+          actionable(audit.spendOutliers).length ===
+          0 && <Empty />}
       </div>
     </Panel>
   );
@@ -126,21 +144,29 @@ function Improvements({ audit }: { audit: Audit }) {
 
 function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
   const max = Math.max(1, ...sizes.prs.map(changes));
-  const outliers = new Set(sizes.outliers.map((x) => `${x.repoId}:${x.number}`));
+  const showRepos = new Set(sizes.prs.map((pr) => pr.repoId)).size > 1;
   return (
-    <Panel title="PR size" className="audit-panel">
+    <Panel
+      title="PR size"
+      sub={`${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`}
+      className="audit-panel"
+    >
       <div className="pb audit-list">
         {sizes.prs.length === 0 ? (
           <Empty />
         ) : (
           sizes.prs.map((s) => (
             <div className="audit-size" key={`${s.repoId}:${s.number}`}>
-              <a href={`/board/${encodeURIComponent(s.repoId)}`}>{prLabel(s.number)}</a>
+              <a href={`/board/${encodeURIComponent(s.repoId)}`}>
+                {showRepos ? `${s.repoId} · ` : ""}
+                {prLabel(s.number)}
+              </a>
               <span className="audit-bar">
                 <i style={{ width: `${(changes(s) / max) * 100}%` }} />
               </span>
               <span>
-                {changes(s)} lines{outliers.has(`${s.repoId}:${s.number}`) ? " · outlier" : ""}
+                {changes(s).toLocaleString()} lines
+                {changes(s) >= AUDIT_PR_OUTLIER_LINES ? " · outlier" : ""}
               </span>
             </div>
           ))

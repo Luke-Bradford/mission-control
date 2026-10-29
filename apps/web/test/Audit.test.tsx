@@ -1,4 +1,4 @@
-import type { AuditView } from "@mc/core";
+import { AUDIT_PR_OUTLIER_LINES, type AuditView, type ConfigView } from "@mc/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
@@ -96,9 +96,16 @@ const AUDIT = {
   surgeonProposals: [],
 } satisfies AuditView;
 
+const CONFIG = {
+  loops: [{ id: "studio-builder" }],
+  crew: {
+    sessions: [{ seats: [{ id: "flight-1", retiring: false, loop: "watch" }] }],
+  },
+} as ConfigView;
+
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(NOW);
-  stubFetch({ "/api/audit?range=30d": AUDIT });
+  stubFetch({ "/api/audit?range=30d": AUDIT, "/api/config": CONFIG });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -108,11 +115,12 @@ it("shows loading until the initial range arrives", async () => {
   let resolve: (response: Response) => void = () => {};
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      () =>
-        new Promise<Response>((done) => {
-          resolve = done;
-        }),
+    vi.fn((input: string) =>
+      input === "/api/config"
+        ? Promise.resolve(new Response(JSON.stringify(CONFIG), { status: 200 }))
+        : new Promise<Response>((done) => {
+            resolve = done;
+          }),
     ),
   );
   render(<Audit />);
@@ -240,4 +248,100 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   await vi.waitFor(() =>
     expect(fetch).toHaveBeenCalledWith("/api/audit?range=7d", expect.anything()),
   );
+});
+
+it("scales PR bars, applies the fixed outlier threshold, and names repos across the range", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      prSizes: {
+        prs: [
+          {
+            ...AUDIT.prSizes.prs[0],
+            repoId: "small-repo",
+            number: 1,
+            additions: 665_702,
+            deletions: 0,
+          },
+          {
+            ...AUDIT.prSizes.prs[1],
+            repoId: "other-repo",
+            number: 2,
+            additions: 2_833,
+            deletions: 0,
+          },
+          {
+            ...AUDIT.prSizes.prs[0],
+            repoId: "small-repo",
+            number: 3,
+            additions: 799,
+            deletions: 0,
+          },
+        ],
+        // The client must not label a below-threshold row merely because a stale payload says so.
+        outliers: [
+          {
+            ...AUDIT.prSizes.prs[0],
+            repoId: "small-repo",
+            number: 1,
+            additions: 665_702,
+            deletions: 0,
+          },
+          {
+            ...AUDIT.prSizes.prs[1],
+            repoId: "other-repo",
+            number: 2,
+            additions: 2_833,
+            deletions: 0,
+          },
+          {
+            ...AUDIT.prSizes.prs[0],
+            repoId: "small-repo",
+            number: 3,
+            additions: 799,
+            deletions: 0,
+          },
+        ],
+      },
+    } satisfies AuditView,
+  });
+  const { container } = render(<Audit />);
+
+  await screen.findByText(
+    `${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`,
+  );
+  const bars = container.querySelectorAll<HTMLSpanElement>(".audit-bar > i");
+  expect(bars[0]?.style.width).toBe("100%");
+  expect(Number.parseFloat(bars[1]?.style.width ?? "")).toBeCloseTo((2_833 / 665_702) * 100, 8);
+  expect(screen.getByText(/665,702 lines · outlier/)).toBeTruthy();
+  expect(screen.getByText(/2,833 lines · outlier/)).toBeTruthy();
+  expect(
+    [...container.querySelectorAll(".audit-size")].find((row) =>
+      row.textContent?.includes("799 lines"),
+    )?.textContent,
+  ).not.toContain("outlier");
+  expect(screen.getByText("small-repo · PR #1")).toBeTruthy();
+  expect(screen.getByText("other-repo · PR #2")).toBeTruthy();
+});
+
+it("does not present observed loops or FLIGHT watch runs as improvements", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      longRunners: [
+        ...AUDIT.longRunners,
+        { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
+        { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
+      ],
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+
+  await screen.findByRole("link", { name: "Long runner · 9h 0m · run/alpha" });
+  expect(screen.queryByText(/run\/observed/)).toBeNull();
+  expect(screen.queryByText(/run\/watch/)).toBeNull();
 });
