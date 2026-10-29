@@ -773,6 +773,7 @@ describe("startReview", () => {
         bodyLength: TICKET.body.length,
         notes: [],
         prevSha: null,
+        prevReviewId: null,
         prevFindings: [],
         prevReply: null,
         diffCut: false,

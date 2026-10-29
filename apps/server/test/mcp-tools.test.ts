@@ -3837,7 +3837,7 @@ describe("report_findings", () => {
                   reviewId: { type: "integer", minimum: 1 },
                   pos: { type: "integer", minimum: 0 },
                 },
-                required: ["reviewId", "pos"],
+                required: ["pos"],
                 additionalProperties: false,
               },
               outcome: { type: "string" },
@@ -3930,6 +3930,62 @@ describe("report_findings", () => {
         )
       ).isError,
     ).toBe(true);
+  });
+
+  it("stores a resolution given by position alone against the previous review", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const resolution = { findingRef: { pos: 0 }, outcome: "fixed" } as const;
+    expect(
+      await report(args({ verdict: passing, findings: [], resolutions: [resolution] }), roundTwo),
+    ).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.reviewResolutions(second)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({
+      resolution: "fixed",
+      resolvedReviewId: second,
+    });
+  });
+
+  it("rejects a positional and an explicit reference to the same prior finding", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const result = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        resolutions: [
+          { findingRef: { pos: 0 }, outcome: "fixed" },
+          { findingRef: { reviewId, pos: 0 }, outcome: "held" },
+        ],
+      }),
+      roundTwo,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Invalid arguments: resolutions:/);
   });
 
   it("rejects duplicate prior-round resolution references before storage", async () => {
