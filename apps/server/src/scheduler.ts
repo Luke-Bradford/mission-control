@@ -1042,17 +1042,37 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           capacityConfig,
         );
         if (capacity.blocked) {
-          const consumers =
-            r.sample.agents === null
-              ? "unavailable"
-              : `${r.sample.agents.count} agents using ${(r.sample.agents.rssBytes / 1024 ** 3).toFixed(1)} GB`;
+          const gb = (bytes: number | null | undefined): string =>
+            bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+          const diskPct =
+            r.sample.diskFreeBytes !== null &&
+            r.sample.diskTotalBytes !== null &&
+            r.sample.diskTotalBytes > 0
+              ? `${((r.sample.diskFreeBytes / r.sample.diskTotalBytes) * 100).toFixed(1)}%`
+              : "—";
+          const swapPct =
+            r.sample.swapUsedBytes !== null &&
+            r.sample.swapUsedBytes !== undefined &&
+            r.sample.swapTotalBytes !== null &&
+            r.sample.swapTotalBytes !== undefined &&
+            r.sample.swapTotalBytes > 0
+              ? `${((r.sample.swapUsedBytes / r.sample.swapTotalBytes) * 100).toFixed(1)}%`
+              : "—";
+          const consumers = r.sample.topConsumers?.length
+            ? r.sample.topConsumers
+                .map(
+                  (p) =>
+                    `${p.command} (pid ${p.pid}, ${gb(p.rssBytes)}, ${p.cpuPct.toFixed(1)}% CPU)`,
+                )
+                .join("; ")
+            : "unavailable";
           store.raiseNote({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,
             seatId: null,
             repoId: null,
-            text: `Machine headroom is tight: ${capacity.reason}. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
+            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap: ${gb(r.sample.swapUsedBytes)} / ${gb(r.sample.swapTotalBytes)} used (${swapPct}). Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
             at,
           });
         } else {

@@ -7,6 +7,7 @@ import {
   parseMemoryPressure,
   parsePs,
   parseSwapUsage,
+  parseTopConsumers,
   parseVmStat,
   sampleMachine,
 } from "../src/collectors/machine.ts";
@@ -98,6 +99,16 @@ describe("parsers", () => {
     expect(parsePs("")).toEqual({ count: 0, rssBytes: 0, cpuPct: 0 });
   });
 
+  it("keeps the highest-RSS process rows for a machine-capacity alert", () => {
+    expect(parseTopConsumers(PS)).toEqual([
+      { pid: 5899, command: "claude", rssBytes: 391520 * 1024, cpuPct: 2 },
+      { pid: 28102, command: "claude", rssBytes: 269344 * 1024, cpuPct: 0.5 },
+      { pid: 12812, command: "claude", rssBytes: 243088 * 1024, cpuPct: 2.3 },
+      { pid: 20003, command: "claude-code-guide", rssBytes: 70000 * 1024, cpuPct: 1 },
+      { pid: 20002, command: "Claude Helper (Renderer)", rssBytes: 60000 * 1024, cpuPct: 1 },
+    ]);
+  });
+
   it("computes CPU % from the busy/total tick delta across all cores", () => {
     // ticks: previous busy 300 of 1100, current busy 600 of 2000 → 300 busy of 900.
     const prev = [cpu(100, 100, 400), cpu(50, 50, 400)];
@@ -169,6 +180,7 @@ describe("sampleMachine", () => {
       memoryPressureFreePct: 9,
       load1: 1.25,
       agents: { count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 },
+      topConsumers: parseTopConsumers(PS),
       testRun: null,
     });
     expect(r.cpus).toHaveLength(2);

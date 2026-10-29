@@ -756,6 +756,8 @@ export interface MachineSample {
   memoryPressureFreePct?: number | null;
   /** One-minute load average; null when not measured. */
   load1?: number | null;
+  /** Bounded highest-RSS process rows, sampled for a machine-capacity alert. */
+  topConsumers?: { pid: number; command: string; rssBytes: number; cpuPct: number }[];
   /** The `claude` and `codex` processes on this machine (editor sessions included). */
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
   /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */

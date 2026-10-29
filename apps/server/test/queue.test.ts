@@ -10,6 +10,7 @@ import {
   DEFAULT_PROFILES,
   fillLoopText,
   freezeRules,
+  type MachineSample,
   NEW_LOOP,
   type PullRequestView,
   QUEUE_DEPTH,
@@ -900,6 +901,23 @@ describe("takeNext", () => {
     await take();
     expect(started).toEqual([{ seatId: SERVER, issue: 1, loop: NEW_LOOP }]);
     expect(issues(SERVER)).toEqual([2]);
+  });
+
+  it("does not start a queued run while a capacity sample is constrained", async () => {
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 14 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    } satisfies MachineSample);
+    await queued(card(1));
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
   });
 
   it("counts a seat with no seat row as idle", async () => {

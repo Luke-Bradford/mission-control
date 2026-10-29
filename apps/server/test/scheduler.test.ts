@@ -1024,6 +1024,11 @@ describe("scheduler", () => {
               at,
               diskFreeBytes: tight ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
               diskTotalBytes: 100 * 1024 ** 3,
+              swapUsedBytes: (tight ? 18 : 1) * 1024 ** 3,
+              swapTotalBytes: 20 * 1024 ** 3,
+              memoryPressureFreePct: tight ? 8 : 20,
+              load1: tight ? 15 : 1,
+              topConsumers: [{ pid: 42, command: "Docker", rssBytes: 4 * 1024 ** 3, cpuPct: 90 }],
               agents: { count: 2, rssBytes: 3 * 1024 ** 3, cpuPct: 10 },
             }),
             cpus: [],
@@ -1032,7 +1037,9 @@ describe("scheduler", () => {
         }),
       });
       await s.tick("machine");
-      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain("disk free");
+      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
+        "Disk: 14.0 GB free (14.0%). Swap: 18.0 GB / 20.0 GB used (90.0%). Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
+      );
       tight = false;
       t += 5 * 60_000 + 1;
       await s.tick("machine");

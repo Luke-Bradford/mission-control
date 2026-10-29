@@ -8,6 +8,7 @@ const execFileP = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 2000;
 /** Command basenames counted as Claude/Codex processes. */
 const AGENT_COMMANDS: ReadonlySet<string> = new Set(["claude", "codex"]);
+const TOP_CONSUMERS = 5;
 
 export interface MachineDeps {
   cpus: () => CpuInfo[];
@@ -130,6 +131,29 @@ export function parsePs(text: string): { count: number; rssBytes: number; cpuPct
     cpuPct += Number(m[3]);
   }
   return { count, rssBytes: rssKib * 1024, cpuPct: Math.round(cpuPct * 10) / 10 };
+}
+
+/** The bounded highest-RSS rows of `ps -axo pid=,rss=,%cpu=,comm=`. */
+export function parseTopConsumers(
+  text: string,
+): { pid: number; command: string; rssBytes: number; cpuPct: number }[] {
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      const m = /^\s*(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(.+?)\s*$/.exec(line);
+      if (!m) return [];
+      const command = m[4] as string;
+      return [
+        {
+          pid: Number(m[1]),
+          command: command.slice(command.lastIndexOf("/") + 1),
+          rssBytes: Number(m[2]) * 1024,
+          cpuPct: Number(m[3]),
+        },
+      ];
+    })
+    .sort((a, b) => b.rssBytes - a.rssBytes || b.cpuPct - a.cpuPct)
+    .slice(0, TOP_CONSUMERS);
 }
 
 export interface PsProc {
@@ -258,8 +282,11 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
   }
 
   let agents = prev?.agents ?? null;
+  let topConsumers = prev?.topConsumers ?? [];
   try {
-    agents = parsePs(await deps.ps());
+    const ps = await deps.ps();
+    agents = parsePs(ps);
+    topConsumers = parseTopConsumers(ps);
   } catch (e) {
     errors.push(`ps: ${msg(e)}`);
   }
@@ -287,6 +314,7 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       swapTotalBytes,
       memoryPressureFreePct,
       load1,
+      topConsumers,
       agents,
       testRun,
     },
