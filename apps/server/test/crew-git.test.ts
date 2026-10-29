@@ -66,6 +66,36 @@ describe("crewGit", () => {
     );
   });
 
+  it("applies the caller's timeout while checking the checkout ownership", async () => {
+    const bin = join(dir, "bin");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh
+case " $* " in
+  *" --git-common-dir "*) sleep 6 ;;
+esac
+exec "${realGit}" "$@"
+`,
+      { mode: 0o755 },
+    );
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      expect(
+        (
+          await crewGit(wt, ["rev-parse", "--abbrev-ref", "HEAD"], common(), {
+            timeoutMs: 10_000,
+          })
+        ).trim(),
+      ).toBe("seat");
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+    }
+  });
+
   it("refuses a worktree whose .git pointer was rewritten to another repo", async () => {
     writeFileSync(join(wt, ".git"), `gitdir: ${join(other, ".git", "worktrees", "evil-wt")}\n`);
     const e = await crewGit(wt, ["status"], common()).catch((x) => x);
