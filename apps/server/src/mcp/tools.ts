@@ -1272,6 +1272,38 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     };
   }
 
+  /** A seat's wake context: not the whole crew channel or every conversation it owns. */
+  async function commsInbox(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = CommsReadArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    if (liveRun(ctx) === null) return ENDED;
+    const pinned = new Set(store.commsPins().map((row) => row.id));
+    const rows = store
+      .commsInboxRun(ctx.seatId, ctx.runId)
+      .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
+      .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)))
+      .slice(-parsed.data.limit)
+      .map((row) => {
+        const chars = Array.from(row.text);
+        return {
+          ...row,
+          text:
+            chars.length > MC_TEXT_MAX
+              ? `${chars.slice(0, MC_TEXT_MAX).join("")}${commsCutMarker(MC_TEXT_MAX, chars.length)}`
+              : row.text,
+          operator: row.from === COMMS_CAPCOM,
+          pinned: pinned.has(row.id),
+          unread: !store.commsInboxRead(ctx.seatId, row.id),
+          reactions: store.commsReactions(row.id),
+        };
+      });
+    store.markCommsInboxRead(
+      ctx.seatId,
+      rows.map((row) => row.id),
+    );
+    return { text: JSON.stringify({ messages: rows }) };
+  }
+
   async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = CommsSendArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2268,6 +2300,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer", "read-only", "scratch"],
       call: commsRead,
+    },
+    {
+      name: MC_TOOL_NAMES.commsInbox,
+      description:
+        "Read this seat's inbox: messages addressed to it, messages that tag it, replies to its messages and current pins. It never includes the whole crew channel.",
+      inputSchema: {
+        type: "object",
+        properties: { limit: { type: "number", minimum: 1, maximum: 100, default: 50 } },
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      call: commsInbox,
     },
     {
       name: MC_TOOL_NAMES.commsSend,
