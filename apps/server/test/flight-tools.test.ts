@@ -7329,6 +7329,16 @@ describe("brief_item with a hold (#760)", () => {
     expect(store.briefs().has(other)).toBe(false);
   });
 
+  it("refuses to hold the not-triaging item, as hold_item does (#758)", async () => {
+    const r = await call(
+      "brief_item",
+      brief({ key: FLIGHT_NOT_TRIAGING_KEY, hold: { condition: { kind: "crew" } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[FLIGHT_NOT_TRIAGING_KEY]).toBeUndefined();
+    expect(store.briefs().has(FLIGHT_NOT_TRIAGING_KEY)).toBe(false);
+  });
+
   it("refuses a manual hold, which would never resurface", async () => {
     const r = await call("brief_item", brief({ hold: { condition: { kind: "manual" } } }));
     expect(r.isError).toBe(true);

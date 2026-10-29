@@ -2160,6 +2160,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const c = flightCall(deps, ctx, BriefItemArgs, args);
     if (!c.ok) return c.result;
     const { key, context, recommendation, options, basis, hold, ...structured } = c.args;
+    // the operator's alone, as with hold_item: FLIGHT clears it by triaging, never by holding it
+    if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
     if (structured.for === "operator" && structured.ask === undefined)
