@@ -18,3 +18,9 @@ it("widens only analytical lens rails to the v3 table proportion", () => {
     "grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px)",
   );
 });
+
+it("draws focused direct imports with the v3 dashed relationship outline", () => {
+  expect(rule(String.raw`\.map-treemap-impact \.map-treemap-tile\[data-direct-import\]`)).toContain(
+    "dashed",
+  );
+});
