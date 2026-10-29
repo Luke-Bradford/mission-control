@@ -2,11 +2,18 @@
 import { type ChildProcess, fork } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import { HUD_PAGE_PATHS, HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
 import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 
-const HUD_PATH =
-  /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
+/**
+ * The root, every page in the shared nav catalogue, and the web router's `/overview` and plural
+ * `/agents` spellings, each alone or followed by a `/` sub-path. Built from `HUD_PAGE_PATHS` so a
+ * new page cannot be missed; the segments are plain words, so the pattern stays anchored.
+ */
+const HUD_SEGMENTS = [
+  ...new Set([...Object.values(HUD_PAGE_PATHS).map((p) => p.slice(1)), "overview", "agents"]),
+].filter((s) => /^[a-z]+$/.test(s));
+const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
 const HUD_READY = "html[data-hud-ready='1']";
