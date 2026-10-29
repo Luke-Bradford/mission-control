@@ -776,18 +776,11 @@ export function telemetry(
       .map((pr) => pr.ticket as string),
   );
   const allTicketRuns = store.runsOverlapping(0, now + 1).filter((run) => known.has(run.agentId));
-  const allDigests = store.digests(allTicketRuns.map((run) => run.id));
   const totalCostByTicket = new Map<string, number | null>();
   for (const run of allTicketRuns) {
     const ticket = runTicket(run, runPrs(config, store, run, prCache));
     if (ticket === null || !mergedTickets.has(ticket) || !matches(run)) continue;
-    totalCostByTicket.set(
-      ticket,
-      addCost(
-        totalCostByTicket.get(ticket) ?? null,
-        runSpend(run, allDigests.get(run.id), 0, now)[0] ?? null,
-      ),
-    );
+    totalCostByTicket.set(ticket, addCost(totalCostByTicket.get(ticket) ?? null, run.costUsd));
   }
   // A ticket can merge inside the selected range after all of its work completed before it.
   // Keep that zero-in-range row so the chart can show its full lifetime cost.

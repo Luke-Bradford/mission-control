@@ -985,6 +985,10 @@ describe("cost", () => {
         costUsd: 3,
       }),
     );
+    store.setDigest(
+      "before-range",
+      digest({ attemptUsage: [{ id: "unknown", at: null, tokens: 10 }] }),
+    );
     store.replacePullRequests("shop-app", [{ ...pr(99, NOW - HOUR), ticket: "shop-app#99" }], NOW);
 
     expect(tel("6h").tokensByTicket).toContainEqual({
