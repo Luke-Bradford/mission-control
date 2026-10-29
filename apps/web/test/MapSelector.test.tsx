@@ -106,12 +106,18 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
   };
   const { container } = render(<CrewMapView snapshot={snapshot} />);
   fireEvent.click(screen.getByRole("button", { name: /^GUIDO-1/ }));
-  const seatCard = container.textContent ?? "";
+  // the whole page, less the lens tabs (their names are lens names, not warnings)
+  const pageText = () => {
+    const page = container.cloneNode(true) as HTMLElement;
+    page.querySelector(".map-lens-tabs")?.remove();
+    return page.textContent ?? "";
+  };
+  const seatCard = pageText();
   fireEvent.change(screen.getByRole("searchbox", { name: "Find a file" }), {
     target: { value: "main" },
   });
   fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));
-  for (const text of [seatCard, container.textContent ?? ""])
+  for (const text of [seatCard, pageText()])
     for (const warning of [
       /question/i,
       /refused/i,

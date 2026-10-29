@@ -139,7 +139,10 @@
   gap: 10px;
   min-height: 0;
 }
-.map-main-impact {
+.map-main-impact,
+.map-main-ownership,
+.map-main-review,
+.map-main-conflicts {
   grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
 }
 
@@ -291,6 +294,92 @@
     var(--treemap-bg)
   );
 }
+/* Ownership: a tile takes a tint of its area; hard-rule files are hatched; no area, no tint */
+.map-treemap-ownership {
+  --map-hatch: var(--void-muted);
+}
+.map-treemap-ownership .map-treemap-folder[data-area] {
+  background: color-mix(in srgb, var(--area-colour) 13%, var(--treemap-folder));
+}
+.map-treemap-ownership .map-treemap-tile {
+  opacity: 1;
+  background: color-mix(in srgb, var(--tile-colour) 34%, var(--treemap-folder));
+}
+.map-treemap-ownership .map-treemap-tile[data-neutral] {
+  background: var(--treemap-folder);
+  color: color-mix(in srgb, var(--treemap-ink) 45%, transparent);
+}
+.map-treemap-ownership .map-treemap-tile[data-hard-rule] {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--map-hatch) 55%, transparent) 0 1px,
+    transparent 1px 5px
+  );
+}
+/* Review: a tile takes a tint of its top severity and a dot, with the count when above one */
+.map-treemap-review .map-treemap-tile {
+  opacity: 1;
+  background: color-mix(in srgb, var(--tile-colour) 16%, var(--treemap-folder));
+}
+.map-treemap-review .map-treemap-tile[data-neutral] {
+  background: var(--treemap-folder);
+}
+.map-treemap-review .map-treemap-tile[data-severity]::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  box-sizing: border-box;
+  min-width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--tile-colour);
+  color: #fff;
+  font: 600 8px / 10px var(--mono);
+  text-align: center;
+  content: "";
+}
+.map-treemap-review .map-treemap-tile[data-findings]::after {
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  line-height: 14px;
+  content: attr(data-findings);
+}
+.map-treemap-review .map-treemap-tile[data-findings="1"]::after {
+  min-width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  content: "";
+}
+/* Conflicts: the seats' changes, faded, with the conflicting files outlined and tinted */
+.map-treemap-conflicts .map-treemap-tile {
+  opacity: 1;
+  background: linear-gradient(
+    var(--tile-split, 90deg),
+    color-mix(in srgb, var(--tile-colour) calc(var(--tile-intensity) * 100%), var(--treemap-folder))
+      50%,
+    color-mix(
+        in srgb,
+        var(--tile-colour-2) calc(var(--tile-intensity-2) * 100%),
+        var(--treemap-folder)
+      )
+      50%
+  );
+}
+.map-treemap-conflicts .map-treemap-tile[data-neutral] {
+  background: var(--treemap-folder);
+}
+.map-treemap-conflicts .map-treemap-tile[data-conflict] {
+  outline: 2px solid var(--rem);
+  outline-offset: -2px;
+}
+.map-treemap-conflicts .map-treemap-tile[data-conflict]::before {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--rem) 10%, transparent);
+  content: "";
+  pointer-events: none;
+}
 .map-treemap-tile[data-overlap] {
   outline: 2px solid var(--rem);
   outline-offset: -2px;
@@ -323,6 +412,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* the Conflicts overlay sits under the label */
+.map-treemap-conflicts .map-treemap-tile > .map-treemap-label,
+.map-treemap-conflicts .map-treemap-tile > .map-treemap-lines {
+  position: relative;
+}
+/* room for the Review dot */
+.map-treemap-review .map-treemap-tile[data-severity] > .map-treemap-label {
+  padding-right: 14px;
 }
 .map-treemap-links {
   position: absolute;
@@ -462,6 +560,73 @@
 }
 .map-key-fix {
   background: linear-gradient(135deg, var(--rem) 0 50%, transparent 50%);
+}
+/* Specific swatches sit under .map-analytical-key so the generic `.map-analytical-key i` cannot win */
+.map-analytical-key .map-key-area {
+  background: var(--map-key-area);
+}
+.map-analytical-key .map-key-hatch {
+  background:
+    repeating-linear-gradient(135deg, var(--void-muted) 0 1px, transparent 1px 4px),
+    var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--fg-2);
+}
+.map-analytical-key .map-key-dot {
+  border-radius: 50%;
+}
+.map-analytical-key .map-key-conflict,
+.map-analytical-key .map-severity-critical {
+  background: var(--rem);
+}
+.map-analytical-key .map-severity-important {
+  background: var(--warn-mark);
+}
+.map-analytical-key .map-severity-minor {
+  background: var(--void-muted);
+}
+/* the severity word in the Review pane */
+.map-severity {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 9.5px;
+}
+.map-lens .map-severity-critical {
+  color: var(--crit);
+  background: var(--crit-soft);
+}
+.map-lens .map-severity-important {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.map-lens .map-severity-minor {
+  color: var(--fg-2);
+  background: var(--surface-2);
+}
+.map-lens-covbar {
+  display: flex;
+  height: 6px;
+  margin: 6px 0 2px;
+  background: var(--surface-2);
+}
+.map-lens-covbar i {
+  display: block;
+  height: 100%;
+}
+.map-lens-pair + .map-lens-pair {
+  margin-top: 6px;
+}
+.map-lens-branch {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.map-lens-seat-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-radius: 50%;
 }
 .map-changes-key {
   min-width: 0;
