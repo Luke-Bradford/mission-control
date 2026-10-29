@@ -675,13 +675,13 @@ function toContextUsage(v: unknown): ContextUsage | null {
   return { categories, total, window: num(r.maxTokens) };
 }
 
+/** After a failed context ask, how long before a read asks again (ms). */
+const CONTEXT_RETRY_MS = 30 * 1000;
+
 /**
  * A seat's last context usage. The CLI is asked once per turn, after it ends, never per request:
  * every answer is a 30 KB line in the CLI's output (#934).
  */
-/** After a failed context ask, how long before a read asks again (ms). */
-const CONTEXT_RETRY_MS = 30 * 1000;
-
 interface ContextCache {
   usage: ContextUsage | null;
   /** A turn has ended since `usage` was asked for (or it never was): the next read asks once. */

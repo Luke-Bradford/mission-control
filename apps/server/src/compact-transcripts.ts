@@ -31,7 +31,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { keeperAlive } from "./runtime/keeper.ts";
 import { compactTranscriptLine, deltaHeartbeats } from "./runtime/transcript-compact.ts";
-import { crewDir, crewKeeperDir } from "./store.ts";
+import { crewDirPath, crewKeeperDirPath } from "./store.ts";
 
 /** A file written to this recently may still have a writer. */
 export const COMPACT_MIN_AGE_MS = 10 * 60 * 1000;
@@ -90,7 +90,10 @@ const stamp = (path: string) => {
  * Rewrites one file atomically; the sizes, or null when it is missing, already compact or changed
  * while it was being read (it is then left as it was).
  */
-export function compactTranscriptFile(path: string): { before: number; after: number } | null {
+export function compactTranscriptFile(
+  path: string,
+  beforeRename: () => void = () => {},
+): { before: number; after: number } | null {
   let text: string;
   let seen: string;
   try {
@@ -108,6 +111,7 @@ export function compactTranscriptFile(path: string): { before: number; after: nu
     rmSync(tmp, { force: true });
     writeFileSync(tmp, compact, { flag: "wx", mode: 0o600, flush: true });
     chmodSync(tmp, mode);
+    beforeRename();
     if (stamp(path) !== seen) {
       rmSync(tmp, { force: true });
       return null; // a writer got there first
@@ -147,11 +151,11 @@ export function compactTranscripts(
     failed: [],
   };
   for (const run of runs) {
-    if (run.ended_at === null || keeperAlive(crewKeeperDir(dbPath, run.id))) {
+    if (run.ended_at === null || keeperAlive(crewKeeperDirPath(dbPath, run.id))) {
       summary.skippedLive += 1;
       continue;
     }
-    if (!plainFileIn(crewDir(dbPath), run.transcript_path)) {
+    if (!plainFileIn(crewDirPath(dbPath), run.transcript_path)) {
       summary.skippedOutside += 1;
       continue;
     }

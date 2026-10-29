@@ -9,7 +9,7 @@ import {
 } from "./codex-transcript.ts";
 import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
 import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
-import { cutBytes } from "./util.ts";
+import { originalBytes } from "./util.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
 export const STREAM_SCAN_BYTES = 8 * 1024 * 1024;
@@ -44,7 +44,7 @@ type Keyed = Item & { key: string };
 
 /** A tool result's content: a string, or blocks whose text parts are joined. */
 /** What the reader is told when the transcript holds only the ends of a result. */
-const cutNote = (bytes: number | null) => (bytes === null ? "" : `\n(${bytes} bytes cut)`);
+const cutNote = (bytes: number | null) => (bytes === null ? "" : `\n(cut from ${bytes} bytes)`);
 
 function resultText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -103,10 +103,11 @@ function itemsOf(ev: Json): Item[] {
     } else if (b.type === "text" && typeof b.text === "string") {
       out.push({ k: "ev", ev: { at, kind: "op", text: cleanText(b.text) } });
     } else if (b.type === "tool_result" && str(b.tool_use_id)) {
+      const text = resultText(b.content);
       out.push({
         k: "res",
         id: b.tool_use_id as string,
-        result: cleanText(resultText(b.content)) + cutNote(cutBytes(b)),
+        result: cleanText(text) + cutNote(originalBytes(b, text.length)),
         error: b.is_error === true,
         at,
       });
@@ -146,9 +147,9 @@ function codexItems(ev: Json): Item[] {
   const found = codexTool(item);
   const id = str(item.id);
   if (!found || id === null) return [];
-  const { cutBytes: cut, ...tool } = found;
+  const { originalBytes: original, ...tool } = found;
   tool.input = cleanText(tool.input);
-  tool.result = cleanText(tool.result) + cutNote(cut);
+  tool.result = cleanText(tool.result) + cutNote(original);
   tool.name = cleanText(tool.name);
   if (ev.method === "item/started")
     return [

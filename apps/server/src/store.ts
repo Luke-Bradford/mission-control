@@ -554,9 +554,14 @@ export const ACTIVE_SEAT_STATES: readonly SeatState[] = ["idle", "starting", "ru
 
 /** `{dir of the DB}/crew/`: every crew run's files. Created with mode 0700. */
 export function crewDir(dbPath: string): string {
-  const dir = join(dirname(dbPath), "crew");
+  const dir = crewDirPath(dbPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+/** Where `crewDir` is, without making it. */
+export function crewDirPath(dbPath: string): string {
+  return join(dirname(dbPath), "crew");
 }
 
 /** A crew run's transcript: `{dir of the DB}/crew/{runId}.jsonl`. */
@@ -605,8 +610,14 @@ export function crewPrBodyPath(dbPath: string): string {
 
 /** A crew run's keeper folder: `{dir of the DB}/crew/k-<12 hex of sha256(runId)>`, short for its socket path. */
 export function crewKeeperDir(dbPath: string, runId: string): string {
+  crewDir(dbPath);
+  return crewKeeperDirPath(dbPath, runId);
+}
+
+/** Where `crewKeeperDir` is, without making `crew/`. */
+export function crewKeeperDirPath(dbPath: string, runId: string): string {
   const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return join(crewDir(dbPath), `k-${hex}`);
+  return join(crewDirPath(dbPath), `k-${hex}`);
 }
 
 /** Codex thread storage survives replacement of the run's keeper. */

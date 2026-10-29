@@ -1,4 +1,6 @@
 import {
+  appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,7 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { compactTranscripts, compactTranscriptText } from "../src/compact-transcripts.ts";
+import {
+  compactTranscriptFile,
+  compactTranscripts,
+  compactTranscriptText,
+} from "../src/compact-transcripts.ts";
 import {
   compactTranscriptLine,
   DELTA_HEARTBEAT_MS,
@@ -45,7 +51,7 @@ describe("compactTranscriptLine", () => {
     const kept = compactTranscriptLine(codexDone(out)) as string;
     expect(kept.length).toBeLessThan(20 * 1024);
     const item = JSON.parse(kept).params.item;
-    expect(item.outputTruncated).toEqual({ bytes: out.length });
+    expect(item.outputTruncated).toEqual({ originalBytes: out.length });
     expect(item.aggregatedOutput.startsWith("a".repeat(100))).toBe(true);
     expect(item.aggregatedOutput.endsWith("z".repeat(100))).toBe(true);
     expect(item.command).toBe("pnpm test");
@@ -78,7 +84,7 @@ describe("compactTranscriptLine", () => {
       const block = Array.isArray(kept.message.content[0].content)
         ? kept.message.content[0].content[0]
         : kept.message.content[0];
-      expect(block.outputTruncated).toEqual({ bytes: big.length });
+      expect(block.outputTruncated).toEqual({ originalBytes: big.length });
       expect(JSON.stringify(kept).length).toBeLessThan(20 * 1024);
     }
     const small = user("fine");
@@ -108,20 +114,17 @@ describe("compactTranscriptLine", () => {
     expect(kept.length).toBeLessThan(40 * 1024);
     const m = JSON.parse(kept);
     const parts = m.message.content[0].content;
-    expect(parts[0].outputTruncated).toEqual({ bytes: big.length });
-    expect(parts[1].source).toMatchObject({ data: "", outputTruncated: { bytes: big.length } });
-    expect(m.tool_use_result).toMatchObject({
-      stderr: "small",
-      interrupted: false,
-      outputTruncated: { bytes: big.length },
+    expect(parts[0].outputTruncated).toEqual({ originalBytes: big.length });
+    expect(parts[1].source).toMatchObject({
+      data: "",
+      outputTruncated: { originalBytes: big.length },
     });
-    // a tool_use_result that is an array of parts, or a string, is cut too
-    const arr = JSON.stringify({ type: "user", tool_use_result: [{ type: "text", text: big }] });
-    expect(parse(compactTranscriptLine(arr)).tool_use_result[0].outputTruncated).toEqual({
-      bytes: big.length,
-    });
-    const str = JSON.stringify({ type: "user", tool_use_result: big });
-    expect((compactTranscriptLine(str) as string).length).toBeLessThan(20 * 1024);
+    // the copy of the result nothing reads is dropped, whatever shape it has
+    expect("tool_use_result" in m).toBe(false);
+    for (const copy of [[{ type: "text", text: big }], big, { stdout: big }]) {
+      const only = JSON.stringify({ type: "user", tool_use_result: copy });
+      expect("tool_use_result" in parse(compactTranscriptLine(only))).toBe(false);
+    }
   });
 
   it("cuts the command outputs of a Codex JSON-RPC result (a resume answer)", () => {
@@ -130,17 +133,18 @@ describe("compactTranscriptLine", () => {
     const line = JSON.stringify({
       id: 4,
       result: {
-        thread: { id: "th", turns: [{ items: [item("commandExecution"), item("other")] }] },
-        turns: [{ items: [item("commandExecution")] }],
+        thread: { id: "th", turns: [{ items: [item("commandExecution")] }, { items: [] }] },
+        turns: [{ items: [item("commandExecution"), item("other")] }],
         items: [item("commandExecution")],
       },
     });
     const kept = compactTranscriptLine(line) as string;
     const r = JSON.parse(kept).result;
-    expect(r.thread.turns[0].items[0].outputTruncated).toEqual({ bytes: big.length });
-    expect(r.thread.turns[0].items[1].aggregatedOutput).toBe(big); // not a command
-    expect(r.turns[0].items[0].outputTruncated).toEqual({ bytes: big.length });
-    expect(r.items[0].outputTruncated).toEqual({ bytes: big.length });
+    expect(r.thread).toEqual({ id: "th", turns: [], turnsDropped: 2 });
+    expect(compactTranscriptLine(kept)).toBe(kept); // a second pass changes nothing
+    expect(r.turns[0].items[1].aggregatedOutput).toBe(big); // not a command
+    expect(r.turns[0].items[0].outputTruncated).toEqual({ originalBytes: big.length });
+    expect(r.items[0].outputTruncated).toEqual({ originalBytes: big.length });
   });
 
   it("is idempotent and keeps non-JSON lines", () => {
@@ -172,6 +176,24 @@ describe("delta heartbeats", () => {
     expect(compactTranscriptLine(delta(DELTA_HEARTBEAT_MS / 1000), hb)).not.toBeNull();
     expect(compactTranscriptLine(first as string, hb)).toBe(first);
     expect(compactTranscriptLine(first as string)).toBe(first);
+  });
+
+  it("forgets an item when it completes, and prunes a long list of idle ones", () => {
+    const hb = deltaHeartbeats();
+    expect(compactTranscriptLine(delta(0), hb)).not.toBeNull();
+    expect(compactTranscriptLine(delta(1), hb)).toBeNull();
+    const done = JSON.stringify({
+      method: "item/completed",
+      params: { item: { id: "cmd", type: "commandExecution", aggregatedOutput: "x" } },
+    });
+    compactTranscriptLine(done, hb);
+    expect(compactTranscriptLine(delta(2), hb)).not.toBeNull(); // the same id again is a new item
+    const early = deltaHeartbeats();
+    for (let i = 0; i < 1100; i++) early(`item-${i}`, start);
+    expect(early("item-5", start + 1000)).toBe(false); // still tracked, inside the minute
+    early("late", start + 2 * DELTA_HEARTBEAT_MS); // over the cap: the idle ones go
+    for (let i = 0; i < 1000; i++) early(`more-${i}`, start + 2 * DELTA_HEARTBEAT_MS);
+    expect(early("item-5", start + 2 * DELTA_HEARTBEAT_MS + 1)).toBe(true);
   });
 
   it("a 15-minute delta-only command still advances lastEventAt through the digest fold", () => {
@@ -278,6 +300,25 @@ describe("compacting existing transcripts", () => {
     expect(s.rewritten).toEqual([]);
     expect(s.skippedLive).toBe(2);
     expect(readFileSync(crewFile("keeper"), "utf8")).toBe(`${big}\n`);
+  });
+
+  it("leaves a file as it was when it changes between the read and the rename", () => {
+    add("racy", 5);
+    const old = new Date(Date.now() - 86_400_000);
+    utimesSync(crewFile("racy"), old, old);
+    const result = compactTranscriptFile(crewFile("racy"), () => {
+      appendFileSync(crewFile("racy"), '{"late":true}\n'); // the keeper writes
+    });
+    expect(result).toBeNull();
+    expect(readFileSync(crewFile("racy"), "utf8")).toBe(`${big}\n{"late":true}\n`);
+    expect(existsSync(`${crewFile("racy")}.compact.tmp`)).toBe(false);
+  });
+
+  it("does not make crew/ when there is none", () => {
+    rmSync(join(dir, "crew"), { recursive: true });
+    const s = summarise();
+    expect(s.rewritten).toEqual([]);
+    expect(existsSync(join(dir, "crew"))).toBe(false);
   });
 
   it("keeps a final line with no newline as it is", () => {

@@ -382,7 +382,7 @@ it("says how many bytes a cut result lost (#934)", () => {
               type: "tool_result",
               tool_use_id: "t1",
               content: "kept",
-              outputTruncated: { bytes: 123456 },
+              outputTruncated: { originalBytes: 123456 },
             },
           ],
         },
@@ -392,5 +392,5 @@ it("says how many bytes a cut result lost (#934)", () => {
     ].join("\n")}\n`,
   );
   const text = JSON.stringify(readStream(p, 10).events);
-  expect(text).toContain("kept\\n(123456 bytes cut)");
+  expect(text).toContain("kept\\n(cut from 123456 bytes)");
 });

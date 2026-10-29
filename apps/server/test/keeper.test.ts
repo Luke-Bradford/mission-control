@@ -790,7 +790,7 @@ describe("the compact transcript (#934)", () => {
     expect(JSON.parse(kept[1] as string).params.delta).toBeUndefined();
     expect(readFileSync(transcript).length).toBeLessThan(20 * 1024);
     const item = JSON.parse(kept[2] as string).params.item;
-    expect(item.outputTruncated).toEqual({ bytes: 2 * 1024 * 1024 });
+    expect(item.outputTruncated).toEqual({ originalBytes: 2 * 1024 * 1024 });
     // a hub that comes back is numbered through the dropped lines and gets the compact form
     const again = await client(folder);
     again.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
@@ -842,7 +842,7 @@ describe("the compact transcript (#934)", () => {
     expect(b.msgs.at(-1)).toEqual({ t: "exit", code: 0, signal: null });
   });
 
-  it("a long replay with a compacted line arriving during it ends in order, the new line whole", async () => {
+  it("a big line inside a long replay arrives compact and in order; the hub attached then heard it whole", async () => {
     const big = 300 * 1024;
     const folder = folderFor(
       `const say = (m) => console.log(JSON.stringify(m));
@@ -853,16 +853,22 @@ describe("the compact transcript (#934)", () => {
       { turnEnd: "codex" },
     );
     const k = keep(folder);
-    const c = await client(folder);
-    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
-    c.say({ t: "in", line: "go", user: false });
-    await until(() => expect(c.outs()).toHaveLength(1501));
-    expect(c.outs().map(([n]) => n)).toEqual(Array.from({ length: 1501 }, (_, i) => i));
-    const last = JSON.parse(c.outs()[1500]?.[1] as string);
-    expect(last.params.item.aggregatedOutput).toHaveLength(big);
-    expect(lines()).toHaveLength(1501);
-    expect(lines()[1500]?.length).toBeLessThan(20 * 1024);
-    c.say({ t: "close", graceMs: 300 });
+    const a = await client(folder);
+    a.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    a.say({ t: "in", line: "go", user: false });
+    await until(() => expect(lines()).toHaveLength(1501));
+    await until(() => expect(a.outs()).toHaveLength(1501));
+    const live = JSON.parse(a.outs()[1500]?.[1] as string);
+    expect(live.params.item.aggregatedOutput).toHaveLength(big); // whole, live
+    // a second hub replays all 1,501 lines, 500 at a time, the big one in the last batch
+    const b = await client(folder);
+    b.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(b.outs()).toHaveLength(1501));
+    expect(b.outs().map(([n]) => n)).toEqual(Array.from({ length: 1501 }, (_, i) => i));
+    const replayed = String(b.outs()[1500]?.[1]);
+    expect(replayed.length).toBeLessThan(20 * 1024);
+    expect(JSON.parse(replayed).params.item.outputTruncated).toEqual({ originalBytes: big });
+    b.say({ t: "close", graceMs: 300 });
     await k.done;
   });
 

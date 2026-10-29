@@ -1650,8 +1650,9 @@ describe("contextUsage", () => {
     await sup.contextUsage("guido-1");
     expect(asks()).toBe(2);
   });
-  it("after a failed ask the next read within 30 s is the cache's, not another ask (#934)", async () => {
-    const { sup } = make();
+  it("after a failed ask the next read within 30 s is the cache's; 31 s on, or a turn later, it asks (#934)", async () => {
+    let t = Date.now();
+    const { sup } = make({ now: () => t });
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
@@ -1662,6 +1663,18 @@ describe("contextUsage", () => {
     expect(asks()).toBe(1);
     expect(await sup.contextUsage("guido-1")).toBeNull();
     expect(asks()).toBe(1);
+    t += 31_000;
+    expect(await sup.contextUsage("guido-1")).toBeNull(); // asks again (and fails again)
+    expect(asks()).toBe(2);
+    expect(await sup.contextUsage("guido-1")).toBeNull();
+    expect(asks()).toBe(2);
+    // a turn that ends needs no wait
+    await sup.message("guido-1", "again", { interrupt: false });
+    await until(() => expect(userLines()).toHaveLength(3));
+    await until(async () => {
+      await sup.contextUsage("guido-1");
+      expect(asks()).toBe(3);
+    });
   });
 });
 

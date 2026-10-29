@@ -187,7 +187,7 @@ describe("crew call ring", () => {
               type: "tool_result",
               tool_use_id: "t1",
               content: "kept",
-              outputTruncated: { bytes: 4000 },
+              outputTruncated: { originalBytes: 4000 },
             },
           ],
         },
@@ -209,7 +209,7 @@ describe("crew call ring", () => {
           method: "item/completed",
           timestamp: at(1),
           params: {
-            item: item({ aggregatedOutput: "kept", outputTruncated: { bytes: 8000 } }),
+            item: item({ aggregatedOutput: "kept", outputTruncated: { originalBytes: 8000 } }),
           },
         },
       )}\n`,
