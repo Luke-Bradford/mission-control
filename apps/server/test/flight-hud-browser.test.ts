@@ -18,6 +18,7 @@ import {
 } from "../src/flight/hud-render.ts";
 import { createFlightTools, type FlightToolsDeps } from "../src/flight/tools.ts";
 import { Store } from "../src/store.ts";
+import { WEB_CSP } from "../src/web.ts";
 
 /** A Chrome or Chromium to render with: the override, else the usual macOS and Linux installs. */
 const CHROME = [
@@ -54,8 +55,14 @@ async function listen(
   return { server, port, origin: `http://127.0.0.1:${port}`, requests, upgrades };
 }
 
-const html = (body: string, script = "") =>
-  `<!doctype html><html><body><main>${body}</main><script>document.documentElement.dataset.hudReady='1';${script}</script></body></html>`;
+// Like the real hub, pages carry its CSP (script-src 'self': no inline script, no eval), so a
+// renderer that evaluates strings in the page fails here as it would live.
+const scripts = new Map<string, string>();
+const html = (body: string, script = "") => {
+  const path = `/s/${scripts.size}.js`;
+  scripts.set(path, `document.documentElement.dataset.hudReady='1';${script}`);
+  return `<!doctype html><html><body><main>${body}</main><script src="${path}"></script></body></html>`;
+};
 
 let hub: Awaited<ReturnType<typeof listen>>;
 let other: Awaited<ReturnType<typeof listen>>;
@@ -65,7 +72,14 @@ const startServers = async (): Promise<void> => {
   other = await listen((_req, res) => res.end("off-hub"));
   hub = await listen((req, res) => {
     const url = new URL(req.url ?? "/", "http://hub");
-    const send = (body: string) => res.setHeader("content-type", "text/html").end(body);
+    const send = (body: string) =>
+      res
+        .setHeader("content-type", "text/html")
+        .setHeader("content-security-policy", WEB_CSP)
+        .end(body);
+    const script = scripts.get(url.pathname);
+    if (script !== undefined)
+      return void res.setHeader("content-type", "text/javascript").end(script);
     switch (url.pathname) {
       case "/map":
         // the lazy page's placeholder, then its data, 600 ms later
@@ -278,12 +292,18 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
       bus: new ChangeBus(),
       hubOrigin: hub.origin,
       // the production renderer: a real helper process and Chrome per call
-      screenshotHud: (url: string, guard: HudRenderGuard) => {
-        events.push(`launch ${new URL(url).pathname}`);
-        return renderHudInHelper(url, guard, {
-          executablePath: CHROME as string,
-          deadlineMs: 20_000,
-        });
+      screenshotHud: async (url: string, guard: HudRenderGuard) => {
+        const page = new URL(url).pathname;
+        events.push(`launch ${page}`);
+        try {
+          return await renderHudInHelper(url, guard, {
+            executablePath: CHROME as string,
+            deadlineMs: 20_000,
+          });
+        } catch (e) {
+          events.push(`failed ${page}`);
+          throw e;
+        }
       },
     } as unknown as FlightToolsDeps);
     const shot = tools.find((t) => t.name === "screenshot_hud");
@@ -291,10 +311,7 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
     const ctx = { seatId: "flight-1", runId: "r-flight" };
 
     // /board redirects off the hub and fails; /overview is a good page queued behind it
-    const first = shot.call(ctx, { page: "/board" }).then((r) => {
-      events.push("first settled");
-      return r;
-    });
+    const first = shot.call(ctx, { page: "/board" });
     const second = shot.call(ctx, { page: "/overview" });
     const [a, b] = await Promise.all([first, second]);
 
@@ -302,6 +319,6 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
     expect(b.isError).toBeUndefined();
     expect(b.image?.mimeType).toBe("image/png");
     // the second helper only launched once the first render had failed and left the queue
-    expect(events).toEqual(["launch /board", "first settled", "launch /overview"]);
+    expect(events).toEqual(["launch /board", "failed /board", "launch /overview"]);
   }, 60_000);
 });

@@ -54,9 +54,14 @@ function fakePlaywright(
       pageHandler?.({ close: popupClose });
       await over.goto?.();
     }),
-    waitForFunction: vi.fn(async (expression: string) => {
-      order.push(expression.includes("hudReady") ? "hudReady" : "pageReady");
-      if (!expression.includes("hudReady")) await over.pageReady;
+    waitForSelector: vi.fn(async (selector: string) => {
+      const step = selector.includes("hud-ready")
+        ? "hudReady"
+        : selector.includes("Loading")
+          ? "pageReady"
+          : "main";
+      order.push(step);
+      if (step === "pageReady") await over.pageReady;
     }),
     on: vi.fn((event: string, handler: () => void) => {
       pageEvents.set(event, [...(pageEvents.get(event) ?? []), handler]);
@@ -176,6 +181,7 @@ describe("renderHudWithPlaywright", () => {
       "page",
       "goto",
       "hudReady",
+      "main",
       "pageReady",
       "pageReady",
     ]);
@@ -183,11 +189,10 @@ describe("renderHudWithPlaywright", () => {
       waitUntil: "load",
       timeout: expect.any(Number),
     });
-    expect(fake.page.waitForFunction).toHaveBeenCalledWith(
-      "document.documentElement.dataset.hudReady === '1'",
-      undefined,
-      { timeout: expect.any(Number) },
-    );
+    expect(fake.page.waitForSelector).toHaveBeenCalledWith("html[data-hud-ready='1']", {
+      state: "attached",
+      timeout: expect.any(Number),
+    });
     expect(fake.popupClose).toHaveBeenCalledOnce();
     expect((await fake.websocket()).close).toHaveBeenCalledWith({
       code: 1008,
@@ -273,8 +278,12 @@ describe("renderHudWithPlaywright", () => {
     release();
     await render;
     expect(fake.page.screenshot).toHaveBeenCalledOnce();
-    const expressions = fake.page.waitForFunction.mock.calls.map((c) => c[0]);
-    expect(expressions.some((e) => e.includes("Loading…") && e.includes("main"))).toBe(true);
+    // selectors only: the hub's CSP forbids the page-evaluated strings waitForFunction would send
+    expect(fake.page).not.toHaveProperty("waitForFunction");
+    expect(fake.page.waitForSelector).toHaveBeenCalledWith("main p:text-is('Loading…')", {
+      state: "detached",
+      timeout: expect.any(Number),
+    });
   });
 
   it("holds the capture while a page request is still in flight", async () => {

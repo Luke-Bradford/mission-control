@@ -8,15 +8,14 @@ import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 const HUD_PATH =
   /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
 const HUD_STREAM_PATH = "/api/stream";
-const HUD_READY = "document.documentElement.dataset.hudReady === '1'";
+// Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
+const HUD_READY = "html[data-hud-ready='1']";
 /**
  * The requested page itself has rendered: the app shell's lazy-route Suspense fallback
  * (`<p>Loading…</p>` inside `<main>`) is gone. `hudReady` only covers the shell's own data.
  */
-const PAGE_READY = `(() => {
-  const main = document.querySelector("main");
-  return main !== null && ![...main.querySelectorAll("p")].some((p) => p.textContent?.trim() === "Loading…");
-})()`;
+const PAGE_MAIN = "main";
+const PAGE_LOADING = "main p:text-is('Loading…')";
 /** The page's requests must stay quiet this long before it is photographed. */
 export const HUD_QUIET_MS = 400;
 const DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -72,10 +71,9 @@ interface BrowserRoute {
 
 interface HudPage {
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
-  waitForFunction(
-    expression: string,
-    arg: undefined,
-    options: { timeout: number },
+  waitForSelector(
+    selector: string,
+    options: { state: "attached" | "detached"; timeout: number },
   ): Promise<unknown>;
   screenshot(options: { type: "png"; timeout: number }): Promise<Buffer | Uint8Array>;
   on(event: "request" | "requestfinished" | "requestfailed", handler: () => void): unknown;
@@ -307,14 +305,17 @@ export async function renderHudWithPlaywright(
     const network = watchNetwork(page);
     await page.goto(url, { waitUntil: "load", timeout: remaining() });
     ensureActive();
-    await page.waitForFunction(HUD_READY, undefined, { timeout: remaining() });
+    const wait = (selector: string, state: "attached" | "detached"): Promise<unknown> =>
+      page.waitForSelector(selector, { state, timeout: remaining() });
+    await wait(HUD_READY, "attached");
     ensureActive();
     // The shell is ready; now the requested (lazy) page and its data: wait for the placeholder to
     // go, the requests to settle, and the placeholder to still be gone once they have.
-    await page.waitForFunction(PAGE_READY, undefined, { timeout: remaining() });
+    await wait(PAGE_MAIN, "attached");
+    await wait(PAGE_LOADING, "detached");
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
-    await page.waitForFunction(PAGE_READY, undefined, { timeout: remaining() });
+    await wait(PAGE_LOADING, "detached");
     ensureActive();
     try {
       guard.page(page.url());
@@ -330,6 +331,10 @@ export async function renderHudWithPlaywright(
 
   try {
     return await Promise.race([work(), deadline]);
+  } catch (error) {
+    // A Playwright call limited to the time remaining can time out just before the deadline timer
+    if ((error as { name?: unknown })?.name === "TimeoutError") throw timeoutError();
+    throw error;
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);
     await closeOwned();
