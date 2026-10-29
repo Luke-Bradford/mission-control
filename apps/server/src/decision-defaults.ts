@@ -59,14 +59,29 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
   return applied;
 }
 
+/** The stores with a delivery pass running: an overlapping sweep leaves the pass to the first. */
+const delivering = new WeakSet<Store>();
+
 /** Hands each applied default's answer to its seat; one that fails is retried on the next sweep. */
 async function deliverPending(d: DecisionDefaultsDeps): Promise<void> {
-  if (d.deliver === undefined) return;
+  if (d.deliver === undefined || delivering.has(d.store)) return;
+  delivering.add(d.store);
+  try {
+    await deliverEach(d, d.deliver);
+  } finally {
+    delivering.delete(d.store);
+  }
+}
+
+async function deliverEach(
+  d: DecisionDefaultsDeps,
+  deliver: NonNullable<DecisionDefaultsDeps["deliver"]>,
+): Promise<void> {
   for (const p of d.store.pendingDecisionDeliveries()) {
     // the lead names the ask, so a seat can tell a repeat after a crash from a new answer
     const text = `Re: ${p.key} · default applied (${p.briefAt})\n\n${p.answer}`;
     try {
-      await d.deliver(p.target, text);
+      await deliver(p.target, text);
     } catch {
       continue;
     }

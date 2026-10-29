@@ -183,6 +183,22 @@ describe("decision defaults", () => {
     expect(outcomes()).toHaveLength(1);
   });
 
+  it("overlapping sweeps deliver a pending answer once", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deliver = vi.fn(() => gate);
+    const first = sweep(DUE, store, deliver);
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
+    await sweep(DUE + MIN, store, deliver);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    release();
+    await first;
+    await sweep(DUE + 2 * MIN, store, deliver);
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
   it("applies once: a second sweep and a restarted store do nothing", async () => {
     expect(await sweep(DUE)).toBe(1);
     expect(await sweep(DUE + MIN)).toBe(0);
