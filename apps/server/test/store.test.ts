@@ -1859,7 +1859,7 @@ describe("Store", () => {
     expect(store.getSetting("other")).toBeNull();
   });
 
-  it("replaces flow rows per repo, skips undone issues and filters on doneAt / mergedAt", () => {
+  it("replaces flow rows per repo, retains open work and filters completed issues on doneAt", () => {
     store.replaceFlow(
       "r1",
       [
@@ -1878,15 +1878,17 @@ describe("Store", () => {
       [{ repoId: "r2", number: 1, mergedAt: 150, firstPushCi: "failing" }],
     );
     expect(store.flowIssues(0).map((i) => [i.repoId, i.number])).toEqual([
+      ["r1", 3],
       ["r1", 1],
       ["r2", 1],
       ["r1", 2],
     ]);
     expect(store.flowIssues(150).map((i) => [i.repoId, i.number])).toEqual([
+      ["r1", 3],
       ["r2", 1],
       ["r1", 2],
     ]);
-    expect(store.flowIssues(0)[0]).toEqual({
+    expect(store.flowIssues(0).find((issue) => issue.number === 1)).toEqual({
       repoId: "r1",
       number: 1,
       size: "S",
