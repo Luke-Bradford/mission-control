@@ -372,7 +372,7 @@ What each seat's process starts with:
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Short Comms.** Messages are limited to 1,200 characters. Put complete findings, plans and
   evidence in `report_findings`, `report_plan` or `report_evidence`, then send Comms a short
-  pointer. The Comms metric endpoint reports each sender's p95 message length over the shared
+  pointer. `GET /api/comms/metrics` reports each sender's p95 message length over the shared
   24-hour range.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
