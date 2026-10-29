@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 const rule = (selector: string) => css.match(new RegExp(`\\n${selector} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Setup Accounts usage layout (hud.css)", () => {

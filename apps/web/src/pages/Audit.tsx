@@ -11,6 +11,7 @@ import { prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
+import "./audit.css";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];

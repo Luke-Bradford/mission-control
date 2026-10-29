@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 const rule = (sel: string) => css.match(new RegExp(`\\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 interface Track {

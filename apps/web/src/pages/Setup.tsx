@@ -21,6 +21,7 @@ import { Sessions } from "../setup/Sessions.tsx";
 import { Sources } from "../setup/Sources.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { toast } from "../shell/Toast.tsx";
+import "../setup/setup.css";
 
 const TAB_LABEL: Record<SetupTab, string> = {
   sessions: "Sessions",

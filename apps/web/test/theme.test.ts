@@ -14,6 +14,7 @@ import {
   TOKEN_NAMES,
   type TokenName,
 } from "../src/theme.ts";
+import { readStyle, readStyles } from "./styles.ts";
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
@@ -135,7 +136,7 @@ describe("theme tokens", () => {
   it.each(THEMES)(
     "colours the YAML view and glossary code with tokens that pass AA: %s",
     (name) => {
-      const css = read("../src/hud.css");
+      const css = readStyles();
       const t = THEME_TOKENS[name];
       const token = (v: string | undefined) =>
         /^var\((--[\w-]+)\)$/.exec(v ?? "")?.[1] as TokenName;
@@ -246,10 +247,12 @@ describe("ruleValue", () => {
 });
 
 describe("hud.css state rules", () => {
-  const css = () => read("../src/hud.css");
-  /** The body of the `@media (prefers-reduced-motion: reduce)` block. */
+  const css = () => readStyles();
+  /** The body of the `@media (prefers-reduced-motion: reduce)` block that holds the lamps' rings. */
   const reduced = () =>
-    /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(css())?.[1] ?? "";
+    /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(
+      readStyle("hud/Lamp.css"),
+    )?.[1] ?? "";
 
   it.each([
     ["warn", "--warn-soft"],
@@ -274,9 +277,11 @@ describe("hud.css state rules", () => {
 
   /** The body of the `@media (max-width: …)` block with that width, to its closing `}` at column 0. */
   const maxWidthBlock = (px: string) =>
-    new RegExp(`@media \\(max-width: ${px}\\) \\{\\n([\\s\\S]*?)\\n\\}`).exec(css())?.[1] ?? "";
+    new RegExp(`@media \\(max-width: ${px}\\) \\{\\n([\\s\\S]*?)\\n\\}`).exec(
+      readStyle("board/board.css"),
+    )?.[1] ?? "";
 
-  it("the phone block of hud.css is the width PHONE_QUERY names", () => {
+  it("the phone block of board.css is the width PHONE_QUERY names", () => {
     const px = /^\(max-width: (\d+px)\)$/.exec(PHONE_QUERY)?.[1];
     expect(px, "PHONE_QUERY is a single max-width").toBeDefined();
     expect(maxWidthBlock(px as string)).toContain(".kcol .kh > button");

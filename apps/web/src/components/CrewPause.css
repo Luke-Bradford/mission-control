@@ -1,0 +1,36 @@
+.crew-pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+.crew-pause-form {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #0005;
+}
+
+.crew-pause-form label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crew-pause-form input:not([type="checkbox"]) {
+  min-width: 0;
+  flex: 1;
+}

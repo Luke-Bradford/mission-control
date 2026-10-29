@@ -1,0 +1,9 @@
+.chipref {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  background: var(--surface-2);
+  border-radius: 2px;
+  padding: 0 5px;
+  white-space: nowrap;
+}

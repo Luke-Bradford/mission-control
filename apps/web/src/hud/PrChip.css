@@ -1,0 +1,7 @@
+/* a PR chip's link and its Merged/Closed pill wrap as one */
+.rpr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}

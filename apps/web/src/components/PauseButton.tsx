@@ -2,6 +2,7 @@ import type { CrewRow } from "@mc/core";
 import { useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
+import "./PauseButton.css";
 
 export const STUDIO_PAUSE_TOOLTIP = "pause arrives with cutover";
 

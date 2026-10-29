@@ -21,6 +21,7 @@ import { agentPath, boardPath, followLink } from "../router.ts";
 import { ExternalLink } from "./ExternalLink.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { StartSeat } from "./StartSeat.tsx";
+import "./TicketDetail.css";
 
 /** Open or Closed, as a word: a closed ticket is never green. */
 const OpenClosed = ({ closed }: { closed: boolean }) => (

@@ -6,6 +6,7 @@ import {
 } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import "./GithubRateRow.css";
 
 /** The GitHub API budget line, with the poll's `slowed: …` note beside it (Overview and Setup › Accounts). */
 export function GithubRateRow() {

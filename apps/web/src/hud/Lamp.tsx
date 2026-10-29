@@ -1,4 +1,5 @@
 import type { HudLampKind } from "@mc/core";
+import "./Lamp.css";
 
 /**
  * A status lamp. Colour is never the only signal: each kind has its own shape (warn diamond, crit

@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, it } from "vitest";
+import { readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(
     /\.overview-grid \{[^}]*grid-template-rows: auto fit-content\(45%\) fit-content\(18%\) minmax\(0, 1fr\)/,

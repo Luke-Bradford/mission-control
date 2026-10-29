@@ -17,6 +17,7 @@ import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { FlowOfWork } from "../telemetry/FlowOfWork.tsx";
 import { InstrumentCharts } from "../telemetry/InstrumentCharts.tsx";
 import { Kpis } from "../telemetry/Kpis.tsx";
+import "../telemetry/telemetry.css";
 
 const RANGES = (Object.keys(TELEMETRY_RANGES) as TelemetryRange[]).map((r) => ({
   value: r,

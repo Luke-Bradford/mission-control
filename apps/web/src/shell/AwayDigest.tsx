@@ -8,6 +8,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { parseTicket } from "../hud/RepoRef.tsx";
 import { followLink, itemPath, ticketPath, usePath } from "../router.ts";
 import { AWAY_DIGEST_KEY, readKey, writeKey } from "../storage.ts";
+import "./AwayDigest.css";
 
 const LABELS = [
   "need you now",

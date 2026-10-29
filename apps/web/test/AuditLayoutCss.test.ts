@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, it } from "vitest";
+import { readStyle, readStyles } from "./styles.ts";
 
-const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+const css = readStyles();
 const rule = (selector: string) => css.match(new RegExp(`\\n${selector} \\{([^}]*)\\}`))?.[1] ?? "";
-const phone = css.match(/@media \(max-width: 760px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+const phone =
+  readStyle("pages/audit.css").match(/@media \(max-width: 760px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
 
 it("keeps the populated Audit dashboard readable at desktop and phone widths", () => {
   expect(rule(".audit-grid")).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");

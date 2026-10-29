@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +7,7 @@ import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, escalation, item, NOW } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const TICKET = "/api/boards/shop-app/items/4001";
 const TICKET_B = "/api/boards/shop-app/items/4002";
@@ -277,7 +276,7 @@ describe("TicketDetail body", () => {
 });
 
 describe("Item panel layout (hud.css)", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   const rule = (sel: string) => css.match(new RegExp(`\\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
   it("the body sits in the shrinkable brief grid and its text can shrink", async () => {
@@ -293,7 +292,7 @@ describe("Item panel layout (hud.css)", () => {
 });
 
 it("wraps long references and spaces action chips in brief sections", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css).toMatch(
     /\.brief-section \.chipref\s*\{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/,
   );

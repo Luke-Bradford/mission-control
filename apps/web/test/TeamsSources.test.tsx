@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { whereOf } from "../src/notifications.ts";
 import { Sources } from "../src/setup/Sources.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, MIN, NOW } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const chat = {
   kind: "chat",
@@ -141,7 +140,7 @@ it("retains selection after a refused save", async () => {
 });
 
 it("keeps feed fields usable at narrow widths", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css).toMatch(/\.teams-selection\s*\{[^}]*flex-wrap: wrap;/);
   expect(css).toMatch(/\.teams-sources\s*\{[^}]*overflow-wrap: anywhere;/);
   expect(css).toMatch(/\.teams-selection label\s*\{[^}]*min-width: 0;/);

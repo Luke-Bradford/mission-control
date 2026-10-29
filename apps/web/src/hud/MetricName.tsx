@@ -1,4 +1,5 @@
 import { METRICS, type MetricId } from "@mc/core";
+import "./MetricName.css";
 
 /**
  * A registry figure's label: its name, then its window (and any scope tag) kept on one line, so a

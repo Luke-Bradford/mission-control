@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
@@ -20,6 +18,7 @@ import {
 import { DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const noop = () => {};
 let off: () => void;
@@ -67,7 +66,7 @@ afterEach(() => {
 
 describe("Dock content", () => {
   it("keeps waiting asks above an independently scrolling message stream", () => {
-    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const css = readStyles();
     expect(css).toMatch(/\.panel \{[^}]*display: flex;[^}]*flex-direction: column/);
     expect(css).toMatch(/\.dock \.dh \{[^}]*flex: none/);
     expect(css).toMatch(/\.dwait \{[^}]*flex: none;[^}]*max-height: 40%;[^}]*overflow: auto/);

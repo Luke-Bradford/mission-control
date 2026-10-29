@@ -15,6 +15,7 @@ import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
+import "../agent/agent.css";
 
 /**
  * One agent in detail (catalogue §2.4): picker, need banner, header and tiles, then Activity beside

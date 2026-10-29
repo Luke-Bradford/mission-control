@@ -6,6 +6,7 @@ import { NeedsBanner } from "../overview/NeedsBanner.tsx";
 import { PipelinePanel } from "../overview/PipelinePanel.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
 import { TimelinePanel } from "../overview/TimelinePanel.tsx";
+import "../overview/overview.css";
 
 /**
  * Overview (catalogue 2.1): what needs the operator, the crew, activity, the machine and quota.

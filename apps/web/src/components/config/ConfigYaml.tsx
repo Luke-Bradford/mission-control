@@ -1,4 +1,5 @@
 import type { ConfigView } from "@mc/core";
+import "./ConfigYaml.css";
 
 /** One coloured run of text on a YAML line: key, value, comment, or plain (indent, punctuation). */
 interface Seg {

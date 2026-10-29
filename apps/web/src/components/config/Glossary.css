@@ -1,0 +1,33 @@
+/* glossary (components/config/Glossary.tsx) */
+.gloss {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  font-size: var(--fs-s);
+}
+
+.gloss dt {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.gloss dd {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.gloss code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--fg);
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+@media (max-width: 760px) {
+  .gloss {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

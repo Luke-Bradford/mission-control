@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Grid, keyStep, PAD, Tip, useChartCursor, useChartWidth, XAxis } from "./Hover.tsx";
+import "./VBars.css";
 
 export interface VBar {
   key: string;

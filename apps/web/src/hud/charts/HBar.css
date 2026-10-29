@@ -1,0 +1,35 @@
+.hrow {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) 56px 56px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+  font-size: var(--fs-s);
+}
+
+/* a bar row's track: thin, square, ruled in quarters so the length reads against a scale */
+.hrow .track {
+  height: 4px;
+  border-radius: 0;
+  background:
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 0 / 25% 100%,
+    var(--line);
+}
+
+.hrow .track i {
+  border-radius: 0;
+  background: var(--fg-2);
+}
+
+.hrow:hover .track i {
+  background: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .hrow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 48px;
+  }
+  .hrow > :nth-child(4) {
+    display: none;
+  }
+}

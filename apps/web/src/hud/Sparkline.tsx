@@ -1,4 +1,5 @@
 import { useId } from "react";
+import "./Sparkline.css";
 
 /** The viewBox: stretched to the host (`preserveAspectRatio="none"`); strokes stay 1 px / 1.5 px. */
 const W = 100;

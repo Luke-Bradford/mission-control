@@ -1,4 +1,5 @@
 import { RESOURCES, useResource } from "../data.ts";
+import "./CrewOff.css";
 
 /** `GET /api/crew/status`: `note` says why crew is off, when it is. */
 interface CrewStatus {

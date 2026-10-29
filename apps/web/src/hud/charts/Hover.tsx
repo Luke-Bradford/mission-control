@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import "./Hover.css";
 
 /** A timestamp shared by time charts inside one operator workspace. */
 const ChartCursor = createContext<{

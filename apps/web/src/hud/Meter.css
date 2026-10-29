@@ -1,0 +1,49 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.meter.hi .track i {
+  background: var(--warn-mark);
+}
+
+.meter.full .track i {
+  background: var(--crit);
+}
+
+/* quota: thin square meters on a quarter-ruled track; the projection tick marks the reset */
+#quotaP .meter .track {
+  /* the meter is a column here: flex: 1 would collapse the track to no height */
+  flex: none;
+  height: 4px;
+  border-radius: 0;
+  overflow: visible;
+  background:
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px) 0 0 / 25% 100%,
+    var(--line);
+}
+
+#quotaP .meter .track i {
+  border-radius: 0;
+}
+
+#quotaP .meter .num {
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.meter .track {
+  position: relative;
+}
+
+.projection-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--fg-2);
+  z-index: 1;
+}

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./HBar.css";
 
 /**
  * One horizontal bar row (the mockup's `.hrow`): a label, a track filled to `pct`, the value and a

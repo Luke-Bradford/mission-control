@@ -1,0 +1,7 @@
+.githubrate {
+  margin-top: 6px;
+}
+
+#quotaP .githubrate {
+  font-size: var(--fs-xs);
+}

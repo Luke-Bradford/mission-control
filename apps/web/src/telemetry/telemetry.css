@@ -1,0 +1,186 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
+/* telemetry */
+#page-telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+/* Telemetry's readouts sit in one instrument band, divided by hairlines rather than boxed apart. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  flex: none;
+}
+
+.kpis > .kpi {
+  border: 0;
+  border-radius: 0;
+  box-shadow:
+    1px 0 0 var(--line),
+    0 1px 0 var(--line);
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+}
+
+.kpi .v {
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi .d {
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .kpi .v.kpi-change {
+    animation: kpi-change 450ms ease-out;
+  }
+  @keyframes kpi-change {
+    from {
+      color: var(--ok);
+      transform: translateY(-2px);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+}
+
+.ticket-bars {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ticket-bar-title {
+  /* two lines at most; the row's title attribute carries the full text */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.kpi.live .lbl::after {
+  content: " ● live";
+  color: var(--ok);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
+}
+
+.grp {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.grp::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line-2), transparent);
+}
+
+.tgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tgrid .wide {
+  grid-column: 1 / -1;
+}
+
+.chart {
+  position: relative;
+}
+
+.ctl-dark {
+  fill: var(--fg-2);
+}
+
+.ubar {
+  display: flex;
+  height: 6px;
+  border-radius: 0;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--line);
+}
+
+.ubar i {
+  display: block;
+  height: 100%;
+}
+
+.hrow.util {
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 48px;
+}
+
+/* cycle time: p50 beside the bar, then p85 and the ticket count on one line */
+#tCycle .hrow {
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 56px 150px;
+}
+
+/* the registry's p50 over every size, above the per-size rows */
+.tcycle-all {
+  margin: 0 0 8px;
+}
+
+/* a long agent tag is cut at its column instead of running under the bar */
+.hrow.util > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tnote {
+  margin-top: 6px;
+}
+
+#page-telemetry.refetching .kpis,
+#page-telemetry.refetching .tgrid {
+  opacity: 0.6;
+}
+
+/* a tile whose figure is not stored */
+.kpi .v.nt,
+.stat2 b.nt {
+  font-size: var(--fs-s);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (max-width: 999px) {
+  .tgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

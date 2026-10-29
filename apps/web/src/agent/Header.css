@@ -1,0 +1,45 @@
+.rename-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rename-editor label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rename-editor input {
+  min-width: 0;
+  width: 16ch;
+  max-width: 100%;
+}
+
+.rename-editor [role="alert"] {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.account-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.account-chooser label,
+.account-chooser select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.account-chooser select {
+  width: 24ch;
+}

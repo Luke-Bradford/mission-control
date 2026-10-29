@@ -9,6 +9,7 @@ import { WorkingLog } from "../src/flight/WorkingLog.tsx";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, NOW, seatRow } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 afterEach(() => vi.restoreAllMocks());
 const overflow = () => {
@@ -100,7 +101,7 @@ it("expands Activity text and preserves its inline formatting", async () => {
   expect(container.querySelector(".expandable.open")).toBeNull();
 });
 it("bounds expanded prose and allows narrow HUD rows to shrink", () => {
-  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const css = readStyles();
   expect(css).toMatch(
     /\.expandable \{[^}]*min-width: 0;[^}]*max-width: 100%;[^}]*overflow-wrap: anywhere;/,
   );

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { closeHelp, trapTab, useHelpOpen, useOverlay, useReturnFocus } from "./overlays.ts";
+import "./HelpModal.css";
 
 /** "Keys and lamps" (catalogue §2.10, without the mockup's "invented data" sentence); Tab stays inside. */
 export function HelpModal() {

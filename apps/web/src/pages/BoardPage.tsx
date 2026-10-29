@@ -41,6 +41,7 @@ import {
 import { boardPath, followLink, navigate, setupPath, useSearch } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { BOARD_LAYOUT_KEY, LANE_KEY, readKey, writeKey } from "../storage.ts";
+import "../board/board.css";
 
 const NO_REPOS: RepoView[] = [];
 const NO_PROFILES: RepoProfile[] = [];

@@ -34,6 +34,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
+import "./Dock.css";
 
 const CAPCOM = "@CAPCOM";
 

@@ -19,6 +19,7 @@ import {
 } from "../router.ts";
 import { ITEM_GONE, openItem } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
+import "../comms/comms.css";
 
 /** Comms (catalogue §2.5): route-driven stored conversations and activity. */
 export function Comms({ item, view }: { item: string | null; view: CommsView }) {

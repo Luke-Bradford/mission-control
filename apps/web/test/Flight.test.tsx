@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   type CrewLoop,
   FLIGHT_BRIEF_SECTIONS,
@@ -62,6 +61,7 @@ import {
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
+import { readStyles } from "./styles.ts";
 
 const KEY = `person:101:${NOW - HOUR}`;
 const N = 12;
@@ -1703,7 +1703,7 @@ describe("FLIGHT's brief", () => {
 
 describe("Draft replies", () => {
   it("wraps long destinations and preserves multiline draft text on narrow screens", () => {
-    const css = readFileSync(new globalThis.URL("../src/hud.css", import.meta.url), "utf8");
+    const css = readStyles();
     expect(css).toMatch(/\.draft-row \.chipref\s*\{[^}]*white-space: normal/);
     expect(css).toMatch(/\.draft-row \.pre\s*\{[^}]*white-space: pre-wrap/);
     expect(css).toMatch(/\.draft-row\s*\{[^}]*overflow-wrap: anywhere/);

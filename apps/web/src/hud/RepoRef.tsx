@@ -5,6 +5,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
 import { repoColor } from "../repoColor.ts";
+import "./RepoRef.css";
 
 /**
  * An issue or PR: the repo as a chip in its colour, then the number apart from it, linked to

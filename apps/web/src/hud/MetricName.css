@@ -1,0 +1,4 @@
+/* a registry label's window ("· 24h") never splits; a narrow tile wraps before it */
+.metric-win {
+  white-space: nowrap;
+}
