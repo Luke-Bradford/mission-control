@@ -560,10 +560,10 @@ describe("FLIGHT page", () => {
       );
       render(<Flight />);
       const list = await screen.findByRole("table", { name: "Crew runs" });
-      await waitFor(() => expect(cells(list)[1]?.text).toBe("CI×2"));
+      await waitFor(() => expect(cells(list)[1]?.text).toBe("Checks×2"));
       expect(cells(list)).toEqual([
         { text: "Working", cls: "d", title: "Working · 1 try" },
-        { text: "CI×2", cls: "d", title: "CI · 2 tries" },
+        { text: "Checks×2", cls: "d", title: "Checks · 2 tries" },
         { text: "In review", cls: "c", title: "" },
         { text: "Done", cls: "", title: "" },
       ]);
@@ -578,7 +578,7 @@ describe("FLIGHT page", () => {
       const list = await screen.findByRole("table", { name: "Crew runs" });
       expect(cells(list)).toEqual([
         { text: "Working", cls: "d", title: "" },
-        { text: "CI", cls: "c", title: "" },
+        { text: "Checks", cls: "c", title: "" },
         { text: "In review", cls: "", title: "" },
         { text: "Done", cls: "", title: "" },
       ]);

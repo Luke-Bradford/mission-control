@@ -74,6 +74,8 @@ const dotOf = (mark: StepMark, i: number): string | number =>
 /**
  * Where a looped run is, as a vertical stepper; `parked` is a held state, not a step. `view` is the
  * run's loop view: without tries (or while it loads) the row's own loop is all there is to show.
+ * Every step is open: a passed step lists its tries, the current one its text, and a step still to
+ * come its rule.
  */
 export function LoopSteps({
   row,
@@ -88,7 +90,6 @@ export function LoopSteps({
   limits: LoopLimits;
   now: number;
 }) {
-  const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set());
   const loop = row.loop;
   if (!loop) return <p className="s muted">{NO_LOOP}</p>;
   const steps = loopSteps(loop);
@@ -153,12 +154,6 @@ export function LoopSteps({
     row.hudState,
     loop.phase === "parked" ? (heldStep(tries) ?? undefined) : undefined,
   );
-  const toggle = (step: string) =>
-    setToggled((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(step)) next.add(step);
-      return next;
-    });
   return (
     <>
       {endAside}
@@ -167,7 +162,6 @@ export function LoopSteps({
         {steps.map((step, i) => {
           const mark = marks[i] as StepMark;
           const current = mark === "cur" || mark === "held";
-          const open = current !== toggled.has(step.name);
           const own = step.phase === null ? [] : stepTries(tries, step.phase);
           const count = own.filter((t) => !t.fix).length;
           const minutes = own.reduce((sum, t) => sum + tryMinutes(t, now), 0);
@@ -185,12 +179,7 @@ export function LoopSteps({
               aria-current={current ? "step" : undefined}
             >
               <span className="tdot">{dotOf(mark, i)}</span>
-              <button
-                type="button"
-                className="vhead"
-                aria-expanded={open}
-                onClick={() => toggle(step.name)}
-              >
+              <div className="vhead">
                 <span className="vname">
                   {step.name}
                   {count > 1 && <span className="titer">×{count}</span>}
@@ -200,12 +189,12 @@ export function LoopSteps({
                     {tokenText(stepTokens(own))} · {minutes}m
                   </span>
                 )}
-              </button>
+              </div>
               {current && <div className="vnow">{loop.text}</div>}
               {current && prRef}
               {failure && <div className="vfail">Last failure: {failure.reason}</div>}
               {rule && <div className="vrule">{rule}</div>}
-              {open && own.length > 0 && (
+              {own.length > 0 && (
                 <div className="atts">
                   {own.map((t) => (
                     <div className="att" key={`${t.fix ? "fix" : "try"}${t.n}:${t.startedAt}`}>
