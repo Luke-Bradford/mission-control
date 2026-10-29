@@ -847,53 +847,6 @@
   }
 }
 
-.optlist {
-  display: grid;
-  gap: 6px;
-}
-
-.nopts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.opt {
-  position: relative;
-  display: grid;
-  gap: 2px;
-  text-align: left;
-  white-space: normal;
-  padding: 7px 10px;
-  background: var(--surface);
-}
-
-.opt.rec {
-  border-color: var(--ok);
-}
-
-div.opt {
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-s);
-}
-
-#dsOpts .nopts {
-  min-width: 0;
-  max-width: 100%;
-}
-
-#dsOpts .nopts button {
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-#dsOpts .optlist {
-  width: 100%;
-  min-width: 0;
-}
-
 @media (max-width: 999px), (max-height: 559px) {
   .comms-page,
   .comms-grid {

@@ -5,6 +5,7 @@ import { Markdown } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
 import { handlePerson, type PersonThreadView, postPersonReply, whereOf } from "../notifications.ts";
 import { toast } from "../shell/Toast.tsx";
+import "./ItemBrief.css";
 
 export const BRIEF_LINES = 8;
 export const BRIEF_FOLD_AFTER = 12;

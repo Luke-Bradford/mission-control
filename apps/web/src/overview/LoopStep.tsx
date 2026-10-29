@@ -14,6 +14,7 @@ import {
   WAIT_WARN,
 } from "../crew.ts";
 import { cutText, mss } from "../fmt.ts";
+import "./LoopStep.css";
 
 const MARK_CLASS: Record<StepMark, string | undefined> = {
   done: "d",

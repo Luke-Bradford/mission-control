@@ -21,6 +21,7 @@ import { useIsPopout } from "../shell/popout.ts";
 import { toast } from "../shell/Toast.tsx";
 import { endConfirm, endSeat, interruptSeat, seatError } from "./seat.ts";
 import { Tiles } from "./Tiles.tsx";
+import "./Header.css";
 
 /** The agent in its own window (`?popout=1`: the Agent page alone), one window per agent. */
 const popOut = (id: string): void => {

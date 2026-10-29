@@ -1,0 +1,39 @@
+.process-line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.process-line > .ellip {
+  min-width: 0;
+}
+
+.process-line > .num {
+  flex: none;
+  white-space: pre;
+}
+
+.stepbar {
+  display: flex;
+  gap: 2px;
+  margin: 4px 0 3px;
+}
+
+.stepbar i {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+}
+
+.stepbar i.d {
+  background: var(--fg-2);
+}
+
+.stepbar i.c {
+  background: var(--ok);
+}
+
+.stepbar i.w {
+  background: var(--warn-mark);
+}
