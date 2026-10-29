@@ -326,7 +326,7 @@ it("scales PR bars, applies the fixed outlier threshold, and names repos across 
   expect(screen.getByText("other-repo · PR #2")).toBeTruthy();
 });
 
-it("does not present observed loops or FLIGHT watch runs as improvements", async () => {
+it("does not present stale, observed-loop, or FLIGHT watch runs as improvements", async () => {
   hub.clear();
   stubFetch({
     "/api/config": CONFIG,
@@ -334,14 +334,16 @@ it("does not present observed loops or FLIGHT watch runs as improvements", async
       ...AUDIT,
       longRunners: [
         ...AUDIT.longRunners,
+        { ...AUDIT.longRunners[0], runId: "run/stale", actionable: false },
         { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
         { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
       ],
-    } satisfies AuditView,
+    } as AuditView,
   });
   render(<Audit />);
 
   await screen.findByRole("link", { name: "Long runner · 9h 0m · run/alpha" });
+  expect(screen.queryByText(/run\/stale/)).toBeNull();
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();
 });

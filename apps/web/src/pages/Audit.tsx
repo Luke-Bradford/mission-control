@@ -15,7 +15,10 @@ const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];
 const RANGE_OPTIONS = RANGES.map((value) => ({ value, label: value }));
 
-type Audit = AuditView;
+/** `actionable` is supplied by newer Audit responses; old servers omit it. */
+type Audit = Omit<AuditView, "longRunners"> & {
+  longRunners: (AuditView["longRunners"][number] & { actionable?: boolean })[];
+};
 
 const duration = (ms: number | null | undefined): string => {
   if (ms === undefined || ms === null) return "—";
@@ -100,7 +103,7 @@ function Improvements({ audit, config }: { audit: Audit; config: ConfigView | un
   const actionable = <T extends { agentId: string | null }>(rows: T[]) =>
     rows.filter((row) => row.agentId !== null && !excludedAgents.has(row.agentId));
   const findings = [
-    ...actionable(audit.longRunners).map((x) => ({
+    ...actionable(audit.longRunners.filter((row) => row.actionable !== false)).map((x) => ({
       label: `Long runner · ${duration(x.durationMs)}`,
       row: x,
     })),
