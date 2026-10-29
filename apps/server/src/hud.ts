@@ -108,7 +108,7 @@ import {
   runTicket,
   runTicketTitle,
 } from "./runview.ts";
-import type { AttentionNote, ReadStamp, Store } from "./store.ts";
+import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -384,7 +384,7 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
 /**
  * The views below are rebuilt from every run, PR and digest row, and several callers (the pages, the
  * scheduler's ticks, FLIGHT's tools) ask for the same one many times a second. A view is reused
- * while the second it was built in is unchanged, no table it read has been written since (by this
+ * while the second it was built in is unchanged, the store has not been written since (by this
  * process or another), no file it read has changed, and the inputs that are in neither (config,
  * lock, login, CLI version) match.
  * The second is the coarsest bucket the age rules allow: they all compare whole seconds or
@@ -394,9 +394,9 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
 const VIEW_MEMO_MS = 1_000;
 const MEMO_ENTRIES = 16;
 
-/** What a memoised view stands on: the tables and the files it read. */
+/** What a memoised view stands on: the store's write version and the files it read. */
 interface Basis {
-  stamps: ReadStamp[];
+  version: string;
   files: FileDeps;
 }
 interface ViewMemo {
@@ -416,6 +416,9 @@ const identityOf = (o: object): number => {
 /** Crew rows handed out of the memo: the memo entry they are a copy of, and what it stands on. */
 const rowOrigins = new WeakMap<object, Basis & { token: string }>();
 
+/** The CLI version for callers that have no use for it: one function, so they share an entry. */
+export const NO_CLI_VERSION = (): string | null => null;
+
 function memoised<T>(
   store: Store,
   now: number,
@@ -431,26 +434,30 @@ function memoised<T>(
     viewMemos.set(store, memo);
   }
   const k = JSON.stringify(key);
+  const version = store.readVersion();
   const hit = memo.entries.get(k);
-  if (hit?.stamps.every((s) => store.holds(s)) && filesUnchanged(hit.files))
+  if (hit?.version === version && filesUnchanged(hit.files))
     return { ...hit, value: cloneData(hit.value as T) };
-  const built = collectFiles(() => store.tracked(build));
+  const built = collectFiles(build);
   if (inherited)
     for (const [f, seen] of inherited.files) if (!built.files.has(f)) built.files.set(f, seen);
-  const stamps = [built.value.stamp, ...(inherited?.stamps ?? [])];
   // names this build, so a view made from its rows is reused only while it is
   const token = `${bucket}/${++nextIdentity}`;
-  // A build that wrote (a read that keeps bookkeeping) left what it read behind it: not reusable.
-  if (built.value.clean) {
-    if (memo.entries.size >= MEMO_ENTRIES) memo.entries.clear();
+  // A build that wrote (a read that keeps bookkeeping) left the store at a newer version: not reusable.
+  if (store.readVersion() === version) {
+    memo.entries.delete(k);
+    if (memo.entries.size >= MEMO_ENTRIES) {
+      const oldest = memo.entries.keys().next();
+      if (!oldest.done) memo.entries.delete(oldest.value);
+    }
     memo.entries.set(k, {
-      value: cloneData(built.value.value),
-      stamps,
+      value: cloneData(built.value),
+      version,
       files: built.files,
       token,
     });
   }
-  return { value: built.value.value, stamps, files: built.files, token };
+  return { value: built.value, version, files: built.files, token };
 }
 
 /** Drops the store's memoised views: something outside the store changed (a bus topic was emitted). */

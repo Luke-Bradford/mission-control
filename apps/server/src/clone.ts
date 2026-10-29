@@ -1,5 +1,5 @@
 /**
- * A deep copy of plain data (objects, arrays, Maps, primitives), several times faster than
+ * For plain data only (no class instances with behaviour, no cycles). A deep copy of plain data (objects, arrays, Maps, primitives), several times faster than
  * `structuredClone`, which matters when a memoised answer is copied per caller. Anything else
  * (a Set, a Date, a typed array) goes to `structuredClone`.
  */

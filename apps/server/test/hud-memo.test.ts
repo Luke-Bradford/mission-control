@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { TestLockState } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, crew } from "../src/hud.ts";
+import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -138,53 +138,23 @@ describe("the crew and Needs-you memo", () => {
     expect(crew(config, store, NOW, undefined, noVersion).rows[0]?.paused).toBe(true);
   });
 
-  it("is not rebuilt by a write to a table it did not read, or by a rewrite that changed nothing", () => {
+  it("shares one entry between callers that pass NO_CLI_VERSION, past the entry cap", () => {
+    const reads = vi.spyOn(store, "status");
+    crew(config, store, NOW, undefined, NO_CLI_VERSION);
+    const n = reads.mock.calls.length;
+    crew(config, store, NOW, undefined, NO_CLI_VERSION);
+    expect(reads.mock.calls.length).toBe(n);
+    for (let i = 0; i < 4; i++) crew(config, store, NOW, undefined, () => null);
+    crew(config, store, NOW, undefined, NO_CLI_VERSION);
+    expect(reads.mock.calls.length).toBe(n + 4);
+  });
+
+  it("is rebuilt by any write, to any table", () => {
     const reads = vi.spyOn(store, "status");
     crew(config, store, NOW, undefined, noVersion);
     const n = reads.mock.calls.length;
     store.setOffset("/somewhere/else.jsonl", 42);
     crew(config, store, NOW, undefined, noVersion);
-    expect(reads.mock.calls.length).toBe(n);
-
-    const board = [
-      {
-        repoId: "shop-app",
-        issueNumber: 1,
-        title: "t",
-        status: "Ready",
-        state: "planned" as const,
-        labels: [],
-        assignees: [],
-        priority: null,
-        updatedAt: NOW,
-        url: "https://github.com/o/shop-app/issues/1",
-        stage: null,
-        owner: null,
-        parent: null,
-        subIssues: null,
-        blockedBy: [],
-        milestone: null,
-        size: null,
-        closed: false,
-        prioritySource: null,
-        createdAt: 1,
-        itemId: null,
-        projectId: null,
-      },
-    ];
-    expect(store.replaceBoard("shop-app", board)).toBe(true);
-    crew(config, store, NOW, undefined, noVersion);
-    const m = reads.mock.calls.length;
-    expect(store.replaceBoard("shop-app", board)).toBe(false);
-    crew(config, store, NOW, undefined, noVersion);
-    expect(reads.mock.calls.length).toBe(m);
-  });
-
-  it("whole-table reads are reused until their table is written, and handed out as copies", () => {
-    const prs = store.pullRequests("shop-app");
-    prs.push({ number: 99 } as never);
-    expect(store.pullRequests("shop-app")).toEqual([]);
-    store.setStatus("x", true, null);
-    expect(store.pullRequests("shop-app")).toEqual([]);
+    expect(reads.mock.calls.length).toBeGreaterThan(n);
   });
 });
