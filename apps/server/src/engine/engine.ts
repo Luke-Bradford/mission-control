@@ -32,6 +32,7 @@ import {
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
   CONTROLLER_CHECK_PARK,
+  CONTROLLER_CHECK_USE_ROUTE,
   cardMark,
   carriedFrom,
   checkState,
@@ -41,8 +42,8 @@ import {
   conflictKey,
   conflictText,
   controllerCheckFailText,
-  controllerCheckOf,
   controllerCheckParkText,
+  controllerCheckUnreadableText,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -116,6 +117,7 @@ import {
   syncTooSoonText,
   TAKE_STALE_MS,
   type TicketView,
+  ticketControllerCheck,
   wakeFailedText,
   wokenEventText,
   writerSyncConflictText,
@@ -177,8 +179,8 @@ export interface EngineDeps {
   publisher: Publisher;
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
   board: { move: (m: Move) => Promise<MoveResult> };
-  /** Reads a ticket (its body holds an optional `## Controller check`); without it no merge is held. */
-  fetchTicket?: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
+  /** Reads a ticket (its body holds an optional `## Controller check`). */
+  fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
   pollGithub?: () => void;
   /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
@@ -210,6 +212,7 @@ export type OperatorRefusal =
   | "floor-enforced"
   | "before-lift"
   | "rework-undelivered"
+  | "use-controller-check"
   | "engine-error";
 
 export type OperatorResult = { lifted: true } | { lifted: false; reason: OperatorRefusal };
@@ -228,6 +231,7 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
+  "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
   "engine-error": "the engine hit an error; see the hub log",
 };
 
@@ -263,17 +267,22 @@ export interface Engine {
     },
   ): Promise<OperatorResult>;
   /**
+   * The operator's verdict on a run parked on its ticket's controller check. `pass` (only while the
+   * PR head is still the parked head) lets the next pass merge; `fail` sends the note to the seat
+   * as rework and ends the park.
+   */
+  controllerCheck(
+    runId: string,
+    verdict: "pass" | "fail",
+    sha: string,
+    note?: string,
+  ): Promise<OperatorResult>;
+  /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
    * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
    * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
    * author the failure.
    */
-  /**
-   * The operator's verdict on a run parked on its ticket's controller check. `pass` (only while the
-   * PR head is still the parked head) lets the next pass merge; `fail` sends the note to the seat
-   * as rework and ends the park.
-   */
-  controllerCheck(runId: string, verdict: "pass" | "fail", note?: string): Promise<OperatorResult>;
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
@@ -358,6 +367,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const lastTransient = new Map<string, number>();
   /** Transient refusals of each run's local branch delete, and when the last was counted (in memory: a restart tries afresh). */
   const localTries = new Map<string, { n: number; at: number }>();
+  /** Consecutive failed reads of each run's ticket at merge (in memory: a restart tries afresh). */
+  const ticketTries = new Map<string, { n: number; at: number; why: string }>();
   /** A CI failure's excerpt, kept until its line is claimed, so a busy seat costs one gh read. */
   const excerpts = new Map<string, string>();
   /** Transient refusals of each review's PR-body edit (in memory: a restart tries afresh). */
@@ -875,7 +886,9 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /**
    * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
-   * the reason to park with, or undefined when the ticket could not be read (tried next pass).
+   * the reason to park with, or undefined when the ticket could not be read yet (tried next pass).
+   * Fails closed: a ticket that is missing or unreadable parks after REFUSAL_TRIES, so the
+   * operator can pass it. Once a run's ticket has listed a check, a pass is needed whatever it says later.
    */
   async function controllerCheckHold(
     run: Run,
@@ -884,19 +897,40 @@ export function createEngine(deps: EngineDeps): Engine {
   ): Promise<{ park?: string } | null> {
     const repo = config.repos.find((r) => r.id === run.repoId);
     const issue = issueOf(run);
-    if (!deps.fetchTicket || repo === undefined || issue === null) return null;
+    if (repo === undefined || issue === null) return null;
     if (cur.controllerCheck?.sha === sha && cur.controllerCheck.pass) return null;
-    let ticket: TicketView | null;
+    let ticket: TicketView | null = null;
+    let why = "";
     try {
       ticket = await deps.fetchTicket(repo, issue);
+      if (ticket === null) why = "the ticket was not found";
     } catch (e) {
-      log(
-        `${run.id}: could not read the ticket for its controller check: ${e instanceof Error ? e.message : String(e)}`,
-      );
-      return {};
+      why = e instanceof Error ? e.message : String(e);
     }
-    const check = controllerCheckOf(ticket?.body);
-    return check === null ? null : { park: controllerCheckParkText(sha, check) };
+    if (ticket === null) {
+      const at = now();
+      const tries = ticketTries.get(run.id) ?? { n: 0, at: 0, why };
+      // one counted per tick, as for a refused merge step
+      if (tries.n === 0 || at - tries.at >= ENGINE_TICK_MS / 2) {
+        tries.n += 1;
+        tries.at = at;
+        log(`${run.id}: could not read the ticket for its controller check: ${why}`);
+      }
+      tries.why = why;
+      ticketTries.set(run.id, tries);
+      cur.lastRefusal = why;
+      if (tries.n < REFUSAL_TRIES) return {};
+      return { park: controllerCheckUnreadableText(sha, why) };
+    }
+    const failed = ticketTries.get(run.id);
+    if (failed !== undefined) {
+      if (cur.lastRefusal === failed.why) cur.lastRefusal = null;
+      ticketTries.delete(run.id);
+    }
+    const check = ticketControllerCheck(ticket);
+    if (check !== null) cur.controllerCheckRequired = true;
+    if (check === null && cur.controllerCheckRequired !== true) return null;
+    return { park: controllerCheckParkText(sha, check ?? "") };
   }
 
   async function act(
@@ -2273,8 +2307,8 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("not-parked");
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
-        // the controller's verdict alone settles a controller check
-        if (by === "FLIGHT" && kind === CONTROLLER_CHECK_PARK) return refuse("not-permitted");
+        // only the controller's verdict settles a controller check, for every caller
+        if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
@@ -2415,7 +2449,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }).then(() => result);
     },
 
-    controllerCheck(runId, verdict, note) {
+    controllerCheck(runId, verdict, sha, note) {
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
         result = { lifted: false, reason };
@@ -2434,13 +2468,15 @@ export function createEngine(deps: EngineDeps): Engine {
           !held
         )
           return refuse("not-parked");
-        if (pausedSeat(store, run.agentId)) return refuse("held");
-        const pushed = store.runPush(run.id);
-        const pr = findPr(run, loop);
-        if (pr?.state !== "open") return refuse("pr-not-open");
-        if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
+        // the verdict is for the head the operator looked at
+        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
         const at = now();
+        const short = held.sha.slice(0, 7);
         if (verdict === "pass") {
+          const pushed = store.runPush(run.id);
+          const pr = findPr(run, loop);
+          if (pr?.state !== "open") return refuse("pr-not-open");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
           store.setRunLoop(run.id, {
             ...loop,
             phase: held.from,
@@ -2448,9 +2484,9 @@ export function createEngine(deps: EngineDeps): Engine {
             controllerCheck: { ...held, pass: true },
           });
           store.addLoopEvent(
-            `${run.id}:controller-check:${held.sha}:pass`,
+            `${run.id}:${loop.epoch}:controller-check:${held.sha}:pass`,
             run.id,
-            `controller check passed on ${held.sha.slice(0, 7)}`,
+            `controller check passed on ${short}`,
             at,
           );
         } else {
@@ -2476,18 +2512,20 @@ export function createEngine(deps: EngineDeps): Engine {
             next.aside = null;
           }
           const text = controllerCheckFailText(held.sha, note);
-          store.addComms({ at, from: "CAPCOM", to: run.agentId, ticket: run.ticket ?? null, text });
           const sent = await supervisor.send(
             run.id,
             `${run.id}:controller-check-fail:${held.sha}:${loop.epoch}`,
             text,
           );
-          if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+          // a paused seat reads it when it resumes: the verdict is recorded all the same
+          if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId))
+            return refuse("rework-undelivered");
+          store.addComms({ at, from: "CAPCOM", to: run.agentId, ticket: run.ticket ?? null, text });
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
-            `${run.id}:controller-check:${held.sha}:fail`,
+            `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
             run.id,
-            `controller check failed on ${held.sha.slice(0, 7)}: sent back for rework`,
+            `controller check failed on ${short}: sent back for rework`,
             at,
           );
         }

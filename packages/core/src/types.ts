@@ -224,6 +224,8 @@ export interface RunLoop {
    * The ticket's `## Controller check` hold: the sha the run parked on and the phase it left, set
    * when the engine parks the merge; `pass` once the operator's verdict on that sha is recorded.
    */
+  /** The ticket listed a controller check once: a pass is needed even if the heading goes. */
+  controllerCheckRequired?: boolean;
   controllerCheck?: { sha: string; from: LoopPhase; pass: boolean } | null;
 }
 

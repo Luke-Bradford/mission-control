@@ -8,6 +8,7 @@ import {
   CI_TRIES,
   ciVerdict,
   controllerCheckOf,
+  controllerCheckParkText,
   fillLoopText,
   hardRulesFlagKey,
   isHardRulesFlagKey,
@@ -31,6 +32,7 @@ import {
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
+  ticketControllerCheck,
   wokenEventText,
 } from "../src/loop.ts";
 import {
@@ -2938,20 +2940,43 @@ describe("isHardRulesFlagKey", () => {
 });
 
 describe("controllerCheckOf", () => {
-  it("reads the section up to the next heading", () => {
+  it("reads the section up to the next heading of its level", () => {
     const body = "## Done when\n- a\n\n## Controller check\nOpen it.\n- light\n\n## Security\nx";
     expect(controllerCheckOf(body)).toBe("Open it.\n- light");
     expect(controllerCheckOf("## Controller check\r\nLook.\r\n")).toBe("Look.");
+    expect(controllerCheckOf("## Controller check\nA\n### Sub\nB\n## End")).toBe("A\n### Sub\nB");
   });
-  it("needs the heading at line start, spelled exactly", () => {
+  it("holds on near-miss headings, not on prose", () => {
+    for (const h of [
+      "## Controller check",
+      "### Controller check",
+      "## controller check",
+      "## Controller checks",
+      "## Controller check (browser)",
+      "   ## Controller check ##",
+      "> ## Controller check",
+      "# Controller Check:",
+    ])
+      expect(controllerCheckOf(`${h}\nx`)).toBe("x");
     expect(controllerCheckOf("")).toBeNull();
     expect(controllerCheckOf("## Done when\n- a")).toBeNull();
-    expect(controllerCheckOf("## controller check\nx")).toBeNull();
-    expect(controllerCheckOf("### Controller check\nx")).toBeNull();
     expect(controllerCheckOf("text ## Controller check\nx")).toBeNull();
-    expect(controllerCheckOf("## Controller checks\nx")).toBeNull();
+    expect(controllerCheckOf("    ## Controller check\nx")).toBeNull();
+    expect(controllerCheckOf("the controller check is below")).toBeNull();
   });
   it("an empty section is still a check", () => {
     expect(controllerCheckOf("## Controller check\n## Next")).toBe("");
+  });
+  it("a cut body the reader did not read holds; the reader's own answer wins", () => {
+    const t = { body: "x", bodyTruncated: true };
+    expect(ticketControllerCheck(t)).toBe("");
+    expect(ticketControllerCheck({ ...t, controllerCheck: null })).toBeNull();
+    expect(ticketControllerCheck({ ...t, controllerCheck: "look" })).toBe("look");
+    expect(ticketControllerCheck({ body: "x", bodyTruncated: false })).toBeNull();
+  });
+  it("cuts a long reason", () => {
+    const r = controllerCheckParkText("a".repeat(40), "word ".repeat(200));
+    expect(r.length).toBeLessThan(360);
+    expect(r).toContain("see ticket");
   });
 });

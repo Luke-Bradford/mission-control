@@ -3009,6 +3009,19 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
+    // a controller check is the operator's call too
+    store.upsertRun(
+      run({
+        id: "r-cc",
+        agentId: "guido-1",
+        loop: {
+          ...(store.run("r-budget")?.loop as RunLoop),
+          parked: { kind: "controller-check", reason: "check", ended: false },
+        },
+      }),
+    );
+    raise("blocked:r-cc:0", "blocked", "r-cc");
+    expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(true);
     // an error a seat is stuck on stays raw too, so it still pings
     store.addCrewError({
       agentId: "guido-1",

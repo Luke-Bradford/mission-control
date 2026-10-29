@@ -105,6 +105,7 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
+  ticketControllerCheck,
   ticketInReviewText,
   watchCheckoutName,
   watchStartRefusedText,
@@ -3025,7 +3026,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         transcriptPath: crewTranscriptPath(deps.dbPath, runId),
         prs: [],
         summary: null,
-        ...(opts?.loop ? { loop: opts.loop } : {}),
+        ...(opts?.loop
+          ? {
+              loop: {
+                ...opts.loop,
+                // a ticket that lists a controller check needs the controller's pass, whatever it says later
+                ...(ticketControllerCheck(ticket) === null
+                  ? {}
+                  : { controllerCheckRequired: true }),
+              },
+            }
+          : {}),
         profile: { ...chosen, hash: profileHash(chosen.profile) },
         ...(plan === undefined ? {} : { plan }),
       };

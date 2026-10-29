@@ -29,6 +29,8 @@ import {
   COMMS_REACTIONS,
   COMMS_REF,
   COMMS_TICKET,
+  CONTROLLER_CHECK_PARK,
+  CONTROLLER_CHECK_USE_ROUTE,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -442,10 +444,17 @@ const MessageBody = z.strictObject({
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
-const ControllerCheckBody = z.strictObject({
-  verdict: z.enum(["pass", "fail"]),
-  note: z.string().max(COMMS_MESSAGE_BODY_LIMIT).optional(),
-});
+const ControllerCheckBody = z
+  .strictObject({
+    verdict: z.enum(["pass", "fail"]),
+    /** The head the operator checked (7 or more characters of its sha). */
+    sha: z.string().regex(/^[0-9a-f]{7,40}$/i),
+    note: z.string().max(COMMS_MESSAGE_MAX).optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.verdict === "fail" && (b.note === undefined || b.note.trim() === ""))
+      ctx.addIssue({ code: "custom", path: ["note"], message: "a failed check needs a note" });
+  });
 
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
 const EndBody = z.strictObject({
@@ -3255,6 +3264,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (deps.engine?.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
+        if (run.loop.parked?.kind === CONTROLLER_CHECK_PARK) {
+          return reply
+            .code(409)
+            .send({ error: `nothing to resume: ${CONTROLLER_CHECK_USE_ROUTE}` });
+        }
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
         const lifted = reviewWaiver
@@ -3270,25 +3284,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // The operator's verdict on a run parked on its ticket's `## Controller check`. FLIGHT has no
       // tool for this; the operator token is required like every mutating route.
       // Reader: docs/runbook.md#record-a-controller-check
-      api.post<{ Params: { id: string } }>("/runs/:id/controller-check", async (req, reply) => {
-        const run = store.run(req.params.id);
-        if (run === null) return reply.code(404).send({ error: "unknown run" });
-        if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
-        if (!crewGate(run.agentId, reply)) return reply;
-        const body = ControllerCheckBody.safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
-        if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
-          return reply.code(409).send({ error: "the loop engine is off" });
-        }
-        const result = await deps.engine.controllerCheck(run.id, body.data.verdict, body.data.note);
-        if (!result.lifted) {
-          return reply.code(409).send({
-            error: `controller check not recorded: ${operatorRefusalText(result.reason)}`,
-          });
-        }
-        return { ok: true };
-      });
+      api.post<{ Params: { id: string } }>(
+        "/runs/:id/controller-check",
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+        async (req, reply) => {
+          const run = store.run(req.params.id);
+          if (run === null) return reply.code(404).send({ error: "unknown run" });
+          if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+          if (!crewGate(run.agentId, reply)) return reply;
+          const body = ControllerCheckBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
+            return reply.code(409).send({ error: "the loop engine is off" });
+          }
+          if (body.data.note !== undefined) {
+            try {
+              await validateCommsText(deps.knownSecrets ?? (async () => []), body.data.note);
+            } catch (e) {
+              return crewFail(
+                new SupervisorError(400, e instanceof Error ? e.message : "Comms message refused."),
+                reply,
+              );
+            }
+          }
+          const result = await deps.engine.controllerCheck(
+            run.id,
+            body.data.verdict,
+            body.data.sha,
+            body.data.note,
+          );
+          if (!result.lifted) {
+            return reply.code(409).send({
+              error: `controller check not recorded: ${operatorRefusalText(result.reason)}`,
+            });
+          }
+          return { ok: true };
+        },
+      );
       // Rework reaches a set-aside run through Comms, rather than interrupting whichever newer run
       // now occupies its seat. The engine wakes the set-aside run after the message is stored.
       // Reader: docs/runbook.md#rework-a-parked-run

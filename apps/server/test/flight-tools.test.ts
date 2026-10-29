@@ -7154,6 +7154,31 @@ describe("attention hold tools", () => {
     expect(await call("release_hold", { key })).toEqual(refused("No active hold."));
     expect(emit).toHaveBeenCalledWith("attention");
   });
+  it("refuses an open-ended hold on a controller check, but a dated one is fine", async () => {
+    live("guido-1", "r-pr", {
+      branch: "mc/7",
+      ticket: "mc#7",
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "controller-check", reason: "check", ended: false },
+      },
+    });
+    store.raiseNote({
+      key: "blocked:r-pr:0",
+      kind: "blocked",
+      runId: "r-pr",
+      seatId: null,
+      repoId: null,
+      text: "check",
+      at: NOW - 1,
+    });
+    const cc = { key: "note:blocked:r-pr:0", reason: "Waiting" };
+    expect((await call("hold_item", { ...cc, condition: { kind: "manual" } })).isError).toBe(true);
+    expect(
+      (await call("hold_item", { ...cc, condition: { kind: "date", at: NOW + 1000 } })).isError,
+    ).not.toBe(true);
+  });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
       refused(HOLD_NOT_TRIAGING_REFUSED),
