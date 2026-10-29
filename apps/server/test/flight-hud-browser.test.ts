@@ -6,17 +6,28 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
+import type { Run, SeatSessionRow } from "@mc/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ChangeBus } from "../src/bus.ts";
+import type { CcConfig } from "../src/config.ts";
 import {
+  type HudRenderGuard,
   hudRenderRequest,
   renderHudInHelper,
   renderHudWithPlaywright,
 } from "../src/flight/hud-render.ts";
+import { createFlightTools, type FlightToolsDeps } from "../src/flight/tools.ts";
+import { Store } from "../src/store.ts";
 
-const CHROME =
-  process.env.MC_BROWSER_EXECUTABLE ??
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const haveChrome = existsSync(CHROME);
+/** A Chrome or Chromium to render with: the override, else the usual macOS and Linux installs. */
+const CHROME = [
+  process.env.MC_BROWSER_EXECUTABLE,
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+].find((path): path is string => path !== undefined && existsSync(path));
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const sockets = new Set<Socket>();
@@ -75,7 +86,7 @@ const startServers = async (): Promise<void> => {
       case "/flight":
         return send(
           html(
-            "<h1>Flight</h1><a id=a target=_blank href='" + other.origin + "/link'>x</a>",
+            `<h1>Flight</h1><a id=a target=_blank href='${other.origin}/link'>x</a>`,
             `window.open('${other.origin}/pop');document.getElementById('a').click();`,
           ),
         );
@@ -125,12 +136,21 @@ const chromeCount = (): number => {
 const render = (path: string, over: { deadlineMs?: number } = {}) => {
   const guard = hudRenderRequest(hub.origin);
   return renderHudWithPlaywright(guard.page(path), guard, {
-    executablePath: CHROME,
+    executablePath: CHROME as string,
     deadlineMs: over.deadlineMs ?? 20_000,
   });
 };
 
-describe.skipIf(!haveChrome)("HUD screenshots in a real browser", () => {
+// CI must prove the confinement: a missing browser there is a failure, not a skip. Only a developer
+// machine without Chrome skips.
+if (CHROME === undefined && process.env.CI)
+  describe("HUD screenshots in a real browser", () => {
+    it("needs a Chrome executable on CI (set MC_BROWSER_EXECUTABLE)", () => {
+      throw new Error("no Chrome or Chromium found; the real-browser HUD suite cannot run");
+    });
+  });
+
+describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () => {
   beforeAll(startServers);
   afterAll(stopServers);
 
@@ -178,20 +198,110 @@ describe.skipIf(!haveChrome)("HUD screenshots in a real browser", () => {
       expect(() => guard.page(page)).toThrow("HUD page required");
   });
 
-  it("leaves no Chrome behind after a deadline in the owned helper, and a queued render still runs", async () => {
+  it("leaves no Chrome behind after a deadline in the owned helper", async () => {
     const baseline = chromeCount();
     const guard = hudRenderRequest(hub.origin);
-    const hung = renderHudInHelper(guard.page("/setup"), guard, {
-      executablePath: CHROME,
-      deadlineMs: 3_000,
-    });
-    const next = renderHudInHelper(guard.page("/overview"), guard, {
-      executablePath: CHROME,
-      deadlineMs: 20_000,
-    });
-    const [a, b] = await Promise.allSettled([hung, next]);
-    expect(a.status).toBe("rejected");
-    expect(b.status).toBe("fulfilled");
+    await expect(
+      renderHudInHelper(guard.page("/setup"), guard, {
+        executablePath: CHROME as string,
+        deadlineMs: 3_000,
+      }),
+    ).rejects.toThrow("timed out");
     await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+  }, 60_000);
+
+  it("releases a queued screenshot_hud render after the render before it failed", async () => {
+    const NOW = Date.now();
+    const store = new Store(":memory:");
+    store.upsertRun({
+      id: "r-flight",
+      agentId: "flight-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: NOW,
+      endedAt: null,
+      status: "running",
+      sessionId: "cli",
+      model: "opus",
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "/x",
+      prs: [],
+      summary: null,
+    } satisfies Run);
+    store.setSeatSession({
+      seatId: "flight-1",
+      runId: "r-flight",
+      cliSessionId: "cli",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    } satisfies SeatSessionRow);
+    const config: CcConfig = {
+      operator: { id: "op", timezone: "UTC" },
+      accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
+      repos: [
+        {
+          id: "mc",
+          github: "o/mc",
+          project: 1,
+          statusMap: {},
+          autonomy: "draft",
+          flightPowers: "superuser",
+        },
+      ],
+      loops: [],
+      poll: { usageMinutes: 30, githubSeconds: 60 },
+      crew: {
+        worktrees: "/tmp/none",
+        maxSeats: 8,
+        sessions: [
+          {
+            id: "s1",
+            repoId: "mc",
+            checkout: "/tmp/none/clone",
+            seats: [
+              { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    const events: string[] = [];
+    // only screenshot_hud is called; the other deps are never reached
+    const tools = createFlightTools({
+      config,
+      store,
+      bus: new ChangeBus(),
+      hubOrigin: hub.origin,
+      // the production renderer: a real helper process and Chrome per call
+      screenshotHud: (url: string, guard: HudRenderGuard) => {
+        events.push(`launch ${new URL(url).pathname}`);
+        return renderHudInHelper(url, guard, {
+          executablePath: CHROME as string,
+          deadlineMs: 20_000,
+        });
+      },
+    } as unknown as FlightToolsDeps);
+    const shot = tools.find((t) => t.name === "screenshot_hud");
+    if (!shot) throw new Error("no screenshot_hud tool");
+    const ctx = { seatId: "flight-1", runId: "r-flight" };
+
+    // /board redirects off the hub and fails; /overview is a good page queued behind it
+    const first = shot.call(ctx, { page: "/board" }).then((r) => {
+      events.push("first settled");
+      return r;
+    });
+    const second = shot.call(ctx, { page: "/overview" });
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a.isError).toBe(true);
+    expect(b.isError).toBeUndefined();
+    expect(b.image?.mimeType).toBe("image/png");
+    // the second helper only launched once the first render had failed and left the queue
+    expect(events).toEqual(["launch /board", "first settled", "launch /overview"]);
   }, 60_000);
 });
