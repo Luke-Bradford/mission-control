@@ -105,7 +105,7 @@ async function assertOwnGitDirs(
   o: CrewGitOptions,
 ): Promise<void> {
   const [common = "", own = ""] = (
-    await run(cwd, ["rev-parse", "--git-common-dir", "--absolute-git-dir"])
+    await run(cwd, ["rev-parse", "--git-common-dir", "--absolute-git-dir"], o)
   ).split("\n");
   const redirected =
     (await abs(cwd, common)) !== (await realpath(expectedCommonDir)) ||
