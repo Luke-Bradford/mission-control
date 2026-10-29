@@ -63,6 +63,7 @@ const RULES: RepoRules = freezeRules({
   hardRulesSet: true,
   hardRulesBy: "operator",
   alwaysAsk: [],
+  checks: [],
 });
 
 let dir: string;

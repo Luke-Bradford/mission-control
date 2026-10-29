@@ -2343,6 +2343,7 @@ describe("sync_main", () => {
       gh: async () => ({ code: 0, stdout: "", stderr: "" }),
       dbPath: join(dir, "mc.sqlite"),
       knownSecrets: async () => [],
+      checks: async () => [],
       syncMain: writerSync,
     });
     const tokens = new RunTokens();

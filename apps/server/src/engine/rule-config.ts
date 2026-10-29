@@ -20,6 +20,12 @@ const labelGlob = z
   .refine((g) => !g.replace(/\/\*\*$/, "").includes("**"), "`**` only as a trailing /**");
 
 const nonEmpty = z.string().min(1);
+// One plain command: a check is matched whole against a seat's `&&` segment, so it holds no chaining.
+const checkCommand = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((c) => !/&&|[|;\n\r]/.test(c), "must be one plain command: no &&, |, ; or line break");
 const issueNumber = z.number().int().positive().safe();
 // `pick_from: []` is refused on purpose: pausing a repo is not this key's job. Status names are
 // not checked against the board here; the engine reports a status it cannot find.
@@ -41,6 +47,8 @@ export const repoRulesSchema = z.strictObject({
   hard_rules_by: z.enum(HARD_RULES_BY).optional(),
   tech_debt_issue: issueNumber.optional(),
   always_ask: z.array(nonEmpty).optional(),
+  // exact commands, matched whole against a seat's shell call: see check-runs.ts
+  checks: z.array(checkCommand).optional(),
 });
 
 /** Resolve user config over defaults; supplied maps and lists replace defaults. */
@@ -59,6 +67,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     hardRulesBy: r.hard_rules_by ?? base.hardRulesBy,
     ...(r.tech_debt_issue === undefined ? {} : { techDebtIssue: r.tech_debt_issue }),
     alwaysAsk: r.always_ask ?? base.alwaysAsk,
+    checks: r.checks ?? base.checks,
   });
 }
 
@@ -95,5 +104,7 @@ export function overlayRepoBlock(
       ? {}
       : { techDebtIssue: base.techDebtIssue ?? block.tech_debt_issue }),
     alwaysAsk: union(base.alwaysAsk, block.always_ask ?? []),
+    // a repo block can only add checks, never drop the user config's
+    checks: union(base.checks, block.checks ?? []),
   });
 }

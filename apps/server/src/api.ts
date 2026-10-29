@@ -199,6 +199,7 @@ import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import {
@@ -388,6 +389,8 @@ export interface AppDeps {
   runGrants?: (who: RunIdentity) => readonly string[];
   /** The test lock the guard takes for a full suite; absent: a full suite is denied, never run unlocked. */
   lock?: TestLock;
+  /** Records the configured checks a seat's shell calls run (the push gate reads them); absent: none. */
+  checks?: CheckRecorder;
   /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
   hubLogin?: () => string | null;
 }
@@ -1476,6 +1479,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // The guard (spec §5): the hook asks before every tool call, with its run's token.
       const tokens = deps.tokens;
       const lock = deps.lock;
+      const checks = deps.checks;
       const seatMode = deps.seatMode ?? (() => "read-only");
       const caller = (req: FastifyRequest) => tokens?.resolve(bearer(req)) ?? null;
       // Reader: apps/server/src/guard/hook.ts (the guard hook each seat's CLI runs before every tool call)
@@ -1506,7 +1510,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .type("application/json")
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
-            lock?.release(key, body.data.hook_event_name === "PostToolUseFailure");
+            const failed = body.data.hook_event_name === "PostToolUseFailure";
+            lock?.release(key, failed);
+            await checks?.end(key, !failed);
             return answer();
           }
           const verdict = crewGuardDecision(
@@ -1518,6 +1524,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a shell call the guard lets run: note the clone it starts on, for the check record
+          const command = body.data.tool_input?.command;
+          if (
+            verdict.kind !== "deny" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            await checks?.begin(key, command);
+          }
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {
             store.addGuardHit({

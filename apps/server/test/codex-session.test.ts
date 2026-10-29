@@ -260,10 +260,27 @@ describe("Codex session", () => {
       JSON.stringify({ command: "pnpm -s test", params: { approvalId: "command-approval" } }),
     );
     await until(() =>
-      expect(events).toContainEqual({ kind: "tool-result", toolUseId: "command-approval" }),
+      expect(events).toContainEqual({
+        kind: "tool-result",
+        toolUseId: "command-approval",
+        ok: false,
+      }),
     );
-    expect(events).toContainEqual({ kind: "tool-result", toolUseId: "item-1" });
+    expect(events).toContainEqual({ kind: "tool-result", toolUseId: "item-1", ok: false });
     expect(recorded()).toContainEqual({ id: "approval-1", result: { decision: "accept" } });
+  });
+
+  it.each([
+    [0, true],
+    [1, false],
+    [undefined, false],
+  ])("says a command that exited %s ended ok = %s", async (exitCode, ok) => {
+    const { session, events } = start();
+    session.send(JSON.stringify({ command: "pnpm -s lint", exitCode }));
+    await until(() => expect(events.some((e) => e.kind === "tool-result")).toBe(true));
+    expect(events.filter((e) => e.kind === "tool-result")).toEqual([
+      { kind: "tool-result", toolUseId: "item-1", ok },
+    ]);
   });
 
   it.each(["interrupt", "close", "exit"])("aborts pending approval on %s", async (how) => {

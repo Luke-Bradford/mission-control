@@ -50,6 +50,11 @@ export interface RepoRules {
   /** The open issue that collects minor findings from merged PRs, when this repo names one. */
   techDebtIssue?: number;
   alwaysAsk: string[];
+  /**
+   * Exact shell commands a seat must have run, passing, on the head it pushes (`mc push` refuses
+   * otherwise). Empty: the push is not gated.
+   */
+  checks: string[];
 }
 
 /**
@@ -64,6 +69,7 @@ export function freezeRules(rules: RepoRules): RepoRules {
   Object.freeze(rules.needs);
   Object.freeze(rules.hardRules);
   Object.freeze(rules.alwaysAsk);
+  Object.freeze(rules.checks);
   if (rules.userSet) Object.freeze(rules.userSet);
   return Object.freeze(rules);
 }
@@ -135,6 +141,7 @@ export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   hardRulesSet: false,
   hardRulesBy: "operator",
   alwaysAsk: [],
+  checks: [],
 });
 
 /**

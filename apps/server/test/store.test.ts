@@ -3527,3 +3527,43 @@ it("prunes old comms and flight decisions at the retention boundary in bounded s
   ).toEqual([cutoff, now]);
   expect(store.flightDecisions(0, 10).map((d) => d.at)).toEqual([now, cutoff]);
 });
+
+describe("check runs", () => {
+  const sha = (c: string) => c.repeat(40);
+
+  it("answers the newest row for a run, command and head, and nothing for another", () => {
+    store.addCheckRun({
+      runId: "r1",
+      command: "pnpm -s lint",
+      headSha: sha("a"),
+      ok: false,
+      at: 1,
+    });
+    store.addCheckRun({ runId: "r1", command: "pnpm -s lint", headSha: sha("a"), ok: true, at: 2 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: true, at: 2 });
+    // a later failure on the same head wins
+    store.addCheckRun({
+      runId: "r1",
+      command: "pnpm -s lint",
+      headSha: sha("a"),
+      ok: false,
+      at: 3,
+    });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: false, at: 3 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("b"))).toBeNull();
+    expect(store.latestCheckRun("r1", "pnpm -s typecheck", sha("a"))).toBeNull();
+    expect(store.latestCheckRun("r2", "pnpm -s lint", sha("a"))).toBeNull();
+  });
+
+  it("breaks a tie on the clock by insertion order", () => {
+    store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: true, at: 5 });
+    store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: false, at: 5 });
+    expect(store.latestCheckRun("r1", "c", sha("a"))).toEqual({ ok: false, at: 5 });
+  });
+
+  it("binds a command with quotes and percent signs as a value, never as SQL", () => {
+    const command = "x'); DROP TABLE check_runs; -- %";
+    store.addCheckRun({ runId: "r1", command, headSha: sha("a"), ok: true, at: 1 });
+    expect(store.latestCheckRun("r1", command, sha("a"))).toEqual({ ok: true, at: 1 });
+  });
+});

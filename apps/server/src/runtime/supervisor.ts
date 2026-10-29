@@ -131,6 +131,7 @@ import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
+import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
@@ -402,6 +403,8 @@ export interface SupervisorDeps {
   tokens: RunTokens;
   /** The test lock: a run's hold goes when its call's tool_result comes, its turn ends or it exits. */
   lock: TestLock;
+  /** Records the configured checks a seat's shell calls run; absent: none. */
+  checks?: CheckRecorder;
   /** The hub's port on loopback: the seats' MCP and guard URLs. */
   hubPort: number;
   /** The hub's own checkout: the roles and the guard hook's entry (`HOOK_ENTRY`). */
@@ -1041,12 +1044,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       case "tool-result":
         // the call has ended, however it ended: its hold goes (a Post hook may never come)
         deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
+        // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
+        if (e.ok !== undefined) {
+          void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok);
+        }
         break;
       case "result": {
         // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
         // result replayed at an attach while a later turn is open: its hold is that turn's.
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
           deps.lock.releaseRun(l.run.id);
+          deps.checks?.dropRun(l.run.id);
         }
         const interrupted = l.interrupted;
         l.inTurn = false;
@@ -1674,6 +1682,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       area: info.seat.area,
       cwd,
       lock: deps.lock,
+      ...(deps.checks === undefined ? {} : { checks: deps.checks }),
       superuserTools: deps.superuserTools,
       runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {

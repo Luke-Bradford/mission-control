@@ -50,6 +50,7 @@ import {
   mergeStepFailedText,
   minorNotPostedText,
   NEW_LOOP,
+  NO_CI_AFTER_MS,
   originMovedText,
   type Profile,
   type PullRequestView,
@@ -57,6 +58,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  pushChecksText,
   pushReferenceText,
   pushSecretText,
   REFUSAL_TRIES,
@@ -1384,6 +1386,7 @@ describe("refusals", () => {
       dbPath: store.path,
       inClone: (_checkout, fn) => fn(),
       knownSecrets: async () => [],
+      checks: async () => [],
       gh: async () => ({ code: 1, stdout: "", stderr }),
     }).rerunRuling("o/mc", SHA);
     expect(refused).toEqual({ ok: false, text, transient: true });
@@ -1410,6 +1413,43 @@ describe("refusals", () => {
     expect(noteKeys()).toEqual([`blocked:${RUN}:0`]);
     expect(store.notes()[0]?.text).toContain("Push refused: the branch moved.");
     expect(h.prs).toEqual([]);
+  });
+
+  it("a push refused for its checks goes to the seat as a hand-off, once, and does not park the run", async () => {
+    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    h.pushResults = [
+      { ok: false, text, transient: false },
+      { ok: false, text, transient: false },
+    ];
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).not.toBe("parked");
+    expect(loopOf().parked ?? null).toBeNull();
+    expect(h.sent.filter((s) => s.text === text)).toHaveLength(1);
+    expect(store.comms(0).map((c) => c.text)).toEqual([text]);
+    expect(store.notes()).toEqual([]);
+    expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
+  });
+
+  it("a checks hand-off restarts the push clock; with no progress after a full window the park names the checks", async () => {
+    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    const refusal = { ok: false, text, transient: false } as const;
+    h.pushResults = Array.from({ length: 8 }, () => refusal);
+    report();
+    h.noSession = true; // the seat cannot be told yet: ci was entered, the message not sent
+    await h.engine.reconcileRun(RUN);
+    h.noSession = false;
+    clock += NO_CI_AFTER_MS - 1000;
+    await h.engine.reconcileRun(RUN); // hand-off: the window restarts here
+    clock += NO_CI_AFTER_MS - 1000; // over NO_CI_AFTER_MS since entering ci, under it since the message
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).not.toBe("parked");
+    clock += 2000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf().parked?.reason).toContain(text);
   });
 
   describe("the note's text is written for the operator", () => {

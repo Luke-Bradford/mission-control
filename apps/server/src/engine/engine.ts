@@ -60,6 +60,7 @@ import {
   type LoopReviewFacts,
   type LoopSnapshot,
   localNotDeletedText,
+  MC_PUSH_CHECKS,
   MC_RUN_ENDED,
   MC_SYNC_DIRTY,
   MC_SYNC_NOT_WORKING,
@@ -945,6 +946,20 @@ export function createEngine(deps: EngineDeps): Engine {
     switch (a.kind) {
       case "push": {
         const r = await publisher.push(run);
+        if (!r.ok && r.text.startsWith(MC_PUSH_CHECKS)) {
+          // the seat has checks to run, not the operator a problem: tell the seat, once per head
+          // and listing, and stay in this phase (the push is tried again when the seat has run them)
+          const text = r.text;
+          const sent = await send(run.id, `checks:${run.id}:${text}`, text);
+          // a park for no progress then explains itself
+          cur.lastRefusal = text;
+          if (sent === "sent") {
+            handOff(COMMS_MC, text);
+            // running checks makes no commit, so the push clock starts over: a full window from the message
+            cur.pushStartedAt = at;
+          }
+          return;
+        }
         if (!r.ok) return refused(r);
         cur.transient = 0;
         lastTransient.delete(run.id);
