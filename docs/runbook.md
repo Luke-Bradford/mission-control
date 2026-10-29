@@ -1051,6 +1051,27 @@ step through agents; `/` opens the selected agent (its composer is off for an ob
 smallest panels do not fit, the work area scrolls); below that the page scrolls; at 390 px nothing
 scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
+### HUD screenshots
+
+FLIGHT's `screenshot_hud` tool (superuser repos only) renders one HUD page at 1600×1000 in the
+system Chrome. The render runs in an owned helper process in its own process group with a minimal
+environment (no tokens); the hub kills the whole group when the render ends or its 30 s deadline
+passes, so no Chrome outlives a call. Chrome is started with `launch()` (a private pipe, no control
+socket) and every request it makes, loopback included, goes through a loopback-only proxy that
+connects to the hub's own host and port and refuses everything else, on top of the Playwright
+routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
+The shot is taken after the shell is ready, the lazy page's `Loading…` placeholder has gone and the
+page's requests have been quiet for 400 ms. Renders are one at a time per host, capped per FLIGHT
+per hour, and the repo's powers are rechecked just before launch.
+
+Each screenshot is kept under `hud-screenshots/` in the data dir (directory `0700`, files `0600`,
+an opaque 128-bit id), at most 50 files and one week. The tool's answer ends with `Reference:
+hud-shot:<id>`, which FLIGHT cites in a ticket. The operator reads one at `GET
+/api/hud-screenshots/<id>` with the `x-mc-operator` token header (404 for an unknown or expired id).
+
+Not built: rendering a PR preview. The hub does not serve PR branches, so there is nothing for the
+tool to point at; FLIGHT reviews merged work on the running hub.
+
 ## Away mode
 
 The server reads the settings saved by `POST /api/settings/away` before starting work or marking

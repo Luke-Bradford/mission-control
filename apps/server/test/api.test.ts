@@ -1210,6 +1210,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/test-lock"],
   ["GET", "/api/test-lock/history"],
   ["GET", "/api/guard/hits?days=7"],
+  ["GET", "/api/hud-screenshots/:id"],
   ["GET", "/api/qa/ci-runs"],
   ["GET", "/api/qa/findings"],
   ["GET", "/api/qa/milestones"],
@@ -1898,6 +1899,7 @@ describe("local access", () => {
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
+      if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need

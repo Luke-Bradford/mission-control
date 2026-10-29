@@ -347,6 +347,7 @@ import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
+import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
@@ -366,6 +367,8 @@ export interface FlightToolsDeps {
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
   screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
+  /** Where screenshots are kept for a durable reference; absent: the image is not stored. */
+  hudShots?: HudShotStore;
   focus?: (seatId: string, focus: string | null) => Promise<unknown>;
   queueReorder?: (
     seatId: string,
@@ -896,8 +899,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const png = await renderer(target, guard);
         if (png.byteLength > HUD_SCREENSHOT_MAX_BYTES)
           return fail(`HUD screenshot refused: PNG exceeds ${HUD_SCREENSHOT_MAX_BYTES} bytes.`);
+        let reference = "";
+        try {
+          const id = deps.hudShots?.save(png);
+          if (id) reference = ` Reference: ${HUD_SHOT_REF_PREFIX}${id}`;
+        } catch {
+          reference = " Not stored: the screenshot could not be saved.";
+        }
         return {
-          text: "HUD screenshot (1600×1000).",
+          text: `HUD screenshot (1600×1000).${reference}`,
           image: { data: png.toString("base64"), mimeType: "image/png" },
         };
       } catch (e) {
@@ -3165,7 +3175,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.screenshotHud,
-      description: `Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour; the host renders one at a time. Compare the image with the mockup and direction, then file or fold the gap.`,
+      description: `Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour; the host renders one at a time. The result carries a stored reference (the operator opens it in the HUD's API at /api/hud-screenshots/<id>; it is kept for a week): cite it when you file or fold a gap. Compare the image with the mockup and direction first.`,
       inputSchema: z.toJSONSchema(ScreenshotHudArgs),
       modes: [],
       grantable: ["read-only"],
