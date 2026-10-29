@@ -28,7 +28,7 @@ export function HelpModal() {
           <p>
             <kbd>g</kbd> then <kbd>o</kbd> Overview · <kbd>f</kbd> FLIGHT · <kbd>b</kbd> Board ·{" "}
             <kbd>a</kbd> Agent · <kbd>m</kbd> Map · <kbd>c</kbd> Comms · <kbd>t</kbd> Telemetry ·{" "}
-            <kbd>s</kbd> Setup
+            <kbd>d</kbd> Audit · <kbd>s</kbd> Setup
           </p>
           <p>
             <kbd>f</kbd> show or hide FLIGHT · <kbd>j</kbd> <kbd>k</kbd> next or previous agent ·{" "}

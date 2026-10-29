@@ -48,6 +48,7 @@ describe("App", () => {
     ["/map/sample", "Crew activity map"],
     ["/comms", "Comms"],
     ["/telemetry", "Telemetry"],
+    ["/audit", "Audit"],
     ["/setup/loops", "Setup"],
   ])("%s has one page heading and the shell landmarks", async (path, heading) => {
     const { container } = at(path);
@@ -72,6 +73,7 @@ describe("App", () => {
     ["/map/sample", "page-map", "Map"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
+    ["/audit", "page-audit", "Audit"],
     ["/setup/loops", "page-setup", null],
   ])("%s renders its page and marks its tab", async (path, id, tabName) => {
     const { container } = at(path);
