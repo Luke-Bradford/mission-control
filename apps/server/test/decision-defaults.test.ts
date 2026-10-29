@@ -79,26 +79,69 @@ afterEach(() => {
 });
 
 describe("decision defaults", () => {
-  it.each([
-    ["the Update hold", `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`, "ready"],
-    ["an approval", "approval:1", "approval"],
-    ["a budget park", "note:budget", "blocked"],
-    ["a hard-rule flag", "flag:run:hard-rule", "flag"],
-    ["an observed-loop escalation", "esc:other#1", "decision"],
-  ] as const)("never defaults %s", (_name, key, kind) => {
-    if (key === "note:budget") {
-      store.raiseNote({
-        key: "budget",
-        kind: "blocked",
-        runId: null,
-        seatId: null,
-        repoId: "repo",
-        text: "budget",
-        at: ASKED,
-      });
-    }
-    expect(decisionDefault(store, item(key, kind))).toBeNull();
+  async function expectProtectedSweep(key: string): Promise<void> {
+    store.addBrief({ key, ...brief() });
+    const deliver = vi.fn(async () => {});
+    expect(await applyDecisionDefaults({ config: config(), store, now: NOW, deliver })).toBe(0);
     expect(store.acks().has(key)).toBe(false);
+    expect(store.pendingDecisionDeliveries()).toEqual([]);
+    expect(deliver).not.toHaveBeenCalled();
+  }
+
+  it("does not sweep the Update hold", async () => {
+    store.raiseNote({
+      key: HUB_UPDATE_HELD_KEY,
+      kind: "ready",
+      runId: null,
+      seatId: null,
+      repoId: "repo",
+      text: "Update",
+      at: ASKED,
+    });
+    await expectProtectedSweep(`${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`);
+  });
+
+  it("does not sweep an approval", async () => {
+    store.raiseNote({
+      key: "approval",
+      kind: "approval",
+      runId: null,
+      seatId: null,
+      repoId: "repo",
+      text: "Approval",
+      at: ASKED,
+    });
+    await expectProtectedSweep("note:approval");
+  });
+
+  it("does not sweep a budget park", async () => {
+    store.raiseNote({
+      key: "budget",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "repo",
+      text: "Budget",
+      at: ASKED,
+    });
+    await expectProtectedSweep("note:budget");
+  });
+
+  it("does not sweep an observed-loop escalation", async () => {
+    store.replaceEscalations("repo", [
+      {
+        id: "repo#9",
+        repoId: "repo",
+        issueNumber: 9,
+        title: "Escalated",
+        kind: "operator-decision",
+        source: "label",
+        openedAt: ASKED,
+        url: "u",
+        question: null,
+      },
+    ]);
+    await expectProtectedSweep("esc:repo#9");
   });
 
   it("never defaults an operator decision on a confinement-floor PR", () => {

@@ -81,7 +81,6 @@ import {
   endFailedText,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_ABOUT_MAX,
-  FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_BASIS_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
@@ -296,7 +295,6 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
