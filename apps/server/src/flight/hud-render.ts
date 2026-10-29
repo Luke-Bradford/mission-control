@@ -1,6 +1,6 @@
 /** The fail-closed browser boundary for FLIGHT's read-only HUD screenshots. */
 import { existsSync } from "node:fs";
-import { OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
 
 const HUD_PATH =
   /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
@@ -82,6 +82,7 @@ interface HudBrowserContext {
 interface HudBrowser {
   newContext(options: {
     serviceWorkers: "block";
+    extraHTTPHeaders: Record<string, string>;
     viewport: { width: number; height: number };
   }): Promise<HudBrowserContext>;
   close(): Promise<void>;
@@ -97,6 +98,7 @@ interface HudBrowserServer {
 export interface HudPlaywright {
   chromium: {
     launchServer(options: {
+      host: "127.0.0.1";
       headless: true;
       executablePath: string;
       chromiumSandbox: true;
@@ -129,10 +131,14 @@ function missingPlaywright(error: unknown): boolean {
   );
 }
 
+/**
+ * The path the hub's router will match: decoded once (Fastify decodes percent-escapes), lower-cased
+ * and without trailing slashes. Malformed encoding or a URL that doesn't parse is null, and refused.
+ */
 const pathOf = (url: string): string | null => {
   try {
-    const parsed = new URL(url);
-    return parsed.pathname;
+    const decoded = decodeURIComponent(new URL(url).pathname).toLowerCase();
+    return decoded.length > 1 ? decoded.replace(/\/+$/, "") : decoded;
   } catch {
     return null;
   }
@@ -225,6 +231,8 @@ export async function renderHudWithPlaywright(
     }
     ensureActive();
     server = await playwright.chromium.launchServer({
+      // the control socket listens on loopback only; Playwright's default is every interface
+      host: "127.0.0.1",
       headless: true,
       executablePath,
       chromiumSandbox: true,
@@ -235,6 +243,8 @@ export async function renderHudWithPlaywright(
     ensureActive();
     context = await browser.newContext({
       serviceWorkers: "block",
+      // the hub refuses the operator bootstrap to any request carrying this header
+      extraHTTPHeaders: { [HUD_RENDERER_HEADER]: "1" },
       viewport: { width: 1600, height: 1000 },
     });
     ensureActive();
@@ -244,7 +254,12 @@ export async function renderHudWithPlaywright(
       const requestUrl = request.url();
       const path = pathOf(requestUrl);
       // Credentials and writes are denied before the generic origin/GET policy is consulted.
-      if (method !== "GET" || path === OPERATOR_BOOTSTRAP_PATH || path === HUD_STREAM_PATH) {
+      if (
+        method !== "GET" ||
+        path === null ||
+        path === OPERATOR_BOOTSTRAP_PATH ||
+        path === HUD_STREAM_PATH
+      ) {
         await route.abort();
         return;
       }

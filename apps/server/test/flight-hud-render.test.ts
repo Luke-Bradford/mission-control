@@ -1,4 +1,4 @@
-import { OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   HUD_RENDER_DEADLINE_MS,
@@ -156,8 +156,12 @@ describe("renderHudWithPlaywright", () => {
         timeout: HUD_RENDER_DEADLINE_MS,
       }),
     );
+    expect(fake.chromium.launchServer).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "127.0.0.1" }),
+    );
     expect(fake.browser.newContext).toHaveBeenCalledWith({
       serviceWorkers: "block",
+      extraHTTPHeaders: { [HUD_RENDERER_HEADER]: "1" },
       viewport: { width: 1600, height: 1000 },
     });
     expect(fake.order).toEqual(["route", "websocket", "page", "goto"]);
@@ -189,6 +193,16 @@ describe("renderHudWithPlaywright", () => {
     expect(bootstrap.aborted).toHaveBeenCalledOnce();
     expect(stream.aborted).toHaveBeenCalledOnce();
     expect(post.aborted).toHaveBeenCalledOnce();
+    for (const spelling of [
+      "/api/operator/%62ootstrap",
+      "/API/Operator/Bootstrap",
+      "/api/operator/bootstrap/",
+      "/api/%73tream",
+      "/api/operator/%E0%A4%A",
+    ]) {
+      const variant = await fake.request("GET", `http://127.0.0.1:7420${spelling}`);
+      expect(variant.aborted).toHaveBeenCalledOnce();
+    }
     expect(guard).not.toHaveBeenCalled();
 
     const asset = await fake.request("GET", "http://127.0.0.1:7420/assets/app.js");
