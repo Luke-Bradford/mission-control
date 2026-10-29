@@ -535,6 +535,12 @@ const BriefItemArgs = z
             kind: z.literal("ticket"),
             ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
           }),
+          z.strictObject({
+            kind: z.literal("ci"),
+            pr: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+            state: z.enum(["passing", "failing"]),
+          }),
+          z.strictObject({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }),
         ]),
       })
       .optional(),
@@ -2176,6 +2182,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
+    }
+    if (hold?.condition.kind === "item") {
+      const waitsOn = hold.condition.key;
+      const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK, () => null).rows;
+      if (
+        waitsOn === key ||
+        !attentionItems(
+          config,
+          store,
+          at,
+          deps.lockState?.() ?? NO_LOCK,
+          rows,
+          deps.login,
+          true,
+        ).some((i) => i.key === waitsOn)
+      )
+        return fail("Not held: the item to wait on is this one or is no longer waiting.");
     }
     // whether the operator already had this item with FLIGHT's brief, before this one replaces it
     const prior = store.briefs().get(key);

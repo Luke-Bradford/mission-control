@@ -10,6 +10,7 @@ import {
   type HudState,
   MACHINE_COLLECTOR,
   type MachineSample,
+  type PullRequestView,
   type Run,
   type TestLockState,
   type UsageSample,
@@ -2347,6 +2348,44 @@ it("releases crew holds from a durable idle seat session after the hold", async 
   store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
   await s.tick("ta");
   expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+});
+
+it("releases a ci hold when the stored PR reaches the state, and an item hold when the item is gone", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  const waiting = new Set(["note:other"]);
+  vi.spyOn(hud, "attentionItems").mockImplementation(
+    () => [...waiting].map((key) => ({ key })) as ReturnType<typeof hud.attentionItems>,
+  );
+  holdItem(store, "ask:1", "Waiting", { kind: "ci", pr: "r1#5", state: "passing" }, "FLIGHT", NOW);
+  holdItem(store, "ask:2", "Waiting", { kind: "item", key: "note:other" }, "FLIGHT", NOW);
+  const pr = (ci: "pending" | "passing"): PullRequestView =>
+    ({
+      repoId: "r1",
+      number: 5,
+      title: "t",
+      url: "u",
+      branch: "b",
+      ticket: null,
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci,
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    }) as PullRequestView;
+  store.replacePullRequests("r1", [pr("pending")], NOW);
+  const s = createScheduler({ config, store, bus, now: () => NOW + 10, collectors: stubs() });
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBeUndefined();
+  expect(holds(store)["ask:2"]?.releasedAt).toBeUndefined();
+  store.replacePullRequests("r1", [pr("passing")], NOW + 5);
+  waiting.clear();
+  await s.tick("ta");
+  expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+  expect(holds(store)["ask:2"]?.releasedAt).toBe(NOW + 10);
 });
 
 it("emits attention at the earliest triage deadline and cancels the timer on stop", async () => {

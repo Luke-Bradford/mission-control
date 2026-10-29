@@ -1,5 +1,10 @@
-import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
-import { type BriefOption, flightFloorBlocked, GUARD_ACK_PREFIX } from "@mc/core";
+import type {
+  AttentionHold,
+  AttentionHoldCondition,
+  AttentionItem,
+  AttentionWaitCondition,
+} from "@mc/core";
+import { BRIEF_KEY_MAX, type BriefOption, flightFloorBlocked, GUARD_ACK_PREFIX } from "@mc/core";
 import { z } from "zod";
 import { runAccountId } from "./account-bindings.ts";
 import type { CcConfig } from "./config.ts";
@@ -17,7 +22,7 @@ export function holdItem(
   store: Store,
   key: string,
   reason: string,
-  condition: AttentionHoldCondition,
+  condition: AttentionHoldCondition | AttentionWaitCondition,
   by: string,
   at: number,
 ): void {
@@ -33,7 +38,7 @@ export function releaseHold(store: Store, key: string, at: number): boolean {
   store.setSetting(SETTING, JSON.stringify(all));
   return true;
 }
-export function conditionText(c: AttentionHoldCondition): string {
+export function conditionText(c: AttentionHoldCondition | AttentionWaitCondition): string {
   switch (c.kind) {
     case "date":
       return new Date(c.at).toISOString();
@@ -43,6 +48,10 @@ export function conditionText(c: AttentionHoldCondition): string {
       return "until the crew resumes";
     case "manual":
       return "until I release it";
+    case "ci":
+      return `until ${c.pr} CI is ${c.state}`;
+    case "item":
+      return `until ${c.key} is resolved`;
   }
 }
 export function evaluateHolds(
@@ -50,6 +59,10 @@ export function evaluateHolds(
   at: number,
   merged: (ticket: string) => boolean,
   resumed: (since: number) => boolean,
+  /** The stored CI state of a PR (`repo#number`); null when unknown. */
+  ciOf: (pr: string) => "passing" | "failing" | "pending" | null = () => null,
+  /** Whether an item (held or not) has left Needs you for good. */
+  resolved: (key: string) => boolean = () => false,
 ): boolean {
   let changed = false;
   for (const [key, hold] of Object.entries(holds(store))) {
@@ -58,7 +71,9 @@ export function evaluateHolds(
     if (
       (c.kind === "date" && at >= c.at) ||
       (c.kind === "ticket" && merged(c.ticket)) ||
-      (c.kind === "crew" && resumed(hold.at))
+      (c.kind === "crew" && resumed(hold.at)) ||
+      (c.kind === "ci" && ciOf(c.pr) === c.state) ||
+      (c.kind === "item" && resolved(c.key))
     ) {
       changed = releaseHold(store, key, at) || changed;
     }
@@ -92,6 +107,8 @@ export function partitionAttention(
   return { items: active, held };
 }
 
+const PR_REF = /^[^#\s]+#[1-9]\d*$/;
+
 export const AttentionHoldInput = z
   .object({
     reason: z.string().trim().min(1).max(1000),
@@ -107,9 +124,17 @@ export const AttentionHoldInput = z
       z
         .object({
           kind: z.literal("ticket"),
-          ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+          ticket: z.string().regex(PR_REF),
         })
         .strict(),
+      z
+        .object({
+          kind: z.literal("ci"),
+          pr: z.string().regex(PR_REF),
+          state: z.enum(["passing", "failing"]),
+        })
+        .strict(),
+      z.object({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }).strict(),
     ]),
   })
   .strict();

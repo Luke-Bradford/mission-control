@@ -456,6 +456,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
     const currentRows = rows ?? crew(config, store, at, lock).rows;
+    let waiting: Set<string> | undefined;
     if (
       evaluateHolds(
         store,
@@ -476,6 +477,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             const seat = store.seatSession(r.id);
             return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
           }),
+        (pr) => {
+          const [repoId, number] = pr.split("#");
+          return (
+            store.pullRequests(repoId ?? "").find((p) => p.number === Number(number))?.ci ?? null
+          );
+        },
+        (key) => {
+          waiting ??= new Set(
+            attentionItems(config, store, at, lock, currentRows, null, true).map((i) => i.key),
+          );
+          return !waiting.has(key);
+        },
       )
     )
       emit("attention");

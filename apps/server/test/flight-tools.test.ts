@@ -7182,12 +7182,23 @@ describe("brief_item with a hold (#760)", () => {
   });
 
   it.each([
-    [{ kind: "date", at: NOW + 1000 }, NOW + 1000, false, false],
-    [{ kind: "ticket", ticket: "demo#12" }, NOW + 5, true, false],
-    [{ kind: "crew" }, NOW + 5, false, true],
+    [{ kind: "date", at: NOW + 1000 }, NOW + 1000, false, false, null, false],
+    [{ kind: "ticket", ticket: "demo#12" }, NOW + 5, true, false, null, false],
+    [{ kind: "crew" }, NOW + 5, false, true, null, false],
+    [{ kind: "ci", pr: "demo#9", state: "passing" }, NOW + 5, false, false, "passing", false],
+    [{ kind: "item", key: "note:blocked:other" }, NOW + 5, false, false, null, true],
   ] as const)(
     "files a %j hold, drops the item from Needs you, and wakes FLIGHT when it is met",
-    async (condition, at, merged, resumed) => {
+    async (condition, at, merged, resumed, ci, resolved) => {
+      store.raiseNote({
+        key: "blocked:other",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "Other",
+        at: NOW - 1,
+      });
       expect(await call("brief_item", brief({ hold: { condition } }))).toEqual({
         text: BRIEFED_TEXT,
       });
@@ -7206,6 +7217,8 @@ describe("brief_item with a hold (#760)", () => {
           NOW + 1,
           () => false,
           () => false,
+          () => "pending",
+          () => false,
         ),
       ).toBe(false);
       expect(items()).toEqual([]);
@@ -7215,6 +7228,8 @@ describe("brief_item with a hold (#760)", () => {
           at,
           () => merged,
           () => resumed,
+          () => ci,
+          () => resolved,
         ),
       ).toBe(true);
       // back, with FLIGHT asked to refresh a brief older than the release
@@ -7234,6 +7249,16 @@ describe("brief_item with a hold (#760)", () => {
       expect(items(at + 2)).toEqual([]);
     },
   );
+
+  it.each([key, "note:gone"])("refuses to wait on item %s", async (waitsOn) => {
+    const r = await call(
+      "brief_item",
+      brief({ hold: { condition: { kind: "item", key: waitsOn } } }),
+    );
+    expect(r.isError).toBe(true);
+    expect(holds(store)[key]).toBeUndefined();
+    expect(store.briefs().has(key)).toBe(false);
+  });
 
   it("refuses a manual hold, which would never resurface", async () => {
     const r = await call("brief_item", brief({ hold: { condition: { kind: "manual" } } }));
