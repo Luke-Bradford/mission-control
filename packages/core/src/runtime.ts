@@ -822,7 +822,7 @@ export interface CrewSandboxInput {
    */
   denyRead: string[];
   /** The hub-owned pnpm store seats may read but never write. */
-  pnpmStoreDir?: string;
+  pnpmStoreDir: string;
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
 }
@@ -942,7 +942,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
-  if (i.pnpmStoreDir !== undefined && !i.pnpmStoreDir.startsWith("/"))
+  if (!i.pnpmStoreDir.startsWith("/"))
     throw new Error("crew sandbox: pnpmStoreDir must be absolute");
   // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
   // same-uid seats cannot read sibling runs without blocking unrelated temp tools.
@@ -970,7 +970,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           : {
               allowRead: [
                 i.tempRoot,
-                ...(i.pnpmStoreDir === undefined ? [] : [i.pnpmStoreDir]),
+                i.pnpmStoreDir,
                 ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
                   tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
                 ),
@@ -988,7 +988,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           i.gitCommonDir,
           i.worktreeGitDir,
           i.dataDir,
-          ...(i.pnpmStoreDir === undefined ? [] : [i.pnpmStoreDir]),
+          i.pnpmStoreDir,
           ...tempDenies,
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not

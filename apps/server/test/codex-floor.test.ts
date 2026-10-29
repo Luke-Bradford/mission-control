@@ -70,6 +70,7 @@ describe.skipIf(installedCodex === null)("Codex seat profile under the real code
             home: join(root, "operator"),
             dataDir: join(root, "data"),
             denyRead: [],
+            pnpmStoreDir: join(root, "pnpm-store"),
           },
           mode,
           "http://127.0.0.1:1/mcp",
@@ -111,7 +112,12 @@ describe("codexSeatConfig", () => {
 
   it("requires the hub-owned pnpm store instead of falling back to a worktree store", () => {
     expect(() =>
-      codexSeatConfig({ ...sandboxInput, pnpmStoreDir: undefined }, "writer", url, tmp),
+      codexSeatConfig(
+        { ...sandboxInput, pnpmStoreDir: undefined } as unknown as CrewSandboxInput,
+        "writer",
+        url,
+        tmp,
+      ),
     ).toThrow("codex seat config: pnpmStoreDir must be absolute");
   });
 
@@ -262,6 +268,7 @@ describe.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-e
             home: join(root, "operator"),
             dataDir: join(root, "data"),
             denyRead: [],
+            pnpmStoreDir: store,
           },
           mode,
           "http://127.0.0.1:7420/mcp",

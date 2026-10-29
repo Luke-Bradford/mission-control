@@ -68,6 +68,7 @@ const base: CrewCliInput = {
     home: "/home/you",
     dataDir: "/home/you/.local/share/mission-control",
     denyRead: [],
+    pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
   },
   mcpConfigFile: "/home/you/.local/share/mission-control/crew/guido-1:1.mcp.json",
   hook: {
