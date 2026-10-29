@@ -146,15 +146,32 @@ describe("Instrument charts", () => {
     expect(nearestRank([1, 2, 9], 0.85)).toBe(9);
   });
 
-  it("renders only the supplied server observations, retaining their timestamps", () => {
+  it("renders an observed merge even when its Ready history is unavailable", () => {
     const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [{ ticket: "repo#1", readyAt: null, startedAt: null, mergedAt: 30, doneAt: 40 }],
+        }}
+      />,
+    );
+    expect(container.querySelectorAll("#tFlow path.line")).toHaveLength(2);
+  });
+
+  it("renders only the supplied server observations, retaining their timestamps", () => {
+    const { container, getByRole } = render(
       <ChartCursorProvider>
         <InstrumentCharts
           scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
           series={{
             stateSpans: [
-              { agentId: "crew", state: "parked", startedAt: 10, endedAt: 20 },
-              { agentId: "crew", state: "running", startedAt: 30, endedAt: 40 },
+              { agentId: "crew", state: "running", startedAt: 10, endedAt: 20 },
+              { agentId: "crew", state: "parked", startedAt: 20, endedAt: 40 },
             ],
             quota: [],
             tickets: [
@@ -177,7 +194,11 @@ describe("Instrument charts", () => {
     expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
     const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
     fireEvent.focus(timeline);
-    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain("crewrunning");
+    fireEvent.keyDown(timeline, { key: "ArrowLeft" });
+    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain("crewparked");
+    const before = timeline.getAttribute("data-from");
+    fireEvent.click(getByRole("button", { name: "Zoom in crew state" }));
+    expect(timeline.getAttribute("data-from")).not.toBe(before);
   });
 });
 

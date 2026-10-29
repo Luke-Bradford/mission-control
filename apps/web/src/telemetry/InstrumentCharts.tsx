@@ -42,6 +42,7 @@ function CrewStateTimeline({
 }) {
   const [ref, width] = useChartWidth(560);
   const [local, setLocal] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
   const cursor = useChartCursor();
   const at = cursor?.at ?? local;
   // Idle-only agents say nothing about active crew state, so keep their lanes folded.
@@ -52,10 +53,21 @@ function CrewStateTimeline({
   const height = Math.max(56, agents.length * lane + 24);
   const x0 = 80;
   const x1 = width - 4;
-  const x = (time: number) => x0 + ((time - from) / Math.max(1, to - from)) * (x1 - x0);
-  const times = [...new Set(spans.flatMap((span) => [span.startedAt, span.endedAt]))].sort(
-    (a, b) => a - b,
-  );
+  const span = (to - from) / zoom;
+  const centre = at !== null && at >= from && at <= to ? at : (from + to) / 2;
+  const visibleFrom = Math.max(from, Math.min(to - span, centre - span / 2));
+  const visibleTo = visibleFrom + span;
+  const x = (time: number) =>
+    x0 + ((time - visibleFrom) / Math.max(1, visibleTo - visibleFrom)) * (x1 - x0);
+  const times = [
+    ...new Set(
+      spans
+        .filter((state) => state.endedAt >= visibleFrom && state.startedAt <= visibleTo)
+        .flatMap((state) => [state.startedAt, state.endedAt]),
+    ),
+  ]
+    .filter((time) => time >= visibleFrom && time <= visibleTo)
+    .sort((a, b) => a - b);
   const setAt = (time: number | null) => {
     setLocal(time);
     cursor?.setAt(time);
@@ -63,8 +75,13 @@ function CrewStateTimeline({
   if (!agents.length)
     return <p className="pb s muted">No crew state observations in this range.</p>;
   const stateAt = (agent: string, time: number) =>
-    spans.find((span) => span.agentId === agent && span.startedAt <= time && span.endedAt >= time)
-      ?.state ?? "—";
+    spans.find(
+      (state) =>
+        state.agentId === agent &&
+        (state.startedAt === state.endedAt
+          ? time === state.startedAt
+          : state.startedAt <= time && time < state.endedAt),
+    )?.state ?? "—";
   const nearest = (time: number) =>
     times.reduce<number | null>(
       (best, candidate) =>
@@ -73,10 +90,23 @@ function CrewStateTimeline({
     );
   return (
     <div className="chart crew-state-chart" ref={ref}>
+      <div className="chart-controls">
+        <button type="button" onClick={() => setZoom((value) => Math.min(16, value * 2))}>
+          Zoom in crew state
+        </button>
+        <button type="button" onClick={() => setZoom((value) => Math.max(1, value / 2))}>
+          Zoom out crew state
+        </button>
+        <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}>
+          Reset crew state zoom
+        </button>
+      </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
         role="img"
+        data-from={visibleFrom}
+        data-to={visibleTo}
         aria-label={`Crew state: ${agents.length} active lanes; idle-only lanes folded`}
         {...keyStep(times.length, at === null ? null : times.indexOf(at), (i) =>
           setAt(i === null ? null : (times[i] ?? null)),
@@ -88,15 +118,23 @@ function CrewStateTimeline({
               {agent}
             </text>
             {spans
-              .filter((span) => span.agentId === agent)
+              .filter(
+                (state) =>
+                  state.agentId === agent &&
+                  state.endedAt >= visibleFrom &&
+                  state.startedAt <= visibleTo,
+              )
               .map((span) => (
                 <rect
                   className="crew-state-span"
                   data-ended-at={span.endedAt}
                   key={`${span.startedAt}:${span.endedAt}:${span.state}`}
-                  x={x(span.startedAt)}
+                  x={x(Math.max(visibleFrom, span.startedAt))}
                   y={row * lane + 5}
-                  width={Math.max(1, x(span.endedAt) - x(span.startedAt))}
+                  width={Math.max(
+                    1,
+                    x(Math.min(visibleTo, span.endedAt)) - x(Math.max(visibleFrom, span.startedAt)),
+                  )}
                   height={12}
                   fill={STATE_COLOUR[span.state]}
                 >
@@ -105,21 +143,23 @@ function CrewStateTimeline({
               ))}
           </g>
         ))}
-        {annotations.map((event) => (
-          <g className="annotation" key={`${event.at}:${event.kind}`}>
-            <line
-              x1={x(event.at)}
-              x2={x(event.at)}
-              y1={0}
-              y2={height - 18}
-              stroke="var(--warn)"
-              strokeDasharray="2 3"
-            />
-            <text className="ct" x={x(event.at) + 3} y={12}>
-              {event.cause}
-            </text>
-          </g>
-        ))}
+        {annotations
+          .filter((event) => event.at >= visibleFrom && event.at <= visibleTo)
+          .map((event) => (
+            <g className="annotation" key={`${event.at}:${event.kind}`}>
+              <line
+                x1={x(event.at)}
+                x2={x(event.at)}
+                y1={0}
+                y2={height - 18}
+                stroke="var(--warn)"
+                strokeDasharray="2 3"
+              />
+              <text className="ct" x={x(event.at) + 3} y={12}>
+                {event.cause}
+              </text>
+            </g>
+          ))}
         {at !== null && (
           <line
             className="xhair"
@@ -140,7 +180,8 @@ function CrewStateTimeline({
           fill="transparent"
           onPointerMove={(event) => {
             const time =
-              from + ((pointerX(event, width) - x0) / Math.max(1, x1 - x0)) * (to - from);
+              visibleFrom +
+              ((pointerX(event, width) - x0) / Math.max(1, x1 - x0)) * (visibleTo - visibleFrom);
             setAt(nearest(time));
           }}
           onPointerLeave={() => setAt(null)}
@@ -251,7 +292,7 @@ export function InstrumentCharts({
       <Panel id="tFlow" title="Cumulative flow" sub="observed Ready and merged ticket events">
         {!series ? (
           unavailable("Board-stage history", scope.range)
-        ) : !flowEvents.length ? (
+        ) : !flowEvents.length && !mergedPoints.length ? (
           <p className="pb s muted">No board-stage observations in this range.</p>
         ) : (
           <LineChart
