@@ -254,6 +254,10 @@ async function prepareSharedPnpmStore(worktreesRoot: string, name: string): Prom
       throw new Error("shared pnpm store must be a private directory owned by the server");
   };
   try {
+    await mkdir(worktreesRoot, { recursive: true, mode: 0o700 });
+    const rootStat = await lstat(worktreesRoot);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+      throw new Error("crew.worktrees must be a real directory");
     const root = await realpath(worktreesRoot);
     if (root !== resolve(worktreesRoot)) throw new Error("crew.worktrees must not be a symlink");
     const storeRoot = join(root, CODEX_PNPM_STORES_DIR);
