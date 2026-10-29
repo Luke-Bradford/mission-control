@@ -1202,6 +1202,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS comms_pins (
         message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS comms_inbox_reads (
+        seat_id TEXT NOT NULL, message_id INTEGER NOT NULL,
+        PRIMARY KEY (seat_id, message_id)
+      );
+      CREATE INDEX IF NOT EXISTS comms_inbox_reads_message ON comms_inbox_reads(message_id);
       CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_insert
       BEFORE INSERT ON comms_reactions
       WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
@@ -3306,17 +3311,18 @@ export class Store {
     );
   }
   commsInboxRun(id: string, runId: string): CommsRow[] {
-    return this.commsForRunWhere(
-      runId,
-      `id IN (
+    return this.commsForWhere(
+      `(
+        (target_run_id IS NULL OR target_run_id = ?)
+        AND id IN (
         SELECT id FROM comms WHERE to_id=?
         UNION
         SELECT message_id FROM comms_mentions WHERE mentioned_id=?
         UNION
         SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
-        UNION
-        SELECT message_id FROM comms_pins
-      )`,
+        )
+      ) OR id IN (SELECT message_id FROM comms_pins)`,
+      runId,
       id,
       id,
       id,
@@ -3537,22 +3543,26 @@ export class Store {
       .get(scope) as { offset: number } | undefined;
     return r ? `comms:${r.offset}` : null;
   }
-  /** Cursor for Comms that a seat itself has received, separate from the operator's UI reads. */
-  commsInboxCursor(seatId: string): number {
-    const r = this.db
-      .prepare("SELECT offset FROM comms_reads WHERE thread_id=? AND source_id='inbox'")
-      .get(`inbox:${seatId}`) as { offset: number } | undefined;
-    return r?.offset ?? 0;
-  }
-  markCommsInboxRead(seatId: string, messageId: string): void {
+  /** Seat delivery receipts, deliberately separate from the operator's UI cursor. */
+  commsInboxRead(seatId: string, messageId: string): boolean {
     const id = commsMessageNumber(messageId);
-    if (id === null) return;
-    this.db
-      .prepare(
-        `INSERT INTO comms_reads(thread_id,source_id,offset,block) VALUES (?, 'inbox', ?, 0)
-         ON CONFLICT(thread_id,source_id) DO UPDATE SET offset=MAX(offset,excluded.offset)`,
-      )
-      .run(`inbox:${seatId}`, id);
+    if (id === null) return false;
+    return (
+      this.db
+        .prepare("SELECT 1 FROM comms_inbox_reads WHERE seat_id=? AND message_id=?")
+        .get(seatId, id) !== undefined
+    );
+  }
+  markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
+    const insert = this.db.prepare(
+      "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
+    );
+    this.transaction(() => {
+      for (const messageId of messageIds) {
+        const id = commsMessageNumber(messageId);
+        if (id !== null) insert.run(seatId, id);
+      }
+    }, true);
   }
 
   /** The hand-offs at or after `since`, oldest first. */

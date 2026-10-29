@@ -3863,7 +3863,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
       try {
-        writeLine(l, text);
+        writeLine(l, withInbox(seatId, runId, text));
       } catch {
         store.dropLine(key);
         return l.session.alive ? "busy" : "no-session";

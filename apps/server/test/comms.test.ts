@@ -209,20 +209,39 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
 });
 
 it("caps a turn inbox at 40 messages or 8k characters, keeping the newest", () => {
+  const ids: string[] = [];
   for (let n = 0; n < COMMS_INBOX_PROMPT_ROWS + 8; n++)
-    store.addComms({
-      at: n,
-      from: "other",
-      to: "seat",
-      ticket: null,
-      text: `${n} ${"x".repeat(500)}`,
-      targetRunId: "r",
-    });
+    ids.push(
+      store.addComms({
+        at: n,
+        from: "other",
+        to: "seat",
+        ticket: null,
+        text: `${n} ${"x".repeat(500)}`,
+        targetRunId: "r",
+      })?.id ?? "",
+    );
   const prompt = commsInboxPrompt(store, "seat", "r");
   expect(prompt.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
   expect(prompt).toContain("older: use comms_inbox");
   expect(prompt).toContain('"text":"47 ');
   expect(prompt).not.toContain('"text":"0 ');
+  expect(store.commsInboxRead("seat", ids[0] ?? "")).toBe(false);
+  expect(store.commsInboxRead("seat", ids.at(-1) ?? "")).toBe(true);
+});
+
+it("keeps a current pin in an inbox across target runs", () => {
+  const pinned = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "pinned old run",
+    targetRunId: "old-run",
+  });
+  if (pinned === null) throw new Error("expected pinned Comms row");
+  expect(store.setCommsPinned(pinned.id, true, "CAPCOM", 2)).toBe(true);
+  expect(store.commsInboxRun("seat", "r").map((row) => row.id)).toContain(pinned.id);
 });
 
 it("keeps the newest oversized inbox row and marks delivered rows read", () => {

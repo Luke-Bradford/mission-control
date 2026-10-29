@@ -117,7 +117,6 @@ export function commsInboxPrompt(store: Store, seatId: string, runId: string): s
     .commsInboxRun(seatId, runId)
     .filter((row) => canReadComms(store, seatId, row, pins))
     .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)));
-  const cursor = store.commsInboxCursor(seatId);
   let omitted = Math.max(0, rows.length - COMMS_INBOX_PROMPT_ROWS);
   const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) => ({
     id: row.id,
@@ -130,7 +129,7 @@ export function commsInboxPrompt(store: Store, seatId: string, runId: string): s
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
-    unread: Number(row.id.slice(6)) > cursor,
+    unread: !store.commsInboxRead(seatId, row.id),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
@@ -160,8 +159,10 @@ export function commsInboxPrompt(store: Store, seatId: string, runId: string): s
     lines.shift();
     omitted++;
   }
-  const newest = rows.at(-1);
-  if (newest !== undefined) store.markCommsInboxRead(seatId, newest.id);
+  store.markCommsInboxRead(
+    seatId,
+    lines.map((line) => line.id),
+  );
   return render();
 }
 
