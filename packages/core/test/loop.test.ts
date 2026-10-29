@@ -747,7 +747,7 @@ describe("desired-state step", () => {
     ]);
   });
 
-  it("review note names the PR and sha; hard-rule flag follows touches", () => {
+  it("review note names the PR and hard-rule flags follow their file set", () => {
     const s = snap(
       { pushed: { sha: SHA, at: 1 }, headCommit: SHA, pr: pr({ ci: "passing" }) },
       { phase: "review", cardFor: "review:0", touches: { sha: SHA, paths: ["a.yml", "b.ts"] } },
@@ -762,17 +762,47 @@ describe("desired-state step", () => {
       },
       {
         kind: "note",
-        key: `flag:r1:hard-rules:${SHA}`,
+        key: hardRulesFlagKey("r1", ["a.yml", "b.ts"]),
         noteKind: "flag",
         text: `${REF} touches hard-rule files: a.yml, b.ts`,
       },
     ]);
+    const sameFiles = reconcile({
+      ...s,
+      headCommit: SHA2,
+      pushed: { sha: SHA2, at: 2 },
+      loop: { ...s.loop, touches: { sha: SHA2, paths: ["b.ts", "a.yml"] } },
+      openNotes: [hardRulesFlagKey("r1", ["a.yml", "b.ts"])],
+    });
+    expect(sameFiles.actions).not.toContainEqual(
+      expect.objectContaining({ kind: "note", noteKind: "flag" }),
+    );
+    const addedFile = reconcile({
+      ...s,
+      headCommit: SHA2,
+      pushed: { sha: SHA2, at: 2 },
+      loop: { ...s.loop, touches: { sha: SHA2, paths: ["a.yml", "b.ts", "c.md"] } },
+      openNotes: [hardRulesFlagKey("r1", ["a.yml", "b.ts"])],
+    });
+    expect(addedFile.actions).toContainEqual({
+      kind: "note",
+      key: hardRulesFlagKey("r1", ["a.yml", "b.ts", "c.md"]),
+      noteKind: "flag",
+      text: `${REF} touches hard-rule files: a.yml, b.ts, c.md`,
+    });
+    expect(addedFile.actions).toContainEqual({
+      kind: "clear-note",
+      key: hardRulesFlagKey("r1", ["a.yml", "b.ts"]),
+    });
     const empty = reconcile({
       ...s,
       loop: { ...s.loop, touches: { sha: SHA, paths: [] } },
-      openNotes: [`flag:r1:hard-rules:${SHA}`],
+      openNotes: [hardRulesFlagKey("r1", ["a.yml", "b.ts"])],
     });
-    expect(empty.actions).toContainEqual({ kind: "clear-note", key: `flag:r1:hard-rules:${SHA}` });
+    expect(empty.actions).toContainEqual({
+      kind: "clear-note",
+      key: hardRulesFlagKey("r1", ["a.yml", "b.ts"]),
+    });
   });
 
   it("a rate-limited seat gets a note, with the reset time when known", () => {
@@ -1187,7 +1217,7 @@ describe("review round", () => {
     const keys = reconcile({ ...base, seat: limited(base) }).actions.flatMap((a) =>
       a.kind === "note" ? [a.key] : [],
     );
-    expect(keys).toEqual(["blocked:r1:0", `flag:r1:hard-rules:${SHA}`, "ratelimit:r1"]);
+    expect(keys).toEqual(["blocked:r1:0", hardRulesFlagKey("r1", ["a.yml"]), "ratelimit:r1"]);
   });
 
   it("6: a new report resets the refusal counter", () => {
@@ -2616,7 +2646,7 @@ describe("merge workspace", () => {
       text: readyHardRuleText(REF, 12, ["CLAUDE.md"]),
     });
     expect(r.actions).toContainEqual(
-      expect.objectContaining({ key: `flag:r1:hard-rules:${SHA}`, noteKind: "flag" }),
+      expect.objectContaining({ key: hardRulesFlagKey("r1", ["CLAUDE.md"]), noteKind: "flag" }),
     );
   });
 
@@ -2888,20 +2918,20 @@ describe("ciVerdict", () => {
 });
 
 describe("isHardRulesFlagKey", () => {
-  const sha = "00c296383f2b261b436d5a1d7951db07f82174af";
+  const hash = "00c296383f2b261b436d5a1d7951db07f82174af";
   it("matches the keys hardRulesFlagKey builds, including run ids that contain a colon", () => {
-    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1:20261021T165337Z", sha))).toBe(true);
-    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1", sha))).toBe(true);
-    expect(isHardRulesFlagKey(hardRulesFlagKey("run-1", "a".repeat(64)))).toBe(true);
+    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1:20261021T165337Z", ["a.yml"]))).toBe(true);
+    expect(isHardRulesFlagKey(hardRulesFlagKey("guido-1", ["a.yml"]))).toBe(true);
+    expect(isHardRulesFlagKey(hardRulesFlagKey("run-1", ["a".repeat(64)]))).toBe(true);
   });
   it("matches nothing else", () => {
-    expect(isHardRulesFlagKey(`flag:guido-1:20261021T165337Z:other:${sha}`)).toBe(false);
-    expect(isHardRulesFlagKey(`flake:guido-1:hard-rules:${sha}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:20261021T165337Z:other:${hash}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flake:guido-1:hard-rules:${hash}`)).toBe(false);
     expect(isHardRulesFlagKey("flag:guido-1:hard-rules:not-a-sha")).toBe(false);
-    expect(isHardRulesFlagKey(`flag:hard-rules:${sha}`)).toBe(false);
-    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.toUpperCase()}`)).toBe(false);
-    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha.slice(1)}`)).toBe(false);
-    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}0`)).toBe(false);
-    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${sha}:x`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:hard-rules:${hash}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash.toUpperCase()}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash.slice(1)}`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}0`)).toBe(false);
+    expect(isHardRulesFlagKey(`flag:guido-1:hard-rules:${hash}:x`)).toBe(false);
   });
 });
