@@ -552,6 +552,17 @@ select {
   margin-left: auto;
 }
 
+/* the header's usage meter (shell): every page shows it */
+.usage {
+  display: inline-flex;
+  gap: 14px;
+  color: var(--fg-2);
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
+.usage b {
+  font-weight: 500;
+}
 .usage-claude {
   color: var(--warn);
 }
