@@ -1,11 +1,23 @@
 /** The fail-closed browser boundary for FLIGHT's read-only HUD screenshots. */
+import { type ChildProcess, fork } from "node:child_process";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
+import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 
 const HUD_PATH =
   /^\/(?:$|map(?:\/|$)|overview(?:\/|$)|board(?:\/|$)|flight(?:\/|$)|telemetry(?:\/|$)|comms(?:\/|$)|agents?(?:\/|$)|setup(?:\/|$))/;
 const HUD_STREAM_PATH = "/api/stream";
-const HUD_READY = "document.documentElement.dataset.hudReady === '1'";
+// Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
+const HUD_READY = "html[data-hud-ready='1']";
+/**
+ * The requested page itself has rendered: the app shell's lazy-route Suspense fallback
+ * (`<p>Loading…</p>` inside `<main>`) is gone. `hudReady` only covers the shell's own data.
+ */
+const PAGE_MAIN = "main";
+const PAGE_LOADING = "main p:text-is('Loading…')";
+/** The page's requests must stay quiet this long before it is photographed. */
+export const HUD_QUIET_MS = 400;
 const DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 /** Whole launch-to-PNG deadline. Individual Playwright calls also receive its remaining time. */
@@ -17,6 +29,8 @@ export const HUD_SCREENSHOT_MAX_BYTES = 1_500_000;
 
 export interface HudRenderGuard {
   (method: string, url: string): boolean;
+  /** The hub origin this guard confines the browser to. */
+  readonly origin: string;
   page(path: string): string;
 }
 
@@ -45,6 +59,7 @@ export function hudRenderRequest(hubOrigin: string): HudRenderGuard {
     }
   }) as HudRenderGuard;
   guard.page = page;
+  (guard as { origin: string }).origin = origin;
   return guard;
 }
 
@@ -56,12 +71,12 @@ interface BrowserRoute {
 
 interface HudPage {
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<unknown>;
-  waitForFunction(
-    expression: string,
-    arg: undefined,
-    options: { timeout: number },
+  waitForSelector(
+    selector: string,
+    options: { state: "attached" | "detached"; timeout: number },
   ): Promise<unknown>;
   screenshot(options: { type: "png"; timeout: number }): Promise<Buffer | Uint8Array>;
+  on(event: "request" | "requestfinished" | "requestfailed", handler: () => void): unknown;
   url(): string;
   close(): Promise<void>;
 }
@@ -88,23 +103,18 @@ interface HudBrowser {
   close(): Promise<void>;
 }
 
-interface HudBrowserServer {
-  wsEndpoint(): string;
-  process(): { kill(signal: "SIGKILL"): unknown };
-  close(): Promise<void>;
-}
-
 /** The injected Playwright surface used by lifecycle tests; production loads playwright-core. */
 export interface HudPlaywright {
   chromium: {
-    launchServer(options: {
-      host: "127.0.0.1";
+    // launch() talks to Chrome over a private pipe: unlike launchServer(), no control socket exists
+    launch(options: {
       headless: true;
       executablePath: string;
       chromiumSandbox: true;
       timeout: number;
-    }): Promise<HudBrowserServer>;
-    connect(endpoint: string, options: { timeout: number }): Promise<HudBrowser>;
+      // every request, loopback included, goes through the hub-only proxy
+      proxy: { server: string };
+    }): Promise<HudBrowser>;
   };
 }
 
@@ -112,8 +122,10 @@ export interface HudRenderOptions {
   executablePath?: string;
   fileExists?: (path: string) => boolean;
   loadPlaywright?: () => Promise<HudPlaywright>;
+  startProxy?: (hubOrigin: string) => Promise<HudProxy>;
   deadlineMs?: number;
   closeTimeoutMs?: number;
+  quietMs?: number;
 }
 
 const loadPlaywright = async (): Promise<HudPlaywright> =>
@@ -121,6 +133,8 @@ const loadPlaywright = async (): Promise<HudPlaywright> =>
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function missingPlaywright(error: unknown): boolean {
   const e = error as { code?: unknown; message?: unknown };
@@ -145,8 +159,32 @@ const pathOf = (url: string): string | null => {
 };
 
 /**
- * Launches a sandboxed system Chrome, confines one explicit context, and returns a bounded PNG.
- * The browser server gives cleanup an owned process to kill if Playwright close hangs.
+ * Counts the page's requests in flight. `quiet` resolves once none has been open, or started or
+ * ended, for `quietMs`; a page with a request that never ends runs out the caller's deadline.
+ */
+function watchNetwork(page: HudPage): {
+  quiet(quietMs: number, stop: () => boolean): Promise<void>;
+} {
+  let open = 0;
+  let last = Date.now();
+  const touch = (delta: number) => () => {
+    open = Math.max(0, open + delta);
+    last = Date.now();
+  };
+  page.on("request", touch(1));
+  page.on("requestfinished", touch(-1));
+  page.on("requestfailed", touch(-1));
+  return {
+    async quiet(quietMs, stop) {
+      while ((open > 0 || Date.now() - last < quietMs) && !stop()) await sleep(25);
+    },
+  };
+}
+
+/**
+ * Starts the hub-only proxy, launches a sandboxed system Chrome behind it, confines one explicit
+ * context, and returns a bounded PNG. This runs inside the owned helper process (renderHudInHelper),
+ * which the parent kills as a group, so a Chrome that will not close cannot outlive the call.
  */
 export async function renderHudWithPlaywright(
   url: string,
@@ -160,9 +198,10 @@ export async function renderHudWithPlaywright(
 
   const deadlineMs = options.deadlineMs ?? HUD_RENDER_DEADLINE_MS;
   const closeTimeoutMs = options.closeTimeoutMs ?? HUD_RENDER_CLOSE_MS;
+  const quietMs = options.quietMs ?? HUD_QUIET_MS;
   const started = Date.now();
   const remaining = (): number => Math.max(1, deadlineMs - (Date.now() - started));
-  let server: HudBrowserServer | undefined;
+  let proxy: HudProxy | undefined;
   let browser: HudBrowser | undefined;
   let context: HudBrowserContext | undefined;
   let cleanup: Promise<void> | undefined;
@@ -171,15 +210,10 @@ export async function renderHudWithPlaywright(
 
   const ensureActive = (): void => {
     if (!expired) return;
-    // A launch/connect that ignored its timeout may settle after deadline cleanup took its snapshot.
-    try {
-      server?.process().kill("SIGKILL");
-    } catch {
-      // The process already exited.
-    }
+    // A launch that ignored its timeout may settle after deadline cleanup took its snapshot.
     void context?.close().catch(() => {});
     void browser?.close().catch(() => {});
-    void server?.close().catch(() => {});
+    void proxy?.close().catch(() => {});
     throw timeoutError();
   };
 
@@ -189,23 +223,16 @@ export async function renderHudWithPlaywright(
       const closing = Promise.allSettled([
         Promise.resolve().then(() => context?.close()),
         Promise.resolve().then(() => browser?.close()),
-        Promise.resolve().then(() => server?.close()),
-      ]).then((results) => results.every((result) => result.status === "fulfilled"));
+        Promise.resolve().then(() => proxy?.close()),
+      ]);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const closed = await Promise.race([
+      await Promise.race([
         closing,
-        new Promise<false>((resolve) => {
-          timer = setTimeout(() => resolve(false), closeTimeoutMs);
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, closeTimeoutMs);
         }),
       ]);
       if (timer) clearTimeout(timer);
-      if (!closed) {
-        try {
-          server?.process().kill("SIGKILL");
-        } catch {
-          // The process already exited.
-        }
-      }
     })();
     return cleanup;
   };
@@ -230,16 +257,15 @@ export async function renderHudWithPlaywright(
       );
     }
     ensureActive();
-    server = await playwright.chromium.launchServer({
-      // the control socket listens on loopback only; Playwright's default is every interface
-      host: "127.0.0.1",
+    proxy = await (options.startProxy ?? startHudProxy)(guard.origin);
+    ensureActive();
+    browser = await playwright.chromium.launch({
       headless: true,
       executablePath,
       chromiumSandbox: true,
-      timeout: deadlineMs,
+      timeout: remaining(),
+      proxy: { server: `http://${proxy.address}` },
     });
-    ensureActive();
-    browser = await playwright.chromium.connect(server.wsEndpoint(), { timeout: remaining() });
     ensureActive();
     context = await browser.newContext({
       serviceWorkers: "block",
@@ -276,9 +302,20 @@ export async function renderHudWithPlaywright(
     context.on("page", (popup) => {
       if (popup !== page) void popup.close().catch(() => {});
     });
+    const network = watchNetwork(page);
     await page.goto(url, { waitUntil: "load", timeout: remaining() });
     ensureActive();
-    await page.waitForFunction(HUD_READY, undefined, { timeout: remaining() });
+    const wait = (selector: string, state: "attached" | "detached"): Promise<unknown> =>
+      page.waitForSelector(selector, { state, timeout: remaining() });
+    await wait(HUD_READY, "attached");
+    ensureActive();
+    // The shell is ready; now the requested (lazy) page and its data: wait for the placeholder to
+    // go, the requests to settle, and the placeholder to still be gone once they have.
+    await wait(PAGE_MAIN, "attached");
+    await wait(PAGE_LOADING, "detached");
+    await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
+    ensureActive();
+    await wait(PAGE_LOADING, "detached");
     ensureActive();
     try {
       guard.page(page.url());
@@ -294,8 +331,104 @@ export async function renderHudWithPlaywright(
 
   try {
     return await Promise.race([work(), deadline]);
+  } catch (error) {
+    // A Playwright call limited to the time remaining can time out just before the deadline timer
+    if ((error as { name?: unknown })?.name === "TimeoutError") throw timeoutError();
+    throw error;
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);
     await closeOwned();
   }
+}
+
+/** The message the helper process replies with. */
+export type HudHelperReply = { ok: true; png: string } | { ok: false; error: string };
+/** What the parent asks the helper to render. */
+export interface HudHelperJob {
+  url: string;
+  hubOrigin: string;
+  executablePath?: string;
+  deadlineMs: number;
+}
+
+export interface HudHelperOptions {
+  /** The helper entry point; tests substitute a stand-in. */
+  helperPath?: string;
+  executablePath?: string;
+  deadlineMs?: number;
+  /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
+  graceMs?: number;
+}
+
+const HELPER_PATH = fileURLToPath(new URL("./hud-helper.ts", import.meta.url));
+/** What the helper (and so Chrome) may inherit: no tokens, only what a browser needs to run. */
+const HELPER_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "LANG", "MC_BROWSER_EXECUTABLE"];
+
+/** Kills the helper's whole process group (the helper and the Chrome it launched). */
+function killGroup(child: ChildProcess): void {
+  try {
+    if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // The group already exited.
+  }
+}
+
+/**
+ * Renders in an owned helper process, started in its own process group. However the render ends
+ * (a PNG, an error, the deadline, a crash) the group is killed afterwards, so no Chrome survives.
+ */
+export function renderHudInHelper(
+  url: string,
+  guard: HudRenderGuard,
+  options: HudHelperOptions = {},
+): Promise<Buffer> {
+  const deadlineMs = options.deadlineMs ?? HUD_RENDER_DEADLINE_MS;
+  const graceMs = options.graceMs ?? HUD_RENDER_CLOSE_MS + 2_000;
+  const env: Record<string, string> = {};
+  for (const key of HELPER_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  const child = fork(options.helperPath ?? HELPER_PATH, [], {
+    detached: true,
+    env,
+    execArgv: ["--experimental-strip-types", "--no-warnings"],
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  return new Promise<Buffer>((resolve, reject) => {
+    let done = false;
+    const finish = (settle: () => void): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      killGroup(child);
+      settle();
+    };
+    const timer = setTimeout(
+      () => finish(() => reject(new Error(`HUD screenshot timed out after ${deadlineMs} ms.`))),
+      deadlineMs + graceMs,
+    );
+    child.on("message", (reply: HudHelperReply) => {
+      if (reply?.ok === true && typeof reply.png === "string") {
+        const png = Buffer.from(reply.png, "base64");
+        finish(() => resolve(png));
+      } else {
+        const error = reply?.ok === false && typeof reply.error === "string" ? reply.error : "";
+        finish(() => reject(new Error(error || "HUD screenshot failed.")));
+      }
+    });
+    child.on("error", (e) =>
+      finish(() => reject(new Error(`HUD screenshot failed: ${errorText(e)}`))),
+    );
+    child.on("exit", () =>
+      finish(() => reject(new Error("HUD screenshot failed: the renderer process exited."))),
+    );
+    const job: HudHelperJob = {
+      url,
+      hubOrigin: guard.origin,
+      deadlineMs,
+      ...(options.executablePath === undefined ? {} : { executablePath: options.executablePath }),
+    };
+    child.send(job);
+  });
 }

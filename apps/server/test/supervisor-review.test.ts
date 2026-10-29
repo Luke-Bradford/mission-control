@@ -654,6 +654,48 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("a round-two brief names the prior review's id and its findings' positions", async () => {
+    const r = reviewOfPush({ state: "queued" });
+    store.setReviewState(r.reviewId, ["queued"], "running", { at: 2, runId: "retro:round-1" });
+    const finding = (summary: string, severity: "Critical" | "Minor") => ({
+      severity,
+      file: "a.txt",
+      line: 1,
+      summary,
+      scenario: "w",
+      fix: "f",
+    });
+    expect(
+      store.recordFindings(r.reviewId, "retro:round-1", {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings: [finding("a minor one", "Minor"), finding("the blocking one", "Critical")],
+        at: 3,
+      }),
+    ).toBe(true);
+    const second = store.requestReview({
+      authorRunId: r.author.id,
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 9,
+      sha: r.sha,
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: 4,
+    }) as number;
+    store.setReviewState(second, ["queued"], "starting", { at: 5 });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await sup.startReview("retro", second);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain(`(review id ${r.reviewId})`);
+    expect(brief).toContain("findingRef.reviewId may be left out");
+    expect(brief).toContain("pos 1. [Critical] a.txt:1 — the blocking one");
+    expect(brief).not.toContain("a minor one");
+  });
+
   it("startReview starts a review whose sha the pushed sha carries", async () => {
     const pushSha = "e".repeat(40);
     const r = reviewOfPush({ pushSha });
@@ -773,6 +815,7 @@ describe("startReview", () => {
         bodyLength: TICKET.body.length,
         notes: [],
         prevSha: null,
+        prevReviewId: null,
         prevFindings: [],
         prevReply: null,
         diffCut: false,

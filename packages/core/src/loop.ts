@@ -184,12 +184,24 @@ export const cleanupBranchNoteKey = (runId: string): string => `cleanup-branch:$
 /** A housekeeping note (a branch or a worktree that could not be removed): the controller's. */
 export const isCleanupNoteKey = (key: string): boolean =>
   key.startsWith("cleanup-") || key.startsWith("cleanup:");
-/** The flag note while a run's PR touches hard-rule files, per pushed sha. */
-export const hardRulesFlagKey = (runId: string, sha: string): string =>
-  `flag:${runId}:hard-rules:${sha}`;
-/** A run id may itself contain colons (`guido-1:20261021T165337Z`), so only the sha is anchored. */
+const FNV_64_OFFSET = 0xcbf29ce484222325n;
+const FNV_64_PRIME = 0x100000001b3n;
+const FNV_64_MASK = 0xffffffffffffffffn;
+
+/** A stable browser-safe hash for a set of hard-rule files, regardless of order or duplicates. */
+export const hardRulesFilesHash = (paths: readonly string[]): string => {
+  let hash = FNV_64_OFFSET;
+  for (const byte of new TextEncoder().encode(JSON.stringify([...new Set(paths)].sort()))) {
+    hash = ((hash ^ BigInt(byte)) * FNV_64_PRIME) & FNV_64_MASK;
+  }
+  return hash.toString(16).padStart(16, "0");
+};
+/** The flag note while a run's PR touches a particular set of hard-rule files. */
+export const hardRulesFlagKey = (runId: string, paths: readonly string[]): string =>
+  `flag:${runId}:hard-rules:${hardRulesFilesHash(paths)}`;
+/** A run id may itself contain colons (`guido-1:20261021T165337Z`), so only the hash is anchored. */
 export const isHardRulesFlagKey = (key: string): boolean =>
-  /^flag:.+:hard-rules:[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(key);
+  /^flag:.+:hard-rules:(?:[0-9a-f]{16}|[0-9a-f]{40}(?:[0-9a-f]{24})?)$/.test(key);
 /** The flag note for a CI failure that passed on its one re-run, per sha. */
 export const flakeNoteKey = (runId: string, sha: string): string => `flake:${runId}:${sha}`;
 /** A flake record is the controller's to follow up. */
@@ -1044,7 +1056,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
     });
   }
   if (loop.touches !== null && loop.touches.paths.length > 0) {
-    notes.set(hardRulesFlagKey(runId, loop.touches.sha), {
+    notes.set(hardRulesFlagKey(runId, loop.touches.paths), {
       noteKind: "flag",
       text: `${ticket.ref} touches hard-rule files: ${loop.touches.paths.join(", ")}`,
     });

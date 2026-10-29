@@ -215,6 +215,10 @@ let clearanceCalls: unknown[][];
 let clearanceOk: boolean;
 let rerunOk: boolean;
 let editCalls: unknown[][];
+let readImpl: (issue: number) => BoardItem | null;
+let readCalls: number[];
+let failEdit: boolean;
+let optionsImpl: () => { ok: boolean; reason?: string };
 let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
@@ -246,6 +250,8 @@ let secretSource: () => Promise<readonly string[]>;
 let logs: string[];
 let screenshotCalls: string[];
 let screenshotImpl: (url: string) => Promise<Buffer>;
+let shotsSaved: Buffer[];
+let shotsSaveImpl: (png: Buffer) => string;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -304,6 +310,10 @@ beforeEach(() => {
   clearanceOk = true;
   rerunOk = true;
   editCalls = [];
+  readImpl = () => null;
+  readCalls = [];
+  failEdit = false;
+  optionsImpl = () => ({ ok: true });
   fetchCalls = [];
   fetchRepos = [];
   busyNow = [];
@@ -337,9 +347,15 @@ beforeEach(() => {
   logs = [];
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
+  shotsSaved = [];
+  shotsSaveImpl = (png) => {
+    shotsSaved.push(png);
+    return "a".repeat(32);
+  };
   stateSeen.mockClear();
   tools = createFlightTools({
     hubOrigin: "http://127.0.0.1:7420",
+    hudShots: { save: (png) => shotsSaveImpl(png), read: () => null },
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
@@ -409,7 +425,15 @@ beforeEach(() => {
     board: {
       edit: async (...args) => {
         editCalls.push(args);
-        return { ok: true, changed: true };
+        return failEdit ? { ok: false, reason: "boom" } : { ok: true, changed: true };
+      },
+      checkFields: async () => {
+        const r = optionsImpl();
+        return r.ok ? { ok: true, changed: false } : { ok: false, reason: r.reason ?? "" };
+      },
+      read: async (_repoId, issue) => {
+        readCalls.push(issue);
+        return readImpl(issue);
       },
       move: async (m) => {
         moveCalls.push(m);
@@ -643,6 +667,59 @@ describe("screenshot_hud", () => {
     need(cfg.repos[0]).flightPowers = "standard";
     expect(await call("screenshot_hud", { page: "/map" })).toEqual(refusal);
     expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  });
+
+  it("stores the screenshot and cites an opaque reference in the answer", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    const result = await call("screenshot_hud", { page: "/map" });
+    expect(result.text).toBe(`HUD screenshot (1600×1000). Reference: hud-shot:${"a".repeat(32)}`);
+    expect(shotsSaved).toEqual([Buffer.from("png")]);
+    expect(result).toMatchObject({ image: { mimeType: "image/png" } });
+  });
+
+  it("still returns the image when it cannot be stored", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    shotsSaveImpl = () => {
+      throw new Error("disk full");
+    };
+    const result = await call("screenshot_hud", { page: "/map" });
+    expect(result.text).toContain("Not stored");
+    expect(result.isError).toBeUndefined();
+    expect(result).toMatchObject({ image: { mimeType: "image/png" } });
+  });
+
+  it("applies a powers downgrade made while the call waits in the render queue", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    let release: () => void = () => {};
+    screenshotImpl = () =>
+      new Promise<Buffer>((resolve) => {
+        release = () => resolve(Buffer.from("png"));
+      });
+    const first = call("screenshot_hud", { page: "/map" });
+    await vi.waitFor(() => expect(screenshotCalls).toHaveLength(1));
+    const second = call("screenshot_hud", { page: "/board" });
+    need(cfg.repos[0]).flightPowers = "standard"; // while the second is queued behind the first
+    release();
+    await first;
+    expect(await second).toEqual({ text: needsSuperuserText("o/mc"), isError: true });
+    expect(screenshotCalls).toEqual(["http://127.0.0.1:7420/map"]);
+  });
+
+  it("runs a queued render after the one before it failed", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    let fail: (e: Error) => void = () => {};
+    screenshotImpl = (url) =>
+      url.endsWith("/map")
+        ? new Promise<Buffer>((_, reject) => {
+            fail = reject;
+          })
+        : Promise.resolve(Buffer.from("png"));
+    const first = call("screenshot_hud", { page: "/map" });
+    await vi.waitFor(() => expect(screenshotCalls).toHaveLength(1));
+    const second = call("screenshot_hud", { page: "/board" });
+    fail(new Error("Chrome crashed"));
+    expect((await first).text).toBe("Chrome crashed");
+    expect(await second).toMatchObject({ image: { mimeType: "image/png" } });
   });
 
   it("counts attempted launches, expires the hourly cap, and describes the limit", async () => {
@@ -1658,11 +1735,9 @@ describe("message_seat", () => {
     ...over,
   });
 
-  it("sends with the FLIGHT prefix and records it", async () => {
+  it("wakes through the supervisor inbox boundary and records it", async () => {
     expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Please push", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(decisions()).toMatchObject([
       {
         kind: "message",
@@ -1675,12 +1750,17 @@ describe("message_seat", () => {
     expect(seen).toContain("flight");
   });
 
-  it("records the message as FLIGHT to the seat, without the prefix, about its run's ticket", async () => {
+  it("records the message as a labelled handoff from FLIGHT, without the prefix, about its run's ticket", async () => {
     live("guido-1", "r-guido", { ticket: "mc#7" });
     await call("message_seat", M());
-    expect(store.comms(0)).toEqual([
-      { at: NOW, from: "flight-1", to: "guido-1", ticket: "mc#7", text: "Please push" },
-    ]);
+    expect(store.commsMessage("comms:1")).toMatchObject({
+      at: NOW,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "mc#7",
+      label: "handoff",
+      text: "Please push",
+    });
     expect(seen).toContain("agents");
   });
 
@@ -1730,7 +1810,9 @@ describe("message_seat", () => {
     };
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
-    expect(store.comms(0)).toEqual([]);
+    expect(store.comms(0)).toMatchObject([
+      { from: "flight-1", to: "guido-1", text: "Please push" },
+    ]);
   });
 
   it("does not deliver or store when the seat leaves during secret scanning", async () => {
@@ -1829,9 +1911,7 @@ describe("message_seat unpark", () => {
     expect(await call("message_seat", U())).toEqual({
       text: "Sent to GUIDO-1, and its run is un-parked.",
     });
-    expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT: Carry on", { interrupt: false, questions: "none" }],
-    ]);
+    expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
     expect(decisions()).toMatchObject([
       {
@@ -3413,6 +3493,48 @@ describe("create_ticket", () => {
       text: "Filed mc#42, on the project, but not confirmed in Backlog. Recorded in Decided without you.",
     });
     expect(decisions()).toHaveLength(1);
+  });
+
+  describe("with a size and priority", () => {
+    beforeEach(() => {
+      need(cfg.repos[0]).flightPowers = "superuser";
+    });
+    it("sets them on the project item it added, then moves it to Backlog", async () => {
+      expect(await call("create_ticket", C({ size: "S", priority: "P1" }))).toEqual({
+        text: "Filed mc#42, on the project in Backlog. Recorded in Decided without you.",
+      });
+      expect(editCalls).toEqual([["mc", 42, { size: "S", priority: "P1" }]]);
+      expect(moveCalls).toHaveLength(1);
+    });
+    it("refuses an invalid size or priority before any write", async () => {
+      for (const over of [{ size: "HUGE" }, { priority: "P9" }])
+        expect((await call("create_ticket", C(over))).isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+      expect(editCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+    it("refuses before any write when the board lacks the option", async () => {
+      optionsImpl = () => ({ ok: false, reason: "No Size option S." });
+      const r = await call("create_ticket", C({ size: "S" }));
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("No Size option S.");
+      expect(ghCalls.some((a) => a[1] === "create")).toBe(false);
+      expect(editCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+    it("refuses before any write on a repo that is not superuser", async () => {
+      need(cfg.repos[0]).flightPowers = "standard";
+      expect((await call("create_ticket", C({ size: "S" }))).isError).toBe(true);
+      expect(ghCalls).toEqual([]);
+    });
+    it("says so when the fields could not be set, and still records the ticket", async () => {
+      failEdit = true;
+      const r = await call("create_ticket", C({ size: "S" }));
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("Filed mc#42");
+      expect(r.text).toContain("Size and Priority");
+      expect(decisions()).toHaveLength(1);
+    });
   });
 
   it("refuses an unparseable gh answer, and records nothing", async () => {
@@ -5660,6 +5782,22 @@ describe("superuser housekeeping", () => {
     ).not.toHaveProperty("isError", true);
     expect(editCalls).toEqual([["mc", 7, { size: "S", priority: "P0" }]]);
     expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({ assignees: ["work-account"] });
+  });
+  it("reads a card the board cache has not seen yet, instead of refusing", async () => {
+    elevated();
+    readImpl = (n) => card(n);
+    expect(await call("edit_card", { issue: 42, size: "S" })).not.toHaveProperty("isError", true);
+    expect(readCalls).toEqual([42]);
+    expect(editCalls).toEqual([["mc", 42, { size: "S" }]]);
+  });
+  it("refuses a card that is on no board even after the re-read", async () => {
+    elevated();
+    expect(await call("edit_card", { issue: 42, size: "S" })).toMatchObject({
+      isError: true,
+      text: "Card is not on this repo's board.",
+    });
+    expect(readCalls).toEqual([42]);
+    expect(editCalls).toEqual([]);
   });
   it("never dismisses operator items or guard acknowledgements", async () => {
     elevated();

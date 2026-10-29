@@ -1,5 +1,6 @@
 import {
   type CrewRow,
+  type LimitRow,
   LOCK_OUTCOME_TEXT,
   lockWaitingLine,
   startOfLocalDay,
@@ -17,6 +18,7 @@ import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useSeatName } from "../seatName.ts";
+import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
@@ -29,6 +31,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
   const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
   const lock = useTestLock();
   const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
+  const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const waits = new Map<string, number>();
   const holds = [...(history?.runs ?? [])];
   const h = lock?.holder;
@@ -63,16 +66,105 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     live: scope.live,
   };
 
+  // New telemetry carries explicit provider reset observations. Legacy rows remain readable, but
+  // never manufacture a reset from a falling percentage.
+  const quotaRows =
+    t?.series?.quota ?? (t?.quota ?? []).map((row) => ({ ...row, resets: [] as const }));
   // A window keeps its colour whichever account is picked: its place among all the windows.
-  const quota = (t?.quota ?? [])
+  const quota = quotaRows
     .map((q, i) => ({ q, color: agentColor(i) }))
     .filter(({ q }) => scope.account === "" || q.accountId === scope.account);
   const quotaLines: LineSeries[] = quota.map(({ q, color }) => ({
     id: `${q.accountId}:${q.window}`,
     name: `${q.accountId} ${q.window}`,
     color,
-    points: q.points.map((p) => ({ at: p.at, v: p.pct })),
+    points: q.points.flatMap((point, index) => {
+      const previous = q.points[index - 1];
+      const reset = q.resets.some((event) => event.at === point.at);
+      // Both an observed reset and an unexplained fall break continuity; only the former is named.
+      return reset || (previous && point.pct < previous.pct)
+        ? [
+            { at: point.at, v: null },
+            { at: point.at, v: point.pct },
+          ]
+        : [{ at: point.at, v: point.pct }];
+    }),
   }));
+  // Only the provider's explicit reset record earns a reset annotation.
+  const quotaResets = quota.flatMap(({ q }) =>
+    q.resets.map((reset) => ({ at: reset.at, label: `${q.accountId} ${q.window} reset` })),
+  );
+  const quotaLegend = quota.map(({ q, color }) => {
+    const latest = q.points.at(-1);
+    return {
+      key: `${q.accountId}:${q.window}`,
+      name: `${q.accountId} ${q.window} · ${latest ? `${Math.round(latest.pct)}%` : DASH}`,
+      color,
+    };
+  });
+  const quotaGuides = quota.flatMap(({ q }) => {
+    const row = limits.find(
+      (limit) => limit.accountId === q.accountId && limit.window === q.window,
+    );
+    return row
+      ? [
+          {
+            value: row.alertAt,
+            label: `${q.accountId} alert ${row.alertAt}%`,
+            color: "var(--warn)",
+          },
+          { value: row.stopAt, label: `${q.accountId} stop ${row.stopAt}%`, color: "var(--crit)" },
+        ]
+      : [];
+  });
+  const quotaForecastLines: LineSeries[] = quota.flatMap(({ q, color }) => {
+    const row = limits.find(
+      (limit) => limit.accountId === q.accountId && limit.window === q.window,
+    );
+    const last = q.points.at(-1);
+    // Only the server's 7d projection is used: no client-side pace is invented.
+    return row?.window === "7d" && last && row.projected !== null
+      ? [
+          {
+            id: `${q.accountId}:${q.window}:forecast`,
+            name: `${q.accountId} ${q.window} projected`,
+            color,
+            dash: "4 3",
+            points: [
+              { at: last.at, v: last.pct },
+              { at: row.resetAt, v: row.projected },
+            ],
+          },
+        ]
+      : [];
+  });
+  const quotaResetEvents = [
+    ...quotaResets,
+    ...quota.flatMap(({ q }) => {
+      const row = limits.find(
+        (limit) => limit.accountId === q.accountId && limit.window === q.window,
+      );
+      return row
+        ? [
+            { at: row.resetAt, label: `${q.accountId} ${q.window} reset` },
+            ...(row.stopForecast === null
+              ? []
+              : [{ at: row.stopForecast, label: `${q.accountId} ${q.window} stop forecast` }]),
+            ...(row.fullAt === null
+              ? []
+              : [{ at: row.fullAt, label: `${q.accountId} ${q.window} full forecast` }]),
+          ]
+        : [];
+    }),
+    ...chartAnnotations(t?.series?.annotations ?? []),
+  ];
+  const quotaTo = Math.max(now, ...limits.map((row) => row.resetAt));
+  const quotaChart = {
+    ...chart,
+    to: quotaTo,
+    xLabels: [`-${scope.range}`, quotaTo === now ? "now" : "reset"] as [string, string],
+    live: quotaTo === now && scope.live,
+  };
   const machine = t?.machine ?? [];
   const machineLines: LineSeries[] = [
     {
@@ -99,20 +191,16 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         ) : (
           <div className="pb">
             <LineChart
-              series={quotaLines}
+              series={[...quotaLines, ...quotaForecastLines]}
               max={110}
               ticks={[0, 50, 100]}
               limit
+              annotations={quotaResetEvents}
+              guides={quotaGuides}
               label="Quota used"
-              {...chart}
+              {...quotaChart}
             />
-            <Legend
-              items={quota.map(({ q, color }) => ({
-                key: `${q.accountId}:${q.window}`,
-                name: `${q.accountId} ${q.window} · ${Math.round(q.points.at(-1)?.pct ?? 0)}%`,
-                color,
-              }))}
-            />
+            <Legend items={quotaLegend} />
           </div>
         )}
       </Panel>
@@ -135,6 +223,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
                 to: r.endedAt ?? now,
                 label: `${nameOf(r.seatId)} suite`,
               }))}
+              annotations={chartAnnotations(t.series?.annotations ?? [])}
               {...chart}
             />
             <Legend

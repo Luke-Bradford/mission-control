@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMMS_CAPCOM, LOOPBACK_HOST, type RepoId, seatCallSign } from "@mc/core";
+import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
@@ -32,6 +32,7 @@ import {
   githubToken,
   makeGql,
 } from "./collectors/github.ts";
+import { commsInboxContext } from "./comms.ts";
 import {
   ConfigError,
   configuredAgents,
@@ -53,10 +54,11 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
-import { renderHudWithPlaywright } from "./flight/hud-render.ts";
+import { renderHudInHelper } from "./flight/hud-render.ts";
+import { hudShotStore } from "./flight/hud-store.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { editCardFields, type Move, moveCard } from "./github-board.ts";
+import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -137,6 +139,9 @@ export async function main(): Promise<void> {
     lockState: () => lock.state(),
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    deliverDefault: async (seatId, text) => {
+      await supervisor.message(seatId, text, { interrupt: false });
+    },
   });
   const preview = isPreview(port, process.env);
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
@@ -179,6 +184,7 @@ export async function main(): Promise<void> {
     cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
+    inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
   });
   // a seat that frees up is about to take new work: read the boards first
   refreshOnSeatFree(
@@ -197,15 +203,13 @@ export async function main(): Promise<void> {
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
-  const deliverComms = (seatId: string, text: string, from: string): void => {
-    const sender = from === COMMS_CAPCOM ? COMMS_CAPCOM : seatCallSign(from);
-    const envelope = `Comms from ${sender}: ${text}`;
-    void messageUnpausedSeat(store, supervisor, seatId, envelope, {
+  const deliverComms = (seatId: string, _text: string, _from: string): void => {
+    void messageUnpausedSeat(store, supervisor, seatId, "", {
       interrupt: false,
       questions: "none",
     }).catch((e: unknown) => {
       log(
-        `comms: could not deliver ${sender} to ${seatId}: ${e instanceof Error ? e.message : String(e)}`,
+        `comms: could not deliver inbox to ${seatId}: ${e instanceof Error ? e.message : String(e)}`,
       );
     });
   };
@@ -247,6 +251,14 @@ export async function main(): Promise<void> {
   const engineBoard = {
     edit: async (repoId: string, issue: number, fields: { size?: string; priority?: string }) =>
       editCardFields({ gql: makeGql(await githubToken()), store, config }, repoId, issue, fields),
+    checkFields: async (repoId: string, fields: { size?: string; priority?: string }) =>
+      checkCardFieldOptions({ gql: makeGql(await githubToken()), config }, repoId, fields),
+    read: async (repoId: string, issue: number) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      return repo === undefined
+        ? null
+        : fetchQueueCard(repo, issue, makeGql(await githubToken()), Date.now());
+    },
     move: async (m: Move) => {
       const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
       // a card that moved shows on the boards now, not at the next poll
@@ -328,10 +340,14 @@ export async function main(): Promise<void> {
     edit: (repoId, issue, fields) => engineBoard.edit(repoId, issue, fields),
   };
 
+  // FLIGHT's HUD screenshots are kept under the private data dir, for a week.
+  const hudShots = hudShotStore(join(dirname(dbPath), "hud-screenshots"));
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    hudShots,
     hubOrigin: `http://${HOST}:${port}`,
-    screenshotHud: renderHudWithPlaywright,
+    screenshotHud: renderHudInHelper,
     focus: (seatId, focus) => {
       if (preview && process.env.MC_CONFIG === undefined)
         throw new Error("Focus writes unavailable.");
@@ -453,6 +469,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    hudShots,
     queueReorder,
     mapRing,
     operatorToken,

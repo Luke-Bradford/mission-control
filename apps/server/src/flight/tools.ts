@@ -59,8 +59,10 @@ import {
   createBodyText,
   createdDecision,
   createdDraftText,
+  createdFieldsFailedText,
   createdText,
   createFailedText,
+  createFieldOptionText,
   createLabelsText,
   createTextText,
   DEFAULT_PROFILES,
@@ -79,9 +81,9 @@ import {
   endedDecision,
   endedText,
   endFailedText,
+  FIELDS_NEED_SUPERUSER,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_ABOUT_MAX,
-  FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_BASIS_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
@@ -296,11 +298,12 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
+  heldRun,
   holdItem,
+  protectedDecisionItem,
   releaseHold,
 } from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
@@ -347,6 +350,7 @@ import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
+import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
@@ -366,6 +370,8 @@ export interface FlightToolsDeps {
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
   screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
+  /** Where screenshots are kept for a durable reference; absent: the image is not stored. */
+  hudShots?: HudShotStore;
   focus?: (seatId: string, focus: string | null) => Promise<unknown>;
   queueReorder?: (
     seatId: string,
@@ -399,6 +405,13 @@ export interface FlightToolsDeps {
       issue: number,
       fields: { size?: string; priority?: string },
     ) => Promise<MoveResult>;
+    /** Whether the project has these Size and Priority options; reads, writes nothing. */
+    checkFields?: (
+      repoId: string,
+      fields: { size?: string; priority?: string },
+    ) => Promise<MoveResult>;
+    /** One issue's board item read fresh, for a card the cached board has not seen yet. */
+    read?: (repoId: string, issue: number) => Promise<BoardItem | null>;
   };
   /** gh, through its one wrapper (`createGh`): create_ticket and comment_ticket write with it. */
   gh: GhRunner;
@@ -683,6 +696,8 @@ const CreateTicketArgs = z.strictObject({
   title: text(FLIGHT_TICKET_TITLE_MAX).refine((s) => !/[\r\n]/.test(s), "must be one line"),
   body: text(TICKET_BODY_MAX),
   labels: z.array(z.string().min(1).max(100)).min(1).max(10),
+  size: z.enum(TICKET_SIZES).optional(),
+  priority: z.enum(PRIORITIES).optional(),
   basis: basisArg,
 });
 const CommentTicketArgs = z.strictObject({
@@ -896,8 +911,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const png = await renderer(target, guard);
         if (png.byteLength > HUD_SCREENSHOT_MAX_BYTES)
           return fail(`HUD screenshot refused: PNG exceeds ${HUD_SCREENSHOT_MAX_BYTES} bytes.`);
+        let reference = "";
+        try {
+          const id = deps.hudShots?.save(png);
+          if (id) reference = ` Reference: ${HUD_SHOT_REF_PREFIX}${id}`;
+        } catch {
+          reference = " Not stored: the screenshot could not be saved.";
+        }
         return {
-          text: "HUD screenshot (1600×1000).",
+          text: `HUD screenshot (1600×1000).${reference}`,
           image: { data: png.toString("base64"), mimeType: "image/png" },
         };
       } catch (e) {
@@ -1338,11 +1360,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           knownSecrets: deps.knownSecrets,
           now: () => at,
           seatSender: false,
-          notify: async (to, text) => {
+          notify: async (to, _text) => {
             // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
             if (to !== seat || (lift !== null && !lift.onSeat)) return;
             try {
-              await deps.supervisor.message(seat, `FLIGHT: ${text}`, {
+              await deps.supervisor.message(seat, "", {
                 interrupt: false,
                 questions: "none",
               });
@@ -1352,7 +1374,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           },
         },
         ctx.seatId,
-        { to: seat, text: body, ref: unendedRun(seat)?.ticket ?? undefined },
+        { to: seat, text: body, label: "handoff", ref: unendedRun(seat)?.ticket ?? undefined },
       );
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Message refused.");
@@ -1688,10 +1710,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function createTicket(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, CreateTicketArgs, args);
     if (!c.ok) return c.result;
-    const { title, body, labels, basis } = c.args;
+    const { title, body, labels, size, priority, basis } = c.args;
     const repo = repoOf();
     if (repo === undefined) return fail(CREATE_NO_REPO);
     if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
+    const fields = {
+      ...(size === undefined ? {} : { size }),
+      ...(priority === undefined ? {} : { priority }),
+    };
+    const setsFields = size !== undefined || priority !== undefined;
+    if (
+      setsFields &&
+      (repo.flightPowers !== "superuser" ||
+        repo.autonomy !== "merge" ||
+        !deps.board.edit ||
+        !deps.board.checkFields)
+    )
+      return fail(FIELDS_NEED_SUPERUSER);
     const bad = labelsProblem(labels);
     if (bad !== null) return fail(createLabelsText(bad));
     const missing = [
@@ -1741,6 +1776,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
+      if (setsFields) {
+        // before the issue exists: a board without the option refuses the call, files nothing
+        const checked = await deps.board.checkFields?.(repo.id, fields);
+        if (!checked?.ok) return fail(createFieldOptionText(checked?.reason ?? ""));
+      }
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const created = await deps.gh(
         [
@@ -1783,6 +1823,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // a draft repo's board is never written: moveCard would answer ok and change nothing
       if (repo.autonomy !== "merge") return { text: createdDraftText(ref, repo.id) };
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+      if (setsFields) {
+        const edited = await deps.board.edit?.(repo.id, issue, fields);
+        if (!edited?.ok) {
+          deps.log?.(`mc create_ticket: setting fields on ${ref} failed: ${edited?.reason ?? ""}`);
+          return fail(createdFieldsFailedText(ref));
+        }
+      }
       const moved = await deps.board.move({
         runId: ctx.runId,
         repoId: repo.id,
@@ -1845,7 +1892,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function closeTicket(
     a: z.output<typeof CloseTicketArgs>,
     repo: CcConfig["repos"][number],
-    ctx: McToolContext,
+    _ctx: McToolContext,
   ): Promise<Result> {
     const refuse = (why: string) => fail(closeRefusedText(why));
     const at = now();
@@ -2128,6 +2175,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         options: options ?? [],
         basis,
         at,
+        defaultEligible: !protectedDecisionItem(store, item, config, at),
       });
     } catch {
       return fail("Source changed; refresh the item before drafting.");
@@ -2731,20 +2779,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   function held(run: Run): boolean {
-    const seat = seatCfg(run.agentId);
-    return (
-      !seat ||
-      run.repoId !== repoOf()?.id ||
-      store.seatSession(run.agentId)?.state === "stopped" ||
-      run.loop?.parked?.kind === "budget" ||
-      store
-        .openQuestions()
-        .some(
-          (q) =>
-            q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
-        ) ||
-      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
-    );
+    return heldRun(store, config, now(), run, repoOf()?.id);
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
@@ -2917,7 +2952,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       async (a, repo) => {
         if (a.assignees?.some((login) => !config.operator.githubLogins?.includes(login)))
           return fail("Assignees must be configured GitHub logins.");
-        const card = store.board(repo.id).find((c) => c.issueNumber === a.issue);
+        // a card filed since the last board poll: read that one item instead of refusing
+        const card =
+          store.board(repo.id).find((c) => c.issueNumber === a.issue) ??
+          (await deps.board.read?.(repo.id, a.issue).catch(() => null));
         if (!card) return fail("Card is not on this repo's board.");
         const rules = await deps.rules(repo.id);
         if (rules instanceof Error) return fail("Cannot read repo rules.");
@@ -3002,6 +3040,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
           (i) => i.key === a.key,
         );
+        if (item && protectedDecisionItem(store, item, config, now()))
+          return fail("This item is protected or unavailable.");
         // an item FLIGHT holds for triage (owner "flight") is still the operator's underneath
         if (
           !resolved &&
@@ -3165,7 +3205,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.screenshotHud,
-      description: `Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour; the host renders one at a time. Compare the image with the mockup and direction, then file or fold the gap.`,
+      description: `Render one HUD page at 1600×1000 for product review. The renderer permits only GET requests to this hub and rejects every non-HUD or off-origin page. At most ${FLIGHT_HUD_RENDERS_PER_HOUR} attempts per FLIGHT per hour; the host renders one at a time. The result carries a stored reference (the operator opens it in the HUD's API at /api/hud-screenshots/<id>; it is kept for a week): cite it when you file or fold a gap. Compare the image with the mockup and direction first.`,
       inputSchema: z.toJSONSchema(ScreenshotHudArgs),
       modes: [],
       grantable: ["read-only"],
@@ -3220,6 +3260,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
           labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 },
+          size: { enum: [...TICKET_SIZES], description: "Optional; superuser repos only." },
+          priority: { enum: [...PRIORITIES], description: "Optional; superuser repos only." },
           basis: BASIS_SCHEMA,
         },
         ["title", "body", "labels", "basis"],

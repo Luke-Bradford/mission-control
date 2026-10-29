@@ -8,6 +8,7 @@ import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import {
   BOARD_IDS_TTL_MS,
+  checkCardFieldOptions,
   clearBoardIds,
   editCardFields,
   followPrs,
@@ -705,4 +706,60 @@ it("edits Size and Priority through the existing project field mutation", async 
       value: { singleSelectOptionId: "high" },
     },
   ]);
+});
+
+describe("checkCardFieldOptions", () => {
+  const c = {
+    ...config,
+    repos: config.repos.map((r) => ({ ...r, flightPowers: "superuser" as const })),
+  } as unknown as CcConfig;
+  const project = (
+    fields: { id: string; name: string; options: { id: string; name: string }[] }[],
+  ) => {
+    const calls: string[] = [];
+    const gql: Gql = async (query) => {
+      calls.push(query);
+      return {
+        repositoryOwner: {
+          __typename: "User",
+          projectV2: { id: "project", fields: { pageInfo: { hasNextPage: false }, nodes: fields } },
+        },
+      };
+    };
+    return { gql, calls };
+  };
+  const SIZE = { id: "size", name: "Size", options: [{ id: "small", name: "S" }] };
+  const PRIORITY = { id: "priority", name: "Priority", options: [{ id: "high", name: "P0" }] };
+
+  it("is ok for options the project has, and mutates nothing", async () => {
+    const { gql, calls } = project([SIZE, PRIORITY]);
+    expect(
+      await checkCardFieldOptions({ config: c, gql }, "mc", { size: "S", priority: "P0" }),
+    ).toEqual({ ok: true, changed: false });
+    expect(calls.some((q) => q.includes("updateProjectV2ItemFieldValue"))).toBe(false);
+  });
+  it("refuses a Size or Priority option the project lacks", async () => {
+    const { gql } = project([SIZE, PRIORITY]);
+    expect(await checkCardFieldOptions({ config: c, gql }, "mc", { size: "XL" })).toEqual({
+      ok: false,
+      reason: "No Size option XL.",
+    });
+    expect(await checkCardFieldOptions({ config: c, gql }, "mc", { priority: "P2" })).toEqual({
+      ok: false,
+      reason: "No Priority option P2.",
+    });
+  });
+  it("refuses when the project has no such field", async () => {
+    const { gql } = project([PRIORITY]);
+    const r = await checkCardFieldOptions({ config: c, gql }, "mc", { size: "S" });
+    expect(r.ok).toBe(false);
+  });
+  it("refuses a repo that is not superuser", async () => {
+    const { gql, calls } = project([SIZE]);
+    expect(await checkCardFieldOptions({ config, gql }, "mc", { size: "S" })).toEqual({
+      ok: false,
+      reason: "Superuser required.",
+    });
+    expect(calls).toEqual([]);
+  });
 });

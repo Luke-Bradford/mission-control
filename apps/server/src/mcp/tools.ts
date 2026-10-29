@@ -57,6 +57,7 @@ import {
   FINDINGS_FAIL_NEEDS_BLOCKING,
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
+  type FindingResolution,
   findingFileOk,
   findingFileText,
   firstCommitNotifier,
@@ -333,7 +334,10 @@ const FindingsArgs = z.strictObject({
   resolutions: z
     .array(
       z.strictObject({
-        findingRef: z.strictObject({ reviewId: z.int().positive(), pos: z.int().min(0) }),
+        findingRef: z.strictObject({
+          reviewId: z.int().positive().optional(),
+          pos: z.int().min(0),
+        }),
         outcome: z.enum(FINDING_RESOLUTION_OUTCOMES),
       }),
     )
@@ -387,10 +391,15 @@ const FindingResolutionSchema = {
     findingRef: {
       type: "object",
       properties: {
-        reviewId: { type: "integer", minimum: 1 },
+        reviewId: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Optional: the previous round's review id, which Mission Control supplies when it is left out.",
+        },
         pos: { type: "integer", minimum: 0 },
       },
-      required: ["reviewId", "pos"],
+      required: ["pos"],
       additionalProperties: false,
     },
     outcome: { type: "string", enum: [...FINDING_RESOLUTION_OUTCOMES] },
@@ -1272,6 +1281,38 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     };
   }
 
+  /** A seat's wake context: not the whole crew channel or every conversation it owns. */
+  async function commsInbox(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = CommsReadArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    if (liveRun(ctx) === null) return ENDED;
+    const pinned = new Set(store.commsPins().map((row) => row.id));
+    const rows = store
+      .commsInboxRun(ctx.seatId, ctx.runId)
+      .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
+      .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)))
+      .slice(-parsed.data.limit)
+      .map((row) => {
+        const chars = Array.from(row.text);
+        return {
+          ...row,
+          text:
+            chars.length > MC_TEXT_MAX
+              ? `${chars.slice(0, MC_TEXT_MAX).join("")}${commsCutMarker(MC_TEXT_MAX, chars.length)}`
+              : row.text,
+          operator: row.from === COMMS_CAPCOM,
+          pinned: pinned.has(row.id),
+          unread: !store.commsInboxRead(ctx.seatId, row.id),
+          reactions: store.commsReactions(row.id),
+        };
+      });
+    store.markCommsInboxRead(
+      ctx.seatId,
+      rows.map((row) => row.id),
+    );
+    return { text: JSON.stringify({ messages: rows }) };
+  }
+
   async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = CommsSendArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2035,27 +2076,37 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (new Set((checked ?? []).map((check) => check.check)).size !== (checked ?? []).length) {
       return { text: `${MC_BAD_ARGS}checked: each check may appear once`, isError: true };
     }
+    let resolved: FindingResolution[] | undefined;
     if (resolutions !== undefined) {
+      if (review.round < 2)
+        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
+      const previous = store
+        .reviewsOfRun(review.authorRunId)
+        .filter((r) => r.id < review.id && r.epoch === review.epoch && r.state === "reported")
+        .at(-1);
+      // a reference without a review id is the previous round's finding at that position
+      resolved = resolutions.map((resolution) => ({
+        ...resolution,
+        findingRef: {
+          reviewId: resolution.findingRef.reviewId ?? previous?.id ?? 0,
+          pos: resolution.findingRef.pos,
+        },
+      }));
       if (
         new Set(
-          resolutions.map((resolution) =>
+          resolved.map((resolution) =>
             [resolution.findingRef.reviewId, resolution.findingRef.pos].join(":"),
           ),
-        ).size !== resolutions.length
+        ).size !== resolved.length
       ) {
         return {
           text: `${MC_BAD_ARGS}resolutions: each prior finding may appear once`,
           isError: true,
         };
       }
-      if (review.round < 2)
-        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
-      const previous = store
-        .reviewsOfRun(review.authorRunId)
-        .find((r) => r.round === review.round - 1);
       if (
         previous === undefined ||
-        resolutions.some(
+        resolved.some(
           (resolution) =>
             resolution.findingRef.reviewId !== previous.id ||
             !store
@@ -2086,7 +2137,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         findings,
         checked,
         tests,
-        resolutions,
+        resolutions: resolved,
         at,
       })
     ) {
@@ -2268,6 +2319,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer", "read-only", "scratch"],
       call: commsRead,
+    },
+    {
+      name: MC_TOOL_NAMES.commsInbox,
+      description:
+        "Read this seat's inbox: messages addressed to it, messages that tag it, replies to its messages and current pins. It never includes the whole crew channel.",
+      inputSchema: {
+        type: "object",
+        properties: { limit: { type: "number", minimum: 1, maximum: 100, default: 50 } },
+        additionalProperties: false,
+      },
+      modes: ["writer", "read-only", "scratch"],
+      call: commsInbox,
     },
     {
       name: MC_TOOL_NAMES.commsSend,

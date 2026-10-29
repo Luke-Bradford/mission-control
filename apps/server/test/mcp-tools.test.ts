@@ -321,6 +321,7 @@ describe("the mc tools", () => {
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
       [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
+      [MC_TOOL_NAMES.commsInbox, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
@@ -333,6 +334,7 @@ describe("the mc tools", () => {
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
       MC_TOOLS.commsRead,
+      MC_TOOLS.commsInbox,
       MC_TOOLS.commsSend,
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
@@ -1179,6 +1181,7 @@ describe("through /mcp", () => {
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
       expect(await names(writer)).toEqual([
         "comms_read",
+        "comms_inbox",
         "comms_send",
         "comms_react",
         "commit",
@@ -1196,6 +1199,7 @@ describe("through /mcp", () => {
       ).toBe("unknown tool");
       expect(await names(reader)).toEqual([
         "comms_read",
+        "comms_inbox",
         "comms_send",
         "comms_react",
         "ask_flight",
@@ -1290,6 +1294,8 @@ describe("through /mcp", () => {
 describe("Comms seat tools", () => {
   const read = (args: unknown = {}, ts = tools, ctx = CTX) =>
     tool("comms_read", ts).call(ctx, args);
+  const inbox = (args: unknown = {}, ts = tools, ctx = CTX) =>
+    tool("comms_inbox", ts).call(ctx, args);
   const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
 
@@ -1313,6 +1319,56 @@ describe("Comms seat tools", () => {
     ]);
     expect(parsed.messages.every((message) => message.id.startsWith("comms:"))).toBe(true);
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
+  });
+
+  it("reads only its direct, mentioned, replied and pinned inbox rows, newest last", async () => {
+    const own = store.addComms({
+      at: NOW - 8,
+      from: "guido-1",
+      to: "retro",
+      ticket: null,
+      text: "my message",
+    });
+    store.addComms({ at: NOW - 7, from: "retro", to: "crew", ticket: null, text: "crew" });
+    store.addComms({ at: NOW - 6, from: "retro", to: "guido-1", ticket: null, text: "direct" });
+    store.addComms({
+      at: NOW - 5,
+      from: "retro",
+      to: "crew",
+      ticket: null,
+      text: "mentioned",
+      mentions: ["guido-1"],
+    });
+    store.addComms({
+      at: NOW - 4,
+      from: "retro",
+      to: "guido-2",
+      ticket: null,
+      text: "reply",
+      replyTo: own?.id,
+    });
+    const pinned = store.addComms({
+      at: NOW - 3,
+      from: "guido-2",
+      to: "retro",
+      ticket: null,
+      text: "pin",
+    });
+    store.addComms({ at: NOW - 2, from: "guido-2", to: "retro", ticket: null, text: "other" });
+    if (pinned === null) throw new Error("expected stored pin");
+    store.setCommsPinned(pinned.id, true, "CAPCOM", NOW - 1);
+
+    const parsed = JSON.parse((await inbox()).text) as {
+      messages: { text: string; pinned: boolean; unread: boolean }[];
+    };
+    expect(
+      parsed.messages.map((message) => [message.text, message.pinned, message.unread]),
+    ).toEqual([
+      ["direct", false, true],
+      ["mentioned", false, true],
+      ["reply", false, true],
+      ["pin", true, true],
+    ]);
   });
 
   it("keeps rework targeted at an aside run from a newer run on the same seat", async () => {
@@ -1472,19 +1528,21 @@ describe("Comms seat tools", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
-  it("delivers direct and mentioned seats once, while reactions never wake or add a message", async () => {
+  it("wakes labelled direct and mentioned seats once, while FYI and reactions do not", async () => {
     liveSeat("guido-2", "guido-2:live");
     const wake = vi.fn();
     const ts = make({ onComms: wake });
-    await send({ to: "guido-2", text: "@guido-2 direct" }, ts);
+    await send({ to: "guido-2", text: "@guido-2 direct", label: "handoff" }, ts);
     const message = store.commsForAgent("guido-1")[0];
     if (message === undefined) throw new Error("expected Comms message");
+    expect(wake).toHaveBeenCalledTimes(1);
+    await send({ to: "guido-2", text: "FYI" }, ts);
     expect(wake).toHaveBeenCalledTimes(1);
     expect(await react({ id: message.id, reaction: "seen" }, ts)).toEqual({
       text: "Reaction recorded.",
     });
     expect(wake).toHaveBeenCalledTimes(1);
-    expect(store.comms(0)).toHaveLength(1);
+    expect(store.comms(0)).toHaveLength(2);
     expect(store.commsReactions(message.id)).toHaveLength(1);
   });
 
@@ -3779,7 +3837,7 @@ describe("report_findings", () => {
                   reviewId: { type: "integer", minimum: 1 },
                   pos: { type: "integer", minimum: 0 },
                 },
-                required: ["reviewId", "pos"],
+                required: ["pos"],
                 additionalProperties: false,
               },
               outcome: { type: "string" },
@@ -3872,6 +3930,99 @@ describe("report_findings", () => {
         )
       ).isError,
     ).toBe(true);
+  });
+
+  it("stores a resolution given by position alone against the previous review", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const resolution = { findingRef: { pos: 0 }, outcome: "fixed" } as const;
+    expect(
+      await report(args({ verdict: passing, findings: [], resolutions: [resolution] }), roundTwo),
+    ).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.reviewResolutions(second)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({
+      resolution: "fixed",
+      resolvedReviewId: second,
+    });
+  });
+
+  it("binds a positional resolution to the latest reported review of the same epoch", async () => {
+    const mk = (epoch: number, round: number, at: number) =>
+      store.requestReview({
+        authorRunId: RUN,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: String(at).padEnd(40, "c"),
+        epoch,
+        attempt: 2,
+        round,
+        at,
+      }) as number;
+    // the epoch-0 round-1 review is the one `reviewId` already holds; a later epoch repeats round 1
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const later = mk(1, 1, NOW + 1);
+    store.setReviewState(later, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
+    expect(await report(args(), reviewRun("retro:e1r1", later))).toEqual({
+      text: FINDINGS_RECORDED,
+    });
+    const second = mk(1, 2, NOW + 2);
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 2, runId: "retro:e1r2" });
+    expect(
+      await report(
+        args({
+          verdict: passing,
+          findings: [],
+          resolutions: [{ findingRef: { pos: 0 }, outcome: "fixed" }],
+        }),
+        reviewRun("retro:e1r2", second),
+      ),
+    ).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.reviewResolutions(second)).toEqual([
+      { reviewId: later, pos: 0, outcome: "fixed" },
+    ]);
+  });
+
+  it("rejects a positional and an explicit reference to the same prior finding", async () => {
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    const roundTwo = reviewRun("retro:round-2", second);
+    const result = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        resolutions: [
+          { findingRef: { pos: 0 }, outcome: "fixed" },
+          { findingRef: { reviewId, pos: 0 }, outcome: "held" },
+        ],
+      }),
+      roundTwo,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.text).toMatch(/^Invalid arguments: resolutions:/);
   });
 
   it("rejects duplicate prior-round resolution references before storage", async () => {

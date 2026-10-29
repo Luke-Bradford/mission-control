@@ -1,3 +1,4 @@
+import type { AuditChange, AuditPrSize, AuditView } from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { prLabel } from "../fmt.ts";
@@ -8,49 +9,7 @@ const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];
 const RANGE_OPTIONS = RANGES.map((value) => ({ value, label: value }));
 
-type Run = {
-  runId: string;
-  agentId?: string;
-  ticket?: string | null;
-  durationMs?: number;
-  parks?: number;
-  rounds?: number;
-};
-type Size = {
-  repoId: string;
-  number: number;
-  additions?: number | null;
-  deletions?: number | null;
-  changedFiles?: number | null;
-  runId?: string;
-  agentId?: string;
-};
-type Change = {
-  at: number;
-  model?: string | null;
-  accountId?: string | null;
-  effort?: string | null;
-  promptHash?: string | null;
-  metrics?: { cycleMs?: number | null; costUsd?: number | null; reworkRounds?: number | null };
-};
-type Audit = {
-  longRunners?: Run[];
-  deathLoops?: Run[];
-  reworkRounds?: Run[];
-  refusalsByRule?: { rule: string; count: number }[];
-  costPerMergedTicket?: { ticket: string; costUsd: number | null }[];
-  prSizes?: Size[];
-  modelPromptTimeline?: Change[];
-  questions?: { asked: number; answered: number; answerMs: number | null };
-  chatter?: { messages: number; unnecessary?: number };
-  flakes?: { name: string; count: number; runId?: string; agentId?: string }[];
-  proposals?: {
-    id: string;
-    title: string;
-    status: "open" | "ticketed" | "dismissed" | "verified";
-    runId?: string;
-  }[];
-};
+type Audit = AuditView;
 
 const duration = (ms: number | null | undefined): string => {
   if (ms === undefined || ms === null) return "—";
@@ -59,9 +18,8 @@ const duration = (ms: number | null | undefined): string => {
 };
 const cost = (n: number | null | undefined): string =>
   n === null || n === undefined ? "—" : `$${n.toFixed(2)}`;
-const changes = (s: Size): number => (s.additions ?? 0) + (s.deletions ?? 0);
-const isOutlier = (s: Size, sizes: readonly Size[]): boolean =>
-  sizes.length > 1 && changes(s) === Math.max(...sizes.map(changes));
+const changes = (s: AuditPrSize): number => s.additions + s.deletions;
+const percent = (n: number | null): string => (n === null ? "—" : `${Math.round(n * 100)}%`);
 
 /** Operator audit: durable evidence over one shared server-bounded period. */
 export function Audit() {
@@ -96,9 +54,9 @@ export function Audit() {
         <div className="audit-grid">
           <Improvements audit={audit} />
           <PrSizes sizes={audit.prSizes} />
-          <Changes changes={audit.modelPromptTimeline} />
+          <Changes changes={audit.changes} />
           <Checks audit={audit} />
-          <Proposals proposals={audit.proposals} />
+          <Proposals />
         </div>
       )}
     </section>
@@ -109,12 +67,14 @@ function RunLink({
   row,
   children,
 }: {
-  row: Run | { runId?: string; agentId?: string };
+  row: { runId?: string | null; agentId?: string | null };
   children: string;
 }) {
-  if (!row.runId || !row.agentId) return <span>{children}</span>;
+  if (!row.agentId) return <span>{children}</span>;
   return (
-    <a href={`/agent/${encodeURIComponent(row.agentId)}?run=${encodeURIComponent(row.runId)}`}>
+    <a
+      href={`/agent/${encodeURIComponent(row.agentId)}${row.runId ? `?run=${encodeURIComponent(row.runId)}` : ""}`}
+    >
       {children}
     </a>
   );
@@ -124,18 +84,16 @@ function Empty({ collected = true }: { collected?: boolean }) {
 }
 
 function Improvements({ audit }: { audit: Audit }) {
-  const costs = audit.costPerMergedTicket ?? [];
-  const highCost = costs.length > 1 ? Math.max(...costs.map((x) => x.costUsd ?? 0)) : -1;
   const findings = [
-    ...(audit.longRunners ?? []).map((x) => ({
+    ...audit.longRunners.map((x) => ({
       label: `Long runner · ${duration(x.durationMs)}`,
       row: x,
     })),
-    ...(audit.deathLoops ?? []).map((x) => ({
+    ...audit.deathLoops.map((x) => ({
       label: `Death loop · ${x.parks ?? 0} parks`,
       row: x,
     })),
-    ...(audit.reworkRounds ?? []).map((x) => ({
+    ...audit.reworkRounds.map((x) => ({
       label: `Rework · ${x.rounds ?? 0} rounds`,
       row: x,
     })),
@@ -149,46 +107,40 @@ function Improvements({ audit }: { audit: Audit }) {
             row={x.row}
           >{`${x.label} · ${x.row.runId}`}</RunLink>
         ))}
-        {(audit.refusalsByRule ?? []).map((x) => (
-          <span key={x.rule}>
-            Guard refusal · {x.rule} · {x.count}
-          </span>
+        {audit.refusals.map((x) => (
+          <RunLink key={`${x.agentId}:${x.runId}:${x.rule}`} row={x}>
+            {`Guard refusal · ${x.rule} · ${x.count}${x.runId ? ` · ${x.runId}` : ""}`}
+          </RunLink>
         ))}
-        {costs
-          .filter((x) => x.costUsd === highCost)
-          .map((x) => (
-            <span key={x.ticket}>
-              Spend outlier · {x.ticket} · {cost(x.costUsd)}
-            </span>
-          ))}
-        {findings.length +
-          (audit.refusalsByRule?.length ?? 0) +
-          costs.filter((x) => x.costUsd === highCost).length ===
-          0 && <Empty />}
+        {audit.spendOutliers.map((x) => (
+          <RunLink
+            key={x.runId}
+            row={x}
+          >{`Spend outlier · ${x.ticket ?? "no ticket"} · ${cost(x.costUsd)} · ${x.runId}`}</RunLink>
+        ))}
+        {findings.length + audit.refusals.length + audit.spendOutliers.length === 0 && <Empty />}
       </div>
     </Panel>
   );
 }
 
-function PrSizes({ sizes }: { sizes?: Size[] }) {
-  const max = Math.max(1, ...(sizes ?? []).map(changes));
+function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
+  const max = Math.max(1, ...sizes.prs.map(changes));
+  const outliers = new Set(sizes.outliers.map((x) => `${x.repoId}:${x.number}`));
   return (
     <Panel title="PR size" className="audit-panel">
       <div className="pb audit-list">
-        {sizes === undefined ? (
-          <Empty collected={false} />
-        ) : sizes.length === 0 ? (
+        {sizes.prs.length === 0 ? (
           <Empty />
         ) : (
-          sizes.map((s) => (
+          sizes.prs.map((s) => (
             <div className="audit-size" key={`${s.repoId}:${s.number}`}>
               <a href={`/board/${encodeURIComponent(s.repoId)}`}>{prLabel(s.number)}</a>
-              {s.runId && <RunLink row={s}>{`Trace ${s.runId}`}</RunLink>}
               <span className="audit-bar">
                 <i style={{ width: `${(changes(s) / max) * 100}%` }} />
               </span>
               <span>
-                {changes(s)} lines{isOutlier(s, sizes) ? " · outlier" : ""}
+                {changes(s)} lines{outliers.has(`${s.repoId}:${s.number}`) ? " · outlier" : ""}
               </span>
             </div>
           ))
@@ -198,40 +150,27 @@ function PrSizes({ sizes }: { sizes?: Size[] }) {
   );
 }
 
-function Changes({ changes: rows }: { changes?: Change[] }) {
+function Changes({ changes: rows }: { changes: AuditChange[] }) {
   return (
     <Panel title="Prompt & model changes" className="audit-panel">
       <div className="pb audit-list">
-        {rows === undefined ? (
-          <Empty collected={false} />
-        ) : rows.length === 0 ? (
+        {rows.length === 0 ? (
           <Empty />
         ) : (
-          rows.map((x, i) => {
-            const before = rows[i - 1]?.metrics;
-            const changed =
-              i > 0 && (x.model !== rows[i - 1]?.model || x.promptHash !== rows[i - 1]?.promptHash);
-            return (
-              <div className="audit-change" key={`${x.at}:${x.promptHash ?? ""}`}>
-                <b>{new Date(x.at).toLocaleDateString("en-GB")}</b> {x.model ?? "default model"} ·{" "}
-                {x.effort ?? "default effort"}
-                {changed && (
-                  <span>
-                    {" "}
-                    changed ·{" "}
-                    {before && x.metrics ? (
-                      <>
-                        cycle {duration(before.cycleMs)} → {duration(x.metrics.cycleMs)} · cost{" "}
-                        {cost(before.costUsd)} → {cost(x.metrics.costUsd)}
-                      </>
-                    ) : (
-                      "Metrics not collected yet."
-                    )}
-                  </span>
-                )}
-              </div>
-            );
-          })
+          rows.map((x) => (
+            <div className="audit-change" key={`${x.agentId}:${x.at}:${x.kind}`}>
+              <b>{new Date(x.at).toLocaleDateString("en-GB")}</b> ·{" "}
+              {x.kind === "prompt" ? "Prompt" : "Model"} change · {x.from ?? "none"} → {x.to}
+              <span>
+                {" effect · merged "}
+                {x.before.merged} → {x.after.merged} · review fail{" "}
+                {percent(x.before.reviewFailRate)} → {percent(x.after.reviewFailRate)} · median cost{" "}
+                {cost(x.before.medianCostPerMergedTicket)} →{" "}
+                {cost(x.after.medianCostPerMergedTicket)} · rework {x.before.reworkRounds} →{" "}
+                {x.after.reworkRounds}
+              </span>
+            </div>
+          ))
         )}
       </div>
     </Panel>
@@ -244,50 +183,35 @@ function Checks({ audit }: { audit: Audit }) {
     <Panel title="Things to check" className="audit-panel">
       <div className="pb audit-list">
         <span>Unanswered questions · {unanswered}</span>
-        {audit.chatter ? (
-          <span>
-            Chatter · {audit.chatter.unnecessary ?? audit.chatter.messages} of{" "}
-            {audit.chatter.messages}
+        {audit.chatter.map((x) => (
+          <span key={`${x.from}:${x.to}:${x.ticket}`}>
+            Chatter · {x.from} ↔ {x.to} · {x.ticket} · {x.rounds} rounds
           </span>
-        ) : (
-          <span className="fg2">Chatter · Not collected yet.</span>
-        )}
-        {(audit.refusalsByRule ?? []).map((x) => (
+        ))}
+        {audit.refusalsByRule.map((x) => (
           <span key={x.rule}>
             Guard refusal spike · {x.rule} · {x.count}
           </span>
         ))}
-        {audit.flakes === undefined ? (
-          <span className="fg2">Flakes · Not collected yet.</span>
-        ) : (
-          audit.flakes.map((x) => (
-            <RunLink
-              key={x.name}
-              row={x}
-            >{`Flake · ${x.name} · ${x.count}${x.runId ? ` · ${x.runId}` : ""}`}</RunLink>
-          ))
-        )}
+        {audit.refusalSpikes.map((x) => (
+          <RunLink
+            key={`${x.agentId}:${x.day}`}
+            row={x}
+          >{`Guard refusal spike · ${x.count}`}</RunLink>
+        ))}
+        {audit.flakes.map((x) => (
+          <span key={x.key}>{`Flake · ${x.key} · ${x.count}`}</span>
+        ))}
       </div>
     </Panel>
   );
 }
 
-function Proposals({ proposals }: { proposals?: NonNullable<Audit["proposals"]> }) {
+function Proposals() {
   return (
     <Panel title="SURGEON proposals" className="audit-panel">
       <div className="pb audit-list">
-        {proposals === undefined ? (
-          <Empty collected={false} />
-        ) : proposals.length === 0 ? (
-          <Empty />
-        ) : (
-          proposals.map((x) => (
-            <div className="audit-proposal" key={x.id}>
-              <span>{x.title}</span>
-              <span className={`audit-status audit-status-${x.status}`}>{x.status}</span>
-            </div>
-          ))
-        )}
+        <Empty collected={false} />
       </div>
     </Panel>
   );

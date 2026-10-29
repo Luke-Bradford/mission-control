@@ -9,6 +9,7 @@ import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
+import { commsInboxContext } from "../src/comms.ts";
 import { messageUnpausedSeat } from "../src/crew-pause.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { CLI_PID_FILE, KEEPER_PID_FILE, pidAlive, readPidFile } from "../src/runtime/keeper.ts";
@@ -311,11 +312,18 @@ describe("supervisor events (Plan 7a)", () => {
   };
   const ended = (seen: SupervisorEvent[]) => seen.filter((e) => e.kind === "run-ended");
 
-  async function idleRun(opts?: { loop: RunLoop }) {
-    const m = make();
+  async function idleRun(opts?: {
+    loop?: RunLoop;
+    inbox?: NonNullable<Parameters<typeof make>[0]>["inbox"];
+  }) {
+    const m = make(opts?.inbox === undefined ? {} : { inbox: opts.inbox });
     m.sup.start();
     const seen = watch(m.sup);
-    const { runId } = await m.sup.startRun("guido-1", 42, opts);
+    const { runId } = await m.sup.startRun(
+      "guido-1",
+      42,
+      opts?.loop === undefined ? undefined : { loop: opts.loop },
+    );
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     return { ...m, runId, seen };
   }
@@ -645,6 +653,34 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.lastEngineLineAt(runId)).not.toBeNull();
     });
 
+    it("adds the waiting inbox when an engine line begins a turn", async () => {
+      const inbox = vi.fn((seatId: string, runId: string) =>
+        commsInboxContext(store, seatId, runId),
+      );
+      const { sup, runId } = await idleRun({ inbox });
+      inbox.mockClear();
+      const waiting = store.addComms({
+        at: Date.now(),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: null,
+        text: "waiting FYI",
+        targetRunId: runId,
+      });
+      if (waiting === null) throw new Error("expected stored Comms row");
+
+      expect(await sup.send(runId, "k1", "CI failed")).toBe("sent");
+      await until(() =>
+        expect(
+          userLines().some(
+            (line) => line.includes("CI failed\n\nComms inbox") && line.includes("waiting FYI"),
+          ),
+        ).toBe(true),
+      );
+      expect(inbox).toHaveBeenCalledWith("guido-1", runId);
+      expect(store.commsInboxRead("guido-1", waiting.id)).toBe(true);
+    });
+
     it("answers busy while the seat is in a turn, even before the CLI's turn-start", async () => {
       const { sup, runId } = await idleRun();
       await sup.message("guido-1", "SLOW", { interrupt: false });
@@ -712,11 +748,10 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.claimedKeys(runId)).toEqual({});
     });
 
-    it("resumes a missing CLI through the API message route and asks CAPCOM to retry", async () => {
+    it("stores an API FYI for a missing CLI without waking or resuming it", async () => {
       const { sup, cfg, runId } = await idleRun();
       prep.sessions[0]?.detach();
       await noKeepers();
-      const release = holdResume();
       const app = buildApp({ config: cfg, store, bus, supervisor: sup });
       try {
         const response = await app.inject({
@@ -725,17 +760,13 @@ describe("supervisor events (Plan 7a)", () => {
           headers: { "content-type": "application/json" },
           payload: { text: "fix it" },
         });
-        expect(response.statusCode).toBe(409);
-        expect(response.json()).toEqual({
-          error: "GUIDO-1 is being resumed; try again in a moment",
-        });
-        release();
-        await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ ok: true });
         expect(store.seatSession("guido-1")?.runId).toBe(runId);
-        expect(prep.sessions).toHaveLength(2);
+        expect(prep.sessions).toHaveLength(1);
+        expect(store.comms(0).map((message) => message.text)).toEqual(["fix it"]);
         expect(userLines()).not.toContain("fix it");
       } finally {
-        release();
         await app.close();
       }
     });
@@ -1140,13 +1171,26 @@ describe("supervisor events (Plan 7a)", () => {
     });
 
     it("drops the key when the write fails, so the line can be sent again", async () => {
-      const { sup, runId } = await idleRun();
+      const { sup, runId } = await idleRun({
+        inbox: (seatId, id) => commsInboxContext(store, seatId, id),
+      });
+      const waiting = store.addComms({
+        at: Date.now(),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: null,
+        text: "do not lose this",
+        targetRunId: runId,
+      });
+      if (waiting === null) throw new Error("expected stored Comms row");
       prep.failWrite = true;
       expect(await sup.send(runId, "k", "again")).toBe("busy");
       expect(store.claimedKeys(runId)).toEqual({});
+      expect(store.commsInboxRead("guido-1", waiting.id)).toBe(false);
       prep.failWrite = false;
       expect(await sup.send(runId, "k", "again")).toBe("sent");
       expect(Object.keys(store.claimedKeys(runId))).toEqual(["k"]);
+      expect(store.commsInboxRead("guido-1", waiting.id)).toBe(true);
     });
 
     it("Stop then the engine's end: operator stands, the seat ends stopped", async () => {

@@ -1,9 +1,12 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { HBar } from "../src/hud/charts/HBar.tsx";
+import { ChartCursorProvider } from "../src/hud/charts/Hover.tsx";
 import { LineChart } from "../src/hud/charts/LineChart.tsx";
 import { StackedArea } from "../src/hud/charts/StackedArea.tsx";
 import { VBars } from "../src/hud/charts/VBars.tsx";
+import { chartAnnotations } from "../src/telemetry/annotations.ts";
+import { InstrumentCharts, nearestRank } from "../src/telemetry/InstrumentCharts.tsx";
 
 const k = (v: number): string => `${Math.round(v)}`;
 
@@ -71,6 +74,181 @@ describe("StackedArea", () => {
   });
 });
 
+describe("VBars time workspace", () => {
+  it("publishes its keyboard cursor and annotations to the shared chart workspace", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <VBars
+          label="Throughput"
+          bars={[
+            { key: "a", label: "Mon", tip: "Monday", segments: [{ name: "merged", value: 1 }] },
+            { key: "b", label: "Tue", tip: "Tuesday", segments: [{ name: "merged", value: 3 }] },
+          ]}
+          times={[100, 200]}
+          annotations={[{ at: 200, label: "hub Update" }]}
+        />
+        <LineChart
+          label="Other chart"
+          from={0}
+          to={200}
+          xLabels={["start", "now"]}
+          at={String}
+          series={[
+            {
+              id: "x",
+              name: "x",
+              color: "red",
+              points: [
+                { at: 100, v: 1 },
+                { at: 200, v: 2 },
+              ],
+            },
+          ]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [throughput, other] = container.querySelectorAll("svg");
+    fireEvent.focus(throughput as SVGSVGElement);
+    expect(other?.parentElement?.querySelector(".tip")?.textContent).toContain("x2%");
+    expect(throughput?.querySelector(".annotation")?.textContent).toBe("");
+    expect(throughput?.parentElement?.querySelector(".tip")?.textContent).toContain("hub Update");
+  });
+
+  it("snaps an external time cursor to the nearest dated bar", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart
+          label="source"
+          from={0}
+          to={300}
+          xLabels={["start", "now"]}
+          at={String}
+          series={[{ id: "x", name: "x", color: "red", points: [{ at: 160, v: 1 }] }]}
+        />
+        <VBars
+          label="Throughput"
+          bars={[
+            { key: "a", label: "Mon", tip: "Monday", segments: [{ name: "merged", value: 1 }] },
+            { key: "b", label: "Tue", tip: "Tuesday", segments: [{ name: "merged", value: 3 }] },
+          ]}
+          times={[100, 200]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [source, throughput] = container.querySelectorAll("svg");
+    fireEvent.focus(source as SVGSVGElement);
+    expect(throughput?.parentElement?.querySelector(".tip")?.textContent).toContain("Tuesday");
+  });
+});
+
+describe("Instrument charts", () => {
+  it("keeps only operator-relevant events in the annotation layer", () => {
+    expect(
+      chartAnnotations([
+        { at: 1, kind: "crew-paused", cause: "Crew paused" },
+        { at: 2, kind: "oauth-usage", cause: "OAuth usage polled" },
+        { at: 3, kind: "quota-poll", cause: "Quota polled" },
+        { at: 4, kind: "hub-update", cause: "Updated Mission Control" },
+      ]),
+    ).toEqual([
+      { at: 1, label: "Crew paused" },
+      { at: 4, label: "Updated Mission Control" },
+    ]);
+  });
+
+  it("uses nearest-rank cycle percentiles without dropping a single observation", () => {
+    expect(nearestRank([2], 0.5)).toBe(2);
+    expect(nearestRank([1, 2, 9], 0.5)).toBe(2);
+    expect(nearestRank([1, 2, 9], 0.85)).toBe(9);
+  });
+
+  it("renders an observed merge even when its Ready history is unavailable", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [{ ticket: "repo#1", readyAt: null, startedAt: null, mergedAt: 30, doneAt: 40 }],
+        }}
+      />,
+    );
+    expect(container.querySelectorAll("#tFlow path.line")).toHaveLength(2);
+  });
+
+  it("keeps an observed Ready ticket in cumulative flow until it is done", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#open", readyAt: 20, startedAt: 20, mergedAt: null, doneAt: null },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector("#tFlow svg")?.getAttribute("aria-label")).toContain(
+      "in progress latest 1",
+    );
+  });
+
+  it("renders only the supplied server observations, retaining their timestamps", () => {
+    const { container, getByRole } = render(
+      <ChartCursorProvider>
+        <InstrumentCharts
+          scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+          series={{
+            stateSpans: [
+              { agentId: "crew", state: "running", startedAt: 10, endedAt: 20 },
+              { agentId: "crew", state: "parked", startedAt: 20, endedAt: 40 },
+            ],
+            quota: [],
+            tickets: [
+              { ticket: "repo#1", readyAt: 10, startedAt: 12, mergedAt: 30, doneAt: 40 },
+              { ticket: "repo#2", readyAt: 20, startedAt: 24, mergedAt: null, doneAt: 50 },
+            ],
+            annotations: [
+              { at: 30, kind: "hub-update", cause: "Updated Mission Control" },
+              { at: 35, kind: "oauth-usage" as "hub-update", cause: "OAuth usage polled" },
+            ],
+          }}
+          ticketCosts={[{ ticket: "repo#1", tokens: 100, costUsd: 1.25 }]}
+          from={0}
+          to={60}
+        />
+      </ChartCursorProvider>,
+    );
+    expect(container.querySelectorAll(".crew-state-span")).toHaveLength(2);
+    expect(container.querySelector(".crew-state-span")?.getAttribute("data-ended-at")).toBe("20");
+    expect(container.querySelectorAll(".annotation")).toHaveLength(4);
+    expect(container.querySelectorAll("#tFlow path.line").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("#tCycleControl path.line").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("#tCostMerged path.line").length).toBeGreaterThan(0);
+    expect(getByRole("heading", { name: "Cost in range per merged ticket" })).toBeTruthy();
+    expect(container.querySelectorAll("#tCrewState .legend span")).toHaveLength(4);
+    expect(container.querySelectorAll("#tFlow .legend span")).toHaveLength(2);
+    const timeline = container.querySelector("#tCrewState svg") as SVGSVGElement;
+    fireEvent.focus(timeline);
+    fireEvent.keyDown(timeline, { key: "ArrowLeft" });
+    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain("crewparked");
+    expect(timeline.parentElement?.querySelector(".tip")?.textContent).toContain(
+      "Updated Mission Control",
+    );
+    const before = timeline.getAttribute("data-from");
+    fireEvent.click(getByRole("button", { name: "Zoom in crew state" }));
+    expect(timeline.getAttribute("data-from")).not.toBe(before);
+    expect(container.querySelector(".crew-state-chart .seg")).not.toBeNull();
+  });
+});
+
 describe("LineChart", () => {
   const from = 0;
   const to = 100;
@@ -117,9 +295,32 @@ describe("LineChart", () => {
     expect(container.querySelector("svg")?.getAttribute("aria-label")).toBe(
       "Machine load: CPU latest 40%, peak 40%; Memory latest 25%, peak 25%",
     );
-    expect(container.querySelectorAll("circle")).toHaveLength(0);
+    // CPU's isolated first reading is a visible point, but still has no fill.
+    expect(container.querySelectorAll("circle.point")).toHaveLength(1);
     // one fill per unbroken run: CPU's lone first reading has none
     expect(container.querySelectorAll("path.area")).toHaveLength(2);
+  });
+
+  it("marks a lone observed value rather than drawing an invisible move-only path", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "cycle",
+            name: "p50 cycle time",
+            color: "var(--accent)",
+            points: [{ at: 50, v: 4 }],
+          },
+          { id: "cost", name: "cost", color: "var(--warn)", points: [{ at: 50, v: 1.25 }] },
+        ]}
+        from={0}
+        to={100}
+        label="Single observations"
+        xLabels={["start", "now"]}
+        at={String}
+      />,
+    );
+    expect(container.querySelectorAll("circle.point")).toHaveLength(2);
   });
 
   it("hover lists each series at the nearest sample", () => {
@@ -169,6 +370,139 @@ describe("LineChart", () => {
       />,
     );
     expect(container.querySelector("line.limit")).toBeNull();
+  });
+
+  it("keeps a missing reading as a gap and exposes reset annotations to keyboard users", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "q",
+            name: "quota",
+            color: "var(--s1)",
+            points: [
+              { at: 0, v: 80 },
+              { at: 50, v: null },
+              { at: 100, v: 12 },
+            ],
+          },
+        ]}
+        from={0}
+        to={100}
+        label="Quota"
+        xLabels={["start", "now"]}
+        at={(ms) => `${ms}`}
+        annotations={[{ at: 100, label: "quota reset" }]}
+        guides={[
+          { value: 80, label: "alert 80%" },
+          { value: 95, label: "stop 95%" },
+        ]}
+      />,
+    );
+    const line = container.querySelector("path.line")?.getAttribute("d") ?? "";
+    expect(line.match(/M/g)).toHaveLength(2);
+    expect(container.querySelector(".annotation")?.textContent).toBe("");
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    expect(svg.getAttribute("aria-label")).toContain("events 100 quota reset");
+    expect(svg.getAttribute("aria-label")).toContain("thresholds alert 80%, stop 95%");
+    fireEvent.focus(svg);
+    expect(container.querySelector(".tip")?.textContent).toContain("Eventquota reset");
+    expect(container.querySelector(".tip")?.textContent).toContain("Thresholdalert 80%");
+  });
+
+  it("stops the shared cursor at an annotation between observed samples", () => {
+    const { container } = render(
+      <LineChart
+        series={[
+          {
+            id: "flow",
+            name: "in progress",
+            color: "var(--accent)",
+            points: [
+              { at: 0, v: 1 },
+              { at: 100, v: 2 },
+            ],
+          },
+        ]}
+        from={0}
+        to={100}
+        label="Flow"
+        xLabels={["start", "now"]}
+        at={String}
+        annotations={[{ at: 50, label: "Crew paused" }]}
+      />,
+    );
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    fireEvent.focus(svg);
+    fireEvent.keyDown(svg, { key: "Home" });
+    fireEvent.keyDown(svg, { key: "ArrowRight" });
+    expect(container.querySelector(".tip")?.textContent).toContain("Crew paused");
+    expect(container.querySelector(".tip")?.textContent).toContain("in progress—");
+  });
+
+  it("shares a keyboard crosshair with the other time charts in its workspace", () => {
+    const props = {
+      series: [
+        {
+          id: "q",
+          name: "quota",
+          color: "var(--s1)",
+          points: [
+            { at: 0, v: 10 },
+            { at: 100, v: 20 },
+          ],
+        },
+      ],
+      from: 0,
+      to: 100,
+      xLabels: ["start", "now"] as [string, string],
+      at: (ms: number) => `${ms}`,
+    };
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart {...props} label="first" />
+        <LineChart {...props} label="second" />
+      </ChartCursorProvider>,
+    );
+    const [first, second] = container.querySelectorAll("svg");
+    fireEvent.focus(first as SVGSVGElement);
+    expect(second?.parentElement?.querySelector(".tip")?.textContent).toContain("quota20%");
+  });
+
+  it("publishes a line-chart keyboard cursor to a stacked-area time chart", () => {
+    const { container } = render(
+      <ChartCursorProvider>
+        <LineChart
+          series={[
+            {
+              id: "q",
+              name: "quota",
+              color: "var(--s1)",
+              points: [
+                { at: 0, v: 10 },
+                { at: 100, v: 20 },
+              ],
+            },
+          ]}
+          from={0}
+          to={100}
+          label="quota"
+          xLabels={["start", "now"]}
+          at={String}
+        />
+        <StackedArea
+          series={[{ id: "a", name: "tokens", color: "var(--s2)", values: [1, 2] }]}
+          label="tokens"
+          xLabels={["start", "now"]}
+          at={String}
+          format={k}
+          times={[0, 100]}
+        />
+      </ChartCursorProvider>,
+    );
+    const [line] = container.querySelectorAll("svg");
+    fireEvent.focus(line as SVGSVGElement);
+    expect(container.querySelectorAll(".tip")[1]?.textContent).toContain("tokens2");
   });
 });
 

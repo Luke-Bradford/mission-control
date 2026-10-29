@@ -57,6 +57,14 @@ function TokensPerMinute({ t, scope }: { t: Telemetry | undefined; scope: Scope 
   }));
   const any = series.some((s) => s.values.some((v) => v > 0));
   const rangeMin = TELEMETRY_RANGES[scope.range];
+  const pointTimes = Array.from(
+    { length: series[0]?.values.length ?? 0 },
+    (_, i) =>
+      Date.now() -
+      (live ? LIVE_MINUTES : rangeMin) *
+        60_000 *
+        (1 - i / Math.max(1, (series[0]?.values.length ?? 1) - 1)),
+  );
 
   return (
     <Panel
@@ -81,6 +89,7 @@ function TokensPerMinute({ t, scope }: { t: Telemetry | undefined; scope: Scope 
             at={(i, n) => minutesAgo(live ? n - 1 - i : rangeMin * (1 - i / (n - 1)))}
             format={kTokens}
             live={scope.live}
+            times={pointTimes}
           />
           <Legend items={series.map((s) => ({ key: s.id, name: s.name, color: s.color }))} />
         </div>

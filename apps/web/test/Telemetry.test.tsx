@@ -17,7 +17,17 @@ import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, HOUR, METRICS_VIEW, MIN, NOW, seatRow } from "./fixtures.ts";
+import {
+  boardItem,
+  CONFIG,
+  HOUR,
+  limit5h,
+  limit7d,
+  METRICS_VIEW,
+  MIN,
+  NOW,
+  seatRow,
+} from "./fixtures.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -800,6 +810,111 @@ describe("Capacity and cost", () => {
     expect(tip.textContent).toContain("codex-main 7d—");
   });
 
+  it("keeps an unexplained quota drop as a gap rather than inventing a reset", async () => {
+    await loaded(
+      tel({
+        quota: [
+          {
+            accountId: "claude-main",
+            window: "5h",
+            points: [
+              { at: NOW - HOUR, pct: 80 },
+              { at: NOW - MIN, pct: 12 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(panel("tQuota").querySelector(".annotation")).toBeNull();
+  });
+
+  it("labels only a provider-recorded quota reset", async () => {
+    await loaded(
+      tel({
+        series: {
+          stateSpans: [],
+          tickets: [],
+          annotations: [],
+          quota: [
+            {
+              accountId: "claude-main",
+              window: "5h",
+              alertAt: 80,
+              stopAt: 95,
+              points: [
+                { at: NOW - HOUR, pct: 80 },
+                { at: NOW - MIN, pct: 12 },
+              ],
+              resets: [{ at: NOW - MIN, resetAt: NOW, cause: "provider" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("");
+    expect(panel("tQuota").querySelector("svg")?.getAttribute("aria-label")).toContain(
+      "claude-main 5h reset",
+    );
+  });
+
+  it("breaks a reset and labels the configured alert and stop thresholds", async () => {
+    const data = tel({
+      quota: [
+        {
+          accountId: "claude-main",
+          window: "5h",
+          points: [
+            { at: NOW - HOUR, pct: 80 },
+            { at: NOW - MIN, pct: 12 },
+          ],
+        },
+      ],
+    });
+    stubFetch({
+      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.metrics().path]: METRICS_VIEW,
+      [RESOURCES.limits.path]: [limit5h({ alertAt: 85, stopAt: 95 })],
+    });
+    render(<Telemetry />);
+    await screen.findByText("61.2k");
+    const quota = panel("tQuota");
+    expect(quota.querySelector("path.line")?.getAttribute("d")?.match(/M/g)).toHaveLength(2);
+    expect(quota.textContent).toContain("claude-main alert 85%");
+    expect(quota.textContent).toContain("claude-main stop 95%");
+  });
+
+  it("draws the server projection through reset and labels its forecasts", async () => {
+    const data = tel({
+      quota: [{ accountId: "codex-main", window: "7d", points: [{ at: NOW - MIN, pct: 41 }] }],
+    });
+    stubFetch({
+      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.metrics().path]: METRICS_VIEW,
+      [RESOURCES.limits.path]: [
+        limit7d({
+          accountId: "codex-main",
+          projected: 84,
+          stopForecast: NOW + HOUR,
+          fullAt: NOW + 2 * HOUR,
+        }),
+      ],
+    });
+    render(<Telemetry />);
+    await screen.findByText("61.2k");
+    const quota = panel("tQuota");
+    expect(quota.querySelectorAll("path.line")).toHaveLength(2);
+    expect(quota.querySelectorAll("path.line")[1]?.getAttribute("stroke-dasharray")).toBe("4 3");
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain("codex-main 7d reset");
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain(
+      "codex-main 7d stop forecast",
+    );
+    expect(quota.querySelector("svg")?.getAttribute("aria-label")).toContain(
+      "codex-main 7d full forecast",
+    );
+  });
+
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
     const data = tel();
     await loaded(data);
@@ -985,6 +1100,13 @@ describe("empty and failing telemetry", () => {
     );
     render(<Telemetry />);
     await within(panel("tTok")).findByText("No tokens in the last 60 minutes.");
+  });
+
+  it("does not invent v2 history from aggregate telemetry", async () => {
+    await loaded();
+    for (const id of ["tCrewState", "tFlow", "tCycleControl", "tQualityTrend", "tCostMerged"]) {
+      expect(panel(id).textContent).toContain("data is not available for the last 6h yet.");
+    }
   });
 
   it("a failed fetch says so", async () => {
