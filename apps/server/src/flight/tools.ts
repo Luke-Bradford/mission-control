@@ -300,6 +300,7 @@ import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
+  heldRun,
   holdItem,
   protectedDecisionItem,
   releaseHold,
@@ -2129,7 +2130,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         options: options ?? [],
         basis,
         at,
-        defaultEligible: !protectedDecisionItem(store, item),
+        defaultEligible: !protectedDecisionItem(store, item, config, at),
       });
     } catch {
       return fail("Source changed; refresh the item before drafting.");
@@ -2733,20 +2734,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   function held(run: Run): boolean {
-    const seat = seatCfg(run.agentId);
-    return (
-      !seat ||
-      run.repoId !== repoOf()?.id ||
-      store.seatSession(run.agentId)?.state === "stopped" ||
-      run.loop?.parked?.kind === "budget" ||
-      store
-        .openQuestions()
-        .some(
-          (q) =>
-            q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
-        ) ||
-      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
-    );
+    return heldRun(store, config, now(), run, repoOf()?.id);
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
@@ -3004,7 +2992,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
           (i) => i.key === a.key,
         );
-        if (item && protectedDecisionItem(store, item))
+        if (item && protectedDecisionItem(store, item, config, now()))
           return fail("This item is protected or unavailable.");
         // an item FLIGHT holds for triage (owner "flight") is still the operator's underneath
         if (

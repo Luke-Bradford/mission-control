@@ -1,6 +1,9 @@
 import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
 import { type BriefOption, flightFloorBlocked, GUARD_ACK_PREFIX } from "@mc/core";
 import { z } from "zod";
+import { runAccountId } from "./account-bindings.ts";
+import type { CcConfig } from "./config.ts";
+import { accountAtStop } from "./engine/queue.ts";
 import { NOTE_KEY } from "./hud.ts";
 import type { Store } from "./store.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
@@ -118,13 +121,45 @@ export function attentionHoldError(e: z.ZodError): string {
 }
 
 /** Items whose authority belongs to the operator and which a timer must never settle. */
-export function protectedDecisionItem(store: Store, item: AttentionItem): boolean {
+export function heldRun(
+  store: Store,
+  config: CcConfig,
+  at: number,
+  run: NonNullable<ReturnType<Store["run"]>>,
+  repoId?: string,
+): boolean {
+  const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
+  return (
+    !seat ||
+    (repoId !== undefined && run.repoId !== repoId) ||
+    store.seatSession(run.agentId)?.state === "stopped" ||
+    run.loop?.parked?.kind === "budget" ||
+    store
+      .openQuestions()
+      .some((q) => q.runId === run.id && (q.passedAt !== null || at - q.at >= 20 * 60_000)) ||
+    accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at)
+  );
+}
+
+export function protectedDecisionItem(
+  store: Store,
+  item: AttentionItem,
+  config?: CcConfig,
+  at?: number,
+): boolean {
   if (item.key.startsWith("esc:")) return true;
   if (item.kind === "approval" || item.kind === "flag" || item.kind === "ratelimit") return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key.startsWith(`${NOTE_KEY}${GUARD_ACK_PREFIX}`)) return true;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   const run = note?.runId ? store.run(note.runId) : null;
+  if (
+    run &&
+    config !== undefined &&
+    at !== undefined &&
+    heldRun(store, config, at, run, item.repoId ?? undefined)
+  )
+    return true;
   if (item.kind === "decision" && run?.loop && flightFloorBlocked(run.loop)) return true;
   const pr = /^pr:([^#]+)#(\d+):/.exec(item.key);
   if (
@@ -149,6 +184,8 @@ export function protectedDecisionItem(store: Store, item: AttentionItem): boolea
 export function decisionDefault(
   store: Store,
   item: AttentionItem,
+  config?: CcConfig,
+  at?: number,
 ): { option: BriefOption; briefAt: number; dueAt: number } | null {
   const brief = item.brief;
   if (
@@ -156,7 +193,7 @@ export function decisionDefault(
     !brief ||
     brief.for === "flight" ||
     brief.defaultAt === undefined ||
-    protectedDecisionItem(store, item)
+    protectedDecisionItem(store, item, config, at)
   )
     return null;
   const option = brief.options.find(

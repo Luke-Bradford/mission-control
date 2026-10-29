@@ -108,6 +108,27 @@ describe("decision defaults", () => {
     expect(decisionDefault(store, item("pr:repo#9:1", "pr"))).toBeNull();
   });
 
+  it("never defaults a non-flag note held by a stopped seat", () => {
+    vi.spyOn(store, "notes").mockReturnValue([
+      { key: "ready:r", runId: "r", dismissedAt: null },
+    ] as never);
+    vi.spyOn(store, "run").mockReturnValue({
+      id: "r",
+      repoId: "repo",
+      agentId: "GUIDO-1",
+    } as never);
+    store.setSeatSession({
+      seatId: "GUIDO-1",
+      runId: "r",
+      cliSessionId: null,
+      state: "stopped",
+      reason: null,
+      worktree: null,
+      updatedAt: ASKED,
+    });
+    expect(decisionDefault(store, item("note:ready:r", "ready"), config(), NOW)).toBeNull();
+  });
+
   it("does not default a brief stored before defaultAt existed", () => {
     const legacy = item("ask:legacy");
     if (legacy.brief) delete legacy.brief.defaultAt;

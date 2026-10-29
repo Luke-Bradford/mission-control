@@ -20,7 +20,7 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
   let applied = 0;
   for (const item of attentionItems(config, store, now, d.lock ?? NO_LOCK)) {
     if (item.acked) continue;
-    const def = decisionDefault(store, item);
+    const def = decisionDefault(store, item, config, now);
     if (def === null || def.dueAt > now) continue;
     const asker = item.agentId !== null && store.seatSession(item.agentId) !== null;
     const claimed = store.claimDecisionDefault(

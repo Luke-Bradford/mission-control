@@ -1037,7 +1037,7 @@ export function attentionItems(
   const partition = partitionAttention(
     store,
     result.map((item) => {
-      const d = decisionDefault(store, item);
+      const d = decisionDefault(store, item, config, now);
       return d === null ? item : { ...item, defaultDueAt: d.dueAt };
     }),
     acks,
