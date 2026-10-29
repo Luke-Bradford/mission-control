@@ -1629,8 +1629,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const moved = lastHour(["promote", "reorder"], at);
     if (moved >= FLIGHT_PROMOTES_PER_HOUR) return fail(capText("moved tickets", moved));
     const board = store.board(repo.id);
-    const card = board.find((i) => i.issueNumber === issue);
-    if (card === undefined) return fail(moveNotOnBoardText(ref));
+    let card = board.find((i) => i.issueNumber === issue);
+    if (card === undefined) {
+      // a ticket filed since the last board poll: read that one item and cache it before refusing
+      const fresh = await deps.board.read?.(repo.id, issue).catch(() => null);
+      if (!fresh) return fail(moveNotOnBoardText(ref));
+      card = fresh;
+      board.push(fresh);
+      store.replaceBoard(repo.id, board);
+    }
     const column = hudColumnOf(card);
     const mine = () => store.countFlightDecisions({ kinds: ["promote"], since: 0, ref }) > 0;
     const allowed =

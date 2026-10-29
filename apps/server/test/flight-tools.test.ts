@@ -3078,6 +3078,33 @@ describe("promote", () => {
   it("refuses a card that is not on the board", async () => {
     board();
     expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    expect(readCalls).toEqual([7]);
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("reads a card the board cache has not seen yet, caches it and moves it", async () => {
+    board();
+    readImpl = (n) => backlog({ issueNumber: n });
+    expect(await call("promote", P())).toEqual({
+      text: "Moved mc#7 to Ready. Recorded in Decided without you.",
+    });
+    expect(readCalls).toEqual([7]);
+    expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Ready" }]);
+    expect(store.board("mc").map((c) => c.issueNumber)).toContain(7);
+  });
+
+  it("does not read the project for a card the cache holds", async () => {
+    await call("promote", P());
+    expect(readCalls).toEqual([]);
+  });
+
+  it("refuses a card whose re-read fails", async () => {
+    board();
+    readImpl = () => {
+      throw new Error("down");
+    };
+    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+    expect(moveCalls).toEqual([]);
   });
 
   it("refuses a ticket with a run", async () => {
