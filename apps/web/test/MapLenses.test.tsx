@@ -329,6 +329,11 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
       Number(swatch.getAttribute("data-opacity")),
     ),
   ).toEqual([0.16, 0.36, 0.6, 0.85]);
+  expect(
+    [...historyKey.querySelectorAll(".map-key-steps-history .map-key-swatch")].every(
+      (swatch) => swatch.getAttribute("style") === null,
+    ),
+  ).toBe(true);
   const history = screen.getByRole("region", { name: "History lens" });
   expect(history.textContent).toContain("PRs · fixes");
   expect(document.body.textContent).toContain("hidden change coupling");
@@ -344,6 +349,30 @@ it("uses lens-specific treemaps and clean, deduplicated code tables", () => {
       .querySelector(".map-treemap-tile[title='src/contract.ts']")
       ?.hasAttribute("data-fix-heavy"),
   ).toBe(true);
+});
+
+it("names working seats by colour in the Impact key and counts idle seats", () => {
+  const value = snapshot();
+  value.seats = value.seats.map((seat) => ({ ...seat, state: "running" as const }));
+  value.seats.push({
+    ...structuredClone(value.seats[0]),
+    seat: "IDLE-1",
+    state: "idle",
+    since: 0,
+    calls: [],
+    recent: [],
+    scope: { read: [], modified: [] },
+    badges: { ...value.seats[0].badges, questions: [], waiting: null },
+  });
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+
+  const key = screen.getByRole("note", { name: "Impact colour scale" });
+  expect(key.querySelectorAll(".map-key-seat-chip")).toHaveLength(2);
+  expect(key.textContent).toContain("GUIDO-1");
+  expect(key.textContent).toContain("INCO-1");
+  expect(key.textContent).toContain("1 idle");
 });
 
 it("packs the complete hierarchy inside the viewport and anchors links to tile centres", () => {
