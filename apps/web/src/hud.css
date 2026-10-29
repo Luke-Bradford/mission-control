@@ -3814,6 +3814,9 @@ pre.diff .h {
   padding: 8px 14px;
   border-top: 1px solid var(--line);
 }
+#cNeeds {
+  max-height: 330px;
+}
 .nrow > .lamp {
   margin-top: 5px;
 }
@@ -6895,6 +6898,13 @@ kbd {
   color: var(--fg-2);
 }
 
+.thread .doing {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 details.guard > summary {
   cursor: pointer;
   padding: 8px 14px;
@@ -7114,6 +7124,10 @@ details.guard > summary {
 }
 .expandable .sm {
   margin-top: 4px;
+}
+#cHandled .nrow > div {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 .dmsg:has(.expandable) {
   grid-template-columns: minmax(0, 1fr);
