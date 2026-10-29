@@ -272,10 +272,18 @@ export function InstrumentCharts({
           ],
     )
     .sort((a, b) => a.at - b.at);
-  const activePoints = flowEvents.map((event) => {
+  for (const event of flowEvents) {
+    if (event.at >= from) break;
     inProgress += event.delta;
-    return { at: event.at, v: inProgress };
-  });
+  }
+  const activePoints = inProgress === 0 ? [] : [{ at: from, v: inProgress }];
+  for (const event of flowEvents) {
+    if (event.at < from || event.at > to) continue;
+    inProgress += event.delta;
+    activePoints.push({ at: event.at, v: inProgress });
+  }
+  if (activePoints.length && (activePoints.at(-1)?.at ?? to) < to)
+    activePoints.push({ at: to, v: inProgress });
   const mergedPoints = tickets
     .filter((ticket): ticket is typeof ticket & { mergedAt: number } => ticket.mergedAt !== null)
     .sort((a, b) => a.mergedAt - b.mergedAt)
@@ -297,7 +305,10 @@ export function InstrumentCharts({
   }));
   const costByTicket = new Map(ticketCosts.map((row) => [row.ticket, row.costUsd]));
   const totalCostByTicket = new Map(
-    ticketCosts.map((row) => [row.ticket, row.totalCostUsd ?? row.costUsd]),
+    ticketCosts.map((row) => [
+      row.ticket,
+      row.totalCostUsd === undefined ? row.costUsd : row.totalCostUsd,
+    ]),
   );
   const mergedCosts = tickets
     .filter((ticket): ticket is typeof ticket & { mergedAt: number } => ticket.mergedAt !== null)
@@ -461,7 +472,10 @@ export function InstrumentCharts({
         ) : !mergedCosts.length ? (
           <p className="pb s muted">No merged tickets in this range.</p>
         ) : !mergedCosts.some((point) => point.v !== null) ? (
-          <p className="pb s muted">No API-equivalent cost was reported for merged tickets.</p>
+          <>
+            <p className="pb s muted">No API-equivalent cost was reported for merged tickets.</p>
+            <p className="note xs">In range: ${inRangeCost.toFixed(2)}</p>
+          </>
         ) : (
           <>
             <LineChart

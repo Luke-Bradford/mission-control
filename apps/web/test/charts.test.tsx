@@ -198,6 +198,28 @@ describe("Instrument charts", () => {
     expect(container.querySelector("#tFlow svg")?.getAttribute("aria-label")).toContain(
       "in progress latest 1",
     );
+    expect(container.querySelector("#tFlow path.line")?.getAttribute("d")).toContain("556.0");
+  });
+
+  it("carries work that entered before the range through the flow chart to now", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={10}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#open", readyAt: 5, startedAt: 5, mergedAt: null, doneAt: null },
+          ],
+        }}
+      />,
+    );
+    const path = container.querySelector("#tFlow path.line")?.getAttribute("d") ?? "";
+    expect(path).toContain("38.0");
+    expect(path).toContain("556.0");
   });
 
   it("plots the served open-work, daily quality, full ticket cost, and bounded forecast series", () => {
@@ -265,6 +287,30 @@ describe("Instrument charts", () => {
     expect(quality.parentElement?.querySelector(".tip")?.textContent).toContain(
       "Updated Mission Control",
     );
+  });
+
+  it("does not substitute a range cost when full ticket cost is explicitly unavailable", () => {
+    const { container } = render(
+      <InstrumentCharts
+        scope={{ range: "6h", all: [], agents: [], account: "", wait: "Loading…", live: false }}
+        from={0}
+        to={60}
+        series={{
+          stateSpans: [],
+          quota: [],
+          annotations: [],
+          tickets: [
+            { ticket: "repo#merged", readyAt: 10, startedAt: 10, mergedAt: 40, doneAt: 45 },
+          ],
+        }}
+        ticketCosts={[{ ticket: "repo#merged", tokens: 0, costUsd: 0.25, totalCostUsd: null }]}
+      />,
+    );
+    expect(container.querySelector("#tCostMerged")?.textContent).toContain(
+      "No API-equivalent cost was reported for merged tickets.",
+    );
+    expect(container.querySelector("#tCostMerged svg")).toBeNull();
+    expect(container.querySelector("#tCostMerged")?.textContent).toContain("In range: $0.25");
   });
 
   it("renders only the supplied server observations, retaining their timestamps", () => {
