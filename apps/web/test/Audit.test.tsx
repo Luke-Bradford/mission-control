@@ -82,6 +82,16 @@ const AUDIT = {
       before: { merged: 1, reviewFailRate: 0.5, medianCostPerMergedTicket: 2, reworkRounds: 1 },
       after: { merged: 3, reviewFailRate: 0, medianCostPerMergedTicket: 1, reworkRounds: 0 },
     },
+    {
+      kind: "model",
+      agentId: "retro-cx",
+      at: NOW - 2 * HOUR,
+      from: "gpt-5.6",
+      to: "gpt-6",
+      windowMs: 7 * 24 * HOUR,
+      before: { merged: 4, reviewFailRate: 0.25, medianCostPerMergedTicket: 4, reworkRounds: 2 },
+      after: { merged: 2, reviewFailRate: null, medianCostPerMergedTicket: null, reworkRounds: 5 },
+    },
   ],
   surgeonProposals: [],
 } satisfies AuditView;
@@ -203,6 +213,14 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
     screen.getByText(
       auditChangeWith(
         "effect · merged 1 → 3 · review fail 50% → 0% · median cost $2.00 → $1.00 · rework 1 → 0",
+      ),
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText(auditChangeWith("Model change · gpt-5.6 → gpt-6"))).toBeTruthy();
+  expect(
+    screen.getByText(
+      auditChangeWith(
+        "effect · merged 4 → 2 · review fail 25% → — · median cost $4.00 → — · rework 2 → 5",
       ),
     ),
   ).toBeTruthy();
