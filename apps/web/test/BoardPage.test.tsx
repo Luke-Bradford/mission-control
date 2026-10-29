@@ -310,6 +310,25 @@ describe("columns", () => {
 });
 
 describe("cards", () => {
+  it("links an active loop card to its run trace", async () => {
+    const active = crewRow({
+      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+    });
+    stub({
+      shopApp: [todo(3349, { status: "In progress", state: "in progress" })],
+      crew: [active],
+    });
+    const { container } = await open();
+    const trace = within(card(container, "shop-app#3349") as HTMLElement).getByRole("link", {
+      name: "Trace",
+    });
+    expect(trace.getAttribute("href")).toBe(`/agent/${active.id}?trace=${active.run?.id}`);
+    fireEvent.click(trace);
+    expect(window.location.pathname + window.location.search).toBe(
+      `/agent/${active.id}?trace=${active.run?.id}`,
+    );
+  });
+
   it("waits for linked PR data before mounting card content", async () => {
     const normal = stub({ shopApp: [todo(1)] });
     let resolvePr: ((response: Response) => void) | undefined;

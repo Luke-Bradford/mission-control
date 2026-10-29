@@ -1,22 +1,27 @@
-import { CI_TRIES, type LoopTry, REVIEW_ROUNDS, type RunLoopView, type RunView } from "@mc/core";
+import type { LoopTry, RunLoopView, RunView } from "@mc/core";
 import { LOOP_PATH, LOOP_PHASE_LABEL } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink } from "../router.ts";
-import { stepTokens, tokenText, tryClass, tryMinutes, tryText } from "./loopView.ts";
+import { runLimits, stepTokens, tokenText, tryClass, tryMinutes, tryText } from "./loopView.ts";
 
 type LoopStep = (typeof LOOP_PATH)[number];
-const nextStep = (step: LoopStep): LoopStep | null =>
-  LOOP_PATH[LOOP_PATH.indexOf(step) + 1] ?? null;
 const stepLabel = (step: LoopStep): string => (step === "ci" ? "Checks" : LOOP_PHASE_LABEL[step]);
 const allTokens = (tries: readonly LoopTry[]): number | null => stepTokens(tries);
+
+const routeAfter = (step: LoopStep, outcome: LoopTry["outcome"]): LoopStep | null => {
+  if (step === "working") return "ci";
+  if (step === "ci") return outcome === "fail" ? "working" : "review";
+  if (step === "review") return outcome === "fail" ? "working" : "done";
+  return null;
+};
 
 type Visit = LoopTry & { next: LoopStep | null };
 const visits = (tries: readonly LoopTry[]): Visit[] =>
   tries.map((try_, i) => ({
     ...try_,
-    next: tries[i + 1]?.step ?? (try_.outcome === "pass" ? nextStep(try_.step) : null),
+    next: tries[i + 1]?.step ?? routeAfter(try_.step, try_.outcome),
   }));
 
 const edgeCounts = (tries: readonly LoopTry[]): readonly [string, number][] => {
@@ -31,6 +36,10 @@ const edgeCounts = (tries: readonly LoopTry[]): readonly [string, number][] => {
 /** A compact history: every recorded try is a visit, so a return is never hidden in an aggregate. */
 export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) {
   const total = allTokens(view.tries);
+  const first = view.tries[0];
+  const last = view.tries.at(-1);
+  const elapsed =
+    first && last ? Math.round(((last.endedAt ?? now) - first.startedAt) / 60_000) : 0;
   if (view.tries.length === 0) return <p className="s muted">No loop steps recorded yet.</p>;
   return (
     <ol className="run-checklist">
@@ -52,23 +61,26 @@ export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) 
       <li className="run-checklist-total">
         <span />
         <span>Loop total</span>
-        <span>{tokenText(total)} tokens total</span>
+        <span>
+          {tokenText(total)} tokens total · {elapsed}m
+        </span>
       </li>
     </ol>
   );
 }
 
-function StopRules({ view }: { view: RunLoopView }) {
+function StopRules({ view, run }: { view: RunLoopView; run?: RunView }) {
   const ciFails = view.loop?.ciFails ?? 0;
   const round = view.round ?? 0;
+  const limits = runLimits(run);
   return (
     <section className="trace-section">
       <h2>Stop rules</h2>
       <p>
-        CI fixes {ciFails} / {CI_TRIES}
+        CI fixes {ciFails} / {limits.tries}
       </p>
       <p>
-        Rework rounds {round} / {REVIEW_ROUNDS}
+        Rework rounds {round} / {limits.rounds}
       </p>
       {view.budget !== null && (
         <p>
@@ -79,20 +91,23 @@ function StopRules({ view }: { view: RunLoopView }) {
   );
 }
 
-function Next({ view }: { view: RunLoopView }) {
+function Next({ view, run }: { view: RunLoopView; run?: RunView }) {
   const current = view.tries.at(-1);
   if (!current) return null;
-  const next =
-    current.outcome === "pass" ? nextStep(current.step) : current.step === "ci" ? "working" : null;
-  const checksDirection = current.step === "ci" && current.outcome === "running";
+  const next = routeAfter(current.step, current.outcome);
+  const conditional =
+    current.outcome === "running" && (current.step === "ci" || current.step === "review");
+  const limits = runLimits(run);
   return (
     <section className="trace-section">
       <h2>Next</h2>
       <p>
-        {checksDirection
-          ? `If Checks pass → In review; if they fail → Working (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, CI_TRIES)} of ${CI_TRIES}).`
+        {conditional
+          ? `If ${stepLabel(current.step)} pass → ${stepLabel(routeAfter(current.step, "pass") as LoopStep)}; if it fails → Working${current.step === "ci" ? ` (CI fix ${Math.min((view.loop?.ciFails ?? 0) + 1, limits.tries)} of ${limits.tries})` : ""}.`
           : next
-            ? `If ${stepLabel(current.step)} ${current.outcome === "pass" ? "passes" : "fails"} → ${stepLabel(next)}`
+            ? current.outcome === "running"
+              ? `${stepLabel(current.step)} → ${stepLabel(next)}`
+              : `If ${stepLabel(current.step)} ${current.outcome === "pass" ? "passes" : "fails"} → ${stepLabel(next)}`
             : "Waiting for the next recorded loop step."}
       </p>
     </section>
@@ -106,12 +121,14 @@ export function RunTrace({
   startedAt,
   endedAt,
   now,
+  run,
 }: {
   runId: string;
   view: RunLoopView;
   startedAt: number;
   endedAt: number | null;
   now: number;
+  run?: RunView;
 }) {
   const elapsed = Math.max(0, (endedAt ?? now) - startedAt);
   const byStep = LOOP_PATH.flatMap((step) => {
@@ -169,8 +186,8 @@ export function RunTrace({
               <p className="muted">No measured token usage yet.</p>
             )}
           </section>
-          <StopRules view={view} />
-          <Next view={view} />
+          <StopRules view={view} run={run} />
+          <Next view={view} run={run} />
         </aside>
       </div>
     </section>
@@ -204,6 +221,7 @@ export function RunTracePanel({ agentId, runId }: { agentId: string; runId: stri
         startedAt={startedAt}
         endedAt={endedAt}
         now={Date.now()}
+        run={run}
       />
     </Panel>
   );

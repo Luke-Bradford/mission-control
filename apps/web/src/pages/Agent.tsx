@@ -72,25 +72,27 @@ export function Agent({ id }: { id: string | null }) {
   return (
     <section id="page-agent">
       <h1 className="sr-only">Agents</h1>
-      <Picker rows={inView} items={items} current={shownId} />
-      {row ? (
+      {traceRun && id !== null ? (
+        <RunTracePanel agentId={id} runId={traceRun} />
+      ) : (
         <>
-          <NeedBanner row={row} items={items} />
-          <Header row={row} limits={limits} />
-          {traceRun ? (
-            <RunTracePanel agentId={row.id} runId={traceRun} />
-          ) : (
-            <div className="agrid">
-              <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-              <div className="side">
-                <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
-                <SideTabs key={`t:${row.id}`} row={row} />
+          <Picker rows={inView} items={items} current={shownId} />
+          {row ? (
+            <>
+              <NeedBanner row={row} items={items} />
+              <Header row={row} limits={limits} />
+              <div className="agrid">
+                <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+                <div className="side">
+                  <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />
+                  <SideTabs key={`t:${row.id}`} row={row} />
+                </div>
               </div>
-            </div>
+            </>
+          ) : (
+            <p className={crew.error && !crew.data ? "pb crit-t" : "pb muted"}>{missing}</p>
           )}
         </>
-      ) : (
-        <p className={crew.error && !crew.data ? "pb crit-t" : "pb muted"}>{missing}</p>
       )}
     </section>
   );

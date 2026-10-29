@@ -191,6 +191,58 @@ afterEach(() => {
 const $ = (c: HTMLElement, sel: string) => c.querySelector<HTMLElement>(sel);
 const loaded = () => screen.findByText("Work on shop-app#3349");
 
+const traceView = (): RunLoopView => ({
+  runId: "r-12",
+  loop: { phase: "working", ciFails: 0, parked: null } as RunLoop,
+  events: [],
+  tries: [
+    {
+      step: "working",
+      fix: false,
+      n: 1,
+      tokens: 100,
+      startedAt: NOW - MIN,
+      endedAt: null,
+      outcome: "running",
+      reason: null,
+    },
+  ],
+  round: 1,
+  budget: null,
+  review: null,
+});
+
+describe("Agent run trace", () => {
+  it("opens the active run trace from its checklist and returns to the agent", async () => {
+    const row = crewRow({
+      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+    });
+    stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
+    const view = render(<Agent id={row.id} />);
+    await screen.findByText("Loop total");
+    const trace = screen.getByRole("link", { name: "Trace" });
+    expect(trace.getAttribute("href")).toBe(`/agent/${row.id}?trace=r-12`);
+    fireEvent.click(trace);
+    expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Back to agent" }));
+    await screen.findByText("Loop total");
+    view.unmount();
+  });
+
+  it("opens a stored trace after its agent has left the current crew", async () => {
+    window.history.replaceState(null, "", "/agent/removed?trace=old-run");
+    stub({
+      rows: [],
+      extra: {
+        "/api/runs/old-run/loop": { ...traceView(), runId: "old-run" },
+        "/api/agents/removed/runs?limit=50": [],
+      },
+    });
+    render(<Agent id="removed" />);
+    expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
+  });
+});
+
 describe("Agent page: header before the timezone loads", () => {
   it("shows the doing line without waiting for the config", async () => {
     stub({ extra: { "/api/config": () => ({ status: 503, body: { error: "loading" } }) } });
