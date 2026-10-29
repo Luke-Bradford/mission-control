@@ -8,6 +8,7 @@ import {
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
+  type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
@@ -2300,7 +2301,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const match = /^(7|30|90|365)d$/.exec(range);
         if (!match) return reply.code(400).send({ error: "range must be 7d, 30d, 90d, or 365d" });
         const until = now();
-        return store.audit(until - Number(match[1]) * 86_400_000, until);
+        const kinds = new Map<string, AuditRunKind>(
+          configuredAgents(config).map((a) => [
+            a.id,
+            a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
+          ]),
+        );
+        return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
       });
       api.get("/machine", async (): Promise<MachineView> => {
         const sessions = config.crew?.sessions ?? [];
