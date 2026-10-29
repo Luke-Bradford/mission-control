@@ -7,7 +7,7 @@ import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 
 const execFileP = promisify(execFile);
-type Tip = Pick<PullRequestView, "branch" | "headSha" | "state">;
+type Tip = Pick<PullRequestView, "branch" | "headSha" | "state"> & { number?: number };
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 // Serialise checks, leaving room for another map git collector under the two-process limit.
@@ -127,7 +127,12 @@ export class MapConflicts {
           checkedTips.add(a.branch);
           checkedTips.add(b.branch);
           for (const file of files) {
-            conflicts.push({ file, branches: [a.branch, b.branch], shas: [a.headSha, b.headSha] });
+            conflicts.push({
+              file,
+              branches: [a.branch, b.branch],
+              shas: [a.headSha, b.headSha],
+              prs: [a.number ?? null, b.number ?? null],
+            });
           }
         }
       }

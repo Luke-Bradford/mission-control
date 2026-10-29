@@ -35,10 +35,12 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DEFAULT_HARD_RULES,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
+  effectiveHardRules,
   type FileDiff,
   FLIGHT_HEADLINE,
   FLIGHT_LIST_MAX,
@@ -4107,6 +4109,34 @@ describe("boards, escalations, health", () => {
     });
   });
 
+  it("carries each seat's area and the hard rules the engine enforces in the map snapshot", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    const repo = config.repos.find((r) => r.id === "shop-app");
+    const seat = session?.seats[0];
+    if (!session || !repo || !seat) throw new Error("fixture session missing");
+    session.checkout = mapCheckout(dir);
+    seat.area = ["apps/web/**", "docs/**"];
+    repo.rules = { ...DEFAULT_REPO_RULES, hardRules: ["config.example.yaml"] };
+
+    // a standard repo's own list is the whole list
+    const standard = (await get("/api/repos/shop-app/map")).json();
+    expect(standard.seats[0].area).toEqual(["apps/web/**", "docs/**"]);
+    expect(standard.rules.hardRules).toEqual(["config.example.yaml"]);
+
+    // a superuser repo's narrower list still carries the defaults and the FLIGHT floor
+    repo.flightPowers = "superuser";
+    const superuser = (await get("/api/repos/shop-app/map")).json();
+    expect(superuser.rules.hardRules).toEqual(effectiveHardRules(repo.rules, "superuser"));
+    expect(superuser.rules.hardRules).toEqual(
+      expect.arrayContaining(["config.example.yaml", ...DEFAULT_HARD_RULES, "CLAUDE.md"]),
+    );
+
+    // a seat with no area sends an empty list
+    seat.area = [];
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].area).toEqual([]);
+  });
+
   for (const vendor of ["claude", "codex"] as const) {
     it(`scopes FLIGHT ${vendor} activity to the current turn and selected repo`, async () => {
       withCrew();
@@ -4545,7 +4575,9 @@ describe("boards, escalations, health", () => {
     const response = await get("/api/repos/shop-app/map/conflicts");
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      conflicts: [{ file: "file.txt", branches: ["right", "left"], shas: [right, left] }],
+      conflicts: [
+        { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [2, 1] },
+      ],
       unchecked: [],
     });
     expect(git("count-objects", "-v")).toBe(before);
