@@ -215,6 +215,20 @@ describe("the route table", () => {
     expect(readerProblem(text as string)).toBeNull();
   });
 
+  it("names the live readers for attention hold and dismiss routes", () => {
+    const readers = readerComments();
+    expect(readers.get("GET /api/attention/held")).toContain("apps/web/src/flight/AskedOfYou.tsx");
+    expect(readers.get("POST /api/attention/:key/hold")).toContain(
+      "apps/web/src/comms/Decisions.tsx",
+    );
+    expect(readers.get("POST /api/attention/:key/hold/release")).toContain(
+      "apps/web/src/flight/AskedOfYou.tsx",
+    );
+    expect(readers.get("POST /api/attention/:key/dismiss")).toContain(
+      "apps/web/src/comms/answer.ts",
+    );
+  });
+
   it("matches by method as well as path", () => {
     const web = ["GET /api/crew", "POST /api/attention/ack"];
     expect(orphans(["GET /api/crew"], web, new Map())).toEqual([]);

@@ -3497,7 +3497,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ?? reply.code(404).send({ error: "Item is no longer open." });
       });
-      // Reader: apps/web/src/comms/NeedsList.tsx
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
       api.get("/attention/held", async () =>
         attentionItems(
           config,
@@ -3509,7 +3509,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           true,
         ).filter((i) => i.hold),
       );
-      // Reader: apps/web/src/comms/NeedsList.tsx
+      // Reader: apps/web/src/comms/Decisions.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
         const body = AttentionHoldInput.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
@@ -3519,7 +3519,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("attention");
         return { ok: true };
       });
-      // Reader: apps/web/src/comms/NeedsList.tsx
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)
           return reply.code(400).send({ error: "Expected an empty object." });
@@ -3633,7 +3633,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { acked: keys.length };
       });
 
-      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button)
+      // Reader: apps/web/src/comms/answer.ts
       api.post<{ Params: { key: string } }>("/attention/:key/dismiss", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
