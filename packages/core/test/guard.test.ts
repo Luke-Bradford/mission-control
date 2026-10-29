@@ -2423,6 +2423,30 @@ describe("detached work: multiplexers fail closed, schedulers and launchers, ari
 
 describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux expansions", () => {
   it.each([
+    "corepack pnpm open .",
+    "pnpm $(echo open) .",
+    "pnpm $" + "{X:-open} .",
+    "$(echo open) .",
+    "ssh -fN host",
+    "ssh -f host sleep 9",
+    "autossh -f host",
+    "start-stop-daemon --start -b",
+    "disown",
+    "gpg-connect-agent /bye",
+    "gpg --sign x",
+    "pnpm t open .",
+    "pnpm server open .",
+  ])("refuses an unmodelled form that can launch work later: %s", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("deny");
+  });
+
+  it("documents program-specific argument execution as an accepted parser boundary", () => {
+    // Generic runner handling still catches npx, but bun is not a modelled runner.
+    expect(ruleOf(bash("npx cross-env A=1 open ."))).toBe("background");
+    expect(ruleOf(bash("bun x open ."))).toBe("allow");
+  });
+
+  it.each([
     ["=git push", "git-write"],
     ["=gh pr merge 1", "gh-cli"],
     ["=curl https://x", "network"],

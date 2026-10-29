@@ -209,6 +209,8 @@ const WRAPPERS: Readonly<Record<string, { valued: readonly string[]; operands: n
   nohup: { valued: [], operands: 0 },
   noglob: { valued: [], operands: 0 },
   nocorrect: { valued: [], operands: 0 },
+  // `corepack pnpm …` delegates to the selected package manager.
+  corepack: { valued: [], operands: 0 },
   sudo: { valued: ["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T"], operands: 0 },
   timeout: { valued: ["-s", "--signal", "-k", "--kill-after"], operands: 1 },
   nice: { valued: ["-n", "--adjustment"], operands: 0 },
@@ -273,6 +275,11 @@ const BACKGROUND_LAUNCHERS = new Set([
   "ssh-agent",
   "systemd-run",
   "daemonize",
+  // These use, or start, gpg-agent as needed.
+  "gpg",
+  "gpg-connect-agent",
+  // A shell builtin that detaches an existing job.
+  "disown",
 ]);
 /**
  * Programs that start a daemon only with one option, which GnuPG also takes as any unambiguous
@@ -285,6 +292,16 @@ const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; short
 /** Whether `program` with `args` hands work to something that outlives this tool call. */
 function launches(program: string, args: readonly string[]): boolean {
   if (BACKGROUND_LAUNCHERS.has(program)) return true;
+  // ssh and autossh fork into the background under -f (including `ssh -fN`).
+  if ((program === "ssh" || program === "autossh") && args.some((a) => a.startsWith("-f")))
+    return true;
+  // start-stop-daemon only detaches the started process when both options are present.
+  if (
+    program === "start-stop-daemon" &&
+    args.some((a) => a === "--start" || a === "-S") &&
+    args.some((a) => a === "--background" || a === "-b")
+  )
+    return true;
   const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
     ? BACKGROUND_LAUNCH_OPTIONS[program]
     : undefined;
@@ -488,12 +505,10 @@ const PNPM_COMMANDS = new Set([
   "run",
   "run-script",
   "self-update",
-  "server",
   "set",
   "setup",
   "start",
   "store",
-  "t",
   "test",
   "tst",
   "un",
@@ -1496,6 +1511,12 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   if (gitEnv) extra.push({ argv: [GIT_ENV_OVERRIDE], background: bg });
   const program = words[at];
   if (program === undefined) return extra;
+  // A shell expansion in the line's command position can resolve to any program. Arguments may
+  // safely expand, but this position determines what the shell invokes, so it cannot be judged.
+  // Nested commands (runner suffixes and eval scripts) are already judged fail-closed by their
+  // caller; retaining their existing rule keeps specific refusals such as gpg and tmux.
+  if (depth === 0 && mux === "none" && !gitEnv && EXPANDS.test(program))
+    return [...extra, { argv: [UNREADABLE_LINE], background: bg }];
   const name = baseName(program);
   const rest = words.slice(at + 1);
   const restBraces = braces.slice(at + 1);
@@ -1550,6 +1571,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   // foreground (no command-line splitting: that is a runner's, and these are scripts or binaries)
   const bin = packageBinStart(name, rest);
   if (bin !== -1) {
+    if (EXPANDS.test(rest[bin] ?? "")) out.push({ argv: [UNREADABLE_LINE], background: bg });
     for (let i = bin; i < rest.length; i++) {
       const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));
       out.push(
