@@ -8,7 +8,6 @@ import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
   ENGINE_TICK_MS,
-  FLIGHT_HOUR_MS,
   FLIGHT_MOVE_COLUMNS,
   FLIGHT_SILENT_TICKS,
   type FlightDecisionKind,
