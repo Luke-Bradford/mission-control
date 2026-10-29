@@ -106,3 +106,71 @@ export function readNewLines(path: string, fromOffset: number, opts: TailOptions
     }
   }
 }
+
+export interface OffsetSinceOptions {
+  /** Bytes read per backward step (default 1 MB). */
+  chunk?: number;
+  /** Furthest back from the end of the file the scan goes (default 16 MB). */
+  maxBytes?: number;
+}
+
+/** The "timestamp" of one JSONL line in ms, or null when it has none. */
+function lineTime(line: string): number | null {
+  const found = /"timestamp"\s*:\s*"([^"]+)"/.exec(line);
+  const at = found ? Date.parse(found[1] as string) : Number.NaN;
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
+ * The byte offset, on a line start, from which reading `path` covers everything at or after
+ * `cutoff` (ms): the line after the last one stamped before the cutoff. Scans back from the end of
+ * the file in chunks, never further than `maxBytes` (then the first complete line within that),
+ * and answers 0 when no line is older than the cutoff or the file can't be read.
+ */
+export function offsetSince(path: string, cutoff: number, opts: OffsetSinceOptions = {}): number {
+  const chunk = opts.chunk ?? SCAN_CHUNK;
+  const maxBytes = opts.maxBytes ?? 16 * 1024 * 1024;
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, "r");
+    const size = fstatSync(fd).size;
+    const floor = Math.max(0, size - maxBytes);
+    // `after` is the start of the text read so far; a line may straddle the chunk boundary.
+    let after = size;
+    let tail = Buffer.alloc(0);
+    while (after > floor) {
+      const from = Math.max(floor, after - chunk);
+      tail = Buffer.concat([readRange(fd, from, after - from), tail]);
+      after = from;
+      // lines wholly inside `tail`, newest last; the first piece is partial unless at file start
+      const starts: number[] = [];
+      for (let i = tail.indexOf(NEWLINE); i !== -1; i = tail.indexOf(NEWLINE, i + 1)) {
+        starts.push(i + 1);
+      }
+      const complete = after === 0 ? [0, ...starts] : starts;
+      for (let k = complete.length - 1; k >= 0; k--) {
+        const lineStart = complete[k] as number;
+        const end = tail.indexOf(NEWLINE, lineStart);
+        if (end === -1) continue; // trailing partial line
+        const at = lineTime(tail.subarray(lineStart, end).toString("utf8"));
+        if (at !== null && at < cutoff) return after + end + 1;
+      }
+      if (after === 0) return 0;
+      if (after <= floor) break;
+    }
+    if (floor === 0) return 0;
+    // capped: begin at the first complete line inside the scanned span
+    const nl = tail.indexOf(NEWLINE);
+    return nl === -1 ? size : floor + nl + 1;
+  } catch {
+    return 0;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // nothing useful to do
+      }
+    }
+  }
+}

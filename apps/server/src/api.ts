@@ -12,6 +12,7 @@ import {
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
+  type BoardItem,
   type ChangedFiles,
   CI_TRIES,
   type CiRunsView,
@@ -35,6 +36,7 @@ import {
   type CrewChanges,
   type CrewMode,
   type CrewPause,
+  type CrewRow,
   type CrewSessionFolders,
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
@@ -71,6 +73,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  type PullRequestView,
   pace5h,
   projectAtReset,
   QA_RETENTION_DAYS,
@@ -100,6 +103,7 @@ import {
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
+  type FastifyBaseLogger,
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
@@ -218,7 +222,7 @@ import { loopTries } from "./loophistory.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
-import { mapTree } from "./map/snapshot.ts";
+import { mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
@@ -544,6 +548,8 @@ export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
+/** Longest a map payload is reused: the backstop for fields that age without any input changing. */
+const MAP_CACHE_MS = 15_000;
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -601,6 +607,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return sources;
   });
   let stopMapRing: (() => void) | undefined;
+  const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapSnapshot> }>();
+  const buildMapPayload = async (
+    repo: (typeof config.repos)[number],
+    checkout: string,
+    crewRows: CrewRow[],
+    lock: typeof NO_LOCK,
+    prs: PullRequestView[],
+    board: BoardItem[],
+    log: FastifyBaseLogger,
+  ): Promise<MapSnapshot> => {
+    const tree = await mapTree(checkout, "origin/HEAD", prs, board, now());
+    const data = mapSeats(
+      crewRows,
+      store,
+      mapRing,
+      lock,
+      now(),
+      flightSeat(config)?.seat.id ?? null,
+    );
+    for (const seat of data.seats) {
+      const context = store.seatSession(
+        seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
+      )?.runId
+        ? await deps.supervisor
+            ?.contextUsage(
+              seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
+            )
+            .catch(() => null)
+        : null;
+      seat.context = context ? { total: context.total, window: context.window } : null;
+    }
+    const conflicts = await mapConflicts.check(checkout, prs);
+    const read = await readRepoRules(repo.github, checkout, repo.rules);
+    // Unreadable repo rules leave the configured ones: the map still draws.
+    const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
+    for (const failure of conflicts.failures)
+      log.warn(failure, "map conflict check failed for a pair; reported unchecked");
+    return {
+      repoId: repo.id,
+      ...tree,
+      ...data,
+      conflicts: conflicts.conflicts,
+      conflictsUnchecked: conflicts.unchecked,
+      rules: { areas: rules.areas, hardRules: rules.hardRules },
+      // Slice 1b will publish sequenced deltas; none have been emitted yet.
+      seq: 0,
+    };
+  };
 
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountModels = new Map<string, AccountModels>();
@@ -694,7 +748,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.addHook("onResponse", async (req, reply) => {
     if (reply.statusCode >= 400 || reply.elapsedTime > 1000) {
-      const fields = { res: reply, responseTime: reply.elapsedTime };
+      // path only: a query string is the caller's, and the operator token travels as a header
+      const fields = {
+        res: reply,
+        responseTime: reply.elapsedTime,
+        method: req.method,
+        url: req.url.split("?")[0],
+      };
       if (reply.statusCode >= 500) {
         req.log.error(
           { ...fields, err: requestErrors.get(req) ?? new Error(`HTTP ${reply.statusCode}`) },
@@ -2116,58 +2176,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
               return reply.code(503).send({ error: "map checkout unavailable" });
             }
-            const tree = await mapTree(
-              checkout,
-              "origin/HEAD",
-              store.pullRequests(repo.id),
-              store.board(repo.id),
-              now(),
-            );
+            const head = await mapHead(checkout);
             if (!stopMapRing) stopMapRing = mapRing.start();
             mapRing.poll();
-            const data = mapSeats(
-              sharedCrew()
-                .rows.filter(
-                  (r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"),
-                )
-                .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r)),
-              store,
-              mapRing,
-              deps.lock?.state() ?? NO_LOCK,
-              now(),
-              flightSeat(config)?.seat.id ?? null,
-            );
-            for (const seat of data.seats) {
-              const context = store.seatSession(
-                seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
-              )?.runId
-                ? await deps.supervisor
-                    ?.contextUsage(
-                      seat.seat === "FLIGHT"
-                        ? (flightSeat(config)?.seat.id ?? seat.seat)
-                        : seat.seat,
-                    )
-                    .catch(() => null)
-                : null;
-              seat.context = context ? { total: context.total, window: context.window } : null;
-            }
-            const conflicts = await mapConflicts.check(checkout, store.pullRequests(repo.id));
-            const read = await readRepoRules(repo.github, checkout, repo.rules);
-            // Unreadable repo rules leave the configured ones: the map still draws.
-            const rules =
-              read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
-            for (const failure of conflicts.failures)
-              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-            return {
-              repoId: repo.id,
-              ...tree,
-              ...data,
-              conflicts: conflicts.conflicts,
-              conflictsUnchecked: conflicts.unchecked,
-              rules: { areas: rules.areas, hardRules: rules.hardRules },
-              // Slice 1b will publish sequenced deltas; none have been emitted yet.
-              seq: 0,
-            };
+            const crewRows = sharedCrew()
+              .rows.filter(
+                (r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"),
+              )
+              .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
+            const lock = deps.lock?.state() ?? NO_LOCK;
+            const prs = store.pullRequests(repo.id);
+            const board = store.board(repo.id);
+            // reused until the default branch, the ring, the seats (rows and lock), the PRs or the
+            // board change; the time-driven fields (ages, context) get the backstop
+            const key = JSON.stringify([
+              head,
+              mapRing.revision(repo.id),
+              crewRows,
+              lock,
+              prs,
+              board,
+            ]);
+            const at = now();
+            const cached = mapPayloads.get(repo.id);
+            if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS)
+              return await cached.payload;
+            const payload = buildMapPayload(repo, checkout, crewRows, lock, prs, board, reply.log);
+            const entry = { key, at, payload };
+            mapPayloads.set(repo.id, entry);
+            payload.catch(() => {
+              if (mapPayloads.get(repo.id) === entry) mapPayloads.delete(repo.id);
+            });
+            return await payload;
           } catch (e) {
             reply.log.warn(
               { reason: e instanceof Error ? e.message : String(e) },

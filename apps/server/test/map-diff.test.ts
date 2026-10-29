@@ -45,6 +45,7 @@ for (const vendor of ["claude", "codex"] as const) {
     const ring = new CallRing(() => [
       { id: "run", seat: "seat", repoId: "repo", cwd, transcriptPath, vendor },
     ]);
+    ring.subscribe("repo", () => {}); // a connected map client keeps the one-second cadence
     const stop = ring.start();
     try {
       await expect.poll(() => ring.modified("seat"), { timeout: 4500 }).toEqual([]);
@@ -119,6 +120,7 @@ it("retains the current checkout collector with an aside run on the same seat", 
     };
   });
   const ring = new CallRing(() => sources);
+  ring.subscribe("repo", () => {}); // a connected map client keeps the one-second cadence
   const stop = ring.start();
   try {
     await expect.poll(() => ring.modified("seat"), { timeout: 4500 }).toEqual([]);

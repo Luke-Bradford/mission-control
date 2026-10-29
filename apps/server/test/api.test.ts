@@ -160,6 +160,12 @@ const stubUpdater = (): Updater => ({
   restart: () => void updaterCalls.push("restart"),
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
+/** A map transcript fixture stamped now: the ring reads only the window the map shows. */
+const mapFixture = (vendor: "claude" | "codex"): string =>
+  readFileSync(new URL(`./fixtures/map/${vendor}.jsonl`, import.meta.url), "utf8").replaceAll(
+    "2026-10-25T00:00:",
+    new Date().toISOString().slice(0, 17),
+  );
 const withCrew = () => {
   config.crew = {
     worktrees: join(dir, "crew"),
@@ -3905,6 +3911,87 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
   });
 
+  it("reuses the map payload while its inputs are unchanged and rebuilds when one changes", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    const checkout = mapCheckout(dir);
+    session.checkout = checkout;
+    const transcriptPath = join(dir, "cache.jsonl");
+    writeFileSync(transcriptPath, "");
+    store.upsertRun(run({ id: "cache-run", agentId: "guido-1", transcriptPath }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "cache-run",
+      cliSessionId: null,
+      vendor: "claude",
+      state: "running",
+      reason: null,
+      worktree: dir,
+      updatedAt: NOW,
+    });
+    const a = buildApp({ config, store, bus, now: () => clock, supervisor: stubSupervisor() });
+    const builds = () => supervisorCalls.filter((c) => c[0] === "context").length;
+    const fetch = async () => {
+      const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
+      expect(response.statusCode).toBe(200);
+      return response;
+    };
+    try {
+      const first = await fetch();
+      const built = builds();
+      expect(built).toBeGreaterThan(0);
+      expect((await fetch()).body).toBe(first.body);
+      expect(builds()).toBe(built);
+      // a ring delta
+      appendFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Grep", input: { pattern: "x" } }] } })}\n`,
+      );
+      await fetch();
+      expect(builds()).toBeGreaterThan(built);
+      const afterDelta = builds();
+      await fetch();
+      expect(builds()).toBe(afterDelta);
+      // a new commit on the default branch
+      writeFileSync(join(checkout, "added.ts"), "export const added = 1;\n");
+      const git = (...args: string[]) =>
+        execFileSync("git", [
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ]);
+      git("add", ".");
+      git("commit", "-qm", "more");
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+      await fetch();
+      expect(builds()).toBeGreaterThan(afterDelta);
+      const afterCommit = builds();
+      // a seat change
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "cache-run",
+        cliSessionId: null,
+        vendor: "claude",
+        state: "idle",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW + 5000,
+      });
+      clock += 5000;
+      await fetch();
+      expect(builds()).toBeGreaterThan(afterCommit);
+    } finally {
+      await a.close();
+    }
+  });
+
   it("carries the repo's resolved area and hard-rule globs in the map snapshot", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
@@ -4065,10 +4152,7 @@ describe("boards, escalations, health", () => {
     if (!session) throw new Error("fixture session missing");
     session.checkout = mapCheckout(dir);
     const transcriptPath = join(dir, "aside.jsonl");
-    writeFileSync(
-      transcriptPath,
-      readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url)),
-    );
+    writeFileSync(transcriptPath, mapFixture("claude"));
     store.upsertRun(
       run({
         id: "aside",
@@ -4186,9 +4270,7 @@ describe("boards, escalations, health", () => {
       session.checkout = mapCheckout(dir);
       const transcriptPath = join(dir, "map.jsonl");
       writeFileSync(join(dir, "file.ts"), "before\n");
-      const lines = readFileSync(new URL(`./fixtures/map/${vendor}.jsonl`, import.meta.url), "utf8")
-        .trim()
-        .split("\n");
+      const lines = mapFixture(vendor).trim().split("\n");
       writeFileSync(transcriptPath, `${lines.join("\n")}\n`);
       store.upsertRun(
         run({ id: "map-run", agentId: "guido-1", transcriptPath, ticket: "shop-app#7" }),
@@ -5281,12 +5363,7 @@ describe("SSE stream", () => {
       ]);
       const otherWrite = vi.spyOn(other.res.raw.res, "write");
       const plainWrite = vi.spyOn(plain.res.raw.res, "write");
-      const frames = readFileSync(
-        resolve(import.meta.dirname, `fixtures/map/${vendor}.jsonl`),
-        "utf8",
-      )
-        .trim()
-        .split("\n");
+      const frames = mapFixture(vendor).trim().split("\n");
       appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
       bus.emit("boards");
       await selected.until('"type":"call.end"');
@@ -5330,9 +5407,7 @@ describe("SSE stream", () => {
     async (transition) => {
       withCrew();
       const transcriptPath = join(dir, "previous-map.jsonl");
-      const frames = readFileSync(resolve(import.meta.dirname, "fixtures/map/claude.jsonl"), "utf8")
-        .trim()
-        .split("\n");
+      const frames = mapFixture("claude").trim().split("\n");
       writeFileSync(transcriptPath, `${frames[0]}\n`);
       store.upsertRun(run({ id: "previous-map", agentId: "guido-1", transcriptPath }));
       const session = {
@@ -7507,6 +7582,10 @@ it("logs a successful request taking over one second", async () => {
   ).toBe(200);
   expect(logs).toHaveLength(1);
   expect(JSON.parse(logs[0]).responseTime).toBeGreaterThan(1000);
+  expect(JSON.parse(logs[0])).toMatchObject({
+    method: "GET",
+    url: "/api/settings/away",
+  });
 });
 
 it("logs the error message and stack of an explicit 5xx response", async () => {

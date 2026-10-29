@@ -104,11 +104,85 @@ describe("crew call ring", () => {
     expect(ring.sequence("two")).toBe(3);
   });
 
+  it("starts a restarted ring at the transcript's recent tail, not at offset 0", () => {
+    const { transcriptPath, lines, ring } = setup("claude");
+    const stale = (id: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id, name: "Stale", input: { file_path: "file.ts" } }],
+        },
+        timestamp: "2026-10-23T00:00:00Z",
+      });
+    // an old day of work, then the fixture's calls at "now"
+    writeFileSync(transcriptPath, `${stale("old-1")}\n${stale("old-2")}\n${lines.join("\n")}\n`);
+    const received: MapDelta[] = [];
+    ring.subscribe("repo", (delta) => received.push(delta));
+    ring.poll();
+    expect(received.length).toBeGreaterThan(0);
+    expect(received.some((d) => "tool" in d && d.tool === "Stale")).toBe(false);
+  });
+
+  it("polls only live runs, and reads a run once more when it stops being current", () => {
+    const { cwd, transcriptPath, lines } = setup("claude");
+    const source = { id: "run", seat: "seat", repoId: "repo", cwd, transcriptPath, current: true };
+    const ring = new CallRing(() => [source]);
+    const received: MapDelta[] = [];
+    ring.subscribe("repo", (delta) => received.push(delta));
+    appendFileSync(transcriptPath, `${lines[0]}\n`);
+    ring.poll();
+    const first = received.length;
+    source.current = false;
+    appendFileSync(transcriptPath, `${lines[1]}\n`);
+    ring.poll(); // the last read of the finished run
+    expect(received.length).toBeGreaterThan(first);
+    const settled = received.length;
+    appendFileSync(transcriptPath, `${lines[2]}\n${lines[3]}\n`);
+    ring.poll();
+    expect(received).toHaveLength(settled);
+    source.current = true;
+    ring.poll();
+    expect(received.length).toBeGreaterThan(settled);
+  });
+
+  it("polls every second with a map client connected and every five seconds without", () => {
+    const { ring } = setup("claude");
+    const poll = vi.spyOn(ring, "poll");
+    const stop = ring.start();
+    expect(poll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(4000);
+    expect(poll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1000);
+    expect(poll).toHaveBeenCalledTimes(2);
+    const unsubscribe = ring.subscribe("repo", () => {});
+    vi.advanceTimersByTime(3000);
+    expect(poll).toHaveBeenCalledTimes(5);
+    unsubscribe();
+    stop();
+  });
+
+  it("moves its revision when a delta is published or a call ages out, and not otherwise", () => {
+    const { transcriptPath, lines, ring } = setup("claude");
+    const before = ring.revision("repo");
+    ring.poll();
+    expect(ring.revision("repo")).toBe(before);
+    appendFileSync(transcriptPath, `${lines[0]}\n${lines[1]}\n`);
+    ring.poll();
+    const after = ring.revision("repo");
+    expect(after).not.toBe(before);
+    ring.poll();
+    expect(ring.revision("repo")).toBe(after);
+    vi.setSystemTime(new Date("2026-10-25T00:20:00Z"));
+    ring.poll();
+    expect(ring.revision("repo")).not.toBe(after);
+  });
+
   for (const vendor of ["claude", "codex"] as const) {
     it(`${vendor}: tails calls within two seconds, closes results and measures raw payloads`, () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-10-25T00:00:00Z"));
       const { ring, lines, transcriptPath } = setup(vendor);
+      ring.subscribe("repo", () => {}); // a connected map client keeps the one-second cadence
       const stop = ring.start();
       const since = Date.now();
       appendFileSync(transcriptPath, `${lines[0]}\n`);

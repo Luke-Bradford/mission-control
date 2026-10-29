@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MAX_LINE_BYTES, MAX_READ_BYTES, readNewLines } from "../src/tail.ts";
+import { MAX_LINE_BYTES, MAX_READ_BYTES, offsetSince, readNewLines } from "../src/tail.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -148,5 +148,39 @@ describe("readNewLines", () => {
 
   it("defaults the line cap to MAX_LINE_BYTES", () => {
     expect(MAX_LINE_BYTES).toBe(64 * 1024 * 1024);
+  });
+});
+
+describe("offsetSince", () => {
+  const line = (at: string, pad = 0) =>
+    `${JSON.stringify({ timestamp: at, pad: "x".repeat(pad) })}\n`;
+  const cutoff = Date.parse("2026-10-25T00:00:00Z");
+
+  it("returns the start of the first line after the last one older than the cutoff", () => {
+    const p = join(dir, "t.jsonl");
+    const old = line("2026-10-24T00:00:00Z", 3000) + line("2026-10-24T23:00:00Z", 3000);
+    writeFileSync(p, `${old}${line("2026-10-25T00:00:01Z")}${line("2026-10-25T00:00:02Z")}`);
+    const offset = offsetSince(p, cutoff, { chunk: 1024 });
+    expect(offset).toBe(Buffer.byteLength(old));
+    expect(readNewLines(p, offset).lines).toHaveLength(2);
+  });
+
+  it("reads the whole file when nothing in it is older than the cutoff", () => {
+    const p = join(dir, "t.jsonl");
+    writeFileSync(p, line("2026-10-25T00:00:01Z") + line("2026-10-25T00:00:02Z"));
+    expect(offsetSince(p, cutoff)).toBe(0);
+  });
+
+  it("stops at the byte cap on a line start when the window is longer", () => {
+    const p = join(dir, "t.jsonl");
+    writeFileSync(p, line("2026-10-25T00:00:01Z", 500).repeat(40));
+    const offset = offsetSince(p, cutoff, { chunk: 1024, maxBytes: 5000 });
+    const size = Buffer.byteLength(line("2026-10-25T00:00:01Z", 500).repeat(40));
+    expect(offset).toBeGreaterThan(size - 6000);
+    expect(readNewLines(p, offset).lines.every((l) => JSON.parse(l).pad.length === 500)).toBe(true);
+  });
+
+  it("answers 0 for a missing file", () => {
+    expect(offsetSince(join(dir, "none.jsonl"), cutoff)).toBe(0);
   });
 });

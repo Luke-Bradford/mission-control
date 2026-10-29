@@ -15,6 +15,26 @@ const MAP_COUPLING_MIN = 4;
 const MAP_COUPLING_CAP = 600;
 const MAP_COUPLING_PR_FILES_MAX = 25;
 
+/** The commit `ref` names in the checkout: one cheap read, the key the cached tree is under. */
+export async function mapHead(checkout: string, ref = "origin/HEAD"): Promise<string> {
+  const env = { ...gitEnv(process.env), GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" };
+  const { stdout } = await exec(
+    "git",
+    [
+      "--no-optional-locks",
+      "-c",
+      "core.fsmonitor=false",
+      "-C",
+      checkout,
+      "rev-parse",
+      "--verify",
+      `${ref}^{commit}`,
+    ],
+    { env, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_BUFFER },
+  );
+  return stdout.trim();
+}
+
 /** Serial tree reads leave one git slot for the conflict collector. Never fetch missing objects. */
 export function mapTree(
   checkout: string,
