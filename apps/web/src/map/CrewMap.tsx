@@ -15,6 +15,7 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
+  ConflictsLens,
   downstream,
   graph,
   HistoryLens,
@@ -24,6 +25,9 @@ import {
   LensTabs,
   lensVisuals,
   type MapLens,
+  OwnershipLens,
+  ReviewLens,
+  rulesOf,
 } from "./Lenses.tsx";
 import { mainAreas } from "./layout.ts";
 import { mapLayoutWorker } from "./layoutClient.ts";
@@ -300,7 +304,7 @@ export function CrewMapView({
             setFocus(null);
           }}
         />
-        {lens === "impact" || lens === "history" ? (
+        {lens !== "changes" ? (
           <AnalyticalMapKey
             lens={lens}
             focus={focus}
@@ -356,6 +360,12 @@ export function CrewMapView({
             <ImpactLens snapshot={snapshot} focus={focus} onFocus={setFocus} />
           ) : lens === "history" ? (
             <HistoryLens snapshot={snapshot} focus={focus} onFocus={setFocus} github={github} />
+          ) : lens === "ownership" ? (
+            <OwnershipLens snapshot={snapshot} onFocus={setFocus} />
+          ) : lens === "review" ? (
+            <ReviewLens snapshot={snapshot} onFocus={setFocus} />
+          ) : lens === "conflicts" ? (
+            <ConflictsLens snapshot={snapshot} onFocus={setFocus} />
           ) : (
             <>
               <section className="map-card map-card-seats" aria-label="Seats">
@@ -539,6 +549,59 @@ function AnalyticalMapKey({
   indices: Record<string, number>;
   names: Record<string, string>;
 }) {
+  if (lens === "ownership") {
+    const rules = rulesOf(snapshot);
+    return (
+      <div className="map-analytical-key" role="note" aria-label="Ownership colour key">
+        {rules ? (
+          <>
+            <span className="map-key-item">
+              <i className="map-key-swatch map-key-area" aria-hidden="true" /> area
+            </span>
+            <span className="map-key-item">
+              <i className="map-key-swatch map-key-outline" aria-hidden="true" /> hard-rule
+            </span>
+            <span className="map-key-item">
+              {rules.areas.length} areas · {snapshot.tree.length} files
+            </span>
+          </>
+        ) : (
+          <span className="map-key-item">Ownership rules unavailable</span>
+        )}
+      </div>
+    );
+  }
+  if (lens === "review") {
+    const counts = Object.fromEntries(
+      ["Critical", "Important", "Minor"].map((severity) => [
+        severity,
+        snapshot.findings.filter((finding) => finding.severity === severity).length,
+      ]),
+    );
+    return (
+      <div className="map-analytical-key" role="note" aria-label="Review severity key">
+        {(["Critical", "Important", "Minor"] as const).map((severity) => (
+          <span className="map-key-item" key={severity}>
+            <i
+              className={`map-key-swatch map-severity-${severity.toLowerCase()}`}
+              aria-hidden="true"
+            />{" "}
+            {counts[severity]} {severity}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  if (lens === "conflicts") {
+    return (
+      <div className="map-analytical-key" role="note" aria-label="Conflicts colour key">
+        <span className="map-key-item">
+          <i className="map-key-swatch map-key-conflict" aria-hidden="true" />{" "}
+          {snapshot.conflicts.length} files changed on 2+ open branches
+        </span>
+      </div>
+    );
+  }
   if (lens === "impact" && focus !== null) {
     const { forward, reverse } = graph(snapshot);
     const reach = downstream(focus, reverse);

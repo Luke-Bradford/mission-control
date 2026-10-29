@@ -11,6 +11,22 @@ const colours = [
   "var(--seat-6)",
   "var(--seat-7)",
 ];
+const areaColours: Record<string, string> = {
+  "area:server": "var(--seat-1)",
+  "area:web": "var(--seat-5)",
+  "area:core": "var(--seat-6)",
+  apps: "var(--accent)",
+  packages: "var(--seat-6)",
+  docs: "var(--seat-5)",
+  roles: "var(--seat-4)",
+  ".github": "var(--seat-7)",
+  "(root)": "var(--void-line)",
+};
+const severityColours = {
+  Critical: "var(--rem)",
+  Important: "var(--seat-4)",
+  Minor: "var(--void-muted)",
+} as const;
 type Rect = { x: number; y: number; width: number; height: number };
 export type TreemapTile = Rect & { path: string; center: [number, number] };
 export type TreemapFolder = Rect & { path: string; name: string };
@@ -195,7 +211,17 @@ export function MapTreemap({
       ref={ref}
       className={`map-treemap map-treemap-${lens}`}
       role="img"
-      aria-label={lens === "impact" ? "Impact reach treemap" : "History PR heat treemap"}
+      aria-label={
+        lens === "impact"
+          ? "Impact reach treemap"
+          : lens === "history"
+            ? "History PR heat treemap"
+            : lens === "ownership"
+              ? "Ownership treemap"
+              : lens === "review"
+                ? "Review findings treemap"
+                : "Conflicts treemap"
+      }
     >
       {layout.folders.map((folder) => (
         <div key={folder.path} className="map-treemap-folder" style={style(folder)}>
@@ -208,11 +234,19 @@ export function MapTreemap({
         const active =
           lens === "history"
             ? v?.hotspot !== undefined
-            : directImport || (v?.seat !== undefined && v.distance !== undefined);
+            : lens === "ownership"
+              ? v?.area !== undefined
+              : lens === "review"
+                ? v?.severity !== undefined
+                : lens === "conflicts"
+                  ? v?.conflict === true
+                  : directImport || (v?.seat !== undefined && v.distance !== undefined);
         const intensity = active
           ? lens === "history"
             ? historyHeat(v?.hotspot ?? 0)
-            : 1 / ((v?.distance ?? 0) + 1)
+            : lens === "review" || lens === "conflicts"
+              ? 0.55
+              : 1 / ((v?.distance ?? 0) + 1)
           : 0;
         const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
         return (
@@ -226,6 +260,10 @@ export function MapTreemap({
             data-overlap={v?.overlap || undefined}
             data-direct-import={directImport || undefined}
             data-fix-heavy={fixHeavy || undefined}
+            data-area={lens === "ownership" ? v?.area : undefined}
+            data-hard-rule={lens === "ownership" && v?.hardRule ? "true" : undefined}
+            data-severity={lens === "review" ? v?.severity : undefined}
+            data-conflict={lens === "conflicts" && v?.conflict ? "true" : undefined}
             style={
               {
                 ...style(tile),
@@ -233,7 +271,13 @@ export function MapTreemap({
                 "--tile-colour": active
                   ? lens === "history"
                     ? "var(--accent)"
-                    : colours[(v?.seat ?? 0) % colours.length]
+                    : lens === "ownership"
+                      ? (areaColours[v?.area?.split("/")[0] ?? "(root)"] ?? "var(--void-muted)")
+                      : lens === "review"
+                        ? severityColours[v?.severity ?? "Minor"]
+                        : lens === "conflicts"
+                          ? "var(--rem)"
+                          : colours[(v?.seat ?? 0) % colours.length]
                   : "var(--void-line)",
               } as CSSProperties
             }

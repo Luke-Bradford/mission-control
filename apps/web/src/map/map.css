@@ -243,6 +243,19 @@
     var(--treemap-bg)
   );
 }
+.map-treemap-ownership .map-treemap-tile,
+.map-treemap-review .map-treemap-tile,
+.map-treemap-conflicts .map-treemap-tile {
+  background: color-mix(
+    in srgb,
+    var(--tile-colour) calc(var(--tile-intensity) * 85%),
+    var(--treemap-bg)
+  );
+}
+.map-treemap-conflicts .map-treemap-tile[data-conflict] {
+  outline: 2px solid var(--rem);
+  outline-offset: -2px;
+}
 .map-treemap-tile[data-overlap] {
   outline: 2px solid var(--rem);
   outline-offset: -2px;
@@ -439,6 +452,35 @@
 }
 .map-key-fix {
   background: linear-gradient(135deg, var(--rem) 0 50%, transparent 50%);
+}
+.map-analytical-key .map-key-area {
+  background: var(--accent);
+}
+.map-severity-critical {
+  background: var(--rem);
+}
+.map-severity-important {
+  background: var(--seat-4);
+}
+.map-severity-minor {
+  background: var(--void-muted);
+}
+.map-analytical-key .map-key-conflict,
+.map-analytical-key .map-severity-critical {
+  background: var(--rem);
+}
+.map-analytical-key .map-severity-important {
+  background: var(--seat-4);
+}
+.map-analytical-key .map-severity-minor {
+  background: var(--void-muted);
+}
+.map-severity {
+  display: inline-block;
+  padding: 1px 3px;
+  border-radius: 2px;
+  color: var(--void);
+  font-size: 9px;
 }
 .map-page .add {
   color: var(--add);

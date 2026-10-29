@@ -126,12 +126,13 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
   };
   const { container } = render(<CrewMapView snapshot={snapshot} />);
   fireEvent.click(screen.getByRole("button", { name: /^GUIDO-1/ }));
-  const seatCard = container.textContent ?? "";
+  const detail = screen.getByRole("complementary", { name: "Selection detail" });
+  const seatCard = detail.textContent ?? "";
   fireEvent.change(screen.getByRole("searchbox", { name: "Find a file or folder" }), {
     target: { value: "main" },
   });
   fireEvent.click(screen.getByRole("button", { name: "src/main.ts" }));
-  for (const text of [seatCard, container.textContent ?? ""])
+  for (const text of [seatCard, detail.textContent ?? ""])
     for (const warning of [
       /question/i,
       /refused/i,

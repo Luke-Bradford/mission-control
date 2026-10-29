@@ -195,6 +195,95 @@ function snapshot(): MapSnapshot {
   return value;
 }
 
+it("shows the Ownership no-data state when rules are absent", () => {
+  const value = snapshot();
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+  expect(screen.getByRole("img", { name: "Ownership treemap" })).toBeTruthy();
+  const lens = screen.getByRole("region", { name: "Ownership lens" });
+  expect(lens.textContent).toContain("Ownership rules are not available");
+  expect(screen.getByRole("note", { name: "Ownership colour key" }).textContent).toContain(
+    "unavailable",
+  );
+});
+
+it("shows Ownership colouring and area rows from map rules", () => {
+  const value = snapshot() as MapSnapshot & {
+    rules: { areas: { label: string; glob: string }[]; hardRules: string[] };
+  };
+  value.rules = {
+    areas: [{ label: "area:web", glob: "src/**" }],
+    hardRules: ["src/contract.ts"],
+  };
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+  expect(
+    document.querySelector(".map-treemap-tile[title='src/contract.ts']")?.getAttribute("data-area"),
+  ).toBe("area:web");
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/contract.ts']")
+      ?.hasAttribute("data-hard-rule"),
+  ).toBe(true);
+  const lens = screen.getByRole("region", { name: "Ownership lens" });
+  expect(lens.textContent).toContain("area:web");
+  expect(lens.textContent).toContain("src/contract.ts");
+});
+
+it("shows Review severity colouring and rows from review findings", () => {
+  const value = snapshot();
+  value.findings = [
+    {
+      seat: "GUIDO-1",
+      ticket: 7,
+      round: 2,
+      severity: "Important",
+      file: "src/contract.ts",
+      line: 12,
+      summary: "Contract breaks callers",
+      scenario: "A consumer imports the changed contract.",
+      fix: "Preserve the existing shape.",
+    },
+  ];
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(screen.getByRole("img", { name: "Review findings treemap" })).toBeTruthy();
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/contract.ts']")
+      ?.getAttribute("data-severity"),
+  ).toBe("Important");
+  const lens = screen.getByRole("region", { name: "Review lens" });
+  expect(lens.textContent).toContain("Contract breaks callers");
+  expect(lens.textContent).toContain("line 12");
+});
+
+it("shows Conflict colouring and rows from the merge-conflict check", () => {
+  const value = snapshot();
+  value.conflicts = [
+    {
+      file: "src/consumer.ts",
+      branches: ["feature/7-contract", "feature/8-consumer"],
+      shas: ["aaaaaaa", "bbbbbbb"],
+    },
+  ];
+  render(<CrewMapView snapshot={value} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Conflicts" }));
+  expect(screen.getByRole("img", { name: "Conflicts treemap" })).toBeTruthy();
+  expect(
+    document
+      .querySelector(".map-treemap-tile[title='src/consumer.ts']")
+      ?.hasAttribute("data-conflict"),
+  ).toBe(true);
+  const lens = screen.getByRole("region", { name: "Conflicts lens" });
+  expect(lens.textContent).toContain("feature/7-contract");
+  expect(lens.textContent).toContain("feature/8-consumer");
+});
+
 it("shows Impact tallies, dependency overlap, untested changes, cycles, and a focused import trace", async () => {
   render(<CrewMapView snapshot={snapshot()} github="Luke-Bradford/mission-control" />);
   fireEvent.click(screen.getByRole("button", { name: "Impact" }));
