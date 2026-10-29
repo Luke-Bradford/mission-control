@@ -17,6 +17,7 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
+  COMMS_CHATTER_WINDOW_MS,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_LABELS,
@@ -1096,6 +1097,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             body.data,
           );
           bus.emit("agents");
+          bus.emit("attention");
           return { message };
         } catch (e) {
           return reply
@@ -1124,6 +1126,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             now(),
           );
           bus.emit("agents");
+          bus.emit("attention");
           return { reaction };
         } catch (e) {
           return reply
@@ -1331,7 +1334,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }));
       // Reader: apps/web/src/comms/CommsGraph.tsx (ticket conversations needing FLIGHT)
       api.get("/comms/chatter", () => ({
-        pairs: store.commsChatter(now() - 24 * 60 * 60 * 1000, now(), flightSeat(config)?.seat.id),
+        pairs: store.commsChatter(
+          now() - COMMS_CHATTER_WINDOW_MS,
+          now(),
+          flightSeat(config)?.seat.id,
+        ),
       }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
       api.post("/comms/read", (req, reply) => {

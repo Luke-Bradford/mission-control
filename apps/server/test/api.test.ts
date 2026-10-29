@@ -742,7 +742,25 @@ describe("Comms API", () => {
           (link: { from: string; to: string }) => link.from === "alpha" && link.to === "beta",
         ),
       ).toMatchObject({ tokens: 20 });
+      expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toHaveLength(1);
+      commsRow("alpha", "beta", "another question", clock, ticket);
+      expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toHaveLength(1);
     });
+  });
+
+  it("does not flag chatter whose seven rounds span more than two hours", async () => {
+    const ticket = "shop-app#706";
+    for (let round = 0; round < 7; round++) {
+      const at = clock - (7 - round) * 30 * 60_000;
+      commsRow("alpha", "beta", `question ${round}`, at, ticket);
+      commsRow("beta", "alpha", `reply ${round}`, at + 1, ticket);
+    }
+    await withCommsApp(async (comms) => {
+      expect((await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json()).toEqual({
+        pairs: [],
+      });
+    });
+    expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toEqual([]);
   });
 
   it("reports the wait and FLIGHT deadline for unanswered questions and blockers", async () => {

@@ -11,6 +11,8 @@ export const COMMS_FLIGHT_ESCALATION_MS = 15 * 60_000;
 export const COMMS_CAPCOM_ESCALATION_MS = 30 * 60_000;
 /** One ticket conversation is chatter once both participants have exceeded this many rounds. */
 export const COMMS_CHATTER_ROUNDS = 6;
+/** The rolling conversation window used to spot a pair stuck in a ticket discussion. */
+export const COMMS_CHATTER_WINDOW_MS = 2 * 60 * 60_000;
 /** The only ticket references accepted at Comms boundaries. */
 export const COMMS_REF = /^(?:#\d+|PR \d+)$/;
 /** A hub-set ticket keeps the repository alongside its issue number. */

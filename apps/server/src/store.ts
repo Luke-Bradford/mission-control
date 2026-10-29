@@ -23,6 +23,7 @@ import {
   type CiRunView,
   COMMS_CAPCOM,
   COMMS_CHATTER_ROUNDS,
+  COMMS_CHATTER_WINDOW_MS,
   COMMS_CREW,
   COMMS_MC,
   COMMS_TEXT_MAX,
@@ -3656,8 +3657,38 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      this.raiseChatterNote(row);
     }, true);
     return id === null ? null : this.commsMessage(`comms:${id}`);
+  }
+
+  /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
+  private raiseChatterNote(row: NewCommsRow): void {
+    if (
+      row.ticket === null ||
+      row.to === COMMS_CAPCOM ||
+      row.to === COMMS_CREW ||
+      row.to === COMMS_MC ||
+      row.from === COMMS_CAPCOM ||
+      row.from === COMMS_CREW ||
+      row.from === COMMS_MC ||
+      row.from === row.to
+    )
+      return;
+    const pair = row.from < row.to ? [row.from, row.to] : [row.to, row.from];
+    const crossed = this.commsChatter(row.at - COMMS_CHATTER_WINDOW_MS, row.at).some(
+      (item) => item.ticket === row.ticket && item.from === pair[0] && item.to === pair[1],
+    );
+    if (!crossed) return;
+    this.raiseNote({
+      key: `chatter:${row.ticket}:${pair[0]}:${pair[1]}`,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: row.ticket.slice(0, row.ticket.lastIndexOf("#")),
+      text: `${pair[0]} and ${pair[1]} exceeded ${COMMS_CHATTER_ROUNDS} rounds on ${row.ticket}.`,
+      at: row.at,
+    });
   }
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
