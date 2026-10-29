@@ -15,6 +15,8 @@ import {
   type BoardItem,
   CI_TRIES,
   COMMS_CAPCOM,
+  COMMS_CAPCOM_ESCALATION_MS,
+  COMMS_FLIGHT_ESCALATION_MS,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -832,6 +834,27 @@ export function attentionItems(
     }
   }
 
+  // A labelled direct question or blocker stays in its conversation while its addressee has the
+  // first fifteen minutes to react. After that it is a durable FLIGHT triage item, rather than an
+  // unbounded stream of unread-chatter items.
+  for (const message of store.openCommsItems()) {
+    if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
+    items.push({
+      owner: OWNER_OPERATOR,
+      key: `comms-open:${message.id}`,
+      kind: message.label === "blocker" ? "blocked" : "question",
+      agentId: message.from,
+      repoId: message.ticket?.split("#")[0] ?? null,
+      text: message.text,
+      tool: null,
+      at: message.at,
+      messageAt: message.at,
+      url: null,
+      escalationId: null,
+      ticket: message.ticket,
+    });
+  }
+
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
@@ -991,6 +1014,17 @@ export function attentionItems(
     // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
+    const unansweredComms = i.key.startsWith("comms-open:");
+    if (unansweredComms && triage !== null) {
+      if (brief !== undefined && brief.for !== "flight") return item;
+      if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
+      if (brief?.for === "flight")
+        return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
+      const triageDueAt = i.at + COMMS_FLIGHT_ESCALATION_MS + COMMS_CAPCOM_ESCALATION_MS;
+      return now < triageDueAt
+        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
+        : missed(item, triageDueAt);
+    }
     if (seatAsk && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS) return missed(item);

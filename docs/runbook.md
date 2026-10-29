@@ -340,6 +340,12 @@ What each seat's process starts with:
   is not triaging, one "FLIGHT is not triaging" item counts what waits on it. A read-only seat
   (RETRO) has the question tool and `report_evidence`, which refuses it (read-only runs have no
   loop).
+- **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
+  After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
+  If FLIGHT has neither settled nor briefed it 30 minutes later, it is counted by the existing
+  single **FLIGHT is not triaging** item; the hub does not invent an operator recommendation or
+  apply a default. The Comms graph also reports 24-hour run-token totals per link and flags a pair
+  that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only

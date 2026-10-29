@@ -1340,6 +1340,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         parsed.data,
       );
       bus.emit("agents");
+      bus.emit("attention");
       return { text: `Sent ${sent.id}.` };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms message refused.", isError: true };
@@ -1365,6 +1366,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         now(),
       );
       bus.emit("agents");
+      bus.emit("attention");
       return { text: "Reaction recorded." };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };

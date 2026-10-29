@@ -22,6 +22,8 @@ import {
   type ChosenProfile,
   type CiRunView,
   COMMS_CAPCOM,
+  COMMS_CHATTER_ROUNDS,
+  COMMS_CHATTER_WINDOW_MS,
   COMMS_CREW,
   COMMS_MC,
   COMMS_TEXT_MAX,
@@ -671,6 +673,7 @@ export interface CommsLinkCount {
   lastId: string;
   lastAt: number;
   lastText: string;
+  tokens: number;
 }
 
 /** Who a seat line is from. */
@@ -3654,8 +3657,38 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      this.raiseChatterNote(row);
     }, true);
     return id === null ? null : this.commsMessage(`comms:${id}`);
+  }
+
+  /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
+  private raiseChatterNote(row: NewCommsRow): void {
+    if (
+      row.ticket === null ||
+      row.to === COMMS_CAPCOM ||
+      row.to === COMMS_CREW ||
+      row.to === COMMS_MC ||
+      row.from === COMMS_CAPCOM ||
+      row.from === COMMS_CREW ||
+      row.from === COMMS_MC ||
+      row.from === row.to
+    )
+      return;
+    const pair = row.from < row.to ? [row.from, row.to] : [row.to, row.from];
+    const crossed = this.commsChatter(row.at - COMMS_CHATTER_WINDOW_MS, row.at).some(
+      (item) => item.ticket === row.ticket && item.from === pair[0] && item.to === pair[1],
+    );
+    if (!crossed) return;
+    this.raiseNote({
+      key: `chatter:${row.ticket}:${pair[0]}:${pair[1]}`,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: row.ticket.slice(0, row.ticket.lastIndexOf("#")),
+      text: `${pair[0]} and ${pair[1]} exceeded ${COMMS_CHATTER_ROUNDS} rounds on ${row.ticket}.`,
+      at: row.at,
+    });
   }
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
@@ -3991,7 +4024,7 @@ export class Store {
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
    */
-  commsLinkCounts(since: number): CommsLinkCount[] {
+  commsLinkCounts(since: number, until = Date.now()): CommsLinkCount[] {
     const rows = this.db
       .prepare(
         `SELECT c.from_id AS 'from', c.to_id AS 'to', g.count AS count, c.id AS lastId,
@@ -4009,6 +4042,7 @@ export class Store {
       lastId: `comms:${r.lastId as number}`,
       lastAt: r.lastAt as number,
       lastText: r.lastText as string,
+      tokens: this.commsTokenTotal(r.from as string, r.to as string, null, since, until),
     }));
   }
   /** Hourly direct-link counts for the Comms Traffic chart. */
@@ -4025,23 +4059,32 @@ export class Store {
   commsChatter(
     since: number,
     until = Number.MAX_SAFE_INTEGER,
-  ): { from: string; to: string; ticket: string; rounds: number }[] {
+    flightId?: string,
+  ): {
+    from: string;
+    to: string;
+    ticket: string;
+    rounds: number;
+    tokens: number;
+    flightSteppedInAt: number | null;
+  }[] {
     const rows = this.db
       .prepare(
-        `SELECT "from", "to", ticket,
+        `SELECT "from", "to", ticket, first_at, last_at,
           CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
         FROM (
           SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
             SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
-            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count
+            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count,
+            MIN(at) AS first_at, MAX(at) AS last_at
           FROM comms
           WHERE at >= ? AND at <= ? AND ticket IS NOT NULL
             AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
           GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
             CASE WHEN from_id < to_id THEN to_id ELSE from_id END
         )
-        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > 6
+        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > ?
         ORDER BY rounds DESC, ticket, "from", "to"`,
       )
       .all(
@@ -4053,13 +4096,103 @@ export class Store {
         COMMS_CAPCOM,
         COMMS_MC,
         COMMS_CREW,
+        COMMS_CHATTER_ROUNDS,
       ) as Row[];
-    return rows.map((row) => ({
-      from: row.from as string,
-      to: row.to as string,
-      ticket: row.ticket as string,
-      rounds: row.rounds as number,
-    }));
+    return rows.map((row) => {
+      const from = row.from as string;
+      const to = row.to as string;
+      const ticket = row.ticket as string;
+      const thresholdAt = this.chatterThresholdAt(from, to, ticket, since, until);
+      return {
+        from,
+        to,
+        ticket,
+        rounds: row.rounds as number,
+        tokens: this.commsTokenTotal(
+          from,
+          to,
+          ticket,
+          row.first_at as number,
+          row.last_at as number,
+        ),
+        flightSteppedInAt:
+          flightId === undefined || thresholdAt === null
+            ? null
+            : ((
+                this.db
+                  .prepare(
+                    "SELECT MIN(at) AS at FROM comms WHERE from_id = ? AND to_id IN (?, ?) AND ticket = ? AND at >= ? AND at <= ?",
+                  )
+                  .get(flightId, from, to, ticket, thresholdAt, until) as { at: number | null }
+              ).at ?? null),
+      };
+    });
+  }
+
+  /** The message which first completes the over-limit reciprocal exchange in this rolling window. */
+  private chatterThresholdAt(
+    from: string,
+    to: string,
+    ticket: string,
+    since: number,
+    until: number,
+  ): number | null {
+    const messages = this.db
+      .prepare(
+        `SELECT at, from_id FROM comms WHERE ticket = ? AND at >= ? AND at <= ?
+         AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)) ORDER BY at, id`,
+      )
+      .all(ticket, since, until, from, to, to, from) as { at: number; from_id: string }[];
+    let forward = 0;
+    let reverse = 0;
+    for (const message of messages) {
+      if (message.from_id === from) forward++;
+      else reverse++;
+      if (Math.min(forward, reverse) > COMMS_CHATTER_ROUNDS) return message.at;
+    }
+    return null;
+  }
+
+  /** Tokens consumed by either end's runs overlapping a Comms link's observed window. */
+  private commsTokenTotal(
+    from: string,
+    to: string,
+    ticket: string | null,
+    since: number,
+    until: number,
+  ): number {
+    const rows = this.db
+      .prepare(
+        `SELECT tokens FROM runs WHERE agent_id IN (?, ?) AND started_at <= ?
+         AND (ended_at IS NULL OR ended_at >= ?)${ticket === null ? "" : " AND ticket = ?"}`,
+      )
+      .all(
+        ...(ticket === null ? [from, to, until, since] : [from, to, until, since, ticket]),
+      ) as Row[];
+    return rows.reduce((total, row) => {
+      if (row.tokens === null) return total;
+      const tokens = JSON.parse(row.tokens as string) as TokenUsage;
+      return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
+    }, 0);
+  }
+
+  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
+  openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.* FROM comms c
+         WHERE c.label IN ('question', 'blocker') AND c.to_id != ?
+           AND NOT EXISTS (
+             SELECT 1 FROM comms_reactions r WHERE r.message_id = c.id AND r.actor_id = c.to_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM comms reply
+             WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
+           )
+         ORDER BY c.at ASC, c.id ASC`,
+      )
+      .all(COMMS_CREW) as Row[];
+    return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
   }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);

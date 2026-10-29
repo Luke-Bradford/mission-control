@@ -1259,7 +1259,16 @@ describe("Store", () => {
       store.setSetting(`${FLIGHT_SIGNALS_SETTING}:broken`, "{");
 
       const audit = store.audit(100, 200) as unknown as AuditView;
-      expect(audit.chatter).toEqual([{ from: "alpha", to: "beta", ticket: "mc#1", rounds: 7 }]);
+      expect(audit.chatter).toEqual([
+        {
+          from: "alpha",
+          to: "beta",
+          ticket: "mc#1",
+          rounds: 7,
+          tokens: 0,
+          flightSteppedInAt: null,
+        },
+      ]);
       expect(audit.refusalSpikes).toEqual([{ agentId: "spiky", day: 0, count: 10 }]);
       expect(audit.flakes).toEqual([{ key: "repo:CI/unit", count: 2, lastAt: 160 }]);
 
@@ -2628,7 +2637,14 @@ describe("comms", () => {
     }
 
     expect(store.commsChatter(0)).toEqual([
-      { from: "alpha", to: "beta", ticket: "mc#exchange", rounds: 7 },
+      {
+        from: "alpha",
+        to: "beta",
+        ticket: "mc#exchange",
+        rounds: 7,
+        tokens: 0,
+        flightSteppedInAt: null,
+      },
     ]);
   });
 

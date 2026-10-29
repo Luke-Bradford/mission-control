@@ -532,6 +532,7 @@ describe("Comms API", () => {
     at = clock,
     ticket: string | null = null,
     ref?: string,
+    label?: "question" | "handoff" | "blocker",
   ) => {
     const row = store.addComms({
       at,
@@ -540,6 +541,7 @@ describe("Comms API", () => {
       ticket,
       text,
       ref,
+      label,
       mentions: text.includes("@CAPCOM") ? ["CAPCOM"] : [],
     });
     if (row === null) throw new Error("Comms row was not stored");
@@ -694,6 +696,137 @@ describe("Comms API", () => {
     await withCommsApp(async (comms) => {
       const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
       expect(links).toEqual([{ from: "alpha", to: "gone-seat", count: 1 }]);
+    });
+  });
+
+  it("reports chatter rounds, run token cost, and FLIGHT's single step-in", async () => {
+    const ticket = "shop-app#706";
+    for (let round = 0; round < 7; round++) {
+      commsRow("alpha", "beta", `question ${round}`, clock, ticket);
+      commsRow("beta", "alpha", `reply ${round}`, clock, ticket);
+    }
+    const steppedInAt = clock;
+    commsRow("flight", "alpha", "Settle on the existing contract.", steppedInAt, ticket);
+    store.upsertRun(
+      run({
+        id: "alpha-run",
+        agentId: "alpha",
+        ticket,
+        startedAt: NOW - HOUR,
+        tokens: { input: 10, output: 2, cacheRead: 1, cacheCreate: 0 },
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "beta-run",
+        agentId: "beta",
+        ticket,
+        startedAt: NOW - HOUR,
+        tokens: { input: 3, output: 4, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    await withCommsApp(async (comms) => {
+      expect((await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json()).toEqual({
+        pairs: [
+          expect.objectContaining({
+            from: "alpha",
+            to: "beta",
+            ticket,
+            rounds: 7,
+            tokens: 20,
+            flightSteppedInAt: steppedInAt,
+          }),
+        ],
+      });
+      const links = (await comms.inject({ method: "GET", url: "/api/comms/links" })).json().links;
+      expect(
+        links.find(
+          (link: { from: string; to: string }) => link.from === "alpha" && link.to === "beta",
+        ),
+      ).toMatchObject({ tokens: 20 });
+      expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toHaveLength(1);
+      commsRow("alpha", "beta", "another question", clock, ticket);
+      expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toHaveLength(1);
+    });
+  });
+
+  it("does not flag chatter whose seven rounds span more than two hours", async () => {
+    const ticket = "shop-app#706";
+    for (let round = 0; round < 7; round++) {
+      const at = clock - (7 - round) * 30 * 60_000;
+      commsRow("alpha", "beta", `question ${round}`, at, ticket);
+      commsRow("beta", "alpha", `reply ${round}`, at + 1, ticket);
+    }
+    await withCommsApp(async (comms) => {
+      expect((await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json()).toEqual({
+        pairs: [],
+      });
+    });
+    expect(store.notes().filter((note) => note.key.startsWith("chatter:"))).toEqual([]);
+  });
+
+  it("only records FLIGHT stepping into the flagged pair after it crosses the threshold", async () => {
+    const ticket = "shop-app#706";
+    commsRow("flight", "gamma", "unrelated", clock, ticket);
+    for (let round = 0; round < 7; round++) {
+      commsRow("alpha", "beta", `question ${round}`, clock, ticket);
+      commsRow("beta", "alpha", `reply ${round}`, clock, ticket);
+    }
+    await withCommsApp(async (comms) => {
+      const pairs = (await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json().pairs;
+      expect(pairs[0]).toMatchObject({ flightSteppedInAt: null });
+      const steppedInAt = clock;
+      commsRow("flight", "beta", "Use the existing contract.", steppedInAt, ticket);
+      expect(
+        (await comms.inject({ method: "GET", url: "/api/comms/chatter" })).json().pairs[0],
+      ).toMatchObject({
+        flightSteppedInAt: steppedInAt,
+      });
+    });
+  });
+
+  it("reports the wait and FLIGHT deadline for unanswered questions and blockers", async () => {
+    const question = commsRow(
+      "alpha",
+      "beta",
+      "Which approach?",
+      clock - 9 * 60_000,
+      "shop-app#703",
+      undefined,
+      "question",
+    );
+    commsRow(
+      "alpha",
+      "beta",
+      "I am blocked",
+      clock - 15 * 60_000,
+      "shop-app#703",
+      undefined,
+      "blocker",
+    );
+    await withCommsApp(async (comms) => {
+      const response = await comms.inject({ method: "GET", url: "/api/comms/open" });
+      expect(response.statusCode, JSON.stringify(response.json())).toBe(200);
+      const items = response.json().items;
+      expect(items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: question.id,
+            label: "question",
+            from: "alpha",
+            to: "beta",
+            ticket: "shop-app#703",
+            waitedMs: clock - question.at,
+            nextStep: "flight",
+            nextAt: question.at + 15 * 60_000,
+          }),
+          expect.objectContaining({
+            label: "blocker",
+            nextStep: "flight-not-triaging",
+            waitedMs: 15 * 60_000 + 1,
+          }),
+        ]),
+      );
     });
   });
 
@@ -1056,6 +1189,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/links"],
   ["GET", "/api/comms/traffic"],
   ["GET", "/api/comms/chatter"],
+  ["GET", "/api/comms/open"],
   ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
