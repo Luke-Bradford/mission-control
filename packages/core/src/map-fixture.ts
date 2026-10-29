@@ -17,6 +17,7 @@ export const mapSnapshotFixture = {
       ticket: 7,
       title: "Handle empty input",
       branches: ["feature/7-empty-input"],
+      area: ["src/**"],
       changedOn: ["feature/7-empty-input"],
       nowTicket: null,
       tickets: { "feature/7-empty-input": 7 },

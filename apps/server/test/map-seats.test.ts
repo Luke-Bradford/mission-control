@@ -168,6 +168,7 @@ describe("mapSeats", () => {
       id: "guido-1",
       kind: "crew",
       role: "GUIDO",
+      area: [],
       repoId: "mission-control",
       hudState: "idle",
       stateSince: 0,
@@ -195,6 +196,18 @@ describe("mapSeats", () => {
   const lock = { holder: null, waiting: [] } as never;
   const seatsOf = (rows: CrewRow[], store: Store, ring: ReturnType<typeof ringOf>) =>
     mapSeats(rows, store, ring as unknown as CallRing, lock, 1000).seats;
+
+  it("carries the seat's configured area globs, a copy and empty when it has none", () => {
+    const area = ["apps/web/**", "docs/**"];
+    const [seat, free] = seatsOf(
+      [row({ area }), row({ id: "retro-1", role: "RETRO", area: [] })],
+      storeOf([]),
+      ringOf({}),
+    );
+    expect(seat?.area).toEqual(area);
+    expect(seat?.area).not.toBe(area);
+    expect(free?.area).toEqual([]);
+  });
 
   it("credits a reviewer nothing from the developer's PR its scratch checkout holds", () => {
     const review = run({

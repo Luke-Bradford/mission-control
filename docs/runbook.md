@@ -257,12 +257,17 @@ the launchd job; do not install it for a manually started hub. Check the expande
 
 `/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
 branch's commit, the call ring's revision (deltas, aged-out calls, branch diff reads), the seats
-(crew rows and test-lock state), or the repo's PRs and board. Fields that age on their own
+(crew rows and test-lock state), the repo's PRs and board, or its rules or FLIGHT powers. Fields that age on their own
 (context usage, ages) are refreshed at most every 15 seconds. The call ring polls only seats with a
 live run (a finished run is read once more, then left), every second while a map client is
 connected and every five seconds otherwise. After a hub restart each transcript is read from the
 byte offset that covers the last `MAP_RECENT_MS` (15 minutes, scanning back at most 16 MB), not
 from the start, so the first map request after an Update no longer re-reads whole transcripts.
+
+The payload also carries what the Ownership and Conflicts lenses read: each seat's configured
+`area` globs (empty when it has none), `prs` on each conflict (the open PR number of each branch,
+in the order of `branches`, null when unknown), and `rules.hardRules` as the effective list the
+engine enforces (on a `superuser` repo the repo's own list plus the defaults and FLIGHT floor).
 
 The hourly maintenance sweep retains seat lines for seven days after their run ends, and
 loop events and run evidence for 30 days after their run ends. Findings stay for 90 days

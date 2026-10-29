@@ -130,6 +130,7 @@ export function mapSeats(
       ticket,
       title: !flight && ticketTitle ? safe(ticketTitle) : null,
       branches: work.map((w) => w.branch),
+      area: [...row.area],
       changedOn: work.filter((w) => w.changed).map((w) => w.branch),
       nowTicket,
       tickets: Object.fromEntries(

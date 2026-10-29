@@ -43,6 +43,7 @@ import {
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
+  effectiveHardRules,
   type FileDiff,
   fixesSent,
   fullAt5h,
@@ -158,6 +159,7 @@ import {
   crewSeatDef,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  flightPowersOf,
   TeamsSelection,
 } from "./config.ts";
 import {
@@ -670,7 +672,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ...data,
       conflicts: conflicts.conflicts,
       conflictsUnchecked: conflicts.unchecked,
-      rules: { areas: rules.areas, hardRules: rules.hardRules },
+      rules: {
+        areas: rules.areas,
+        hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
+      },
       // Slice 1b will publish sequenced deltas; none have been emitted yet.
       seq: 0,
     };
@@ -690,9 +695,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const lock = deps.lock?.state() ?? NO_LOCK;
     const prs = store.pullRequests(repo.id);
     const board = store.board(repo.id);
-    // reused until the default branch, the ring, the seats (rows and lock), the PRs or the
-    // board change; the time-driven fields (ages, context) get the backstop
-    const key = JSON.stringify([head, mapRing.revision(repo.id), crewRows, lock, prs, board]);
+    // reused until the default branch, the ring, the seats (rows and lock), the PRs, the
+    // board or the rules change; the time-driven fields (ages, context) get the backstop
+    const key = JSON.stringify([
+      head,
+      mapRing.revision(repo.id),
+      crewRows,
+      lock,
+      prs,
+      board,
+      flightPowersOf(config, repo.id),
+      repo.rules,
+    ]);
     const at = now();
     const cached = mapPayloads.get(repo.id);
     if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
