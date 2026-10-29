@@ -1,100 +1,125 @@
 ---
 name: plain-talk
-description: How to write anything a person will read: a Comms message, a message to FLIGHT or CAPCOM, a Needs-you brief, a PR description or comment, a ticket, a report. Use before sending or writing any of those.
+description: How to write text a person will read. Use before any Comms message, a message to FLIGHT, a Needs-you brief, a ticket, a PR description, a review finding or a run report.
 ---
 
 # Plain talk
 
-The operator reads this on its own, often hours later, often on a phone-sized card, without
-the context you have. Write so it makes sense by itself.
+The operator reads a message on its own, often hours later, without the context you have.
+Write so the message makes sense by itself.
 
 ## The six rules
 
-1. **Say the main thing first.** First sentence: what happened or what you need. Reasons and
-   detail come after, if at all.
-2. **One message, one point.** One question per message. One topic per paragraph. A paragraph is
-   at most four sentences.
-3. **Short sentences, everyday words.** Under 20 words a sentence. If a simpler word says the same
-   thing, use it: "stop", not "terminate"; "turn on", not "enable"; "ask", not "escalate".
-   Define a code word or number the first time you use it ("#1027, the check-lock ticket").
+1. **Main thing first.** The first sentence says what happened. Detail comes after, if needed.
+2. **One point per message.** One question per message. One topic per paragraph. At most four
+   sentences in a paragraph.
+3. **Short sentences, plain words.** Keep a sentence under 20 words. Prefer the shorter word:
+   "stop", not "terminate"; "turn on", not "enable"; "ask", not "escalate". Name an id the first
+   time you use it: "#1027 (the check-lock ticket)", "GUIDO-1 (a server developer seat)".
 4. **Facts, not feelings.** No "I think", "it seems", "unfortunately", "great news". No
-   exclamation marks. No "just", "simply", "easy", "quick". No apology unless you made the
-   mistake, and then once. Say what is true and what you will do.
-5. **A question stands alone.** It names the thing, the choice, and what happens if nobody
-   answers: "PR 975 is clean. Merge it now, or hold it until the FLIGHT page mockup is approved?
-   If no answer by Friday, I merge." The reader should not need to open anything to answer.
-6. **An error says what failed and what next.** "The push of 73f0d3d was refused: the test suite
-   was not run on it. Run `pnpm -s test`, then push again." Not the whole log, not the rule's
-   wording, not a dozen ways to fix it.
+   exclamation marks. No "just", "simply", "easy", "quick". Apologise once, only for your own
+   mistake.
+5. **A question works on its own.** Name the thing, the choice, and what happens with no answer:
+   "PR 975 (the FLIGHT page) passed review and CI. Merge now, or wait for the mockup? Default:
+   hold until Monday 3 November." A default is allowed only for a choice within the writer's own
+   authority. An operator approval has no default.
+6. **An error says what failed and what to do.** "Push of 73f0d3d refused: `pnpm -s test` was
+   not run on this commit. Commit or delete any changed files, run it, then push again." Not the
+   log, not the rule text.
 
-## Shape by kind
+## One message, one shape
 
-- **Comms message (to a seat, FLIGHT, CAPCOM):** 1–4 sentences. Main thing first. One ask at the
-  end if there is one. Under 600 characters. Long content (findings, a plan, evidence) goes to its
-  structured tool; the message points at it: "RETRO found 3 blocking issues on PR 984; see the
-  findings."
-- **Question to the operator (Needs-you brief):** the question in one sentence; why it is theirs
-  (money, direction, security, irreversible); two to four options with what each costs; your
-  recommendation; the default and when it applies. Nothing else.
-- **PR description:** What (two sentences), Why (one paragraph), what you did not do and why,
-  Checks, Security (one line when nothing changed). A reader with no context can decide to merge.
-- **PR or review comment:** the finding, the file and line, the fix. One per comment.
-- **Ticket:** Outcome (what is true when it is done, measurable), Why (the evidence), Done when
-  (a checklist), Size, Security. No mechanism unless the mechanism is the point.
-- **Report at the end of a run:** three lines: done, not done, next. Then evidence links.
+- **Comms message (to a seat or to FLIGHT).** Order: what happened, what you did, what you need.
+  Two to four sentences. Put long content (findings, a plan, evidence) in its structured tool and
+  point at it. The hub allows 1,200 characters (#995); aim for 600.
+- **Question to the operator.** Only FLIGHT writes these, as a brief (`brief_item`). The fields
+  come from `roles/FLIGHT.md`:
+  - the question, in one sentence;
+  - why it is the operator's: money, direction, security, irreversible, or a floor approval;
+  - an assessment in two or three sentences, and what FLIGHT did;
+  - two to four options as a list, each with its cost in time or money;
+  - the recommendation and its basis. No default on an approval.
+- **Ticket.** Sections, in order:
+  - Outcome: what is true when the work is done, measurable;
+  - Why: the evidence;
+  - what to change;
+  - Done when: a checklist;
+  - Controller check, when only the controller can produce the evidence;
+  - Size; Security.
+- **Review finding (RETRO, through `report_findings`).** Severity and category as `roles/RETRO.md`
+  defines them, the file and line, what fails and how, the fix. One finding per entry.
+- **PR description (the hub writes it from the run's report).** What (two sentences); Why (one
+  paragraph); what was left out and why; Checks; Security (one line when nothing changed).
+- **Run report (`report_evidence`).** Three lines: done, not done, next. Then the evidence.
+
+Seats do not post comments on GitHub and do not message the operator; both go through FLIGHT.
 
 ## Words
 
-| Write | Not |
+| Use | Instead of |
 |---|---|
 | stop, end, cancel | kill, abort, terminate |
-| ask, tell | escalate, surface, flag up |
+| ask, tell | escalate, surface, flag |
 | turn on, turn off | enable, disable |
-| might (possibility) | may (permission) |
+| might | may (when you mean "possibly") |
 | to | in order to |
 | lets you | allows you to |
-| the hub refused | the hub threw an error |
-| the test failed: `name` | the suite exhibited a failure |
-| now, today, Thursday | currently, at this time, tomorrow (which day?) |
+| the hub refused the push | the push errored out |
+| the test `name` failed | the suite exhibited a failure |
+| Monday 3 November, 14:00 UK | tomorrow, currently, later |
 
-Use "you" for the reader and name yourself by call sign, not "I think". Present tense for
-state: "Review done", not "Review has been completed". Active voice: say who did what.
+More rules for words:
+- Say "you" to the reader. Name yourself by your seat name ("GUIDO-1"), not "I".
+- Use one name for one thing. The roles say "seat" and "developer"; do not add "builder".
+- No hub state names in text for the operator ("parked", "aside", "controller check").
+  Say what the state means: "waiting for a review".
+- No @mentions. No links to other repositories.
+- Present tense for state: "Review done", not "Review has been completed".
+- Say who did what: "RETRO-CX found two problems", not "two problems were found".
+- A list for options or steps; prose for one idea.
 
 ## Before sending, check
 
-- [ ] First sentence carries the point.
-- [ ] A reader who sees only this message understands it.
-- [ ] One question at most, with its default.
-- [ ] No sentence over 20 words; no paragraph over four sentences.
-- [ ] No hedging, hype, apology loop or exclamation mark.
-- [ ] Every id (#, PR, sha, seat) is named with what it is the first time.
+- [ ] The first sentence says what happened.
+- [ ] Someone who sees only this message can act on it.
+- [ ] At most one question, and its default if a default is allowed.
+- [ ] No sentence of 20 words or more. Count every word; ignore code, shas and ids.
+- [ ] No paragraph over four sentences.
+- [ ] No hedge, hype, exclamation mark or second apology.
+- [ ] Every id is named the first time it appears.
+
+## For a reviewer
+
+A finding against this skill is Minor. It never holds a clean PR. Raise it to Important only when
+the reader could not act on the message. That means: the main thing is missing, the question has
+no choice, or an error has no next step. Quote the sentence and the rule.
 
 ## Examples from this crew
 
-**Before:** "the push or PR for 73f0d3d has not shown up on GitHub after 10 minutes (Not pushed:
-the repo's checks have not all passed on this exact commit in the seat's clone. Commit 73f0d3d:
-- not run: pnpm -s test. Run each command exactly as written, alone or joined with && (no pipe,
-||, ; or extra lines), with no uncommitted or untracked files (commit or delete scratch files),
-at this commit, then push again.): no push is recorded for the run"
-**After:** "Push of 73f0d3d refused: `pnpm -s test` was not run on it. Run it on a clean tree,
-then push again."
+**Before (a hub message):** "the push or PR for 73f0d3d has not shown up on GitHub after 10
+minutes (Not pushed: the repo's checks have not all passed on this exact commit in the seat's
+clone. Commit 73f0d3d: - not run: pnpm -s test. Run each command exactly as written, alone or
+joined with && (no pipe, ||, ; or extra lines), with no uncommitted or untracked files (commit
+or delete scratch files), at this commit, then push again.): no push is recorded for the run"
 
-**Before:** "I've answered FAO-1's questions on #1028 (verify queue), and it's writing the plan
-now. The three builders are still held up by the push gate, and I'm waiting on the controller
-to check the test records and push. Nothing new since my last update, and nothing needs a
-decision from you."
-**After:** "Nothing needs you. FAO-1 is writing the #1028 plan. Three builders wait on the push
-gate; the controller is on it."
+**After:** "Push of 73f0d3d refused: `pnpm -s test` was not run on this commit. Commit or delete
+any changed files. Run `pnpm -s test` on its own, with no pipe or `&&`. Then push again."
 
-**Before:** "Would you like to merge PR 975 now?"
-**After:** "PR 975 (FLIGHT page v2) is clean. Merge now, or wait for the design mockup? Default:
-merge Friday."
+**Before (FLIGHT to the operator):** "I've answered FAO-1's questions on #1028 (verify queue),
+and it's writing the plan now. The three builders are still held up by the push gate, and I'm
+waiting on the controller to check the test records and push. Nothing new since my last update,
+and nothing needs a decision from you."
 
-## Where this comes from
+**After:** "No decision needed. FAO-1 (the planner) is writing the plan for #1028, the verify
+queue. Three developer seats cannot push until the controller checks their test records."
 
-Google's People + AI Guidebook (explainability, errors, mental models), Google's conversation
-design guidance (one question at a time, no apology loops, front-load key information), the
-Google developer documentation style guide (most important first, under 26 words a sentence,
-plain words, the word list), Material Design writing guidance (neutral consequences, no
-exclamation marks, present tense, scannable segments) and Material's notification rules (the
-reader may see it a day later; name the day). Collected 29 October 2026.
+**Before (a question):** "Would you like to merge PR 975 now?"
+
+**After:** "PR 975 (the FLIGHT page) passed review and CI. Merge now, or wait for the mockup?
+Default: hold until Monday 3 November."
+
+## Sources
+
+Google's People + AI Guidebook; Google's conversation design guidance; the Google developer
+documentation style guide; Material Design's writing and notification rules. Collected 29
+October 2026. Google allows 26 words a sentence; this crew uses 20 because a card shows less.
