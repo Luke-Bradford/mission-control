@@ -574,7 +574,11 @@ function codexSession(
         cancelApprovals(item.id);
         if (item.type === "commandExecution" && !uncertain && report()) {
           for (const key of new Set([item.id, ...(itemKeys.get(item.id) ?? [])])) {
-            emit({ kind: "tool-result", toolUseId: key, ok: item.exitCode === 0 });
+            emit({
+              kind: "tool-result",
+              toolUseId: key,
+              ok: item.status === "completed" && item.exitCode === 0,
+            });
           }
         }
         paths.delete(item.id);

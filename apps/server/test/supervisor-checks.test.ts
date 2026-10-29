@@ -2,7 +2,7 @@
 import "./supervisor-harness.ts";
 
 import { describe, expect, it } from "vitest";
-import type { CheckRecorder } from "../src/check-runs.ts";
+import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { seatState, until } from "./supervisor-harness.ts";
 

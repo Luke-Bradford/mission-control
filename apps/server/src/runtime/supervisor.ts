@@ -112,7 +112,6 @@ import {
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
-import type { CheckRecorder } from "../check-runs.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli-update.ts";
 import { probeClaudeVersion } from "../cli-version.ts";
@@ -132,6 +131,7 @@ import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
+import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";

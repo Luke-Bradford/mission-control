@@ -225,6 +225,22 @@ describe("parseRepoRules", () => {
     expect(() => parseRepoRules(block("mc: {checks: pnpm}"))).toThrow(RepoRulesError);
   });
 
+  it("trims a check and refuses one that chains, pipes or spans lines", () => {
+    expect(parseRepoRules(block('mc: {checks: ["  pnpm -s lint  "]}')).checks).toEqual([
+      "pnpm -s lint",
+    ]);
+    for (const bad of ["a && b", "a | b", "a || b", "a; b", "a\\nb"]) {
+      expect(() => parseRepoRules(block(`mc: {checks: ["${bad}"]}`))).toThrow(RepoRulesError);
+    }
+  });
+
+  it("lets a repo block add checks to the user config's, never drop them", () => {
+    const base = userRules({ checks: ["pnpm -s lint"] });
+    const r = parseRepoRules(block('mc: {checks: ["pnpm -s typecheck", "pnpm -s lint"]}'), base);
+    expect(r.checks).toEqual(["pnpm -s lint", "pnpm -s typecheck"]);
+    expect(parseRepoRules(block("mc: {checks: []}"), base).checks).toEqual(["pnpm -s lint"]);
+  });
+
   it("reads hard_rules_by, defaults it to the operator, and refuses an unknown value", () => {
     const by = (v: string) =>
       parseRepoRules(block(`mc:\n  hard_rules: []\n  hard_rules_by: ${v}\n`));

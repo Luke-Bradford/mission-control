@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CheckRecorder } from "../src/check-runs.ts";
 import type { CcConfig } from "../src/config.ts";
+import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
@@ -320,6 +320,15 @@ describe("Codex check records", () => {
       [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint"],
       [{ runId: "run", toolUseId: "appr-2" }, "pnpm -s typecheck"],
     ]);
+  });
+
+  it("starts no record for a command run from a subfolder of the worktree", async () => {
+    const { begun, checks } = recorder();
+    const h = approver("writer", [], undefined, checks);
+    mkdirSync(join(cwd, "apps"));
+    const sub = request("pnpm -s lint", { itemId: "item-4", cwd: join(cwd, "apps") });
+    expect(await h.approve(sub, undefined, signal())).toBe("accept");
+    expect(begun).toEqual([]);
   });
 
   it("starts no record for a refused command", async () => {

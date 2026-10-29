@@ -1464,6 +1464,7 @@ describe("reused worktrees", () => {
         dbPath,
         inClone: sup.inClone,
         knownSecrets: async () => [],
+        checks: async () => [],
         gh: async () => ({ code: 0, stdout: "", stderr: "" }),
       }).find((t) => t.name === "commit");
       expect(commit).toBeDefined();

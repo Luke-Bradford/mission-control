@@ -229,6 +229,7 @@ function deps(over: Partial<McToolsDeps> = {}): McToolsDeps {
     gh: noGh,
     dbPath: join(dir, "data", "mc.sqlite"),
     knownSecrets: async () => [],
+    checks: async () => [],
     log: (line) => logs.push(line),
     ...over,
   };
@@ -2424,11 +2425,24 @@ describe("push and draft_pr", () => {
         GIT_AUTHOR_EMAIL: "t@example.com",
         GIT_COMMITTER_EMAIL: "t@example.com",
       });
-      /** The branch's own commit, then main merged in by `author` with `subject` (a clean merge). */
-      const branchThenMerge = (author: string, subject: string): string => {
+      /**
+       * The branch's own commit (pushed first, its checks passed, unless `pushed` is false), then
+       * main merged in by `author` with `subject` (a clean merge).
+       */
+      const branchThenMerge = async (
+        author: string,
+        subject: string,
+        pushed = true,
+      ): Promise<string> => {
         write("apps/a.ts", "branch\n");
         git(wt, "commit", "-qam", "feat: branch");
-        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: head(), at: NOW });
+        const own = head();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: own, at: NOW });
+        if (pushed) {
+          ran(LINT, own, true);
+          ran(TYPES, own, true);
+          expect((await push(gated())).text).toBe(`Pushed ${own.slice(0, 7)} to ${BRANCH}.`);
+        }
         operatorPushes("docs/main.md", "main");
         git(clone, "fetch", "-q", "origin");
         execFileSync("git", ["merge", "--no-ff", "-q", "-m", subject, "origin/main"], {
@@ -2441,7 +2455,7 @@ describe("push and draft_pr", () => {
       };
 
       it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
-        const merge = branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
         expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
         const next = await commitOk("apps/a.ts", "on top\n");
         expect(await push(gated())).toEqual(
@@ -2452,8 +2466,33 @@ describe("push and draft_pr", () => {
         );
       });
 
+      it("gates a merge whose first parent was never pushed, even under the engine's name", async () => {
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
+        expect(await push(gated())).toEqual(
+          refusal(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("gates a merge when the seat's unpushed commit sits under it, after an earlier push", async () => {
+        const first = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, first, true);
+        ran(TYPES, first, true);
+        await push(gated());
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
+        expect((await push(gated())).text).toBe(
+          pushChecksText(merge, [
+            { command: LINT, state: "missing" },
+            { command: TYPES, state: "missing" },
+          ]),
+        );
+      });
+
       it("gates a seat's own merge of main", async () => {
-        const merge = branchThenMerge("Seat", `Merge main into ${BRANCH}`);
+        const merge = await branchThenMerge("Seat", `Merge main into ${BRANCH}`);
         expect(await push(gated())).toEqual(
           refusal(merge, [
             { command: LINT, state: "missing" },
@@ -2463,7 +2502,7 @@ describe("push and draft_pr", () => {
       });
 
       it("gates a merge of main under the engine's name whose tree carries an edit", async () => {
-        const merge = branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
         write("apps/a.ts", "rides along\n");
         git(wt, "add", "-A");
         execFileSync("git", ["commit", "-q", "--amend", "--no-edit"], {
@@ -2493,11 +2532,6 @@ describe("push and draft_pr", () => {
         expect(await push(ts({ checks: async () => [] }))).toEqual({
           text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
         });
-      });
-
-      it("does not gate when the hub has no way to read checks", async () => {
-        const sha = await commitOk("apps/a.ts", "a2\n");
-        expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
       });
 
       it("answers Already on origin without asking for checks", async () => {

@@ -57,6 +57,7 @@ import {
   prNamedRefText,
   prNotifyText,
   prSecretText,
+  pushChecksText,
   pushReferenceText,
   pushSecretText,
   REFUSAL_TRIES,
@@ -1384,6 +1385,7 @@ describe("refusals", () => {
       dbPath: store.path,
       inClone: (_checkout, fn) => fn(),
       knownSecrets: async () => [],
+      checks: async () => [],
       gh: async () => ({ code: 1, stdout: "", stderr }),
     }).rerunRuling("o/mc", SHA);
     expect(refused).toEqual({ ok: false, text, transient: true });
@@ -1410,6 +1412,24 @@ describe("refusals", () => {
     expect(noteKeys()).toEqual([`blocked:${RUN}:0`]);
     expect(store.notes()[0]?.text).toContain("Push refused: the branch moved.");
     expect(h.prs).toEqual([]);
+  });
+
+  it("a push refused for its checks goes to the seat as a hand-off, once, and does not park the run", async () => {
+    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    h.pushResults = [
+      { ok: false, text, transient: false },
+      { ok: false, text, transient: false },
+    ];
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).not.toBe("parked");
+    expect(loopOf().parked ?? null).toBeNull();
+    expect(h.sent.filter((s) => s.text === text)).toHaveLength(1);
+    expect(store.comms(0).map((c) => c.text)).toEqual([text]);
+    expect(store.notes()).toEqual([]);
+    expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
   });
 
   describe("the note's text is written for the operator", () => {

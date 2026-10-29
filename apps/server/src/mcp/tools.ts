@@ -177,13 +177,13 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { flightSeat } from "../flight/seat.ts";
 import type { ProfilesError } from "../profiles.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
   CREW_GIT_SLOW_MS,
-  MC_MERGE_AUTHOR,
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
@@ -228,10 +228,10 @@ export interface McToolsDeps {
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
   /**
-   * The run's repo's configured checks (`mc.checks`), read for each push; none (or absent): the push
-   * is not gated on them.
+   * The run's repo's configured checks (`mc.checks`), read for each push; empty: the push is not
+   * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
    */
-  checks?: (runId: string) => Promise<readonly string[]>;
+  checks: (runId: string) => Promise<readonly string[]>;
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -684,47 +684,12 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
     async function unmetChecks(sha: string): Promise<{ command: string; state: CheckState }[]> {
       const unmet: { command: string; state: CheckState }[] = [];
-      for (const command of (await deps.checks?.(runId)) ?? []) {
+      for (const command of await deps.checks(runId)) {
         const last = store.latestCheckRun(runId, command, sha);
         if (last === null) unmet.push({ command, state: "missing" });
         else if (!last.ok) unmet.push({ command, state: "failed" });
       }
       return unmet;
-    }
-
-    /**
-     * Whether `sha` is the engine's own clean merge of main: its author and subject, two parents,
-     * the second on origin's default branch, and a tree that is exactly the clean merge of the
-     * parents, so no edit rides along (the same test the engine's publish step applies).
-     */
-    async function engineMergeOfMain(
-      g: (a: string[]) => Promise<string>,
-      sha: string,
-      parents: readonly string[],
-      defaultSha: string,
-    ): Promise<boolean> {
-      const [first, second] = parents;
-      if (parents.length !== 2 || first === undefined || second === undefined) return false;
-      const [author, subject] = (await g(["log", "-1", "--format=%an%x09%s", sha, "--"]))
-        .trim()
-        .split("\t");
-      if (author !== MC_MERGE_AUTHOR || subject !== `Merge main into ${branch}`) return false;
-      const onMain = await g(["merge-base", "--is-ancestor", second, defaultSha]).then(
-        () => true,
-        (e: unknown) => {
-          if ((e as { code?: unknown } | null)?.code === 1) return false;
-          throw e;
-        },
-      );
-      if (!onMain) return false;
-      const clean = await g(["merge-tree", "--write-tree", first, second]).then(
-        (out) => out.trim(),
-        (e: unknown) => {
-          if ((e as { code?: unknown } | null)?.code === 1) return null;
-          throw e;
-        },
-      );
-      return clean !== null && clean === (await g(["rev-parse", `${sha}^{tree}`])).trim();
     }
 
     async function steps(
@@ -795,7 +760,7 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         .filter((l) => l !== "")
         .map((l) => {
           const [id = "", ...parents] = l.split(" ");
-          return { sha: id, parents: parents.length, parentIds: parents };
+          return { sha: id, parents: parents.length };
         });
       if (commits.length === 0) return { text: NOTHING_TO_PUSH };
 
@@ -812,13 +777,12 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       if (commits.some((c) => c.parents === 0)) return { text: MC_PUSH_ROOT, isError: true };
 
       // 3b. every configured check passed on exactly this commit (the hub saw the seat run it).
-      // The engine's clean merge of main is not the seat's work: it is not gated. A seat's own
-      // merge (a resolved conflict) is.
-      const tip = commits.find((c) => c.sha === sha);
-      if (
-        tip === undefined ||
-        !(await engineMergeOfMain(g, sha, tip.parentIds, heads.defaultSha))
-      ) {
+      // The engine's clean merges of main on top of what origin already has are not the seat's
+      // work: they are not gated. A seat's own merge (a resolved conflict) is.
+      const engineOnly =
+        remote !== null &&
+        (await onlyHubMerges(g, branch, remote, sha, heads.defaultSha, new Set([remote])));
+      if (!engineOnly) {
         const unmet = await unmetChecks(sha);
         if (unmet.length > 0) return { text: pushChecksText(sha, unmet), isError: true };
       }

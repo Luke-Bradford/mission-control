@@ -120,7 +120,6 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
-import type { CheckRecorder } from "./check-runs.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -200,6 +199,7 @@ import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import {

@@ -22,7 +22,6 @@ import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
-import { cloneState, configuredChecks, createCheckRecorder } from "./check-runs.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
 import {
@@ -60,6 +59,7 @@ import { hudShotStore } from "./flight/hud-store.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
+import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";

@@ -1,4 +1,5 @@
 /** The same Codex approval path for supervisor runs and the controller's live check. */
+import { realpathSync } from "node:fs";
 import {
   type CrewMode,
   codexCommand,
@@ -14,14 +15,24 @@ import {
   mcTool,
   seatCallSign,
 } from "@mc/core";
-import type { CheckRecorder } from "../check-runs.ts";
 import { type CcConfig, crewSeatGrants } from "../config.ts";
+import type { CheckRecorder } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { codexApproval, codexEditAllowed } from "./codex-floor.ts";
 import { CODEX_MCP_ELICITATION, type CodexSessionInput } from "./codex-session.ts";
 
 const REFUSAL_DETAIL_MAX = 200;
+
+/** Whether `a` and `b` are the same folder once symlinks are resolved. */
+function sameDir(a: unknown, b: string): boolean {
+  if (typeof a !== "string") return false;
+  try {
+    return realpathSync.native(a) === realpathSync.native(b);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Codex's request to run a command outside the seat's sandbox. On codex-cli 0.154.0 the command
@@ -166,7 +177,12 @@ export function createCodexApprover(i: {
     if (signal.aborted) return refuse("codex-allowlist");
     // the lock's key: the completion event names the same one (see codex-session's tool-result)
     const id = params.approvalId ?? params.itemId;
-    if (i.checks !== undefined && (typeof id === "string" || typeof id === "number")) {
+    // only a command run at the worktree root is a check: from a subfolder it checks something else
+    if (
+      i.checks !== undefined &&
+      (typeof id === "string" || typeof id === "number") &&
+      sameDir(params.cwd, i.cwd)
+    ) {
       for (const event of events) {
         if (event.tool === "Bash" && event.input.command !== undefined) {
           await i.checks.begin({ runId: i.runId, toolUseId: String(id) }, event.input.command);

@@ -6,27 +6,29 @@
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { RepoRules } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { seatPlace } from "./mcp/tools.ts";
-import { adminDirOf } from "./runtime/checkouts.ts";
-import { crewGit } from "./runtime/git.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import { seatPlace } from "../mcp/tools.ts";
+import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
+import { crewGit } from "../runtime/git.ts";
+import type { Store } from "../store.ts";
 
 /** A command that chains, pipes, or runs on after a failure can pass without the check passing. */
 const NOT_PLAIN = /[|;\n\r]/;
 
 /**
- * The configured checks this shell command runs: split on `&&` only, a check counts when it is one
- * segment exactly (trimmed). A command holding `|`, `||`, `;` or a line break counts for nothing, so
- * `lint | tail` and `test || true` cannot pass.
+ * The configured checks this shell command runs: split on `&&` only, and the call counts only when
+ * EVERY trimmed segment is a configured check. Anything else in the chain (`cd x`, `exit 0`, a
+ * shell function, an edit) could change what the check sees or whether it runs, so it counts for
+ * nothing. A command holding `|`, `||`, `;` or a line break counts for nothing too.
  */
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
-  const segments = new Set(command.split("&&").map((s) => s.trim()));
-  return checks.filter((c) => segments.has(c));
+  const segments = command.split("&&").map((s) => s.trim());
+  if (segments.some((s) => !checks.includes(s))) return [];
+  return checks.filter((c) => segments.includes(c));
 }
 
-/** The seat clone's state at one moment: its checked-out commit, and whether tracked files are clean. */
+/** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */
 export interface CloneState {
   head: string;
   clean: boolean;
@@ -82,8 +84,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       started.delete(callId(key));
       try {
         const at = await d.state(key.runId);
-        // the head moved during the call: it did not check the commit it started on
-        if (at === null || at.head !== call.head) return;
+        // the head moved, or the call left the tree dirty: it did not check the commit it started on
+        if (at === null || at.head !== call.head || !at.clean) return;
         for (const command of call.matched) {
           d.store.addCheckRun({ runId: key.runId, command, headSha: call.head, ok, at: now() });
         }
@@ -116,7 +118,14 @@ export function cloneState(
     if (gitDir === null) return null;
     const g = (args: string[]) => crewGit(worktree, args, common, { gitDir });
     const head = (await g(["rev-parse", "--verify", "HEAD"])).trim();
-    const dirty = await g(["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"]);
+    // the hub's own test of a clean tree (the commit tool's): untracked files count
+    const dirty = await g([
+      "--no-optional-locks",
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      ...COMMIT_ADD_PATHSPEC,
+    ]);
     return { head, clean: dirty.trim() === "" };
   };
 }

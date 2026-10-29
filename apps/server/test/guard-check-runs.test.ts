@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type CloneState, checksRun, cloneState, createCheckRecorder } from "../src/check-runs.ts";
+import {
+  type CloneState,
+  checksRun,
+  cloneState,
+  createCheckRecorder,
+} from "../src/guard/check-runs.ts";
 
 const LINT = "pnpm -s lint";
 const TYPES = "pnpm -s typecheck";
@@ -14,7 +19,16 @@ describe("checksRun", () => {
     expect(checksRun(LINT, CHECKS)).toEqual([LINT]);
     expect(checksRun(`  ${LINT}  `, CHECKS)).toEqual([LINT]);
     expect(checksRun(`${LINT} && ${TYPES}`, CHECKS)).toEqual([LINT, TYPES]);
-    expect(checksRun(`cd apps/server && ${TYPES}`, CHECKS)).toEqual([TYPES]);
+  });
+
+  it.each([
+    ["an exit before it", `exit 0 && ${LINT}`],
+    ["a shell function shadowing the runner", `pnpm() ( true ) && ${LINT}`],
+    ["a cd before it", `cd fake && ${LINT}`],
+    ["an edit before it", `sed -i x a.ts && ${LINT}`],
+    ["an edit after it", `${LINT} && sed -i x a.ts`],
+  ])("matches nothing when %s shares the chain", (_n, command) => {
+    expect(checksRun(command, CHECKS)).toEqual([]);
   });
 
   it("matches nothing for a command that only contains a check", () => {
@@ -101,6 +115,14 @@ describe("the check recorder", () => {
     const r = recorder();
     await r.begin(KEY, LINT);
     state = { head: HEAD, clean: true };
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
+  });
+
+  it("records nothing when the call left the tree dirty (an edit during the call)", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    state = { head: HEAD, clean: false };
     await r.end(KEY, true);
     expect(rows).toEqual([]);
   });
@@ -200,9 +222,9 @@ describe("cloneState", () => {
     expect(await cloneState(config(), store(wt))("r")).toEqual({ head, clean: false });
   });
 
-  it("treats an untracked file as clean, as the ticket says", async () => {
+  it("counts an untracked file as dirty, as the commit tool does", async () => {
     writeFileSync(join(wt, "new.txt"), "n\n");
-    expect((await cloneState(config(), store(wt))("r"))?.clean).toBe(true);
+    expect((await cloneState(config(), store(wt))("r"))?.clean).toBe(false);
   });
 
   it("is null for a seat with no worktree or a path that is no worktree of the clone", async () => {
