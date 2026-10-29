@@ -206,7 +206,8 @@ export async function renderHudWithPlaywright(
   let context: HudBrowserContext | undefined;
   let cleanup: Promise<void> | undefined;
   let expired = false;
-  const timeoutError = (): Error => new Error(`HUD screenshot timed out after ${deadlineMs} ms.`);
+  const timeoutError = (): Error =>
+    new Error(`HUD screenshot timed out: the ${deadlineMs} ms deadline expired.`);
 
   const ensureActive = (): void => {
     if (!expired) return;
@@ -333,7 +334,9 @@ export async function renderHudWithPlaywright(
     return await Promise.race([work(), deadline]);
   } catch (error) {
     // A Playwright call limited to the time remaining can time out just before the deadline timer
-    if ((error as { name?: unknown })?.name === "TimeoutError") throw timeoutError();
+    // Likewise the deadline's own cleanup closes the browser under a call still in flight (a slow
+    // Chrome start), which then fails with "has been closed": the cause is the deadline.
+    if (expired || (error as { name?: unknown })?.name === "TimeoutError") throw timeoutError();
     throw error;
   } finally {
     if (deadlineTimer) clearTimeout(deadlineTimer);

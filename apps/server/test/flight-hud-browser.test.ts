@@ -147,11 +147,15 @@ const chromeCount = (): number => {
   }
 };
 
+// A cold Chrome start on a loaded CI runner can take most of 20 s; the deadline covers launch too.
+// Every render's test timeout must exceed this.
+const COLD_START_DEADLINE_MS = 60_000;
+
 const render = (path: string, over: { deadlineMs?: number } = {}) => {
   const guard = hudRenderRequest(hub.origin);
   return renderHudWithPlaywright(guard.page(path), guard, {
     executablePath: CHROME as string,
-    deadlineMs: over.deadlineMs ?? 20_000,
+    deadlineMs: over.deadlineMs ?? COLD_START_DEADLINE_MS,
   });
 };
 
@@ -173,30 +177,30 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
     expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
     // the beacon is sent only after the placeholder was replaced; the capture came after it
     expect(ready).toEqual(["?page=map"]);
-  }, 30_000);
+  }, 90_000);
 
   it("refuses a redirect off the hub and never reaches the other server", async () => {
     await expect(render("/board")).rejects.toThrow();
     expect(other.requests).toEqual([]);
-  }, 30_000);
+  }, 90_000);
 
   it("closes popups and never reaches the other server from them", async () => {
     const before = other.requests.length;
     const png = await render("/flight");
     expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
     expect(other.requests).toHaveLength(before);
-  }, 30_000);
+  }, 90_000);
 
   it("blocks service workers", async () => {
     await render("/comms");
     expect(hub.requests.filter((u) => u === "/sw.js")).toEqual([]);
-  }, 30_000);
+  }, 90_000);
 
   it("blocks WebSockets, to the hub and anywhere else", async () => {
     await render("/telemetry");
     expect(hub.upgrades).toEqual([]);
     expect(other.upgrades).toEqual([]);
-  }, 30_000);
+  }, 90_000);
 
   it("denies encoded spellings of the bootstrap and the stream, and every write", async () => {
     await render("/overview");
@@ -204,7 +208,7 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
     expect(seen).not.toContain("/api/operator/bootstrap");
     expect(seen).not.toContain("/api/stream");
     expect(seen).not.toContain("/api/x");
-  }, 30_000);
+  }, 90_000);
 
   it("rejects encoded and dot-segment spellings of non-HUD paths before launching", () => {
     const guard = hudRenderRequest(hub.origin);
@@ -222,7 +226,7 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
       }),
     ).rejects.toThrow("timed out");
     await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
-  }, 60_000);
+  }, 150_000);
 
   it("releases a queued screenshot_hud render after the render before it failed", async () => {
     const NOW = Date.now();
@@ -298,7 +302,7 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
         try {
           return await renderHudInHelper(url, guard, {
             executablePath: CHROME as string,
-            deadlineMs: 20_000,
+            deadlineMs: COLD_START_DEADLINE_MS,
           });
         } catch (e) {
           events.push(`failed ${page}`);
@@ -320,5 +324,5 @@ describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () =>
     expect(b.image?.mimeType).toBe("image/png");
     // the second helper only launched once the first render had failed and left the queue
     expect(events).toEqual(["launch /board", "failed /board", "launch /overview"]);
-  }, 60_000);
+  }, 150_000);
 });
