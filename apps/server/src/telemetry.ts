@@ -789,6 +789,11 @@ export function telemetry(
       ),
     );
   }
+  // A ticket can merge inside the selected range after all of its work completed before it.
+  // Keep that zero-in-range row so the chart can show its full lifetime cost.
+  for (const ticket of totalCostByTicket.keys()) {
+    if (!byTicket.has(ticket)) byTicket.set(ticket, { tokens: 0, costUsd: null });
+  }
   const tokensByTicket: Telemetry["tokensByTicket"] = [...byTicket]
     .map(([ticket, t]) => ({
       ticket,

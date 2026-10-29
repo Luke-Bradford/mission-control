@@ -985,23 +985,13 @@ describe("cost", () => {
         costUsd: 3,
       }),
     );
-    store.upsertRun(
-      run({
-        id: "in-range",
-        seq: 2,
-        ticket: "shop-app#99",
-        startedAt: NOW - 2 * HOUR,
-        endedAt: NOW - HOUR,
-        costUsd: 2,
-      }),
-    );
     store.replacePullRequests("shop-app", [{ ...pr(99, NOW - HOUR), ticket: "shop-app#99" }], NOW);
 
     expect(tel("6h").tokensByTicket).toContainEqual({
       ticket: "shop-app#99",
       tokens: 0,
-      costUsd: 2,
-      totalCostUsd: 5,
+      costUsd: null,
+      totalCostUsd: 3,
     });
   });
   // #26 A3: a run whose branch names no ticket counts toward its PR's ticket.
