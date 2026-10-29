@@ -3118,19 +3118,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: checkout.path,
       });
-      // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
-      // answered: wait for that, so the exit that marks the run failed and the seat in error
-      // comes before a start is claimed.
+      // answered. The Codex handshake also confirms its seat floor: do not even put a brief in
+      // its outbox until that confirmation has succeeded.
       await session.ready;
       if (!session.alive) {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
+      // The CLI prints nothing (not even init) until its first line: the brief goes at once.
+      await enqueue(l, () => {
+        writeLine(l, brief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       return { runId, branch: checkout.branch };
     } finally {
       starting.delete(seatId);
@@ -3269,15 +3269,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: checkout.path,
       });
-      await enqueue(l, () => {
-        writeLine(l, firstBrief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
+      await enqueue(l, () => {
+        writeLine(l, firstBrief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       return { runId };
     } finally {
       starting.delete(seatId);
@@ -3501,15 +3501,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reason: null,
         worktree: scratch.path,
       });
-      await enqueue(l, () => {
-        writeLine(l, brief);
-        markInboxRead(seatId, inbox);
-      }).catch(() => {});
       await session.ready;
       if (!session.alive) {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
+      await enqueue(l, () => {
+        writeLine(l, brief);
+        markInboxRead(seatId, inbox);
+      }).catch(() => {});
       return { runId };
     } finally {
       starting.delete(seatId);

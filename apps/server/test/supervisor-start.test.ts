@@ -74,7 +74,7 @@ import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
-import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
+import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
 import {
   CREW_LOCK_FILE,
@@ -2789,6 +2789,7 @@ import(${JSON.stringify(fixture)});
     expect(seat).toMatchObject({ state: "error", reason: CANNOT_START, runId: expect.any(String) });
     const runId = seat?.runId ?? "";
     expect(store.run(runId)).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    expect(existsSync(join(crewCodexDir(dbPath, runId), CODEX_OUTBOX_FILE))).toBe(false);
     expect(recorded().some((m) => m.method === "turn/start")).toBe(false);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("did not confirm the seat floor"));
     // Keeper cleanup can finish after the refusal is recorded on a loaded runner.
