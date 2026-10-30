@@ -126,6 +126,24 @@ afterEach(() => {
 });
 
 describe("flightMetrics", () => {
+  it("does not list controller decisions without a FLIGHT seat", () => {
+    store.addFlightDecision({
+      at: NOW - MIN,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "Missing power",
+      decision: `${FOR_THE_CONTROLLER} choose a replacement`,
+      basis: "operator",
+    });
+
+    const withoutFlight = { ...config, crew: undefined };
+    expect(flightMetrics(withoutFlight, store, NOW).forTheController).toBe(0);
+    expect(flightView(withoutFlight, store, NOW).controllerDecisions).toEqual([]);
+  });
+
   it("shares every recent controller decision with the daily count beyond the view limit", () => {
     const decision = (at: number, text: string) =>
       store.addFlightDecision({

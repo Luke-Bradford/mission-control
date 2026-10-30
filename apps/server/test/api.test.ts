@@ -6156,6 +6156,13 @@ describe("crew routes", () => {
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
       const now = Date.now();
       const d = (at: number, about: string, decision = "d") =>
         store.addFlightDecision({

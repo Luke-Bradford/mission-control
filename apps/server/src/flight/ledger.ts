@@ -1,5 +1,4 @@
 import {
-  FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_LEDGER_KINDS,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_LEDGER_STATUSES,
@@ -13,7 +12,6 @@ import {
   type FlightMetrics,
   type FlightSummaryItem,
   type FlightSummaryView,
-  forTheControllerDecisions,
   isCiFailureEvent,
   orderLedger,
   parkedEventText,
@@ -26,6 +24,7 @@ import { z } from "zod";
 import type { CcConfig } from "../config.ts";
 import { crew, NO_CLI_VERSION, NO_LOCK } from "../hud.ts";
 import type { Store } from "../store.ts";
+import { controllerDecisions } from "./controller-decisions.ts";
 import { flightBriefView, flightHeadline, flightSeat, flightTriageItems } from "./state.ts";
 import { cut } from "./tools.ts";
 
@@ -117,9 +116,7 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
         ).length,
       0,
     );
-  metrics.forTheController = forTheControllerDecisions(
-    store.flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT),
-  ).length;
+  metrics.forTheController = controllerDecisions(config, store, now).length;
   return metrics;
 }
 
