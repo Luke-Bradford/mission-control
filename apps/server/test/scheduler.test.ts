@@ -1060,6 +1060,25 @@ describe("scheduler", () => {
       expect(c.machine).not.toHaveBeenCalled();
     });
 
+    it("samples the default capacity guard without a browser", async () => {
+      config.crew = {
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+
+      await s.tick("machine");
+
+      expect(c.machine).toHaveBeenCalledOnce();
+    });
+
     it("writes the first sample of each minute to the store, not every tick", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       let t = minute + 1000;
@@ -2544,6 +2563,23 @@ it("releases crew holds from a durable idle seat session after the hold", async 
   store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
   await s.tick("ta");
   expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+});
+
+it("releases an expired hold from a no-client loop tick", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  holdItem(store, "ask:expired", "Waiting", { kind: "date", at: NOW }, "operator", NOW);
+  const s = createScheduler({
+    config,
+    store,
+    bus,
+    now: () => NOW + 1,
+    collectors: stubs(),
+    hasViewClients: () => false,
+  });
+
+  await s.tick("ta");
+
+  expect(holds(store)["ask:expired"]?.releasedAt).toBe(NOW + 1);
 });
 
 it("releases a ci hold when the stored PR reaches the state, and an item hold when the item is gone", async () => {

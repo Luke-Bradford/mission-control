@@ -552,7 +552,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   const afterLoopTick = () => {
-    if (deps.hasViewClients?.() === false) return;
     const at = now();
     const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK).rows;
     recordStateChanges(rows, at);
@@ -1039,7 +1038,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         );
     },
     machine: async () => {
-      if (deps.hasViewClients?.() === false && config.crew?.machineCapacity === undefined) return;
+      if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
       const r = await c.machine(
         machineCpus,
