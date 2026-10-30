@@ -3219,6 +3219,30 @@ describe("the engine runs reviews", () => {
     expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
   });
 
+  it("updates before review when the merged predecessor run has ended", async () => {
+    h.touchesByRun = {
+      [RUN]: ["packages/core/src/guard.ts"],
+      [RUN2]: ["packages/core/src/guard.ts"],
+    };
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    const first = need(store.run(RUN));
+    store.upsertRun({ ...first, endedAt: clock - 1000 });
+    clock += 5000;
+    h.tip = SHA_C;
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
   it("keeps a mergeable head queued until it includes the older merge", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     await secondAuthor();
