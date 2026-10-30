@@ -2417,8 +2417,8 @@ describe("push and draft_pr", () => {
         const sha = await commitOk("apps/a.ts", "a3\n");
         expect(await push(gated())).toEqual(
           refusal(sha, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            { command: LINT, state: "missing", recorded: { headSha: old, ok: true, at: NOW } },
+            { command: TYPES, state: "missing", recorded: { headSha: old, ok: true, at: NOW } },
           ]),
         );
         expect(remoteTip()).toBeNull();
@@ -2479,12 +2479,13 @@ describe("push and draft_pr", () => {
 
       it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
         const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        const own = git(wt, "rev-parse", `${merge}^1`).trim();
         expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
         const next = await commitOk("apps/a.ts", "on top\n");
         expect(await push(gated())).toEqual(
           refusal(next, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            { command: LINT, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
+            { command: TYPES, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
           ]),
         );
       });
@@ -2508,18 +2509,19 @@ describe("push and draft_pr", () => {
         const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
         expect((await push(gated())).text).toBe(
           pushChecksText(merge, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            { command: LINT, state: "missing", recorded: { headSha: first, ok: true, at: NOW } },
+            { command: TYPES, state: "missing", recorded: { headSha: first, ok: true, at: NOW } },
           ]),
         );
       });
 
       it("gates a seat's own merge of main", async () => {
         const merge = await branchThenMerge("Seat", `Merge main into ${BRANCH}`);
+        const own = git(wt, "rev-parse", `${merge}^1`).trim();
         expect(await push(gated())).toEqual(
           refusal(merge, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            { command: LINT, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
+            { command: TYPES, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
           ]),
         );
       });
