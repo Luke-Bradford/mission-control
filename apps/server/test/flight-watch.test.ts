@@ -5,6 +5,7 @@ import {
   BACKGROUND_STALL_MS,
   type BoardItem,
   COMMS_CAPCOM,
+  CREW_PAUSE_SETTING,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
@@ -582,9 +583,121 @@ describe("FLIGHT's flow queues", () => {
       kind: "machine",
       reason: "disk free is 10.0 GB (below 15 GB)",
       blocks: "5 queued reviews for 2 idle review seats",
+      blocking: true,
     });
     expect(wakeFacts(result)).toContain("machine");
-    expect(wakeLine(result)).toContain("name the hold and feedback loop");
+    expect(wakeLine(result)).toContain("the hold blocks reviews, and reviews cannot merge");
+  });
+
+  it("keeps a machine hold's wake fact stable while its reading changes", () => {
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 1,
+      sha: "sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    const sample = (at: number, diskFreeBytes: number) =>
+      store.addMachineSample({
+        at,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes,
+        diskTotalBytes: 100 * 1024 ** 3,
+        memTotalBytes: 100 * 1024 ** 3,
+        cores: 8,
+        agents: null,
+      });
+    sample(T0, 10 * 1024 ** 3);
+    const first = flightState({ config, store, busy: [], now: T0 });
+    sample(T0 + MIN, 9.8 * 1024 ** 3);
+    const second = flightState({ config, store, busy: [], now: T0 + MIN });
+
+    expect(second.flowHolds?.[0]).toMatchObject({
+      kind: "machine",
+      reason: "disk free is 9.8 GB (below 15 GB)",
+      blocking: true,
+    });
+    expect(wakeFacts(second)).toBe(deliveredFacts(first));
+  });
+
+  it("does not claim a build-only pause blocks a review", () => {
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 1,
+      sha: "sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    store.setSetting(
+      CREW_PAUSE_SETTING,
+      JSON.stringify({ seats: ["guido-1"], reason: "builders off", at: T0, by: "operator" }),
+    );
+
+    const hold = flightState({ config, store, busy: [], now: T0 }).flowHolds?.find(
+      (candidate) => candidate.kind === "crew-pause",
+    );
+
+    expect(hold).toMatchObject({
+      reason: "builders off",
+      blocks: "1 build seat, 0 review seats and 0 queued reviews",
+      blocking: false,
+    });
+  });
+
+  it("lists merge waits and quota and stopped-seat holds", () => {
+    live("guido-1", "r-guido");
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "review",
+      prNumber: 7,
+      awaitingFlight: "sha",
+    });
+    store.upsertPullRequests(
+      "mc",
+      [
+        stored(7, {
+          checks: [
+            {
+              name: "test",
+              kind: "check",
+              state: "failing",
+              conclusion: "failing",
+              attempt: 1,
+              url: null,
+            },
+          ],
+        }),
+      ],
+      T0,
+    );
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: T0,
+      pct: 95,
+      resetAt: T0 + MIN,
+      source: "test",
+    });
+    store.setSeatSession(row("inco-1", null, "stopped"));
+
+    const result = flightState({ config, store, busy: [], now: T0 });
+
+    expect(result.mergeQueue).toEqual([{ pr: 7, waitsOn: ["CI: test", "review", "FLIGHT merge"] }]);
+    expect(result.flowHolds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "quota", reason: "GUIDO-1's 5h quota is 95% (stop 95%)" }),
+        expect.objectContaining({ kind: "seat-stopped", reason: "INCO-1 is stopped" }),
+      ]),
+    );
   });
 });
 

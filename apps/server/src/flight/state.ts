@@ -827,20 +827,26 @@ export function flightState(i: {
               queuedReviews > 0
                 ? `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`
                 : `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+            blocking: queuedReviews > 0 || eligibleBuilds > 0,
           },
         ]
       : []),
     ...(() => {
       const pause = readCrewPause(store);
       if (pause === null) return [];
-      const blocked = reviewQueue.seats.filter((seat) =>
+      const pausedReviews = reviewQueue.seats.filter((seat) =>
         pause.seats === "all" ? true : pause.seats.includes(seat.seat),
-      ).length;
+      );
+      const pausedBuilds = seats.filter(
+        (seat) => seat.loop === "build" && (pause.seats === "all" || pause.seats.includes(seat.id)),
+      );
+      const pausedQueuedReviews = pausedReviews.reduce((total, seat) => total + seat.queued, 0);
       return [
         {
           kind: "crew-pause" as const,
           reason: pause.reason,
-          blocks: `${blocked} review seat${blocked === 1 ? "" : "s"} and ${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"}`,
+          blocks: `${pausedBuilds.length} build seat${pausedBuilds.length === 1 ? "" : "s"}, ${pausedReviews.length} review seat${pausedReviews.length === 1 ? "" : "s"} and ${pausedQueuedReviews} queued review${pausedQueuedReviews === 1 ? "" : "s"}`,
+          blocking: (pausedBuilds.length > 0 && eligibleBuilds > 0) || pausedQueuedReviews > 0,
         },
       ];
     })(),
@@ -869,6 +875,10 @@ export function flightState(i: {
           kind: "quota" as const,
           reason,
           blocks: `${seat.loop} work assigned to ${seat.call}`,
+          blocking:
+            (seat.loop === "build" && eligibleBuilds > 0) ||
+            (seat.loop === "review" &&
+              reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
         };
       }),
     ...seats
@@ -877,6 +887,10 @@ export function flightState(i: {
         kind: "seat-stopped" as const,
         reason: `${seat.call} is stopped`,
         blocks: `${seat.loop} work assigned to ${seat.call}`,
+        blocking:
+          (seat.loop === "build" && eligibleBuilds > 0) ||
+          (seat.loop === "review" &&
+            reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
       })),
   ];
 
@@ -1181,18 +1195,13 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
-    reviews: reviewFault
-      ? [
-          s.reviewQueue?.queued ?? 0,
-          s.reviewQueue?.running ?? 0,
-          ...(s.reviewQueue?.seats ?? []).map(
-            (seat) => `${seat.seat}:${seat.queued}:${seat.running}:${seat.idle}`,
-          ),
-        ]
-      : [],
+    reviews: reviewFault ? ["idle-reviewers"] : [],
     merge: s.mergeQueue?.map((pr) => `${pr.pr}:${pr.waitsOn.join(",")}`).sort() ?? [],
     holdsInForce:
-      s.flowHolds?.map((hold) => `${hold.kind}:${hold.reason}:${hold.blocks}`).sort() ?? [],
+      s.flowHolds
+        ?.filter((hold) => hold.blocking)
+        .map((hold) => hold.kind)
+        .sort() ?? [],
     prs: s.prs
       .map(
         (p) =>

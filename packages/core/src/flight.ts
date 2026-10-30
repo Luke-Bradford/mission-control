@@ -960,6 +960,8 @@ export interface FlightState {
     kind: "machine" | "crew-pause" | "quota" | "seat-stopped";
     reason: string;
     blocks: string;
+    /** True only when this hold currently prevents queued work from moving. */
+    blocking: boolean;
   }[];
   recent: { id: number; time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
@@ -1149,7 +1151,7 @@ export function wakeLine(
     : "";
   const idleReviewFault =
     (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
-      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop, then act or report the fix you need."
+      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}\n${JSON.stringify(digest)}`;
 }
