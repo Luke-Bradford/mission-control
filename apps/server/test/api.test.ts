@@ -92,6 +92,7 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -4766,6 +4767,19 @@ describe("boards, escalations, health", () => {
     ];
     expect(await urlsOf("/api/repos")).toEqual(want);
     expect(await urlsOf("/api/repos/profiles")).toEqual(want);
+  });
+
+  it("health carries the engine's recent tick durations", async () => {
+    const ticks = tickLogOf(store);
+    ticks.begin(1000);
+    ticks.end(1450);
+    const row = (await get("/api/health"))
+      .json()
+      .find((h: { collector: string }) => h.collector === "engine:ticks");
+    expect(row).toMatchObject({
+      ok: true,
+      ticks: [{ startedAt: 1000, endedAt: 1450, durationMs: 450, overranOn: null }],
+    });
   });
 
   it("escalations and health return the store rows", async () => {

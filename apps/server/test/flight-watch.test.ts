@@ -42,6 +42,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
@@ -3172,6 +3173,18 @@ describe("ops review regressions", () => {
     expect(signalState().signals.filter((s) => s.key.startsWith("watch:"))).toEqual([
       expect.objectContaining({ key: `watch:flight-1:${nowMs}`, told: false }),
     ]);
+  });
+
+  it("names what a stuck engine tick is doing in the silent-engine signal", () => {
+    flightLoopHeartbeat(store, "engine", T0 - 3 * MIN, MIN);
+    flightLoopHeartbeat(store, "sessions", T0, MIN);
+    expect(signalState().signals[0]?.evidence).not.toContain("still running");
+    const ticks = tickLogOf(store);
+    ticks.begin(T0 - 2 * MIN);
+    ticks.step("reconcile mc guido-1:run-1 ci");
+    expect(signalState().signals[0]?.evidence).toContain(
+      "still running; on reconcile mc guido-1:run-1 ci",
+    );
   });
 
   it("guards sleep/wake silence and writes each source heartbeat at most once a minute", () => {
