@@ -17,5 +17,5 @@ if (!root) throw new Error("#root missing");
 // The harness page stands in for the app at Comms' own address; the shell around it (top bar,
 // FLIGHT's dock, `main`) is the real one, so Comms is laid out where operators see it.
 writeBool(DOCK_COLLAPSED_KEY, false);
-history.replaceState(null, "", "/comms/crew");
+history.replaceState(null, "", new URLSearchParams(location.search).get("at") ?? "/comms/crew");
 createRoot(root).render(<App />);

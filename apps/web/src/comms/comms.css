@@ -124,6 +124,13 @@
     box-shadow 150ms ease;
 }
 
+/* The lists are flex columns that scroll: a row keeps its own height rather than squeezing into
+   the one below when there are more rows than room. */
+.comms-nav button,
+.comms-contacts button {
+  flex: none;
+}
+
 .comms-nav button:hover,
 .comms-contacts button:hover {
   background: color-mix(in srgb, var(--fg) 4%, transparent);

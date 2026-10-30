@@ -3,8 +3,13 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { CONFIG, crewRow, NOW } from "./fixtures.ts";
+import {
+  type Box,
+  BROWSER_TEST_TIMEOUT_MS,
+  browserSession,
+  describeRendered,
+} from "./browserRunner.ts";
+import { CONFIG, crewRow, NOW, seatRow } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR ?? join(process.env.TMPDIR ?? "/tmp", "comms-shots");
@@ -58,6 +63,73 @@ describeRendered("Comms with older messages to load, rendered", () => {
         if (pane) pane.scrollTop = 0;
       }, undefined);
       await page.screenshot(join(SHOTS, `comms-${width}.png`));
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});
+
+// Enough seats that the list outgrows the viewport and scrolls.
+const SEATS = Array.from({ length: 16 }, (_, i) => (i === 0 ? "guido-1" : `retro-${i}`));
+const seats = SEATS.map((id, index) =>
+  seatRow({ id, index: index + 1, role: id.startsWith("guido") ? "GUIDO" : "RETRO" }),
+);
+const flightPage = {
+  messages: Array.from({ length: 6 }, (_, i) => ({
+    ...message(i + 1),
+    from: i % 2 === 0 ? "CAPCOM" : "flight-1",
+    to: i % 2 === 0 ? "flight-1" : "CAPCOM",
+    text: `FLIGHT and CAPCOM, message ${i + 1}`,
+  })),
+  hasMore: false,
+  // Opening the conversation posted its read; the route now answers with the cursor moved.
+  cursor: "comms:6",
+  unread: 0,
+};
+const flightApi = {
+  ...api,
+  "/api/crew?shape=summary": {
+    rows: [seatRow({ id: "flight-1", index: 0 }), ...seats],
+    firstRunToday: null,
+  },
+  "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+  "/api/comms/flight": flightPage,
+  "/api/comms/read": { ok: true },
+  ...Object.fromEntries(
+    SEATS.map((id) => [
+      `/api/comms/agents/${id}?summary=1`,
+      { messages: [], contacts: [], unread: 3, inboxUnread: 0, directUnread: 0 },
+    ]),
+  ),
+};
+
+describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
+  it.each([1280, 1600, 1920])(
+    "shows no read error and keeps the agent rows apart at %i wide",
+    async (width) => {
+      mkdirSync(SHOTS, { recursive: true });
+      const page = await renderAt({
+        page: "test/commsBrowser.html",
+        width,
+        height: 1000,
+        search: "?at=/comms",
+        api: flightApi,
+      });
+      await page.box(".comms-bubble");
+      expect(await page.evaluate(() => document.body.textContent ?? "", undefined)).not.toContain(
+        "Could not mark this conversation read",
+      );
+      const rows = await page.boxes(".comms-nav-row");
+      expect(rows).toHaveLength(SEATS.length);
+      // Each row ends where the next begins; its second line sits inside it.
+      const lines = await page.boxes(".comms-nav-row .comms-nav-agent small");
+      rows.forEach((row, i) => {
+        const line = lines[i] as Box;
+        expect(line.y + line.height).toBeLessThanOrEqual(row.y + row.height - 1);
+        const next = rows[i + 1];
+        if (next) expect(row.y + row.height).toBeLessThanOrEqual(next.y + 1);
+      });
+      await page.screenshot(join(SHOTS, `comms-flight-${width}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
