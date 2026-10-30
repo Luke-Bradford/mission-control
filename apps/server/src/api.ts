@@ -1825,13 +1825,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: docs/runbook.md#qa-board-data (review findings with category and resolution)
+      // Reader: docs/runbook.md#qa-board-data (review findings and per-round RETRO summaries)
       api.get<{ Querystring: { days?: unknown } }>(
         "/qa/findings",
         async (req, reply): Promise<QaFindingsView | FastifyReply> => {
           const days = qaDays(req.query.days, 30);
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
-          return { findings: store.qaFindings(now() - days * DAY_MS) };
+          const since = now() - days * DAY_MS;
+          return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
         },
       );
 

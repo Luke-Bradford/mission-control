@@ -279,7 +279,8 @@ batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
 Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
 hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
 also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
-merged-PR history remain available to Activity and Telemetry for one year. Deletion makes SQLite
+merged-PR history remain available to Activity and Telemetry for one year. Reported reviews and
+unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
 ## First crew
@@ -1127,11 +1128,14 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
 - **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
   date, state, open and closed issue counts. `GET /api/qa/milestones`. Milestones the repo does not
   use give an empty list.
-- **Findings.** `GET /api/qa/findings?days=` (1..90, default 30) lists review findings with their
-  RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or `waived`; null while
-  unresolved). RETRO sets the resolution of the findings it names when it reports round 2 or later;
-  when a round reports nothing to fix, the engine marks the earlier blocking findings it left
-  unnamed `fixed`. Minor findings are logged, not resolved.
+- **Findings and review rounds.** `GET /api/qa/findings?days=` (1..90, default 30) lists review
+  findings with their RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or
+  `waived`; null while unresolved), plus completed `reviews` with each round's head SHA, verdict,
+  blocking and minor counts, and end time. Resolved findings and closed PRs use the requested
+  window. Unresolved findings and completed rounds for a currently open PR remain available beyond
+  it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
+  round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
+  `fixed`. Minor findings are logged, not resolved.
 
 ## The HUD
 

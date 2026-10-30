@@ -1,4 +1,5 @@
 import type { ProfileStep, ReviewDepth } from "./profiles.ts";
+import type { ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
@@ -549,9 +550,24 @@ export interface QaFindingView {
   resolvedReviewId: number | null;
 }
 
+/** One completed RETRO review round, including clean rounds with no findings. */
+export interface QaReviewRoundView {
+  reviewId: number;
+  authorRunId: string;
+  repoId: string;
+  prNumber: number;
+  round: number;
+  sha: string;
+  verdict: ReviewVerdict;
+  blocking: number;
+  minor: number;
+  endedAt: number;
+}
+
 /** `GET /api/qa/findings`. */
 export interface QaFindingsView {
   findings: QaFindingView[];
+  reviews: QaReviewRoundView[];
 }
 
 /** `GET /api/qa/milestones`. */

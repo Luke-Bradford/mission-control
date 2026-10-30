@@ -7726,6 +7726,129 @@ describe("QA board data", () => {
     ]);
     expect((await get("/api/qa/findings?days=91")).statusCode).toBe(400);
   });
+
+  it("keeps old unresolved findings on open PRs and serves review-round summaries", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [9, 10, 11].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: `PR ${number}`,
+        url: `https://example.test/${number}`,
+        branch: `feature/${number}`,
+        ticket: null,
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: "passing" as const,
+        createdAt: NOW - 100 * DAY,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: String(number).repeat(40),
+        mergeable: null,
+        checks: [],
+      })),
+      NOW,
+    );
+    const record = (
+      prNumber: number,
+      round: number,
+      verdict: { spec: "pass" | "fail"; quality: "pass" | "fail" },
+      findings: { severity: "Important" | "Minor"; summary: string }[],
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId: `author-${prNumber}`,
+        repoId: "shop-app",
+        seatId: "retro-1",
+        prNumber,
+        sha: `${prNumber}${round}`.repeat(20),
+        epoch: 0,
+        attempt: round,
+        round,
+        at,
+      });
+      if (id === null) throw new Error("fixture review missing");
+      const runId = `review-${prNumber}-${round}`;
+      store.setReviewState(id, ["queued"], "running", { at, runId });
+      store.recordFindings(id, runId, {
+        verdict,
+        summary: `Round ${round}`,
+        findings: findings.map((finding) => ({
+          ...finding,
+          file: "file.ts",
+          line: 1,
+          scenario: "A scenario",
+          fix: "A fix",
+        })),
+        at,
+      });
+      return id;
+    };
+    const old = NOW - 91 * DAY;
+    const unresolved = record(
+      9,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Open" }],
+      old,
+    );
+    record(
+      10,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Resolved" }],
+      old,
+    );
+    record(10, 2, { spec: "pass", quality: "pass" }, [], old + 1);
+    const clean = record(11, 1, { spec: "pass", quality: "pass" }, [], NOW - 2);
+    const failing = record(
+      11,
+      2,
+      { spec: "pass", quality: "fail" },
+      [
+        { severity: "Important", summary: "Blocking" },
+        { severity: "Minor", summary: "Minor" },
+      ],
+      NOW - 1,
+    );
+
+    const body = (await get("/api/qa/findings?days=90")).json();
+    expect(body.findings).toEqual([
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Blocking" }),
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Minor" }),
+      expect.objectContaining({
+        reviewId: unresolved,
+        prNumber: 9,
+        summary: "Open",
+        resolution: null,
+      }),
+    ]);
+    expect(body.reviews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reviewId: clean,
+          prNumber: 11,
+          round: 1,
+          sha: "111".repeat(20),
+          verdict: { spec: "pass", quality: "pass" },
+          blocking: 0,
+          minor: 0,
+          endedAt: NOW - 2,
+        }),
+        expect.objectContaining({
+          reviewId: failing,
+          prNumber: 11,
+          round: 2,
+          sha: "112".repeat(20),
+          verdict: { spec: "pass", quality: "fail" },
+          blocking: 1,
+          minor: 1,
+          endedAt: NOW - 1,
+        }),
+      ]),
+    );
+  });
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
