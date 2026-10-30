@@ -44,6 +44,8 @@ import {
   type FileDiff,
   FLIGHT_HEADLINE,
   FLIGHT_LIST_MAX,
+  FLIGHT_RUNAWAY_NOTE_KEY,
+  FLIGHT_RUNAWAY_SETTING,
   FLIGHT_WAKE_SETTING,
   type FlightBriefView,
   type FlightLedgerEntry,
@@ -63,6 +65,8 @@ import {
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type ReloadResult,
+  RUNAWAY_LIFTED_DECISION,
+  RUNAWAY_NOT_TRIPPED,
   type Run,
   type RunDigest,
   type RunView,
@@ -1322,6 +1326,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/flight/memory?repo=shop-app"],
   ["PUT", "/api/flight/memory/:repo/:topic", { kind: "lesson", body: "note", source: "test" }],
   ["DELETE", "/api/flight/memory/:repo/:topic"],
+  ["POST", "/api/flight/runaway/lift"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -2221,6 +2226,11 @@ describe("local access", () => {
         continue;
       }
       if (url === "/api/accounts/claude-main" && method === "DELETE") {
+        expect(r.statusCode).toBe(409);
+        continue;
+      }
+      if (url === "/api/flight/runaway/lift") {
+        // nothing is tripped in this fixture
         expect(r.statusCode).toBe(409);
         continue;
       }
@@ -8444,6 +8454,34 @@ describe("operator token", () => {
       expect(shot.statusCode).toBe(403);
       expect(shot.body).not.toContain("tok-1");
     }
+  });
+});
+
+describe("POST /api/flight/runaway/lift", () => {
+  it("answers 409 when the breaker is not tripped", async () => {
+    const res = await post("/api/flight/runaway/lift");
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: RUNAWAY_NOT_TRIPPED });
+  });
+
+  it("lifts a tripped breaker, clears its flag and logs the lift", async () => {
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    store.raiseNote({
+      key: FLIGHT_RUNAWAY_NOTE_KEY,
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "tripped",
+      at: 1,
+    });
+    const res = await post("/api/flight/runaway/lift");
+    expect(res.statusCode).toBe(200);
+    expect(store.getSetting(FLIGHT_RUNAWAY_SETTING)).toBeNull();
+    expect(store.notes().some((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toBe(false);
+    expect(store.flightDecisions(0, 10)).toMatchObject([
+      { kind: "hub", decision: RUNAWAY_LIFTED_DECISION },
+    ]);
   });
 });
 

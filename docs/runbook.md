@@ -257,6 +257,19 @@ therefore includes a hub restart and the crew's normal shutdown and resume. This
 the launchd job; do not install it for a manually started hub. Check the expanded entry with
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
 
+### FLIGHT runaway breaker
+
+FLIGHT has no hourly, per-run or per-ticket caps on what it does; it makes judgement calls. One
+breaker stops it when it loops. It trips when FLIGHT makes more than 200 write decisions in an
+hour, or the same action on the same target 5 times in 30 minutes. While it is tripped every FLIGHT
+write is refused with the breaker's text (reads still work), the trip is logged in Decided without
+you, and one flag appears in Needs you. Operator holds, budget and account stops, secret
+redaction and the git safety rules are not affected by it and stay as they were.
+
+Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker with
+`curl -X POST http://localhost:<port>/api/flight/runaway/lift`. The lift is logged and clears the
+flag; it answers 409 when the breaker is not tripped. `flight_state` shows `breaker.tripped`.
+
 ### Map payload cache and polling
 
 `/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
@@ -956,7 +969,7 @@ operator.
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
 | `promote` | Reads the live card, and refuses when it cannot be read |
-| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status`; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
@@ -1087,7 +1100,7 @@ hold before it takes no new ticket; it applies live, and starts by hand are not 
 **FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
 not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
-`released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
+`released_at`), shows in FLIGHT's digest as
 `holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
 (`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
 promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.

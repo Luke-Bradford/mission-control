@@ -8,8 +8,6 @@
 import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
-  FLIGHT_HOUR_MS,
-  FLIGHT_PROMOTES_PER_HOUR,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
@@ -221,14 +219,6 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         )
           return fail("A ticket carries exactly one area:* label.");
       }
-      if (
-        a.status !== undefined &&
-        store.countFlightDecisions({
-          kinds: ["promote", "reorder", "status"],
-          since: now() - FLIGHT_HOUR_MS,
-        }) >= FLIGHT_PROMOTES_PER_HOUR
-      )
-        return fail("You have moved the most tickets allowed in the last hour.");
       if (away()) return fail(AWAY_WRITES_REFUSED);
       const done: string[] = [];
       // a field that fails after others landed says which landed

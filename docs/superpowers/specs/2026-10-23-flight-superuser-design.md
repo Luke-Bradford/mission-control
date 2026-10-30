@@ -115,11 +115,11 @@ This replaces the merge queue that this design first planned. The operator turne
   - It refuses floors 2, 3, 4 and 7. Floor 4 is checked against seat state `stopped` versus `error`, park kinds and operator holds.
   - The hub checks the basis with `scanSecrets` and the notifier check, clears the head, then posts the basis.
 - **`settle_park { runId, action, note?, basis }`.** Uses the same lane check as `merge_pr`. The actions are:
-  - `lift`: only a stuck park whose head descends from the push, sharing `FLIGHT_UNPARKS_PER_RUN` with `message_seat`;
+  - `lift`: only a stuck park whose head descends from the push, with no per-run limit;
   - `rereview`: a fresh RETRO review, at most twice per head; the only action for a `review-failed` park;
   - `accept`: only `review` and `review-ruling` parks, through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"). CI must pass before merging. A head touching `FLIGHT_FLOOR_ENFORCING_PATHS` needs a reported, unblocked RETRO review on that head. CI `ruling` parks use `accept_ruling` (re-run, then accept);
-  - `rework`: sends the findings to the seat, followed by the optional short `note`. On a capped review park, FLIGHT may grant exactly one extra rework round per head; a repeat is left to the controller.
-- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, and 4 an hour shared with `accept_ruling`. Refused calls spend no re-run budget.
+  - `rework`: sends the findings to the seat, followed by the optional short `note`. On a capped review park, FLIGHT may grant as many rework rounds as it judges right; each grant gives the head one more blocking review before the run parks again.
+- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, with no hourly or per-head limit. FLIGHT's writes have one limit, the runaway breaker (docs/runbook.md, FLIGHT runaway breaker).
 - **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. Only `write`, `maintain` and `admin` are trusted; results last 24 hours, entries older than 7 days are pruned, and cached authors need no GitHub call on wake. The role doesn't act on that text without the operator.
 
 ### #458: FLIGHT runs the board and Needs you (M; depends on #198)
@@ -139,7 +139,7 @@ This replaces the merge queue that this design first planned. The operator turne
   - GET only, on fixed path templates, for the repo FLIGHT is raised on.
   - It runs from an empty folder, with its own `GH_CONFIG_DIR` and `GH_TOKEN` from the hub's `gh auth token` (in the environment only).
   - It always passes `--method GET`, and refuses `-f`, `-F`, `--input` and `graphql`.
-  - Output goes through `scanSecrets`, capped at 20,000 characters, with a per-hour call cap.
+  - Output goes through `scanSecrets`, capped at 20,000 characters.
 - **WebFetch and WebSearch** for a `superuser` FLIGHT seat.
   - The URL is normalised first (`127.1`, `0x7f000001`, `2130706433`). Then these are denied: loopback, `localhost`, `[::1]`, `::ffff:127.0.0.1`, private ranges, `169.254/16` and `fc00::/7`.
   - Only http and https are allowed. The host is resolved, and the fetch is denied if any address is private.
@@ -174,12 +174,12 @@ This replaces the merge queue that this design first planned. The operator turne
 - **New GitHub writes,** all under the operator's account, only on `superuser` repos, and only through typed hub tools that log a basis:
   - merges of run PRs in FLIGHT's lane;
   - the engine's worktree merges of main (already made today, now in order);
-  - CI re-runs (capped);
+  - CI re-runs;
   - `mc/review` set to "waived" by `settle_park accept`;
   - PR comments carrying FLIGHT's basis, after secret and notifier checks;
   - project fields, labels and configured-login assignees.
 - **New reads:**
-  - `gh_read` (GET only, fixed templates, one repo, capped);
+  - `gh_read` (GET only, fixed templates, one repo, output capped at 20,000 characters);
   - a cached collaborator-permission lookup;
   - WebFetch and WebSearch for FLIGHT's seat, with private ranges denied.
 - **No general instruments.** FLIGHT's Bash keeps its sandbox. FLIGHT has no raw `gh`, no general HUD-route tool, none of the operator's skills or plugins, and no code writing.

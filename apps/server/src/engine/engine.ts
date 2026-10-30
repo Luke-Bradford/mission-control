@@ -55,8 +55,6 @@ import {
   evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
-  FLIGHT_REWORKS_PER_HEAD,
-  FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
   fixSentText,
   fixText,
@@ -223,7 +221,6 @@ export type OperatorRefusal =
   | "not-permitted"
   | "head-moved"
   | "pr-not-open"
-  | "round-granted"
   | "floor-enforced"
   | "before-lift"
   | "rework-undelivered"
@@ -245,7 +242,6 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "not-permitted": "this action is not allowed for the caller",
   "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
   "pr-not-open": "the PR is not open",
-  "round-granted": "the extra review or rework round was already granted on this head",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "before-lift": "the operator's message could not be stored",
@@ -307,13 +303,13 @@ export interface Engine {
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
-   * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
+   * on the ruled sha (once per sha); later
    * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
    * author the failure.
    */
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
-  acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
+  acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
   syncMain(runId: string): Promise<SyncMainResult>;
   /** Writer-requested local sync, capped per run; reports conflicts and dependency install refusals. */
@@ -330,7 +326,6 @@ export type AcceptRulingResult =
   | { kind: "pending"; sha: string }
   | { kind: "accepted"; sha: string }
   | { kind: "refused"; sha: string }
-  | { kind: "capped" }
   | { kind: "not"; text: string };
 
 export type SyncMainResult =
@@ -2527,15 +2522,6 @@ export function createEngine(deps: EngineDeps): Engine {
             !(kind === "review-failed" && opts.action === "rereview")
           )
             return refuse("wrong-action");
-          if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
-            return refuse("round-granted");
-          if (
-            opts.action === "rework" &&
-            ((loop.flightReworks?.[pushed.sha] ?? 0) >= FLIGHT_REWORKS_PER_HEAD ||
-              Object.values(loop.flightReworks ?? {}).reduce((n, v) => n + v, 0) >=
-                FLIGHT_REWORKS_PER_RUN)
-          )
-            return refuse("round-granted");
           if (opts.action === "accept") {
             const review = store
               .reviewsOfRun(run.id)
@@ -2881,7 +2867,6 @@ export function createEngine(deps: EngineDeps): Engine {
         )
           return no("No failed CI on this run's current head.");
         const count = run.loop.flightReruns?.[sha] ?? 0;
-        if (count >= 2) return no("Already re-run twice on this head.");
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);
@@ -2893,7 +2878,7 @@ export function createEngine(deps: EngineDeps): Engine {
       });
     },
 
-    acceptRuling(runId, opts) {
+    acceptRuling(runId) {
       const not = (text: string): AcceptRulingResult => ({ kind: "not", text });
       return onChainResult(runId, not("the loop engine is off"), async () => {
         if (!live()) return not("the loop engine is off");
@@ -2923,7 +2908,6 @@ export function createEngine(deps: EngineDeps): Engine {
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null) {
-          if (!opts.mayRerun) return { kind: "capped" };
           const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
           store.setRunLoop(run.id, {

@@ -23,7 +23,6 @@ import {
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightLedgerEntry,
@@ -55,7 +54,6 @@ import {
   deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
-  flightStartCap,
   flightState,
   flightView,
   markPrsShown,
@@ -1108,7 +1106,7 @@ describe("the FLIGHT watcher", () => {
     expect(digest.facts.q).toEqual([]);
   });
 
-  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free or counted", () => {
+  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free", () => {
     const cfg = structuredClone(config);
     const seats = cfg.crew?.sessions[0]?.seats ?? [];
     const byId = (id: string) => {
@@ -1118,11 +1116,8 @@ describe("the FLIGHT watcher", () => {
     };
     byId("flight-1").retiring = true;
     expect(flightSeat(cfg)).toBeNull();
-    // two build seats count; a retiring one does not
     delete byId("flight-1").retiring;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR * 2);
     byId("inco-1").retiring = true;
-    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR);
     const state = flightState({ config: cfg, store, busy: [], now: T0 });
     expect(state.seats.map((s) => s.id)).toEqual(["guido-1", "retro-1"]);
     // a second watch seat takes over while the first retires
@@ -2041,7 +2036,7 @@ describe("wakeSummary", () => {
     items: [],
     holds: [],
     recent: [],
-    limits: { startsLeft: 4, messagesLeft: 30 },
+    breaker: { tripped: false, reason: null },
     brief: [],
     headlineAgeMin: null,
     headline: "",
