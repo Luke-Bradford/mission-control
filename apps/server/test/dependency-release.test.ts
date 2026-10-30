@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { blockedWork, observeWaits, releasedLines } from "../src/dependencies.ts";
 import { RELEASE_RETRY_MS, releaseDependents } from "../src/engine/dependencies.ts";
-import { flightView } from "../src/flight/state.ts";
+import { flightState, flightView } from "../src/flight/state.ts";
 import type { Move } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
 
@@ -272,6 +272,23 @@ describe("what the hub tells FLIGHT", () => {
         waitedMin: 45,
       },
     ]);
+  });
+
+  it("puts the blocked tickets in the state FLIGHT reads, and a freed ticket in the wake", () => {
+    store.replaceBoard(REPO, [
+      card(1, { status: "In progress", state: "in progress" }),
+      card(2, { status: "Blocked", state: "blocked", after: { issues: [1], prs: [] } }),
+    ]);
+    expect(flightState({ config, store, busy: [], now: T0 }).blocked?.map((b) => b.ref)).toEqual([
+      "mc#2",
+    ]);
+    store.replaceBoard(REPO, [
+      card(1, { status: "Done", state: "done", closed: true }),
+      card(2, { status: "Blocked", state: "blocked", after: { issues: [1], prs: [] } }),
+    ]);
+    const next = flightState({ config, store, busy: [], now: T0 + MIN });
+    expect(next.blocked).toEqual([]);
+    expect(next.triage.map((t) => t.evidence)).toEqual(["mc#1 closed: mc#2 unblocked"]);
   });
 
   it("says which work merged and which tickets it unblocked", () => {
