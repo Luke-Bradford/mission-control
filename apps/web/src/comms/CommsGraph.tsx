@@ -619,8 +619,6 @@ export function CommsGraph({
           </p>
         ) : lengths === undefined ? (
           <p className="comms-traffic-empty">Loading message lengths…</p>
-        ) : lengths.length === 0 ? (
-          <p className="comms-traffic-empty">No messages in the last 24h.</p>
         ) : (
           <>
             {lengthsResource.error !== null && (
@@ -629,36 +627,40 @@ export function CommsGraph({
                 Stale · couldn't refresh. Retrying.
               </p>
             )}
-            <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
-              {[...lengths]
-                .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
-                .map(({ seatId, p95, n }) => {
-                  const row = rows.find((r) => r.id === seatId);
-                  const level = lengthLevel(p95);
-                  return (
-                    <li key={seatId} className={level}>
-                      <b>{row === undefined ? seatId : callSign(row)}</b>
-                      <span className="comms-length-value">
-                        {p95 === null ? "—" : Math.round(p95).toLocaleString()}
-                        {level !== "" && (
-                          <em>{level === "over" ? " over limit" : " near limit"}</em>
-                        )}
-                      </span>
-                      <span className="comms-length-n">{n} msg</span>
-                      <span className="comms-watch-bar" aria-hidden="true">
-                        <i
-                          style={{
-                            width: percent(
-                              Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100),
-                              0,
-                            ),
-                          }}
-                        />
-                      </span>
-                    </li>
-                  );
-                })}
-            </ul>
+            {lengths.length === 0 ? (
+              <p className="comms-traffic-empty">No messages in the last 24h.</p>
+            ) : (
+              <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
+                {[...lengths]
+                  .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
+                  .map(({ seatId, p95, n }) => {
+                    const row = rows.find((r) => r.id === seatId);
+                    const level = lengthLevel(p95);
+                    return (
+                      <li key={seatId} className={level}>
+                        <b>{row === undefined ? seatId : callSign(row)}</b>
+                        <span className="comms-length-value">
+                          {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                          {level !== "" && (
+                            <em>{level === "over" ? " over limit" : " near limit"}</em>
+                          )}
+                        </span>
+                        <span className="comms-length-n">{n} msg</span>
+                        <span className="comms-watch-bar" aria-hidden="true">
+                          <i
+                            style={{
+                              width: percent(
+                                Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100),
+                                0,
+                              ),
+                            }}
+                          />
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
           </>
         )}
       </Panel>

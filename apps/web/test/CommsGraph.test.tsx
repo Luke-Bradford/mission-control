@@ -823,3 +823,23 @@ it("says the message lengths could not be loaded instead of loading for good", a
   expect(await screen.findByText(/Couldn't load message lengths/)).toBeTruthy();
   expect(screen.queryByText(/Loading message lengths/)).toBeNull();
 });
+
+it("keeps a cached empty result but marks it stale when the refresh fails", async () => {
+  let fail = false;
+  stubFetch({
+    "/api/comms/links": { links: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+    "/api/comms/metrics": () =>
+      fail
+        ? { status: 500, body: { error: "boom" } }
+        : { status: 200, body: { from: 0, to: 1, p95BySeat: [] } },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/No messages in the last 24h/)).toBeTruthy();
+  expect(screen.queryByText(/Stale/)).toBeNull();
+  fail = true;
+  act(() => hub.refetchTopic("agents"));
+  expect(await screen.findByText(/Stale · couldn't refresh/)).toBeTruthy();
+  expect(screen.getByText(/No messages in the last 24h/)).toBeTruthy();
+});
