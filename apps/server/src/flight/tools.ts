@@ -3119,6 +3119,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         }
         const pause = pausedSeat(store, a.seat);
         if (pause !== null) writeCrewPause(store, pauseWithout(pause, a.seat, "FLIGHT"), at);
+        // What this call wrote; a rollback leaves a newer change by the operator alone.
+        const pauseAfter = JSON.stringify(readCrewPause(store));
+        const rowAfter = JSON.stringify(store.seatSession(a.seat));
         try {
           await deps.supervisor.resumeRun(run.id);
         } catch {
@@ -3127,8 +3130,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const after = store.seatSession(a.seat);
         const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
         if (!live) {
-          if (pause !== null) writeCrewPause(store, pause, at);
-          if (store.run(run.id)?.endedAt === null && row.state === "stopped")
+          if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
+            writeCrewPause(store, pause, at);
+          if (
+            store.run(run.id)?.endedAt === null &&
+            row.state === "stopped" &&
+            JSON.stringify(store.seatSession(a.seat)) === rowAfter
+          )
             store.setSeatSession(row);
           const outcome =
             store.run(run.id)?.endedAt !== null

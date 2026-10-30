@@ -664,6 +664,29 @@ describe("resume_seat", () => {
     expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
   });
 
+  it("keeps a newer operator pause and stop when a resume does not go live", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    const newer = { seats: "all", reason: "later", at: NOW + 1, by: "op" } as const;
+    resumeImpl = async () => {
+      writeCrewPause(store, newer, NOW + 1);
+      store.setSeatSession({
+        ...row("guido-1", "r-guido"),
+        state: "stopped",
+        reason: "operator again",
+        updatedAt: NOW + 1,
+      });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)).toMatchObject(newer);
+    expect(store.seatSession("guido-1")?.reason).toBe("operator again");
+  });
+
   it("leaves the operator's stop alone when the seat is busy", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-guido");
