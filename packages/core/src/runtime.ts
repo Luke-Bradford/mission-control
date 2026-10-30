@@ -891,6 +891,8 @@ export interface CrewHook {
   command: string;
   /** Seconds; past it the CLI runs the tool, so the hook's own deadline is shorter. */
   timeoutS: number;
+  /** The trim hook (#1045): after every tool, a huge result is cut before it enters context. */
+  trim?: { command: string; timeoutS: number };
 }
 
 /** The tools whose Post events the hook sees: only a Bash call can hold the test lock. */
@@ -907,6 +909,12 @@ function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   ];
   const out = {} as Record<GuardHookEvent, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) out[e] = entry(e === "PreToolUse" ? "*" : POST_HOOK_MATCHER);
+  if (hook.trim !== undefined) {
+    out.PostToolUse.push({
+      matcher: "*",
+      hooks: [{ type: "command", command: hook.trim.command, timeout: hook.trim.timeoutS }],
+    });
+  }
   return out;
 }
 
@@ -1054,6 +1062,32 @@ export function guardHookCommand(i: GuardHookInput): string {
   }
   const q = (v: string) => `'${v}'`;
   return `${q(i.node)} --experimental-strip-types ${q(i.entry)} ${q(i.tokenFile)} ${q(i.url)} || exit 2`;
+}
+
+/** What `trimHookCommand` builds the trim hook's command from. */
+export interface TrimHookInput {
+  /** `crew.node`: a stable path, never a Cellar one. */
+  node: string;
+  /** `<hub root>/apps/server/src/guard/trim-cli.ts`. */
+  entry: string;
+  /** The run's folder for full outputs (under its temp root). */
+  dir: string;
+}
+
+/** The CLI's `timeout` (s) on the trim hook: it only reads stdin and writes one file. */
+export const TRIM_HOOK_TIMEOUT_S = 10;
+
+/**
+ * The trim hook's command line, quoted as `guardHookCommand` is. It has no `|| exit 2`: a failure
+ * to run it leaves the result whole, and the tool has already run.
+ */
+export function trimHookCommand(i: TrimHookInput): string {
+  for (const [k, v] of Object.entries(i)) {
+    if (/['\n\r]/.test(v)) throw new Error(`crew trim hook: ${k} holds a quote or a line break`);
+    if (!v.startsWith("/")) throw new Error(`crew trim hook: ${k} must be absolute`);
+  }
+  const q = (v: string) => `'${v}'`;
+  return `${q(i.node)} --experimental-strip-types ${q(i.entry)} ${q(i.dir)}`;
 }
 
 /** The argv (after `claude`) for one seat's long-lived stream-json process. */

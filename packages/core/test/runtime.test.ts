@@ -51,6 +51,7 @@ import {
   SEAT_STATES,
   STOP_GRACE_MS,
   seatDef,
+  trimHookCommand,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
 
@@ -352,6 +353,27 @@ describe("guardHookCommand", () => {
   it("refuses a relative node, entry or token file", () => {
     for (const k of ["node", "entry", "tokenFile"] as const) {
       expect(() => guardHookCommand({ ...ok, [k]: "rel/path" }), k).toThrow("must be absolute");
+    }
+  });
+});
+
+describe("trimHookCommand", () => {
+  const ok = {
+    node: "/opt/homebrew/bin/node",
+    entry: "/hub/apps/server/src/guard/trim-cli.ts",
+    dir: "/tmp/mc-runs/seat/tool-output",
+  };
+
+  it("single-quotes each part", () => {
+    expect(trimHookCommand(ok)).toBe(
+      "'/opt/homebrew/bin/node' --experimental-strip-types '/hub/apps/server/src/guard/trim-cli.ts' '/tmp/mc-runs/seat/tool-output'",
+    );
+  });
+
+  it("refuses a quote, a line break or a relative path", () => {
+    for (const k of ["node", "entry", "dir"] as const) {
+      expect(() => trimHookCommand({ ...ok, [k]: `${ok[k]}'x` }), k).toThrow("quote");
+      expect(() => trimHookCommand({ ...ok, [k]: "rel" }), k).toThrow("absolute");
     }
   });
 });
@@ -970,6 +992,17 @@ describe("crew sandbox and scoped edits", () => {
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
+  });
+
+  it("adds the trim hook after every tool's call, beside the Bash one, when given", () => {
+    const trim = { command: "trim-cmd", timeoutS: 10 };
+    const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", { ...base.hook, trim }));
+    expect(j.hooks.PostToolUse).toEqual([
+      { matcher: "Bash", hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
+      { matcher: "*", hooks: [{ type: "command", command: "trim-cmd", timeout: 10 }] },
+    ]);
+    expect(j.hooks.PreToolUse).toHaveLength(1);
+    expect(j.hooks.PostToolUseFailure).toHaveLength(1);
   });
 
   it("denies reading credential folders and the hub's data dir, in every mode", () => {
