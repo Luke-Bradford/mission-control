@@ -74,7 +74,7 @@ it("gives every named shortened chip or value a title", () => {
   }
 });
 
-it("bounds Activity text to one inert log line", async () => {
+it("expands Activity text and preserves its inline formatting", async () => {
   overflow();
   const text = `${"Activity detail ".repeat(40)}**final words**`;
   stubFetch({
@@ -95,10 +95,10 @@ it("bounds Activity text to one inert log line", async () => {
     ],
   });
   const { container } = render(<ActivityPanel />);
-  const row = await screen.findByText(/Activity detail/);
-  expect(row.textContent).toHaveLength(120);
-  expect(container.querySelector(".expandable")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+  expect(container.querySelector(".expandable.open strong")?.textContent).toBe("final words");
+  fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+  expect(container.querySelector(".expandable.open")).toBeNull();
 });
 it("bounds expanded prose and allows narrow HUD rows to shrink", () => {
   const css = readStyles();

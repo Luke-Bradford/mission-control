@@ -12,9 +12,10 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { needsYouItems } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
+import { Expandable } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { activityKey, compareActivity, RESOURCES, useResource } from "../data.ts";
-import { cutText, hhmm, rel } from "../fmt.ts";
+import { hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
@@ -53,11 +54,6 @@ function rememberedFilter(): Filter {
   } catch {
     return "steps";
   }
-}
-
-/** Compact, inert summary for the live stream; detail remains available through the event links. */
-export function activityLogLine(event: { who: string; kind: string; text: string }): string {
-  return `${event.who} ${event.kind.replace(/-/g, " ")} ${cutText(event.text.replace(/\s+/g, " ").trim(), 120)}`;
 }
 
 const FALLBACK_GLYPH = "◆";
@@ -386,10 +382,12 @@ export function ActivityPanel() {
                 <span className="log-who ellip">
                   <CommsEnd id={e.who} />
                 </span>
-                <span className="txt" title={activityLogLine(e)}>
-                  <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
-                  <MentionText text={cutText(e.text.replace(/\s+/g, " ").trim(), 120)} />
-                </span>
+                <Expandable lines={2}>
+                  <span className="txt">
+                    <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                    <MentionText text={e.text} />
+                  </span>
+                </Expandable>
                 {e.ref ? (
                   <span className="arefs">
                     <TicketRef ticket={e.ref} url={null} />
@@ -435,15 +433,17 @@ export function ActivityPanel() {
                   <span className="muted">{e.who}</span>
                 )}
               </span>
-              <span className="txt" title={activityLogLine(e)}>
-                <ActivityText
-                  event={{ ...e, text: cutText(e.text.replace(/\s+/g, " ").trim(), 120) }}
-                  prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
-                  split={split}
-                  red={red}
-                  attentionKey={e.attentionKey}
-                />
-              </span>
+              <Expandable lines={2}>
+                <span className="txt">
+                  <ActivityText
+                    event={e}
+                    prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
+                    split={split}
+                    red={red}
+                    attentionKey={e.attentionKey}
+                  />
+                </span>
+              </Expandable>
               {e.ref || e.prs.length > 0 ? (
                 <span className="arefs">
                   {e.ref && !split && (

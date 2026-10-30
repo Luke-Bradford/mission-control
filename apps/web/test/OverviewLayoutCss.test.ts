@@ -45,8 +45,8 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
-    expect(rule(String.raw`\.pipeline-grid`)).toContain("repeat(auto-fit");
-    expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: start");
+    expect(rule(String.raw`\.pipeline-grid`)).toContain("repeat(5, minmax(0, 1fr))");
+    expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
     expect(css).not.toContain("@container overview (width < 1100px)");
     expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
     expect(rule(String.raw`#machP \.resrow \.spark`)).toContain("width: 100%");

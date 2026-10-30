@@ -56,7 +56,6 @@ export function QuotaPanel() {
     >
       <div className="pb">
         {accounts.map((a) => {
-          const vendor = config?.accounts.find((account) => account.id === a)?.vendor;
           const mine = rows.filter((r) => r.accountId === a);
           const read =
             tz && mine.length > 0
@@ -69,7 +68,7 @@ export function QuotaPanel() {
                   {a}
                 </span>
               </span>
-              {vendor !== "codex" && cell(a, "5h")}
+              {cell(a, "5h")}
               {cell(a, "7d")}
             </div>
           );
