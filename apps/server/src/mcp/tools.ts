@@ -10,6 +10,7 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
@@ -1974,7 +1975,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       from: ctx.seatId,
       to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
-      text: parsed.data.question,
+      text: ASK_FLIGHT_COMMS_POINTER,
     });
     bus.emit("attention");
     bus.emit("agents");

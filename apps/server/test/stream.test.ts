@@ -10,7 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readStream, STREAM_CHUNK_BYTES, STREAM_SCAN_BYTES } from "../src/stream.ts";
+import {
+  readStream,
+  readStreamPage,
+  STREAM_CHUNK_BYTES,
+  STREAM_SCAN_BYTES,
+} from "../src/stream.ts";
 
 const FIXTURE = resolve(import.meta.dirname, "fixtures/stream/agent.jsonl");
 const T = (iso: string) => Date.parse(iso);
@@ -42,6 +47,22 @@ const write = (name: string, text: string) => {
 };
 
 describe("readStream", () => {
+  it("pages older: `before` an event's id returns the events ahead of it, and says if more remain", () => {
+    const p = write(
+      "page.jsonl",
+      `${[1, 2, 3, 4, 5, 6, 7].map((i) => say(`m${i}`, i)).join("\n")}\n`,
+    );
+    const newest = readStreamPage(p, 3);
+    expect(newest.events.map((e) => e.text)).toEqual(["m5", "m6", "m7"]);
+    expect(newest.more).toBe(true);
+    const older = readStreamPage(p, 3, undefined, newest.events[0]?.id);
+    expect(older.events.map((e) => e.text)).toEqual(["m2", "m3", "m4"]);
+    expect(older.more).toBe(true);
+    const oldest = readStreamPage(p, 3, undefined, older.events[0]?.id);
+    expect(oldest.events.map((e) => e.text)).toEqual(["m1"]);
+    expect(oldest.more).toBe(false);
+  });
+
   it("turns the fixture's top-level frames into events, oldest first", () => {
     const { events, truncated } = readStream(FIXTURE, 200);
     expect(truncated).toBe(false);

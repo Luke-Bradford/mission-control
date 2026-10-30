@@ -383,6 +383,9 @@ export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
 export const conflictText = (files: readonly string[]): string =>
   `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** A Comms pointer to a conflict list delivered directly to the author seat. */
+export const conflictCommsText = (files: readonly string[]): string =>
+  `Merging main conflicted in ${files.length} files; the list was sent to the seat.`;
 /** The Activity rows for merging main into a run's branch. */
 export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;

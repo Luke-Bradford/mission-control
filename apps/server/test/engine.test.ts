@@ -13,12 +13,12 @@ import {
   type BoardItem,
   CI_EXCERPT_MAX,
   CODEX_REVIEW_TOKEN_BUDGET,
+  COMMS_MESSAGE_MAX,
   COMMS_TEXT_MAX,
   CONTROLLER_CHECK_HEADING,
   CONTROLLER_CHECK_PARK,
   cleanupBranchNoteKey,
   closedIssueText,
-  commsCutMarker,
   conflictKey,
   controllerCheckFailText,
   controllerCheckParkText,
@@ -1258,7 +1258,7 @@ describe("CI and review", () => {
   });
 
   it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
-    "delivers a %i-character CI excerpt whole without parking and bounds only its stored copy",
+    "shortens a %i-character CI excerpt to the Comms limit without parking",
     async (length) => {
       await inCi();
       await failCi();
@@ -1267,12 +1267,9 @@ describe("CI and review", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
       const text = h.sent[0]?.text ?? "";
-      expect(text.endsWith(excerpt)).toBe(true);
-      expect(store.comms(0)[0]?.text).toBe(
-        text.length <= COMMS_TEXT_MAX
-          ? text
-          : `${text.slice(0, COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, text.length)}`,
-      );
+      expect(Array.from(text)).toHaveLength(COMMS_MESSAGE_MAX);
+      expect(text.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
+      expect(store.comms(0)[0]?.text).toBe(text);
       expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
@@ -1449,7 +1446,12 @@ describe("refusals", () => {
   });
 
   it("a push refused for its checks goes to the seat as a hand-off, once, and does not park the run", async () => {
-    const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
+    const commands = Array.from({ length: 10 }, (_, i) => ({
+      command: `pnpm -s check-${i}-${"x".repeat(180)}`,
+      state: "missing" as const,
+    }));
+    const text = pushChecksText("a".repeat(40), commands);
+    expect(Array.from(text).length).toBeGreaterThan(COMMS_MESSAGE_MAX);
     h.pushResults = [
       { ok: false, text, transient: false },
       { ok: false, text, transient: false },
@@ -1461,7 +1463,10 @@ describe("refusals", () => {
     expect(loopOf().phase).not.toBe("parked");
     expect(loopOf().parked ?? null).toBeNull();
     expect(h.sent.filter((s) => s.text === text)).toHaveLength(1);
-    expect(store.comms(0).map((c) => c.text)).toEqual([text]);
+    expect(store.comms(0).map((c) => c.text)).toEqual([
+      "Push checks failed; the full command list was sent to the seat.",
+    ]);
+    expect(store.comms(0).every((c) => Array.from(c.text).length <= COMMS_MESSAGE_MAX)).toBe(true);
     expect(store.notes()).toEqual([]);
     expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
   });
@@ -3934,12 +3939,12 @@ describe("the engine runs reviews", () => {
         from: RETRO,
         to: SEAT,
         ticket: `${REPO}#7`,
-        text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
+        text: "RETRO-1 reviewed aaaaaaa: 1 Critical, 1 Important, 1 Minor.\nFindings are in RETRO-1's report_findings record; address Critical and Important findings, then report_evidence.",
       },
     ]);
   });
 
-  it("stores a long review hand-off whole without parking the author", async () => {
+  it("stores a concise review hand-off without parking the author", async () => {
     await toReview();
     const findings = Array.from({ length: 6 }, () => ({
       ...finding("Important"),
@@ -3948,10 +3953,10 @@ describe("the engine runs reviews", () => {
     reported(first().id, findings);
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     const text = need(h.sent[0]).text;
-    expect(text.length).toBeGreaterThan(CI_EXCERPT_MAX);
     expect(text.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
-    expect(FIX_TEXT_MAX).toBeLessThan(COMMS_TEXT_MAX);
-    expect(store.comms(0)[0]?.text).toBe(text);
+    expect(text).toContain("a Important thing");
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(store.comms(0)[0]?.text).toContain("6 Important");
     expect(loopOf().parked).toBeNull();
   });
 
@@ -4835,7 +4840,7 @@ describe("the engine runs reviews", () => {
         });
       });
 
-      it("a carried blocking review sends its findings in the fix line", async () => {
+      it("a carried blocking review sends its findings count in the fix line", async () => {
         h.busyList = [{ seatId: RETRO, state: "running" }];
         await toReview();
         await h.engine.reconcileRun(RUN);
@@ -4860,8 +4865,9 @@ describe("the engine runs reviews", () => {
       });
 
       it("a conflict is left for the seat, and the line goes once", async () => {
+        const files = Array.from({ length: 60 }, (_, i) => `apps/${"x".repeat(40)}-${i}.ts`);
         behindMain();
-        h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+        h.updateResults = [{ ok: true, kind: "conflict", files }];
         // a busy seat is offered the line again, and nothing is recorded until it goes through
         h.busy = true;
         await conflictingReview();
@@ -4874,11 +4880,11 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(sentKeys()).toContain(`conflict:${RUN}:${MAIN}`));
         expect(loopOf()).toMatchObject({
           phase: "working",
-          mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
+          mainMerge: { mainSha: MAIN, files },
         });
-        expect(loopTexts()).toContain(`merging main ${MAIN.slice(0, 7)} conflicted in 2 files`);
+        expect(loopTexts()).toContain(`merging main ${MAIN.slice(0, 7)} conflicted in 60 files`);
         expect(h.sent.find((s) => s.key.startsWith("conflict:"))?.text).toContain(
-          "conflicted in: apps/a.ts, apps/b.ts",
+          `conflicted in: ${files.join(", ")}`,
         );
         await h.engine.tick();
         expect(sentKeys().filter((k) => k.startsWith("conflict:"))).toHaveLength(1);
@@ -4889,9 +4895,12 @@ describe("the engine runs reviews", () => {
             from: "MC",
             to: SEAT,
             ticket: `${REPO}#7`,
-            text: expect.stringContaining("conflicted in: apps/a.ts, apps/b.ts"),
+            text: "Merging main conflicted in 60 files; the list was sent to the seat.",
           },
         ]);
+        expect(store.comms(0).every((c) => Array.from(c.text).length <= COMMS_MESSAGE_MAX)).toBe(
+          true,
+        );
       });
 
       it("a conflicting PR in ci is merged with main", async () => {
@@ -6209,13 +6218,15 @@ describe("the engine runs reviews", () => {
       store.upsertRun(run({ id: other, seq: 2 }));
       seatIdle(other);
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
-      expect(await h.engine.controllerCheck(RUN, "fail", SHA, "swatch 3 is unreadable")).toEqual({
+      const detail = "x".repeat(1200);
+      expect(await h.engine.controllerCheck(RUN, "fail", SHA, detail)).toEqual({
         lifted: true,
       });
       expect(loopOf()).toMatchObject({ phase: "working", aside: { worktree: WT, wake: true } });
       expect(h.sent).toEqual([]);
       const note = store.comms(0, RUN).at(-1);
-      expect(note?.text).toBe(controllerCheckFailText(SHA, "swatch 3 is unreadable"));
+      expect(note?.text).toBe("Controller check failed; the full note was sent to the seat.");
+      expect(Array.from(note?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
       h.wakeError = null;
       h.asideOn = false;
       store.setRunEnded(other, clock, "ok", "operator");
@@ -6224,7 +6235,7 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(loopOf().aside).toBeNull());
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       // the woken run is sent the note, once; the inbox does not repeat it
-      const text = controllerCheckFailText(SHA, "swatch 3 is unreadable");
+      const text = controllerCheckFailText(SHA, detail);
       await vi.waitFor(() => expect(h.sent.at(-1)?.text).toBe(text));
       await h.engine.reconcileRun(RUN);
       expect(h.sent.filter((m) => m.text === text)).toHaveLength(1);
@@ -6250,8 +6261,9 @@ describe("the engine runs reviews", () => {
       reported(first().id, [finding("Important")]);
       await h.engine.reconcileRun(RUN);
       setLoop({ phase: "parked", parked: { kind: "review", reason: "findings", ended: false } });
+      const detail = "x".repeat(2000);
       expect(
-        await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework", note: "do the thing" }),
+        await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework", note: detail }),
       ).toBe(true);
       // refused before; now queued: it waits in Comms and the aside flag wakes it later
       const rework = () => h.sent.filter((l) => l.key.includes("flight-rework"));
@@ -6259,10 +6271,15 @@ describe("the engine runs reviews", () => {
       expect(loopOf()).toMatchObject({
         phase: "working",
         aside: { worktree: WT, wake: true },
-        pendingLine: { text: expect.stringContaining("FLIGHT fix list: do the thing") },
+        pendingLine: { text: expect.stringContaining(`FLIGHT fix list: ${detail}`) },
         flightReworks: { [SHA]: 1 },
       });
-      expect(store.comms(0, RUN).at(-1)?.text).toContain("FLIGHT fix list: do the thing");
+      expect(store.comms(0, RUN).at(-1)?.text).toBe(
+        "FLIGHT requested rework; the full request was sent to the seat.",
+      );
+      expect(Array.from(store.comms(0, RUN).at(-1)?.text ?? "").length).toBeLessThanOrEqual(
+        COMMS_MESSAGE_MAX,
+      );
       // filed from FLIGHT's seat, not the controller's
       expect(store.comms(0, RUN).at(-1)?.from).toBe("flight-1");
       // the seat frees: the run is woken and sent the rework, once
@@ -6273,7 +6290,7 @@ describe("the engine runs reviews", () => {
       emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
       await vi.waitFor(() => expect(loopOf().aside).toBeNull());
       await vi.waitFor(() => expect(rework()).toHaveLength(1));
-      expect(rework()[0]?.text).toContain("FLIGHT fix list: do the thing");
+      expect(rework()[0]?.text).toContain(`FLIGHT fix list: ${detail}`);
     });
 
     it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {

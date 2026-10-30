@@ -405,6 +405,34 @@ export interface PrCheck {
   url: string | null;
 }
 
+/** A check as a PR list shows it: the name and state, not the run's ids and links. */
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+
+/** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
+export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
+
+/**
+ * A PR as `?shape=summary` sends it: what a list shows (number, title, state, head, checks rollup,
+ * review state), nothing that grows with the PR. The full row is the PR's own route.
+ */
+export type PullRequestSummary = Pick<
+  PullRequestView,
+  | "repoId"
+  | "number"
+  | "title"
+  | "url"
+  | "branch"
+  | "headSha"
+  | "ticket"
+  | "state"
+  | "isDraft"
+  | "review"
+  | "ci"
+  | "createdAt"
+  | "updatedAt"
+  | "mergedAt"
+>;
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
@@ -652,6 +680,8 @@ export interface AgentStream {
   events: StreamEvent[];
   /** The scan stopped at its byte cap before reaching `limit` events. */
   truncated: boolean;
+  /** Older events remain: ask again with `?before=` the first event's id. Absent when no read happened. */
+  hasMore?: boolean;
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
@@ -978,6 +1008,31 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** The digest fields the Overview reads: activity, the tool in flight, context. */
+export type CrewSummaryDigest = Pick<
+  RunDigest,
+  | "lastEventAt"
+  | "minuteTokens"
+  | "liveTool"
+  | "lastText"
+  | "background"
+  | "contextTokens"
+  | "contextWindow"
+  | "compactions"
+>;
+
+/** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns"> & {
+  digest: CrewSummaryDigest | null;
+  asideRuns?: Omit<CrewAsideRun, "events">[];
+};
+
+/** `GET /api/crew?shape=summary`. */
+export interface CrewSummary {
+  rows: CrewSummaryRow[];
+  firstRunToday: number | null;
+}
+
 /** Catch-up text is evidence to display, never instructions to execute. */
 export interface BriefCatchUp {
   kind: CatchUpKind;
@@ -1220,6 +1275,11 @@ export interface VersionInfo {
   canUpdate: boolean;
   /** Why Update is refused; null when it may run. */
   reason: string | null;
+}
+
+/** `GET /api/update/log`: the last update's commands and output; null before any update. */
+export interface UpdateLog {
+  text: string | null;
 }
 
 /** Provider CLI status in the same binding used by usage collection. */

@@ -15,7 +15,7 @@ import { RESOURCES, type Resource, useResource } from "../data.ts";
 import { cost, dayMonth, dur, hhmm, kTokens } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { PrChip } from "../hud/PrChip.tsx";
+import { PrChip, type PrPreview } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { followLink, navigate, tracePath, useSearch } from "../router.ts";
@@ -121,6 +121,7 @@ export const RunRow = memo(function RunRow({
   run,
   tz,
   prs,
+  previewPrs,
   open,
   onToggle,
   onRender,
@@ -130,6 +131,8 @@ export const RunRow = memo(function RunRow({
   run: RunView;
   tz: string | null;
   prs: ReturnType<typeof runPrs>;
+  /** Decorated PR rows from the Agent payload, keyed here only for this run's PR chip. */
+  previewPrs?: readonly PullRequestView[];
   open: boolean;
   onToggle: (id: string) => void;
   /** Test instrumentation for the static row boundary. */
@@ -191,7 +194,18 @@ export const RunRow = memo(function RunRow({
             </span>
           )}
           {prs.map((pr) => (
-            <PrChip key={`${pr.repoId}#${pr.number}`} pr={pr} bare />
+            <PrChip
+              key={`${pr.repoId}#${pr.number}`}
+              pr={pr}
+              bare
+              preview={
+                (
+                  previewPrs?.find((candidate) => candidate.number === pr.number) as
+                    | (PullRequestView & { preview?: PrPreview | null })
+                    | undefined
+                )?.preview
+              }
+            />
           ))}
         </span>
       )}
@@ -346,6 +360,7 @@ export function RunsPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
             run={run}
             tz={tz}
             prs={runPrs(run, row.kind === "crew" ? repoPrs : undefined)}
+            previewPrs={repoPrs}
             open={open.has(run.id)}
             onToggle={toggle}
           />

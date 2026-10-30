@@ -8,11 +8,23 @@ import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
-const change = (series: (number | null)[] | undefined, format = kTokens): string => {
+/** A tile's change over its 30 minutes: one sign, and `±` when it rounds to nothing. */
+export const change = (
+  series: (number | null)[] | undefined,
+  format = kTokens,
+  decimals = 0,
+): string => {
   if (!series || series.length < 2 || series[0] == null || series.at(-1) == null) return "—";
-  const delta = (series.at(-1) ?? 0) - (series[0] ?? 0);
-  return `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${format(Math.abs(delta))} · 30m`;
+  const scale = 10 ** decimals;
+  const delta = Math.round(((series.at(-1) ?? 0) - (series[0] ?? 0)) * scale) / scale;
+  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+  return `${sign}${format(Math.abs(delta))} · 30m`;
 };
+
+/** A change in dollars: the sign leads, so no `~` between it and the figure. */
+export const dollars = (n: number): string => `$${n.toFixed(2)}`;
+/** A change in percentage points. */
+export const points = (n: number): string => `${Math.round(n)} pp`;
 
 /**
  * A KPI's last 30 minutes on its own scale: the trace, its real peak labelled on the dashed top
@@ -123,7 +135,7 @@ export function KpiStrip() {
       history: "last 30 minutes",
     },
     registry("cost", "telemetry", {
-      delta: change(k?.spendToday?.series, usd),
+      delta: change(k?.spendToday?.series, dollars, 2),
       series: k?.spendToday?.series,
       fmt: usd,
     }),
@@ -150,7 +162,7 @@ export function KpiStrip() {
       pending,
       delta:
         k?.ciPassRate24h?.series !== undefined
-          ? change(k.ciPassRate24h.series, (n) => `${kTokens(n)} pp`)
+          ? change(k.ciPassRate24h.series, points)
           : k?.ciPassRate24h?.runs != null
             ? `${plural(k.ciPassRate24h.runs, "run")} · ${k.ciPassRate24h.redNow} red now`
             : "—",

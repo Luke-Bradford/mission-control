@@ -224,6 +224,19 @@ export function fixText(i: {
   return build(kept);
 }
 
+/** RETRO's Comms mirror of findings; the full fix list is delivered to the author seat. */
+export function fixCommsText(i: {
+  retro: string;
+  sha: string;
+  findings: readonly ReviewFinding[];
+}): string {
+  const counts = FINDING_SEVERITIES.flatMap((severity) => {
+    const n = i.findings.filter((f) => f.severity === severity).length;
+    return n === 0 ? [] : [`${n} ${severity}`];
+  });
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
+}
+
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";
 export const MINOR_LISTED_MAX = 20;
 export const MINOR_SUMMARY_SHOWN = 300;

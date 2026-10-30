@@ -39,6 +39,7 @@ import {
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
   COMMENTED_DECISION,
+  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
@@ -85,6 +86,7 @@ import {
   FIELDS_NEED_SUPERUSER,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_ANSWER_COMMS_POINTER,
   FLIGHT_BASIS_MAX,
   FLIGHT_BRIEF_INPUT_MAX,
   FLIGHT_BRIEF_SECTION_MAX,
@@ -199,6 +201,7 @@ import {
   notStartableSeatText,
   OWN_SEAT_TEXT,
   OWNER_OPERATOR,
+  openPrText,
   PASSED_DECISION,
   PLAN_SIZES,
   PRIORITIES,
@@ -1122,7 +1125,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       from: ctx.seatId,
       to: q.agentId,
       ticket: store.run(q.runId)?.ticket ?? null,
-      text: answer,
+      text: Array.from(answer).length > COMMS_MESSAGE_MAX ? FLIGHT_ANSWER_COMMS_POINTER : answer,
     });
     bus.emit("agents");
     record(at, {
@@ -1178,12 +1181,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
-    const found = store.board(repo.id).find((i) => i.issueNumber === issue);
-    // a card filed or moved since the last board poll: read that one item before refusing
-    const card = found ?? (await deps.board.read?.(repo.id, issue).catch(() => null)) ?? undefined;
+    // The card as it is now: the cached board is only refreshed by the poll, so a ticket closed or
+    // moved since would otherwise be started on its old column. A card that cannot be read fails closed.
+    let card: BoardItem | undefined;
+    if (deps.board.read !== undefined) {
+      try {
+        card = (await deps.board.read(repo.id, issue)) ?? undefined;
+      } catch {
+        return fail(START_NO_GITHUB);
+      }
+    } else {
+      card = store.board(repo.id).find((i) => i.issueNumber === issue);
+    }
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
     if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
+    // the previous run's PR: a ticket is not started again while one is open on it
+    const openPr = store
+      .pullRequests(repo.id)
+      .find((p) => p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(issue)));
+    if (openPr !== undefined) return fail(openPrText(ref, openPr.number));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
     let body: string;
