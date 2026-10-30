@@ -5,7 +5,15 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { agentPath, followLink } from "../router.ts";
-import { reasonLine, runLimits, stepTokens, tokenText, tryClass, tryMinutes } from "./loopView.ts";
+import {
+  type ReasonLine,
+  reasonLine,
+  runLimits,
+  stepTokens,
+  tokenText,
+  tryClass,
+  tryMinutes,
+} from "./loopView.ts";
 
 type LoopStep = (typeof LOOP_PATH)[number];
 const stepLabel = (step: LoopStep): string => (step === "ci" ? "Checks" : LOOP_PHASE_LABEL[step]);
