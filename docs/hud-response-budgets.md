@@ -51,3 +51,10 @@ events ahead of that one, and `hasMore` says older ones remain.
 
 `GET /api/audit` cuts each list to 50 rows until the Audit page is redesigned. When a list was
 cut, `capped` names it with the count it held; with nothing cut there is no `capped` field.
+
+## The routes pages request
+
+`firstLoadPaths` in `packages/core/src/hud-paths.ts` builds each page's first-load routes. The
+budget test measures exactly those paths. The web's resource refs should be built from the same
+builders (`crewSummaryPath`, `crewDetailPath`, `prListPath`, `commsNavPath`, `dockStreamPath`),
+so a page cannot ask for a heavier route than the one the budget measured.

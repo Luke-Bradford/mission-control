@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
+  FIRST_LOAD_PAGES,
+  firstLoadPaths,
   HUD_PAGE_BUDGET_BYTES,
   HUD_RESPONSE_BUDGET_BYTES,
   type PrCheck,
@@ -34,36 +36,13 @@ const REPOS = ["mission-control", "shop-app", "site-builder"];
 const FLIGHT = "flight-1";
 const HEAVY = SEAT_IDS[1] as string;
 
-const PAGES: Record<string, string[]> = {
-  Overview: [
-    "/api/crew?shape=summary",
-    ...REPOS.map((r) => `/api/repos/${r}/prs?shape=summary`),
-    `/api/agents/${FLIGHT}/stream?limit=20`,
-    "/api/flight",
-    "/api/activity",
-    "/api/overview",
-  ],
-  Comms: [
-    ...SEAT_IDS.map((id) => `/api/comms/agents/${id}?summary=1`),
-    `/api/comms/agents/${HEAVY}`,
-    "/api/comms/crew",
-    "/api/comms/flight",
-    "/api/crew?shape=summary",
-  ],
-  Board: [
-    ...REPOS.map((r) => `/api/repos/${r}/prs?linked=1&shape=summary`),
-    "/api/crew?shape=summary",
-    `/api/boards/${REPOS[0]}`,
-  ],
-  Audit: ["/api/audit?range=30d"],
-  Agent: [
-    `/api/repos/${REPOS[0]}/prs?shape=summary`,
-    `/api/agents/${HEAVY}/runs`,
-    "/api/activity",
-    `/api/agents/${HEAVY}/stream?limit=20`,
-    `/api/crew/${HEAVY}`,
-  ],
-};
+/** Built from the path builders the web's resources share, so the budget measures what pages request. */
+const PAGES = Object.fromEntries(
+  FIRST_LOAD_PAGES.map((page) => [
+    page,
+    firstLoadPaths(page, { repoIds: REPOS, seatIds: SEAT_IDS, flightId: FLIGHT, agentId: HEAVY }),
+  ]),
+);
 
 /** Seeded text that gzip cannot squash, as real messages, titles and ids are not repetitive. */
 let seed = 7;
