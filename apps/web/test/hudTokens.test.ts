@@ -47,9 +47,11 @@ const FILES = sourceFiles(SRC)
   .filter((file) => /\.(css|tsx?)$/.test(file) && !TOKEN_FILES.has(file));
 
 const blank = (text: string) => text.replace(/[^\n]/g, " ");
-/** The stylesheet without its comments and its `:root` token blocks, line numbers kept. */
-const stripCss = (css: string) =>
-  css.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/:root[^{]*\{[\s\S]*?\n\s*\}/g, blank);
+/** The stylesheet without its comments, and for hud.css alone its `:root` token blocks; lines kept. */
+const stripCss = (file: string, css: string) => {
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, blank);
+  return file === "hud.css" ? bare.replace(/:root[^{]*\{[\s\S]*?\n\s*\}/g, blank) : bare;
+};
 const stripTs = (ts: string) =>
   ts
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
@@ -77,7 +79,7 @@ function declarations(css: string): { line: number; prop: string; value: string 
 function offences(file: string, text: string): string[] {
   const found: string[] = [];
   if (file.endsWith(".css")) {
-    const css = stripCss(text);
+    const css = stripCss(file, text);
     for (const { line, prop, value } of declarations(css)) {
       const at = `${file}:${line} ${prop}: ${value}`;
       if (prop === "font-size" && !FONT_SIZE_OK.test(value)) found.push(at);
@@ -154,7 +156,9 @@ describe("the web source uses only the tokens", () => {
     expect(offences("a.css", ".a { font: var(--fs-s) var(--mono); }")).toHaveLength(1);
     expect(offences("a.css", ".a { font: inherit; }")).toEqual([]);
     expect(offences("a.css", ".a { font: var(--fs-s) / 1.4 var(--mono); }")).toHaveLength(1);
-    expect(offences("a.css", ":root {\n  --a: #fff;\n  --fs: 13px;\n}")).toEqual([]);
+    // only hud.css may hold raw token values; a :root block anywhere else is checked like any rule
+    expect(offences("a.css", ":root {\n  --a: #fff;\n}")).toHaveLength(1);
+    expect(offences("hud.css", ":root {\n  --a: #fff;\n  --fs: 13px;\n}")).toEqual([]);
     expect(offences("a.css", "/* font-size: 10px; #fff */ .a { font-size: var(--fs-s); }")).toEqual(
       [],
     );
