@@ -172,7 +172,7 @@ describe("Overview panels", () => {
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
     );
-    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
+    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
     expect(await screen.findByText("No events yet.")).toBeTruthy();
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     stop();
@@ -1687,7 +1687,7 @@ describe("Account quota panel", () => {
     expect(rows.length).toBe(2);
     expect(rows[0]?.textContent).toContain("5h 100%");
     expect(rows[0]?.textContent).toContain("7d 60%");
-    expect(rows[1]?.textContent).toContain("5h —");
+    expect(rows[1]?.textContent).not.toContain("5h");
     expect(
       quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
     ).toBeTruthy();
@@ -1715,15 +1715,15 @@ describe("Account quota panel", () => {
     expect(rows[0]?.querySelector('[title*="7d: 73%"]')?.getAttribute("title")).toContain(
       "resets Wed 28 Oct 02:00",
     );
-    expect(rows[1]?.textContent).toContain("5h —");
+    expect(rows[1]?.textContent).not.toContain("5h");
     expect(rows[1]?.querySelector('[title*="7d: 9%"]')?.getAttribute("title")).toContain(
       "resets Thu 29 Oct 16:22",
     );
-    // the none slot is shaped like a bar slot, and the 7d slots match across rows
+    // Codex exposes only its real weekly slot; the weekly bars match across accounts.
     const slot = (r: Element | undefined, i: number) => r?.children[i];
     expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
-    expect(slot(rows[1], 2)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
-    expect(slot(rows[1], 2)?.querySelectorAll("*").length).toBe(
+    expect(slot(rows[1], 1)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
+    expect(slot(rows[1], 1)?.querySelectorAll("*").length).toBe(
       slot(rows[0], 2)?.querySelectorAll("*").length,
     );
   });
@@ -1742,7 +1742,7 @@ describe("Account quota panel", () => {
         quota.querySelector('[title^="claude-main 5h: 40% used · too little history for a pace"]'),
       ).toBeTruthy(),
     );
-    expect(quota.querySelector('[title^="codex-main 5h: 40% used · ~2h00"]')).toBeTruthy();
+    expect(quota.querySelector('[title^="codex-main 5h:"]')).toBeNull();
   });
 
   it("the GitHub row: what is left, the poll cost and the reset", async () => {

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
-import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
+import { ActivityPanel, activityLogLine } from "../src/overview/ActivityPanel.tsx";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
@@ -123,6 +123,48 @@ it("marks the projected quota at reset", async () => {
   await waitFor(() =>
     expect(container.querySelector<HTMLElement>(".projection-tick")?.style.left).toBe("84%"),
   );
+});
+
+it("formats a live-log event as one bounded line", () => {
+  expect(
+    activityLogLine({
+      who: "INCO-1",
+      kind: "push",
+      text: "refused because the remote branch has advanced ".repeat(8),
+    }),
+  ).toMatch(/^INCO-1 push refused because/);
+  expect(
+    activityLogLine({
+      who: "INCO-1",
+      kind: "push",
+      text: "refused because the remote branch has advanced ".repeat(8),
+    }),
+  ).toHaveLength(132);
+});
+
+it("keeps an empty pipeline stage as a compact Board link", async () => {
+  stubFetch({
+    "/api/overview": { pipeline: [{ stage: "ready", count: 1, cards: [] }] },
+    "/api/crew": { rows: [] },
+  });
+  render(<PipelinePanel />);
+  expect(await screen.findByRole("link", { name: "In review" })).toBeTruthy();
+  const stage = screen.getByRole("link", { name: "In review" }).closest("section");
+  expect(stage?.className).toContain("empty");
+  expect(stage?.textContent).toContain("0");
+});
+
+it("shows Codex's available weekly quota without inventing a 5h meter", async () => {
+  stubFetch({
+    "/api/limits": [limit7d({ accountId: "codex-main" })],
+    "/api/config": { ...CONFIG, accounts: [{ id: "codex-main", vendor: "codex" }] },
+    "/api/health": [],
+  });
+  const { QuotaPanel } = await import("../src/overview/QuotaPanel.tsx");
+  const view = render(<QuotaPanel />);
+  await screen.findByText("codex-main");
+  expect(view.container.querySelector("#quotaP")?.textContent).toContain("7d");
+  expect(view.container.querySelector("#quotaP")?.textContent).not.toContain("5h");
 });
 
 it("shows a backed-off quota row's next try beside its stale age", async () => {
@@ -274,6 +316,7 @@ it.each([
   expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
     Array(8).fill("—"),
   );
-  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
+  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
+  expect(container.querySelectorAll(".pipeline-stage.empty")).toHaveLength(5);
   expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
 });

@@ -81,15 +81,19 @@ describe("Pipeline", () => {
     expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(
       "/board?stage=progress",
     );
-    expect(screen.queryByRole("region", { name: "In review" })).toBeNull();
+    const reviewLane = screen.getByRole("region", { name: "In review" });
+    expect(reviewLane.className).toContain("empty");
+    expect(reviewLane.textContent).toContain("0");
   });
 
-  it("hides empty lanes and refetches the selected session on SSE invalidation", async () => {
+  it("collapses empty lanes and refetches the selected session on SSE invalidation", async () => {
     setSession("session-1");
     let data = summary(stages.map((stage) => ({ stage, count: 0, oldestAt: null, cards: [] })));
     stubFetch({ "/api/overview?session=session-1": () => ({ status: 200, body: data }) });
     const { container } = render(<PipelinePanel />);
-    await waitFor(() => expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".pipeline-stage.empty")).toHaveLength(5),
+    );
     data = summary();
     await act(async () => {
       hub.refetchTopic("boards");

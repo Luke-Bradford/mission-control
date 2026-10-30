@@ -968,7 +968,9 @@
 
 .arow .txt {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (min-width: 761px) {
@@ -1063,7 +1065,7 @@
 
 .pipeline-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   align-content: start;
   gap: 10px;
 }
@@ -1078,6 +1080,14 @@
 .pipeline-stage {
   min-width: 0;
   --stage-colour: var(--muted);
+}
+
+.pipeline-stage.empty {
+  max-width: 150px;
+}
+
+.pipeline-stage.empty h3 {
+  border-bottom-color: var(--line-2);
 }
 
 .pipeline-stage.progress {
@@ -1121,8 +1131,9 @@
 }
 
 .pipeline-chip {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 6px;
   min-width: 0;
   padding: 5px 6px;
@@ -1152,12 +1163,15 @@
 .pipeline-title {
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 16px;
 }
 
 .pipeline-assignee {
+  grid-column: 2;
   display: flex;
   align-items: center;
   gap: 4px;

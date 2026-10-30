@@ -63,9 +63,12 @@ export function PipelinePanel() {
           const cards = stageCards.slice(0, VISIBLE_CARDS);
           const more = count - cards.length;
           const href = `/board?stage=${key}`;
-          if (data && count === 0) return null;
           return (
-            <section key={key} className={`pipeline-stage ${key}`} aria-label={label}>
+            <section
+              key={key}
+              className={`pipeline-stage ${key}${data && count === 0 ? " empty" : ""}`}
+              aria-label={label}
+            >
               <h3>
                 <a href={href} onClick={(e) => followLink(e, href)}>
                   {label}
