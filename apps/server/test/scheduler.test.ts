@@ -1016,10 +1016,10 @@ describe("scheduler", () => {
       expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
     });
 
-    it("runs every 2 s, keeps the latest sample in memory and emits machine", async () => {
+    it("runs every 10 s, keeps the latest sample in memory and emits machine", async () => {
       vi.useFakeTimers();
       expect(JOBS).toContain("machine");
-      expect(MACHINE_INTERVAL_MS).toBe(2000);
+      expect(MACHINE_INTERVAL_MS).toBe(10_000);
       let t = NOW;
       const c = stubs();
       const s = createScheduler({ config, store, bus, now: () => t, collectors: c });
@@ -1028,9 +1028,9 @@ describe("scheduler", () => {
       expect(s.machine()).toMatchObject({ at: NOW, cpuPct: null });
       flushEmits();
       expect(topics).toContain("machine");
-      t += 2000;
+      t += MACHINE_INTERVAL_MS;
       await s.tick("machine");
-      expect(s.machine()).toMatchObject({ at: NOW + 2000, cpuPct: 5 });
+      expect(s.machine()).toMatchObject({ at: NOW + MACHINE_INTERVAL_MS, cpuPct: 5 });
       // The previous sample is handed back to the collector.
       expect(vi.mocked(c.machine).mock.calls[1]?.[1]).toMatchObject({ at: NOW });
 
