@@ -9,6 +9,7 @@ const { renderAt } = browserSession();
 
 const LONG =
   "apps/server/test/live/skills-live-check.ts stub report_evidence MCP tool Skill call ".repeat(5);
+const PARK = { kind: "review", reason: "RETRO-CX found blocking issues in 3 reviews" } as const;
 const loop = (text: string) => ({
   phase: "working" as const,
   text,
@@ -40,6 +41,12 @@ const crew: Crew = {
       run: null,
     }),
     crewRow({ id: "inco-1", ticketTitle: "Short", loop: loop("Editing"), hudState: "running" }),
+    // parked on RETRO's findings: the Loop cell offers the waiver beside its step bar
+    crewRow({
+      id: "retro-1",
+      loop: { ...loop("Waiting"), phase: "parked", parked: PARK },
+      hudState: "parked",
+    }),
   ],
   firstRunToday: null,
 };
@@ -49,6 +56,9 @@ const api = {
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
   "/api/crew": crew,
+  "/api/runs/r-12/loop": {
+    loop: { phase: "parked", parked: PARK, pushFor: "c74cdfc0123456789", prNumber: null },
+  },
   "/api/attention": [
     item({ key: "ask:guido-1", kind: "decision", agentId: "guido-1", text: LONG, ticket: null }),
   ],
@@ -65,7 +75,7 @@ const api = {
 };
 
 describeRendered("Overview Crew table with very long text, rendered", () => {
-  it.each([1100, 1366, 1600])(
+  it.each([1100, 1280, 1366, 1600])(
     "keeps every cell inside its own row at %ipx",
     async (width) => {
       const page = await renderAt({ page: "test/overviewBrowser.html", width, height: 1000, api });
@@ -106,6 +116,31 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
         undefined,
       );
       expect(spill).toEqual([]);
+      // nothing inside a crew row hangs below it, unless an ancestor inside the row clips it
+      const hanging = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>("#agentsList .trow:not(.head)")].flatMap(
+            (row) => {
+              const bottom = row.getBoundingClientRect().bottom + 0.5;
+              return [...row.querySelectorAll<HTMLElement>("*")]
+                .filter((el) => {
+                  const r = el.getBoundingClientRect();
+                  if (r.height === 0 || r.bottom <= bottom) return false;
+                  for (let n = el.parentElement; n && n !== row; n = n.parentElement)
+                    if (
+                      getComputedStyle(n).overflow !== "visible" &&
+                      n.getBoundingClientRect().bottom <= bottom
+                    )
+                      return false;
+                  return true;
+                })
+                .map((el) => `${el.tagName}.${el.className}: ${el.textContent?.slice(0, 40)}`);
+            },
+          ),
+        undefined,
+      );
+      expect(hanging).toEqual([]);
+      expect(await page.boxes("#agentsList .waive-compact button")).toHaveLength(1);
       // the crew seat's Work cell carries Answer, Interrupt and End, each whole and apart
       const buttons = await page.boxes("#agentsList .work-cell .need button");
       const cell = await page.box("#agentsList .work-cell:has(.need)");

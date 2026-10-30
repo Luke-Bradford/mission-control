@@ -1351,3 +1351,26 @@
     flex-wrap: wrap;
   }
 }
+
+/* a parked review's waiver takes the step label's line, so the cell stays within its row */
+#agentsList .loopstep .acts:empty {
+  display: none;
+}
+
+#agentsList .loopstep .acts,
+.waive-compact {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#agentsList .loopstep:has(.acts > *) > .ellip {
+  display: none;
+}
+
+.waive-compact > button {
+  flex: none;
+}

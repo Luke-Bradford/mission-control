@@ -521,7 +521,7 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
 function ReviewParkSeatAction({ runId }: { runId: string }) {
   const loop = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop;
   const park = reviewPark(loop);
-  return park ? <WaiveReviewFindings runId={runId} park={park} /> : null;
+  return park ? <WaiveReviewFindings runId={runId} park={park} compact /> : null;
 }
 
 /** FLIGHT heads the crew, observed loops and stopped seats. */

@@ -24,7 +24,16 @@ export const reviewParkConfirm = (park: ReviewPark): string =>
   `Waive RETRO's findings on ${reviewParkSha(park)} and resume this run? This accepts: ${park.reason}`;
 
 /** An intentional waiver is separate from the normal message/rework route. */
-export function WaiveReviewFindings({ runId, park }: { runId: string; park: ReviewPark }) {
+export function WaiveReviewFindings({
+  runId,
+  park,
+  compact = false,
+}: {
+  runId: string;
+  park: ReviewPark;
+  /** One line for a table cell: a short button whose full name and the findings sit in its title. */
+  compact?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const waive = async () => {
@@ -38,6 +47,29 @@ export function WaiveReviewFindings({ runId, park }: { runId: string; park: Revi
       setBusy(false);
     }
   };
+  const name = `Waive findings on ${reviewParkSha(park)} and resume`;
+  if (compact)
+    return (
+      <span className="waive-compact">
+        <button
+          type="button"
+          className="sm warn"
+          disabled={busy}
+          aria-label={name}
+          title={`Findings on ${reviewParkSha(park)}: ${park.reason}. ${name}.`}
+          onClick={() => {
+            if (window.confirm(reviewParkConfirm(park))) void waive();
+          }}
+        >
+          Waive
+        </button>
+        {error && (
+          <span className="ellip crit-t s" role="alert" title={error}>
+            {error}
+          </span>
+        )}
+      </span>
+    );
   return (
     <div className="s">
       <div className="xs muted">
@@ -51,7 +83,7 @@ export function WaiveReviewFindings({ runId, park }: { runId: string; park: Revi
           if (window.confirm(reviewParkConfirm(park))) void waive();
         }}
       >
-        Waive findings on {reviewParkSha(park)} and resume
+        {name}
       </button>
       {error && (
         <span className="crit-t s" role="alert">
