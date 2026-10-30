@@ -1,9 +1,14 @@
-import { type Crew, FLIGHT_DECISION_KINDS, FLIGHT_VIEW_LIMIT } from "@mc/core";
+import {
+  type Crew,
+  FLIGHT_DECISION_KINDS,
+  FLIGHT_VIEW_LIMIT,
+  type FlightSummaryView,
+} from "@mc/core";
 import { useMemo, useState } from "react";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { kindLabel } from "./conversation.ts";
+import { isForTheController, kindLabel } from "./conversation.ts";
 import { DecidedRow } from "./Decided.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 import { Incoming } from "./Incoming.tsx";
@@ -13,6 +18,9 @@ import { WorkingLog } from "./WorkingLog.tsx";
 
 export const NO_DECISIONS_24H = "FLIGHT has decided nothing in the last 24 hours.";
 export const DECISIONS_CAPPED = `newest ${FLIGHT_VIEW_LIMIT} shown · the hub serves no older decisions of the last 24 h`;
+export const NO_CONTROLLER_ASKS = "Nothing was addressed to the controller in the last 24 hours.";
+export const controllerCapped = (counted: number, listed: number): string =>
+  `${counted} asks for the controller were counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold ${listed}.`;
 export const NO_MATCHING = "No decision matches those filters.";
 export const MISSING_POWERS_PENDING =
   "Missing powers: not available yet. The hub does not report what FLIGHT lacked.";
@@ -29,7 +37,7 @@ const matches = (d: FlightDecision, text: string): boolean => {
 };
 
 /** Every decision FLIGHT made in the last day, newest first, with filters and Overturn. */
-function Decisions() {
+function Decisions({ controllerOnly }: { controllerOnly: boolean }) {
   const flight = useResource<FlightView>(RESOURCES.flight);
   const view = flight.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -37,18 +45,21 @@ function Decisions() {
   const [kind, setKind] = useState(ALL);
   const [seat, setSeat] = useState(ALL);
   const [text, setText] = useState("");
+  const counted = useResource<FlightSummaryView>(RESOURCES.flightSummary).data?.metrics
+    .forTheController;
   const all = view?.decisions ?? [];
   const rows = useMemo(
     () =>
       all
         .filter(
           (d) =>
+            (!controllerOnly || isForTheController(d)) &&
             (kind === ALL || d.kind === kind) &&
             (seat === ALL || d.seatId === seat) &&
             matches(d, text),
         )
         .sort((a, b) => b.at - a.at || b.id - a.id),
-    [all, kind, seat, text],
+    [all, controllerOnly, kind, seat, text],
   );
   if (view === undefined)
     return <Pending what="decisions" error={flight.error} resource={RESOURCES.flight} />;
@@ -89,8 +100,20 @@ function Decisions() {
         </span>
       </search>
       <p className="pb note">{WAKE_GROUPING_UNAVAILABLE}</p>
+      {controllerOnly &&
+        all.length >= FLIGHT_VIEW_LIMIT &&
+        counted !== undefined &&
+        counted > all.filter(isForTheController).length && (
+          <p className="pb note" role="status">
+            {controllerCapped(counted, all.filter(isForTheController).length)}
+          </p>
+        )}
       {rows.length === 0 ? (
-        <p className="pb note">{NO_MATCHING}</p>
+        <p className="pb note">
+          {controllerOnly && text === "" && kind === ALL && seat === ALL
+            ? NO_CONTROLLER_ASKS
+            : NO_MATCHING}
+        </p>
       ) : (
         <section aria-label="Decisions, newest first" data-testid="decision-list">
           {rows.map((d) => (
@@ -111,21 +134,31 @@ function Decisions() {
 
 /** What FLIGHT did: its decisions, what they led to, and what it could not do. */
 export function DidTab() {
+  // The "For the controller" tile in Outcomes narrows the decisions to those asks.
+  const [controllerOnly, setControllerOnly] = useState(false);
   return (
     <>
       <Panel
         id="decidedP"
         title="Decisions"
-        sub="everything FLIGHT decided in the last 24 hours, newest first"
+        sub={
+          controllerOnly
+            ? "asks FLIGHT addressed to the controller in the last 24 hours, newest first"
+            : "everything FLIGHT decided in the last 24 hours, newest first"
+        }
       >
         <div className="flight-panel-scroll">
-          <Decisions />
+          <Decisions controllerOnly={controllerOnly} />
         </div>
       </Panel>
       <div className="flight-did-side">
         <Panel id="outcomesP" title="Outcomes" sub="recently completed work and the last 24 hours">
           <div className="flight-panel-scroll">
-            <Summary mode="record" />
+            <Summary
+              mode="record"
+              controllerOnly={controllerOnly}
+              onControllerOnly={setControllerOnly}
+            />
           </div>
         </Panel>
         <Panel id="powersP" title="Missing powers" sub="what FLIGHT could not do">
