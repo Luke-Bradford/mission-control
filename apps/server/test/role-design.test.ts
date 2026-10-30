@@ -44,3 +44,12 @@ it("the HUD checklist stays a one-minute read", () => {
   const words = body.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w));
   expect(words.length).toBeLessThanOrEqual(300);
 });
+
+it("RETRO tries to break each kind of change and renders screens itself", () => {
+  const text = read("roles/RETRO.md");
+  const section = text.split(/^## /m).find((part) => part.startsWith("Try to break it\n")) ?? "";
+  for (const kind of ["Screens", "APIs", "Database", "Shared code", "Anything with state"])
+    expect(section, kind).toContain(`**${kind}`);
+  expect(text).not.toMatch(/rendered page[^.]*Controller check/);
+  expect(checklist).not.toMatch(/cannot render them/);
+});
