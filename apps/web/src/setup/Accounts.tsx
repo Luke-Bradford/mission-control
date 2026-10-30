@@ -4,7 +4,7 @@ import { apiDelete, apiPost, apiPut } from "../api.ts";
 import { copyText } from "../clipboard.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { rel, wkdTime } from "../fmt.ts";
+import { plural, rel, wkdTime } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
@@ -108,7 +108,7 @@ function ModelsCell({ account, now, tz }: { account: Account; now: number; tz: s
     }
   }
   const detail = models.data
-    ? `${models.data.models.length} model${models.data.models.length === 1 ? "" : "s"} · ${fresh ? "checked" : "stale"} ${rel(models.data.checkedAt, now, tz ?? "UTC")}`
+    ? `${plural(models.data.models.length, "model")} · ${fresh ? "checked" : "stale"} ${rel(models.data.checkedAt, now, tz ?? "UTC")}`
     : models.loading
       ? "Discovering models…"
       : "Not checked";

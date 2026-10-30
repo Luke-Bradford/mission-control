@@ -1,4 +1,5 @@
 import type { ConfigView, Crew, RepoView } from "@mc/core";
+import { plural } from "../fmt.ts";
 
 /** One entry in the Map's repo picker: only a repo with a crew session can be mapped. */
 export interface MapRepoOption {
@@ -9,7 +10,6 @@ export interface MapRepoOption {
   label: string;
 }
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 export const pickRepo = (
   ids: string[],
   running: { repoId: string; started: number }[],

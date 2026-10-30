@@ -334,7 +334,7 @@ export function InstrumentCharts({
     {
       id: "first-pass-review",
       name: "first pass review",
-      color: "var(--s2)",
+      color: "var(--seat-2)",
       points: quality.map((point) => ({ at: point.at, v: point.firstPassReviewPct })),
     },
   ];
@@ -378,7 +378,7 @@ export function InstrumentCharts({
                   color: "var(--accent)",
                   points: activePoints,
                 },
-                { id: "merged", name: "merged", color: "var(--s2)", points: mergedPoints },
+                { id: "merged", name: "merged", color: "var(--seat-2)", points: mergedPoints },
               ]}
               from={from}
               to={to}
@@ -391,7 +391,7 @@ export function InstrumentCharts({
             <Legend
               items={[
                 { key: "in-progress", name: "in progress", color: "var(--accent)" },
-                { key: "merged", name: "merged", color: "var(--s2)" },
+                { key: "merged", name: "merged", color: "var(--seat-2)" },
               ]}
             />
           </>

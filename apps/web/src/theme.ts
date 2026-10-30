@@ -12,7 +12,7 @@ export { THEME_KEY };
 
 /**
  * Repo chip colours, assigned to repos in config order (repoColor.ts). Kept apart from the agent
- * colours --s1…--s7 so a repo chip is never mistaken for an agent marker; a test pins both.
+ * colours --seat-1…--seat-7 so a repo chip is never mistaken for an agent marker; a test pins both.
  */
 export const REPO_TOKEN_NAMES = [
   "--r1",
@@ -48,13 +48,13 @@ export const TOKEN_NAMES = [
   "--accent-soft",
   "--shadow",
   "--glow",
-  "--s1",
-  "--s2",
-  "--s3",
-  "--s4",
-  "--s5",
-  "--s6",
-  "--s7",
+  "--seat-1",
+  "--seat-2",
+  "--seat-3",
+  "--seat-4",
+  "--seat-5",
+  "--seat-6",
+  "--seat-7",
   ...REPO_TOKEN_NAMES,
 ] as const;
 export type TokenName = (typeof TOKEN_NAMES)[number];
@@ -84,13 +84,13 @@ export const THEME_TOKENS: Record<"dark" | "light", Record<TokenName, string>> =
     "--shadow": "0 10px 30px rgba(0, 0, 0, 0.45)",
     "--glow":
       "radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%)",
-    "--s1": "#3987e5",
-    "--s2": "#d95926",
-    "--s3": "#199e70",
-    "--s4": "#c98500",
-    "--s5": "#d55181",
-    "--s6": "#008300",
-    "--s7": "#9085e9",
+    "--seat-1": "#3987e5",
+    "--seat-2": "#d95926",
+    "--seat-3": "#199e70",
+    "--seat-4": "#c98500",
+    "--seat-5": "#d55181",
+    "--seat-6": "#008300",
+    "--seat-7": "#9085e9",
     "--r1": "#3fd0e8",
     "--r2": "#e6dc6e",
     "--r3": "#f5b5d0",
@@ -124,13 +124,13 @@ export const THEME_TOKENS: Record<"dark" | "light", Record<TokenName, string>> =
     "--shadow": "0 10px 28px rgba(20, 30, 50, 0.16)",
     "--glow":
       "radial-gradient(1200px 300px at 20% -120px, rgba(10, 107, 125, 0.06), transparent 70%)",
-    "--s1": "#2a78d6",
-    "--s2": "#eb6834",
-    "--s3": "#1baf7a",
-    "--s4": "#eda100",
-    "--s5": "#e87ba4",
-    "--s6": "#008300",
-    "--s7": "#6250d6",
+    "--seat-1": "#2a78d6",
+    "--seat-2": "#eb6834",
+    "--seat-3": "#1baf7a",
+    "--seat-4": "#eda100",
+    "--seat-5": "#e87ba4",
+    "--seat-6": "#008300",
+    "--seat-7": "#6250d6",
     "--r1": "#0e6a8a",
     "--r2": "#586018",
     "--r3": "#a2308f",

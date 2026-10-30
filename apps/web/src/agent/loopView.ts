@@ -11,7 +11,7 @@ import {
   type RunView,
 } from "@mc/core";
 import type { LOOP_PATH } from "../crew.ts";
-import { kTokens } from "../fmt.ts";
+import { kTokens, shortSha } from "../fmt.ts";
 
 export type LoopStep = (typeof LOOP_PATH)[number];
 
@@ -136,12 +136,10 @@ export function barClass(t: LoopTry): string {
   }
 }
 
-const sha7 = (sha: string): string => sha.slice(0, 7);
-
 /** The CI check of the pushed commit, read from the PR the loop watches. */
 export function ciCheck(loop: RunLoop, prs: readonly PullRequestView[] | undefined): Check {
   if (!loop.pushFor) return { text: "Nothing pushed yet", state: "wait" };
-  const short = sha7(loop.pushFor);
+  const short = shortSha(loop.pushFor);
   const pr = prs?.find((p) => p.number === loop.prNumber);
   if (!pr || pr.headSha !== loop.pushFor) {
     return { text: `CI on ${short}: waiting for the push to show on GitHub`, state: "wait" };

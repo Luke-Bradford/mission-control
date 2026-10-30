@@ -122,10 +122,6 @@
   position: relative;
 }
 
-.ctl-dark {
-  fill: var(--fg-2);
-}
-
 .ubar {
   display: flex;
   height: 6px;

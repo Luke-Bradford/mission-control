@@ -1,4 +1,5 @@
 import type { PullRequestView, QaFindingView } from "@mc/core";
+import { plural } from "../fmt.ts";
 
 export type ReadinessVerdict = { tone: "ok" | "warn" | "crit"; text: string };
 
@@ -19,7 +20,7 @@ export function prVerdict(
   if (important > 0)
     return {
       tone: "crit",
-      text: `Held: ${important} open important finding${important === 1 ? "" : "s"}`,
+      text: `Held: ${plural(important, "open important finding")}`,
     };
   if (pr.mergeable === "CONFLICTING") return { tone: "crit", text: "Held: merge conflict" };
   if (pr.isDraft) return { tone: "warn", text: "Waiting on draft" };

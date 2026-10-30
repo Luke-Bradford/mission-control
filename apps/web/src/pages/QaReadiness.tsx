@@ -8,7 +8,7 @@ import type {
 import { type ReactNode, useMemo, useState } from "react";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { prLabel } from "../fmt.ts";
+import { prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
@@ -160,7 +160,7 @@ function ReadinessCard({
               <Empty text="No CI tries captured for this head." />
             )}
             {olderRuns.length > 0 && (
-              <span>{`Older heads: ${olderRuns.map((run) => `${run.name} · ${run.sha.slice(0, 7)} · ${run.state}`).join("; ")}`}</span>
+              <span>{`Older heads: ${olderRuns.map((run) => `${run.name} · ${shortSha(run.sha)} · ${run.state}`).join("; ")}`}</span>
             )}
           </Evidence>
           <Evidence title="Review findings">

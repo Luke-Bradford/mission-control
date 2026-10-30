@@ -14,6 +14,7 @@ import {
 } from "@mc/core";
 import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
+import { plural } from "../fmt.ts";
 
 const DAY = 86_400_000;
 
@@ -127,10 +128,9 @@ const MINUTE = 60_000;
 
 /** `under a minute`, `5 minutes`, `1 hour`, `5 hours`, `1 day`, `9 days`: how long something has waited. */
 export function waitingText(ms: number): string {
-  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? "" : "s"}`;
-  if (ms >= DAY) return n(Math.floor(ms / DAY), "day");
-  if (ms >= HOUR) return n(Math.floor(ms / HOUR), "hour");
-  return ms >= MINUTE ? n(Math.floor(ms / MINUTE), "minute") : "under a minute";
+  if (ms >= DAY) return plural(Math.floor(ms / DAY), "day");
+  if (ms >= HOUR) return plural(Math.floor(ms / HOUR), "hour");
+  return ms >= MINUTE ? plural(Math.floor(ms / MINUTE), "minute") : "under a minute";
 }
 
 /** A card's "You:" chip: its first Needs-you item, what it asks and how long it has waited. */

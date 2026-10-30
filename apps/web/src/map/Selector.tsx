@@ -1,5 +1,6 @@
 import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
 import type { CSSProperties } from "react";
+import { plural } from "../fmt.ts";
 import {
   type ChangeCount,
   changeTotals,
@@ -107,7 +108,7 @@ export function SeatSelector({
 function Lines({ count, files }: { count: ChangeCount; files?: number }) {
   return (
     <>
-      {files !== undefined && `${files} file${files === 1 ? "" : "s"} · `}
+      {files !== undefined && `${plural(files, "file")} · `}
       <b className="add">+{count.add}</b> <b className="rem">−{count.rem}</b>
       {count.churn && <span className="map-note"> edit churn</span>}
     </>
@@ -136,9 +137,7 @@ export function SeatDetail({
         <dt>Changed</dt>
         <dd>{totals.files ? <Lines count={totals} files={totals.files} /> : "nothing yet"}</dd>
         <dt>Read</dt>
-        <dd>
-          {read} file{read === 1 ? "" : "s"}
-        </dd>
+        <dd>{plural(read, "file")}</dd>
       </dl>
     </>
   );

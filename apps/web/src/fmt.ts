@@ -131,6 +131,13 @@ export function kTokens(n: number): string {
   return `${round(n / 1e6, 1).toFixed(1)}M`;
 }
 
+/** `1 file` / `3 files`: the count with its noun, `-s` unless `many` is given (`fix`, `fixes`). */
+export const plural = (n: number, one: string, many = `${one}s`): string =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** The short form of a commit sha, as the HUD shows it everywhere. */
+export const shortSha = (sha: string): string => sha.slice(0, 7);
+
 /** API-equivalent cost: `~$1.84`, or `—` when no run reported one. */
 export const cost = (usd: number | null): string => (usd === null ? "—" : `~$${usd.toFixed(2)}`);
 

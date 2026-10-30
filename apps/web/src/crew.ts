@@ -28,7 +28,14 @@ import {
   seatCallSign,
   type TestLockState,
 } from "@mc/core";
-import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
+import { cutText, hhmm, mss, prLabel, shortSha, wkdTime } from "./fmt.ts";
+
+/** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
+const SEAT_PALETTE = 7;
+
+/** A seat's colour token by its config index: the one palette every page draws from. */
+export const seatColorVar = (index: number): string =>
+  `--seat-${(Math.max(0, index) % SEAT_PALETTE) + 1}`;
 
 /**
  * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
@@ -130,7 +137,7 @@ export const READY_TO_MERGE = "Ready to merge";
 
 /** An idle reviewing seat's doing line: the PR, its short sha and the ticket ref when there is one. */
 export const reviewingLine = (r: ReviewingPr): string =>
-  `Reviewing PR #${r.prNumber} (${r.sha.slice(0, 7)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+  `Reviewing PR #${r.prNumber} (${shortSha(r.sha)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
 
 /** Whether the seat has a session open: running, or idle at the end of a turn of an open run. */
 const sessionOpen = (row: CrewRow): boolean =>

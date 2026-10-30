@@ -1,4 +1,5 @@
 import { MAP_RECENT_MS, type MapSeat, type MapSnapshot, namesOnly } from "@mc/core";
+import { seatColorVar } from "../crew.ts";
 
 const isDocked = (seat: MapSeat, now: number): boolean =>
   seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
@@ -134,8 +135,8 @@ export function workLine(work: SeatWork): string | null {
 }
 
 /**
- * A seat's colour token on the map, its place in config order (FLIGHT its own), defined on the
- * map page in one palette for both themes, so the void stage and the rail show the same colour.
+ * A seat's colour token on the map, its place in config order (FLIGHT its own): the same palette
+ * as `agentColor`, so a seat is one colour on every page.
  */
 export const seatToken = (seat: string, order: number): string =>
-  seat === "FLIGHT" ? "--seat-flight" : `--seat-${(Math.max(0, order) % 7) + 1}`;
+  seat === "FLIGHT" ? "--seat-flight" : seatColorVar(order);
