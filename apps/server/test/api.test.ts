@@ -68,7 +68,6 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
-  TOPICS,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -8372,7 +8371,7 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it.each(TOPICS.filter((topic) => topic !== "machine"))(
+  it.each(["agents", "boards", "escalations", "health", "settings", "config", "guard"] as const)(
     "invalidates shared crew on %s",
     async (topic) => {
       const reads = vi.spyOn(store, "asideRuns");
@@ -8385,9 +8384,23 @@ describe("overview", () => {
     },
   );
 
+  it.each(["limits", "machine", "attention", "flight"] as const)(
+    "keeps shared crew for the unrelated %s topic",
+    async (topic) => {
+      const reads = vi.spyOn(store, "readVersion");
+      await get("/api/crew");
+      const initial = reads.mock.calls.length;
+      bus.emit(topic);
+      await get("/api/crew");
+      expect(reads).toHaveBeenCalledTimes(initial);
+      reads.mockRestore();
+    },
+  );
+
   it("rebuilds shared crew when the configured selection changes", async () => {
     await get("/api/crew");
     withCrew();
+    bus.emit("config");
     expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
       true,
     );
