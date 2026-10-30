@@ -10,6 +10,7 @@
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   AWAY_BUG_VERIFIED,
@@ -422,14 +423,17 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatuses = new Map<string, string>();
   /** The last failure logged for each run's review status, so a lasting failure is logged once. */
   const reviewStatusFailures = new Map<string, string>();
-  /** PR rows are immutable enough for one engine pass; avoid one whole-table read per run. */
-  let tickPrs: Map<RepoId, ReturnType<Store["pullRequests"]>> | null = null;
-  let tickNotes: ReturnType<Store["notes"]> | null = null;
+  /** Tick-local snapshots avoid repeated whole-table reads without leaking to external reconciles. */
+  const tickCache = new AsyncLocalStorage<{
+    prs: Map<RepoId, ReturnType<Store["pullRequests"]>>;
+    notes: ReturnType<Store["notes"]>;
+  }>();
   const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
-    const cached = tickPrs?.get(repoId);
+    const cache = tickCache.getStore();
+    const cached = cache?.prs.get(repoId);
     if (cached !== undefined) return cached;
     const rows = store.pullRequests(repoId);
-    tickPrs?.set(repoId, rows);
+    cache?.prs.set(repoId, rows);
     return rows;
   };
   let started = false;
@@ -664,11 +668,12 @@ export function createEngine(deps: EngineDeps): Engine {
   function noteHardRules(repoId: RepoId, set: boolean): void {
     if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return;
     const key = hardRulesUnsetNoteKey(repoId);
-    const notes = tickNotes ?? store.notes();
+    const cache = tickCache.getStore();
+    const notes = cache?.notes ?? store.notes();
     const open = notes.some((n) => n.key === key);
     if (set && open) {
       store.clearNote(key, now());
-      if (tickNotes) tickNotes = tickNotes.filter((n) => n.key !== key);
+      if (cache) cache.notes = cache.notes.filter((n) => n.key !== key);
       bus.emit("attention");
     } else if (!set && !open) {
       store.raiseNote({
@@ -680,7 +685,7 @@ export function createEngine(deps: EngineDeps): Engine {
         text: hardRulesUnsetText(repoId),
         at: now(),
       });
-      tickNotes?.push({
+      cache?.notes.push({
         key,
         kind: "blocked",
         runId: null,
@@ -2347,11 +2352,13 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      tickPrs = new Map();
-      tickNotes = store.notes();
-      try {
+      const cache = {
+        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
+        notes: store.notes(),
+      };
+      await tickCache.run(cache, async () => {
         const runs = loopRuns();
-        const notes = tickNotes;
+        const notes = cache.notes;
         await Promise.all(runs.map((r) => wakePendingWork(r.id)));
         await Promise.all(
           store
@@ -2365,10 +2372,7 @@ export function createEngine(deps: EngineDeps): Engine {
         untakeStale();
         await takeForSeats();
         await kickReviews();
-      } finally {
-        tickPrs = null;
-        tickNotes = null;
-      }
+      });
     },
 
     reconcileRun,
@@ -2381,10 +2385,6 @@ export function createEngine(deps: EngineDeps): Engine {
 
     onOperatorMessage(runId, by = "CAPCOM", opts) {
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
-      // An operator action is outside the tick that may be awaiting GitHub or git work.
-      // Read fresh PR and note rows rather than inheriting that snapshot.
-      tickPrs = null;
-      tickNotes = null;
       // a pass that throws before deciding leaves this: the error is logged by the chain
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
