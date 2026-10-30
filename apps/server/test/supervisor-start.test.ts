@@ -1,7 +1,7 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -2463,7 +2463,7 @@ import(${JSON.stringify(fixture)});
     expect(recorded().some((m) => m.type === "spawn")).toBe(false);
   });
 
-  it("launches with only the hub's config, private auth and temp dirs, then removes them", async () => {
+  it("launches a Codex home under 5 MB without remote plugins, then removes it", async () => {
     const { sup } = codex();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -2501,6 +2501,11 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
+    expect(config).toContain("remote_plugin = false");
+    expect(
+      Number.parseInt(execFileSync("du", ["-sk", home], { encoding: "utf8" }), 10),
+    ).toBeLessThan(5 * 1024);
+    expect(readdirSync(home, { recursive: true })).toHaveLength(2);
     const parent = dirname(spawn.env.TMPDIR);
     expect(parent).toBe(join(spawn.cwd, MC_TMP_DIR_NAME));
     expect(basename(spawn.env.TMPDIR)).toBe(
