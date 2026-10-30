@@ -12,6 +12,7 @@ import { ApiError, apiPost } from "../api.ts";
 import { ticketForRef } from "../comms/model.ts";
 import { callSign, seatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
+import { checkedHead, markChecked, undoChecked } from "../qa/checked.ts";
 import {
   agentPath,
   commsAgentPath,
@@ -232,6 +233,24 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
       haystack: `${pr.repoId} pr ${pr.number} #${pr.number} ${pr.title}`,
       run: () => openPr(pr),
     });
+    // The same local mark the PR readiness tab keeps; without a head SHA there is nothing to mark.
+    if (pr.headSha) {
+      const head = pr.headSha;
+      const label = `${pr.repoId} PR ${pr.number}`;
+      const isChecked = checkedHead(pr.repoId, pr.number) === head;
+      out.push({
+        id: `action:${isChecked ? "uncheck" : "check"}:${refText(pr.repoId, pr.number)}`,
+        group: "Action",
+        title: isChecked ? `Undo checked on ${label}` : `Mark ${label} checked`,
+        hint: isChecked ? "checked at this head" : pr.title,
+        haystack: `${isChecked ? "undo uncheck" : "mark check"} checked ${label} #${pr.number} ${pr.title}`,
+        run: () => {
+          if (isChecked) undoChecked(pr.repoId, pr.number);
+          else markChecked(pr.repoId, pr.number, head);
+          toast(isChecked ? `${label} check undone.` : `${label} marked checked.`);
+        },
+      });
+    }
   }
   out.push(...commsEntries(src));
   for (const th of src.threads ?? []) {

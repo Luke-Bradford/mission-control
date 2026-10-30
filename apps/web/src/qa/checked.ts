@@ -4,6 +4,16 @@ export { QA_CHECKED_HEADS_KEY } from "../storage.ts";
 
 type CheckedHeads = Record<string, string>;
 
+const listeners = new Set<() => void>();
+
+/** Calls `fn` after every mark or undo in this window, so a mounted view can re-read the marks. */
+export function onCheckedChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
 const checkedKey = (repoId: string, number: number): string => `${repoId}:${number}`;
 
 function heads(): CheckedHeads {
@@ -32,10 +42,12 @@ export function markChecked(repoId: string, number: number, headSha: string): vo
     QA_CHECKED_HEADS_KEY,
     JSON.stringify({ ...heads(), [checkedKey(repoId, number)]: headSha }),
   );
+  for (const fn of listeners) fn();
 }
 
 export function undoChecked(repoId: string, number: number): void {
   const next = heads();
   delete next[checkedKey(repoId, number)];
   writeKey(QA_CHECKED_HEADS_KEY, JSON.stringify(next));
+  for (const fn of listeners) fn();
 }
