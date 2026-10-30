@@ -310,6 +310,9 @@ export async function main(): Promise<void> {
   }
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
   const hubRoot = findHubRoot();
+  // An implicit branch preview reads the live config as its snapshot, but must never write it.
+  const writableConfigPath =
+    !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
   const previewRepoId = config.crew?.sessions.find(
     (session) => hubRoot !== null && resolve(session.checkout) === hubRoot,
   )?.repoId;
@@ -671,8 +674,8 @@ export async function main(): Promise<void> {
     hubLogin: () => hubLogin,
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
-    configPath,
-    crewReloader,
+    configPath: writableConfigPath,
+    crewReloader: writableConfigPath === undefined ? undefined : crewReloader,
     // A preview writes only a config file it was explicitly pointed at, never the live one.
     seatWrites: !preview || process.env.MC_CONFIG !== undefined,
     supervisor,

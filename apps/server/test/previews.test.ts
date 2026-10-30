@@ -111,6 +111,31 @@ describe("PreviewManager", () => {
     ).resolves.toMatchObject({ pr: 42 });
   });
 
+  it("closes a child that becomes ready while its pending preview is being cancelled", async () => {
+    let ready: (() => void) | undefined;
+    const prepared = new Promise<void>((resolve) => (ready = resolve));
+    const stop = vi.fn();
+    const remove = vi.fn(async () => {});
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async () => {
+        await prepared;
+        return { stop, dbPath: "/tmp/preview.sqlite" };
+      },
+      remove,
+    });
+    const starting = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    ready?.();
+    await expect(manager.close(41)).resolves.toBe(true);
+    await expect(starting).resolves.toMatchObject({ pr: 41 });
+    expect(manager.list()).toEqual([]);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
+  });
+
   it("expires a start that exceeds the preparation deadline", async () => {
     vi.useFakeTimers();
     try {
@@ -224,5 +249,27 @@ describe("PreviewManager", () => {
     await manager.expire();
     expect(process.stop).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledOnce();
+  });
+
+  it("begins its idle lifetime when preparation is ready", async () => {
+    let clock = NOW;
+    const stop = vi.fn();
+    const manager = new PreviewManager({
+      now: () => clock,
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async () => {
+        clock += 5 * 60_000;
+        return { stop };
+      },
+      remove: async () => {},
+    });
+    await manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    clock += PREVIEW_IDLE_MS - 1;
+    await manager.expire();
+    expect(stop).not.toHaveBeenCalled();
+    clock += 2;
+    await manager.expire();
+    expect(stop).toHaveBeenCalledOnce();
   });
 });

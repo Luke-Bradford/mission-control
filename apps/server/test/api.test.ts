@@ -8819,3 +8819,14 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     await a.close();
   }
 });
+
+it("reports ordinary child-preview requests to the parent activity callback", async () => {
+  const previewActivity = vi.fn();
+  const a = buildApp({ config, store, bus, previewActivity });
+  try {
+    expect((await a.inject("/api/health")).statusCode).toBe(200);
+    expect(previewActivity).toHaveBeenCalledOnce();
+  } finally {
+    await a.close();
+  }
+});

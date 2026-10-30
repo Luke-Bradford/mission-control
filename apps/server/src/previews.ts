@@ -97,7 +97,6 @@ export class PreviewManager {
   async start(input: PreviewStart): Promise<PreviewView> {
     const pending = await this.reserve(input.pr);
     const { port } = pending;
-    const startedAt = this.now();
     const token = randomBytes(32).toString("base64url");
     let child: PreviewProcess & { dbPath?: string };
     const timeout = setTimeout(() => pending.controller.abort(), PREVIEW_START_MS);
@@ -109,6 +108,8 @@ export class PreviewManager {
     } finally {
       clearTimeout(timeout);
     }
+    // The idle lifetime starts once the URL can actually be used, not while checkout/build runs.
+    const startedAt = this.now();
     const preview: Preview = {
       pr: input.pr,
       branch: input.branch,
@@ -161,6 +162,9 @@ export class PreviewManager {
     if (pending) {
       pending.controller.abort();
       await pending.done;
+      // start() may have published the child between its dependency resolving and our abort.
+      // In that case this close still owns the requested teardown.
+      if (this.previews.has(pr)) await this.close(pr);
       return true;
     }
     const preview = this.previews.get(pr);
