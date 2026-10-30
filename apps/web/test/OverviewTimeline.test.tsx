@@ -157,13 +157,13 @@ it("uses live crew names and colours and resizes its lane grid after updates", a
   stub(lanes, [seatRow({ id: "seat-1", displayCallSign: "guido-cx", index: 2 })]);
   const { container } = render(<TimelinePanel />);
   const lane = await screen.findByRole("link", { name: "guido-cx" });
-  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s3)");
+  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-3)");
   const grid = () => container.querySelector<HTMLElement>(".overview-lanes");
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("2");
   stub(lanes.slice(0, 1), [seatRow({ id: "seat-1", displayCallSign: "renamed", index: 4 })]);
   await act(async () => hub.refetchTopic("agents"));
   const renamed = await screen.findByRole("link", { name: "renamed" });
-  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s5)");
+  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-5)");
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("1");
   stub();
   await act(async () => hub.refetchTopic("agents"));

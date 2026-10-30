@@ -12,12 +12,11 @@ import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { openNeedsYou, useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
-import { needsLamp } from "../crew.ts";
+import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hms, MONTHS, swapOfRam } from "../fmt.ts";
+import { hhmm, hms, MONTHS, percent, plural, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
 import { openAway, useDock } from "./overlays.ts";
@@ -115,7 +114,7 @@ function Usage() {
   const used = (vendor: "claude" | "codex") => {
     const ids = new Set(config?.accounts.filter((a) => a.vendor === vendor).map((a) => a.id) ?? []);
     const rows = limits.filter((row) => ids.has(row.accountId) && row.window === "7d");
-    return rows.length > 0 ? `${Math.round(Math.max(...rows.map((row) => row.used)))}%` : "—";
+    return rows.length > 0 ? percent(Math.max(...rows.map((row) => row.used))) : "—";
   };
   return (
     <span
@@ -136,13 +135,7 @@ function Usage() {
 function Clock() {
   const now = useSecond();
   const tz = useResource<ConfigView>(RESOURCES.config).data?.operator.timezone;
-  const time = new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: tz,
-  }).format(now);
-  return <time className="top-clock">{time}</time>;
+  return <time className="top-clock">{tz ? hhmm(now, tz) : "—"}</time>;
 }
 
 function SessionSelect() {
@@ -184,7 +177,6 @@ function Met() {
 }
 
 const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
-const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
 const gb = (n: number | null | undefined): string =>
   n == null ? "—" : String(Math.round((n / 2 ** 30) * 10) / 10);
@@ -212,7 +204,7 @@ function MachineButton() {
     m && m.memUsedBytes !== null && m.memTotalBytes > 0
       ? (100 * m.memUsedBytes) / m.memTotalBytes
       : null;
-  const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
+  const status = `CPU ${percent(m?.cpuPct ?? null)}, RAM ${percent(ram)}, ${lockText}`;
   const held = warning === null ? null : `Holding new work: ${warning}`;
   const label = `Machine status: ${status}${held === null ? "" : `. ${held}`}. Opens Overview.`;
   const detail =
@@ -271,7 +263,7 @@ function NeedsButton({ items }: { items: readonly AttentionItem[] }) {
   const lamp = needsLamp(items, unacked);
   // The accessible name starts with the visible "Needs you {n}" (WCAG 2.5.3), then says more.
   const n = items.length;
-  const what = n === 0 ? "nothing" : `${n} ${n === 1 ? "thing" : "things"}`;
+  const what = n === 0 ? "nothing" : plural(n, "thing");
   const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. ${NEEDS_YOU_OPENS}.`;
   return (
     <button

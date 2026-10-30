@@ -2,6 +2,7 @@ import type { RunLoop } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS } from "../data.ts";
+import { shortSha } from "../fmt.ts";
 import { seatError } from "./seat.ts";
 
 const REVIEW_PARK_KINDS = new Set(["review", "review-ruling"]);
@@ -17,7 +18,7 @@ export function reviewPark(loop: RunLoop | null | undefined): ReviewPark | null 
   return { sha: loop.pushFor, reason: loop.parked.reason };
 }
 
-export const reviewParkSha = (park: ReviewPark): string => park.sha.slice(0, 7);
+export const reviewParkSha = (park: ReviewPark): string => shortSha(park.sha);
 
 export const reviewParkConfirm = (park: ReviewPark): string =>
   `Waive RETRO's findings on ${reviewParkSha(park)} and resume this run? This accepts: ${park.reason}`;

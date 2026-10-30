@@ -813,7 +813,7 @@ describe("Decisions", () => {
 
     const decisions = screen.getByRole("region", { name: "Decisions" });
     expect(within(decisions).getByText("Which cache should we use?")).toBeTruthy();
-    expect(within(decisions).getByText("default in 01:30")).toBeTruthy();
-    expect(within(decisions).getByText("default in 01:00")).toBeTruthy();
+    expect(within(decisions).getByText("default in 1:30")).toBeTruthy();
+    expect(within(decisions).getByText("default in 1:00")).toBeTruthy();
   });
 });

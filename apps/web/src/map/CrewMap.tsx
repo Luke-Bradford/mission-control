@@ -6,10 +6,9 @@ import {
   type RepoView,
 } from "@mc/core";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
   ConflictsLens,
@@ -35,6 +34,7 @@ import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector
 import { SessionTimeline } from "./SessionTimeline.tsx";
 import { useSessionTimeline } from "./timeline.ts";
 import "./map.css";
+import { plural } from "../fmt.ts";
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -53,7 +53,7 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     setError(null);
     const live = new LiveMap(
       repo,
-      () => apiGet<MapSnapshot>(RESOURCES.repoMap(repo).path),
+      () => hub.read<MapSnapshot>(RESOURCES.repoMap(repo)),
       setSnapshot,
       setError,
     );
@@ -435,7 +435,7 @@ function ChangesKey({ tree }: { tree: MapSnapshot["tree"] }) {
         <i className="map-key-read" aria-hidden="true" /> read only
       </span>
       <span className="map-key-item">click a file for its seats</span>
-      <span className="map-key-item">{tree.length.toLocaleString()} files</span>
+      <span className="map-key-item">{plural(tree.length, "file")}</span>
     </div>
   );
 }
@@ -479,8 +479,8 @@ function AnalyticalMapKey({
         {owner ? (
           <>
             <span className="map-key-item">
-              <b>{owned}</b> of {snapshot.tree.length} files owned by an area · <b>{hard}</b>{" "}
-              hard-rule
+              <b>{owned}</b> of {plural(snapshot.tree.length, "file")} owned by an area ·{" "}
+              {plural(hard, "hard-rule")}
             </span>
             {owner.labels.map((label) => (
               <span className="map-key-item" key={label}>
@@ -512,8 +512,8 @@ function AnalyticalMapKey({
     return (
       <div className="map-analytical-key" role="note" aria-label="Review severity key">
         <span className="map-key-item">
-          <b>{snapshot.findings.length}</b> findings on{" "}
-          {new Set(snapshot.findings.map((finding) => finding.file)).size} files
+          {plural(snapshot.findings.length, "finding")} on{" "}
+          {plural(new Set(snapshot.findings.map((finding) => finding.file)).size, "file")}
         </span>
         {FINDING_SEVERITIES.map((severity) => (
           <span className="map-key-item" key={severity}>

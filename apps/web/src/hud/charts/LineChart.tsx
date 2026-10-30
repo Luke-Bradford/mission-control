@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { percent } from "../../fmt.ts";
 import {
   FadeGradient,
   Grid,
@@ -24,8 +25,6 @@ export interface LineSeries {
   dash?: string;
 }
 
-const pct = (v: number): string => `${Math.round(v)}%`;
-
 /**
  * Percent lines over time (the mockup's `lineChart`): x from `from` to `to` (epoch ms), y from 0 to
  * `max`, dashed grid at 0/50/100 % of `max`, an optional dashed limit at 100 %, 1.5 px lines over a
@@ -47,7 +46,7 @@ export function LineChart({
   at,
   height = 170,
   live = false,
-  format = pct,
+  format = percent,
 }: {
   series: LineSeries[];
   bands?: { from: number; to: number; label: string }[];

@@ -2,7 +2,7 @@ import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { bytes, rel, swapOfRam } from "../fmt.ts";
+import { bytes, percent, plural, rel, swapOfRam } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
@@ -158,7 +158,7 @@ function AgentSlots({ view }: { view: MachineView }) {
       className={`row s agentslots ${room ? "ok-t" : "warn-t"}`}
       title={[
         perSessionMax > 0 ? `up to ${perSessionMax} per session` : null,
-        room ? `Room for ${free} more agent${free === 1 ? "" : "s"}` : "No room for another agent",
+        room ? `Room for ${plural(free, "more agent")}` : "No room for another agent",
       ]
         .filter(Boolean)
         .join(" · ")}
@@ -224,7 +224,7 @@ export function MachinePanel() {
               className="num s"
               title={none ?? (u.cpu === null ? "Not measured yet" : undefined)}
             >
-              {u.cpu === null ? DASH : `${Math.round(u.cpu)}%`}
+              {u.cpu === null ? DASH : percent(u.cpu)}
               <span className="muted">
                 {" "}
                 of{" "}

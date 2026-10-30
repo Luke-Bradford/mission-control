@@ -1734,7 +1734,7 @@ describe("Account quota panel", () => {
     });
     const { container } = render(<Overview />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
-    await within(quota).findByText("7d 86% · 8h ago");
+    await within(quota).findByText("7d 86% · 8h 0m ago");
     await waitFor(() =>
       expect(quota.querySelector('[title*="Usage endpoint rate limited"]')).toBeTruthy(),
     );

@@ -47,8 +47,8 @@ describe("map rules", () => {
     s.calls = [];
     expect(stateLabel(s, 15_000)).toBe("thinking");
     s.state = "stalled";
-    expect(stateLabel(s, 362_000)).toBe("stalled 6m");
+    expect(stateLabel(s, 362_000)).toBe("stalled 6m 00s");
     s.state = "idle";
-    expect(stateLabel(s, 182_000)).toBe("idle 3m");
+    expect(stateLabel(s, 182_000)).toBe("idle 3m 00s");
   });
 });

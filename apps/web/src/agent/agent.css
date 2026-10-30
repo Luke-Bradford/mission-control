@@ -441,19 +441,19 @@
 .ctxbar i {
   display: block;
   height: 100%;
-  background: var(--s1);
+  background: var(--seat-1);
 }
 
 .ctxbar.seg i.sys {
-  background: var(--s5);
+  background: var(--seat-5);
 }
 
 .ctxbar.seg i.tools {
-  background: var(--s4);
+  background: var(--seat-4);
 }
 
 .ctxbar.seg i.msgs {
-  background: var(--s1);
+  background: var(--seat-1);
 }
 
 .ctxbar.seg i.buf {

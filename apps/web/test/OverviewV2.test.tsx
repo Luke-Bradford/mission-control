@@ -134,7 +134,7 @@ it("shows a backed-off quota row's next try beside its stale age", async () => {
       showAge
     />,
   );
-  expect(await screen.findByText(/3h ago · next try in 2m/)).toBeTruthy();
+  expect(await screen.findByText(/3h 0m ago · next try in 2m/)).toBeTruthy();
 });
 
 const attentionItem = {

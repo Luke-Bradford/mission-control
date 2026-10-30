@@ -34,11 +34,3 @@ export interface Scope {
 
 export const indexOf = (scope: Scope, id: AgentId): number =>
   scope.all.find((a) => a.id === id)?.index ?? 0;
-
-/** `now` / `{n} min ago` / `{n} h ago` / `{n} days ago` for a point `mins` before now (the mockup's `rangeLabel`). */
-export function minutesAgo(mins: number): string {
-  if (mins < 1) return "now";
-  if (mins < 120) return `${Math.round(mins)} min ago`;
-  if (mins < 2880) return `${Math.round(mins / 60)} h ago`;
-  return `${Math.round(mins / 1440)} days ago`;
-}

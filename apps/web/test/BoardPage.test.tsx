@@ -698,7 +698,7 @@ describe("cards", () => {
       name: "You: decide on the draft · waiting 9 days. Opens its brief.",
     });
     expect(chip.textContent).toBe("You: decide on the draft · waiting 9 days");
-    expect(chip.className).toBe("kyou pill warn");
+    expect(chip.className).toBe("pill warn kyou");
     expect(c.className).toContain("pulse-warn");
     fireEvent.click(chip);
     expect(new URLSearchParams(window.location.search).get("item")).toBe(key);

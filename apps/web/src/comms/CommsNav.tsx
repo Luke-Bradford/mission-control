@@ -8,6 +8,7 @@ import {
 } from "@mc/core";
 import { callSign, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
@@ -18,7 +19,7 @@ export function commsAgentRole(row: CrewRow): string {
   return area?.slice("area:".length) || row.role?.toLowerCase() || "crew";
 }
 
-function AgentNavRow({
+export function AgentNavRow({
   row,
   view,
   mentions,
@@ -49,7 +50,10 @@ function AgentNavRow({
         <small>{`${commsAgentRole(row)} · ${status.label.toLowerCase()}`}</small>
       </span>
       <span className="comms-nav-counts">
-        <small className={recent === 0 ? "zero" : undefined} title={`${recent} messages in 24h`}>
+        <small
+          className={recent === 0 ? "zero" : undefined}
+          title={`${plural(recent, "message")} in 24h`}
+        >
           {recent}
         </small>
         <CountBadges unread={unread} mentions={mentions} direct={direct} />
@@ -57,8 +61,6 @@ function AgentNavRow({
     </button>
   );
 }
-
-const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function CountBadges({
   unread = 0,
@@ -70,9 +72,9 @@ function CountBadges({
   /** Unread replies to CAPCOM on the agent's direct line, its transcript included. */
   direct?: number;
 }) {
-  const unreadLabel = counted(unread, "unread message", "unread messages");
-  const mentionsLabel = counted(mentions, "new mention", "new mentions");
-  const directLabel = counted(direct, "unread reply to you", "unread replies to you");
+  const unreadLabel = plural(unread, "unread message");
+  const mentionsLabel = plural(mentions, "new mention");
+  const directLabel = plural(direct, "unread reply to you", "unread replies to you");
   return (
     <>
       {direct > 0 && (
@@ -158,7 +160,7 @@ export function CommsNav({
         <i aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>FLIGHT ↔ CAPCOM</b>
-          <small>{`${flight?.messages.length ?? 0} messages`}</small>
+          <small>{plural(flight?.messages.length ?? 0, "message")}</small>
         </span>
         <span className="comms-nav-counts">
           <CountBadges
@@ -175,7 +177,7 @@ export function CommsNav({
         <i className="crew" aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>#crew</b>
-          <small>{`${crewMembers} members`}</small>
+          <small>{plural(crewMembers, "member")}</small>
         </span>
         <span className="comms-nav-counts">
           <CountBadges unread={crew?.unread} mentions={unseenMentionsFor(mentions, "crew")} />
@@ -183,7 +185,7 @@ export function CommsNav({
       </button>
       <div className="comms-section-head">
         <h2>Agents</h2>
-        <span>{`${seats.length} agents`}</span>
+        <span>{plural(seats.length, "agent")}</span>
       </div>
       {seats.map((row) => (
         <AgentNavRow

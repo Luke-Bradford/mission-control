@@ -1,4 +1,5 @@
 import { RESOURCES, useResource } from "../data.ts";
+import { Pill } from "./Pill.tsx";
 import "./CrewOff.css";
 
 /** `GET /api/crew/status`: `note` says why crew is off, when it is. */
@@ -19,9 +20,9 @@ export function CrewOff({
   if (status?.enabled !== false) return null;
   if (compact) {
     return (
-      <span className="pill neutral crew-off" role="status" title={status.note ?? "Crew is off"}>
+      <Pill tone="neutral" className="crew-off" role="status" title={status.note ?? "Crew is off"}>
         Crew off
-      </span>
+      </Pill>
     );
   }
   return (

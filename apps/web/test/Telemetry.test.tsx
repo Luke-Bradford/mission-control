@@ -709,6 +709,16 @@ describe("Agents", () => {
     expect(panel("tTotals").querySelectorAll("tbody tr")).toHaveLength(1);
   });
 
+  it.each([
+    [1, "of 1 agent"],
+    [3, "of 3 agents"],
+  ])("counts the agents behind a filtered working figure: %s", async (agents, detail) => {
+    const { container } = await loaded(tel({ today: { ...tel().today, agents } }));
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "shop-app-ta" } });
+    await screen.findByText("Working · now · filtered");
+    expect(kpi(container, "Working · now · filtered").detail).toBe(detail);
+  });
+
   it("where agent time goes: four labelled shares, rounded for display", async () => {
     await loaded();
     const row = panel("tUtil").querySelector(".hrow") as HTMLElement;
@@ -1288,7 +1298,7 @@ describe("engine telemetry", () => {
     ]);
     expect(row.querySelector(".warn-t")).toBeTruthy();
     within(panel("tLock")).getByText(state === "stalled" ? "no output" : "running");
-    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 runs" });
+    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 run" });
     expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
     // Lock holds shade the chart; their names stay in the tooltip so the 100% line has no text pile.
     const chartText = [...panel("tMach").querySelectorAll("svg text")].map((t) => t.textContent);

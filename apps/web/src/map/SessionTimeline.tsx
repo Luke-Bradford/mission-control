@@ -6,6 +6,7 @@ import {
   useRef,
 } from "react";
 import { useTz } from "../clock.ts";
+import { hhmm, plural } from "../fmt.ts";
 import { seatToken } from "./cards.ts";
 import {
   TIMELINE_SPAN_MS,
@@ -14,13 +15,7 @@ import {
   type useSessionTimeline,
 } from "./timeline.ts";
 
-const clockIn = (tz: string | null) => (at: number) =>
-  new Date(at).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: tz ?? undefined,
-  });
+const clockIn = (tz: string | null) => (at: number) => (tz ? hhmm(at, tz) : "—");
 const AXIS_STEP_MS = 5 * 60_000;
 /** An arrow key moves a window edge by this much; a window is never narrower than it. */
 const KEY_STEP_MS = 60_000;
@@ -167,7 +162,7 @@ export function SessionTimeline({
         <span role="status" aria-label="Playback" className="sr-only">
           {playback && current
             ? playback.step === 1 && !done
-              ? `Replaying ${label(playback.seat)}, ${playback.total} steps`
+              ? `Replaying ${label(playback.seat)}, ${plural(playback.total, "step")}`
               : done
                 ? `${label(playback.seat)} replay finished`
                 : ""

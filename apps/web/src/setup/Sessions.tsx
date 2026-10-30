@@ -15,7 +15,7 @@ import {
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
-import { modelLine, seatAreaText, seatStatus } from "../crew.ts";
+import { modelLine, seatAreaText, seatStatus, useSeatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -23,7 +23,6 @@ import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 import {
   getSession,
   inSession,

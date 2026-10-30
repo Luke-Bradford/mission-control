@@ -8,7 +8,7 @@ import type {
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { prLabel } from "../fmt.ts";
+import { plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
@@ -124,7 +124,7 @@ function ReadinessCard({
   const size =
     pr.additions == null || pr.deletions == null
       ? "Size not captured"
-      : `${pr.additions + pr.deletions} lines · ${pr.changedFiles ?? "—"} files`;
+      : `${plural(pr.additions + pr.deletions, "line")} · ${pr.changedFiles == null ? "— files" : plural(pr.changedFiles, "file")}`;
   const diffUrl = githubHref(pr.url) ? githubHref(`${pr.url}/files`) : null;
   return (
     <Panel
@@ -162,7 +162,7 @@ function ReadinessCard({
               <Empty text="No CI tries captured for this head." />
             )}
             {olderRuns.length > 0 && (
-              <span>{`Older heads: ${olderRuns.map((run) => `${run.name} · ${run.sha.slice(0, 7)} · ${run.state}`).join("; ")}`}</span>
+              <span>{`Older heads: ${olderRuns.map((run) => `${run.name} · ${shortSha(run.sha)} · ${run.state}`).join("; ")}`}</span>
             )}
           </Evidence>
           <Evidence title="Review findings">

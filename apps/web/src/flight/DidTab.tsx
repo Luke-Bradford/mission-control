@@ -7,6 +7,7 @@ import {
 import { useMemo, useState } from "react";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { isForTheController, kindLabel } from "./conversation.ts";
 import { DecidedRow } from "./Decided.tsx";
@@ -20,7 +21,7 @@ export const NO_DECISIONS_24H = "FLIGHT has decided nothing in the last 24 hours
 export const DECISIONS_CAPPED = `newest ${FLIGHT_VIEW_LIMIT} shown · the hub serves no older decisions of the last 24 h`;
 export const NO_CONTROLLER_ASKS = "Nothing was addressed to the controller in the last 24 hours.";
 export const controllerCapped = (counted: number, listed: number): string =>
-  `${counted} asks for the controller were counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold ${listed}.`;
+  `${plural(counted, "ask")} for the controller ${counted === 1 ? "was" : "were"} counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold ${listed}.`;
 export const NO_MATCHING = "No decision matches those filters.";
 export const MISSING_POWERS_PENDING =
   "Missing powers: not available yet. The hub does not report what FLIGHT lacked.";

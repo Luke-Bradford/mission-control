@@ -12,14 +12,7 @@
   --void-muted: #8391ad;
   --add: #4fdc8a;
   --rem: #ff6b6b;
-  /* the seats' colours on the void, in both themes: the dark theme's s1–s7 and its FLIGHT tone */
-  --seat-1: #3987e5;
-  --seat-2: #d95926;
-  --seat-3: #199e70;
-  --seat-4: #a36a00;
-  --seat-5: #d55181;
-  --seat-6: #008300;
-  --seat-7: #7567cb;
+  /* the seats' colours are the HUD's (hud.css); FLIGHT's tone on the void is its own */
   --seat-flight: #707b8c;
   display: flex;
   flex-direction: column;

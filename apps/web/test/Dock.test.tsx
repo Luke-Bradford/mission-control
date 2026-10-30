@@ -357,7 +357,7 @@ describe("live FLIGHT", () => {
     await waitFor(() =>
       expect(
         screen.getByText("known").closest<HTMLElement>(".ag")?.style.getPropertyValue("--c"),
-      ).toBe("var(--s3)"),
+      ).toBe("var(--seat-3)"),
     );
     expect(screen.getByText("removed").closest(".ag")).toBeNull();
     const asks = screen.getAllByTestId("waiting-ask");

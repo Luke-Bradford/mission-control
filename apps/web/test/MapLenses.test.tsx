@@ -1,9 +1,15 @@
-import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
 import { changeIntensity, historyHeat, isFixHeavy, treemapLayout } from "../src/map/MapTreemap.tsx";
+
+// Clock times need the operator's timezone, which the hub would load from /api/config.
+vi.mock("../src/clock.ts", async (original) => ({
+  ...(await original<typeof import("../src/clock.ts")>()),
+  useTz: () => "Europe/London",
+}));
 
 it("derives seed reach, history heat and focused partner confidence from the map payload", () => {
   const value = snapshot();
@@ -240,7 +246,7 @@ it("counts the files an area owns, not every file, and the configured areas, not
   expect(lens.textContent).toContain("none");
   expect(lens.textContent).toContain("everything else");
   expect(screen.getByRole("note", { name: "Ownership colour key" }).textContent).toContain(
-    `${owned} of ${value.tree.length} files owned by an area · 2 hard-rule`,
+    `${owned} of ${value.tree.length} files owned by an area · 2 hard-rules`,
   );
 });
 
@@ -1264,4 +1270,73 @@ it("moves, resizes and clears the timeline window with the arrow keys", () => {
     vi.useRealTimers();
     reset();
   }
+});
+
+it("says 1 file for a one-file repository and N files otherwise", () => {
+  const one = structuredClone(mapSnapshotFixture);
+  one.tree = one.tree.slice(0, 1);
+  const { unmount } = render(<CrewMapView snapshot={one} />);
+  expect(screen.getAllByText("1 file").length).toBeGreaterThan(0);
+  unmount();
+  render(<CrewMapView snapshot={structuredClone(mapSnapshotFixture)} />);
+  expect(screen.getAllByText(`${mapSnapshotFixture.tree.length} files`).length).toBeGreaterThan(0);
+});
+
+/** A second seat that changed src/util.ts, so the first seat's main.ts depends on its changes. */
+const utilChanger = (snapshot: MapSnapshot): MapSeat => ({
+  ...structuredClone(snapshot.seats[0] as MapSeat),
+  seat: "INCO-1",
+  scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
+});
+
+it("says 1 step for a direct import and N steps for a longer chain in the Impact overlap", () => {
+  const direct: MapSnapshot = structuredClone(mapSnapshotFixture);
+  direct.seats.push(utilChanger(direct));
+  const { unmount } = render(<CrewMapView snapshot={direct} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
+    "which depends on INCO-1’s changes · 1 step: main.ts → util.ts.",
+  );
+  unmount();
+
+  const chained: MapSnapshot = structuredClone(mapSnapshotFixture);
+  chained.tree = [
+    { path: "src/main.ts", lines: 10 },
+    { path: "src/mid.ts", lines: 10 },
+    { path: "src/util.ts", lines: 10 },
+  ];
+  chained.imports = [
+    { from: "src/main.ts", to: "src/mid.ts" },
+    { from: "src/mid.ts", to: "src/util.ts" },
+  ];
+  chained.seats.push(utilChanger(chained));
+  render(<CrewMapView snapshot={chained} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
+    "· 2 steps: main.ts → mid.ts → util.ts.",
+  );
+});
+
+it("counts hard-rule files and findings in the analytical keys, singular and plural", () => {
+  const ownershipKey = (snapshot: MapSnapshot): string => {
+    render(<CrewMapView snapshot={snapshot} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+    const text = screen.getByRole("note", { name: "Ownership colour key" }).textContent ?? "";
+    cleanup();
+    return text;
+  };
+  // contract.ts and unowned.ts are the two hard-rule files
+  expect(ownershipKey(ownershipSnapshot())).toContain("· 2 hard-rules");
+  const one = ownershipSnapshot();
+  one.tree = one.tree.filter((file) => file.path !== "src/unowned.ts");
+  expect(ownershipKey(one)).toContain("· 1 hard-rule");
+  expect(ownershipKey(one)).not.toContain("1 hard-rules");
+
+  const single = reviewSnapshot();
+  single.findings = single.findings.slice(0, 1);
+  render(<CrewMapView snapshot={single} />);
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(screen.getByRole("note", { name: "Review severity key" }).textContent).toContain(
+    "1 finding on 1 file",
+  );
 });

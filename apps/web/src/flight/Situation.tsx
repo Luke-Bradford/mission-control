@@ -1,7 +1,6 @@
 import {
   type AttentionItem,
   type CrewPause,
-  clockHm,
   FLIGHT_VIEW_LIMIT,
   type FlightSummaryView,
   type FlightWakeStatus,
@@ -11,7 +10,7 @@ import {
 import { useNow, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { dur, rel } from "../fmt.ts";
+import { dur, hhmm, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { useMetrics } from "../metrics.ts";
 import { stateWord } from "../shell/Dock.tsx";
@@ -26,7 +25,7 @@ const DASH = "—";
 const wakeAt = (at: number | null | undefined, now: number, tz: string | null): string =>
   at === null || at === undefined || tz === null
     ? DASH
-    : `${clockHm(at, tz)} · ${at <= now ? rel(at, now, tz) : `in ${dur(at - now)}`}`;
+    : `${hhmm(at, tz)} · ${at <= now ? rel(at, now, tz) : `in ${dur(at - now)}`}`;
 
 /** The strip's wake line: last and next wake and what woke FLIGHT, a dash only for what is unknown. */
 export function wakeLine(wake: FlightWakeStatus | undefined, now: number, tz: string | null) {

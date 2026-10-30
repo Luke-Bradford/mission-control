@@ -1,5 +1,6 @@
 import type { FindingSeverity, MapSnapshot } from "@mc/core";
 import { type CSSProperties, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { plural } from "../fmt.ts";
 import { type LensVisual, type MapLens, ownershipOf } from "./Lenses.tsx";
 
 const colours = [
@@ -481,11 +482,11 @@ export const MapTreemap = memo(function MapTreemap({
                 : lens === "impact" && active && v?.distance !== undefined
                   ? `${v.seatName ? `${v.seatName}, ` : ""}import distance ${v.distance}`
                   : lens === "history" && v?.hotspot
-                    ? `${v.hotspot} merged PR${v.hotspot === 1 ? "" : "s"}, ${v.fixes ?? 0} fix${v.fixes === 1 ? "" : "es"}`
+                    ? `${plural(v.hotspot, "merged PR")}, ${plural(v.fixes ?? 0, "fix", "fixes")}`
                     : lens === "ownership"
                       ? `${v?.area ?? "no area"}${v?.hardRule ? ", hard-rule" : ""}`
                       : lens === "review" && v?.severity
-                        ? `${v.findings} finding${v.findings === 1 ? "" : "s"}, top severity ${v.severity}`
+                        ? `${plural(v.findings ?? 0, "finding")}, top severity ${v.severity}`
                         : lens === "conflicts" && v?.conflict
                           ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
                           : ""

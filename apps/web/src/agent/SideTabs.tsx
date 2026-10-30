@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { LOOP_PHASE_LABEL } from "../crew.ts";
 import { hub, RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
-import { dur, kTokens } from "../fmt.ts";
+import { dur, kTokens, shortSha } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
@@ -452,7 +452,7 @@ function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFil
             )}
           </span>
           <span className={f.state === "committed" ? "num xs fg2" : "num xs muted"}>
-            {f.state === "committed" ? (f.commitSha?.slice(0, 7) ?? DASH) : "uncommitted"}
+            {f.state === "committed" ? (f.commitSha ? shortSha(f.commitSha) : DASH) : "uncommitted"}
           </span>
         </button>
       ))}

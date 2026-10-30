@@ -24,7 +24,7 @@ import {
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { dur } from "../fmt.ts";
+import { dur, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -74,7 +74,7 @@ export function StepCells({ r }: { r: CrewRow }) {
             // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
             key={`${i}:${step.name}`}
             className={["wstep", MARK_CLASS[mark]].filter(Boolean).join(" ")}
-            title={n > 0 ? `${label} · ${n} ${n === 1 ? "try" : "tries"}` : undefined}
+            title={n > 0 ? `${label} · ${plural(n, "try", "tries")}` : undefined}
             aria-current={mark === "cur" || mark === "held" ? "step" : undefined}
           >
             {label}

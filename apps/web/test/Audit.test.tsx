@@ -253,14 +253,14 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(
     screen
-      .getByRole("link", { name: "Spend outlier · mission-control#700 · $42.50 · run/expensive" })
+      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · run/expensive" })
       .getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
   expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
   expect(
     screen.getByText(
       auditChangeWith(
-        "effect · merged 1 → 3 · review fail 50% → 0% · median cost $2.00 → $1.00 · rework 1 → 0",
+        "effect · merged 1 → 3 · review fail 50% → 0% · median cost ~$2.00 → ~$1.00 · rework 1 → 0",
       ),
     ),
   ).toBeTruthy();
@@ -268,7 +268,7 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   expect(
     screen.getByText(
       auditChangeWith(
-        "effect · merged 4 → 2 · review fail 25% → — · median cost $4.00 → — · rework 2 → 5",
+        "effect · merged 4 → 2 · review fail 25% → — · median cost ~$4.00 → — · rework 2 → 5",
       ),
     ),
   ).toBeTruthy();
@@ -393,4 +393,22 @@ it("does not present stale, observed-loop, or FLIGHT watch runs as improvements"
   expect(screen.queryByText(/run\/stale/)).toBeNull();
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();
+});
+
+it("sizes a one-line PR as 1 line", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      prSizes: {
+        prs: [
+          { ...AUDIT.prSizes.prs[0], repoId: "small-repo", number: 4, additions: 1, deletions: 0 },
+        ],
+        outliers: [],
+      },
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+  expect(await screen.findByText(/^1 line$/)).toBeTruthy();
 });

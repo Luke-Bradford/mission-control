@@ -8,7 +8,7 @@ import {
 } from "@mc/core";
 import { useId, useMemo, useState } from "react";
 import type { NeedsYou } from "../attention.ts";
-import { agoDays } from "../fmt.ts";
+import { agoDays, plural } from "../fmt.ts";
 import { Card, type CardProps } from "./Card.tsx";
 import {
   cardAgent,
@@ -164,7 +164,7 @@ export function Kanban({
         const moreDone =
           hiddenDone > 0 ? (
             <button type="button" className="done-more" onClick={() => setDoneExpanded(true)}>
-              Show {hiddenDone} more completed card{hiddenDone === 1 ? "" : "s"}
+              Show {plural(hiddenDone, "more completed card")}
             </button>
           ) : null;
         if (phone && list.length > 0) {

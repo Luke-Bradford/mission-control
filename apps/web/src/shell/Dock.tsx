@@ -3,7 +3,6 @@ import {
   ATTENTION_LABEL,
   type AttentionItem,
   type Crew,
-  clockHm,
   flightTurnText,
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +35,7 @@ import { DOCK_COLLAPSED_KEY, readBool, writeBool } from "../storage.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
 import "./Dock.css";
+import { hhmm, percent } from "../fmt.ts";
 
 const CAPCOM = "@CAPCOM";
 
@@ -64,7 +64,7 @@ export function stateWord(seat: FlightSeat): string {
 const flightMarkdown = (text: string): string => text.split(CAPCOM).join(`**${CAPCOM}**`);
 
 const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) {
-  const at = row.at !== null && tz !== null ? clockHm(row.at, tz) : null;
+  const at = row.at !== null && tz !== null ? hhmm(row.at, tz) : null;
   const pending = row.kind === "you" && row.pending === true;
   const sender =
     row.kind === "you"
@@ -431,7 +431,7 @@ export function Dock() {
                       row?.accountId,
                       seat.model,
                       seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
-                      ctx !== null && `context ${Math.round(ctx)}%`,
+                      ctx !== null && `context ${percent(ctx)}`,
                       row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
                     ]
                       .filter(Boolean)

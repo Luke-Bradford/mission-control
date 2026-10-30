@@ -128,7 +128,7 @@ describe("theme tokens", () => {
     expect(THEME_TOKENS.dark).toMatchObject({
       "--bg": "#070a0e",
       "--fg": "#e7eaef",
-      "--s1": "#3987e5",
+      "--seat-1": "#3987e5",
     });
     expect(THEME_TOKENS.light).toMatchObject({ "--bg": "#f3f5f8", "--surface": "#ffffff" });
   });
@@ -467,7 +467,15 @@ describe("setTheme / getTheme", () => {
 });
 
 describe("repo palette", () => {
-  const AGENTS: readonly TokenName[] = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
+  const AGENTS: readonly TokenName[] = [
+    "--seat-1",
+    "--seat-2",
+    "--seat-3",
+    "--seat-4",
+    "--seat-5",
+    "--seat-6",
+    "--seat-7",
+  ];
   /** CIE76 ΔE between two `#rrggbb` colours (sRGB, D65): ~2 is a just-noticeable difference. */
   function deltaE(a: string, b: string): number {
     const lab = (hex: string): [number, number, number] => {
