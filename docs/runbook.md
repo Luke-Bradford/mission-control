@@ -1037,6 +1037,11 @@ This code change does not edit `CLAUDE.md` or your home config.
 run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
+use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
+`300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
+no Claude review did). When a review fails on its budget, the author's next attempt goes to another
+free reviewer of the session, not the same seat, and only a single reviewer retries on itself.
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
