@@ -158,6 +158,7 @@ import {
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
+import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
@@ -1829,9 +1830,19 @@ export function createEngine(deps: EngineDeps): Engine {
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }
 
+  const ticks = tickLogOf(store);
+
   const reconcileRun = (runId: string): Promise<void> => {
     if (!live()) return Promise.resolve();
-    return onChain(runId, () => pass(runId));
+    return onChain(runId, async () => {
+      const run = store.run(runId);
+      const done = ticks.step(`reconcile ${run?.repoId} ${runId} ${run?.loop?.phase ?? "no loop"}`);
+      try {
+        await pass(runId);
+      } finally {
+        done();
+      }
+    });
   };
 
   /** Whether an ended run's Blocked move and note are settled, or no longer wanted. */
@@ -2389,27 +2400,54 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const cache = {
-        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
-        notes: store.notes(),
+      const startedAt = now();
+      ticks.begin(startedAt);
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      // a tick past its interval is logged once, with what it is on (the scheduler skips the next)
+      const noteOverrun = () => {
+        const steps = ticks.overrun();
+        if (steps !== null) log(overrunText(startedAt, steps));
       };
-      await tickCache.run(cache, async () => {
-        const runs = loopRuns();
-        const notes = cache.notes;
-        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-        await Promise.all(
-          store
-            .runsActiveSince(now())
-            .filter((r) => r.loop !== null && r.loop !== undefined)
-            .map((run) => watchGreenEvidence(run, notes)),
-        );
-        await Promise.all(runs.map((r) => reconcileRun(r.id)));
-        await refreshRuleNotes(runs);
-        await sweepNotes(notes);
-        untakeStale();
-        await takeForSeats();
-        await kickReviews();
-      });
+      // work that blocks the event loop starves the timer, so each step also checks the clock
+      const phase = async <T>(label: string, fn: () => Promise<T> | T): Promise<T> => {
+        const done = ticks.step(label);
+        try {
+          return await fn();
+        } finally {
+          if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+          done();
+        }
+      };
+      try {
+        timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
+        timer.unref();
+        const notes = await phase("load notes", () => store.notes());
+        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
+        await tickCache.run(cache, async () => {
+          const runs = await phase("list runs", loopRuns);
+          await phase("wake pending work", () =>
+            Promise.all(runs.map((r) => wakePendingWork(r.id))),
+          );
+          await phase("watch green evidence", () =>
+            Promise.all(
+              store
+                .runsActiveSince(now())
+                .filter((r) => r.loop !== null && r.loop !== undefined)
+                .map((run) => watchGreenEvidence(run, notes)),
+            ),
+          );
+          await Promise.all(runs.map((r) => reconcileRun(r.id)));
+          await phase("refresh rule notes", () => refreshRuleNotes(runs));
+          await phase("sweep notes", () => sweepNotes(notes));
+          await phase("untake stale", untakeStale);
+          await phase("take for seats", takeForSeats);
+          await phase("kick reviews", kickReviews);
+        });
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+        if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+        ticks.end(now());
+      }
     },
 
     reconcileRun,

@@ -131,6 +131,7 @@ import {
 import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -2724,6 +2725,68 @@ describe("review round", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(h.pushes).toEqual([RUN]);
     expect(loopOf()).toMatchObject({ phase: "ci", reportedEvidenceId: 1 });
+  });
+
+  describe("tick diagnostics", () => {
+    it("records each tick's start, end and duration", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += 700;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      const startedAt = clock;
+      await h.engine.tick();
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        { startedAt, endedAt: startedAt + 700, durationMs: 700, overranOn: null },
+      ]);
+      expect(tickLogOf(store).running()).toBeNull();
+    });
+
+    it("logs a tick whose synchronous work starved the timer, naming that work", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += ENGINE_TICK_MS + 1;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      await h.engine.tick();
+      expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+        expect.stringContaining("on load notes"),
+      ]);
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        expect.objectContaining({ overranOn: ["load notes"] }),
+      ]);
+    });
+
+    it("finishes the tick it records when the tick throws", async () => {
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        throw new Error("db gone");
+      });
+      const before = tickLogOf(store).recent().length;
+      await expect(h.engine.tick()).rejects.toThrow("db gone");
+      expect(tickLogOf(store).running()).toBeNull();
+      expect(tickLogOf(store).recent()).toHaveLength(before + 1);
+    });
+
+    it("logs a tick still running past its interval once, with the run it is on", async () => {
+      report();
+      h.pushHang = true;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        void h.engine.tick();
+        await vi.advanceTimersByTimeAsync(ENGINE_TICK_MS - 1);
+        expect(h.logs.filter((l) => l.includes("still running"))).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(3 * ENGINE_TICK_MS);
+        const lines = h.logs.filter((l) => l.includes("still running"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(`reconcile ${REPO} ${RUN} `);
+        expect(tickLogOf(store).running()?.steps.join()).toContain(RUN);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("an ended run settles only when both the move and the note have landed", () => {

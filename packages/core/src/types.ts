@@ -827,6 +827,8 @@ export interface HealthRow {
   lastOkAt: number | null;
   /** When its current run of failures began, UTC ms; null while it succeeds. */
   failingSince?: number | null;
+  /** The `engine:ticks` row only: the last engine ticks, oldest first. */
+  ticks?: EngineTick[];
 }
 
 /**
@@ -1349,4 +1351,13 @@ export interface AttentionHold {
   by: string;
   at: number;
   releasedAt?: number;
+}
+
+/** One finished engine tick, as `/api/health` serves it. */
+export interface EngineTick {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  /** The steps it was still on when it passed its interval; null for a tick that stayed within it. */
+  overranOn: string[] | null;
 }

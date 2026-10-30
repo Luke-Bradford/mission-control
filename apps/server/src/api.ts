@@ -43,6 +43,7 @@ import {
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
+  ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
   fixesSent,
@@ -195,6 +196,7 @@ import {
 } from "./crew-pause.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   changedFiles,
   committedLines,
@@ -2491,7 +2493,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       }
 
-      api.get("/health", async () => store.status());
+      api.get("/health", async () => {
+        const ticks = tickLogOf(store);
+        const recent = ticks.recent();
+        const last = recent.at(-1);
+        const running = ticks.running();
+        if (recent.length === 0 && running === null) return store.status();
+        return [
+          ...store.status(),
+          // the engine's recent tick durations; `error` names a tick still running past its interval
+          {
+            collector: TICKS_COLLECTOR,
+            ok: running === null || now() - running.startedAt < ENGINE_TICK_MS,
+            error: running === null ? null : overrunText(running.startedAt, running.steps),
+            at: last?.endedAt ?? 0,
+            lastOkAt: last?.endedAt ?? null,
+            ticks: recent,
+          },
+        ];
+      });
       // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
       api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
         const range = req.query.range ?? "30d";
