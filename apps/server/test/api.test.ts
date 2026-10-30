@@ -8685,6 +8685,11 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     ],
     NOW,
   );
+  store.replacePullRequests(
+    "site-builder",
+    store.pullRequests("shop-app").map((pr) => ({ ...pr, repoId: "site-builder" })),
+    NOW,
+  );
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
@@ -8696,9 +8701,20 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     },
     remove: async () => {},
   });
-  const a = buildApp({ config, store, bus, previews, operatorToken: "preview-token" });
+  const a = buildApp({
+    config,
+    store,
+    bus,
+    previews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
   try {
     expect((await a.inject("/api/previews")).statusCode).toBe(401);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers: json, payload: { pr: 41 } }))
+        .statusCode,
+    ).toBe(401);
     const headers = { [OPERATOR_HEADER]: "preview-token", ...json };
     const started = await a.inject({
       method: "POST",
@@ -8708,6 +8724,10 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect((await a.inject("/api/repos/shop-app/prs")).json()[0]).toMatchObject({
+      number: 41,
+      preview: { url: "http://127.0.0.1:7431", port: 7431 },
+    });
     expect((await a.inject({ method: "GET", url: "/api/previews", headers })).json()).toHaveLength(
       1,
     );
@@ -8729,6 +8749,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
         })
       ).statusCode,
     ).toBe(404);
+    expect((await a.inject({ method: "DELETE", url: "/api/previews/41" })).statusCode).toBe(401);
     expect(
       (
         await a.inject({

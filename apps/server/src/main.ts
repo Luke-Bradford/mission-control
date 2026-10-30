@@ -310,6 +310,9 @@ export async function main(): Promise<void> {
   }
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
   const hubRoot = findHubRoot();
+  const previewRepoId = config.crew?.sessions.find(
+    (session) => hubRoot !== null && resolve(session.checkout) === hubRoot,
+  )?.repoId;
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
@@ -646,6 +649,7 @@ export async function main(): Promise<void> {
   });
   const app = buildApp({
     previews,
+    previewRepoId,
     previewActivity,
     hudShots,
     queueReorder,
@@ -776,7 +780,12 @@ async function runPreviewCommand(
   cwd?: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  const child = spawn(command, args, { cwd, stdio: "ignore", signal });
+  const child = spawn(command, args, {
+    cwd,
+    stdio: "ignore",
+    signal,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
   await new Promise<void>((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code) =>

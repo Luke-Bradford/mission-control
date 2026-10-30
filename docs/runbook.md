@@ -1676,7 +1676,9 @@ temporary detached worktree, a spare port from 7431–7439, and `MC_NO_LOOP_WRIT
 off. It receives a newly generated operator token; the live token is never passed to it. At most
 two previews run. A capacity hold refuses new previews with its measured reason. The parent stops
 a preview after 20 minutes without a browser request, and removes its worktree and database on
-expiry, explicit close, or live-hub shutdown.
+expiry, explicit close, or live-hub shutdown. Preparation has a five-minute deadline, and an
+operator close cancels preparation as well as a running child. Previews only run branches from the
+repository checked out by the hub; PR numbers in another configured repository are not eligible.
 
 ## Audit API
 

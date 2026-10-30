@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 export const PREVIEW_PORTS = [7431, 7432, 7433, 7434, 7435, 7436, 7437, 7438, 7439] as const;
 export const PREVIEW_LIMIT = 2;
 export const PREVIEW_IDLE_MS = 20 * 60_000;
+export const PREVIEW_START_MS = 5 * 60_000;
 export const PREVIEW_ACTIVITY_HEADER = "x-mc-preview-activity";
 
 export type PreviewErrorCode = "capacity" | "limit" | "already-running" | "no-port";
@@ -99,11 +100,14 @@ export class PreviewManager {
     const startedAt = this.now();
     const token = randomBytes(32).toString("base64url");
     let child: PreviewProcess & { dbPath?: string };
+    const timeout = setTimeout(() => pending.controller.abort(), PREVIEW_START_MS);
     try {
       child = await this.deps.start({ ...input, port, token, signal: pending.controller.signal });
     } catch (e) {
       this.release(input.pr);
       throw e;
+    } finally {
+      clearTimeout(timeout);
     }
     const preview: Preview = {
       pr: input.pr,
@@ -153,6 +157,12 @@ export class PreviewManager {
   }
 
   async close(pr: number): Promise<boolean> {
+    const pending = this.pending.get(pr);
+    if (pending) {
+      pending.controller.abort();
+      await pending.done;
+      return true;
+    }
     const preview = this.previews.get(pr);
     if (!preview) return false;
     this.previews.delete(pr);

@@ -83,6 +83,7 @@ import {
   type QaFindingsView,
   READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
+  type RepoId,
   type RepoProfile,
   type RepoView,
   type RunLoopView,
@@ -340,6 +341,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
+  /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
+  previewRepoId?: RepoId;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -2388,7 +2391,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const repo = config.repos.find((r) => r.id === req.params.repoId);
           if (!repo) return reply.code(404).send({ error: "unknown repo" });
           const prs = store.pullRequests(repo.id);
-          return linked === "1" ? prs.filter((p) => p.ticket !== null) : prs;
+          const rows = linked === "1" ? prs.filter((p) => p.ticket !== null) : prs;
+          return rows.map((pr) => ({
+            ...pr,
+            preview:
+              repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+          }));
         },
       );
 
@@ -2417,21 +2425,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!parsed.success) return reply.code(400).send({ error: z.prettifyError(parsed.error) });
         if (!deps.previews)
           return reply.code(409).send({ error: "previews are unavailable on this server" });
-        const matches = config.repos.flatMap((repo) =>
-          store
-            .pullRequests(repo.id)
-            .filter((pr) => pr.number === parsed.data.pr && pr.state === "open")
-            .map((pr) => ({
-              repo,
-              pr,
-              checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
-            })),
-        );
-        if (matches.length === 0) return reply.code(404).send({ error: "open PR not found" });
-        if (matches.length > 1)
-          return reply.code(409).send({ error: "PR number is ambiguous across repositories" });
-        const match = matches[0];
-        if (!match) return reply.code(404).send({ error: "open PR not found" });
+        const repo = config.repos.find((candidate) => candidate.id === deps.previewRepoId);
+        if (!repo)
+          return reply.code(409).send({ error: "previews run Mission Control branches only" });
+        const pr = store
+          .pullRequests(repo.id)
+          .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
+        if (!pr) return reply.code(404).send({ error: "open PR not found" });
+        const match = {
+          repo,
+          pr,
+          checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
+        };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
         try {
           return await deps.previews.start({

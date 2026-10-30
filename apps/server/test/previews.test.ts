@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PREVIEW_IDLE_MS,
+  PREVIEW_START_MS,
   PreviewHubError,
   PreviewManager,
   type PreviewProcess,
@@ -56,6 +57,58 @@ describe("PreviewManager", () => {
     expect(cleaned).toBe(true);
   });
 
+  it("cancels a pending preview when the operator closes it and releases its slot", async () => {
+    let cancelled = false;
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async ({ signal, pr }) => {
+        if (pr === 42) return { stop: () => {} };
+        return await new Promise<PreviewProcess>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            cancelled = true;
+            reject(new Error("cancelled"));
+          });
+        });
+      },
+      remove: async () => {},
+    });
+    const starting = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(manager.close(41)).resolves.toBe(true);
+    await expect(starting).rejects.toThrow("cancelled");
+    expect(cancelled).toBe(true);
+    await expect(
+      manager.start({ pr: 42, branch: "feature/42", checkout: "/repo" }),
+    ).resolves.toMatchObject({ pr: 42 });
+  });
+
+  it("expires a start that exceeds the preparation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new PreviewManager({
+        exists: () => false,
+        capacity: () => ({ blocked: false, reason: null }),
+        start: async ({ signal }) =>
+          await new Promise<PreviewProcess>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("preview start timed out")));
+          }),
+        remove: async () => {},
+      });
+      const starting = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+      const outcome = starting.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(PREVIEW_START_MS);
+      await expect(outcome).resolves.toMatchObject({ message: "preview start timed out" });
+      expect(manager.list()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the spare-port pool, refuses a third preview, and releases a closed port", async () => {
     let clock = NOW;
     const starts: { port: number; dbPath: string; token: string }[] = [];
@@ -85,6 +138,26 @@ describe("PreviewManager", () => {
     clock += 1;
     await manager.start({ pr: 43, branch: "feature/43", checkout: "/repo" });
     expect(starts.at(-1)?.port).toBe(7432);
+  });
+
+  it("stops and removes every running preview on shutdown", async () => {
+    const first = { stop: vi.fn(), dbPath: "/tmp/first.sqlite" };
+    const second = { stop: vi.fn(), dbPath: "/tmp/second.sqlite" };
+    const remove = vi.fn(async () => {});
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async ({ pr }) => (pr === 41 ? first : second),
+      remove,
+    });
+    await manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    await manager.start({ pr: 42, branch: "feature/42", checkout: "/repo" });
+
+    await manager.closeAll();
+    expect(first.stop).toHaveBeenCalledOnce();
+    expect(second.stop).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(manager.list()).toEqual([]);
   });
 
   it("refuses while machine capacity is held and tears down idle previews", async () => {
