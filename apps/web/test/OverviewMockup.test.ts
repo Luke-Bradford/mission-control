@@ -63,6 +63,8 @@ describe("Overview v2 mockup", () => {
       return totals;
     }, new Map<string, number>());
     const crewSummary = document.querySelector("#crew .sub")?.textContent ?? "";
+    const crewHeadline = document.querySelector(".health b")?.textContent ?? "";
+    const workingKpi = document.querySelector(".kpi b")?.textContent ?? "";
     const pipelineSummary = document.querySelector("#pipeline .sub")?.textContent ?? "";
     const stageTotal = [...document.querySelectorAll("#pipeline .stage h3 span")].reduce(
       (total, count) => total + Number(count.textContent),
@@ -70,6 +72,8 @@ describe("Overview v2 mockup", () => {
     );
 
     expect(crewSummary).toContain(`${counts.get("Working")} working`);
+    expect(crewHeadline).toBe(`${counts.get("Working")} working`);
+    expect(workingKpi).toBe(String(counts.get("Working")));
     expect(crewSummary).toContain(`${counts.get("Waiting")} waiting`);
     expect(crewSummary).toContain(`${counts.get("Free")} free`);
     expect(crewSummary).toContain(`${counts.get("Checking")} checking`);
