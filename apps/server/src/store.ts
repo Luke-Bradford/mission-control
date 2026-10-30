@@ -107,6 +107,10 @@ export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
+export const LIVE_COMMS_LIMIT = 5_000;
+export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
+export const OPERATIONAL_RETENTION_DAYS = 90;
+export const AUDIT_RETENTION_DAYS = 365;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
@@ -1249,6 +1253,22 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
+      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
+      CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
+      CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
+      CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
+      CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
+      CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
+      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
+      CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
+      CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -1338,6 +1358,8 @@ export class Store {
     this.addColumn("comms", "reply_to", "INTEGER");
     this.addColumn("comms", "target_run_id", "TEXT");
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
@@ -1596,7 +1618,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') IS NOT NULL",
+          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') > ''",
         )
         .all(agentId) as Row[]
     ).map(toRun);
@@ -1605,9 +1627,11 @@ export class Store {
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
     const rows = this.db
-      .prepare(
-        "SELECT * FROM runs WHERE ended_at IS NULL OR ended_at >= ? ORDER BY started_at, seq",
-      )
+      .prepare(`SELECT * FROM (
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
+        UNION ALL
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= ?
+      ) ORDER BY started_at, seq`)
       .all(since) as Row[];
     return rows.map(toRun);
   }
@@ -1616,7 +1640,12 @@ export class Store {
   runsForAwayDigest(): Run[] {
     const rows = this.db
       .prepare(
-        "SELECT * FROM runs WHERE ended_at IS NULL OR json_extract(loop, '$.merging') IS NOT NULL ORDER BY started_at, seq",
+        `SELECT * FROM (
+           SELECT * FROM runs WHERE ended_at IS NULL
+           UNION ALL
+           SELECT * FROM runs INDEXED BY runs_merging_started
+             WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
+         ) ORDER BY started_at, seq`,
       )
       .all() as Row[];
     return rows.map(toRun);
@@ -1643,11 +1672,13 @@ export class Store {
   loopRuns(endedSince: number): Run[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM runs WHERE loop IS NOT NULL
-           AND (ended_at IS NULL
-             OR (ended_at >= ? AND (json_extract(loop, '$.phase') != 'done'
-               OR json_extract(loop, '$.merging') IS NOT NULL)))
-         ORDER BY started_at, seq`,
+        `SELECT * FROM (
+           SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
+           UNION ALL
+           SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= ?
+             AND (json_extract(loop, '$.phase') != 'done'
+               OR json_extract(loop, '$.merging') > '')
+         ) ORDER BY started_at, seq`,
       )
       .all(endedSince) as Row[];
     return rows.map(toRun);
@@ -2035,11 +2066,101 @@ export class Store {
   }
 
   private historyNextTable = 0;
+  private operationalHistoryNextTable = 0;
 
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
+    let batches = 0;
+    // These rows are operational traces, not durable Audit and QA records. One bounded batch per
+    // table keeps an upgrade's first maintenance pass within the same sweep budget as run history.
+    const operationalTables = [
+      ["attention_notes", "cleared_at IS NOT NULL AND cleared_at < ?", OPERATIONAL_RETENTION_DAYS],
+      [
+        "attention_episodes",
+        "cleared_at IS NOT NULL AND cleared_at < ?",
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      [
+        "board_moves",
+        `at < ? AND state IN ('done', 'failed') AND EXISTS (
+          SELECT 1 FROM runs r WHERE r.id = board_moves.run_id AND r.ended_at IS NOT NULL)`,
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      ["guard_hits", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
+      ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
+      [
+        "briefs",
+        `at < ? AND NOT (
+          id = (SELECT MAX(current.id) FROM briefs current WHERE current.key = briefs.key)
+          AND EXISTS (SELECT 1 FROM attention_notes n WHERE n.key = briefs.key AND n.cleared_at IS NULL)
+        )`,
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      [
+        "reviews",
+        "ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')",
+        AUDIT_RETENTION_DAYS,
+      ],
+      [
+        "runs",
+        `ended_at IS NOT NULL AND ended_at < ? AND NOT EXISTS (
+          SELECT 1 FROM reviews v WHERE v.author_run_id = runs.id OR v.run_id = runs.id
+        )`,
+        AUDIT_RETENTION_DAYS,
+      ],
+      ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+    ] as const;
+    const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
+    const [table, condition, retentionDays] = operationalTables[operationalIndex];
+    this.operationalHistoryNextTable = (operationalIndex + 1) % operationalTables.length;
+    if (batches < HISTORY_SWEEP_MAX_BATCHES) {
+      const ids = this.db
+        .prepare(`SELECT rowid AS id FROM ${table} WHERE ${condition} ORDER BY rowid LIMIT ?`)
+        .all(now - retentionDays * day, HISTORY_BATCH_ROWS) as { id: number }[];
+      if (ids.length > 0) {
+        this.transaction(() => {
+          if (table === "reviews") {
+            const marks = ids.map(() => "?").join(",");
+            this.db
+              .prepare(`DELETE FROM review_checks WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_tests WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_resolutions WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_findings WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+          }
+          if (table === "runs") {
+            const marks = ids.map(() => "?").join(",");
+            const runIds = this.db
+              .prepare(`SELECT id FROM runs WHERE rowid IN (${marks})`)
+              .all(...ids.map(({ id }) => id)) as { id: string }[];
+            const values = runIds.map(({ id }) => id);
+            if (values.length > 0) {
+              const runMarks = values.map(() => "?").join(",");
+              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
+                this.db
+                  .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
+                  .run(...values);
+            }
+          }
+          this.db
+            .prepare(`DELETE FROM ${table} WHERE rowid IN (${ids.map(() => "?").join(",")})`)
+            .run(...ids.map(({ id }) => id));
+        });
+        batches++;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
       AND json_extract(r.loop, '$.aside') IS NULL
@@ -2056,7 +2177,6 @@ export class Store {
       ["comms", COMMS_RETENTION_DAYS, ""],
       ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
     ] as const;
-    let batches = 0;
     const start = this.historyNextTable;
     for (let offset = 0; offset < tables.length; offset++) {
       const index = (start + offset) % tables.length;
@@ -2382,9 +2502,12 @@ export class Store {
           );
       const runs = this.db
         .prepare(
-          "SELECT id FROM runs WHERE repo_id = ? AND (json_extract(loop, '$.prNumber') = ? OR id IN (SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?))",
+          `SELECT id FROM runs INDEXED BY runs_loop_pr_number
+             WHERE json_extract(loop, '$.prNumber') = ?
+           UNION
+           SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?`,
         )
-        .all(repoId, p.number, repoId, p.number) as Row[];
+        .all(p.number, repoId, p.number) as Row[];
       for (const run of runs) {
         this.appendAttempt(run.id as string, "ci", readAt, {
           sha: p.headSha,
@@ -3756,11 +3879,13 @@ export class Store {
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
   planLanded(run: Run): boolean {
+    if (this.statement("SELECT 1 FROM loop_events WHERE key = ?").get(`${run.id}:plan`))
+      return true;
     return (
       this.statement(
-        `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
-           WHERE e.key = ? OR (e.key LIKE '%:plan' AND r.repo_id = ? AND r.ticket = ?) LIMIT 1`,
-      ).get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
+        `SELECT 1 FROM runs r JOIN loop_events e ON e.key = r.id || ':plan'
+           WHERE r.repo_id = ? AND r.ticket = ? LIMIT 1`,
+      ).get(run.repoId, run.ticket) !== undefined
     );
   }
 
@@ -4398,10 +4523,22 @@ export class Store {
     const rows = this.db
       .prepare(
         targetRunId === undefined
-          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id"
-          : "SELECT * FROM comms WHERE at >= ? AND (target_run_id IS NULL OR target_run_id = ?) ORDER BY at, id",
+          ? `SELECT * FROM (
+               SELECT * FROM comms WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`
+          : `SELECT * FROM (
+               SELECT * FROM (
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
+                 UNION ALL
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
+               ) ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`,
       )
-      .all(since, ...(targetRunId === undefined ? [] : [targetRunId])) as Row[];
+      .all(
+        since,
+        ...(targetRunId === undefined ? [] : [since, targetRunId]),
+        LIVE_COMMS_LIMIT,
+      ) as Row[];
     // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
     // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({
@@ -4513,11 +4650,17 @@ export class Store {
   loopEvents(since: number, repoId?: RepoId): LoopEvent[] {
     const rows = (
       repoId === undefined
-        ? this.db.prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key").all(since)
+        ? this.db
+            .prepare(`SELECT * FROM (
+              SELECT * FROM loop_events WHERE at >= ? ORDER BY at DESC, key DESC LIMIT ?
+            ) ORDER BY at, key`)
+            .all(since, LIVE_LOOP_EVENTS_LIMIT)
         : this.db
-            .prepare(`SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
-          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key`)
-            .all(since, repoId)
+            .prepare(`SELECT * FROM (
+              SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
+              WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at DESC, e.key DESC LIMIT ?
+            ) ORDER BY at, key`)
+            .all(since, repoId, LIVE_LOOP_EVENTS_LIMIT)
     ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
