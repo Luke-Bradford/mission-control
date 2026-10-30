@@ -496,12 +496,14 @@ export const smallNoPlanText = (ref: string, size: string): string =>
   `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
-  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. At most 4 starts an hour, and one start of a ticket a day.";
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. At most 4 starts an hour, and one start of a ticket a day, never while its PR is open.";
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;
 export const restartRefusedText = (ref: string): string =>
   `Not started: you started ${ref} in the last 24 hours; ask the operator before starting it again.`;
+export const openPrText = (ref: string, pr: number): string =>
+  `Not started: ${ref} has PR #${pr} open; finish or close it first.`;
 export const notOnBoardText = (ref: string): string => `Not started: ${ref} is not on the board.`;
 export const restartDoneText = (ref: string): string =>
   `Not restarted: ${ref} is closed; reopen_issue first.`;
