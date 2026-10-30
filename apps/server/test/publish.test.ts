@@ -1384,6 +1384,27 @@ describe("merge steps", () => {
       });
     });
 
+    it("recomputes legacy cached facts to identify a HUD diff", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "apps/web/src/pages/Overview.tsx\0",
+      };
+      expect(
+        await withArea().gateFacts(R, SHA, {
+          sha: SHA,
+          mainSha: MAIN,
+          containsMain: true,
+          hubOnly: true,
+          strays: [],
+        }),
+      ).toMatchObject({ ok: true, facts: { webChanged: true } });
+    });
+
     it("counts a file the repo lists as protected as a stray", async () => {
       store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
       gitAnswers = {

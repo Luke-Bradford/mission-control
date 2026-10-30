@@ -52,6 +52,13 @@ export interface ReviewCheck {
   note?: string;
 }
 
+/** A design pass cites the before and after screenshots that RETRO compared. */
+export function hasHudShotPair(note: string | undefined): boolean {
+  if (note === undefined) return false;
+  const ids = new Set(note.match(/hud-shot:([0-9a-f]{32})/gi)?.map((ref) => ref.toLowerCase()));
+  return ids.size >= 2;
+}
+
 export interface ReportedTest {
   command: string;
   file?: string;

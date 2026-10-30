@@ -2403,18 +2403,27 @@ describe("merge workspace", () => {
   });
 
   it("keeps a HUD PR in draft until RETRO records screenshot evidence with the design pass", () => {
-    const held = reconcile(
-      merge(
-        { review: rows({ design: { result: "pass" } as never }) },
-        { gate: gateOf({ webChanged: true }) },
-      ),
-    );
-    expect(kindsOf(held.actions)).not.toContain("mark-ready");
-    expect(kindsOf(held.actions)).not.toContain("merge");
+    for (const note of [undefined, "design checked", "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]) {
+      const held = reconcile(
+        merge(
+          { review: rows({ design: { result: "pass", note } as never }) },
+          { gate: gateOf({ webChanged: true }) },
+        ),
+      );
+      expect(kindsOf(held.actions)).not.toContain("mark-ready");
+      expect(kindsOf(held.actions)).not.toContain("merge");
+    }
 
     const passed = reconcile(
       merge(
-        { review: rows({ design: { result: "pass", note: "hud-shot:pair" } as never }) },
+        {
+          review: rows({
+            design: {
+              result: "pass",
+              note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            } as never,
+          }),
+        },
         { gate: gateOf({ webChanged: true }) },
       ),
     );

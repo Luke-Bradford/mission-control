@@ -119,7 +119,7 @@ export interface GateFacts {
   hubOnly: boolean;
   strays: string[];
   /** Whether the head changes the HUD and therefore needs a recorded RETRO design pass. */
-  webChanged?: boolean;
+  webChanged: boolean;
 }
 export type GateResult =
   | { ok: true; facts: GateFacts }
@@ -224,7 +224,7 @@ export interface Publisher {
   gateFacts(
     run: Run,
     sha: string,
-    known?: (GateFacts & { sha: string }) | null,
+    known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
@@ -886,7 +886,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
         const { defaultBranch, mainSha } = await originNow(g, null);
-        if (known?.sha === sha && known.mainSha === mainSha) {
+        if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
           const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
           return {
             ok: true,
@@ -895,7 +895,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               containsMain,
               hubOnly,
               strays: [...strays],
-              ...(webChanged === undefined ? {} : { webChanged }),
+              webChanged,
               ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
             },
           };
@@ -947,9 +947,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             containsMain,
             hubOnly,
             strays,
-            ...(names.some((p) => p === "apps/web" || p.startsWith("apps/web/"))
-              ? { webChanged: true }
-              : {}),
+            webChanged: names.some((p) => p === "apps/web" || p.startsWith("apps/web/")),
             ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
           },
         };

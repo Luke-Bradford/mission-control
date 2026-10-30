@@ -9,6 +9,7 @@ import {
   fixesSent,
   fixKey,
   fixText,
+  hasHudShotPair,
   headMovedNoteKey,
   headMovedText,
   type LoopReviewFacts,
@@ -801,7 +802,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     gate?.hubOnly === true &&
     gate.strays.length === 0 &&
     (gate.webChanged !== true ||
-      (rv.cur?.design?.result === "pass" && (rv.cur.design.note?.trim().length ?? 0) > 0)) &&
+      (rv.cur?.design?.result === "pass" && hasHudShotPair(rv.cur.design.note))) &&
     (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
   const awaiting =
     elevated && otherGates && touches !== null && touches.paths.length > 0 && !floor && !cleared;
