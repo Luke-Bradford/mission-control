@@ -6115,7 +6115,7 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [] });
+      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6153,6 +6153,38 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("lists every recent controller decision beyond the main decision limit", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const d = (at: number, about: string, decision = "d") =>
+        store.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about,
+          decision,
+          basis: "b",
+        });
+      d(now - 2 * 60_000, "Missing power", "For the controller: choose a replacement");
+      for (let n = 0; n < 101; n++) d(now - n * 1000, `newer ${n}`);
+      d(now - 25 * 60 * 60_000, "Missing power", "For the controller: expired request");
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.decisions).toHaveLength(FLIGHT_LIST_MAX);
+      expect((body.controllerDecisions ?? []).map((x) => x.decision)).toEqual([
+        "For the controller: choose a replacement",
+      ]);
     });
 
     it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
