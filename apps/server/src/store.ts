@@ -362,7 +362,7 @@ CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
 -- A configured check a seat ran in its clone, on the head it ran against (the push gate reads it).
 CREATE TABLE IF NOT EXISTS check_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, command TEXT NOT NULL,
-  head_sha TEXT NOT NULL, ok INTEGER NOT NULL, at INTEGER NOT NULL
+  invoked_command TEXT, head_sha TEXT NOT NULL, ok INTEGER NOT NULL, exit_code INTEGER, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
@@ -1168,6 +1168,11 @@ export class Store {
     });
     // When a failing collector began failing; a row failing at upgrade takes its next poll's time.
     this.addColumn("collector_status", "failing_since", "INTEGER");
+    this.whenColumnMissing("check_runs", "invoked_command", () => {
+      this.db.exec("ALTER TABLE check_runs ADD COLUMN invoked_command TEXT");
+      this.db.exec("UPDATE check_runs SET invoked_command = command WHERE invoked_command IS NULL");
+    });
+    this.addColumn("check_runs", "exit_code", "INTEGER");
     // A re-polled fallback reading has the same key every time: keep one row per reading. Once per
     // database (`PRAGMA user_version`); the unique index keeps it true afterwards. An up-to-date
     // database takes no write lock; one that is behind re-checks once it holds it.
@@ -4831,13 +4836,25 @@ export class Store {
   addCheckRun(c: {
     runId: string;
     command: string;
+    invokedCommand?: string;
     headSha: string;
     ok: boolean;
+    exitCode?: number | null;
     at: number;
   }): void {
     this.db
-      .prepare("INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)")
-      .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
+      .prepare(
+        "INSERT INTO check_runs (run_id, command, invoked_command, head_sha, ok, exit_code, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        c.runId,
+        c.command,
+        c.invokedCommand ?? c.command,
+        c.headSha,
+        c.ok ? 1 : 0,
+        c.exitCode ?? null,
+        c.at,
+      );
   }
 
   /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */
@@ -4845,14 +4862,57 @@ export class Store {
     runId: string,
     command: string,
     headSha: string,
-  ): { ok: boolean; at: number } | null {
+  ): {
+    headSha: string;
+    invokedCommand: string;
+    ok: boolean;
+    exitCode: number | null;
+    at: number;
+  } | null {
     const r = this.db
       .prepare(
-        `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?
+        `SELECT head_sha, invoked_command, ok, exit_code, at FROM check_runs
+         WHERE run_id = ? AND command = ? AND head_sha = ?
          ORDER BY at DESC, id DESC LIMIT 1`,
       )
       .get(runId, command, headSha) as Row | undefined;
-    return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
+    return r === undefined
+      ? null
+      : {
+          headSha: r.head_sha as string,
+          invokedCommand: (r.invoked_command as string | null) ?? command,
+          ok: r.ok === 1,
+          exitCode: (r.exit_code as number | null) ?? null,
+          at: r.at as number,
+        };
+  }
+
+  /** The newest result this run recorded for `command`, regardless of commit. */
+  newestCheckRun(
+    runId: string,
+    command: string,
+  ): {
+    headSha: string;
+    invokedCommand: string;
+    ok: boolean;
+    exitCode: number | null;
+    at: number;
+  } | null {
+    const r = this.db
+      .prepare(
+        `SELECT head_sha, invoked_command, ok, exit_code, at FROM check_runs WHERE run_id = ? AND command = ?
+         ORDER BY at DESC, id DESC LIMIT 1`,
+      )
+      .get(runId, command) as Row | undefined;
+    return r === undefined
+      ? null
+      : {
+          headSha: r.head_sha as string,
+          invokedCommand: (r.invoked_command as string | null) ?? command,
+          ok: r.ok === 1,
+          exitCode: (r.exit_code as number | null) ?? null,
+          at: r.at as number,
+        };
   }
 
   addLockHold(h: LockHoldRow): void {

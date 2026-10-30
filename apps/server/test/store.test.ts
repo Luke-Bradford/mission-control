@@ -3611,7 +3611,13 @@ describe("check runs", () => {
       at: 1,
     });
     store.addCheckRun({ runId: "r1", command: "pnpm -s lint", headSha: sha("a"), ok: true, at: 2 });
-    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: true, at: 2 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: true,
+      exitCode: null,
+      at: 2,
+    });
     // a later failure on the same head wins
     store.addCheckRun({
       runId: "r1",
@@ -3620,21 +3626,46 @@ describe("check runs", () => {
       ok: false,
       at: 3,
     });
-    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: false, at: 3 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: false,
+      exitCode: null,
+      at: 3,
+    });
     expect(store.latestCheckRun("r1", "pnpm -s lint", sha("b"))).toBeNull();
     expect(store.latestCheckRun("r1", "pnpm -s typecheck", sha("a"))).toBeNull();
     expect(store.latestCheckRun("r2", "pnpm -s lint", sha("a"))).toBeNull();
+    expect(store.newestCheckRun("r1", "pnpm -s lint")).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: false,
+      exitCode: null,
+      at: 3,
+    });
   });
 
   it("breaks a tie on the clock by insertion order", () => {
     store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: true, at: 5 });
     store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: false, at: 5 });
-    expect(store.latestCheckRun("r1", "c", sha("a"))).toEqual({ ok: false, at: 5 });
+    expect(store.latestCheckRun("r1", "c", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "c",
+      ok: false,
+      exitCode: null,
+      at: 5,
+    });
   });
 
   it("binds a command with quotes and percent signs as a value, never as SQL", () => {
     const command = "x'); DROP TABLE check_runs; -- %";
     store.addCheckRun({ runId: "r1", command, headSha: sha("a"), ok: true, at: 1 });
-    expect(store.latestCheckRun("r1", command, sha("a"))).toEqual({ ok: true, at: 1 });
+    expect(store.latestCheckRun("r1", command, sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: command,
+      ok: true,
+      exitCode: null,
+      at: 1,
+    });
   });
 });

@@ -190,7 +190,12 @@ export function createCodexApprover(i: {
     ) {
       for (const event of events) {
         if (event.tool === "Bash" && event.input.command !== undefined) {
-          await i.checks.begin({ runId: i.runId, toolUseId: String(id) }, event.input.command);
+          const itemId = typeof params.itemId === "string" ? params.itemId : null;
+          await i.checks.begin(
+            { runId: i.runId, toolUseId: String(id) },
+            event.input.command,
+            itemId === null || itemId === String(id) ? [] : [{ runId: i.runId, toolUseId: itemId }],
+          );
         }
       }
     }

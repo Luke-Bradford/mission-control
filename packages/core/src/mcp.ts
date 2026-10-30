@@ -368,9 +368,26 @@ const CHECKS_ADVICE =
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,
-  found: readonly { command: string; state: CheckState }[],
+  found: readonly {
+    command: string;
+    state: CheckState;
+    recorded?: {
+      headSha: string;
+      invokedCommand: string;
+      ok: boolean;
+      exitCode: number | null;
+      at: number;
+    } | null;
+  }[],
 ): string => {
-  const lines = found.map((c) => `- ${c.state === "failed" ? "failed" : "not run"}: ${c.command}`);
+  const lines = found.map((c) => {
+    const result = c.state === "failed" ? "failed" : "not run";
+    return `- ${result}: ${c.command}\n  ${
+      c.recorded == null
+        ? "nothing recorded"
+        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
+    }`;
+  });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;
 };
 /** The secret scan's log passed its output cap: nothing is pushed unread. */

@@ -2355,7 +2355,17 @@ describe("push and draft_pr", () => {
         store.addCheckRun({ runId: RUN, command, headSha, ok, at });
       const refusal = (
         head: string,
-        found: { command: string; state: "missing" | "failed" }[],
+        found: {
+          command: string;
+          state: "missing" | "failed";
+          recorded?: {
+            headSha: string;
+            invokedCommand: string;
+            ok: boolean;
+            exitCode: number | null;
+            at: number;
+          } | null;
+        }[],
       ) => ({
         text: pushChecksText(head, found),
         isError: true,
@@ -2384,7 +2394,15 @@ describe("push and draft_pr", () => {
         ran(LINT, sha, false);
         ran(TYPES, sha, true);
         const r = await push(gated());
-        expect(r).toEqual(refusal(sha, [{ command: LINT, state: "failed" }]));
+        expect(r).toEqual(
+          refusal(sha, [
+            {
+              command: LINT,
+              state: "failed",
+              recorded: { headSha: sha, invokedCommand: LINT, ok: false, exitCode: null, at: NOW },
+            },
+          ]),
+        );
         expect(r.text).toContain(`failed: ${LINT}`);
         expect(remoteTip()).toBeNull();
       });
@@ -2395,7 +2413,21 @@ describe("push and draft_pr", () => {
         ran(LINT, sha, true, NOW + 1);
         ran(TYPES, sha, true, NOW);
         ran(TYPES, sha, false, NOW + 1);
-        expect(await push(gated())).toEqual(refusal(sha, [{ command: TYPES, state: "failed" }]));
+        expect(await push(gated())).toEqual(
+          refusal(sha, [
+            {
+              command: TYPES,
+              state: "failed",
+              recorded: {
+                headSha: sha,
+                invokedCommand: TYPES,
+                ok: false,
+                exitCode: null,
+                at: NOW + 1,
+              },
+            },
+          ]),
+        );
       });
 
       it("refuses checks that passed on an older head, and lists every missing one", async () => {
@@ -2405,11 +2437,64 @@ describe("push and draft_pr", () => {
         const sha = await commitOk("apps/a.ts", "a3\n");
         expect(await push(gated())).toEqual(
           refusal(sha, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: old, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: old, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
         expect(remoteTip()).toBeNull();
+      });
+
+      it("names the latest recorded command, exit and commit when that record is not on the head", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, old, true, NOW);
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        const r = await push(gated());
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain(
+          `not run: ${LINT}\n  recorded: ${LINT} exited unknown on ${old.slice(0, 7)}`,
+        );
+        expect(r.text).toContain(`not run: ${TYPES}\n  nothing recorded`);
+        expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
+      });
+
+      it("names a chained invocation and its numeric exit", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({
+          runId: RUN,
+          command: LINT,
+          invokedCommand: `${LINT} && ${TYPES}`,
+          headSha: old,
+          ok: false,
+          exitCode: 2,
+          at: NOW,
+        });
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        const r = await push(gated());
+        expect(r.text).toContain(`recorded: ${LINT} && ${TYPES} exited 2 on ${old.slice(0, 7)}`);
+        expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
+      });
+
+      it("names a chained invocation and its numeric exit on the rejected head", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({
+          runId: RUN,
+          command: LINT,
+          invokedCommand: `${LINT} && ${TYPES}`,
+          headSha: sha,
+          ok: false,
+          exitCode: 2,
+          at: NOW,
+        });
+        const r = await push(gated());
+        expect(r.text).toContain(`recorded: ${LINT} && ${TYPES} exited 2 on ${sha.slice(0, 7)}`);
       });
 
       it("ignores another run's records", async () => {
@@ -2456,12 +2541,21 @@ describe("push and draft_pr", () => {
 
       it("does not gate the engine's merge of main, but gates a commit on top of it", async () => {
         const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`);
+        const own = git(wt, "rev-parse", `${merge}^1`).trim();
         expect((await push(gated())).text).toBe(`Pushed ${merge.slice(0, 7)} to ${BRANCH}.`);
         const next = await commitOk("apps/a.ts", "on top\n");
         expect(await push(gated())).toEqual(
           refusal(next, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
       });
@@ -2485,18 +2579,41 @@ describe("push and draft_pr", () => {
         const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
         expect((await push(gated())).text).toBe(
           pushChecksText(merge, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: first, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: {
+                headSha: first,
+                invokedCommand: TYPES,
+                ok: true,
+                exitCode: null,
+                at: NOW,
+              },
+            },
           ]),
         );
       });
 
       it("gates a seat's own merge of main", async () => {
         const merge = await branchThenMerge("Seat", `Merge main into ${BRANCH}`);
+        const own = git(wt, "rev-parse", `${merge}^1`).trim();
         expect(await push(gated())).toEqual(
           refusal(merge, [
-            { command: LINT, state: "missing" },
-            { command: TYPES, state: "missing" },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
       });
