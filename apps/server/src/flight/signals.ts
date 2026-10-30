@@ -579,7 +579,7 @@ export function flightSignals(i: {
     if (now - pr.at < FLIGHT_MERGE_STALL_MS) continue;
     raise(
       "merge_stalled",
-      `${pr.pr}:${pr.at}`,
+      `${pr.ref}:${pr.pr}:${pr.at}`,
       pr.at,
       `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
     );
@@ -605,7 +605,8 @@ export function flightSignals(i: {
     if (now - d.at < FLIGHT_CONTROLLER_WAIT_MS || answers.some((at) => at > d.at)) continue;
     raise(
       "controller_unanswered",
-      String(d.id),
+      // the request's own ref, when it has one, so a brief or wait on that ref handles it
+      `${d.ref ?? "controller"}:${d.id}`,
       d.at,
       `FLIGHT asked the controller at ${new Date(d.at).toISOString()} and has no answer: ${d.about.slice(0, 200)}`,
     );

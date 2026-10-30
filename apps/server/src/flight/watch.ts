@@ -406,7 +406,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       try {
         const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
-        const reasons = wakeReasons(lastFacts, wakeFacts(state));
+        const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
         const left = leftOf(state);
         const { runId } = await supervisor.startWatch(id, {
           first: wakeLine(
@@ -520,7 +520,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       );
       const changed = changedWakeFacts(lastFacts, wake);
       const causes = left === null ? changed : [leftLine(left), ...changed];
-      const reasons = wakeReasons(lastFacts, wake);
+      const reasons = wakeReasons(lastFacts, wake, state.items);
       if (
         (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
         "sent"

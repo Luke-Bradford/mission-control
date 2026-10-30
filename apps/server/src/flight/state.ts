@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import {
+  ATTENTION_KINDS,
   type AttentionItem,
   carriedFrom,
   clockHm,
@@ -1334,7 +1335,15 @@ const decisionOnly = (id: string): boolean =>
 const NOT_A_TARGET = new Set(["true", "false", "open", "merged", "closed", "null"]);
 
 /** Words that name a kind of fact, not the thing it is about: never a target of their own. */
-const GENERIC = new Set(["report", "watch", "loop", "ask"]);
+const GENERIC = new Set<string>([
+  "report",
+  "watch",
+  "loop",
+  "ask",
+  "note",
+  "controller",
+  ...ATTENTION_KINDS,
+]);
 
 /**
  * What a decision on this fact would name. A signal's kind and its times are not targets (two
@@ -1367,7 +1376,9 @@ const wordsOf = (text: string): Set<string> =>
       .toLowerCase()
       .split(/[\s,;()"'`]+/)
       .map((w) => w.replace(/[.:]+$/, ""))
-      .filter((w) => w !== ""),
+      .filter((w) => w !== "")
+      // #12 and repo#12 both name 12, kept as "#12"
+      .flatMap((w) => (w.includes("#") ? [w, w.slice(w.lastIndexOf("#"))] : [w])),
   );
 
 /** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
@@ -1385,7 +1396,11 @@ const accountable = (category: string, item: unknown): boolean => {
 };
 
 /** What a wake newly lists, as reasons: the facts in `current` that `previous` did not have. */
-export function wakeReasons(previous: string, current: string): WakeReason[] {
+export function wakeReasons(
+  previous: string,
+  current: string,
+  itemRefs: readonly { key: string; ticket: string | null }[] = [],
+): WakeReason[] {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
   return Object.entries(after).flatMap(([category, items]) => {
@@ -1398,7 +1413,13 @@ export function wakeReasons(previous: string, current: string): WakeReason[] {
           0,
           200,
         ),
-        targets: factTargets(category, item),
+        // an item's ticket is a target too: a brief or wait on the ticket handles the item
+        targets: [
+          ...factTargets(category, item),
+          ...(category === "items"
+            ? itemRefs.flatMap((x) => (x.key === item && x.ticket !== null ? [x.ticket] : []))
+            : []),
+        ],
       }));
   });
 }
@@ -1437,7 +1458,8 @@ export function unhandledReasons(
           d.seatId === t ||
           d.targetRunId === t ||
           (d.questionId !== null && String(d.questionId) === t) ||
-          (t.length >= 3 && words[i]?.has(t.toLowerCase()) === true),
+          (t.length >= 2 && words[i]?.has(t.toLowerCase()) === true) ||
+          (/^\d+$/.test(t) && words[i]?.has(`#${t}`) === true),
       ),
     );
   });

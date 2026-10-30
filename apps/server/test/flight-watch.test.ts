@@ -3941,6 +3941,62 @@ describe("every wake ends with each reason handled", () => {
     expect(line).not.toContain("guido-1");
   });
 
+  it("a brief or wait that names the ticket or PR handles a stalled merge", async () => {
+    liveCrew();
+    watch.start();
+    store.setRunLoop("r-guido", { ...NEW_LOOP, prNumber: 7 });
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-guido", { ...NEW_LOOP, prNumber: 7 });
+    store.upsertPullRequests("mc", [stored(7, { ticket: "mc#176", isDraft: false })], T0);
+    store.raiseNote({
+      key: "ready:r-guido",
+      kind: "ready",
+      runId: "r-guido",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#176 is ready to merge",
+      at: nowMs - 11 * MIN,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("PR #7");
+    flightIdle();
+    decide({
+      kind: "brief",
+      ref: "mc#176",
+      about: "PR #7 stalled",
+      decision: "briefed the operator",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(leftNotes()).toEqual([]);
+  });
+
+  it("a decision with an item's kind in it does not settle every stale item of that kind", async () => {
+    liveCrew();
+    watch.start();
+    for (const r of ["r1", "r2"])
+      store.raiseNote({
+        key: `blocked:${r}:0`,
+        kind: "blocked",
+        runId: null,
+        seatId: "guido-1",
+        repoId: "mc",
+        text: `mc#7 parked (${r})`,
+        at: nowMs - 11 * MIN,
+      });
+    await watch.check();
+    flightIdle();
+    decide({ kind: "note", about: "r1 blocked handled", decision: "on it" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const line = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(line).toContain("r2");
+    expect(line).not.toContain("r1");
+  });
+
   it("a decision about something else leaves the reason unhandled", async () => {
     await wokeOnAQuestion();
     decide({ kind: "note", about: "mc#999 something else", decision: "noted" });
