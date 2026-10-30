@@ -59,7 +59,7 @@ export interface CallKey {
 
 export interface CheckRecorder {
   /** A shell call is about to start: keep the head and cleanliness it starts on. */
-  begin(key: CallKey, command: string): Promise<void>;
+  begin(key: CallKey, command: string, aliases?: readonly CallKey[]): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean): Promise<void>;
   /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
@@ -93,14 +93,16 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
-    async begin(key, command) {
+    async begin(key, command, aliases = []) {
       try {
         const matched = checksRun(command, await d.checks(key.runId));
         if (matched.length === 0) return;
         const at = await d.state(key.runId);
         // a dirty tree: the check ran on something no commit holds
         if (at === null || !at.clean) return;
-        started.set(callId(key), { runId: key.runId, matched, head: at.head });
+        const call = { runId: key.runId, matched, head: at.head };
+        started.set(callId(key), call);
+        for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
         d.log?.(`checks: could not start a record for ${key.runId}: ${(e as Error).message}`);
       }
@@ -108,7 +110,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     async end(key, ok) {
       const call = started.get(callId(key));
       if (call === undefined) return;
-      started.delete(callId(key));
+      for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
         const at = await d.state(key.runId);
         // the head moved, or the call left the tree dirty: it did not check the commit it started on

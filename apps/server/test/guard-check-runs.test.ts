@@ -102,10 +102,20 @@ describe("the check recorder", () => {
     checks = CHECKS;
   });
 
-  it("records one row per matched check with the call's exit success, on the head it started on", async () => {
+  it("records a plain lint and typecheck call from Claude on the clean head it started on", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);
     await r.end(KEY, true);
+    expect(rows).toEqual([
+      { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
+      { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },
+    ]);
+  });
+
+  it("records a plain lint and typecheck call when Codex completes it by its item id", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    await r.end({ runId: "r1", toolUseId: "codex-item-1" }, true);
     expect(rows).toEqual([
       { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
       { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },

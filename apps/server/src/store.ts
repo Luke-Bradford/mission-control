@@ -4786,6 +4786,22 @@ export class Store {
     return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
   }
 
+  /** The newest result this run recorded for `command`, regardless of commit. */
+  newestCheckRun(
+    runId: string,
+    command: string,
+  ): { headSha: string; ok: boolean; at: number } | null {
+    const r = this.db
+      .prepare(
+        `SELECT head_sha, ok, at FROM check_runs WHERE run_id = ? AND command = ?
+         ORDER BY at DESC, id DESC LIMIT 1`,
+      )
+      .get(runId, command) as Row | undefined;
+    return r === undefined
+      ? null
+      : { headSha: r.head_sha as string, ok: r.ok === 1, at: r.at as number };
+  }
+
   addLockHold(h: LockHoldRow): void {
     this.db
       .prepare(

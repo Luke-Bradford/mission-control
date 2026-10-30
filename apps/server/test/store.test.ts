@@ -3568,6 +3568,11 @@ describe("check runs", () => {
     expect(store.latestCheckRun("r1", "pnpm -s lint", sha("b"))).toBeNull();
     expect(store.latestCheckRun("r1", "pnpm -s typecheck", sha("a"))).toBeNull();
     expect(store.latestCheckRun("r2", "pnpm -s lint", sha("a"))).toBeNull();
+    expect(store.newestCheckRun("r1", "pnpm -s lint")).toEqual({
+      headSha: sha("a"),
+      ok: false,
+      at: 3,
+    });
   });
 
   it("breaks a tie on the clock by insertion order", () => {

@@ -2355,7 +2355,11 @@ describe("push and draft_pr", () => {
         store.addCheckRun({ runId: RUN, command, headSha, ok, at });
       const refusal = (
         head: string,
-        found: { command: string; state: "missing" | "failed" }[],
+        found: {
+          command: string;
+          state: "missing" | "failed";
+          recorded?: { headSha: string; ok: boolean; at: number } | null;
+        }[],
       ) => ({
         text: pushChecksText(head, found),
         isError: true,
@@ -2384,7 +2388,11 @@ describe("push and draft_pr", () => {
         ran(LINT, sha, false);
         ran(TYPES, sha, true);
         const r = await push(gated());
-        expect(r).toEqual(refusal(sha, [{ command: LINT, state: "failed" }]));
+        expect(r).toEqual(
+          refusal(sha, [
+            { command: LINT, state: "failed", recorded: { headSha: sha, ok: false, at: NOW } },
+          ]),
+        );
         expect(r.text).toContain(`failed: ${LINT}`);
         expect(remoteTip()).toBeNull();
       });
@@ -2395,7 +2403,11 @@ describe("push and draft_pr", () => {
         ran(LINT, sha, true, NOW + 1);
         ran(TYPES, sha, true, NOW);
         ran(TYPES, sha, false, NOW + 1);
-        expect(await push(gated())).toEqual(refusal(sha, [{ command: TYPES, state: "failed" }]));
+        expect(await push(gated())).toEqual(
+          refusal(sha, [
+            { command: TYPES, state: "failed", recorded: { headSha: sha, ok: false, at: NOW + 1 } },
+          ]),
+        );
       });
 
       it("refuses checks that passed on an older head, and lists every missing one", async () => {
@@ -2410,6 +2422,17 @@ describe("push and draft_pr", () => {
           ]),
         );
         expect(remoteTip()).toBeNull();
+      });
+
+      it("names the latest recorded command, exit and commit when that record is not on the head", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        ran(LINT, old, true, NOW);
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        const r = await push(gated());
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain(`not run: ${LINT}; recorded exit 0 on ${old.slice(0, 7)}`);
+        expect(r.text).toContain(`not run: ${TYPES}; nothing recorded`);
+        expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
       });
 
       it("ignores another run's records", async () => {
