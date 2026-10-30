@@ -1062,6 +1062,8 @@ describe("scheduler", () => {
 
     it("samples the default capacity guard without a browser", async () => {
       config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
         sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
       } as NonNullable<CcConfig["crew"]>;
       const c = stubs();
