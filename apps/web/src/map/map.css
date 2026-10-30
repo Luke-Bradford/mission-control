@@ -326,6 +326,9 @@
 .map-timeline-controls strong {
   color: var(--fg);
 }
+.map-timeline-controls button {
+  font-size: var(--fs-s);
+}
 .map-timeline-controls .map-timeline-list {
   display: grid;
   gap: 3px;
@@ -568,7 +571,7 @@ button.map-timeline-tick {
 .map-results button {
   text-align: left;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   padding: 3px 8px;
   white-space: normal;
   overflow-wrap: anywhere;

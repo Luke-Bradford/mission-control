@@ -28,6 +28,12 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.flight-note-heading h3 a`,
       String.raw`\.flight-markdown-source summary`,
       String.raw`\.comms-spider-legend \.away`,
+      String.raw`\.seg button`,
+      String.raw`\.comms-section-head \.comms-needs-link`,
+      String.raw`\.comms-mentions-panel header button`,
+      String.raw`\.comms-ref`,
+      String.raw`\.map-results button`,
+      String.raw`\.map-timeline-controls button`,
     ]) {
       expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
     }
@@ -38,6 +44,7 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.ph \.act \.ph-link`,
       String.raw`\.flight-markdown-source summary`,
       String.raw`\.comms-spider-legend \.away`,
+      String.raw`\.comms-section-head \.comms-needs-link`,
     ]) {
       const action = rule(selector);
       expect(action, selector).toContain("display: inline-flex");
@@ -46,6 +53,7 @@ describe("Overview layout (hud.css)", () => {
     }
     expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
     expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
+    expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-xs)");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {

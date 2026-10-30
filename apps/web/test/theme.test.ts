@@ -234,6 +234,14 @@ describe("theme tokens", () => {
 });
 
 describe("shell styles", () => {
+  it("keeps type scale tokens at or above the 11px floor", () => {
+    const hud = read("../src/hud.css");
+    for (const token of ["--fs", "--fs-s", "--fs-xs"]) {
+      const value = Number(hud.match(new RegExp(`${token}: (\\d+(?:\\.\\d+)?)px`))?.[1]);
+      expect(value, token).toBeGreaterThanOrEqual(11);
+    }
+  });
+
   it("keeps literal UI text at or above the 11px floor", () => {
     const css = readStyles();
     const sizes = [...css.matchAll(/font(?:-size)?:\s*(?:\d+(?:\.\d+)?\s+)?(\d+(?:\.\d+)?)px\b/g)]

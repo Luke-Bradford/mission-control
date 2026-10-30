@@ -86,3 +86,8 @@ it("keeps active Map seat names legible on their changed surface", () => {
     expect(listed(selector)).toContain("color: var(--fg)");
   }
 });
+
+it("uses the action type size for Map result and timeline controls", () => {
+  for (const selector of [".map-results button", ".map-timeline-controls button"])
+    expect(listed(selector)).toContain("font-size: var(--fs-s)");
+});
