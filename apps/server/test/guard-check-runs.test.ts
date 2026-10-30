@@ -8,6 +8,7 @@ import {
   checksRun,
   cloneState,
   createCheckRecorder,
+  lockedCheck,
 } from "../src/guard/check-runs.ts";
 
 const LINT = "pnpm -s lint";
@@ -54,6 +55,33 @@ describe("checksRun", () => {
   });
 });
 
+describe("lockedCheck", () => {
+  it("names a configured check the command runs, alone or in a chain", () => {
+    expect(lockedCheck(TYPES, CHECKS)).toBe(TYPES);
+    expect(lockedCheck(`  ${LINT}  `, CHECKS)).toBe(LINT);
+    expect(lockedCheck(`cd x && ${TYPES}`, CHECKS)).toBe(TYPES);
+    expect(lockedCheck(`${LINT} | tail`, CHECKS)).toBe(LINT);
+    expect(lockedCheck(`${LINT}; true`, CHECKS)).toBe(LINT);
+  });
+
+  it.each([
+    ["an output redirection", `${TYPES} > /tmp/typecheck.log`],
+    ["a 2>&1 redirection", `${TYPES} 2>&1`],
+    ["the command builtin", `command ${TYPES}`],
+    ["env", `env FOO=1 ${TYPES}`],
+    ["extra spaces", "pnpm  -s   typecheck"],
+  ])("names the check behind %s", (_n, command) => {
+    expect(lockedCheck(command, CHECKS)).toBe(TYPES);
+  });
+
+  it("names nothing for a command that only mentions or extends a check", () => {
+    expect(lockedCheck("echo pnpm -s lint", CHECKS)).toBeNull();
+    expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
+    expect(lockedCheck("ls", CHECKS)).toBeNull();
+    expect(lockedCheck(LINT, [])).toBeNull();
+  });
+});
+
 describe("the check recorder", () => {
   const HEAD = "a".repeat(40);
   const KEY = { runId: "r1", toolUseId: "t1" };
@@ -74,13 +102,55 @@ describe("the check recorder", () => {
     checks = CHECKS;
   });
 
-  it("records one row per matched check with the call's exit success, on the head it started on", async () => {
+  it("records a plain lint and typecheck call from Claude on the clean head it started on", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);
     await r.end(KEY, true);
     expect(rows).toEqual([
-      { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
-      { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+    ]);
+  });
+
+  it("records a plain lint and typecheck call when Codex completes it by its item id", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    await r.end({ runId: "r1", toolUseId: "codex-item-1" }, true);
+    expect(rows).toEqual([
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
     ]);
   });
 
@@ -89,6 +159,38 @@ describe("the check recorder", () => {
     await r.begin(KEY, LINT);
     await r.end(KEY, false);
     expect(rows.map((x) => x.ok)).toEqual([false]);
+  });
+
+  it("keeps a chained invocation and Codex's numeric failure exit", async () => {
+    const detailed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void detailed.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => 99,
+    });
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    await r.end(KEY, false, 2);
+    expect(detailed).toEqual([
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+    ]);
   });
 
   it.each([
@@ -179,6 +281,29 @@ describe("the check recorder", () => {
       log: (l) => void lines.push(l),
     });
     await r.begin(KEY, LINT);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("names the check a call must take the test lock for, and records nothing for a call that waited", async () => {
+    const r = recorder();
+    expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
+    expect(await r.lockedBy("r1", "ls")).toBeNull();
+    // refused while another seat held the lock: it began but never ended, so no failed row
+    await r.begin(KEY, TYPES);
+    expect(rows).toEqual([]);
+  });
+
+  it("takes no lock when the repo's rules cannot be read", async () => {
+    const lines: string[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: () => {} },
+      checks: async () => {
+        throw new Error("no rules");
+      },
+      state: async () => state,
+      log: (l) => void lines.push(l),
+    });
+    expect(await r.lockedBy("r1", TYPES)).toBeNull();
     expect(lines).toHaveLength(1);
   });
 });

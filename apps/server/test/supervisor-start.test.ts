@@ -1,7 +1,7 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -24,6 +24,7 @@ import {
   AWAY_SETTING,
   type BoardItem,
   CANNOT_START,
+  CODEX_PNPM_STORES_DIR,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
   CREW_DISABLED,
@@ -55,6 +56,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
   startMissingNeedsText,
@@ -90,6 +92,7 @@ import {
   crewMcpPath,
   crewPrBodyPath,
   crewPromptPath,
+  crewSkillsDir,
   crewTokenPath,
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
@@ -690,7 +693,10 @@ describe("startRun", () => {
       const parent = dirname(tmp);
       expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([realpathSync(tmp)]);
+      expect(settings.sandbox.filesystem.allowRead).toEqual([
+        realpathSync(tmp),
+        join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
+      ]);
       expect(settings.sandbox.filesystem.denyRead).toContain(realpathSync(parent));
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/tmp");
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/private/tmp");
@@ -704,20 +710,22 @@ describe("startRun", () => {
     for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
   });
 
-  it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
+  it("points pnpm at the hub-owned store outside the seat worktree", async () => {
+    expect(existsSync(join(clone, "pnpm-lock.yaml"))).toBe(false);
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
+    expect(store).toBe(join(root, CODEX_PNPM_STORES_DIR, "shared"));
+    expect(statSync(store).isDirectory()).toBe(true);
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
     const rel = relative(start.cwd as string, store);
     expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
-    expect(relative(realpathSync(root), store).startsWith("..")).toBe(true);
+    expect(relative(realpathSync(root), store).startsWith("..")).toBe(false);
   });
 
   it("points uv's cache and Python's tool caches at the seat's own folders in the sandbox's temp root", async () => {
@@ -783,7 +791,15 @@ describe("startRun", () => {
     expect(allowed).toContain("Read");
     expect(readFileSync(join(cwd, ".claude/skills/gates/SKILL.md"), "utf8")).toBe(skill);
     expect(argv).toContain("--restricted");
-    expect(argv).toContain("--disable-slash-commands");
+    // the Skill tool needs the flag off; the repo's skills come as a hub-built plugin folder (#1051)
+    expect(argv).not.toContain("--disable-slash-commands");
+    expect(argv[argv.indexOf("--tools") + 1].split(",")).toContain("Skill");
+    expect(allowed).toContain("Skill");
+    const plugin = argv[argv.indexOf("--plugin-dir") + 1];
+    expect(plugin).toBe(crewSkillsDir(dbPath, runId));
+    expect(plugin.startsWith(cwd)).toBe(false);
+    expect(readFileSync(join(plugin, "skills/gates/SKILL.md"), "utf8")).toBe(skill);
+    expect(readdirSync(plugin).sort()).toEqual([".claude-plugin", "skills"]);
     expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
     expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
     expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
@@ -835,6 +851,7 @@ describe("startRun", () => {
       `${common}/worktrees/guido-1-42`,
       // the run's token, MCP, prompt and transcript files: no seat rewrites them (R28)
       join(dir, "db"),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
     ]);
@@ -2439,6 +2456,27 @@ import(${JSON.stringify(fixture)});
       );
   });
 
+  it("copies the repo's skills into the Codex seat's own skills folder (#1051)", async () => {
+    mkdirSync(join(clone, ".claude/skills/gates"), { recursive: true });
+    const skill = "---\nname: gates\ndescription: Check the work.\n---\nRun the checks.";
+    writeFileSync(join(clone, ".claude/skills/gates/SKILL.md"), skill);
+    writeFileSync(join(clone, ".claude/skills/gates/run.sh"), "#!/bin/sh\n");
+    mkdirSync(join(clone, ".claude/skills/plain"), { recursive: true });
+    writeFileSync(join(clone, ".claude/skills/plain/SKILL.md"), "Write plainly");
+    git(clone, "add", ".claude");
+    git(clone, "commit", "-qm", "Add skills");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    const { sup } = codex();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+    const spawn = recorded().find((m) => m.type === "spawn");
+    const skills = join(spawn.env.CODEX_HOME, "skills");
+    // `gates` holds a script, so the guard leaves it out whole; `plain` is plain text
+    expect(readdirSync(skills)).toEqual(["plain"]);
+    expect(readFileSync(join(skills, "plain/SKILL.md"), "utf8")).toBe("Write plainly");
+  });
+
   it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
     const { sup, log } = codex();
     unlinkSync(join(dir, "home", ".codex", "auth.json"));
@@ -2455,7 +2493,7 @@ import(${JSON.stringify(fixture)});
     expect(recorded().some((m) => m.type === "spawn")).toBe(false);
   });
 
-  it("launches with only the hub's config, private auth and temp dirs, then removes them", async () => {
+  it("launches a Codex home under 5 MB without remote plugins, then removes it", async () => {
     const { sup } = codex();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -2482,7 +2520,7 @@ import(${JSON.stringify(fixture)});
       expect(isInside(spawn.env[key], spawn.env.TMPDIR)).toBe(true);
     }
     expect(spawn.env[PNPM_STORE_ENV]).toBe(
-      join(dirname(spawn.cwd), ".mc-pnpm-store", basename(spawn.cwd)),
+      join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
     );
     expect(spawn.env.TMP).toBe(spawn.env.TMPDIR);
     expect(spawn.env.TEMP).toBe(spawn.env.TMPDIR);
@@ -2493,6 +2531,10 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
+    expect(
+      Number.parseInt(execFileSync("du", ["-sk", home], { encoding: "utf8" }), 10),
+    ).toBeLessThan(5 * 1024);
+    expect(readdirSync(home, { recursive: true }).length).toBeLessThanOrEqual(48);
     const parent = dirname(spawn.env.TMPDIR);
     expect(parent).toBe(join(spawn.cwd, MC_TMP_DIR_NAME));
     expect(basename(spawn.env.TMPDIR)).toBe(

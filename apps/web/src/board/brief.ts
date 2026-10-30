@@ -1,6 +1,7 @@
 import { type BoardItem, type CrewRow, type PullRequestView, startOfLocalDay } from "@mc/core";
 import { type NeedsYou, prAction } from "../attention.ts";
 import { loopStepLabel } from "../crew.ts";
+import { agoWords } from "../fmt.ts";
 import {
   cardAgent,
   cardColumn,
@@ -43,9 +44,6 @@ function longDate(ms: number, tz: string): string {
   for (const part of f.formatToParts(new Date(ms))) p[part.type] = part.value;
   return `${p.weekday} ${p.day} ${p.month}`;
 }
-
-const agoWords = (d: number): string =>
-  d === 0 ? "today" : d === 1 ? "1 day ago" : `${d} days ago`;
 
 /** Sections of a brief share one line shape: `- {ref}{ (PR #n)}: {title}{ ({extra})}`. */
 function section(

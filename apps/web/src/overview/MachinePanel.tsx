@@ -1,7 +1,10 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
+import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { bytes, percent, plural, rel, swapOfRam } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 
@@ -122,7 +125,22 @@ function usage(m: MachineSample | null) {
     diskTotal !== null && diskTotal > 0 && diskFree !== null
       ? (100 * (diskTotal - diskFree)) / diskTotal
       : null;
-  return { cores, cpu, agentsCpu, memTotal, memUsed, agentsMem, memPct, diskFree, diskPct };
+  const swapUsed = m?.swapUsedBytes ?? null;
+  const swapPct =
+    memTotal !== null && swapUsed !== null ? Math.min(100, (100 * swapUsed) / memTotal) : null;
+  return {
+    cores,
+    cpu,
+    agentsCpu,
+    memTotal,
+    memUsed,
+    agentsMem,
+    memPct,
+    swapUsed,
+    swapPct,
+    diskFree,
+    diskPct,
+  };
 }
 
 /** The agents row: a dot per seat up to the cap, and whether another agent fits (catalogue 2.1.4). */
@@ -140,7 +158,7 @@ function AgentSlots({ view }: { view: MachineView }) {
       className={`row s agentslots ${room ? "ok-t" : "warn-t"}`}
       title={[
         perSessionMax > 0 ? `up to ${perSessionMax} per session` : null,
-        room ? `Room for ${free} more agent${free === 1 ? "" : "s"}` : "No room for another agent",
+        room ? `Room for ${plural(free, "more agent")}` : "No room for another agent",
       ]
         .filter(Boolean)
         .join(" · ")}
@@ -161,6 +179,8 @@ function AgentSlots({ view }: { view: MachineView }) {
 export function MachinePanel() {
   const view = useResource<MachineView>(RESOURCES.machine).data;
   const overview = useResource<OverviewSummary>(RESOURCES.overview());
+  const now = useNow();
+  const tz = useTz();
   const summary = overview.data;
   const live = summary !== undefined && overview.error === null;
   const m = view?.latest ?? null;
@@ -204,7 +224,7 @@ export function MachinePanel() {
               className="num s"
               title={none ?? (u.cpu === null ? "Not measured yet" : undefined)}
             >
-              {u.cpu === null ? DASH : `${Math.round(u.cpu)}%`}
+              {u.cpu === null ? DASH : percent(u.cpu)}
               <span className="muted">
                 {" "}
                 of{" "}
@@ -250,6 +270,20 @@ export function MachinePanel() {
             </span>
           </div>
           <div className="resrow">
+            <span className="s fg2">Swap</span>
+            <Bar
+              segs={
+                u.swapPct === null ? [] : [{ pct: u.swapPct, colour: OTHER_COLOUR, label: "used" }]
+              }
+            />
+            <span
+              className="num s"
+              title={none ?? (u.swapUsed === null ? "Not measured" : undefined)}
+            >
+              {swapOfRam(u.swapUsed, u.memTotal)}
+            </span>
+          </div>
+          <div className="resrow">
             <span className="s fg2">Disk</span>
             {summary?.machine?.disk?.length ? (
               <MachineAreaChart
@@ -272,7 +306,36 @@ export function MachinePanel() {
               <span className="muted"> free</span>
             </span>
           </div>
+          {view?.warning && (
+            <div className="row s capwarn warn-t" role="status" title={view.warning}>
+              <Pill tone="warn" title={view.warning}>
+                Holding new work
+              </Pill>
+              <span className="muted"> {view.warning}</span>
+            </div>
+          )}
           {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
+          {view?.transcripts && (
+            <div
+              className="resrow transcript-footprint"
+              title={
+                view.transcripts.seats.length === 0
+                  ? "No transcripts"
+                  : view.transcripts.seats
+                      .map((seat) => `${seat.seatId} ${bytes(seat.bytes)} · ${seat.files} files`)
+                      .join("\n")
+              }
+            >
+              <span className="s fg2">Transcripts</span>
+              <span />
+              <span className="num s">
+                {bytes(view.transcripts.totalBytes)}
+                {view.transcripts.oldestAt !== null && tz && (
+                  <span className="muted"> · oldest {rel(view.transcripts.oldestAt, now, tz)}</span>
+                )}
+              </span>
+            </div>
+          )}
           <LockBox />
         </div>
       </div>

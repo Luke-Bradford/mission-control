@@ -1,8 +1,11 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-s);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -20,7 +23,7 @@
 #page-overview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
   overflow: hidden;
 }
 
@@ -32,8 +35,10 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto fit-content(45%) fit-content(18%) minmax(0, 1fr);
-  gap: 12px;
+  /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
+  grid-template-rows: max-content minmax(160px, 1fr) max-content 280px;
+  gap: var(--sp-3);
+  overflow-y: auto;
 }
 
 .overview-grid > *,
@@ -50,12 +55,31 @@
 
 .overview-grid .ph {
   flex-shrink: 0;
-  padding: 10px 14px 8px;
+  flex-wrap: nowrap;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2);
+}
+
+/* A header is one line: the title and controls keep their size and the subtitle gives way. */
+.overview-grid .ph h2 {
+  flex: none;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .act {
+  flex: none;
+  flex-wrap: nowrap;
 }
 
 .overview-grid .ph h2 {
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--fs);
   font-weight: 600;
 }
 
@@ -66,17 +90,29 @@
 
 .overview-work {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 28%);
+  grid-template-columns: minmax(0, 1fr) 31%;
   grid-template-rows: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
+}
+
+@media (max-width: 1280px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 34%;
+  }
+}
+
+@media (min-width: 1920px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 27%;
+  }
 }
 
 .nbanner {
   display: flex;
   align-items: center;
-  gap: 10px 14px;
+  gap: var(--sp-2) var(--sp-3);
   flex-wrap: wrap;
-  padding: 9px 14px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--warn-mark);
   background: var(--warn-soft);
   border-radius: var(--r);
@@ -92,14 +128,14 @@
 
 .nbanner b {
   font-family: var(--display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--warn);
 }
 
 .nbanner .bits {
   display: flex;
-  gap: 6px 14px;
+  gap: var(--sp-1) var(--sp-3);
   flex-wrap: wrap;
   color: var(--fg-2);
   font-size: var(--fs-s);
@@ -116,7 +152,7 @@
 }
 
 .nbanner .bit {
-  font-size: 14px;
+  font-size: var(--fs-panel);
 }
 
 .nbanner .accent {
@@ -124,26 +160,26 @@
 }
 
 .quotawarn {
-  margin-top: 6px;
+  margin-top: var(--sp-1);
 }
 
 .ov {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr);
   grid-template-rows: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
+/* Machine and Quota sit beside the Live log, each in its own column. */
 .ov > .col {
-  display: grid;
-  grid-template-rows: repeat(2, fit-content(calc(50% - 6px)));
-  align-content: start;
-  overflow: hidden;
+  display: contents;
 }
 
 .ov > .col > .panel {
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ov > .col > .panel > .pb {
@@ -154,9 +190,9 @@
 .overview-axis {
   position: relative;
   height: 14px;
-  margin-left: 100px;
+  margin-left: calc(var(--lane-label) + var(--sp-2));
   border-top: 1px solid var(--line-2);
-  font: 10px / 1 var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 .overview-axis > span {
@@ -194,6 +230,8 @@
 }
 
 .timeline-body {
+  /* the lane labels' column; the axis below the lanes starts after it and its gap */
+  --lane-label: 92px;
   display: flex;
   flex-direction: column;
 }
@@ -239,21 +277,37 @@
 
 .overview-lane {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: var(--lane-label) minmax(0, 1fr);
+  gap: var(--sp-2);
   align-items: center;
   height: 100%;
-  /* Keep the 19px visual lane while extending its pointer target to 24px. */
+  /* Keep the 20px visual lane while extending its pointer target to 24px. */
   min-height: 24px;
   max-height: var(--lane-max);
-  margin-block: -2.5px;
+  margin-block: calc(var(--sp-1) / -2);
   color: var(--fg-2);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 
 .overview-lane:hover {
   background: var(--accent-soft);
+}
+
+.overview-lane .num {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--fg);
+}
+
+.overview-lane .num::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c, var(--fg-2));
+  content: "";
 }
 
 /*
@@ -297,40 +351,25 @@
   top: calc(50% + var(--sub) / 2 + var(--sub-gap));
 }
 
-.overview-tick {
-  position: absolute;
-  top: calc(50% - 8px);
-  height: 16px;
-  width: 1px;
-  background: var(--fg-2);
-  opacity: 0.7;
-}
-
 .overview-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 10px;
-  font: 10px var(--mono);
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   text-transform: lowercase;
 }
 
 .overview-legend > span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
 }
 
 .overview-legend i {
   width: 14px;
   height: 3px;
   border-radius: 0;
-}
-
-.overview-legend .tool-tick {
-  width: 1px;
-  height: 10px;
-  background: var(--fg-2);
 }
 
 #agentsList {
@@ -346,10 +385,10 @@
 
 .trow {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  row-gap: 2px;
-  padding: 8px 10px;
+  row-gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-2);
   border-top: 1px solid var(--line);
   cursor: pointer;
   position: relative;
@@ -361,10 +400,10 @@
 
 .trow.head {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   cursor: default;
   border-top: 0;
-  padding-block: 2px 6px;
+  padding-block: var(--sp-1) var(--sp-1);
 }
 
 .trow:not(.head):hover,
@@ -428,7 +467,7 @@
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: nowrap;
   overflow: hidden;
   color: var(--warn);
@@ -438,7 +477,7 @@
 .trow .needpart {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 100%;
 }
@@ -454,7 +493,7 @@
 .trow .need .needctl {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .trow > * {
@@ -462,13 +501,13 @@
 }
 
 #agentsList .agent-identity .ag {
-  color: var(--c, var(--fg));
+  color: var(--fg);
 }
 
 .agent-identity {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: nowrap;
 }
 
@@ -495,7 +534,7 @@
 .state-cell {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: nowrap;
 }
 
@@ -504,8 +543,8 @@
   min-width: 0;
   overflow: hidden;
   max-width: 100%;
-  padding-inline: 5px;
-  gap: 4px;
+  padding-inline: var(--sp-1);
+  gap: var(--sp-1);
 }
 
 .state-cell > .xs {
@@ -550,12 +589,13 @@
 
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
-  gap: 0 6px;
-  padding: 2px 8px;
+  grid-template-columns: 150px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
+  gap: 0 var(--sp-1);
+  padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
-  height: 34px;
-  line-height: 15px;
+  align-items: center;
+  height: calc(var(--sp-6) + var(--sp-2));
+  line-height: var(--lh);
 }
 
 #agentsList .trow > * {
@@ -567,22 +607,22 @@
 }
 
 #agentsList .need {
-  font-size: 11px;
-  line-height: 14px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
   max-width: 100%;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 #agentsList .need button {
   min-height: 24px;
-  padding: 0 4px;
-  line-height: 12px;
-  font-size: 10px;
+  padding: 0 var(--sp-1);
+  line-height: var(--lh-s);
+  font-size: var(--fs-s);
 }
 
 #agentsList .xs {
-  font-size: 11px;
-  line-height: 14px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 
 .crew-skeleton .kpi-skeleton {
@@ -593,25 +633,47 @@
 #agentsList .state-cell,
 #agentsList .ticket-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-}
-
-#agentsList .work-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
 }
 
+#agentsList .agent-identity > *,
 #agentsList .ticket-cell > * {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 
-#agentsList .agent-identity > :nth-child(2)::before {
-  content: none;
+#agentsList .agent-identity > :first-child,
+#agentsList .state-cell > *,
+#agentsList .ticket-cell .need,
+#agentsList .ticket-cell .needctl {
+  flex: none;
 }
 
-#agentsList .agent-identity > :nth-child(2) {
-  padding-left: 15px;
+#agentsList .ticket-cell > .ellip:first-child {
+  flex: 1 1 0;
+}
+
+/* the need text takes what the title and controls leave; its button and the controls never shrink */
+#agentsList .ticket-cell .need {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart > .ellip {
+  flex: 1 1 0;
+  min-width: 0;
+  contain: inline-size;
 }
 
 #agentsList .agent-cli {
@@ -622,7 +684,7 @@
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-s);
   color: var(--fg);
 }
 
@@ -634,14 +696,14 @@
 #agentsList .state-cell .pill {
   flex: none;
   border-radius: 10px;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
 }
 
 #agentsList .meter {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 
 #agentsList .meter .track {
@@ -676,7 +738,7 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 120px 118px 180px 96px 50px 56px 64px;
+    grid-template-columns: 150px 118px minmax(180px, 1fr) 50px 56px 64px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -692,8 +754,8 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
-    column-gap: 4px;
+    grid-template-columns: 100px 80px minmax(140px, 1fr) 50px 44px 46px 46px;
+    column-gap: var(--sp-1);
   }
 }
 
@@ -727,7 +789,7 @@
 #agentsList .loopstep {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
   align-items: stretch;
 }
 
@@ -760,35 +822,35 @@
 
 .meters2 {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 
 .tok {
   display: grid;
-  gap: 1px;
+  gap: 0;
   justify-items: end;
 }
 
 .tok .row {
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: nowrap;
 }
 
 .res {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .resrow {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) 128px;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
 }
 
 .slots {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .slots i {
@@ -807,9 +869,9 @@
 .lock {
   border: 1px solid var(--line-2);
   border-radius: var(--r);
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .lock.hot {
@@ -820,7 +882,7 @@
 .lockq {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   font-size: var(--fs-s);
 }
@@ -828,20 +890,20 @@
 .quotarow {
   display: grid;
   grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  padding: 3px 0;
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
 }
 
 #timelineP .ph {
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   flex-wrap: nowrap;
 }
 
 #machP .resrow {
-  grid-template-columns: 42px minmax(24px, 1fr) 128px;
-  gap: 6px;
+  grid-template-columns: 56px minmax(24px, 1fr) 128px;
+  gap: var(--sp-1);
   align-items: center;
 }
 
@@ -884,18 +946,22 @@
 }
 
 #machP .resrow .num {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   white-space: nowrap;
+}
+
+#machP .transcript-footprint .num {
+  font-size: var(--fs-s);
 }
 
 #machP .agentslots {
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 #machP .slots {
   min-width: 0;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 #machP .slots i {
@@ -904,15 +970,24 @@
   border-radius: 2px;
 }
 
+/* One line per meter (its text), then a full-width bar. */
 #quotaP .quotarow {
-  grid-template-columns: minmax(65px, 1fr) repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  align-items: stretch;
 }
 
 #quotaP .quotarow .meter {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: stretch;
+  gap: var(--sp-1);
+}
+
+#quotaP .quotarow .meter .num {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #quotaP .quotarow .track {
@@ -920,22 +995,22 @@
 }
 
 #quotaP .quotarow + .quotarow {
-  margin-top: 4px;
+  margin-top: var(--sp-2);
 }
 
 .arow {
   display: grid;
   grid-template-columns: 44px 16px minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: baseline;
-  padding: 5px 14px;
+  padding: var(--sp-1) var(--sp-3);
   border-top: 1px solid var(--line);
   font-size: var(--fs-s);
 }
 
 .arow .t {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .arow .g {
@@ -963,12 +1038,27 @@
 .arow .arefs {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .arow .txt {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* A Comms preview is one line; its read link sits in the row's action column. */
+.arow .log-line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.arow .log-read {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  white-space: nowrap;
 }
 
 @media (min-width: 761px) {
@@ -984,7 +1074,7 @@
 #actList .arow {
   grid-template-columns: 44px 14px 110px minmax(0, 1fr) auto;
   justify-content: stretch;
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 
 #actList .log-who {
@@ -994,15 +1084,15 @@
 /* away mode */
 .awaystrip {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
   flex-wrap: wrap;
-  padding: 7px 14px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   border-radius: var(--r);
   font-size: var(--fs-s);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 @media (max-width: 999px) {
@@ -1062,22 +1152,29 @@
 }
 
 .pipeline-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  align-content: start;
-  gap: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
 }
 
-/* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
+/* Lanes show whole cards only (three, then Show more), so the panel is as tall as they are. */
 #pipelineP > .pipeline-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
 }
 
 .pipeline-stage {
+  flex: 1 1 0;
   min-width: 0;
   --stage-colour: var(--muted);
+}
+
+/* A lane with no tickets keeps its header and count in a narrow column. */
+.pipeline-stage.empty {
+  flex: 0 0 112px;
+}
+
+.pipeline-stage.empty h3 {
+  border-bottom-color: var(--line);
 }
 
 .pipeline-stage.progress {
@@ -1100,11 +1197,11 @@
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: var(--sp-1) var(--sp-1);
   margin: 0;
-  padding-bottom: 4px;
+  padding-bottom: var(--sp-1);
   border-bottom: 2px solid var(--stage-colour);
-  font-size: 11px;
+  font-size: var(--fs-s);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1123,22 +1220,22 @@
 .pipeline-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   min-width: 0;
-  padding: 5px 6px;
-  margin-top: 6px;
+  padding: var(--sp-1) var(--sp-1);
+  margin-top: var(--sp-1);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   background: var(--surface-2);
   color: var(--fg);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-ticket {
   flex: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-skeleton {
@@ -1160,10 +1257,10 @@
 .pipeline-assignee {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 42%;
-  font-size: 11px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-assignee i {
@@ -1174,16 +1271,26 @@
   background: var(--c);
 }
 
+.pipeline-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
 .pipeline-more {
-  display: block;
-  padding: 5px 0;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--sp-1) 0;
 }
 
 /* Overview v2 metrics and stream freshness. */
 .overview-kpis {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .overview-kpi {
@@ -1191,8 +1298,8 @@
   min-width: 0;
   /* the label row grows when a narrow tile wraps its name above its window */
   grid-template-rows: minmax(22px, auto) 26px 14px 34px;
-  gap: 3px;
-  padding: 9px 12px;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -1209,13 +1316,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-s);
   color: var(--muted);
 }
 
 .overview-kpi .lbl {
-  font-size: 10px;
-  line-height: 11px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
   color: var(--muted);
   white-space: normal;
   overflow-wrap: break-word;
@@ -1226,9 +1333,9 @@
 .overview-kpi .v {
   grid-row: 2;
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  line-height: 1.05;
+  line-height: var(--lh-title);
   letter-spacing: 0.01em;
 }
 
@@ -1242,7 +1349,7 @@
   position: relative;
   display: grid;
   grid-template-rows: 24px 9px;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -1256,9 +1363,9 @@
   position: absolute;
   top: -1px;
   left: 0;
-  padding-right: 4px;
+  padding-right: var(--sp-1);
   background: var(--surface);
-  font: 9px / 9px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 
@@ -1271,23 +1378,23 @@
 .kpi-axis {
   display: flex;
   justify-content: space-between;
-  font: 9px / 9px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 
 .kpi-secondary {
   grid-row: 3 / 5;
-  font-size: 11px;
+  font-size: var(--fs-s);
   color: var(--fg-2);
   align-self: end;
-  line-height: 1.4;
+  line-height: var(--lh-s);
 }
 
 .kpi-skeleton {
   display: block;
   width: 70%;
   height: 16px;
-  margin: 5px 0;
+  margin: var(--sp-1) 0;
   border-radius: 3px;
   background: var(--line);
 }
@@ -1321,4 +1428,82 @@
     grid-column: 4;
     flex-wrap: wrap;
   }
+}
+
+/* Observed loops: one compact strip under the crew roster. */
+.loops-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-s);
+}
+
+.loops-strip > strong {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.loop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  max-width: 100%;
+  padding-left: var(--sp-2);
+  border-left: 3px solid var(--accent);
+  color: var(--fg-2);
+  text-decoration: none;
+}
+
+.loop-chip:hover {
+  color: var(--fg);
+}
+
+.loop-chip.tone-ok {
+  border-left-color: var(--ok);
+}
+
+.loop-chip.tone-warn {
+  border-left-color: var(--warn-mark);
+}
+
+.loop-chip.tone-crit {
+  border-left-color: var(--crit);
+}
+
+.loop-chip.tone-neutral {
+  border-left-color: var(--line-2);
+}
+
+.loop-chip.sel {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+/* a parked review's waiver sits under the work lines, inside the cell */
+#agentsList .work-cell .acts,
+.waive-compact {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.waive-compact > button {
+  flex: none;
+}
+
+.waive-compact > select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--sp-5);
 }

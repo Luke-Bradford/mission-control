@@ -5,7 +5,7 @@ import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { SESSION_ALL, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { HOUR, item, METRICS_VIEW, NOW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
+import { CONFIG, HOUR, item, METRICS_VIEW, NOW, OVERVIEW, REGISTRY_ROUTES } from "./fixtures.ts";
 
 const kpis = OVERVIEW.kpis;
 
@@ -207,6 +207,7 @@ describe("KpiStrip", () => {
     let failed = false;
     stubFetch({
       ...REGISTRY_ROUTES,
+      "/api/config": CONFIG,
       "/api/overview": () => ({
         status: failed ? 503 : 200,
         body: failed ? {} : { at, kpis },
@@ -221,9 +222,7 @@ describe("KpiStrip", () => {
     const warning = await screen.findByRole("alert");
     // stale values keep their traces, but the now-cursors stop claiming live
     expect(document.querySelectorAll(".spark-now.live")).toHaveLength(0);
-    expect(warning.textContent).toBe(
-      `Last updated ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`,
-    );
+    expect(warning.textContent).toBe("Last updated 11:25 · refresh failed. Showing stale values.");
     expect(screen.getByText("41.2k")).toBeTruthy();
     failed = false;
     act(() => hub.refetchTopic("agents"));

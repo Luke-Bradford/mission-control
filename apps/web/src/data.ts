@@ -153,6 +153,11 @@ export const RESOURCES = {
     path: `/api/repos/${enc(repoId)}/prs?linked=1`,
     topic: "boards",
   }),
+  // Every PR of the repo, linked to a ticket or not: the command palette reaches them all.
+  allPrs: (repoId: string): ResourceRef => ({
+    path: `/api/repos/${enc(repoId)}/prs`,
+    topic: "boards",
+  }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
   files: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/files`,
@@ -177,6 +182,11 @@ export const RESOURCES = {
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
+  /** A GitHub read of what the board lacks (field and label setup); read fresh, once per check. */
+  boardSetup: (repoId: string): ResourceRef => ({
+    path: `/api/boards/${enc(repoId)}/setup`,
+    topic: null,
+  }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
@@ -259,7 +269,7 @@ export const ACTIONS = {
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
-  boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
+  boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
@@ -340,6 +350,8 @@ interface Entry {
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  /** The start sequence of the newest answer kept: an older request must not replace it. */
+  appliedSeq: number;
   settled: number;
   settledListeners: Set<() => void>;
 }
@@ -350,6 +362,8 @@ class Hub {
   private readonly entries = new Map<string, Entry>();
   /** Bumped by clear(): a response to a request from an older generation is dropped. */
   private generation = 0;
+  /** Stamps each request as it starts, so answers can be told apart by age. */
+  private seq = 0;
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -361,6 +375,7 @@ class Hub {
         listeners: new Set(),
         inflight: false,
         again: false,
+        appliedSeq: 0,
         settled: 0,
         settledListeners: new Set(),
       };
@@ -430,6 +445,7 @@ class Hub {
       return;
     }
     const gen = this.generation;
+    const seq = ++this.seq;
     e.inflight = true;
     // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
     // this lets identical responses retain their complete snapshot identity.
@@ -516,6 +532,9 @@ class Hub {
       next = { ...e.snap, error, loading: false };
     }
     if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
+    // A read that started later may already have stored a newer answer: keep that one.
+    if (seq < e.appliedSeq) next = e.snap;
+    else e.appliedSeq = seq;
     e.inflight = false;
     this.set(e, next);
     this.settle(e);
@@ -525,6 +544,25 @@ class Hub {
       e.fullAgain = false;
       if (e.listeners.size > 0) void this.fetch(e, fullAgain);
     }
+  }
+
+  /**
+   * A fresh read for a decision or a check that must not use a copy that may be stale: it asks the
+   * server now, stores the answer in the cache so every other consumer of the resource shares it,
+   * and returns it.
+   */
+  async read<T>(ref: ResourceRef): Promise<T> {
+    const gen = this.generation;
+    const seq = ++this.seq;
+    const data = await apiGet<T>(ref.path);
+    const e = this.entry(ref.path, ref.topic);
+    if (gen === this.generation && seq > e.appliedSeq) {
+      e.appliedSeq = seq;
+      if (e.snap.error !== null || !sameJson(data, e.snap.data)) {
+        this.set(e, { data, error: null, loading: false });
+      }
+    }
+    return data;
   }
 
   refetch(path: string): void {

@@ -68,7 +68,6 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
-  TOPICS,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -93,9 +92,11 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -145,6 +146,7 @@ let updaterVersion: VersionInfo;
 let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
+let dropUpdateResponse: boolean;
 const stubUpdater = (): Updater => ({
   changes: async () => null,
   version: async () => {
@@ -316,6 +318,7 @@ beforeEach(async () => {
   updaterResult = async () => ({ upToDate: true });
   updaterCalls = [];
   updaterCheckError = null;
+  dropUpdateResponse = false;
   clock = NOW;
   logs = [];
   projectFields = [{ name: "Status", options: [{ name: "Todo" }] }];
@@ -407,6 +410,11 @@ beforeEach(async () => {
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
     updater: stubUpdater(),
+  });
+  app.addHook("onSend", async (req) => {
+    if (dropUpdateResponse && req.url === "/api/update") {
+      throw new Error("client disconnected");
+    }
   });
   // The /api plugin registers its routes at ready(), so this sees every one of them.
   apiRoutes = [];
@@ -2067,6 +2075,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     const latest: MachineSample = {
       at: NOW,
@@ -2087,6 +2096,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     await a.close();
   });
@@ -2114,6 +2124,32 @@ describe("GET /api/machine", () => {
     };
     const r = await get("/api/machine");
     expect(r.json()).toMatchObject({ maxSeats: 8, seats: 4, perSessionMax: 3 });
+  });
+
+  it("carries the crew folder transcript footprint", async () => {
+    const crew = join(dir, "crew");
+    mkdirSync(crew);
+    const path = (id: string, suffix = ".jsonl") => join(crew, `${id}${suffix}`);
+    for (const [id, agentId, bytes] of [
+      ["r1", "a-1", 100],
+      ["r2", "a-1", 40],
+      ["r3", "b-1", 10],
+    ] as const) {
+      const suffix = id === "r2" ? ".jsonl.gz" : ".jsonl";
+      store.upsertRun(run({ id, agentId, transcriptPath: path(id), endedAt: NOW, status: "ok" }));
+      writeFileSync(path(id, suffix), Buffer.alloc(bytes));
+    }
+    writeFileSync(join(crew, "r3.prompt.md"), Buffer.alloc(7));
+    const oldest = NOW - 5 * DAY;
+    utimesSync(path("r3"), new Date(oldest), new Date(oldest));
+    expect((await get("/api/machine")).json().transcripts).toEqual({
+      totalBytes: 157,
+      seats: [
+        { seatId: "a-1", bytes: 140, files: 2 },
+        { seatId: "b-1", bytes: 10, files: 1 },
+      ],
+      oldestAt: oldest,
+    });
   });
 });
 
@@ -4023,7 +4059,7 @@ describe("boards, escalations, health", () => {
     }
   });
 
-  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+  it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
@@ -4051,11 +4087,10 @@ describe("boards, escalations, health", () => {
         supervisor: stubSupervisor(),
         warmMap: true,
       });
-    // built before anyone asks
     const warmed = start();
     try {
       await warmed.ready();
-      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(builds()).toBe(0);
       expect(
         (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
       ).toBe(200);
@@ -4063,11 +4098,12 @@ describe("boards, escalations, health", () => {
     } finally {
       await warmed.close();
     }
-    // asked for while the warm-up is still building: the same build, not a second
+    // A new hub also leaves the map cold until its first map request.
     supervisorCalls = [];
     const racing = start();
     try {
       await racing.ready();
+      expect(builds()).toBe(0);
       const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
       expect(response.statusCode).toBe(200);
       expect(builds()).toBe(1);
@@ -4521,6 +4557,7 @@ describe("boards, escalations, health", () => {
       { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
     ]);
     const a = buildApp({ config, store, bus, mapRing: ring });
+    const unsubscribe = ring.subscribe("shop-app", () => {});
     const stop = ring.start();
     try {
       await expect
@@ -4547,6 +4584,7 @@ describe("boards, escalations, health", () => {
       expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
       expect(ring.diff("unknown")).toBeNull();
     } finally {
+      unsubscribe();
       stop();
       await a.close();
     }
@@ -4746,6 +4784,19 @@ describe("boards, escalations, health", () => {
     ];
     expect(await urlsOf("/api/repos")).toEqual(want);
     expect(await urlsOf("/api/repos/profiles")).toEqual(want);
+  });
+
+  it("health carries the engine's recent tick durations", async () => {
+    const ticks = tickLogOf(store);
+    ticks.begin(1000);
+    ticks.end(1450);
+    const row = (await get("/api/health"))
+      .json()
+      .find((h: { collector: string }) => h.collector === "engine:ticks");
+    expect(row).toMatchObject({
+      ok: true,
+      ticks: [{ startedAt: 1000, endedAt: 1450, durationMs: 450, overranOn: null }],
+    });
   });
 
   it("escalations and health return the store rows", async () => {
@@ -5251,6 +5302,35 @@ describe("reload", () => {
     await a.close();
   });
 
+  it("uses machine-capacity thresholds applied by reload immediately", async () => {
+    withCrew();
+    const latest: MachineSample = {
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 16 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    };
+    const reloader = stubReloader();
+    reloader.reload = async () => {
+      const crew = config.crew;
+      if (crew === undefined) throw new Error("test fixture has no crew");
+      crew.machineCapacity = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 20 };
+      return { ...NO_CHANGES, applied: [] };
+    };
+    const a = buildApp({ config, store, bus, crewReloader: reloader, machine: () => latest });
+
+    expect((await a.inject({ method: "GET", url: "/api/machine" })).json().warning).toBeNull();
+    expect((await reloadPost(a)).statusCode).toBe(200);
+    expect((await a.inject({ method: "GET", url: "/api/machine" })).json().warning).toBe(
+      "disk free is 16.0 GB (below 20 GB)",
+    );
+    await a.close();
+  });
+
   it("refuses a foreign origin and a non-JSON body", async () => {
     const { a } = withReloader({});
     const origin = await a.inject({
@@ -5451,6 +5531,40 @@ describe("SSE stream", () => {
     return { res, until, text: () => text };
   }
 
+  it("reports browser stream opens and closes", async () => {
+    await app.close();
+    const counts: number[] = [];
+    app = buildApp({ config, store, bus, onStreamCount: (count) => counts.push(count) });
+    const first = await open();
+    const second = await open();
+    await Promise.all([first.until(": connected"), second.until(": connected")]);
+    expect(counts).toEqual([1, 2]);
+
+    first.res.raw.res.emit("close");
+    second.res.raw.res.emit("close");
+
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+
+  it("stops map polling after the last map stream closes", async () => {
+    vi.useFakeTimers();
+    await app.close();
+    const poll = vi.spyOn(CallRing.prototype, "poll");
+    app = buildApp({ config, store, bus });
+    try {
+      const client = await open("/api/stream?map=shop-app");
+      await client.until(": connected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+
+      client.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
     async (vendor) => {
@@ -5622,6 +5736,40 @@ describe("crew routes", () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
     expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
+  it("holds a constrained operator start unless force records an override", async () => {
+    const crew = config.crew;
+    if (crew === undefined) throw new Error("test fixture has no crew");
+    crew.machineCapacity = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 20 };
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 16 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+
+    const held = await post5("start", { issue: 5 });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toEqual({
+      error: "Machine capacity held: disk free is 16.0 GB (below 20 GB)",
+    });
+    expect(supervisorCalls).toEqual([]);
+
+    const forced = await post5("start", { issue: 5, force: true });
+    expect(forced.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+    expect(store.flightDecisions(0, 1)[0]).toMatchObject({
+      kind: "start",
+      seatId: "guido-1",
+      ref: "shop-app#5",
+      decision: "Operator override: started GUIDO-1 despite machine capacity hold.",
+      basis: "disk free is 16.0 GB (below 20 GB)",
+    });
   });
 
   it("transfers one seat explicitly and returns the supervisor outcome", async () => {
@@ -6041,7 +6189,7 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [] });
+      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6079,6 +6227,38 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("lists every recent controller decision beyond the main decision limit", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const d = (at: number, about: string, decision = "d") =>
+        store.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about,
+          decision,
+          basis: "b",
+        });
+      d(now - 2 * 60_000, "Missing power", "For the controller: choose a replacement");
+      for (let n = 0; n < 101; n++) d(now - n * 1000, `newer ${n}`);
+      d(now - 25 * 60 * 60_000, "Missing power", "For the controller: expired request");
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.decisions).toHaveLength(FLIGHT_LIST_MAX);
+      expect((body.controllerDecisions ?? []).map((x) => x.decision)).toEqual([
+        "For the controller: choose a replacement",
+      ]);
     });
 
     it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
@@ -6467,11 +6647,12 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
-  it("answers 202 { restarting }, and asks for the restart only after the response", async () => {
+  it("restarts a successful Update when the client disconnects before its response", async () => {
     updaterResult = async () => ({ restarting: true });
-    const r = await post("/api/update");
-    expect(r.statusCode).toBe(202);
-    expect(r.json()).toEqual({ restarting: true });
+    dropUpdateResponse = true;
+
+    await post("/api/update");
+
     expect(updaterCalls).toEqual(["update", "restart"]);
   });
 
@@ -7620,6 +7801,129 @@ describe("QA board data", () => {
     ]);
     expect((await get("/api/qa/findings?days=91")).statusCode).toBe(400);
   });
+
+  it("keeps old unresolved findings on open PRs and serves review-round summaries", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [9, 10, 11].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: `PR ${number}`,
+        url: `https://example.test/${number}`,
+        branch: `feature/${number}`,
+        ticket: null,
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: "passing" as const,
+        createdAt: NOW - 100 * DAY,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: String(number).repeat(40),
+        mergeable: null,
+        checks: [],
+      })),
+      NOW,
+    );
+    const record = (
+      prNumber: number,
+      round: number,
+      verdict: { spec: "pass" | "fail"; quality: "pass" | "fail" },
+      findings: { severity: "Important" | "Minor"; summary: string }[],
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId: `author-${prNumber}`,
+        repoId: "shop-app",
+        seatId: "retro-1",
+        prNumber,
+        sha: `${prNumber}${round}`.repeat(20),
+        epoch: 0,
+        attempt: round,
+        round,
+        at,
+      });
+      if (id === null) throw new Error("fixture review missing");
+      const runId = `review-${prNumber}-${round}`;
+      store.setReviewState(id, ["queued"], "running", { at, runId });
+      store.recordFindings(id, runId, {
+        verdict,
+        summary: `Round ${round}`,
+        findings: findings.map((finding) => ({
+          ...finding,
+          file: "file.ts",
+          line: 1,
+          scenario: "A scenario",
+          fix: "A fix",
+        })),
+        at,
+      });
+      return id;
+    };
+    const old = NOW - 91 * DAY;
+    const unresolved = record(
+      9,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Open" }],
+      old,
+    );
+    record(
+      10,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Resolved" }],
+      old,
+    );
+    record(10, 2, { spec: "pass", quality: "pass" }, [], old + 1);
+    const clean = record(11, 1, { spec: "pass", quality: "pass" }, [], NOW - 2);
+    const failing = record(
+      11,
+      2,
+      { spec: "pass", quality: "fail" },
+      [
+        { severity: "Important", summary: "Blocking" },
+        { severity: "Minor", summary: "Minor" },
+      ],
+      NOW - 1,
+    );
+
+    const body = (await get("/api/qa/findings?days=90")).json();
+    expect(body.findings).toEqual([
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Blocking" }),
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Minor" }),
+      expect.objectContaining({
+        reviewId: unresolved,
+        prNumber: 9,
+        summary: "Open",
+        resolution: null,
+      }),
+    ]);
+    expect(body.reviews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reviewId: clean,
+          prNumber: 11,
+          round: 1,
+          sha: "111".repeat(20),
+          verdict: { spec: "pass", quality: "pass" },
+          blocking: 0,
+          minor: 0,
+          endedAt: NOW - 2,
+        }),
+        expect.objectContaining({
+          reviewId: failing,
+          prNumber: 11,
+          round: 2,
+          sha: "112".repeat(20),
+          verdict: { spec: "pass", quality: "fail" },
+          blocking: 1,
+          minor: 1,
+          endedAt: NOW - 1,
+        }),
+      ]),
+    );
+  });
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
@@ -8297,7 +8601,7 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it.each(TOPICS.filter((topic) => topic !== "machine"))(
+  it.each(["agents", "boards", "escalations", "health", "settings", "config", "guard"] as const)(
     "invalidates shared crew on %s",
     async (topic) => {
       const reads = vi.spyOn(store, "asideRuns");
@@ -8310,9 +8614,23 @@ describe("overview", () => {
     },
   );
 
+  it.each(["limits", "machine", "attention", "flight"] as const)(
+    "keeps shared crew for the unrelated %s topic",
+    async (topic) => {
+      const reads = vi.spyOn(store, "readVersion");
+      await get("/api/crew");
+      const initial = reads.mock.calls.length;
+      bus.emit(topic);
+      await get("/api/crew");
+      expect(reads).toHaveBeenCalledTimes(initial);
+      reads.mockRestore();
+    },
+  );
+
   it("rebuilds shared crew when the configured selection changes", async () => {
     await get("/api/crew");
     withCrew();
+    bus.emit("config");
     expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
       true,
     );

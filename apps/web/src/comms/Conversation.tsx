@@ -1,7 +1,6 @@
 import {
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
   type CommsMessage,
@@ -14,8 +13,10 @@ import {
 } from "@mc/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiDelete, apiPost, apiPut } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
+import { ago, dayMonth, hhmm } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import {
@@ -29,7 +30,7 @@ import {
   ticketPath,
 } from "../router.ts";
 import { CommsEnd, MentionText } from "./messages.tsx";
-import type { CommsView } from "./model.ts";
+import { type CommsView, ticketForRef } from "./model.ts";
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
@@ -39,13 +40,15 @@ const MENTIONS_GAP_PX = 8;
 const MENTIONS_MIN_PX = 120;
 
 /** A message's time; one from an earlier day carries its date, so old traffic never reads as today's. */
-const time = (at: number) => {
-  const date = new Date(at);
-  const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return date.toDateString() === new Date().toDateString()
-    ? clock
-    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${clock}`;
-};
+function useMessageTime(): (at: number) => string {
+  const tz = useTz();
+  return (at) => {
+    if (!tz) return "—";
+    return ago(at, Date.now(), tz) === "today"
+      ? hhmm(at, tz)
+      : `${dayMonth(at, tz)} ${hhmm(at, tz)}`;
+  };
+}
 
 function scopeFor(view: CommsView): string | null {
   if (view.kind === "crew") return "crew";
@@ -69,12 +72,6 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
     agentId: message.from === COMMS_CAPCOM ? message.to : message.from,
     contactId: message.from === COMMS_CAPCOM ? message.from : message.to,
   };
-}
-
-function ticketForRef(ref: string, ticket: string | null): string | undefined {
-  if (ticket === null || !COMMS_TICKET.test(ticket)) return undefined;
-  const issue = /^#(\d+)$/.exec(ref)?.[1];
-  return issue === undefined || ticket.endsWith(`#${issue}`) ? ticket : undefined;
 }
 
 function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {
@@ -200,6 +197,7 @@ function MessagePane({
   /** Counts CAPCOM's sends: each one brings the pane back to the latest, wherever the reader was. */
   sent?: number;
 }) {
+  const time = useMessageTime();
   const box = useRef<HTMLDivElement>(null);
   const followsLatest = useRef(true);
   useLayoutEffect(() => {
@@ -383,6 +381,7 @@ function MentionsBell({
   onOpenMessage: OpenMessage;
   flightId: string | undefined;
 }) {
+  const time = useMessageTime();
   const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());

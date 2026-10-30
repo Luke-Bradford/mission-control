@@ -34,21 +34,13 @@ it("sums measured retries once and shows each attempt and timeline tokens, inclu
   const { container } = render(
     <LoopSteps row={row} view={view} prs={[]} limits={{ tries: 3, rounds: 3 }} now={NOW} />,
   );
-  expect(container.querySelector(".vmeta")?.textContent).toBe("1.5k · 5m");
+  expect(container.querySelector(".vmeta")?.textContent).toBe("5m · 1.5k");
+  // identical outcomes in a row are one line, summing only the measured tokens
+  fireEvent.click(container.querySelector("button.vhead") as HTMLElement);
   expect([...container.querySelectorAll(".att")].map((e) => e.textContent)).toEqual([
-    "try 1pass1.2k1m",
-    "try 2pass3001m",
-    "try 3pass01m",
-    "try 4pass—1m",
-    "try 5pass—1m",
+    "tries 1–5pass×55m1.5k",
   ]);
-  expect(container.textContent).toContain(RETRY_NOTE);
-  const header = container.querySelector<HTMLButtonElement>("button.vhead") as HTMLButtonElement;
-  expect(header.tabIndex).toBe(0);
-  fireEvent.click(header);
-  expect(header.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(header);
-  expect(container.querySelectorAll(".att")).toHaveLength(5);
+  expect(container.textContent).not.toContain(RETRY_NOTE);
   expect(stepTokens([attempt(null, 1), attempt(undefined, 2)])).toBeNull();
   expect(stepTokens([attempt(0, 1)])).toBe(0);
   const timeline = render(

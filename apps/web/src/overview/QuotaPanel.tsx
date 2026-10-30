@@ -1,10 +1,11 @@
 import type { ConfigView, LimitRow } from "@mc/core";
+import { Fragment } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { rel } from "../fmt.ts";
+import { percent, rel } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { quotaWarnings, resetWhen, timeToFull } from "../quota.ts";
+import { quotaWarnings, quotaWindows, resetWhen, timeToFull } from "../quota.ts";
 import { QuotaMeter } from "./QuotaMeter.tsx";
 
 const DASH = "—";
@@ -12,7 +13,7 @@ const DASH = "—";
 /** The hover text of one bar: `{account} {window}: {used}% used · {time to full} · resets {when}`. */
 function title(row: LimitRow, now: number, tz: string | null): string {
   return [
-    `${row.accountId} ${row.window}: ${Math.round(row.used)}% used`,
+    `${row.accountId} ${row.window}: ${percent(row.used)} used`,
     timeToFull(row, now),
     `resets ${tz ? resetWhen(row, now, tz) : DASH}`,
     row.stale ? "stale" : null,
@@ -35,13 +36,17 @@ export function QuotaPanel() {
     const row = rows.find((r) => r.accountId === account && r.window === window);
     return row ? (
       <span title={title(row, now, tz)}>
-        <QuotaMeter row={row} now={now} showAge />
+        <QuotaMeter row={row} now={now} />
       </span>
     ) : (
       <QuotaMeter row={null} accountId={account} window={window} now={now} />
     );
   };
-  const warnings = tz ? quotaWarnings(rows, now, tz) : [];
+  // A window the vendor does not show is not warned about either.
+  const shown = rows.filter((r) =>
+    quotaWindows(config?.accounts.find((c) => c.id === r.accountId)?.vendor).includes(r.window),
+  );
+  const warnings = tz ? quotaWarnings(shown, now, tz) : [];
 
   return (
     <Panel
@@ -61,15 +66,17 @@ export function QuotaPanel() {
             tz && mine.length > 0
               ? `read ${rel(Math.max(...mine.map((r) => r.sampledAt)), now, tz)}`
               : null;
+          const windows = quotaWindows(config?.accounts.find((c) => c.id === a)?.vendor);
           return (
-            <div className="quotarow" key={a}>
+            <div className="quotarow" key={a} data-windows={windows.length}>
               <span className="min0 quota-account" title={read ?? undefined}>
                 <span className="ellip" title={a}>
                   {a}
                 </span>
               </span>
-              {cell(a, "5h")}
-              {cell(a, "7d")}
+              {windows.map((w) => (
+                <Fragment key={w}>{cell(a, w)}</Fragment>
+              ))}
             </div>
           );
         })}

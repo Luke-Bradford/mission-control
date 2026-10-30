@@ -85,6 +85,7 @@ import {
 } from "./collectors/usage-sources.ts";
 import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
+import { TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
@@ -99,6 +100,11 @@ import {
 } from "./machine-capacity.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
+import {
+  maintainTranscripts,
+  TRANSCRIPT_PASS_FIRST_DELAY_MS,
+  TRANSCRIPT_PASS_INTERVAL_MS,
+} from "./transcript-lifecycle.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
@@ -109,6 +115,7 @@ export type Job =
   | "github"
   | "usage"
   | "maintenance"
+  | "transcripts"
   | "machine"
   | "prs"
   | "flow"
@@ -127,6 +134,7 @@ export const JOBS: readonly Job[] = [
   "github",
   "usage",
   "maintenance",
+  "transcripts",
   "machine",
   "prs",
   "flow",
@@ -138,7 +146,8 @@ export const JOBS: readonly Job[] = [
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
 export const LOOP_INTERVAL_MS = 15_000;
-export const MACHINE_INTERVAL_MS = 2000;
+/** Machine collection is expensive (it reads process state); capacity decisions need no finer cadence. */
+export const MACHINE_INTERVAL_MS = 10_000;
 /** The machine collector status is rewritten at most this often while it does not change. */
 export const MACHINE_STATUS_MS = 60_000;
 export const MAINTENANCE_INTERVAL_MS = 60 * 60_000;
@@ -234,6 +243,7 @@ export interface Collectors {
     now: number,
     testCommand: string | null,
   ) => Promise<MachineResult>;
+  transcripts?: typeof maintainTranscripts;
 }
 
 export interface SchedulerDeps {
@@ -249,6 +259,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
+  hasViewClients?: () => boolean;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
@@ -335,6 +347,7 @@ export function realCollectors(config: CcConfig): Collectors {
     },
     machine: (prevCpus, prev, now, testCommand) =>
       sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
+    transcripts: maintainTranscripts,
   };
 }
 
@@ -1013,7 +1026,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           `backfill: ${r.folded} runs in ${Math.round(performance.now() - t0)} ms, ${r.left} left`,
         );
       }),
+    transcripts: async () => {
+      const r = await (c.transcripts ?? maintainTranscripts)({
+        store,
+        now: now(),
+        retention: config.crew?.transcripts ?? TRANSCRIPT_RETENTION_DEFAULTS,
+      });
+      if (r.gzipped || r.deleted || r.failed.length)
+        deps.log?.(
+          `transcripts: ${r.gzipped} gzipped, ${r.deleted} deleted, ${r.failed.length} failed`,
+        );
+    },
     machine: async () => {
+      if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
       const r = await c.machine(
         machineCpus,
@@ -1050,14 +1075,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             r.sample.diskTotalBytes > 0
               ? `${((r.sample.diskFreeBytes / r.sample.diskTotalBytes) * 100).toFixed(1)}%`
               : "—";
-          const swapPct =
-            r.sample.swapUsedBytes !== null &&
-            r.sample.swapUsedBytes !== undefined &&
-            r.sample.swapTotalBytes !== null &&
-            r.sample.swapTotalBytes !== undefined &&
-            r.sample.swapTotalBytes > 0
-              ? `${((r.sample.swapUsedBytes / r.sample.swapTotalBytes) * 100).toFixed(1)}%`
-              : "—";
           const consumers = r.sample.topConsumers?.length
             ? r.sample.topConsumers
                 .map(
@@ -1072,7 +1089,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             runId: null,
             seatId: null,
             repoId: null,
-            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap: ${gb(r.sample.swapUsedBytes)} / ${gb(r.sample.swapTotalBytes)} used (${swapPct}). Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
+            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
             at,
           });
         } else {
@@ -1126,6 +1143,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     github: config.poll.githubSeconds * 1000,
     usage: config.poll.usageMinutes * 60_000,
     maintenance: MAINTENANCE_INTERVAL_MS,
+    transcripts: TRANSCRIPT_PASS_INTERVAL_MS,
     machine: MACHINE_INTERVAL_MS,
     prs: PR_SWEEP_MS,
     flow: FLOW_INTERVAL_MS,
@@ -1140,6 +1158,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     prs: PR_SWEEP_FIRST_DELAY_MS,
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
+    transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {

@@ -72,6 +72,10 @@ Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within 
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
+Do not give a scripted Update a short client timeout. The build can take several minutes; leave
+the request connected until it answers, then allow the hub to reconnect. If a caller disconnects,
+the completed update still restarts the hub.
+
 The button is disabled, with the reason as its tooltip, on a preview server (any port but 7420, or
 `MC_NO_LOOP_WRITES=1`), when the checkout is not on `main`, when it has uncommitted changes
 (untracked files included), and while a crew seat is mid-turn or starting. With nothing new on
@@ -276,9 +280,12 @@ after both their review and author run end; test-lock holds and CI runs stay 90 
 set-aside runs, unanswered questions, pending drafts and open attention notes protect
 their associated rows. Deletions use transactions of at most 500 rows, yield between
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
-Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
-Activity and Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database
-file on disk.
+Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
+hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
+also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
+merged-PR history remain available to Activity and Telemetry for one year. Reported reviews and
+unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
+pages reusable; it does not shrink the database file on disk.
 
 ## First crew
 
@@ -360,9 +367,11 @@ What each seat's process starts with:
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
   After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
-  FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
-  its required reason; only this Comms item kind is eligible for that path. Messages from before
-  the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
+  FLIGHT may settle only a stale or already-resolved `comms-open:` item it sent, recording its
+  required reason; a seat's or the operator's item stays protected. A linked PR that merges or
+  closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
+  Messages from before the feature's rollout boundary do not enter the escalation, preventing a
+  rollout backlog.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
@@ -437,8 +446,9 @@ What each seat's process starts with:
   - the keychains as a service: the rule blocks only the keychain *file*. Security-framework
     queries go through `securityd`, and a probe showed that the data-protection keychain answers
     sandboxed code (#31; typed `security` is refused by name);
-  - the per-seat pnpm stores (`/tmp/claude-<uid>/mc-pnpm-store/<seat>`). They sit in the sandbox
-    temp root, which every seat can read and write, so they keep pnpm's store out of the worktree
+  - the hub-owned pnpm store (`<crew.worktrees>/.mc-pnpm-store/shared`). The hub installs from it;
+    every Claude and Codex seat can read it but its sandbox explicitly denies writes, so one seat
+    cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
   The sandbox has no network, and the secret scan at push time is the backstop for anything a seat
@@ -606,11 +616,19 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
   (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
   a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
-- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time.
+- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time. So do the repo's `mc.checks` commands (lint, typecheck): a check waits its turn like the suite, so the push gate never puts more than one heavy check on the Mac at once. A check that waited is not recorded as failed.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 
 Each refusal is recorded as a guard hit (`/api/guard/hits`, Comms › Guard).
+
+**Re-reads.** A second whole-file read (a `Read` with no `offset`, `limit` or `pages`, a lone `cat FILE` or
+`sed -n p FILE`) of a file of 32 KB or more that the run already read whole, with the same size and
+mtime and no compaction since, by the same agent (a subagent has its own context, so its reads are
+kept apart), is answered with the earlier read's tool call instead of the file.
+A range, a smaller file, a changed file and another run's read all pass. This is not a guard hit: it
+is counted in `run_rereads` and shows as `digest.rereads` (`count`, `tokensSaved` at about 4 bytes a
+token) on the run's digest. The ledger is `run_reads`; both tables go with the run.
 
 ### A looped run, step by step
 
@@ -853,9 +871,10 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
-action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
-the configured review-round cap for a head, optionally adding a short fix list; a second grant for
-that head is left to the controller.
+action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
+configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
+cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
@@ -891,7 +910,7 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
+A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
@@ -923,6 +942,29 @@ removes an identical line from `## Done when`. Nothing else in the body changes.
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
+
+### FLIGHT's controller powers
+
+FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
+product direction, a security exception, an irreversible external action, and a floor approval the
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
+repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
+guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
+operator.
+
+| Tool | What it does |
+|---|---|
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
+| `sync_main` | Merge main into a run's branch |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
+| `promote` | Reads the live card, and refuses when it cannot be read |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+
+A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
+watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
+started before the set was recorded rotates on its wake count as before.
 
 ## What it observes
 
@@ -1038,6 +1080,11 @@ This code change does not edit `CLAUDE.md` or your home config.
 run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
+use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
+`300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
+no Claude review did). When a review fails on its budget, the author's next attempt goes to another
+free reviewer of the session, not the same seat, and only a single reviewer retries on itself.
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
@@ -1121,11 +1168,14 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
 - **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
   date, state, open and closed issue counts. `GET /api/qa/milestones`. Milestones the repo does not
   use give an empty list.
-- **Findings.** `GET /api/qa/findings?days=` (1..90, default 30) lists review findings with their
-  RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or `waived`; null while
-  unresolved). RETRO sets the resolution of the findings it names when it reports round 2 or later;
-  when a round reports nothing to fix, the engine marks the earlier blocking findings it left
-  unnamed `fixed`. Minor findings are logged, not resolved.
+- **Findings and review rounds.** `GET /api/qa/findings?days=` (1..90, default 30) lists review
+  findings with their RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or
+  `waived`; null while unresolved), plus completed `reviews` with each round's head SHA, verdict,
+  blocking and minor counts, and end time. Resolved findings and closed PRs use the requested
+  window. Unresolved findings and completed rounds for a currently open PR remain available beyond
+  it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
+  round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
+  `fixed`. Minor findings are logged, not resolved.
 
 ## The HUD
 
@@ -1651,7 +1701,7 @@ Add a Codex seat in **Setup › Sessions**, or in `config.yaml`: choose an accou
 
 If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery or validation. The hub still boots and Claude seats continue to run. No intervention is required: the state clears itself when discovery succeeds.
 
-Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
+Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. Remote plugins are off for seats, so Codex does not download its shared plugin catalog into each isolated home. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
 

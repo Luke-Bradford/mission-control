@@ -1,20 +1,22 @@
-import { type AgentStream, clockHm } from "@mc/core";
+import type { AgentStream } from "@mc/core";
 import { useMemo } from "react";
 import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { RESOURCES, useResource } from "../data.ts";
+import { hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { type DockRow, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 export const NOTHING_LOGGED = "Nothing logged yet.";
 
-export const entriesLabel = (n: number): string => (n === 1 ? "1 entry" : `${n} entries`);
+export const entriesLabel = (n: number): string => plural(n, "entry", "entries");
 
 type LogEntry = Extract<DockRow, { kind: "hub" }>;
 
 function LogRow({ row, tz }: { row: LogEntry; tz: string | null }) {
-  const at = row.at !== null && tz !== null ? ` · ${clockHm(row.at, tz)}` : "";
+  const at = row.at !== null && tz !== null ? ` · ${hhmm(row.at, tz)}` : "";
   return (
     <div className={`dmsg ${row.kind}`}>
       <div className="who">
@@ -33,7 +35,8 @@ function LogRow({ row, tz }: { row: LogEntry; tz: string | null }) {
  * left out: decisions have their one presentation in Decided without you.
  */
 export function WorkingLog() {
-  const view = useResource<FlightView>(RESOURCES.flight).data;
+  const flight = useResource<FlightView>(RESOURCES.flight);
+  const view = flight.data;
   const seat = view?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
@@ -49,7 +52,7 @@ export function WorkingLog() {
       actions={seat ? <span className="flight-count">{entriesLabel(rows.length)}</span> : undefined}
     >
       {view === undefined ? (
-        <p className="pb note">—</p>
+        <Pending what="the log" error={flight.error} resource={RESOURCES.flight} />
       ) : !seat ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (

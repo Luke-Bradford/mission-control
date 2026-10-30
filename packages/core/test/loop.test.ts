@@ -2402,6 +2402,19 @@ describe("merge workspace", () => {
     expect(kindsOf(r.actions)).not.toContain("note");
   });
 
+  it("records HUD design checks without making them a merge gate", () => {
+    const result = reconcile(
+      merge(
+        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } as never }) },
+        { gate: gateOf({ webChanged: true }) },
+      ),
+    );
+    expect(result.actions.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
+      { kind: "mark-ready" },
+      { kind: "merge", sha: SHA },
+    ]);
+  });
+
   it("skips mark-ready for a PR that is not a draft or already marked", () => {
     const a = reconcile(merge({ pr: pr({ ci: "passing", isDraft: false }) })).actions;
     expect(kindsOf(a).filter((k) => k === "mark-ready" || k === "merge")).toEqual(["merge"]);

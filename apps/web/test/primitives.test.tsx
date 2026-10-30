@@ -108,9 +108,9 @@ describe("Seg", () => {
 
 describe("AgentTag", () => {
   it("colours agents by config index, wrapping after seven, and FLIGHT grey", () => {
-    expect(agentColor(0)).toBe("var(--s1)");
-    expect(agentColor(6)).toBe("var(--s7)");
-    expect(agentColor(7)).toBe("var(--s1)");
+    expect(agentColor(0)).toBe("var(--seat-1)");
+    expect(agentColor(6)).toBe("var(--seat-7)");
+    expect(agentColor(7)).toBe("var(--seat-1)");
     expect(agentColor("flight")).toBe("var(--fg-2)");
   });
 
@@ -124,7 +124,7 @@ describe("AgentTag", () => {
     const [a, f] = [...container.querySelectorAll(".ag")] as HTMLElement[];
     expect(a?.textContent).toBe("shop-app-ta");
     expect(a?.className).toBe("ag");
-    expect(a?.style.getPropertyValue("--c")).toBe("var(--s3)");
+    expect(a?.style.getPropertyValue("--c")).toBe("var(--seat-3)");
     expect(f?.className).toBe("ag sm");
     expect(f?.style.getPropertyValue("--c")).toBe("var(--fg-2)");
   });

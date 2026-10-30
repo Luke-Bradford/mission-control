@@ -145,7 +145,7 @@ export function createCodexApprover(i: {
         return refuse("codex-allowlist");
     }
     for (const event of events) {
-      const verdict = crewGuardDecision(
+      let verdict = crewGuardDecision(
         i.config,
         i.repoId,
         i.mode,
@@ -155,6 +155,11 @@ export function createCodexApprover(i: {
         i.cwd,
         typeof params.cwd === "string" ? params.cwd : undefined,
       );
+      // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+      if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
+        const check = await i.checks?.lockedBy(i.runId, event.input.command);
+        if (check) verdict = { kind: "lock", command: check };
+      }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
@@ -185,7 +190,12 @@ export function createCodexApprover(i: {
     ) {
       for (const event of events) {
         if (event.tool === "Bash" && event.input.command !== undefined) {
-          await i.checks.begin({ runId: i.runId, toolUseId: String(id) }, event.input.command);
+          const itemId = typeof params.itemId === "string" ? params.itemId : null;
+          await i.checks.begin(
+            { runId: i.runId, toolUseId: String(id) },
+            event.input.command,
+            itemId === null || itemId === String(id) ? [] : [{ runId: i.runId, toolUseId: itemId }],
+          );
         }
       }
     }

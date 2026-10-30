@@ -30,6 +30,7 @@ import {
 } from "../src/collectors/usage-claude.ts";
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
+import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import * as hud from "../src/hud.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
@@ -167,6 +168,60 @@ const row = (collector: string) => store.status().find((s) => s.collector === co
 const flushEmits = () => vi.advanceTimersByTime(EMIT_COALESCE_MS);
 
 describe("scheduler", () => {
+  it("runs transcript maintenance with default retention", async () => {
+    const transcripts = vi.fn(async () => ({ gzipped: 1, deleted: 0, skippedLive: 0, failed: [] }));
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts }),
+      log,
+    });
+    await s.tick("transcripts");
+    expect(transcripts).toHaveBeenCalledWith({
+      store,
+      now: NOW,
+      retention: TRANSCRIPT_RETENTION_DEFAULTS,
+    });
+    expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
+  });
+
+  it("starts transcript maintenance after one minute, then every six hours", async () => {
+    vi.useFakeTimers();
+    config.crew = {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 1,
+      transcripts: { gzipAfterHours: 2, deleteAfterDays: 3 },
+      sessions: [],
+    };
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts }),
+      log,
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transcripts).toHaveBeenCalledTimes(1);
+    expect(transcripts).toHaveBeenLastCalledWith({
+      store,
+      now: NOW,
+      retention: { gzipAfterHours: 2, deleteAfterDays: 3 },
+    });
+    expect(log).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+    expect(transcripts).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
   it("skips a job tick while the previous run of that job is still in flight", async () => {
     let release: () => void = () => undefined;
     const ta = vi.fn(
@@ -961,10 +1016,10 @@ describe("scheduler", () => {
       expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
     });
 
-    it("runs every 2 s, keeps the latest sample in memory and emits machine", async () => {
+    it("runs every 10 s, keeps the latest sample in memory and emits machine", async () => {
       vi.useFakeTimers();
       expect(JOBS).toContain("machine");
-      expect(MACHINE_INTERVAL_MS).toBe(2000);
+      expect(MACHINE_INTERVAL_MS).toBe(10_000);
       let t = NOW;
       const c = stubs();
       const s = createScheduler({ config, store, bus, now: () => t, collectors: c });
@@ -973,9 +1028,9 @@ describe("scheduler", () => {
       expect(s.machine()).toMatchObject({ at: NOW, cpuPct: null });
       flushEmits();
       expect(topics).toContain("machine");
-      t += 2000;
+      t += MACHINE_INTERVAL_MS;
       await s.tick("machine");
-      expect(s.machine()).toMatchObject({ at: NOW + 2000, cpuPct: 5 });
+      expect(s.machine()).toMatchObject({ at: NOW + MACHINE_INTERVAL_MS, cpuPct: 5 });
       // The previous sample is handed back to the collector.
       expect(vi.mocked(c.machine).mock.calls[1]?.[1]).toMatchObject({ at: NOW });
 
@@ -989,6 +1044,41 @@ describe("scheduler", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(c.machine).toHaveBeenCalledTimes(calls + 2);
       await u.stop();
+    });
+
+    it("does not sample an idle hub without a browser or machine guard", async () => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+      await s.tick("machine");
+      expect(c.machine).not.toHaveBeenCalled();
+    });
+
+    it("samples the default capacity guard without a browser", async () => {
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+
+      await s.tick("machine");
+
+      expect(c.machine).toHaveBeenCalledOnce();
     });
 
     it("writes the first sample of each minute to the store, not every tick", async () => {
@@ -1024,6 +1114,7 @@ describe("scheduler", () => {
               at,
               diskFreeBytes: tight ? 14 * 1024 ** 3 : 20 * 1024 ** 3,
               diskTotalBytes: 100 * 1024 ** 3,
+              memTotalBytes: 24 * 1024 ** 3,
               swapUsedBytes: (tight ? 18 : 1) * 1024 ** 3,
               swapTotalBytes: 20 * 1024 ** 3,
               memoryPressureFreePct: tight ? 8 : 20,
@@ -1038,7 +1129,7 @@ describe("scheduler", () => {
       });
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
-        "Disk: 14.0 GB free (14.0%). Swap: 18.0 GB / 20.0 GB used (90.0%). Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
+        "Disk: 14.0 GB free (14.0%). Swap used: 18.0 GB. RAM: 24.0 GB. Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
       );
       tight = false;
       t += 5 * 60_000 + 1;
@@ -1053,7 +1144,15 @@ describe("scheduler", () => {
         { diskFreeBytes: 20 * 1024 ** 3, diskTotalBytes: 500 * 1024 ** 3 },
         "disk free is 4.0%",
       ],
-      ["swap", { swapUsedBytes: 86, swapTotalBytes: 100 }, "swap is 86.0% used"],
+      [
+        "swap",
+        {
+          swapUsedBytes: 18 * 1024 ** 3,
+          memTotalBytes: 24 * 1024 ** 3,
+          memoryPressureFreePct: 9,
+        },
+        "swap used is 18.0 GB of 24.0 GB RAM (above 60%) and memory free is 9.0% (below 10%)",
+      ],
       ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
     ])("raises exactly one capacity item for %s", async (_name, over, reason) => {
       const s = createScheduler({
@@ -1100,7 +1199,8 @@ describe("scheduler", () => {
               diskTotalBytes: 100 * 1024 ** 3,
               swapUsedBytes: disk ? 1 : 18,
               swapTotalBytes: 20,
-              memoryPressureFreePct: 20,
+              memTotalBytes: 20,
+              memoryPressureFreePct: disk ? 20 : 9,
               load1: 1,
               topConsumers: [
                 {
@@ -1122,7 +1222,7 @@ describe("scheduler", () => {
       await s.tick("machine");
       const notes = store.notes().filter((n) => n.key === "machine-capacity");
       expect(notes).toHaveLength(1);
-      expect(notes[0]?.text).toContain("swap is 90.0% used");
+      expect(notes[0]?.text).toContain("swap used is 0.0 GB of 0.0 GB RAM (above 60%)");
       expect(notes[0]?.text).toContain("node (pid 2");
     });
 
@@ -2465,6 +2565,23 @@ it("releases crew holds from a durable idle seat session after the hold", async 
   store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
   await s.tick("ta");
   expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+});
+
+it("releases an expired hold from a no-client loop tick", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  holdItem(store, "ask:expired", "Waiting", { kind: "date", at: NOW }, "operator", NOW);
+  const s = createScheduler({
+    config,
+    store,
+    bus,
+    now: () => NOW + 1,
+    collectors: stubs(),
+    hasViewClients: () => false,
+  });
+
+  await s.tick("ta");
+
+  expect(holds(store)["ask:expired"]?.releasedAt).toBe(NOW + 1);
 });
 
 it("releases a ci hold when the stored PR reaches the state, and an item hold when the item is gone", async () => {

@@ -3,7 +3,15 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
-import { handlePerson, type PersonThreadView, postPersonReply, whereOf } from "../notifications.ts";
+import { Pill } from "../hud/Pill.tsx";
+import {
+  CATCH_UP_LABEL,
+  catchUpTone,
+  handlePerson,
+  type PersonThreadView,
+  postPersonReply,
+  whereOf,
+} from "../notifications.ts";
 import { toast } from "../shell/Toast.tsx";
 import "./ItemBrief.css";
 
@@ -57,29 +65,14 @@ export function ItemBrief({
         <div className="ctx">
           <div className="bsec">Catch-up</div>
           <div className="ctxline">
-            <span className={`pill ${brief.catchUp.kind === "new" ? "plain" : "warn"}`}>
-              {brief.catchUp.kind === "new"
-                ? "New"
-                : brief.catchUp.kind === "old"
-                  ? "Old thread"
-                  : "Follow-up"}
-            </span>
+            <Pill tone={catchUpTone(brief.catchUp.kind)}>{CATCH_UP_LABEL[brief.catchUp.kind]}</Pill>
             {brief.catchUp.line}
           </div>
           <TextList title="So far" lines={brief.catchUp.story} />
           <TextList title="Be aware" lines={brief.catchUp.aware} />
         </div>
       ) : (
-        (catchUp ??
-        (brief && (
-          <div className="ctx">
-            <div className="bsec">Catch-up</div>
-            <div className="bsec">So far</div>
-            <p className="note">Catch-up unavailable.</p>
-            <div className="bsec">Be aware</div>
-            <p className="note">Awareness unavailable.</p>
-          </div>
-        )))
+        catchUp
       )}
       <BriefSection
         title="The question"
@@ -297,7 +290,7 @@ function OptionCard(p: {
         p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() ? (
           <Recommendation text={p.recommendation} of={`Recommendation, ${p.of}`} />
         ) : (
-          <span className="pill plain">FLIGHT recommends</span>
+          <Pill tone="plain">FLIGHT recommends</Pill>
         ))}
     </div>
   );
@@ -307,7 +300,7 @@ export function Recommendation({ text, of = "Recommendation" }: { text: string; 
   if (!text.trim()) return null;
   return (
     <div className="recommendation">
-      <span className="pill plain">FLIGHT recommends</span>
+      <Pill tone="plain">FLIGHT recommends</Pill>
       <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={of}>
         <Markdown text={text} />
       </Expandable>
@@ -387,7 +380,7 @@ export function PersonChoices({
               <div className={i === 0 ? "opt rec" : "opt"} key={reply.id}>
                 <span className="row">
                   <b>{reply.label}</b>
-                  {i === 0 && <span className="pill plain">FLIGHT suggests</span>}
+                  {i === 0 && <Pill tone="plain">FLIGHT suggests</Pill>}
                 </span>
                 {editing === reply.id ? (
                   <textarea

@@ -62,6 +62,13 @@ describe("overrideProfile", () => {
 });
 
 describe("profileStep and text", () => {
+  it("asks web feature plans for the design question and defined KPIs", () => {
+    const feature = named("feature");
+    expect(feature.checklist).toContain(
+      "For an apps/web ticket, Design names the page question and every KPI's definition, window and unit",
+    );
+  });
+
   it("names the step for the phase", () => {
     const f = named("feature");
     expect(profileStep(f, "working")).toBe("implement");

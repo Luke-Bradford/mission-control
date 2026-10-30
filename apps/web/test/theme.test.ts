@@ -57,6 +57,15 @@ const PILLS: readonly [TokenName, TokenName][] = [
 ];
 const LAMPS: readonly TokenName[] = ["--warn-mark", "--ok", "--crit"];
 
+/** Seat tokens are defined in hud.css so additions to the visual-system palette cannot evade checks. */
+function seatTokens(): TokenName[] {
+  return [
+    ...new Set(
+      [...read("../src/hud.css").matchAll(/^\s*(--seat-\d+):/gm)].map((match) => match[1] ?? ""),
+    ),
+  ] as TokenName[];
+}
+
 /** The text from the line `header` opens to the `}` that closes it (no nested braces inside). */
 function blockBody(css: string, header: string): string {
   const start = `\n${css}`.indexOf(`\n${header}`);
@@ -120,6 +129,15 @@ describe("theme tokens", () => {
     }
   });
 
+  it.each(THEMES)("seat swatches meet non-text contrast on a panel: %s", (name) => {
+    const t = THEME_TOKENS[name];
+    const seats = seatTokens();
+    expect(seats).toEqual(TOKEN_NAMES.filter((token) => /^--seat-\d+$/.test(token)));
+    for (const seat of seats) {
+      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it("dark warn-mark is warn, as in the mockup", () => {
     expect(THEME_TOKENS.dark["--warn-mark"]).toBe(THEME_TOKENS.dark["--warn"]);
   });
@@ -128,7 +146,6 @@ describe("theme tokens", () => {
     expect(THEME_TOKENS.dark).toMatchObject({
       "--bg": "#070a0e",
       "--fg": "#e7eaef",
-      "--s1": "#3987e5",
     });
     expect(THEME_TOKENS.light).toMatchObject({ "--bg": "#f3f5f8", "--surface": "#ffffff" });
   });
@@ -217,11 +234,28 @@ describe("theme tokens", () => {
 });
 
 describe("shell styles", () => {
+  it("keeps type scale tokens at or above the 11px floor", () => {
+    const hud = read("../src/hud.css");
+    for (const token of ["--fs", "--fs-s", "--fs-micro"]) {
+      const value = Number(hud.match(new RegExp(`${token}: (\\d+(?:\\.\\d+)?)px`))?.[1]);
+      expect(value, token).toBeGreaterThanOrEqual(11);
+    }
+  });
+
+  it("keeps literal UI text at or above the 11px floor", () => {
+    const css = readStyles();
+    const sizes = [...css.matchAll(/font(?:-size)?:\s*(?:\d+(?:\.\d+)?\s+)?(\d+(?:\.\d+)?)px\b/g)]
+      .map((match) => Number(match[1]))
+      .filter((size) => size < 11);
+
+    expect(sizes).toEqual([]);
+  });
+
   // The header's usage meter is on every page, so its rules live in hud.css, not in a page's own
   // stylesheet (#839's split once moved them into ConfigYaml.css, which only Setup loads).
   it("styles the header usage meter from hud.css", () => {
     const css = read("../src/hud.css");
-    expect(ruleValue(css, ".usage", "font")).toBe("11px var(--mono)");
+    expect(ruleValue(css, ".usage", "font")).toBe("var(--fs-micro) / var(--lh-micro) var(--mono)");
     expect(ruleValue(css, ".usage", "color")).toBe("var(--fg-2)");
     expect(ruleValue(css, ".usage b", "font-weight")).toBe("500");
   });
@@ -467,7 +501,7 @@ describe("setTheme / getTheme", () => {
 });
 
 describe("repo palette", () => {
-  const AGENTS: readonly TokenName[] = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"];
+  const AGENTS = seatTokens();
   /** CIE76 ΔE between two `#rrggbb` colours (sRGB, D65): ~2 is a just-noticeable difference. */
   function deltaE(a: string, b: string): number {
     const lab = (hex: string): [number, number, number] => {

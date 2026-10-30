@@ -44,6 +44,7 @@ import {
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
+  ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
   fixesSent,
@@ -197,6 +198,7 @@ import {
 } from "./crew-pause.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   changedFiles,
   committedLines,
@@ -214,6 +216,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
+import { rereadDenial } from "./guard/rereads.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -272,6 +275,8 @@ import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store 
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -358,6 +363,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** Receives the number of open browser event streams. */
+  onStreamCount?: (count: number) => void;
   now?: () => number;
   /** true: log to stdout; an object: log to that stream; false/absent: no logging. */
   logger?: boolean | { stream: { write(msg: string): void } };
@@ -446,6 +453,8 @@ const StartBody = z.strictObject({
     .min(1)
     .max(2 ** 31 - 1)
     .optional(),
+  /** An operator may explicitly start through a temporary machine-capacity hold. */
+  force: z.boolean().optional(),
 });
 
 /**
@@ -500,11 +509,15 @@ const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
+  agent_id: z.string().min(1).max(256).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      pages: z.string().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
     })
     .optional(),
 });
@@ -584,6 +597,10 @@ const MAP_CACHE_MS = 15_000;
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  let transcriptFootprintCache: {
+    at: number;
+    value: ReturnType<typeof transcriptFootprint>;
+  } | null = null;
   const mapConflicts = new MapConflicts();
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
@@ -702,7 +719,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const head = await mapHead(checkout);
     if (!stopMapRing) stopMapRing = mapRing.start();
     mapRing.poll();
-    const crewRows = sharedCrew()
+    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
+    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
+    const crewRows = crew(config, store, now(), deps.lock?.state() ?? NO_LOCK)
       .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
       .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
     const lock = deps.lock?.state() ?? NO_LOCK;
@@ -977,11 +996,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
-  let crewMemo: { key: string; value: Crew } | undefined;
+  // The configured crew changes only through routes and reloads, which emit one of these topics.
+  // Keep a small local revision rather than serialising the full config for every GET /api/crew.
+  let crewRevision = 0;
+  const crewTopics = new Set<Topic>([
+    "agents",
+    "boards",
+    "escalations",
+    "health",
+    "settings",
+    "config",
+    "guard",
+  ]);
+  let crewMemo: { bucket: number; revision: number; lockKey: string; value: Crew } | undefined;
   const sharedCrew = (at = now()): Crew => {
-    const key = JSON.stringify([Math.floor(at / HUD_MEMO_MS), config, deps.lock?.state()]);
-    if (crewMemo?.key !== key)
-      crewMemo = { key, value: crew(config, store, at, deps.lock?.state() ?? NO_LOCK) };
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewMemo?.bucket !== bucket ||
+      crewMemo.revision !== crewRevision ||
+      crewMemo.lockKey !== lockKey
+    )
+      crewMemo = { bucket, revision: crewRevision, lockKey, value: crew(config, store, at, lock) };
     return crewMemo.value;
   };
 
@@ -1025,8 +1062,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseRevision++;
       responseCache.clear();
       attentionMemo = undefined;
-      crewMemo = undefined;
       forgetViews(store);
+    }
+    if (crewTopics.has(topic)) {
+      crewRevision++;
+      crewMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
@@ -1035,25 +1075,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     scheduleNotifications();
   });
   app.addHook("onReady", async () => {
-    stopMapRing = mapRing.start();
-  });
-  // Warm each repo's map in the background so the first viewer after a start finds it built or
-  // being built (the same promise a request shares), not a cold rebuild.
-  app.addHook("onReady", async () => {
-    if (!deps.warmMap) return;
-    for (const repo of config.repos) {
-      const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-      if (!checkout) continue;
-      void (async () => {
-        if (!(await stat(checkout).catch(() => null))?.isDirectory()) return;
-        await mapPayloadFor(repo, checkout, app.log);
-      })().catch((e) =>
-        app.log.warn(
-          { reason: e instanceof Error ? e.message : String(e) },
-          "map warm-up unavailable",
-        ),
-      );
-    }
+    // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
@@ -1122,7 +1144,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           const path = run.transcriptPath;
           if (path === "") return missing();
-          const st = await stat(path).catch(() => null);
+          const st = await stat(transcriptFilePath(path)).catch(() => null);
           if (!st?.isFile()) return missing();
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
@@ -1687,11 +1709,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
+            // a read that failed gave the seat nothing to scroll back to
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
             return answer();
           }
-          const verdict = crewGuardDecision(
+          let verdict = crewGuardDecision(
             config,
             seat.repoId,
             seatMode(who.seatId),
@@ -1700,8 +1724,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a large file this run already read whole, unchanged, is not given again
+          if (verdict.kind === "allow") {
+            const reread = rereadDenial(
+              store,
+              { ...key, agentId: body.data.agent_id ?? "" },
+              store.seatSession(who.seatId)?.worktree ?? undefined,
+              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              now(),
+            );
+            if (reread !== null) return answer(reread);
+          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          if (
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const check = await checks?.lockedBy(who.runId, command);
+            if (check) verdict = { kind: "lock", command: check };
+          }
           if (
             verdict.kind !== "deny" &&
             body.data.tool_name === "Bash" &&
@@ -1805,13 +1849,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: docs/runbook.md#qa-board-data (review findings with category and resolution)
+      // Reader: docs/runbook.md#qa-board-data (review findings and per-round RETRO summaries)
       api.get<{ Querystring: { days?: unknown } }>(
         "/qa/findings",
         async (req, reply): Promise<QaFindingsView | FastifyReply> => {
           const days = qaDays(req.query.days, 30);
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
-          return { findings: store.qaFindings(now() - days * DAY_MS) };
+          const since = now() - days * DAY_MS;
+          return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
         },
       );
 
@@ -2468,7 +2513,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       }
 
-      api.get("/health", async () => store.status());
+      api.get("/health", async () => {
+        const ticks = tickLogOf(store);
+        const recent = ticks.recent();
+        const last = recent.at(-1);
+        const running = ticks.running();
+        if (recent.length === 0 && running === null) return store.status();
+        return [
+          ...store.status(),
+          // the engine's recent tick durations; `error` names a tick still running past its interval
+          {
+            collector: TICKS_COLLECTOR,
+            ok: running === null || now() - running.startedAt < ENGINE_TICK_MS,
+            error: running === null ? null : overrunText(running.startedAt, running.steps),
+            at: last?.endedAt ?? 0,
+            lastOkAt: last?.endedAt ?? null,
+            ticks: recent,
+          },
+        ];
+      });
       // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
       api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
         const range = req.query.range ?? "30d";
@@ -2484,6 +2547,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
       });
       api.get("/machine", async (): Promise<MachineView> => {
+        const cached = transcriptFootprintCache;
+        const footprint =
+          cached !== null && now() - cached.at < 60_000
+            ? cached.value
+            : (() => {
+                const value = transcriptFootprint(store);
+                transcriptFootprintCache = { at: now(), value };
+                return value;
+              })();
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
@@ -2501,6 +2573,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),
+          transcripts: footprint,
         };
       });
 
@@ -2967,21 +3040,49 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
         const pause = pausedSeat(store, id);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+        const at = now();
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          store.machineSamples(machineCapacitySince(at, capacityConfig)),
+          at,
+          capacityConfig,
+        );
+        if (capacity.blocked && b.force !== true)
+          throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;
+        let started: unknown;
         // the watch seat runs the crew and takes no ticket; every other seat needs one
         if (loop === "watch") {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          return sup.startWatch(id);
+          started = await sup.startWatch(id);
+        } else {
+          if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          started = await (deps.engine?.status().on === true && loop === "build"
+            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
         }
-        if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
-        return deps.engine?.status().on === true && loop === "build"
-          ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-          : startUnpausedRun(store, sup, id, b.issue, { operator: true });
+        if (capacity.blocked && b.force === true) {
+          const repoId = configuredAgents(config).find(
+            (agent) => agent.kind === "crew" && agent.id === id,
+          )?.repoId;
+          store.addFlightDecision({
+            at,
+            kind: "start",
+            seatId: id,
+            targetRunId: null,
+            ref: repoId === undefined || b.issue === undefined ? null : `${repoId}#${b.issue}`,
+            questionId: null,
+            about: "machine capacity",
+            decision: `Operator override: started ${seatCallSign(id)} despite machine capacity hold.`,
+            basis: capacity.reason ?? "machine capacity held",
+          });
+        }
+        return started;
       });
       seatAction(
         "/seats/:id/message",
@@ -3682,30 +3783,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(500).send({ error: CHECK_FAILED });
         }
       });
-      api.post(
-        "/update",
-        {
-          // The exit is scheduled only once the 202 has gone out.
-          onResponse: async (_req, reply) => {
-            if (reply.statusCode === 202) updater?.restart();
-          },
-        },
-        async (req, reply) => {
-          const body = NoBody.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-          if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
-          try {
-            const out = await updater.update();
-            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
-            return "restarting" in out ? reply.code(202).send(out) : out;
-          } catch (e) {
-            captureError(reply, e);
-            if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
-            reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
-            return reply.code(500).send({ error: UPDATE_FAILED });
-          }
-        },
-      );
+      api.post("/update", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
+        try {
+          const out = await updater.update();
+          if ("restarting" in out) updater.restart();
+          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          return "restarting" in out ? reply.code(202).send(out) : out;
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
+          return reply.code(500).send({ error: UPDATE_FAILED });
+        }
+      });
 
       api.get(
         "/attention",
@@ -4060,12 +4153,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }, 10_000);
         });
         // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        const unsubscribeMap =
-          repoId === undefined
-            ? undefined
-            : mapRing.subscribe(repoId, (delta) => {
-                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-              });
+        let unsubscribeMap: (() => void) | undefined;
+        if (repoId !== undefined) {
+          stopMapRing ??= mapRing.start();
+          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
+            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+          });
+        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
@@ -4073,12 +4167,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           unsubscribe();
           unsubscribeMap?.();
           streams.delete(end);
+          deps.onStreamCount?.(streams.size);
         };
         const end = () => {
           cleanup();
           res.end();
         };
         streams.add(end);
+        deps.onStreamCount?.(streams.size);
         res.on("close", cleanup);
       });
     },

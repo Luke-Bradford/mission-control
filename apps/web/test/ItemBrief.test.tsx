@@ -183,6 +183,14 @@ it("retains catch-up and checked findings in the new sections", () => {
   ).toBe("FLIGHT's view");
 });
 
+it("omits catch-up sections when the hub has no catch-up data", () => {
+  render(<ItemBrief brief={brief({ catchUp: undefined })} />);
+  expect(screen.queryByText("Catch-up unavailable.")).toBeNull();
+  expect(screen.queryByText("Awareness unavailable.")).toBeNull();
+  expect(screen.queryByText("So far")).toBeNull();
+  expect(screen.queryByText("Be aware")).toBeNull();
+});
+
 it.each([undefined, "", "   "])(
   "omits an empty ask (%s) instead of repeating the recommendation",
   (ask) => {

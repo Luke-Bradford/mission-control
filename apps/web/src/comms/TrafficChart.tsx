@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useTz } from "../clock.ts";
-import { hhmm } from "../fmt.ts";
+import { hhmm, plural } from "../fmt.ts";
 
 export type TrafficHour = {
   hour: number;
@@ -131,7 +131,7 @@ export function TrafficChart({
             width={band}
             height={PLOT_H}
           >
-            <title>{`${bucketLabel(hour.hour, tz)} · ${hour.total} messages · ${hour.part} ${partLabel.toLowerCase()}`}</title>
+            <title>{`${bucketLabel(hour.hour, tz)} · ${plural(hour.total, "message")} · ${hour.part} ${partLabel.toLowerCase()}`}</title>
           </rect>
         ))}
       </svg>

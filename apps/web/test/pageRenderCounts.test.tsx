@@ -12,7 +12,7 @@ import "../src/pages/Overview.tsx";
 import "../src/pages/Setup.tsx";
 import "../src/pages/Telemetry.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, REPOS } from "./fixtures.ts";
+import { CONFIG, REPOS, seatRow } from "./fixtures.ts";
 
 class Stream {
   static OPEN = 1;
@@ -38,7 +38,7 @@ class Stream {
 }
 
 const PAGES = [
-  ["Overview", "/", "page-overview", 72],
+  ["Overview", "/", "page-overview", 12],
   ["Flight", "/flight", "page-flight", 72],
   ["Board", "/board", "page-board", 12],
   ["Agent", "/agent", "page-agent", 0],
@@ -48,7 +48,13 @@ const PAGES = [
   ["Setup", "/setup/loops", "page-setup", 12],
 ] as const;
 
-async function commitsOverMinute(path: string, pageId: string, live: boolean): Promise<number> {
+async function commitsOverMinute(
+  path: string,
+  pageId: string,
+  live: boolean,
+  routes: Record<string, unknown> = {},
+): Promise<{ commits: number; requests: number }> {
+  const fetchMock = stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG, ...routes });
   window.history.replaceState(null, "", path);
   let commits = 0;
   const onRender: ProfilerOnRenderCallback = () => {
@@ -66,6 +72,10 @@ async function commitsOverMinute(path: string, pageId: string, live: boolean): P
     });
   }
   expect(view.container.querySelector(`#${pageId}`)).not.toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500); // let the first fetches finish rendering
+  });
+  fetchMock.mockClear();
   commits = 0; // Mount/data settling is not part of the 60-second observation window.
 
   for (let second = 0; second < 60; second++) {
@@ -76,7 +86,7 @@ async function commitsOverMinute(path: string, pageId: string, live: boolean): P
   }
   stop();
   view.unmount();
-  return commits;
+  return { commits, requests: fetchMock.mock.calls.length };
 }
 
 describe("page-root render counts", () => {
@@ -91,13 +101,35 @@ describe("page-root render counts", () => {
   });
 
   it.each(PAGES)("keeps %s within its idle render budget", async (_, path, pageId, maxIdle) => {
-    const commits = await commitsOverMinute(path, pageId, false);
+    const { commits, requests } = await commitsOverMinute(path, pageId, false);
     expect(commits).toBeLessThanOrEqual(maxIdle);
+    expect(requests).toBe(0);
   });
 
   it.each(PAGES)("measures %s with an agents event every five seconds", async (_, path, pageId) => {
     // This companion measurement is deliberately not bounded: live updates should be allowed to render.
-    const commits = await commitsOverMinute(path, pageId, true);
+    const { commits } = await commitsOverMinute(path, pageId, true);
     expect(commits).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps Overview within its idle budget with an idle seat that has an open run", async () => {
+    const crew = { rows: [seatRow({ id: "dev-1", hudState: "idle" })], firstRunToday: null };
+    const { commits, requests } = await commitsOverMinute("/", "page-overview", false, {
+      "/api/crew": crew,
+    });
+    expect(commits).toBeLessThanOrEqual(12);
+    expect(requests).toBe(0);
+  });
+
+  it("keeps the Agent page with an idle seat open within its idle render budget", async () => {
+    const crew = {
+      rows: [seatRow({ id: "dev-1", hudState: "idle", run: null })],
+      firstRunToday: null,
+    };
+    const { commits, requests } = await commitsOverMinute("/agent/dev-1", "page-agent", false, {
+      "/api/crew": crew,
+    });
+    expect(commits).toBeLessThanOrEqual(12);
+    expect(requests).toBe(0);
   });
 });

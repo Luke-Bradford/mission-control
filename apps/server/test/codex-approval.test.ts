@@ -21,6 +21,7 @@ function approver(
   grants: string[] = [],
   runGrants?: () => readonly string[],
   checks?: CheckRecorder,
+  lock = new TestLock(),
 ) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
@@ -39,7 +40,7 @@ function approver(
     mode,
     area: ["apps/**"],
     cwd,
-    lock: new TestLock(),
+    lock,
     record,
     seatGrants,
     ...(runGrants === undefined ? {} : { runGrants }),
@@ -292,8 +293,9 @@ describe("Codex check records", () => {
   const recorder = () => {
     const begun: unknown[][] = [];
     const checks: CheckRecorder = {
-      begin: async (k, c) => void begun.push([k, c]),
+      begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
+      lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
       dropRun: () => {},
     };
     return { begun, checks };
@@ -317,9 +319,38 @@ describe("Codex check records", () => {
       ),
     ).toBe("accept");
     expect(begun).toEqual([
-      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint"],
-      [{ runId: "run", toolUseId: "appr-2" }, "pnpm -s typecheck"],
+      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", []],
+      [
+        { runId: "run", toolUseId: "appr-2" },
+        "pnpm -s typecheck",
+        [{ runId: "run", toolUseId: "item-2" }],
+      ],
     ]);
+  });
+
+  it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    await lock.acquire(
+      { runId: "other", toolUseId: "x" },
+      "other-seat",
+      "pnpm -s lint",
+      1000,
+      signal(),
+    );
+    const h = approver("writer", [], undefined, checks, lock);
+    const busy = new AbortController();
+    const waiting = h.approve(
+      request("pnpm -s typecheck", { itemId: "item-9" }),
+      undefined,
+      busy.signal,
+    );
+    busy.abort();
+    expect(await waiting).not.toBe("accept");
+    // a command that is no check takes no lock
+    expect(await h.approve(request("ls", { itemId: "item-10" }), undefined, signal())).toBe(
+      "accept",
+    );
   });
 
   it("starts no record for a command run from a subfolder of the worktree", async () => {

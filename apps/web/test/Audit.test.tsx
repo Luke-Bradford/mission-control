@@ -1,5 +1,11 @@
-import { AUDIT_PR_OUTLIER_LINES, type AuditView, type ConfigView } from "@mc/core";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  AUDIT_PR_OUTLIER_LINES,
+  type AuditView,
+  type ConfigView,
+  type MapSnapshot,
+  mapSnapshotFixture,
+} from "@mc/core";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
@@ -253,14 +259,14 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(
     screen
-      .getByRole("link", { name: "Spend outlier · mission-control#700 · $42.50 · run/expensive" })
+      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · run/expensive" })
       .getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
   expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
   expect(
     screen.getByText(
       auditChangeWith(
-        "effect · merged 1 → 3 · review fail 50% → 0% · median cost $2.00 → $1.00 · rework 1 → 0",
+        "effect · merged 1 → 3 · review fail 50% → 0% · median cost ~$2.00 → ~$1.00 · rework 1 → 0",
       ),
     ),
   ).toBeTruthy();
@@ -268,7 +274,7 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   expect(
     screen.getByText(
       auditChangeWith(
-        "effect · merged 4 → 2 · review fail 25% → — · median cost $4.00 → — · rework 2 → 5",
+        "effect · merged 4 → 2 · review fail 25% → — · median cost ~$4.00 → — · rework 2 → 5",
       ),
     ),
   ).toBeTruthy();
@@ -393,4 +399,96 @@ it("does not present stale, observed-loop, or FLIGHT watch runs as improvements"
   expect(screen.queryByText(/run\/stale/)).toBeNull();
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();
+});
+
+it("sizes a one-line PR as 1 line", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      prSizes: {
+        prs: [
+          { ...AUDIT.prSizes.prs[0], repoId: "small-repo", number: 4, additions: 1, deletions: 0 },
+        ],
+        outliers: [],
+      },
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+  expect(await screen.findByText(/^1 line$/)).toBeTruthy();
+});
+
+it("Hotspots tab shows History and Review findings for the picked repo", async () => {
+  const map = (repoId: string, file: string): MapSnapshot => {
+    const value: MapSnapshot = structuredClone(mapSnapshotFixture);
+    value.repoId = repoId;
+    value.hist = {
+      since: 0,
+      prCount: 9,
+      fixCount: 4,
+      files: { "0": [9, 4, 1, [11]] },
+      coupling: [],
+    };
+    value.findings = [{ ...(value.findings[0] as MapSnapshot["findings"][number]), file }];
+    return value;
+  };
+  const config = {
+    ...CONFIG,
+    crew: {
+      sessions: [
+        { id: "s1", repoId: "mission-control", seats: [] },
+        { id: "s2", repoId: "other", seats: [] },
+      ],
+    },
+  } as unknown as ConfigView;
+  const fetch = stubFetch({
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": config,
+    "/api/repos": [
+      { id: "mission-control", github: "Luke-Bradford/mission-control" },
+      { id: "other", github: "Luke-Bradford/other" },
+      { id: "observed", github: "Luke-Bradford/observed" },
+    ],
+    "/api/crew": { rows: [] },
+    "/api/repos/mission-control/map": map("mission-control", "src/main.ts"),
+    "/api/repos/other/map": map("other", "lib/other.ts"),
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 1, name: "Audit" });
+  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
+
+  const history = await screen.findByRole("region", { name: "History lens" });
+  expect(history.textContent).toContain("9 merged PRs · 4 fixed a bug");
+  const review = screen.getByRole("region", { name: "Review lens" });
+  expect(review.textContent).toContain("Review findings");
+  expect(review.textContent).toContain("src/main.ts");
+  // a repo with no crew session cannot be mapped, so it is not offered
+  const repo = screen.getByLabelText("Repo") as HTMLSelectElement;
+  expect([...repo.options].map((o) => o.value)).toEqual(["mission-control", "other"]);
+
+  fireEvent.change(repo, { target: { value: "other" } });
+  await waitFor(() =>
+    expect(screen.getByRole("region", { name: "Review lens" }).textContent).toContain(
+      "lib/other.ts",
+    ),
+  );
+  expect(fetch.mock.calls.filter(([path]) => path === "/api/repos/other/map")).toHaveLength(1);
+});
+
+it("Hotspots tab says so when no repo has a crew session", async () => {
+  stubFetch({
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": CONFIG,
+    "/api/repos": [{ id: "mission-control", github: "Luke-Bradford/mission-control" }],
+    "/api/crew": { rows: [] },
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 1, name: "Audit" });
+  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
+  expect(
+    await screen.findByText(
+      "No repo has a crew session yet, so there is no history or review heat to show.",
+    ),
+  ).toBeTruthy();
 });

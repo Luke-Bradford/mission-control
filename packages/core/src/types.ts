@@ -191,6 +191,8 @@ export interface RunLoop {
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
+    /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
+    webChanged?: boolean;
   } | null;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
@@ -601,6 +603,11 @@ export interface RunDigest {
    * measured only when both timestamps exist.
    */
   speed?: { tokensPerSec: number | null; turnMs: number | null; firstTokenMs?: number | null };
+  /**
+   * Whole-file re-reads of a large unchanged file the guard refused this run, and the tokens that
+   * saved (the file's size at about 4 bytes a token). Absent when there are none.
+   */
+  rereads?: { count: number; tokensSaved: number };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
@@ -775,6 +782,13 @@ export interface MachineView {
   seats: number;
   /** The most seats in any one session. */
   perSessionMax: number;
+  transcripts: TranscriptFootprint | null;
+}
+
+export interface TranscriptFootprint {
+  totalBytes: number;
+  seats: { seatId: string; bytes: number; files: number }[];
+  oldestAt: number | null;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */
@@ -813,6 +827,8 @@ export interface HealthRow {
   lastOkAt: number | null;
   /** When its current run of failures began, UTC ms; null while it succeeds. */
   failingSince?: number | null;
+  /** The `engine:ticks` row only: the last engine ticks, oldest first. */
+  ticks?: EngineTick[];
 }
 
 /**
@@ -1335,4 +1351,13 @@ export interface AttentionHold {
   by: string;
   at: number;
   releasedAt?: number;
+}
+
+/** One finished engine tick, as `/api/health` serves it. */
+export interface EngineTick {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  /** The steps it was still on when it passed its interval; null for a tick that stayed within it. */
+  overranOn: string[] | null;
 }

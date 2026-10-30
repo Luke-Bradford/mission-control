@@ -34,6 +34,7 @@ const sandboxInput: CrewSandboxInput = {
   home: "/home/you",
   dataDir: "/home/you/.local/share/mission-control",
   denyRead: [],
+  pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
 };
 
 /** The installed Codex CLI, when this machine has one (the probe below runs only then). */
@@ -69,6 +70,7 @@ describe.skipIf(installedCodex === null)("Codex seat profile under the real code
             home: join(root, "operator"),
             dataDir: join(root, "data"),
             denyRead: [],
+            pnpmStoreDir: join(root, "pnpm-store"),
           },
           mode,
           "http://127.0.0.1:1/mcp",
@@ -108,6 +110,17 @@ describe("codexSeatConfig", () => {
   const url = "http://127.0.0.1:7420/mcp";
   const tmp = "/tmp/claude-501/seat-1";
 
+  it("requires the hub-owned pnpm store instead of falling back to a worktree store", () => {
+    expect(() =>
+      codexSeatConfig(
+        { ...sandboxInput, pnpmStoreDir: undefined } as unknown as CrewSandboxInput,
+        "writer",
+        url,
+        tmp,
+      ),
+    ).toThrow("codex seat config: pnpmStoreDir must be absolute");
+  });
+
   it("writes the isolated profile, MCP auth and command environment", () => {
     const config = codexSeatConfig(sandboxInput, "writer", url, tmp);
     expect(config).toContain('approvals_reviewer = "user"');
@@ -117,7 +130,7 @@ describe("codexSeatConfig", () => {
     // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
     expect(config).toContain('web_search = "disabled"');
     expect(config).toContain(
-      "[features]\nunified_exec = false\nshell_snapshot = false\nshell_zsh_fork = false",
+      "[features]\nremote_plugin = false\nunified_exec = false\nshell_snapshot = false\nshell_zsh_fork = false",
     );
     expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
     expect(config).toContain(`[mcp_servers.mc]\nurl = "${url}"`);
@@ -139,8 +152,8 @@ describe("codexSeatConfig", () => {
   it.each(["writer", "read-only"] as const)(
     "refuses writes to Codex's pnpm store for %s seats",
     (mode) => {
-      const store = codexPnpmStoreDir(sandboxInput.cwd);
-      const config = codexSeatConfig(sandboxInput, mode, url, tmp);
+      const store = "/mc/crew/.mc-pnpm-store/shared";
+      const config = codexSeatConfig({ ...sandboxInput, pnpmStoreDir: store }, mode, url, tmp);
       expect(config).toContain('":root"="read"');
       expect(config).toContain(`"${tmp}"="write"`);
       expect(config).toContain(`"${store}"="read"`);
@@ -255,6 +268,7 @@ describe.skipIf(process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-e
             home: join(root, "operator"),
             dataDir: join(root, "data"),
             denyRead: [],
+            pnpmStoreDir: store,
           },
           mode,
           "http://127.0.0.1:7420/mcp",

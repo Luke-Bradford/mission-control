@@ -1,6 +1,8 @@
 import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/core";
+import { useState } from "react";
 import { needsYouItems, sortNeeds } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { ItemBrief } from "../comms/ItemBrief.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { NEED_TEXT_MAX, needText } from "../comms/needText.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
@@ -10,6 +12,7 @@ import { rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import {
   CATCH_UP_LABEL,
+  catchUpTone,
   handledLine,
   type NotificationsView,
   whereOf,
@@ -19,26 +22,65 @@ import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { HeldNeeds } from "./HeldNeeds.tsx";
 import { isNotTriaging, NotTriagingRow } from "./NotTriaging.tsx";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
+
+/** An ask's full brief, open so the operator can decide from the page; Hide folds it. */
+function FullBrief({ item }: { item: AttentionItem }) {
+  const [open, setOpen] = useState(true);
+  if (!item.brief) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className="sm ghost fullbrief"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        {open ? "Hide brief" : "Full brief"}
+      </button>
+      {open && <ItemBrief brief={item.brief} approval={item.kind === "approval"} />}
+    </>
+  );
+}
 export const NOBODY_WAITING = "Nobody is waiting on you.";
 
 /**
  * Asked of you (catalogue §2.2.2): the whole Needs-you set, as the header counts it (never narrowed
  * by the session filter). A GitHub thread waiting on the operator is a card; the other items are
- * rows, with FLIGHT's take where it briefed one. Until #766 builds FLIGHT › Needs you, this is
- * Needs you's home.
+ * rows, with FLIGHT's take and its full brief where it briefed one. It is the first panel of the
+ * FLIGHT page's Needs you tab, Needs you's home.
  */
-export function AskedOfYou() {
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+export function AskedOfYou({
+  withDefaults = true,
+  withHeld = true,
+}: {
+  /** False leaves out the asks FLIGHT will settle by default (the Needs you tab groups them). */
+  withDefaults?: boolean;
+  /** False leaves out the Held group (the Needs you tab places it itself). */
+  withHeld?: boolean;
+} = {}) {
+  const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
+  const attention = attentionRes.data;
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const now = useSecond();
   const tz = useTz();
   const { inRepo } = useSessionScope();
-  // A failed load counts as no threads, so the rest of the list still shows.
-  if (attention === undefined || (notes.data === undefined && notes.error === null))
-    return <p className="pb note">{DASH}</p>;
-  const needsYou = sortNeeds(needsYouItems(attention));
+  if (attention === undefined)
+    return (
+      <Pending what="what needs you" error={attentionRes.error} resource={RESOURCES.attention} />
+    );
+  if (notes.data === undefined && notes.error === null)
+    return <Pending what="your GitHub threads" error={null} resource={RESOURCES.notifications} />;
+  const needsYou = sortNeeds(needsYouItems(attention)).filter(
+    (i) => withDefaults || i.defaultDueAt === undefined,
+  );
+  // A failed notifications load leaves the asks below standing, but says GitHub threads are missing:
+  // their cards fall back to plain rows until it loads.
+  const notice = notes.data === undefined && notes.error !== null && (
+    <Pending what="your GitHub threads" error={notes.error} resource={RESOURCES.notifications} />
+  );
   const open = new Map((notes.data?.open ?? []).map((t) => [t.key, t]));
   // A person item whose thread the notifications view holds is a card; any other item is a row.
   const threads = needsYou.flatMap((item) => {
@@ -59,13 +101,15 @@ export function AskedOfYou() {
   if (threads.length === 0 && items.length === 0 && notTriaging === undefined)
     return (
       <>
+        {notice}
         <p className="pb note">{NOBODY_WAITING}</p>
-        <HeldNeeds />
+        {withHeld && <HeldNeeds />}
         {footer}
       </>
     );
   return (
     <div>
+      {notice}
       {notTriaging && <NotTriagingRow item={notTriaging} items={attention} open />}
       <div className="askcards">
         {threads.map(({ t, item }) => {
@@ -78,9 +122,7 @@ export function AskedOfYou() {
                 <span className="s">{tz === null ? DASH : rel(t.updatedAt, now, tz)}</span>
               </div>
               <div className="row">
-                <Pill tone={t.catchUp === "new" ? "plain" : "warn"}>
-                  {CATCH_UP_LABEL[t.catchUp]}
-                </Pill>
+                <Pill tone={catchUpTone(t.catchUp)}>{CATCH_UP_LABEL[t.catchUp]}</Pill>
                 <span className="min0">
                   {t.reasonText}: {t.title}
                 </span>
@@ -127,9 +169,10 @@ export function AskedOfYou() {
               <b>FLIGHT's take:</b> <MarkdownInline text={i.brief.recommendation} />
             </div>
           )}
+          <FullBrief item={i} />
         </div>
       ))}
-      <HeldNeeds />
+      {withHeld && <HeldNeeds />}
       {footer}
     </div>
   );

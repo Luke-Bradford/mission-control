@@ -1,8 +1,17 @@
 import { type HealthRow, type LimitRow, usageCollector } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
+import { elapsed, percent } from "../fmt.ts";
 import { Meter } from "../hud/Meter.tsx";
+import { timeToFull } from "../quota.ts";
 
 const MINUTE_MS = 60_000;
+
+/** ` · full in ~2d at this rate`: only for a window that fills before it resets. */
+function forecast(row: LimitRow, now: number): string {
+  return row.fullAt !== null && row.used < 100 && row.fullAt > now
+    ? ` · full in ${timeToFull(row, now)} at this rate`
+    : "";
+}
 
 export function QuotaMeter({
   row,
@@ -24,8 +33,7 @@ export function QuotaMeter({
     (h) => h.collector === usageCollector(accountId ?? row?.accountId ?? ""),
   )?.error;
   const stale = !!note || (!!row && (row.stale || now - row.sampledAt > 60 * 60_000));
-  const minutes = row ? Math.max(0, Math.floor((now - row.sampledAt) / MINUTE_MS)) : 0;
-  const age = minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
+  const age = elapsed(row ? now - row.sampledAt : 0);
   const nextTry =
     row?.nextTryAt && row.nextTryAt > now
       ? `next try in ${Math.ceil((row.nextTryAt - now) / MINUTE_MS)}m`
@@ -36,7 +44,7 @@ export function QuotaMeter({
       className={compact && stale ? "quota-compact stale" : undefined}
       title={[
         accountId ?? row?.accountId,
-        row ? `${row.window} · ${row.used}% used` : null,
+        row ? `${row.window} · ${percent(row.used)} used` : null,
         row ? `Last reading ${age} ago` : "No reading yet",
         nextTry,
         note,
@@ -55,8 +63,10 @@ export function QuotaMeter({
             : null)
         }
         detail={
-          row && !compact && (showAge || row.stale || note)
-            ? ` · ${age} ago${nextTry ? ` · ${nextTry}` : ""}`
+          row && !compact
+            ? `${forecast(row, now)}${
+                showAge || row.stale || note ? ` · ${age} ago${nextTry ? ` · ${nextTry}` : ""}` : ""
+              }`
             : undefined
         }
       />

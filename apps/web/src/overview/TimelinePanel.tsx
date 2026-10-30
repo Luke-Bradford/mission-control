@@ -1,6 +1,6 @@
 import { type ConfigView, type Crew, type OverviewTimeline, TIMELINE_WINDOW_MS } from "@mc/core";
 import type { CSSProperties } from "react";
-import { useSecond } from "../clock.ts";
+import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
@@ -27,14 +27,14 @@ const AXIS: [string, number][] = [
 
 /**
  * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
- * activity stays visible, tool calls as ticks, 5- and 15-minute gridlines and a "now" cursor.
+ * activity stays visible, 5- and 15-minute gridlines and a "now" cursor.
  */
 export function TimelinePanel() {
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roster = configuredAgents(config);
-  const now = useSecond();
+  const now = useNow();
   const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
   const from = now - TIMELINE_WINDOW_MS;
   const geometry = timelineGeometry({ from, to: now });
@@ -74,8 +74,6 @@ export function TimelinePanel() {
         />
       );
     });
-    const ticks = lane.ticks.filter((at) => at >= from && at <= now);
-    if (ticks.length) active = true;
     return (
       <a
         key={lane.agentId}
@@ -88,16 +86,12 @@ export function TimelinePanel() {
         <span
           className="num ellip"
           title={lane.agentId}
-          style={{ color: agentColor(agent?.index ?? "flight") }}
+          style={{ "--c": agentColor(agent?.index ?? "flight") } as CSSProperties}
         >
           {agent ? callSign(agent) : (name ?? (pending ? "Loading…" : lane.agentId))}
         </span>
         <span className="overview-track" aria-hidden="true">
           {spans}
-          {ticks.map((at) => {
-            const tick = geometry.tick(at);
-            return <i key={at} className="overview-tick" style={{ left: `${tick.left}%` }} />;
-          })}
         </span>
       </a>
     );
@@ -149,10 +143,6 @@ export function TimelinePanel() {
               {kind}
             </span>
           ))}
-          <span>
-            <i className="tool-tick" />
-            tool calls
-          </span>
         </div>
       </div>
     </Panel>

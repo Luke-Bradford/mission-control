@@ -15,8 +15,8 @@
 
 .stepbar {
   display: flex;
-  gap: 2px;
-  margin: 4px 0 3px;
+  gap: var(--sp-1);
+  margin: var(--sp-1) 0 var(--sp-1);
 }
 
 .stepbar i {

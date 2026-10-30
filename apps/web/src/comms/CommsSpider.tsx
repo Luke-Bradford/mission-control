@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { useNow, useTz } from "../clock.ts";
-import { rel } from "../fmt.ts";
+import { plural, rel } from "../fmt.ts";
 import {
   curve,
   type Frame,
@@ -569,7 +569,7 @@ export function CommsSpider({
           : {
               role: "button",
               tabIndex: current === `n:${node.id}` ? 0 : -1,
-              "aria-label": `${node.label}, open ${node.name}, ${node.count} messages in 24h${node.state ? `, ${node.state}` : ""}`,
+              "aria-label": `${node.label}, open ${node.name}, ${plural(node.count, "message")} in 24h${node.state ? `, ${node.state}` : ""}`,
               "aria-describedby": describedBy("node", node.id),
               onClick: () => onOpenNode(node.id),
               onKeyDown: nodeKeys(node),
@@ -689,7 +689,7 @@ export function CommsSpider({
                 style={{ "--w": edge.weight.toFixed(3) } as CSSProperties}
                 role="button"
                 tabIndex={current === `e:${edge.key}` ? 0 : -1}
-                aria-label={`Conversation ${a.name} ↔ ${b.name}, ${count} messages in 24h`}
+                aria-label={`Conversation ${a.name} ↔ ${b.name}, ${plural(count, "message")} in 24h`}
                 aria-describedby={describedBy("edge", edge.key)}
                 onClick={() => onOpenEdge(edge.a, edge.b)}
                 onKeyDown={edgeKeys(edge)}

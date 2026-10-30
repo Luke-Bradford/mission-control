@@ -1,15 +1,15 @@
 .legend {
   display: flex;
-  gap: 6px 14px;
+  gap: var(--sp-1) var(--sp-3);
   flex-wrap: wrap;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .legend span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
 }
 
 .legend i {
@@ -47,7 +47,7 @@
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r-s);
-  padding: 6px 9px;
+  padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-s);
   box-shadow: var(--shadow);
   z-index: 3;
@@ -58,7 +58,7 @@
 .tip .tr {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .tip i {
@@ -70,7 +70,7 @@
 
 .tip b {
   margin-left: auto;
-  padding-left: 12px;
+  padding-left: var(--sp-3);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }

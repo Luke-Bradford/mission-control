@@ -8,9 +8,9 @@ const phone =
 
 it("keeps the populated Audit dashboard readable at desktop and phone widths", () => {
   expect(rule(".audit-grid")).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
-  expect(rule(".audit-grid")).toContain("gap: 10px");
+  expect(rule(".audit-grid")).toContain("gap: var(--sp-2)");
   expect(rule(".audit-panel:last-child")).toContain("grid-column: 1 / -1");
-  expect(rule(".audit-list")).toContain("gap: 7px");
+  expect(rule(".audit-list")).toContain("gap: var(--sp-2)");
   expect(rule(".audit-size,\\n.audit-proposal")).toContain("align-items: center");
   expect(phone).toContain(".audit-grid");
   expect(phone).toContain("grid-template-columns: minmax(0, 1fr)");

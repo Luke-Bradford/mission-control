@@ -49,8 +49,12 @@ import {
   READONLY_TOOLS,
   SCRATCH_TOOLS,
   SEAT_STATES,
+  SKILL_FILE_MAX,
+  SKILLS_DIR,
   STOP_GRACE_MS,
   seatDef,
+  skillFileProblem,
+  skillPluginManifest,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
 
@@ -68,6 +72,7 @@ const base: CrewCliInput = {
     home: "/home/you",
     dataDir: "/home/you/.local/share/mission-control",
     denyRead: [],
+    pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
   },
   mcpConfigFile: "/home/you/.local/share/mission-control/crew/guido-1:1.mcp.json",
   hook: {
@@ -119,9 +124,24 @@ describe("crewCliArgs", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
-    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash");
+    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash");
+    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill");
+  });
+
+  it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      const a = crewCliArgs({ ...base, mode, pluginDir: "/data/crew/skills-abc" });
+      expect(a[a.indexOf("--plugin-dir") + 1]).toBe("/data/crew/skills-abc");
+      expect(count(a, "--plugin-dir")).toBe(1);
+      // the flag removes the Skill tool; the plugin carries skills only, so nothing else loads
+      expect(a).not.toContain("--disable-slash-commands");
+      expect(a[a.indexOf("--tools") + 1].split(",")).toContain("Skill");
+      const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
+      expect(allowed).toContain("Skill");
+    }
+    expect(crewCliArgs(base)).not.toContain("--plugin-dir");
+    expect(CREW_ISOLATION_FLAGS).toEqual(["--restricted", "--strict-mcp-config"]);
   });
 
   it("denies git's --output file writers", () => {
@@ -292,6 +312,8 @@ describe("the allowlist in phase 2b", () => {
       ghRead: "mcp__mc__gh_read",
       listTickets: "mcp__mc__list_tickets",
       updateBrief: "mcp__mc__update_brief",
+      editIssue: "mcp__mc__edit_issue",
+      setFields: "mcp__mc__set_fields",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -604,6 +626,8 @@ describe("crew constants", () => {
           "recall",
           "hold_item",
           "release_hold",
+          "edit_issue",
+          "set_fields",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -723,6 +747,8 @@ describe("mc tool grants", () => {
       "recall",
       "hold_item",
       "release_hold",
+      "edit_issue",
+      "set_fields",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
@@ -776,7 +802,7 @@ describe("scratch mode", () => {
     ]) {
       expect(allowed).not.toContain(t);
     }
-    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash");
+    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
   });
 
   it("scratch allows exactly its tools, Edit and Write anchored to the worktree", () => {
@@ -789,6 +815,7 @@ describe("scratch mode", () => {
       "Write(//w/retro-1-review-3/**)",
       "TodoWrite",
       "Bash",
+      "Skill",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",
@@ -826,7 +853,7 @@ describe("crew sandbox and scoped edits", () => {
         expect(
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
-        expect(f.allowRead).toEqual([tempRoot]);
+        expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
         expect(f.denyRead).not.toContain("/tmp");
         expect(f.denyRead).not.toContain("/private/tmp");
       }
@@ -861,13 +888,30 @@ describe("crew sandbox and scoped edits", () => {
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
-      expect(f.allowRead).toEqual([tempRoot]);
+      expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
       expect(f.denyWrite).toContain("/tmp/claude-*");
       expect(f.denyWrite).toContain("/private/tmp/claude-*");
     }
   });
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "lets a %s seat read but never write the hub-owned pnpm store",
+    (mode) => {
+      const store = "/mc/crew/.mc-pnpm-store/shared";
+      const f = JSON.parse(
+        crewSandboxSettings(
+          { ...base.sandbox, tempRoot: "/tmp/mc-runs/seat-test", pnpmStoreDir: store },
+          mode,
+          base.hook,
+        ),
+      ).sandbox.filesystem;
+      expect(f.allowRead).toContain(store);
+      expect(f.allowWrite).not.toContain(store);
+      expect(f.denyWrite).toContain(store);
+    },
+  );
 
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
@@ -884,6 +928,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 
@@ -934,6 +979,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 
@@ -1224,5 +1270,49 @@ describe("the read-only text", () => {
   it("is one string: the guard rule and the commit tool's refusal both build on it", () => {
     expect(GUARD_RULES["read-only"]).toBe(READ_ONLY_CANNOT_WRITE);
     expect(MC_READ_ONLY_COMMIT).toBe(`${READ_ONLY_CANNOT_WRITE}: commit is for writer seats.`);
+  });
+});
+
+describe("skill files a seat's plugin may carry (#1051)", () => {
+  const ok = (path: string, text = "# Skill\n", mode = "100644") =>
+    skillFileProblem(path, mode, Buffer.from(text));
+
+  it("takes SKILL.md and plain text files under a skill's folder", () => {
+    expect(SKILLS_DIR).toBe(".claude/skills");
+    expect(ok(".claude/skills/hud-design/SKILL.md")).toBeNull();
+    expect(ok(".claude/skills/hud-design/notes/checklist.md")).toBeNull();
+    expect(ok(".claude/skills/plain-talk/examples.txt")).toBeNull();
+    expect(ok(".claude/skills/x/data.json", "{}")).toBeNull();
+  });
+
+  it.each([
+    ["a script", ".claude/skills/x/run.sh", "#!/bin/sh\n", "100644"],
+    ["an executable bit", ".claude/skills/x/notes.md", "hi", "100755"],
+    ["a symlink", ".claude/skills/x/notes.md", "../../../etc/passwd", "120000"],
+    ["a submodule", ".claude/skills/x", "", "160000"],
+    ["a binary", ".claude/skills/x/pic.md", "a\u0000b", "100644"],
+    ["bytes that are not UTF-8", ".claude/skills/x/n.txt", "\ufffd", "100644"],
+    ["a loose file", ".claude/skills/README.md", "hi", "100644"],
+    ["a hidden folder", ".claude/skills/x/.hooks/SKILL.md", "hi", "100644"],
+    ["a path outside skills", ".claude/settings.json", "{}", "100644"],
+    ["a dot-dot step", ".claude/skills/x/../y/SKILL.md", "hi", "100644"],
+  ])("refuses %s", (_what, path, text, mode) => {
+    const raw = text === "\ufffd" ? Buffer.from([0xff, 0xfe]) : Buffer.from(text);
+    expect(skillFileProblem(path, mode, raw)).toEqual(expect.any(String));
+  });
+
+  it("refuses a file over the size cap", () => {
+    const big = Buffer.alloc(SKILL_FILE_MAX + 1, "a");
+    expect(skillFileProblem(".claude/skills/x/SKILL.md", "100644", big)).toMatch(/too big/);
+  });
+
+  it("the plugin manifest names the repo and carries nothing executable", () => {
+    const m = JSON.parse(skillPluginManifest("Luke-Bradford/mission-control"));
+    expect(m).toEqual({
+      name: "mission-control",
+      description: "Skills from Luke-Bradford/mission-control's .claude/skills",
+    });
+    expect(JSON.parse(skillPluginManifest("My Repo!!")).name).toBe("my-repo");
+    expect(JSON.parse(skillPluginManifest("///")).name).toBe("repo");
   });
 });

@@ -1,5 +1,6 @@
 import { METER_FULL_PCT, METER_WARN_PCT } from "@mc/core";
 import "./Meter.css";
+import { percent } from "../fmt.ts";
 
 /** The class a meter's bar takes: ` full` from METER_FULL_PCT, ` hi` from METER_WARN_PCT, judged on the rounded value. */
 export function meterLevel(pct: number | null): "" | " hi" | " full" {
@@ -31,13 +32,13 @@ export function Meter({
         {projected != null && Number.isFinite(projected) && (
           <b
             className="projection-tick"
-            title={`Projected at reset: ${Math.round(projected)}%`}
+            title={`Projected at reset: ${percent(projected)}`}
             style={{ left: `${Math.min(100, Math.max(0, projected))}%` }}
           />
         )}
         {pct !== null && <i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />}
       </span>
-      <span className="num xs">{`${label} ${n === null ? "—" : `${n}%`}${detail ?? ""}`}</span>
+      <span className="num xs">{`${label} ${percent(n)}${detail ?? ""}`}</span>
     </span>
   );
 }

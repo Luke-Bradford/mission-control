@@ -11,15 +11,16 @@ import {
 } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hhmm, mss } from "../fmt.ts";
+import { hhmm, minutesAgo, mss, percent } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { useSeatName } from "../seatName.ts";
 import { chartAnnotations } from "./annotations.ts";
-import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
+import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
+import { MachineReadout } from "./MachineReadout.tsx";
 
 const MINUTE_MS = 60_000;
 
@@ -98,7 +99,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
     const latest = q.points.at(-1);
     return {
       key: `${q.accountId}:${q.window}`,
-      name: `${q.accountId} ${q.window} · ${latest ? `${Math.round(latest.pct)}%` : DASH}`,
+      name: `${q.accountId} ${q.window} · ${latest ? percent(latest.pct) : DASH}`,
       color,
     };
   });
@@ -110,10 +111,14 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
       ? [
           {
             value: row.alertAt,
-            label: `${q.accountId} alert ${row.alertAt}%`,
+            label: `${q.accountId} alert ${percent(row.alertAt)}`,
             color: "var(--warn)",
           },
-          { value: row.stopAt, label: `${q.accountId} stop ${row.stopAt}%`, color: "var(--crit)" },
+          {
+            value: row.stopAt,
+            label: `${q.accountId} stop ${percent(row.stopAt)}`,
+            color: "var(--crit)",
+          },
         ]
       : [];
   });
@@ -212,9 +217,13 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>
         ) : machine.length === 0 ? (
-          <p className="pb s muted">No machine samples in the last {scope.range}.</p>
+          <div className="pb">
+            <p className="s muted">No machine samples in the last {scope.range}.</p>
+            <MachineReadout />
+          </div>
         ) : (
           <div className="pb">
+            <MachineReadout />
             <LineChart
               series={machineLines}
               label="Machine load"

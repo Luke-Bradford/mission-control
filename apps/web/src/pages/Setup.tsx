@@ -10,7 +10,7 @@ import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { rel } from "../fmt.ts";
+import { plural, rel, shortSha } from "../fmt.ts";
 import { navigate, type SetupTab, setupPath } from "../router.ts";
 import { Access } from "../setup/Access.tsx";
 import { Accounts } from "../setup/Accounts.tsx";
@@ -50,7 +50,6 @@ const sectionFor = (tab: SetupTab): SetupTab => {
 
 const UPDATE_CONFIRM = "Update to the latest main and restart? Crew runs resume after the restart.";
 const UPDATING = "Updating… the HUD reconnects when the hub is back.";
-const commits = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
 
 /** A failed check: the 502 carries `checkedAt`, shown in relative time like the toolbar's. */
 function checkError(err: unknown, now: number, tz: string | null): string {
@@ -80,7 +79,7 @@ function UpdateControl() {
     v.behind === null
       ? " · could not compare with main"
       : v.behind > 0
-        ? ` · ${commits(v.behind)} behind main`
+        ? ` · ${plural(v.behind, "commit")} behind main`
         : "";
   const checkOff = v.reason === PREVIEW_SERVER || v.reason === UPDATE_UNAVAILABLE;
   const checked = v.checkedAt !== null && tz ? ` · checked ${rel(v.checkedAt, now, tz)}` : "";
@@ -97,7 +96,7 @@ function UpdateControl() {
             ? UP_TO_DATE_MAIN
             : out.behind === 0
               ? "No new commits on main."
-              : `${commits(out.behind)} behind main.`,
+              : `${plural(out.behind, "commit")} behind main.`,
       );
     } catch (err) {
       toast(checkError(err, now, tz));
@@ -123,7 +122,7 @@ function UpdateControl() {
   }
   return (
     <>
-      <span className="s fg2">{`Version ${v.sha.slice(0, 7) || "—"}${behind}${checked}`}</span>
+      <span className="s fg2">{`Version ${shortSha(v.sha) || "—"}${behind}${checked}`}</span>
       <button
         type="button"
         className="sm"

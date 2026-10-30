@@ -305,6 +305,16 @@ describe("loadConfig", () => {
     expect(c.repos[1]?.needsYouLabels).toBeUndefined();
   });
 
+  it("takes an optional positive integer review_token_budget on an account", () => {
+    expect(loadConfig(EXAMPLE).accounts[1]?.reviewTokenBudget).toBeUndefined();
+    const set = (v: string) =>
+      tmpConfig((y) => y.replace("stop_at: 80", `stop_at: 80\n    review_token_budget: ${v}`));
+    expect(loadConfig(set("250000")).accounts[1]?.reviewTokenBudget).toBe(250000);
+    for (const bad of ["0", "1.5", "lots"]) {
+      expect(errorOf(() => loadConfig(set(bad))).path).toBe("accounts[1].reviewTokenBudget");
+    }
+  });
+
   it("rejects a statusMap value outside TicketState", () => {
     const p = tmpConfig((y) => y.replace("Todo: planned", "Todo: someday"));
     const e = errorOf(() => loadConfig(p));
@@ -413,6 +423,7 @@ describe("crew", () => {
     maxOpen?: string;
     lane?: string;
     laneDefault?: string;
+    transcripts?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
   }): string {
@@ -430,6 +441,7 @@ crew:
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
+  ${opts.transcripts === undefined ? "" : `transcripts: ${opts.transcripts}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
     - id: ${opts.sessionId ?? "shop-app"}
@@ -499,6 +511,20 @@ ${seats.join("\n")}
     for (const bad of ["0", "-1", "1.5"]) {
       expect(fails(crewText({ maxOpen: bad })).path).toBe("crew.maxOpenRunsPerSeat");
     }
+  });
+
+  it("defaults and parses transcript retention", () => {
+    expect(load(crewText({})).crew?.transcripts).toEqual({
+      gzipAfterHours: 24,
+      deleteAfterDays: 14,
+    });
+    expect(
+      load(crewText({ transcripts: "{ gzip_after_hours: 6, delete_after_days: 3 }" })).crew
+        ?.transcripts,
+    ).toEqual({ gzipAfterHours: 6, deleteAfterDays: 3 });
+    expect(fails(crewText({ transcripts: "{ delete_after_days: 0 }" })).path).toBe(
+      "crew.transcripts.deleteAfterDays",
+    );
   });
 
   it.each(["../x", "Shop", "a/b", ""])("refuses the session id %j (it is a folder name)", (id) => {

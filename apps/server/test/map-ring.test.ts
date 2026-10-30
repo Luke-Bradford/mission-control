@@ -145,19 +145,19 @@ describe("crew call ring", () => {
     expect(received.length).toBeGreaterThan(settled);
   });
 
-  it("polls every second with a map client connected and every five seconds without", () => {
+  it("polls only while a map client is connected", () => {
     const { ring } = setup("claude");
     const poll = vi.spyOn(ring, "poll");
     const stop = ring.start();
-    expect(poll).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(4000);
-    expect(poll).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(1000);
-    expect(poll).toHaveBeenCalledTimes(2);
+    expect(poll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(5000);
+    expect(poll).not.toHaveBeenCalled();
     const unsubscribe = ring.subscribe("repo", () => {});
     vi.advanceTimersByTime(3000);
-    expect(poll).toHaveBeenCalledTimes(5);
+    expect(poll).toHaveBeenCalledTimes(3);
     unsubscribe();
+    vi.advanceTimersByTime(5000);
+    expect(poll).toHaveBeenCalledTimes(3);
     stop();
   });
 

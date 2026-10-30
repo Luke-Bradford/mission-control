@@ -9,6 +9,7 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
@@ -20,6 +21,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_METRICS_DAY_MS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
@@ -33,7 +35,6 @@ import {
   FLIGHT_TICKETS_LISTED,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
-  FLIGHT_VIEW_MS,
   FLIGHT_WAKE_SETTING,
   type FlightArrivalDisposition,
   type FlightArrivalOperation,
@@ -76,6 +77,7 @@ import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
+import { controllerDecisions } from "./controller-decisions.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { flightSeat } from "./seat.ts";
@@ -297,6 +299,8 @@ export function flightView(
   const found = flightSeat(config);
   const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
   const live = found === null ? false : flightLive(config, store, alive);
+  const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
+  const controller = found === null ? [] : controllerDecisions(decisions);
   return {
     seat:
       found === null
@@ -312,7 +316,8 @@ export function flightView(
                 ? null
                 : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
           },
-    decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
+    decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
+    controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
   };
 }

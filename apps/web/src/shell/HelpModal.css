@@ -1,4 +1,4 @@
 .helpb {
   display: grid;
-  gap: 10px;
+  gap: var(--sp-2);
 }

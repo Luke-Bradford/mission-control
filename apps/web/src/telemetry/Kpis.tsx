@@ -2,12 +2,12 @@ import type { GuardHitsView, MetricId, Telemetry, TestLockHistory } from "@mc/co
 import { useEffect, useRef, useState } from "react";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { cost, dur, kTokens, mss } from "../fmt.ts";
+import { cost, dur, kTokens, mss, plural } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
 import { metricText, metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { followLink } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE } from "./common.ts";
 import {
   GUARD_DRAWER_HREF,
@@ -185,7 +185,7 @@ export function Kpis({
           label: "Working · now · filtered",
           hint: filteredHint,
           value: num((x) => String(x.working)),
-          detail: `of ${num((x) => String(x.agents))} agents`,
+          detail: d ? `of ${plural(d.agents, "agent")}` : `of ${DASH} agents`,
           live,
         }
       : registry("agentsWorking", r.agentsWorking?.detail ?? ""),
@@ -197,7 +197,7 @@ export function Kpis({
       key: "lock",
       label: "Lock wait",
       ...figure(history !== undefined || lockHistory.error !== null, history?.today.waitMs, mss),
-      detail: history ? `today · ${history.today.runs} runs` : "today",
+      detail: history ? `today · ${plural(history.today.runs, "run")}` : "today",
     },
     {
       key: "capcom",

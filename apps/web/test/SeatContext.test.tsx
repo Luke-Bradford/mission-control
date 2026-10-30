@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Tiles } from "../src/agent/Tiles.tsx";
 import { hub, SEAT_CONTEXT_REFRESH_MS } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { crewRow, NOW } from "./fixtures.ts";
+import { CONFIG, crewRow, NOW } from "./fixtures.ts";
 
 const PATH = "/api/seats/guido-1/context";
 const OTHER = "/api/seats/guido-2/context";
@@ -71,5 +71,14 @@ describe("a seat's Context tile", () => {
     await flush();
     expect(fetches(OTHER)).toBe(0);
     expect(fetches()).toBe(1);
+  });
+
+  it("never requests context for a codex seat, which would answer 409", async () => {
+    f = stubFetch({ [PATH]: null, "/api/config": CONFIG });
+    const row = { ...seat("running"), accountId: "codex-main" };
+    render(<Tiles row={row} limits={[]} now={NOW} />);
+    await flush();
+    await act(() => vi.advanceTimersByTimeAsync(3 * SEAT_CONTEXT_REFRESH_MS));
+    expect(fetches()).toBe(0);
   });
 });

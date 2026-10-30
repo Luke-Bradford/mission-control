@@ -57,7 +57,6 @@ import {
   conflictText,
   crewCliArgs,
   crewMcpConfig,
-  crewPnpmStoreDir,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
@@ -145,11 +144,13 @@ import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
+  CREW_SKILLS_DIR,
   crewCodexDir,
   crewDir,
   crewKeeperDir,
   crewMcpPath,
   crewPromptPath,
+  crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
   type KeeperCursor,
@@ -157,7 +158,6 @@ import {
 } from "../store.ts";
 import {
   type RepoDocs,
-  readRepoDocs,
   repoReferenceIndex,
   reviewBrief,
   rolePrompt,
@@ -166,7 +166,6 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
-  codexPnpmStoreDir,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -177,8 +176,10 @@ import {
   preparePlanCheckout,
   prepareReadOnlyCheckout,
   prepareScratch,
+  prepareSharedPnpmStore,
   type RepoPeer,
   removeCheckout,
+  sharedPnpmStoreDir,
   sweepPnpmStores,
   syncReusedWorktree,
   writeReviewInputs,
@@ -208,6 +209,7 @@ import {
   type SessionEvent,
   startSession,
 } from "./session.ts";
+import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
 export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
@@ -1090,7 +1092,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
         if (e.ok !== undefined) {
-          void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok);
+          void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
         }
         break;
       case "result": {
@@ -1221,7 +1223,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
-   * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
+   * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
   function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
@@ -1235,7 +1237,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.TMP = tmp;
     env.TEMP = tmp;
     env.CLAUDE_CODE_TMPDIR = tmp;
-    env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
+    env[PNPM_STORE_ENV] = sharedPnpmStoreDir(crew?.worktrees ?? "");
     Object.assign(env, crewPythonEnv(tmp, seatId));
     return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
   }
@@ -1309,8 +1311,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.endedAt === null && r.vendor === "codex")
           .map((r) => basename(crewCodexDir(deps.dbPath, r.id))),
       );
+      const skillsDirs = new Set(
+        store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .filter((r) => r.endedAt === null && r.vendor !== "codex")
+          .map((r) => basename(crewSkillsDir(deps.dbPath, r.id))),
+      );
       for (const name of readdirSync(dir)) {
         if (CREW_CODEX_DIR.test(name) && !codexHomes.has(name)) {
+          rmSync(join(dir, name), { recursive: true, force: true });
+          continue;
+        }
+        if (CREW_SKILLS_DIR.test(name) && !skillsDirs.has(name)) {
           rmSync(join(dir, name), { recursive: true, force: true });
           continue;
         }
@@ -1384,6 +1396,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       [...(modeOfSeat(info.seat) === "read-only" ? [] : [checkout.path]), seatTmp(run.id)],
       [dirname(deps.dbPath)],
     );
+    // Every seat receives this read-only sandbox grant, even if this repository has no pnpm
+    // lockfile and therefore did not run installation.
+    await prepareSharedPnpmStore(crew?.worktrees ?? "", info.seat.id);
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -1501,6 +1516,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       // the cursor of an earlier keeper counts that keeper's lines, not this one's
       store.deleteKeeperCursor(run.id);
+      for (const why of repoDocs?.skills?.refused ?? []) {
+        log(`${info.seat.id}: skill left out of the run: ${why}`);
+      }
       writePrivate(tokenPath, token);
       writePrivate(mcpPath, crewMcpConfig(`${hub}${MCP_PATH}`, token));
       const cwd = realpathSync(checkout.path);
@@ -1532,26 +1550,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
-      let codexPnpmStore: string | undefined;
-      if (run.vendor === "codex") {
-        const storePath = codexPnpmStoreDir(cwd);
-        for (const path of [dirname(storePath), storePath]) {
-          try {
-            mkdirSync(path, { mode: 0o700 });
-          } catch (e) {
-            if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-          }
-          const stat = lstatSync(path);
-          if (
-            !stat.isDirectory() ||
-            stat.uid !== process.getuid?.() ||
-            (stat.mode & 0o777) !== 0o700 ||
-            realpathSync(path) !== path
-          )
-            throw new Error("Codex pnpm store must be a private directory owned by the server");
-        }
-        codexPnpmStore = realpathSync(storePath);
-      }
+      const pnpmStore = sharedPnpmStoreDir(crew?.worktrees ?? "");
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
@@ -1562,6 +1561,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
+        pnpmStoreDir: pnpmStore,
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),
@@ -1571,7 +1571,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
-        if (codexPnpmStore === undefined) throw new Error("Codex pnpm store is unavailable");
         addMcTmpExclude(gitCommonDir);
         const claudeTmpParentPath = dirname(seatTmp(run.id));
         try {
@@ -1621,7 +1620,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           TMPDIR: tmp,
           TMP: tmp,
           TEMP: tmp,
-          [PNPM_STORE_ENV]: codexPnpmStore,
+          [PNPM_STORE_ENV]: pnpmStore,
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
           RUFF_CACHE_DIR: join(tmp, "ruff-cache"),
@@ -1664,10 +1663,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               ),
             );
             writePrivate(join(home, "auth.json"), auth);
+            // a resume has no skills read; its home already holds the run's
+            if (repoDocs?.skills !== undefined) {
+              copySkillsToCodexHome(home, repoDocs.skills.skills);
+            }
           },
         });
       } else {
+        const skillsDir = crewSkillsDir(deps.dbPath, run.id);
+        // a resume has no skills read; the folder the start built is still there
+        if (repoDocs?.skills !== undefined && repoDocs.skills.skills.length > 0) {
+          writeSkillPlugin(skillsDir, info.repo.id, repoDocs.skills.skills);
+        }
         const args = crewCliArgs({
+          pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
           model,
@@ -1745,6 +1754,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
+      rmSync(crewSkillsDir(deps.dbPath, runId), { recursive: true, force: true });
       const codexTmp = store.getSetting(codexTmpKey(runId));
       if (codexTmp === null) rmSync(seatTmp(runId), { recursive: true, force: true });
       else if (!removeCodexTmp(runId, codexTmp))
@@ -2986,7 +2996,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               });
         return {
           checkout: c,
-          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -3080,7 +3090,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mergedMainText(checkout.baseSha),
             startedAt,
           );
-          installNote = await installAfterSync(info.session.checkout, checkout, result.before);
+          installNote = await installAfterSync(
+            info.session.checkout,
+            checkout,
+            result.before,
+            crew?.worktrees ?? "",
+          );
           if (installNote) {
             log(`${seatId}: ${installNote}`);
             store.addLoopEvent(
@@ -3242,7 +3257,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         return {
           checkout: c,
-          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -3445,7 +3460,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return {
             scratch: s,
             inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            repoDocs: await readRepoDocs(checkout, s.baseSha),
+            repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
             references: await repoReferenceIndex(checkout, s.baseSha),
           };
         } catch (e) {

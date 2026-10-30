@@ -57,6 +57,8 @@ export const MC_TOOL_NAMES = {
   holdItem: "hold_item",
   releaseHold: "release_hold",
   screenshotHud: "screenshot_hud",
+  editIssue: "edit_issue",
+  setFields: "set_fields",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -116,6 +118,8 @@ export const MC_TOOLS = {
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
+  editIssue: mcTool(MC_TOOL_NAMES.editIssue),
+  setFields: mcTool(MC_TOOL_NAMES.setFields),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -368,9 +372,26 @@ const CHECKS_ADVICE =
 /** The checks refusal: each check that is missing or failed, with the exact command to run. */
 export const pushChecksText = (
   head: string,
-  found: readonly { command: string; state: CheckState }[],
+  found: readonly {
+    command: string;
+    state: CheckState;
+    recorded?: {
+      headSha: string;
+      invokedCommand: string;
+      ok: boolean;
+      exitCode: number | null;
+      at: number;
+    } | null;
+  }[],
 ): string => {
-  const lines = found.map((c) => `- ${c.state === "failed" ? "failed" : "not run"}: ${c.command}`);
+  const lines = found.map((c) => {
+    const result = c.state === "failed" ? "failed" : "not run";
+    return `- ${result}: ${c.command}\n  ${
+      c.recorded == null
+        ? "nothing recorded"
+        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
+    }`;
+  });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;
 };
 /** The secret scan's log passed its output cap: nothing is pushed unread. */

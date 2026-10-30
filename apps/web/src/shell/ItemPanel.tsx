@@ -29,9 +29,11 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
 import { dayMonth, hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
+import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import {
   CATCH_UP_LABEL,
+  catchUpTone,
   markHandled,
   type NotificationsView,
   type PersonThreadView,
@@ -525,7 +527,7 @@ function OriginalItem({
                   <span className="qtext">
                     <MarkdownInline text={answer} />
                   </span>
-                  {answer === q.recommendation && <span className="pill plain">Recommended</span>}
+                  {answer === q.recommendation && <Pill tone="plain">Recommended</Pill>}
                 </li>
               ))}
             </ul>
@@ -611,7 +613,7 @@ function SourceCatchUp({
     <div className="ctx">
       <div className="bsec">Catch-up</div>
       <div className="ctxline">
-        <span className={`pill ${kind === "new" ? "plain" : "warn"}`}>{CATCH_UP_LABEL[kind]}</span>
+        <Pill tone={catchUpTone(kind)}>{CATCH_UP_LABEL[kind]}</Pill>
         <span>
           {thread ? (
             <>

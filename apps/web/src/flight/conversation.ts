@@ -1,4 +1,4 @@
-import { type AgentStream, startOfLocalDay } from "@mc/core";
+import { type AgentStream, FOR_THE_CONTROLLER, startOfLocalDay } from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
@@ -42,6 +42,14 @@ export const decidedToday = (
   const from = startOfLocalDay(now, tz);
   return decisions.filter((d) => DECIDED_KINDS.includes(d.kind) && d.at >= from);
 };
+
+/** Whether FLIGHT addressed this decision to the controller: what `metrics.forTheController` counts. */
+export const isForTheController = (d: Pick<FlightDecision, "about" | "decision">): boolean =>
+  d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER);
+
+/** The DOM id of a decision's row, which a link to that decision targets. */
+export const DECISION_ANCHOR_PREFIX = "decision-";
+export const decisionAnchor = (id: number): string => `${DECISION_ANCHOR_PREFIX}${id}`;
 
 /** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>

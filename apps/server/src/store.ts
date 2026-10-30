@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
@@ -53,7 +53,6 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
-  type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightWatchEntry,
@@ -65,17 +64,19 @@ import {
   type GuardHit,
   type GuardRule,
   type HealthRow,
+  type HudColumn,
   type HudState,
   inferTicket,
   type LoopEvent,
   type MachineSample,
-  type MoveColumn,
   memoryTopicKey,
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
   QA_RETENTION_DAYS,
   type QaFindingView,
+  type QaReviewRoundView,
+  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -107,6 +108,10 @@ export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
+export const LIVE_COMMS_LIMIT = 5_000;
+export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
+export const OPERATIONAL_RETENTION_DAYS = 90;
+export const AUDIT_RETENTION_DAYS = 365;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
@@ -305,6 +310,15 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+-- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
+CREATE TABLE IF NOT EXISTS run_reads (
+  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
+  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, path)
+);
+CREATE TABLE IF NOT EXISTS run_rereads (
+  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
+);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
@@ -362,7 +376,7 @@ CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
 -- A configured check a seat ran in its clone, on the head it ran against (the push gate reads it).
 CREATE TABLE IF NOT EXISTS check_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, command TEXT NOT NULL,
-  head_sha TEXT NOT NULL, ok INTEGER NOT NULL, at INTEGER NOT NULL
+  invoked_command TEXT, head_sha TEXT NOT NULL, ok INTEGER NOT NULL, exit_code INTEGER, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
@@ -633,6 +647,17 @@ export function crewCodexDir(dbPath: string, runId: string): string {
 
 export const CREW_CODEX_DIR = /^codex-[0-9a-f]{12}$/;
 
+/**
+ * A Claude run's skills plugin folder (`--plugin-dir`), built by the hub from the repo's commit. It
+ * sits in the data dir, which the seat's sandbox cannot write, and is removed with the run's files.
+ */
+export function crewSkillsDir(dbPath: string, runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return join(crewDir(dbPath), `skills-${hex}`);
+}
+
+export const CREW_SKILLS_DIR = /^skills-[0-9a-f]{12}$/;
+
 /** A keeper folder's name in `{DB dir}/crew/`. */
 export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
 
@@ -680,7 +705,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn | FlightMoveColumn;
+  column: HudColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -982,6 +1007,18 @@ function compactFlightWake(text: string): string {
 
 export class Store {
   private readonly db: DatabaseSync;
+  private readonly rawDb: DatabaseSync;
+  /** Statements used by read-heavy views stay prepared for this Store's lifetime. */
+  private readonly statements = new Map<string, StatementSync>();
+
+  private statement(sql: string): StatementSync {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.rawDb.prepare(sql);
+      this.statements.set(sql, statement);
+    }
+    return statement;
+  }
 
   /** `busyTimeoutMs` is shortened only by tests that hold a lock on purpose. */
   /** The database file. */
@@ -990,7 +1027,16 @@ export class Store {
   constructor(path: string, busyTimeoutMs = BUSY_TIMEOUT_MS) {
     this.path = path;
     // Wait up to the timeout for another writer's lock instead of failing at once.
-    this.db = new DatabaseSync(path, { timeout: busyTimeoutMs });
+    this.rawDb = new DatabaseSync(path, { timeout: busyTimeoutMs });
+    // Store has many small methods. Cache every SQL text here so callers cannot accidentally
+    // prepare the same statement on each HUD build.
+    this.db = new Proxy(this.rawDb, {
+      get: (target, property) => {
+        if (property === "prepare") return (sql: string) => this.statement(sql);
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
     this.db.exec("PRAGMA journal_mode = WAL");
     const hasEpisodes = this.db
       .prepare("SELECT 1 FROM sqlite_master WHERE name = 'attention_episodes'")
@@ -1062,6 +1108,7 @@ export class Store {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.statements.clear();
     this.db.close();
   }
 
@@ -1146,6 +1193,11 @@ export class Store {
     });
     // When a failing collector began failing; a row failing at upgrade takes its next poll's time.
     this.addColumn("collector_status", "failing_since", "INTEGER");
+    this.whenColumnMissing("check_runs", "invoked_command", () => {
+      this.db.exec("ALTER TABLE check_runs ADD COLUMN invoked_command TEXT");
+      this.db.exec("UPDATE check_runs SET invoked_command = command WHERE invoked_command IS NULL");
+    });
+    this.addColumn("check_runs", "exit_code", "INTEGER");
     // A re-polled fallback reading has the same key every time: keep one row per reading. Once per
     // database (`PRAGMA user_version`); the unique index keeps it true afterwards. An up-to-date
     // database takes no write lock; one that is behind re-checks once it holds it.
@@ -1222,6 +1274,22 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
+      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
+      CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
+      CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
+      CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
+      CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
+      CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
+      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
+      CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
+      CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -1311,6 +1379,8 @@ export class Store {
     this.addColumn("comms", "reply_to", "INTEGER");
     this.addColumn("comms", "target_run_id", "TEXT");
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
@@ -1534,10 +1604,34 @@ export class Store {
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
-    const rows = this.db
-      .prepare("SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?")
-      .all(agentId, limit) as Row[];
+    const rows = this.statement(
+      "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?",
+    ).all(agentId, limit) as Row[];
     return rows.map(toRun);
+  }
+
+  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  runsForAgents(
+    agentIds: readonly AgentId[],
+    limit: number,
+    heldRunIds: readonly string[] = [],
+  ): Map<AgentId, Run[]> {
+    const out = new Map<AgentId, Run[]>();
+    if (agentIds.length === 0) return out;
+    for (const agentId of agentIds) out.set(agentId, []);
+    const held = [...new Set(heldRunIds)];
+    const rows = this.statement(
+      `SELECT * FROM (
+         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
+         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
+       ) WHERE row_number <= ?${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}`,
+    ).all(...agentIds, ...held, limit, ...held) as Row[];
+    for (const run of rows.map(toRun)) {
+      const runs = out.get(run.agentId) ?? [];
+      runs.push(run);
+      out.set(run.agentId, runs);
+    }
+    return out;
   }
 
   /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
@@ -1545,7 +1639,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') IS NOT NULL",
+          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') > ''",
         )
         .all(agentId) as Row[]
     ).map(toRun);
@@ -1554,18 +1648,34 @@ export class Store {
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
     const rows = this.db
-      .prepare(
-        "SELECT * FROM runs WHERE ended_at IS NULL OR ended_at >= ? ORDER BY started_at, seq",
-      )
+      .prepare(`SELECT * FROM (
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
+        UNION ALL
+        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= ?
+      ) ORDER BY started_at, seq`)
       .all(since) as Row[];
     return rows.map(toRun);
+  }
+
+  /** Every recorded run on a branch; review ordering needs merged predecessors too. */
+  runsOnBranch(repoId: RepoId, branch: string): Run[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM runs WHERE repo_id = ? AND branch = ? ORDER BY started_at, seq")
+        .all(repoId, branch) as Row[]
+    ).map(toRun);
   }
 
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db
       .prepare(
-        "SELECT * FROM runs WHERE ended_at IS NULL OR json_extract(loop, '$.merging') IS NOT NULL ORDER BY started_at, seq",
+        `SELECT * FROM (
+           SELECT * FROM runs WHERE ended_at IS NULL
+           UNION ALL
+           SELECT * FROM runs INDEXED BY runs_merging_started
+             WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
+         ) ORDER BY started_at, seq`,
       )
       .all() as Row[];
     return rows.map(toRun);
@@ -1592,11 +1702,13 @@ export class Store {
   loopRuns(endedSince: number): Run[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM runs WHERE loop IS NOT NULL
-           AND (ended_at IS NULL
-             OR (ended_at >= ? AND (json_extract(loop, '$.phase') != 'done'
-               OR json_extract(loop, '$.merging') IS NOT NULL)))
-         ORDER BY started_at, seq`,
+        `SELECT * FROM (
+           SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
+           UNION ALL
+           SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= ?
+             AND (json_extract(loop, '$.phase') != 'done'
+               OR json_extract(loop, '$.merging') > '')
+         ) ORDER BY started_at, seq`,
       )
       .all(endedSince) as Row[];
     return rows.map(toRun);
@@ -1841,19 +1953,88 @@ export class Store {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
       | undefined;
-    return row ? parseDigest(row.digest) : null;
+    if (!row) return null;
+    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
+  }
+
+  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
+    return r ? { ...d, rereads: r } : d;
+  }
+
+  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
+  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
+    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
+    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
+      const ids = runIds.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
+      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
+    }
+    return out;
+  }
+
+  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
+  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
+    const r = this.db
+      .prepare(
+        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
+      )
+      .get(runId, agentId, path) as
+      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
+      | undefined;
+    return (
+      r && {
+        size: r.size,
+        mtimeMs: r.mtime_ms,
+        compactions: r.compactions,
+        toolUseId: r.tool_use_id,
+        at: r.at,
+      }
+    );
+  }
+
+  /** Remembers the run's whole read of `path`, replacing an earlier one. */
+  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
+           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
+      )
+      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
+  }
+
+  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
+  forgetRunRead(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
+  /** Counts one refused re-read that saved about `tokens`. */
+  addReread(runId: string, tokens: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
+         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
+      )
+      .run(runId, tokens);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
     const out = new Map<string, RunDigest>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows = this.db
-        .prepare(
-          `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
-        )
-        .all(...ids) as { run_id: string; digest: string }[];
+      const rows = this.statement(
+        `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
+    }
+    for (const [id, r] of this.rereads(runIds)) {
+      const d = out.get(id);
+      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -1969,7 +2150,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn | FlightMoveColumn,
+      column: r.board_column as HudColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,
@@ -1978,21 +2159,120 @@ export class Store {
 
   /** Each agent's state after its latest recorded change. */
   latestAgentStates(): Map<AgentId, HudState> {
-    const rows = this.db
-      .prepare(
-        `SELECT agent_id, to_state FROM agent_events e
+    const rows = this.statement(
+      `SELECT agent_id, to_state FROM agent_events e
          WHERE at = (SELECT MAX(at) FROM agent_events WHERE agent_id = e.agent_id)`,
-      )
-      .all() as Row[];
+    ).all() as Row[];
     return new Map(rows.map((r) => [r.agent_id as AgentId, r.to_state as HudState]));
   }
 
   private historyNextTable = 0;
+  private operationalHistoryNextTable = 0;
 
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
+    let batches = 0;
+    // These rows are operational traces, not durable Audit and QA records. One bounded batch per
+    // table keeps an upgrade's first maintenance pass within the same sweep budget as run history.
+    const operationalTables = [
+      ["attention_notes", "cleared_at IS NOT NULL AND cleared_at < ?", OPERATIONAL_RETENTION_DAYS],
+      [
+        "attention_episodes",
+        "cleared_at IS NOT NULL AND cleared_at < ?",
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      [
+        "board_moves",
+        `at < ? AND state IN ('done', 'failed') AND EXISTS (
+          SELECT 1 FROM runs r WHERE r.id = board_moves.run_id AND r.ended_at IS NOT NULL)`,
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      ["guard_hits", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
+      ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
+      [
+        "briefs",
+        `at < ? AND NOT (
+          id = (SELECT MAX(current.id) FROM briefs current WHERE current.key = briefs.key)
+          AND EXISTS (SELECT 1 FROM attention_notes n WHERE n.key = briefs.key AND n.cleared_at IS NULL)
+        )`,
+        OPERATIONAL_RETENTION_DAYS,
+      ],
+      [
+        "reviews",
+        `ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')
+         AND NOT (state = 'reported' AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = reviews.repo_id AND p.number = reviews.pr_number AND p.state = 'open'
+         ))`,
+        AUDIT_RETENTION_DAYS,
+      ],
+      [
+        "runs",
+        `ended_at IS NOT NULL AND ended_at < ? AND NOT EXISTS (
+          SELECT 1 FROM reviews v WHERE v.author_run_id = runs.id OR v.run_id = runs.id
+        )`,
+        AUDIT_RETENTION_DAYS,
+      ],
+      ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+    ] as const;
+    const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
+    const [table, condition, retentionDays] = operationalTables[operationalIndex];
+    this.operationalHistoryNextTable = (operationalIndex + 1) % operationalTables.length;
+    if (batches < HISTORY_SWEEP_MAX_BATCHES) {
+      const ids = this.db
+        .prepare(`SELECT rowid AS id FROM ${table} WHERE ${condition} ORDER BY rowid LIMIT ?`)
+        .all(now - retentionDays * day, HISTORY_BATCH_ROWS) as { id: number }[];
+      if (ids.length > 0) {
+        this.transaction(() => {
+          if (table === "reviews") {
+            const marks = ids.map(() => "?").join(",");
+            this.db
+              .prepare(`DELETE FROM review_checks WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_tests WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_resolutions WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+            this.db
+              .prepare(`DELETE FROM review_findings WHERE review_id IN (${marks})`)
+              .run(...ids.map(({ id }) => id));
+          }
+          if (table === "runs") {
+            const marks = ids.map(() => "?").join(",");
+            const runIds = this.db
+              .prepare(`SELECT id FROM runs WHERE rowid IN (${marks})`)
+              .all(...ids.map(({ id }) => id)) as { id: string }[];
+            const values = runIds.map(({ id }) => id);
+            if (values.length > 0) {
+              const runMarks = values.map(() => "?").join(",");
+              for (const child of [
+                "run_commits",
+                "run_pushes",
+                "run_attempts",
+                "run_digests",
+                "run_reads",
+                "run_rereads",
+              ])
+                this.db
+                  .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
+                  .run(...values);
+            }
+          }
+          this.db
+            .prepare(`DELETE FROM ${table} WHERE rowid IN (${ids.map(() => "?").join(",")})`)
+            .run(...ids.map(({ id }) => id));
+        });
+        batches++;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
       AND json_extract(r.loop, '$.aside') IS NULL
@@ -2009,7 +2289,6 @@ export class Store {
       ["comms", COMMS_RETENTION_DAYS, ""],
       ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
     ] as const;
-    let batches = 0;
     const start = this.historyNextTable;
     for (let offset = 0; offset < tables.length; offset++) {
       const index = (start + offset) % tables.length;
@@ -2026,7 +2305,12 @@ export class Store {
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
-            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
+            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})
+          AND NOT (review_findings.resolution IS NULL AND EXISTS (
+            SELECT 1 FROM reviews v JOIN pull_requests p
+              ON p.repo_id = v.repo_id AND p.number = v.pr_number
+            WHERE v.id = review_findings.review_id AND p.state = 'open'
+          ))`
             : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
@@ -2335,9 +2619,12 @@ export class Store {
           );
       const runs = this.db
         .prepare(
-          "SELECT id FROM runs WHERE repo_id = ? AND (json_extract(loop, '$.prNumber') = ? OR id IN (SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?))",
+          `SELECT id FROM runs INDEXED BY runs_loop_pr_number
+             WHERE json_extract(loop, '$.prNumber') = ?
+           UNION
+           SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?`,
         )
-        .all(repoId, p.number, repoId, p.number) as Row[];
+        .all(p.number, repoId, p.number) as Row[];
       for (const run of runs) {
         this.appendAttempt(run.id as string, "ci", readAt, {
           sha: p.headSha,
@@ -2672,10 +2959,25 @@ export class Store {
   }
 
   pullRequests(repoId: RepoId): PullRequestView[] {
-    const rows = this.db
-      .prepare("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC")
-      .all(repoId) as Row[];
+    const rows = this.statement(
+      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
+    ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
+  }
+
+  /** Pull requests for configured repos, indexed after one table read for the HUD. */
+  pullRequestsForRepos(repoIds: readonly RepoId[]): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>();
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(
+      `SELECT * FROM pull_requests WHERE repo_id IN (${repoIds.map(() => "?").join(", ")}) ORDER BY number DESC`,
+    ).all(...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) {
+      const prs = out.get(pr.repoId) ?? [];
+      prs.push(pr);
+      out.set(pr.repoId, prs);
+    }
+    return out;
   }
 
   overviewPullRequests(repoId: RepoId, since: number): PullRequestView[] {
@@ -3529,13 +3831,20 @@ export class Store {
     }));
   }
 
-  /** Findings of reviews that ended since `since`, newest review first. */
+  /**
+   * Findings of reviews in the requested window, plus unresolved findings on PRs still open now.
+   * The latter protects an open card from losing its blocking review evidence as it ages.
+   */
   qaFindings(since: number): QaFindingView[] {
     const rows = this.db
       .prepare(
         `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
          JOIN reviews v ON v.id = f.review_id
-         WHERE v.ended_at >= ? ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
+         WHERE v.ended_at >= ? OR (f.resolution IS NULL AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
       )
       .all(since) as Row[];
     return rows.map((r) => ({
@@ -3553,6 +3862,32 @@ export class Store {
       summary: r.summary as string,
       resolution: r.resolution as string | null,
       resolvedReviewId: r.resolved_review_id as number | null,
+    }));
+  }
+
+  /** Completed review rounds in the requested window, plus the full history of open PRs. */
+  qaReviewRounds(since: number): QaReviewRoundView[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM reviews v
+         WHERE v.state = 'reported' AND v.ended_at IS NOT NULL AND (v.ended_at >= ? OR EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, v.id DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      sha: r.sha as string,
+      verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
+      blocking: r.blocking as number,
+      minor: r.minor as number,
+      endedAt: r.ended_at as number,
     }));
   }
 
@@ -3694,21 +4029,21 @@ export class Store {
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
   planLanded(run: Run): boolean {
+    if (this.statement("SELECT 1 FROM loop_events WHERE key = ?").get(`${run.id}:plan`))
+      return true;
     return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
-           WHERE e.key = ? OR (e.key LIKE '%:plan' AND r.repo_id = ? AND r.ticket = ?) LIMIT 1`,
-        )
-        .get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
+      this.statement(
+        `SELECT 1 FROM runs r JOIN loop_events e ON e.key = r.id || ':plan'
+           WHERE r.repo_id = ? AND r.ticket = ? LIMIT 1`,
+      ).get(run.repoId, run.ticket) !== undefined
     );
   }
 
   /** The run's loop events, oldest first. */
   loopEventsOfRun(runId: string): LoopEvent[] {
-    const rows = this.db
-      .prepare("SELECT * FROM loop_events WHERE run_id = ? ORDER BY at, key")
-      .all(runId) as Row[];
+    const rows = this.statement("SELECT * FROM loop_events WHERE run_id = ? ORDER BY at, key").all(
+      runId,
+    ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
       runId: r.run_id as string,
@@ -4338,10 +4673,22 @@ export class Store {
     const rows = this.db
       .prepare(
         targetRunId === undefined
-          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id"
-          : "SELECT * FROM comms WHERE at >= ? AND (target_run_id IS NULL OR target_run_id = ?) ORDER BY at, id",
+          ? `SELECT * FROM (
+               SELECT * FROM comms WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`
+          : `SELECT * FROM (
+               SELECT * FROM (
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
+                 UNION ALL
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
+               ) ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`,
       )
-      .all(since, ...(targetRunId === undefined ? [] : [targetRunId])) as Row[];
+      .all(
+        since,
+        ...(targetRunId === undefined ? [] : [since, targetRunId]),
+        LIVE_COMMS_LIMIT,
+      ) as Row[];
     // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
     // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({
@@ -4355,9 +4702,9 @@ export class Store {
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
   commsCountTo(from: string, to: string, since: number): number {
-    const r = this.db
-      .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?")
-      .get(from, to, since) as { n: number };
+    const r = this.statement(
+      "SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?",
+    ).get(from, to, since) as { n: number };
     return r.n;
   }
 
@@ -4453,11 +4800,17 @@ export class Store {
   loopEvents(since: number, repoId?: RepoId): LoopEvent[] {
     const rows = (
       repoId === undefined
-        ? this.db.prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key").all(since)
+        ? this.db
+            .prepare(`SELECT * FROM (
+              SELECT * FROM loop_events WHERE at >= ? ORDER BY at DESC, key DESC LIMIT ?
+            ) ORDER BY at, key`)
+            .all(since, LIVE_LOOP_EVENTS_LIMIT)
         : this.db
-            .prepare(`SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
-          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key`)
-            .all(since, repoId)
+            .prepare(`SELECT * FROM (
+              SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
+              WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at DESC, e.key DESC LIMIT ?
+            ) ORDER BY at, key`)
+            .all(since, repoId, LIVE_LOOP_EVENTS_LIMIT)
     ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
@@ -4669,6 +5022,20 @@ export class Store {
     return r ? seatRow(r) : null;
   }
 
+  /** Seat sessions for the configured HUD rows, indexed after one table read. */
+  seatSessions(seatIds: readonly AgentId[]): Map<AgentId, SeatSessionRow> {
+    const out = new Map<AgentId, SeatSessionRow>();
+    if (seatIds.length === 0) return out;
+    const rows = this.statement(
+      `SELECT * FROM seat_sessions WHERE seat_id IN (${seatIds.map(() => "?").join(", ")})`,
+    ).all(...seatIds) as Row[];
+    for (const row of rows) {
+      const seat = seatRow(row);
+      out.set(seat.seatId, seat);
+    }
+    return out;
+  }
+
   setSeatSession(row: SeatSessionRow): void {
     this.db
       .prepare(
@@ -4762,13 +5129,25 @@ export class Store {
   addCheckRun(c: {
     runId: string;
     command: string;
+    invokedCommand?: string;
     headSha: string;
     ok: boolean;
+    exitCode?: number | null;
     at: number;
   }): void {
     this.db
-      .prepare("INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)")
-      .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
+      .prepare(
+        "INSERT INTO check_runs (run_id, command, invoked_command, head_sha, ok, exit_code, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        c.runId,
+        c.command,
+        c.invokedCommand ?? c.command,
+        c.headSha,
+        c.ok ? 1 : 0,
+        c.exitCode ?? null,
+        c.at,
+      );
   }
 
   /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */
@@ -4776,14 +5155,57 @@ export class Store {
     runId: string,
     command: string,
     headSha: string,
-  ): { ok: boolean; at: number } | null {
+  ): {
+    headSha: string;
+    invokedCommand: string;
+    ok: boolean;
+    exitCode: number | null;
+    at: number;
+  } | null {
     const r = this.db
       .prepare(
-        `SELECT ok, at FROM check_runs WHERE run_id = ? AND command = ? AND head_sha = ?
+        `SELECT head_sha, invoked_command, ok, exit_code, at FROM check_runs
+         WHERE run_id = ? AND command = ? AND head_sha = ?
          ORDER BY at DESC, id DESC LIMIT 1`,
       )
       .get(runId, command, headSha) as Row | undefined;
-    return r === undefined ? null : { ok: r.ok === 1, at: r.at as number };
+    return r === undefined
+      ? null
+      : {
+          headSha: r.head_sha as string,
+          invokedCommand: (r.invoked_command as string | null) ?? command,
+          ok: r.ok === 1,
+          exitCode: (r.exit_code as number | null) ?? null,
+          at: r.at as number,
+        };
+  }
+
+  /** The newest result this run recorded for `command`, regardless of commit. */
+  newestCheckRun(
+    runId: string,
+    command: string,
+  ): {
+    headSha: string;
+    invokedCommand: string;
+    ok: boolean;
+    exitCode: number | null;
+    at: number;
+  } | null {
+    const r = this.db
+      .prepare(
+        `SELECT head_sha, invoked_command, ok, exit_code, at FROM check_runs WHERE run_id = ? AND command = ?
+         ORDER BY at DESC, id DESC LIMIT 1`,
+      )
+      .get(runId, command) as Row | undefined;
+    return r === undefined
+      ? null
+      : {
+          headSha: r.head_sha as string,
+          invokedCommand: (r.invoked_command as string | null) ?? command,
+          ok: r.ok === 1,
+          exitCode: (r.exit_code as number | null) ?? null,
+          at: r.at as number,
+        };
   }
 
   addLockHold(h: LockHoldRow): void {
@@ -5131,7 +5553,7 @@ export class Store {
 
   /** The run's last push, or null when it has not pushed. */
   runPush(runId: string): { sha: string; at: number } | null {
-    const r = this.db.prepare("SELECT sha, at FROM run_pushes WHERE run_id = ?").get(runId) as
+    const r = this.statement("SELECT sha, at FROM run_pushes WHERE run_id = ?").get(runId) as
       | { sha: string; at: number }
       | undefined;
     return r ? { sha: r.sha, at: r.at } : null;

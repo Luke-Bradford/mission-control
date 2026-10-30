@@ -296,5 +296,5 @@ it("wraps long references and spaces action chips in brief sections", () => {
   expect(css).toMatch(
     /\.brief-section \.chipref\s*\{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/,
   );
-  expect(css).toMatch(/\.brief-refs\s*\{[^}]*flex-wrap: wrap;[^}]*gap: 4px;/);
+  expect(css).toMatch(/\.brief-refs\s*\{[^}]*flex-wrap: wrap;[^}]*gap: var\(--sp-1\);/);
 });

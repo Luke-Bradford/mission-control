@@ -218,8 +218,9 @@ const EMPTY: TelemetryData = {
   totals: [],
 };
 
-function stub(data: TelemetryData = tel(), config: ConfigView = CFG) {
+function stub(data: TelemetryData = tel(), config: ConfigView = CFG, machine?: unknown) {
   return stubFetch({
+    ...(machine === undefined ? {} : { "/api/machine": machine }),
     "/api/telemetry?range=1h": data,
     "/api/telemetry?range=6h": data,
     "/api/telemetry?range=24h": data,
@@ -243,8 +244,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function loaded(data?: TelemetryData, config?: ConfigView) {
-  const fetch = stub(data, config);
+async function loaded(data?: TelemetryData, config?: ConfigView, machine?: unknown) {
+  const fetch = stub(data, config, machine);
   const view = render(<Telemetry />);
   await screen.findByText("61.2k");
   return { fetch, ...view };
@@ -708,6 +709,16 @@ describe("Agents", () => {
     expect(panel("tTotals").querySelectorAll("tbody tr")).toHaveLength(1);
   });
 
+  it.each([
+    [1, "of 1 agent"],
+    [3, "of 3 agents"],
+  ])("counts the agents behind a filtered working figure: %s", async (agents, detail) => {
+    const { container } = await loaded(tel({ today: { ...tel().today, agents } }));
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "shop-app-ta" } });
+    await screen.findByText("Working · now · filtered");
+    expect(kpi(container, "Working · now · filtered").detail).toBe(detail);
+  });
+
   it("where agent time goes: four labelled shares, rounded for display", async () => {
     await loaded();
     const row = panel("tUtil").querySelector(".hrow") as HTMLElement;
@@ -933,6 +944,63 @@ describe("Capacity and cost", () => {
     });
     within(panel("tLock")).getByText(NOT_TRACKED);
     within(panel("tStepBars")).getByText(NOT_TRACKED);
+  });
+
+  describe("machine readout", () => {
+    const GIB = 2 ** 30;
+    const latest = {
+      at: NOW,
+      cpuPct: 10,
+      cores: 8,
+      memUsedBytes: 8 * GIB,
+      memTotalBytes: 16 * GIB,
+      diskFreeBytes: 40 * GIB,
+      diskTotalBytes: 500 * GIB,
+      swapUsedBytes: 3.5 * GIB,
+      swapTotalBytes: 8 * GIB,
+      agents: null,
+    };
+    const view = (over: Record<string, unknown> = {}) => ({
+      latest,
+      warning: null,
+      maxSeats: 4,
+      seats: 1,
+      perSessionMax: 2,
+      ...over,
+    });
+
+    it("normal: swap used of total and disk free, no warning", async () => {
+      await loaded(undefined, undefined, view());
+      const p = panel("tMach");
+      await waitFor(() => expect(p.textContent).toContain("Swap 3.5 GB (22% of RAM)"));
+      expect(p.textContent).toContain("Disk 40 GB free");
+      expect(p.querySelector(".pill")).toBeNull();
+    });
+
+    it("constrained: a warn Pill carries the reason", async () => {
+      await loaded(undefined, undefined, view({ warning: "swap 21.5 of 22.5 GB used" }));
+      const pill = await waitFor(() => {
+        const el = panel("tMach").querySelector<HTMLElement>(".pill");
+        if (!el) throw new Error("no pill");
+        return el;
+      });
+      expect(pill.className).toContain("warn");
+      expect(pill.textContent).toBe("Holding new work");
+      expect(pill.title).toBe("swap 21.5 of 22.5 GB used");
+    });
+
+    it("missing fields are dashes", async () => {
+      await loaded(
+        undefined,
+        undefined,
+        view({
+          latest: { ...latest, swapUsedBytes: null, swapTotalBytes: null, diskFreeBytes: null },
+        }),
+      );
+      const p = panel("tMach");
+      await waitFor(() => expect(p.textContent).toContain("Swap —"));
+      expect(p.textContent).toContain("Disk — GB free");
+    });
   });
 
   it("tokens by ticket and totals", async () => {
@@ -1230,8 +1298,11 @@ describe("engine telemetry", () => {
     ]);
     expect(row.querySelector(".warn-t")).toBeTruthy();
     within(panel("tLock")).getByText(state === "stalled" ? "no output" : "running");
-    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 runs" });
+    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 run" });
     expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
+    // Lock holds shade the chart; their names stay in the tooltip so the 100% line has no text pile.
+    const chartText = [...panel("tMach").querySelectorAll("svg text")].map((t) => t.textContent);
+    expect(chartText.filter((t) => t?.includes("suite"))).toEqual([]);
     const live = within(panel("tLock"))
       .getByText(state === "stalled" ? "no output" : "running")
       .closest("tr") as HTMLTableRowElement;

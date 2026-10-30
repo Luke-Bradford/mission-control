@@ -5,14 +5,13 @@ import {
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
-  type HudState,
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
-import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
-import { useSecond, useTz } from "../clock.ts";
+import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
+import { useNow, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -27,7 +26,6 @@ import {
   lockSince,
   modelLine,
   type NeedPart,
-  NO_LOOP,
   needLine,
   needsLamp,
   SET_ASIDE_LABEL,
@@ -36,9 +34,9 @@ import {
   seatStatus,
   waitText,
 } from "../crew.ts";
-import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
+import { RESOURCES, useResource, useResources, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
-import { cutText } from "../fmt.ts";
+import { cutText, elapsed, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -52,66 +50,22 @@ import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
-import { activityValues, age } from "./agentActivity.ts";
-import { LoopStep } from "./LoopStep.tsx";
+import { activityValues } from "./agentActivity.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
-const COLUMNS = ["Agent", "Model", "State", "Work", "Loop", "Tokens · 30 min", "Cost", "Context"];
-const LIVE_LOOP_STATES: readonly HudState[] = ["running", "waiting", "blocked", "parked"];
-
-/** The Loop column describes the run in progress, never a completed seat's last run. */
-function hasLiveLoop(row: Crew["rows"][number] | null, needsYou: boolean): boolean {
-  return Boolean(
-    row?.loop &&
-      hasActiveRun(row) &&
-      row.hudState !== "stopped" &&
-      row.hudState !== "error" &&
-      (LIVE_LOOP_STATES.includes(row.hudState) || needsYou),
-  );
-}
-
-function ModelCell({ row, title }: { row: Crew["rows"][number] | null; title?: string }) {
-  const id = row?.run?.model ?? row?.model ?? DASH;
-  const name = cutText(
-    id.startsWith("gpt-")
-      ? id
-      : id
-          .replace(/[- ]\d{8}$/, "")
-          .replace(/^claude-/, "")
-          .replace(/\[1m\]/i, " 1M")
-          .replace(/(\d)-(\d)/g, "$1.$2")
-          .replace(/-/g, " "),
-    24,
-  );
-  return (
-    <span
-      role="cell"
-      className="ellip xs muted agent-model"
-      title={title ?? (row ? modelLine(row) : undefined)}
-    >
-      <span className="ellip">{name}</span>
-      {row?.cli.version && (
-        <span className="agent-cli">{` · v${row.cli.version.replace(/^v/, "")}`}</span>
-      )}
-      {row?.cli.effort && (
-        <span className="agent-effort">
-          {" "}
-          · {row.cli.effort === "medium" ? "med" : row.cli.effort}
-        </span>
-      )}
-    </span>
-  );
-}
-
+const COLUMNS = ["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"];
 function WorkCell({
   row,
   doing,
   note,
+  actions,
 }: {
   row: Crew["rows"][number] | null;
   doing: string;
   note?: ReactNode;
+  /** A row action that used to sit in the Loop column (the review-park waiver). */
+  actions?: ReactNode;
 }) {
   const prs = useReviewPrs(row ?? undefined);
   const prNumber = row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
@@ -128,6 +82,7 @@ function WorkCell({
             {doing || DASH}
           </span>
         )}
+        {actions}
       </span>
     );
   }
@@ -166,6 +121,7 @@ function WorkCell({
           {doing || DASH}
         </span>
       )}
+      {actions}
     </span>
   );
 }
@@ -179,10 +135,21 @@ function flightSeatId(config: ConfigView | undefined): string | null {
   return null;
 }
 
+/**
+ * Whether a row's text counts seconds (a live tool, a stall, a wait for the test lock). Idle rows
+ * show only minutes and so follow the panel's slower clock.
+ */
+const showsSeconds = (row: Crew["rows"][number] | null, lock: TestLockState | undefined): boolean =>
+  row !== null &&
+  row.run?.status === "running" &&
+  (row.hudState === "running" ||
+    row.hudState === "stalled" ||
+    lockSince(lock, row.run.id) !== null);
+
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
   row,
-  now,
+  now: coarseNow,
   tz,
   configPending,
   selected,
@@ -199,6 +166,7 @@ function FlightRow({
   max: number;
   lock: TestLockState | undefined;
 }) {
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
@@ -229,7 +197,10 @@ function FlightRow({
       : label === "Held" || label === "Stopped"
         ? " · next check paused"
         : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
-  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
+  const openAsks = items.filter((i) =>
+    ["question", "person", "decision", "approval"].includes(i.kind),
+  ).length;
+  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${plural(openAsks, "open ask")} · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
   const needs = row ? needLine(row, items, now, lock) : [];
@@ -245,7 +216,7 @@ function FlightRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={row ? modelLine(row) : undefined}>
         <button
           type="button"
           className="rowlink"
@@ -264,15 +235,11 @@ function FlightRow({
           head agent
         </a>
       </span>
-      <ModelCell row={row} />
       <span role="cell" className={row ? "state-cell" : undefined} title={status?.reason ?? label}>
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
             <span>{label}</span>
           </Pill>
-        )}
-        {row && row.stateSince > 0 && (
-          <span className="xs muted block">{age(row.stateSince, now)}</span>
         )}
       </span>
       <WorkCell
@@ -284,26 +251,59 @@ function FlightRow({
           ) : undefined
         }
       />
-      <span role="cell" className="min0 loopstep" title={sessionTurns}>
-        {row?.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            hudState={row.hudState}
-            wait={waitText(row.loop, "FLIGHT", lockSince(lock, row.run?.id), now)}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-          />
-        ) : (
-          <span title={sessionTurns}>{DASH}</span>
-        )}
-      </span>
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span role="cell">{DASH}</span>}
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={row ? contextPct(row) : null} />
       </span>
+      <span role="cell" className="num xs" title={sessionTurns}>
+        {row && row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
+      </span>
     </div>
+  );
+}
+
+/**
+ * The observed loops (config.yaml loops, not crew seats) as one compact strip under the roster:
+ * name, state in words and what step they are on. Each opens its Agent page.
+ */
+function LoopsStrip({
+  rows,
+  items,
+  selected,
+}: {
+  rows: Crew["rows"];
+  items: AttentionItem[];
+  selected: string | null;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <nav className="loops-strip" aria-label="Loops">
+      <strong>Loops</strong>
+      {rows.map((row) => {
+        const status = seatStatus(row);
+        const asks = seatItems(row, items).length;
+        const step = row.loop && hasActiveRun(row) ? row.loop.text : null;
+        const to = agentPath(row.id);
+        // A loop waiting on the operator says so in words and takes the warn colour.
+        const tone = asks > 0 ? "warn" : status.tone;
+        const state = asks > 0 ? "needs you" : status.label;
+        return (
+          <a
+            key={row.id}
+            className={`loop-chip tone-${tone}${row.id === selected ? " sel" : ""}`}
+            href={to}
+            title={[callSign(row), state, step, status.reason].filter(Boolean).join(" · ")}
+            onClick={(e) => followLink(e, to)}
+          >
+            <span className="ellip">
+              {callSign(row)} · {step ?? state}
+            </span>
+            {step && <span className="xs muted">{state}</span>}
+          </a>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -349,7 +349,7 @@ function AgentNeeds({
         // biome-ignore lint/a11y/useKeyWithClickEvents: the buttons inside are the keyboard route
         // biome-ignore lint/a11y/noStaticElementInteractions: a click on them must not open the Agent page
         <span className="needctl" onClick={(e) => e.stopPropagation()}>
-          <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} />
+          <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} compact />
         </span>
       )}
     </span>
@@ -360,7 +360,7 @@ function AgentRow({
   row,
   items,
   max,
-  now,
+  now: coarseNow,
   tz,
   selected,
   lock,
@@ -374,6 +374,7 @@ function AgentRow({
   lock: TestLockState | undefined;
 }) {
   const mine = seatItems(row, items);
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const needs = needLine(row, items, now, lock);
   const repoPrs = useReviewPrs(row ?? undefined);
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -394,7 +395,8 @@ function AgentRow({
   const statusTitle = row.crewPause
     ? status.reason
     : lockSince(lock, row.run?.id) !== null
-      ? "Waiting on test lock"
+      ? (row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)) ||
+        "Waiting on test lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Crew is paused"
         : (status.reason ?? statusLabel);
@@ -427,7 +429,7 @@ function AgentRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={identityTitle}>
         <a
           className="rowlink"
           title={callSign(row)}
@@ -445,12 +447,10 @@ function AgentRow({
             : row.loopKind}
         </span>
       </span>
-      <ModelCell row={row} title={identityTitle} />
       <span role="cell" className="state-cell" title={statusTitle}>
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
-        {row.stateSince > 0 && <span className="xs muted block">{age(row.stateSince, now)}</span>}
       </span>
       <WorkCell
         row={row}
@@ -458,28 +458,15 @@ function AgentRow({
         note={
           needs.length ? <AgentNeeds row={row} items={items} now={now} lock={lock} /> : undefined
         }
+        actions={<ReviewParkSeatActions row={row} />}
       />
-      <span role="cell" className="min0 loopstep">
-        {row.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-            hudState={row.hudState}
-            wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
-          />
-        ) : (
-          <span className="xs fg2" title={NO_LOOP}>
-            {DASH}
-          </span>
-        )}
-        <ReviewParkSeatActions row={row} />
-      </span>
       <AgentActivity row={row} now={now} max={max} />
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={contextPct(row)} />
+      </span>
+      <span role="cell" className="num xs">
+        {row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
       </span>
     </div>
   );
@@ -487,23 +474,24 @@ function AgentRow({
 
 /** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
 function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
-  const current = row.loop?.phase === "parked" && row.run ? [{ id: row.run.id }] : [];
-  const aside = (row.asideRuns ?? [])
-    .filter((run) => run.loop.phase === "parked")
-    .map((run) => ({ id: run.runId }));
+  const ids = [
+    ...(row.loop?.phase === "parked" && row.run ? [row.run.id] : []),
+    ...(row.asideRuns ?? []).filter((run) => run.loop.phase === "parked").map((run) => run.runId),
+  ];
+  const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
+  const parks = ids.flatMap((runId, i) => {
+    const park = reviewPark(loops[i]?.data?.loop);
+    return park ? [{ runId, park }] : [];
+  });
+  if (parks.length === 0) return null;
   return (
     <span className="acts">
-      {[...current, ...aside].map(({ id }) => (
-        <ReviewParkSeatAction key={id} runId={id} />
-      ))}
+      {parks.length === 1 && (
+        <WaiveReviewFindings runId={parks[0].runId} park={parks[0].park} compact />
+      )}
+      {parks.length > 1 && <WaiveReviewMenu parks={parks} />}
     </span>
   );
-}
-
-function ReviewParkSeatAction({ runId }: { runId: string }) {
-  const loop = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop;
-  const park = reviewPark(loop);
-  return park ? <WaiveReviewFindings runId={runId} park={park} /> : null;
 }
 
 /** FLIGHT heads the crew, observed loops and stopped seats. */
@@ -512,7 +500,7 @@ export function AgentsPanel() {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
   const tz = useTz();
-  const now = useSecond();
+  const now = useNow();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);
@@ -533,6 +521,9 @@ export function AgentsPanel() {
   const metrics = useMetrics();
   const working = metrics.readings.agentsWorking;
 
+  // Crew seats make the roster; observed loops sit in the Loops strip beneath it.
+  const seatRows = rows?.filter((r) => r.kind === "crew") ?? null;
+  const loopRows = rows?.filter((r) => r.kind === "loop") ?? [];
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
   const placeholders = config
@@ -571,12 +562,7 @@ export function AgentsPanel() {
         <div className="trow head" role="row">
           {COLUMNS.map((label) => (
             // biome-ignore lint/a11y/useFocusableInteractive: these columns are not sortable
-            <span
-              role="columnheader"
-              key={label}
-              title={label}
-              className={label === "Loop" ? "loopstep" : undefined}
-            >
+            <span role="columnheader" key={label} title={label}>
               {label}
             </span>
           ))}
@@ -591,7 +577,7 @@ export function AgentsPanel() {
           tz={tz}
           lock={lock}
         />
-        {rows?.map((row) => (
+        {seatRows?.map((row) => (
           <AgentRow
             key={row.id}
             row={row}
@@ -622,6 +608,7 @@ export function AgentsPanel() {
             </div>
           ))}
       </div>
+      <LoopsStrip rows={loopRows} items={items} selected={selected} />
     </Panel>
   );
 }

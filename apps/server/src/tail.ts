@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { openTranscript, type TranscriptFile } from "./transcript-file.ts";
 
 /** Most bytes a single readNewLines call will read (a single longer line is still returned whole). */
 export const MAX_READ_BYTES = 8 * 1024 * 1024;
@@ -14,11 +14,11 @@ export interface TailResult {
   reset: boolean;
 }
 
-function readRange(fd: number, pos: number, len: number): Buffer {
+function readRange(fd: TranscriptFile, pos: number, len: number): Buffer {
   const buf = Buffer.allocUnsafe(len);
   let got = 0;
   while (got < len) {
-    const n = readSync(fd, buf, got, len - got, pos + got);
+    const n = fd.read(buf, got, len - got, pos + got);
     if (n === 0) break;
     got += n;
   }
@@ -26,7 +26,7 @@ function readRange(fd: number, pos: number, len: number): Buffer {
 }
 
 /** Position of the first "\n" at or after `from`, scanning in bounded chunks; -1 if none before `size`. */
-function findNewline(fd: number, from: number, size: number): number {
+function findNewline(fd: TranscriptFile, from: number, size: number): number {
   for (let pos = from; pos < size; pos += SCAN_CHUNK) {
     const buf = readRange(fd, pos, Math.min(SCAN_CHUNK, size - pos));
     const i = buf.indexOf(NEWLINE);
@@ -56,10 +56,10 @@ export interface TailOptions {
 export function readNewLines(path: string, fromOffset: number, opts: TailOptions = {}): TailResult {
   const maxBytes = opts.maxBytes ?? MAX_READ_BYTES;
   const maxLineBytes = opts.maxLineBytes ?? MAX_LINE_BYTES;
-  let fd: number | null = null;
+  let fd: TranscriptFile | null = null;
   try {
-    fd = openSync(path, "r");
-    const size = fstatSync(fd).size;
+    fd = openTranscript(path);
+    const size = fd.size;
     const reset = size < fromOffset;
     const start = reset ? 0 : fromOffset;
     const none = { lines: [], nextOffset: start, reset };
@@ -99,7 +99,7 @@ export function readNewLines(path: string, fromOffset: number, opts: TailOptions
   } finally {
     if (fd !== null) {
       try {
-        closeSync(fd);
+        fd.close();
       } catch {
         // nothing useful to do
       }
@@ -130,10 +130,10 @@ function lineTime(line: string): number | null {
 export function offsetSince(path: string, cutoff: number, opts: OffsetSinceOptions = {}): number {
   const chunk = opts.chunk ?? SCAN_CHUNK;
   const maxBytes = opts.maxBytes ?? 16 * 1024 * 1024;
-  let fd: number | null = null;
+  let fd: TranscriptFile | null = null;
   try {
-    fd = openSync(path, "r");
-    const size = fstatSync(fd).size;
+    fd = openTranscript(path);
+    const size = fd.size;
     const floor = Math.max(0, size - maxBytes);
     // `after` is the start of the text read so far; a line may straddle the chunk boundary.
     let after = size;
@@ -167,7 +167,7 @@ export function offsetSince(path: string, cutoff: number, opts: OffsetSinceOptio
   } finally {
     if (fd !== null) {
       try {
-        closeSync(fd);
+        fd.close();
       } catch {
         // nothing useful to do
       }

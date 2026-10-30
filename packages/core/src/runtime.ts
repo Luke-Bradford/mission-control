@@ -82,6 +82,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.recall,
   MC_TOOL_NAMES.holdItem,
   MC_TOOL_NAMES.releaseHold,
+  MC_TOOL_NAMES.editIssue,
+  MC_TOOL_NAMES.setFields,
 ];
 
 /**
@@ -250,12 +252,13 @@ export function modeOfSeat(seat: { role: string; mode?: ConfigSeatMode; def?: Se
  * and local settings files (managed settings and --settings still apply)", and
  * docs/spikes/2026-10-22-crewing-other-repos.md found the repo's `.claude` settings and hooks
  * ignored. (`mc commit` refuses `.claude/**` as a protected path either way.)
+ *
+ * `--disable-slash-commands` is not here: it removes the Skill tool, and a seat needs the repo's
+ * skills (docs/spikes/2026-10-29-seat-skills.md). Its job, keeping the operator's own commands out,
+ * is done by `--restricted` (no user, project or local settings) and by `--plugin-dir`, whose folder
+ * the hub builds from the repo commit with skills only: no hooks, bin or MCP config.
  */
-export const CREW_ISOLATION_FLAGS = [
-  "--restricted",
-  "--strict-mcp-config",
-  "--disable-slash-commands",
-] as const;
+export const CREW_ISOLATION_FLAGS = ["--restricted", "--strict-mcp-config"] as const;
 
 /** Git reads ignore operator config and disable repo hooks and filesystem monitors. */
 export const CREW_GIT_ENV = {
@@ -302,6 +305,7 @@ export const WRITER_TOOLS = [
   "Write",
   "TodoWrite",
   "Bash",
+  "Skill",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.askFlight,
@@ -318,6 +322,7 @@ export const READONLY_TOOLS = [
   "Glob",
   "TodoWrite",
   "Bash",
+  "Skill",
   MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
@@ -334,6 +339,7 @@ export const SCRATCH_TOOLS = [
   "Write",
   "TodoWrite",
   "Bash",
+  "Skill",
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
   MC_TOOLS.commsRead,
@@ -359,8 +365,53 @@ export const WRITER_BUILTINS = [
   "Write",
   "TodoWrite",
   "Bash",
+  "Skill",
 ] as const;
-export const READONLY_BUILTINS = ["Read", "Grep", "Glob", "TodoWrite", "Bash"] as const;
+export const READONLY_BUILTINS = ["Read", "Grep", "Glob", "TodoWrite", "Bash", "Skill"] as const;
+
+/** Where a repo keeps its skills; the hub builds a seat's plugin folder from this path at the run's commit. */
+export const SKILLS_DIR = ".claude/skills";
+
+/** The biggest file a seat's skill folder may carry. */
+export const SKILL_FILE_MAX = 256 * 1024;
+
+/** The plain text a skill folder may hold besides its SKILL.md. */
+const SKILL_TEXT_EXT = /\.(md|txt|json|ya?ml|toml|csv)$/i;
+
+/**
+ * Why a file in the repo's skills folder may not reach a seat's plugin, or null. A skill is prompt
+ * text: `SKILL.md` and plain text files only, regular and not executable, never a script, binary or
+ * link. `path` is repo-relative (`.claude/skills/<skill>/...`), `mode` the git tree mode.
+ */
+export function skillFileProblem(path: string, mode: string, body: Buffer): string | null {
+  const rel = path.startsWith(`${SKILLS_DIR}/`) ? path.slice(SKILLS_DIR.length + 1) : null;
+  const parts = rel?.split("/") ?? [];
+  if (parts.length < 2 || parts.some((p) => p === "" || p === ".." || p.startsWith("."))) {
+    return `${path} is not inside a skill folder`;
+  }
+  if (mode !== "100644") return `${path} is not a plain file (mode ${mode})`;
+  if (path.split("/").at(-1) !== "SKILL.md" && !SKILL_TEXT_EXT.test(path)) {
+    return `${path} is not SKILL.md or a plain text file`;
+  }
+  if (body.length > SKILL_FILE_MAX) return `${path} is too big (over ${SKILL_FILE_MAX} bytes)`;
+  if (body.includes(0)) return `${path} holds binary data`;
+  try {
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body);
+  } catch {
+    return `${path} is not UTF-8 text`;
+  }
+  return null;
+}
+
+/** The plugin manifest of a seat's skills folder: a name and a description, no hooks, bin or MCP. */
+export function skillPluginManifest(repoName: string): string {
+  const slug =
+    (repoName.split("/").at(-1) ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "repo";
+  return `${JSON.stringify({ name: slug, description: `Skills from ${repoName}'s ${SKILLS_DIR}` }, null, 2)}\n`;
+}
 
 /**
  * Files the Edit and Write tools may not touch: build, install and CI config, git's own pointer,
@@ -757,8 +808,10 @@ export const CREW_PNPM_ENV = {
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
-/** The folder beside a worktrees folder's worktrees holding each one's private pnpm store. */
+/** The hub-owned pnpm store folder below `crew.worktrees`. */
 export const CODEX_PNPM_STORES_DIR = ".mc-pnpm-store";
+/** The one pnpm store all crew checkouts and review scratch copies share. */
+export const SHARED_PNPM_STORE_NAME = "shared";
 /** A Codex seat's private, worktree-local temporary directory. */
 export const MC_TMP_DIR_NAME = ".mc-tmp";
 /**
@@ -819,6 +872,8 @@ export interface CrewSandboxInput {
    * `crew.deny_read`, in that order (`seatDenyRead`). Repeats are dropped.
    */
   denyRead: string[];
+  /** The hub-owned pnpm store seats may read but never write. */
+  pnpmStoreDir: string;
   /** Private per-run temp directory, outside the operator's Claude session tree. */
   tempRoot?: string;
 }
@@ -938,6 +993,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
+  if (!i.pnpmStoreDir.startsWith("/"))
+    throw new Error("crew sandbox: pnpmStoreDir must be absolute");
   // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
   // same-uid seats cannot read sibling runs without blocking unrelated temp tools.
   // Core also runs in the browser bundle, so no node:path: the root is absolute, so its parent is the text before its last "/".
@@ -964,6 +1021,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           : {
               allowRead: [
                 i.tempRoot,
+                i.pnpmStoreDir,
                 ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
                   tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
                 ),
@@ -981,6 +1039,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           i.gitCommonDir,
           i.worktreeGitDir,
           i.dataDir,
+          i.pnpmStoreDir,
           ...tempDenies,
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
@@ -1017,6 +1076,8 @@ export interface CrewCliInput {
   runTools?: readonly McToolName[];
   /** The repo's own commands; they replace the default pnpm entries. Default DEFAULT_SEAT_COMMANDS. */
   commands?: SeatCommands;
+  /** A hub-built plugin folder of the repo's skills (`skillPluginManifest` and `skills/`), read-only to the seat. */
+  pluginDir?: string;
   /** Extra Edit and Write denies, on top of PROTECTED_FILES. Default []. */
   protectedFiles?: readonly string[];
 }
@@ -1083,6 +1144,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
     ...CREW_ISOLATION_FLAGS,
+    ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--tools",
     (i.mode === "read-only" ? READONLY_BUILTINS : WRITER_BUILTINS).join(","),
     "--settings",
@@ -1121,8 +1183,8 @@ export type SessionEvent =
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
-  /** `ok`: a Codex command's exit success (the Claude stream carries none; its Post hook does). */
-  | { kind: "tool-result"; toolUseId: string; ok?: boolean }
+  /** Codex sends its exit code; the Claude stream carries none and its Post hook does. */
+  | { kind: "tool-result"; toolUseId: string; ok?: boolean; exitCode?: number | null }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }

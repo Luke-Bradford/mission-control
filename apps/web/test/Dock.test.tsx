@@ -15,7 +15,7 @@ import {
   useFlightUnread,
   useItem,
 } from "../src/shell/overlays.ts";
-import { DOCK_KEY } from "../src/storage.ts";
+import { DOCK_COLLAPSED_KEY, DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
 import { readStyles } from "./styles.ts";
@@ -127,6 +127,20 @@ describe("Dock content", () => {
 });
 
 describe("Dock on a wide screen", () => {
+  it("starts collapsed to its title row, expands on click, and remembers the choice", () => {
+    stubWidth(true);
+    const { container } = render(<Dock />);
+    const toggle = screen.getByRole("button", { name: "Expand" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Collapse" }).getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(false);
+    expect(localStorage.getItem(DOCK_COLLAPSED_KEY)).toBe("false");
+  });
+
   it("is shown by default; Hide hides it and remembers, showing again remembers that", () => {
     stubWidth(true);
     const { container } = render(<Dock />);
@@ -343,7 +357,7 @@ describe("live FLIGHT", () => {
     await waitFor(() =>
       expect(
         screen.getByText("known").closest<HTMLElement>(".ag")?.style.getPropertyValue("--c"),
-      ).toBe("var(--s3)"),
+      ).toBe("var(--seat-3)"),
     );
     expect(screen.getByText("removed").closest(".ag")).toBeNull();
     const asks = screen.getAllByTestId("waiting-ask");
@@ -699,6 +713,7 @@ describe("the conversation", () => {
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
     }
+    localStorage.setItem(DOCK_COLLAPSED_KEY, "false");
     const { container } = render(
       <>
         <Unread />
@@ -716,6 +731,34 @@ describe("the conversation", () => {
     act(() => toggleDock(true));
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("0"));
     expect(container.querySelectorAll(".dmsg.flight")).toHaveLength(3);
+  });
+
+  it("counts a reply as unread while the visible dock is collapsed, and clears it on Expand", async () => {
+    stubWidth(true);
+    const reply = { id: "4:0", at: NOW - 100_000, kind: "msg", text: "A new answer" };
+    let events = STREAM.events;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }) },
+    );
+    function Unread() {
+      return <span data-testid="unread">{useFlightUnread()}</span>;
+    }
+    const { container } = render(
+      <>
+        <Unread />
+        <Dock />
+      </>,
+    );
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
+    events = [...STREAM.events, reply];
+    await act(async () => {
+      hub.refetch("/api/agents/flight-1/stream");
+    });
+    await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("0"));
   });
 
   it("keeps the scroll position while reading up, and follows again near the bottom", async () => {

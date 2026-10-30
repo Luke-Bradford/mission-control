@@ -903,4 +903,21 @@ describe("account edits", () => {
     expect(removed.config.accounts).toEqual([{ ...before.accounts[0], alertAt: 70, stopAt: 90 }]);
     expect(loadConfig(path)).toEqual(removed.config);
   });
+
+  it("keeps an account's review_token_budget through an edit", async () => {
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8").replace(
+        "stop_at: 80",
+        "stop_at: 80\n    review_token_budget: 250000",
+      ),
+    );
+    const changed = await setAccount(
+      path,
+      "codex-main",
+      { provider: "codex", alertAt: 60, stopAt: 90 },
+      NOW,
+    );
+    expect(changed.config.accounts[1]).toMatchObject({ alertAt: 60, reviewTokenBudget: 250000 });
+  });
 });

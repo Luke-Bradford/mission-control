@@ -59,6 +59,56 @@ const loop = (over: Partial<RunLoop> = {}): RunLoop => ({
 });
 
 describe("runs: loop and endedBy", () => {
+  it("keeps the newest bounded loop-event window in public order", () => {
+    for (let i = 0; i <= 5_000; i++) store.addLoopEvent(`event:${i}`, "r1", String(i), i);
+    const events = store.loopEvents(0);
+    expect(events).toHaveLength(5_000);
+    expect(events[0]?.text).toBe("1");
+    expect(events.at(-1)?.text).toBe("5000");
+  });
+
+  it("indexes the store's frequent bounded reads", () => {
+    const db = new DatabaseSync(dbPath());
+    try {
+      const plans = [
+        "SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key LIMIT 500",
+        "SELECT key FROM attention_notes WHERE run_id = 'r1' AND cleared_at IS NULL ORDER BY key",
+        "SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL AND json_extract(loop, '$.aside') IS NOT NULL ORDER BY started_at, seq LIMIT 200",
+        "SELECT * FROM runs WHERE agent_id = 'a1' AND json_extract(loop, '$.aside.worktree') > ''",
+        `SELECT * FROM (
+          SELECT * FROM runs WHERE ended_at IS NULL
+          UNION ALL
+          SELECT * FROM runs INDEXED BY runs_merging_started
+            WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
+        ) ORDER BY started_at, seq`,
+        `SELECT * FROM (
+          SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
+          UNION ALL
+          SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= 0
+            AND (json_extract(loop, '$.phase') != 'done' OR json_extract(loop, '$.merging') > '')
+        ) ORDER BY started_at, seq`,
+        `SELECT * FROM (
+          SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
+          UNION ALL
+          SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= 0
+        ) ORDER BY started_at, seq`,
+        `SELECT id FROM runs INDEXED BY runs_loop_pr_number
+           WHERE json_extract(loop, '$.prNumber') = 1
+         UNION
+         SELECT author_run_id FROM reviews WHERE repo_id = 'repo' AND pr_number = 1`,
+        "SELECT * FROM comms WHERE at >= 0 AND target_run_id = 'r1' ORDER BY at, id LIMIT 5000",
+        "SELECT * FROM comms WHERE ticket = 'repo#1' ORDER BY at, id LIMIT 5000",
+        "SELECT * FROM pull_requests WHERE ticket = 'repo#1' ORDER BY updated_at DESC LIMIT 200",
+        "SELECT * FROM reviews WHERE ended_at >= 0 ORDER BY ended_at DESC LIMIT 200",
+      ].flatMap((sql) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[]);
+      expect(plans.map((plan) => plan.detail).join("\n")).not.toMatch(
+        /SCAN (?:TABLE )?(?:attention_notes|runs|comms|pull_requests|reviews)/,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("opening the database again changes nothing and loses no rows", () => {
     store.upsertRun(run());
     store.setRunLoop("r1", loop());

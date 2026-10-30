@@ -10,11 +10,14 @@ import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
 import { App } from "../src/App.tsx";
+import { DOCK_COLLAPSED_KEY, writeBool } from "../src/storage.ts";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");
 // The harness page stands in for the app at the Run Trace's own address; the shell around it
 // (top bar, FLIGHT's dock, `main`) is the real one, so the trace is laid out where operators see it.
+// The dock starts folded; this page checks its waiting asks, so it opens expanded.
+writeBool(DOCK_COLLAPSED_KEY, false);
 history.replaceState(
   null,
   "",

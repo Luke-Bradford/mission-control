@@ -319,6 +319,7 @@ console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: cur
             gitCommonDir: join(cwd, ".git"),
             worktreeGitDir: join(cwd, ".git"),
             denyRead: [secret, join(operator, ".codex")],
+            pnpmStoreDir: join(run, "pnpm-store"),
           },
           "writer",
           `${url}${MCP_PATH}`,

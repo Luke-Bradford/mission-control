@@ -284,6 +284,33 @@ describe("Header", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("turns the machine button to warn with the reason while starts are held", async () => {
+    routes({
+      machine: {
+        latest: {
+          at: NOW,
+          cpuPct: 12.4,
+          cores: 10,
+          memUsedBytes: 32e9,
+          memTotalBytes: 64e9,
+          diskFreeBytes: 5 * 2 ** 30,
+          diskTotalBytes: 500e9,
+          swapUsedBytes: 21.5 * 2 ** 30,
+          swapTotalBytes: 22.5 * 2 ** 30,
+          agents: null,
+        },
+        warning: "swap 21.5 of 22.5 GB used",
+      },
+    });
+    render(<Header page="flight" />);
+    const btn = await screen.findByRole("button", { name: /Holding new work/ });
+    expect(btn.className).toContain("hot");
+    const tooltip = within(btn).getByRole("tooltip");
+    expect(tooltip.textContent).toContain("swap 21.5 of 22.5 GB used");
+    expect(tooltip.textContent).toContain("Swap 21.5 GB (36% of RAM)");
+    expect(tooltip.textContent).toContain("Disk 5 GB free");
+  });
+
   it("the Lock span names the holder and the queue", async () => {
     routes({
       lock: {

@@ -219,14 +219,13 @@ describe("Agent run trace", () => {
     });
     stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
     const view = render(<Agent id={row.id} />);
-    await screen.findByText("Loop total");
-    expect(view.container.querySelector(".vsteps")).toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
     const trace = screen.getByRole("link", { name: "Trace" });
     expect(trace.getAttribute("href")).toBe(`/agent/${row.id}?trace=r-12`);
     fireEvent.click(trace);
     expect(await screen.findByRole("heading", { name: "Run Trace", level: 1 })).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: "Back to agent" }));
-    await screen.findByText("Loop total");
+    await waitFor(() => expect(view.container.querySelector(".vsteps")).not.toBeNull());
     view.unmount();
   });
 
@@ -871,6 +870,27 @@ describe("Agent page: header and tiles", () => {
     expect(now.textContent).not.toContain("Last");
   });
 
+  it("a parked loop's header status is one line, with the whole park text behind details", async () => {
+    const park = `RETRO-CX reviewed c74cdfc and found 1 issue to resolve. ${"Fix it, then explain. ".repeat(40)}`;
+    stub({
+      rows: [
+        crewRow({
+          hudState: "idle",
+          loop: { phase: "parked", text: `Blocked: ${park}`, prNumber: 77, parked: park },
+          digest: digest(),
+          contextWindow: 200_000,
+        }),
+      ],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
+    const line = $(container, "#ahead .doing") as HTMLElement;
+    expect(line.textContent).toContain("Parked · review findings on c74cdfc · 1 held");
+    expect(line.textContent).not.toContain("Fix it, then explain");
+    fireEvent.click(within(line).getByRole("button", { name: "details" }));
+    expect($(container, "#ahead .vdetail")?.textContent).toContain("Fix it, then explain");
+  });
+
   it("has no Pause (or any loop control) for a studio loop, only Pop out", async () => {
     stub();
     const { container } = render(<Agent id="studio-builder" />);
@@ -1045,6 +1065,31 @@ describe("Agent page: header and tiles", () => {
     );
     expect(ctx?.textContent).toContain("(phase 2) · 1 compaction");
     expect(ctx?.textContent).not.toContain("1 compactions");
+  });
+
+  it.each([
+    ["missing", undefined, null],
+    ["zero", { count: 0, tokensSaved: 0 }, null],
+    [
+      "few, under 1k tokens",
+      { count: 3, tokensSaved: 950 },
+      "Re-reads avoided: 3, about 1k tokens saved",
+    ],
+    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4k tokens saved"],
+    [
+      "many",
+      { count: 128, tokensSaved: 1_234_000 },
+      "Re-reads avoided: 128, about 1234k tokens saved",
+    ],
+  ])("context tile re-reads line: %s", async (_name, rereads, line) => {
+    stub({
+      rows: [crewRow({ digest: digest({ rereads }), contextWindow: 200_000 })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const ctx = tileOf(container, "Context");
+    if (line === null) expect(ctx?.textContent).not.toContain("Re-reads");
+    else expect(ctx?.textContent).toContain(line);
   });
 
   it("context tile shows — for compactions when there is no digest, not 0", async () => {
@@ -1988,7 +2033,7 @@ describe("Agent page: loop steps", () => {
       "working",
       [
         ["Working", "●"],
-        ["CI", "2"],
+        ["Checks", "2"],
         ["In review", "3"],
         ["Done", "4"],
       ],
@@ -1997,7 +2042,7 @@ describe("Agent page: loop steps", () => {
       "ci",
       [
         ["Working", "✓"],
-        ["CI", "●"],
+        ["Checks", "●"],
         ["In review", "3"],
         ["Done", "4"],
       ],
@@ -2006,7 +2051,7 @@ describe("Agent page: loop steps", () => {
       "review",
       [
         ["Working", "✓"],
-        ["CI", "✓"],
+        ["Checks", "✓"],
         ["In review", "●"],
         ["Done", "4"],
       ],
@@ -2015,7 +2060,7 @@ describe("Agent page: loop steps", () => {
       "done",
       [
         ["Working", "✓"],
-        ["CI", "✓"],
+        ["Checks", "✓"],
         ["In review", "✓"],
         ["Done", "✓"],
       ],
@@ -2095,13 +2140,51 @@ describe("Agent page: loop steps", () => {
       const ci = loopOf({ phase: "ci", text: "CI is running", prNumber: 77 });
       const tries = [triesAt("working", 1, "pass"), triesAt("ci", 1, "running", { endedAt: null })];
       const panel = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: "pending" })] });
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
-      expect(panel.textContent).toContain("Checks");
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
+      expect(panel.textContent).toContain("CI is running");
       cleanup();
       const quiet = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: null })] });
-      await screen.findByText("Loop total");
-      expect(quiet.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(quiet.querySelector(".vsteps")).not.toBeNull());
+    });
+
+    it("lists steps with time and tries; a step's tries open on click, a step to come has none", async () => {
+      const tries = [
+        triesAt("working", 1, "pass"),
+        triesAt("ci", 1, "fail", { reason: "lint" }),
+        triesAt("ci", 2, "running", { startedAt: NOW - 3 * MIN, endedAt: null }),
+      ];
+      const panel = await openLoop(
+        loopOf({ phase: "ci", text: "CI is running", prNumber: 77 }),
+        viewOf("ci", tries, { round: null }),
+        { prs: [pr77({ ci: "pending" })] },
+      );
+      await waitFor(() => expect(panel.querySelector(".vsteps .vmeta")).not.toBeNull());
+      const steps = [...panel.querySelectorAll<HTMLElement>(".vstep")];
+      expect(steps.map((s) => $(s, ".vname")?.textContent)).toEqual([
+        "Working",
+        "Checks2 tries",
+        "In review",
+        "Done",
+      ]);
+      // tries are folded until asked for
+      expect(panel.querySelector(".att")).toBeNull();
+      const passed = steps[0] as HTMLElement;
+      expect(passed.className).toContain("done");
+      fireEvent.click(within(passed).getByRole("button", { name: /Working/ }));
+      expect($(passed, ".att")?.textContent).toContain("pass");
+      expect($(passed, ".att")?.textContent).toContain("10m");
+      // the current step: live text, time in step, both tries once opened
+      const current = steps[1] as HTMLElement;
+      expect(current.getAttribute("aria-current")).toBe("step");
+      expect(current.textContent).toContain("CI is running");
+      fireEvent.click(within(current).getByRole("button", { name: /Checks/ }));
+      expect(current.querySelectorAll(".att")).toHaveLength(2);
+      expect($(current, ".vmeta")?.textContent).toContain("13m");
+      // a step still to come: muted, with no tries and nothing to open
+      const future = steps[2] as HTMLElement;
+      expect(future.className).toContain("todo");
+      expect(future.querySelector(".att")).toBeNull();
+      expect(future.querySelector("button")?.hasAttribute("disabled")).toBe(true);
     });
 
     it("review round 2 of 3", async () => {
@@ -2118,8 +2201,7 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "review", text: "In review", prNumber: 77 }),
         viewOf("review", tries, { round: 2, review }),
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
       expect(panel.textContent).toContain("In review");
     });
 
@@ -2135,8 +2217,7 @@ describe("Agent page: loop steps", () => {
         loopOf({ phase: "parked", text: `Blocked: ${why}`, parked: why, prNumber: 77 }),
         viewOf("parked", tries),
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
       expect(panel.textContent).toContain(`parked: ${why}`);
     });
 
@@ -2173,6 +2254,9 @@ describe("Agent page: loop steps", () => {
         const waive = await within(panel).findByRole("button", {
           name: "Waive findings on abc1234 and resume",
         });
+        // the findings sit behind "details", not in the panel by default
+        expect(panel.textContent).not.toContain("RETRO found a missing regression test");
+        fireEvent.click(within(panel).getByRole("button", { name: "details" }));
         expect(panel.textContent).toContain("RETRO found a missing regression test");
         expect(screen.getByRole("button", { name: "Send rework message" })).toBeTruthy();
         expect(screen.getByText(/does not waive them/)).toBeTruthy();
@@ -2245,14 +2329,13 @@ describe("Agent page: loop steps", () => {
           ],
         },
       );
-      await screen.findByText("Loop total");
-      expect(panel.querySelector(".vsteps")).toBeNull();
+      await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
     });
 
     it("the loop's own counter", async () => {
       const panel = await open(loopOf({ phase: "ci", tries: { n: 2, max: 3 } }));
       const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
-      expect($(ci, ".titer")?.textContent).toBe("×2");
+      expect($(ci, ".titer")?.textContent).toBe("2 tries");
     });
 
     it("budget header", async () => {
@@ -2476,7 +2559,7 @@ describe("Agent page: loop steps", () => {
       loopOf({ phase: "parked", text: "Held: CI failed twice", parked: "CI failed twice" }),
     );
     const held = $(panel, ".vhold") as HTMLElement;
-    expect(held.textContent).toContain("Held: CI failed twice");
+    expect(held.textContent).toContain("parked: CI failed twice");
     expect(held.textContent).toContain("!");
     expect(panel.textContent).not.toContain("●");
     expect(panel.querySelectorAll(".vstep")).toHaveLength(4);
@@ -2491,7 +2574,7 @@ describe("Agent page: loop steps", () => {
     const panel = $(container, "#loopP") as HTMLElement;
     expect(dots(panel)).toEqual([
       ["Working", "!"],
-      ["CI", "2"],
+      ["Checks", "2"],
       ["In review", "3"],
       ["Done", "4"],
     ]);
@@ -2631,7 +2714,7 @@ describe("Agent page: loop steps", () => {
     const cur = [...panel.querySelectorAll(".vstep")].filter(
       (x) => x.getAttribute("aria-current") === "step",
     );
-    expect(cur.map((x) => x.querySelector(".vname")?.textContent)).toEqual(["CI"]);
+    expect(cur.map((x) => x.querySelector(".vname")?.textContent)).toEqual(["Checks"]);
   });
 });
 

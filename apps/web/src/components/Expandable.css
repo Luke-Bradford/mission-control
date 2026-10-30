@@ -6,7 +6,7 @@
 }
 
 .expandable-content {
-  line-height: 1.5;
+  line-height: var(--lh);
   min-width: 0;
   overflow: hidden;
 }
@@ -28,7 +28,7 @@
 }
 
 .expandable .sm {
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .dmsg:has(.expandable) {
@@ -37,6 +37,7 @@
 
 /* Summary disclosures keep their headers whole and their details inside the row. */
 .disclosure > summary {
+  min-height: 24px;
   cursor: pointer;
   overflow-wrap: anywhere;
 }
