@@ -3206,14 +3206,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (a.key.startsWith("comms-open:")) {
           const messageId = a.key.slice("comms-open:".length);
           const message = store.openCommsItems().find((item) => item.id === messageId);
+          const ticketRepoId = /^(.+)#\d+$/.exec(message?.ticket ?? "")?.[1];
           const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
-            (candidate) => candidate.key === a.key && candidate.owner === "flight",
+            (candidate) => candidate.key === a.key,
           );
           if (
             message === undefined ||
-            message.ticket?.split("#")[0] !== repo.id ||
-            item === undefined
+            message.from !== ctx.seatId ||
+            (ticketRepoId !== undefined && ticketRepoId !== repo.id) ||
+            item === undefined ||
+            protectedDecisionItem(store, item, config, now())
           )
             return fail("This item is protected or unavailable.");
           if (!store.settleCommsItem(messageId, ctx.seatId, a.basis, now()))

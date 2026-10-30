@@ -10,6 +10,7 @@
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import {
   AWAY_BUG_VERIFIED,
@@ -62,6 +63,7 @@ import {
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   hudColumnOf,
+  isReviewBudgetFailure,
   type LoopAction,
   type LoopReviewFacts,
   type LoopSnapshot,
@@ -112,6 +114,7 @@ import {
   reviewRunStep,
   reviewStartedText,
   reviewStatusOf,
+  reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
@@ -342,13 +345,15 @@ const REVIEWS_CHAIN = "\0reviews";
  * profile names one), the first such seat of that role is preferred. With `avail`, the first of those
  * whose account is not at its stop and has no review starting or running is preferred. When every
  * available reviewer is busy, the first non-stopped seat keeps the queued review; when every account
- * is at its stop, the first stands, so its reviews wait rather than vanish.
+ * is at its stop, the first stands, so its reviews wait rather than vanish. With `avail.avoid`, seats
+ * in it are passed over while any other seat qualifies (a review that went over its token budget on a
+ * seat is retried on another).
  */
 export function reviewerOf(
   config: CcConfig,
   seatId: string,
   role?: string,
-  avail?: { store: Store; now: number },
+  avail?: { store: Store; now: number; avoid?: ReadonlySet<string> },
 ): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
@@ -362,7 +367,27 @@ export function reviewerOf(
   const busy = new Set(
     avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
   );
-  return notStopped.find((x) => !busy.has(x.id)) ?? notStopped[0] ?? pool[0] ?? null;
+  const others = notStopped.filter((x) => !avail.avoid?.has(x.id));
+  const from = others.length > 0 ? others : notStopped;
+  return from.find((x) => !busy.has(x.id)) ?? from[0] ?? pool[0] ?? null;
+}
+
+/** The seats whose review of the run's pushed sha, this epoch, failed on its token budget. */
+function budgetFailedSeats(store: Store, run: Run): Set<string> {
+  const sha = store.runPush(run.id)?.sha;
+  const epoch = run.loop?.epoch;
+  const seats = new Set<string>();
+  if (sha === undefined || epoch === undefined) return seats;
+  for (const r of store.reviewsOfRun(run.id)) {
+    if (
+      r.sha === sha &&
+      r.epoch === epoch &&
+      r.state === "failed" &&
+      isReviewBudgetFailure(r.failure)
+    )
+      seats.add(r.seatId);
+  }
+  return seats;
 }
 
 /** The review seat's role the run's profile asks for, if it has a profile. */
@@ -401,7 +426,16 @@ export function createEngine(deps: EngineDeps): Engine {
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
   const reviewerFor = (run: Run): CrewSeatConfig | null =>
-    reviewerOf(config, run.agentId, reviewRoleOf(run), { store, now: now() });
+    reviewerOf(config, run.agentId, reviewRoleOf(run), {
+      store,
+      now: now(),
+      avoid: budgetFailedSeats(store, run),
+    });
+  /** The input + output tokens a review run on this seat's account may use. */
+  const reviewBudgetOf = (seatId: string): number => {
+    const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
+    return reviewTokenBudgetOf(account?.vendor ?? "claude", account?.reviewTokenBudget);
+  };
   const chains = new Map<string, Promise<void>>();
   const ruleNotes = new Map<RepoId, string>();
   /** Whether each repo's rules set `hard_rules` at their last good read. */
@@ -422,6 +456,19 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatuses = new Map<string, string>();
   /** The last failure logged for each run's review status, so a lasting failure is logged once. */
   const reviewStatusFailures = new Map<string, string>();
+  /** Tick-local snapshots avoid repeated whole-table reads without leaking to external reconciles. */
+  const tickCache = new AsyncLocalStorage<{
+    prs: Map<RepoId, ReturnType<Store["pullRequests"]>>;
+    notes: ReturnType<Store["notes"]>;
+  }>();
+  const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
+    const cache = tickCache.getStore();
+    const cached = cache?.prs.get(repoId);
+    if (cached !== undefined) return cached;
+    const rows = store.pullRequests(repoId);
+    cache?.prs.set(repoId, rows);
+    return rows;
+  };
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -527,7 +574,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
-    const prs = store.pullRequests(run.repoId);
+    const prs = prsFor(run.repoId);
     if (loop.prNumber !== null) return prs.find((p) => p.number === loop.prNumber) ?? null;
     if (run.branch === null) return null;
     return (
@@ -566,7 +613,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** A green head without any evidence needs one prompt, then operator attention. */
-  async function watchGreenEvidence(run: Run): Promise<void> {
+  async function watchGreenEvidence(run: Run, notes = store.notes()): Promise<void> {
     const loop = run.loop;
     if (!loop || run.endedAt !== null) return;
     const prefix = `evidence-remind:${run.id}:`;
@@ -576,7 +623,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const green = pr?.state === "open" && pr.ci === "passing" && !!head;
     const evidence = store.evidenceCount(run.id);
     const currentNote = head ? evidenceNoteKey(run.id, head) : null;
-    for (const note of store.notes()) {
+    for (const note of notes) {
       if (
         note.runId === run.id &&
         note.clearedAt === null &&
@@ -592,7 +639,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const remindedAt = claimed[remindKey];
     if (remindedAt !== undefined) {
       if (now() - remindedAt < EVIDENCE_REMIND_MS) return;
-      if (store.notes().some((n) => n.key === evidenceNoteKey(run.id, head))) return;
+      if (notes.some((n) => n.key === evidenceNoteKey(run.id, head))) return;
       store.raiseNote({
         key: evidenceNoteKey(run.id, head),
         kind: "flag",
@@ -654,9 +701,12 @@ export function createEngine(deps: EngineDeps): Engine {
   function noteHardRules(repoId: RepoId, set: boolean): void {
     if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return;
     const key = hardRulesUnsetNoteKey(repoId);
-    const open = store.notes().some((n) => n.key === key);
+    const cache = tickCache.getStore();
+    const notes = cache?.notes ?? store.notes();
+    const open = notes.some((n) => n.key === key);
     if (set && open) {
       store.clearNote(key, now());
+      if (cache) cache.notes = cache.notes.filter((n) => n.key !== key);
       bus.emit("attention");
     } else if (!set && !open) {
       store.raiseNote({
@@ -667,6 +717,17 @@ export function createEngine(deps: EngineDeps): Engine {
         repoId,
         text: hardRulesUnsetText(repoId),
         at: now(),
+      });
+      cache?.notes.push({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId,
+        text: hardRulesUnsetText(repoId),
+        at: now(),
+        clearedAt: null,
+        dismissedAt: null,
       });
       bus.emit("attention");
     }
@@ -1820,9 +1881,9 @@ export function createEngine(deps: EngineDeps): Engine {
     return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
   }
 
-  async function sweepNotes(): Promise<void> {
+  async function sweepNotes(notes = store.notes()): Promise<void> {
     const at = now();
-    for (const n of store.notes()) {
+    for (const n of notes) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
       if (n.key === `${run.id}:file-minor`) continue;
@@ -1926,17 +1987,14 @@ export function createEngine(deps: EngineDeps): Engine {
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
     const author = store.run(row.authorRunId);
     if (author === null) return true;
-    const ownAuthor = store
-      .pullRequests(author.repoId)
-      .find((pr) => pr.number === row.prNumber)?.author;
-    const older = store
-      .pullRequests(author.repoId)
-      .filter(
-        (pr) =>
-          pr.state !== "closed" &&
-          pr.number < row.prNumber &&
-          !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
-      );
+    const prs = prsFor(author.repoId);
+    const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
+    const older = prs.filter(
+      (pr) =>
+        pr.state !== "closed" &&
+        pr.number < row.prNumber &&
+        !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
+    );
     if (older.length === 0) return false;
     try {
       const rules = await rulesFor(author.repoId);
@@ -1966,11 +2024,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return true;
       const snapshots = new Map<number, string>();
-      const runs = store.runsActiveSince(0);
       const candidates = older.flatMap((pr) => {
-        const run = runs.find(
-          (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
-        );
+        const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
         return run === undefined ? [] : [{ pr, run }];
       });
       const terminalKey = (number: number) => `review-merged:${author.repoId}:${number}`;
@@ -2137,6 +2192,7 @@ export function createEngine(deps: EngineDeps): Engine {
         },
         claimed: store.claimedKeys(rrun.id),
         lastEngineLineAt: store.lastEngineLineAt(rrun.id),
+        tokenBudget: reviewBudgetOf(row.seatId),
       });
       if (action === null) continue;
       if (action.kind === "send") {
@@ -2333,20 +2389,27 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const runs = loopRuns();
-      await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-      await Promise.all(
-        store
-          .runsActiveSince(now())
-          .filter((r) => r.loop !== null && r.loop !== undefined)
-          .map(watchGreenEvidence),
-      );
-      await Promise.all(runs.map((r) => reconcileRun(r.id)));
-      await refreshRuleNotes(runs);
-      await sweepNotes();
-      untakeStale();
-      await takeForSeats();
-      await kickReviews();
+      const cache = {
+        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
+        notes: store.notes(),
+      };
+      await tickCache.run(cache, async () => {
+        const runs = loopRuns();
+        const notes = cache.notes;
+        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
+        await Promise.all(
+          store
+            .runsActiveSince(now())
+            .filter((r) => r.loop !== null && r.loop !== undefined)
+            .map((run) => watchGreenEvidence(run, notes)),
+        );
+        await Promise.all(runs.map((r) => reconcileRun(r.id)));
+        await refreshRuleNotes(runs);
+        await sweepNotes(notes);
+        untakeStale();
+        await takeForSeats();
+        await kickReviews();
+      });
     },
 
     reconcileRun,

@@ -4034,7 +4034,7 @@ describe("boards, escalations, health", () => {
     }
   });
 
-  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+  it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
@@ -4062,11 +4062,10 @@ describe("boards, escalations, health", () => {
         supervisor: stubSupervisor(),
         warmMap: true,
       });
-    // built before anyone asks
     const warmed = start();
     try {
       await warmed.ready();
-      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(builds()).toBe(0);
       expect(
         (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
       ).toBe(200);
@@ -4074,11 +4073,12 @@ describe("boards, escalations, health", () => {
     } finally {
       await warmed.close();
     }
-    // asked for while the warm-up is still building: the same build, not a second
+    // A new hub also leaves the map cold until its first map request.
     supervisorCalls = [];
     const racing = start();
     try {
       await racing.ready();
+      expect(builds()).toBe(0);
       const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
       expect(response.statusCode).toBe(200);
       expect(builds()).toBe(1);
@@ -4532,6 +4532,7 @@ describe("boards, escalations, health", () => {
       { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
     ]);
     const a = buildApp({ config, store, bus, mapRing: ring });
+    const unsubscribe = ring.subscribe("shop-app", () => {});
     const stop = ring.start();
     try {
       await expect
@@ -4558,6 +4559,7 @@ describe("boards, escalations, health", () => {
       expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
       expect(ring.diff("unknown")).toBeNull();
     } finally {
+      unsubscribe();
       stop();
       await a.close();
     }
@@ -5491,6 +5493,40 @@ describe("SSE stream", () => {
     return { res, until, text: () => text };
   }
 
+  it("reports browser stream opens and closes", async () => {
+    await app.close();
+    const counts: number[] = [];
+    app = buildApp({ config, store, bus, onStreamCount: (count) => counts.push(count) });
+    const first = await open();
+    const second = await open();
+    await Promise.all([first.until(": connected"), second.until(": connected")]);
+    expect(counts).toEqual([1, 2]);
+
+    first.res.raw.res.emit("close");
+    second.res.raw.res.emit("close");
+
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+
+  it("stops map polling after the last map stream closes", async () => {
+    vi.useFakeTimers();
+    await app.close();
+    const poll = vi.spyOn(CallRing.prototype, "poll");
+    app = buildApp({ config, store, bus });
+    try {
+      const client = await open("/api/stream?map=shop-app");
+      await client.until(": connected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+
+      client.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
     async (vendor) => {
@@ -6115,7 +6151,7 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [] });
+      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6153,6 +6189,38 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("lists every recent controller decision beyond the main decision limit", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const d = (at: number, about: string, decision = "d") =>
+        store.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about,
+          decision,
+          basis: "b",
+        });
+      d(now - 2 * 60_000, "Missing power", "For the controller: choose a replacement");
+      for (let n = 0; n < 101; n++) d(now - n * 1000, `newer ${n}`);
+      d(now - 25 * 60 * 60_000, "Missing power", "For the controller: expired request");
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.decisions).toHaveLength(FLIGHT_LIST_MAX);
+      expect((body.controllerDecisions ?? []).map((x) => x.decision)).toEqual([
+        "For the controller: choose a replacement",
+      ]);
     });
 
     it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
@@ -7693,6 +7761,129 @@ describe("QA board data", () => {
       }),
     ]);
     expect((await get("/api/qa/findings?days=91")).statusCode).toBe(400);
+  });
+
+  it("keeps old unresolved findings on open PRs and serves review-round summaries", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [9, 10, 11].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: `PR ${number}`,
+        url: `https://example.test/${number}`,
+        branch: `feature/${number}`,
+        ticket: null,
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: "passing" as const,
+        createdAt: NOW - 100 * DAY,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: String(number).repeat(40),
+        mergeable: null,
+        checks: [],
+      })),
+      NOW,
+    );
+    const record = (
+      prNumber: number,
+      round: number,
+      verdict: { spec: "pass" | "fail"; quality: "pass" | "fail" },
+      findings: { severity: "Important" | "Minor"; summary: string }[],
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId: `author-${prNumber}`,
+        repoId: "shop-app",
+        seatId: "retro-1",
+        prNumber,
+        sha: `${prNumber}${round}`.repeat(20),
+        epoch: 0,
+        attempt: round,
+        round,
+        at,
+      });
+      if (id === null) throw new Error("fixture review missing");
+      const runId = `review-${prNumber}-${round}`;
+      store.setReviewState(id, ["queued"], "running", { at, runId });
+      store.recordFindings(id, runId, {
+        verdict,
+        summary: `Round ${round}`,
+        findings: findings.map((finding) => ({
+          ...finding,
+          file: "file.ts",
+          line: 1,
+          scenario: "A scenario",
+          fix: "A fix",
+        })),
+        at,
+      });
+      return id;
+    };
+    const old = NOW - 91 * DAY;
+    const unresolved = record(
+      9,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Open" }],
+      old,
+    );
+    record(
+      10,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Resolved" }],
+      old,
+    );
+    record(10, 2, { spec: "pass", quality: "pass" }, [], old + 1);
+    const clean = record(11, 1, { spec: "pass", quality: "pass" }, [], NOW - 2);
+    const failing = record(
+      11,
+      2,
+      { spec: "pass", quality: "fail" },
+      [
+        { severity: "Important", summary: "Blocking" },
+        { severity: "Minor", summary: "Minor" },
+      ],
+      NOW - 1,
+    );
+
+    const body = (await get("/api/qa/findings?days=90")).json();
+    expect(body.findings).toEqual([
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Blocking" }),
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Minor" }),
+      expect.objectContaining({
+        reviewId: unresolved,
+        prNumber: 9,
+        summary: "Open",
+        resolution: null,
+      }),
+    ]);
+    expect(body.reviews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reviewId: clean,
+          prNumber: 11,
+          round: 1,
+          sha: "111".repeat(20),
+          verdict: { spec: "pass", quality: "pass" },
+          blocking: 0,
+          minor: 0,
+          endedAt: NOW - 2,
+        }),
+        expect.objectContaining({
+          reviewId: failing,
+          prNumber: 11,
+          round: 2,
+          sha: "112".repeat(20),
+          verdict: { spec: "pass", quality: "fail" },
+          blocking: 1,
+          minor: 1,
+          endedAt: NOW - 1,
+        }),
+      ]),
+    );
   });
 });
 

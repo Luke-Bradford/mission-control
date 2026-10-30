@@ -848,12 +848,16 @@ export function setAccount(
     const { bytes, text, current } = await readCurrent(path);
     const index = current.accounts.findIndex((existing) => existing.id === id);
     if (index < 0) throw new ConfigWriteError("missing", "account not found");
+    // the form does not carry the review budget: an edit leaves it as the file has it
+    const reviewTokenBudget = current.accounts[index]?.reviewTokenBudget;
+    const kept = reviewTokenBudget === undefined ? {} : { reviewTokenBudget };
     const nextAccount = {
       id,
       vendor: account.provider,
       alertAt: account.alertAt,
       stopAt: account.stopAt,
       ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+      ...kept,
     };
     const problem = accountBindingProblem(
       current.accounts.map((existing, i) => (i === index ? nextAccount : existing)),
@@ -882,6 +886,7 @@ export function setAccount(
       alertAt: account.alertAt,
       stopAt: account.stopAt,
       ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+      ...kept,
     };
     if (
       !isDeepStrictEqual(next, {

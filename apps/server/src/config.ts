@@ -226,6 +226,8 @@ export interface CcConfig {
     alertAt: number;
     stopAt: number;
     cliProfile?: string;
+    /** Input + output tokens one review run on this account may use; unset: the vendor's default (reviewTokenBudgetOf). */
+    reviewTokenBudget?: number;
   }[];
   repos: {
     id: RepoId;
@@ -481,6 +483,7 @@ const fileSchema = z
         alert_at: percent,
         stop_at: percent,
         cli_profile: nonEmpty.optional(),
+        review_token_budget: z.number().int().positive().optional(),
       }),
     ),
     repos: z.array(
@@ -657,6 +660,9 @@ const fileSchema = z
         alertAt: a.alert_at,
         stopAt: a.stop_at,
         ...(a.cli_profile === undefined ? {} : { cliProfile: a.cli_profile }),
+        ...(a.review_token_budget === undefined
+          ? {}
+          : { reviewTokenBudget: a.review_token_budget }),
       })),
       repos: f.repos.map((r) => ({
         id: r.id,

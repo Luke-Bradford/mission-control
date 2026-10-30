@@ -14,6 +14,7 @@ import { DecidedRow } from "./Decided.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 import { Incoming } from "./Incoming.tsx";
 import { Pending } from "./Pending.tsx";
+import { PowerRequests } from "./PowerRequests.tsx";
 import { Summary } from "./Summary.tsx";
 import { WorkingLog } from "./WorkingLog.tsx";
 
@@ -23,8 +24,6 @@ export const NO_CONTROLLER_ASKS = "Nothing was addressed to the controller in th
 export const controllerCapped = (counted: number, listed: number): string =>
   `${plural(counted, "ask")} for the controller ${counted === 1 ? "was" : "were"} counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold ${listed}.`;
 export const NO_MATCHING = "No decision matches those filters.";
-export const MISSING_POWERS_PENDING =
-  "Missing powers: not available yet. The hub does not report what FLIGHT lacked.";
 export const WAKE_GROUPING_UNAVAILABLE =
   "Wake grouping unavailable: the hub does not serve a wake id for a decision, so they are listed by time.";
 const ALL = "";
@@ -162,9 +161,7 @@ export function DidTab() {
             />
           </div>
         </Panel>
-        <Panel id="powersP" title="Missing powers" sub="what FLIGHT could not do">
-          <p className="pb note">{MISSING_POWERS_PENDING}</p>
-        </Panel>
+        <PowerRequests />
         <Panel id="incP" title="Arrivals" sub="what came in and how FLIGHT routed it">
           <div className="flight-panel-scroll">
             <Incoming />

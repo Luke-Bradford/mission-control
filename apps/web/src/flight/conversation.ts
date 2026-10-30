@@ -47,6 +47,10 @@ export const decidedToday = (
 export const isForTheController = (d: Pick<FlightDecision, "about" | "decision">): boolean =>
   d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER);
 
+/** The DOM id of a decision's row, which a link to that decision targets. */
+export const DECISION_ANCHOR_PREFIX = "decision-";
+export const decisionAnchor = (id: number): string => `${DECISION_ANCHOR_PREFIX}${id}`;
+
 /** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>
   rows.filter((r) => r.kind === "you" || r.kind === "flight");

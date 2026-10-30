@@ -358,6 +358,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** Receives the number of open browser event streams. */
+  onStreamCount?: (count: number) => void;
   now?: () => number;
   /** true: log to stdout; an object: log to that stream; false/absent: no logging. */
   logger?: boolean | { stream: { write(msg: string): void } };
@@ -1064,25 +1066,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     scheduleNotifications();
   });
   app.addHook("onReady", async () => {
-    stopMapRing = mapRing.start();
-  });
-  // Warm each repo's map in the background so the first viewer after a start finds it built or
-  // being built (the same promise a request shares), not a cold rebuild.
-  app.addHook("onReady", async () => {
-    if (!deps.warmMap) return;
-    for (const repo of config.repos) {
-      const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-      if (!checkout) continue;
-      void (async () => {
-        if (!(await stat(checkout).catch(() => null))?.isDirectory()) return;
-        await mapPayloadFor(repo, checkout, app.log);
-      })().catch((e) =>
-        app.log.warn(
-          { reason: e instanceof Error ? e.message : String(e) },
-          "map warm-up unavailable",
-        ),
-      );
-    }
+    // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
@@ -1825,13 +1809,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: docs/runbook.md#qa-board-data (review findings with category and resolution)
+      // Reader: docs/runbook.md#qa-board-data (review findings and per-round RETRO summaries)
       api.get<{ Querystring: { days?: unknown } }>(
         "/qa/findings",
         async (req, reply): Promise<QaFindingsView | FastifyReply> => {
           const days = qaDays(req.query.days, 30);
           if (days === null) return reply.code(400).send({ error: QA_DAYS_ERROR });
-          return { findings: store.qaFindings(now() - days * DAY_MS) };
+          const since = now() - days * DAY_MS;
+          return { findings: store.qaFindings(since), reviews: store.qaReviewRounds(since) };
         },
       );
 
@@ -4118,12 +4103,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }, 10_000);
         });
         // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        const unsubscribeMap =
-          repoId === undefined
-            ? undefined
-            : mapRing.subscribe(repoId, (delta) => {
-                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-              });
+        let unsubscribeMap: (() => void) | undefined;
+        if (repoId !== undefined) {
+          stopMapRing ??= mapRing.start();
+          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
+            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+          });
+        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
@@ -4131,12 +4117,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           unsubscribe();
           unsubscribeMap?.();
           streams.delete(end);
+          deps.onStreamCount?.(streams.size);
         };
         const end = () => {
           cleanup();
           res.end();
         };
         streams.add(end);
+        deps.onStreamCount?.(streams.size);
         res.on("close", cleanup);
       });
     },

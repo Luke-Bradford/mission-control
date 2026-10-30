@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fillLoopText, RATE_LIMIT_RETRY_MS } from "../src/loop.ts";
 import {
+  CODEX_REVIEW_TOKEN_BUDGET,
   carriedFrom,
   currentReview,
   FIX_TEXT_MAX,
@@ -8,6 +9,7 @@ import {
   findingFileOk,
   fixesSent,
   fixText,
+  isReviewBudgetFailure,
   minorLine,
   nextAttempt,
   parseMinorFindings,
@@ -18,11 +20,13 @@ import {
   type ReviewFact,
   type ReviewFinding,
   type ReviewRunSnapshot,
+  reviewBudgetFailure,
   reviewDepth,
   reviewFor,
   reviewParkText,
   reviewRunStep,
   reviewStatusOf,
+  reviewTokenBudgetOf,
 } from "../src/review.ts";
 
 describe("findingFileOk", () => {
@@ -198,6 +202,7 @@ describe("reviewRunStep", () => {
     },
     claimed: {},
     lastEngineLineAt: null,
+    tokenBudget: REVIEW_TOKEN_BUDGET,
     ...over,
   });
   const fail = (reason: string) => ({ kind: "fail", reason });
@@ -215,6 +220,16 @@ describe("reviewRunStep", () => {
   it("3: fails over the token budget", () => {
     const run = { startedAt: 1, ended: null, tokens: REVIEW_TOKEN_BUDGET + 1 };
     expect(reviewRunStep(base({ run }))).toEqual(fail("over its 120000-token budget"));
+  });
+  it("3: a run over 120000 passes under its own budget and fails over it", () => {
+    const tokenBudget = reviewTokenBudgetOf("codex");
+    expect(tokenBudget).toBeGreaterThan(REVIEW_TOKEN_BUDGET);
+    const under = { startedAt: 1, ended: null, tokens: REVIEW_TOKEN_BUDGET + 1 };
+    expect(reviewRunStep(base({ run: under, tokenBudget }))).toBeNull();
+    const over = { startedAt: 1, ended: null, tokens: tokenBudget + 1 };
+    expect(reviewRunStep(base({ run: over, tokenBudget }))).toEqual(
+      fail(reviewBudgetFailure(tokenBudget)),
+    );
   });
   it("4: fails after 60 minutes, but not while parked", () => {
     const late = { startedAt: 10_000_000 - REVIEW_RUN_MAX_MS - 1 };
@@ -387,5 +402,18 @@ describe("parseMinorFindings", () => {
       ),
     ).toEqual(["- `a.ts:2` — Keep this.", "- …and 2 more in Mission Control"]);
     expect(parseMinorFindings("## Tests\n- Passed")).toEqual([]);
+  });
+});
+
+describe("reviewTokenBudgetOf", () => {
+  it("is the account's own budget, else the vendor's default", () => {
+    expect(reviewTokenBudgetOf("claude")).toBe(REVIEW_TOKEN_BUDGET);
+    expect(reviewTokenBudgetOf("codex")).toBe(CODEX_REVIEW_TOKEN_BUDGET);
+    expect(reviewTokenBudgetOf("codex", 90_000)).toBe(90_000);
+  });
+  it("isReviewBudgetFailure matches only the budget failure text", () => {
+    expect(isReviewBudgetFailure(reviewBudgetFailure(250_000))).toBe(true);
+    expect(isReviewBudgetFailure("the review run ended (exit)")).toBe(false);
+    expect(isReviewBudgetFailure(null)).toBe(false);
   });
 });
