@@ -4682,7 +4682,7 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([pr]);
+    expect(r.json()).toEqual([{ ...pr, preview: null }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
@@ -4711,10 +4711,12 @@ describe("boards, escalations, health", () => {
       closingIssues: [] as number[],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
-    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);
+    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
+      { ...pr(4, "shop-app#9"), preview: null },
+    ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      pr(5, null),
-      pr(4, "shop-app#9"),
+      { ...pr(5, null), preview: null },
+      { ...pr(4, "shop-app#9"), preview: null },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
@@ -8773,7 +8775,11 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     });
     expect(started.statusCode).toBe(200);
     expect(started.json().url).toBe("http://127.0.0.1:7431");
-    expect((await a.inject("/api/repos/shop-app/prs")).json()[0]).toMatchObject({
+    expect(
+      (await a.inject("/api/repos/shop-app/prs"))
+        .json()
+        .find((pr: { number: number }) => pr.number === 41),
+    ).toMatchObject({
       number: 41,
       preview: { url: "http://127.0.0.1:7431", port: 7431 },
     });
