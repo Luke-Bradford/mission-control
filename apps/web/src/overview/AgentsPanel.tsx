@@ -185,10 +185,10 @@ function flightSeatId(config: ConfigView | undefined): string | null {
  */
 const showsSeconds = (row: Crew["rows"][number] | null, lock: TestLockState | undefined): boolean =>
   row !== null &&
-  (row.run?.status === "running" ||
-    row.hudState === "running" ||
+  row.run?.status === "running" &&
+  (row.hudState === "running" ||
     row.hudState === "stalled" ||
-    lockSince(lock, row.run?.id) !== null);
+    lockSince(lock, row.run.id) !== null);
 
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({

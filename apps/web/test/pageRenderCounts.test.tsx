@@ -72,6 +72,9 @@ async function commitsOverMinute(
     });
   }
   expect(view.container.querySelector(`#${pageId}`)).not.toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500); // let the first fetches finish rendering
+  });
   commits = 0; // Mount/data settling is not part of the 60-second observation window.
 
   for (let second = 0; second < 60; second++) {
@@ -105,6 +108,12 @@ describe("page-root render counts", () => {
     // This companion measurement is deliberately not bounded: live updates should be allowed to render.
     const commits = await commitsOverMinute(path, pageId, true);
     expect(commits).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps Overview within its idle budget with an idle seat that has an open run", async () => {
+    const crew = { rows: [seatRow({ id: "dev-1", hudState: "idle" })], firstRunToday: null };
+    const commits = await commitsOverMinute("/", "page-overview", false, { "/api/crew": crew });
+    expect(commits).toBeLessThanOrEqual(12);
   });
 
   it("keeps the Agent page with an idle seat open within its idle render budget", async () => {
