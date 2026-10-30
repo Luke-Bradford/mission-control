@@ -1285,6 +1285,28 @@ describe("Store", () => {
       expect(t?.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
     });
 
+    it("backfills the loop kind of older runs, so a seat removed later still counts", () => {
+      // runs and a baseline stored before loop_kind existed
+      store.replaceBoard(
+        "repo",
+        [6, 7, 8, 9, 10, 11].map((n) => boardItem(n, "M")),
+      );
+      for (const [i, total] of [90_000, 95_000, 100_000, 105_000, 110_000].entries()) {
+        ended(20 + i, until - 3 * DAY + i, total, { loopKind: null, ticket: `repo#${6 + i}` });
+      }
+      ended(30, until - 2 * DAY, 900_000, { loopKind: null, ticket: "repo#11", agentId: "gone" });
+      const gone = new Map<string, AuditRunKind>();
+      expect(store.audit(until - 7 * DAY, until, gone).tokenOveruse?.runs).toEqual([]);
+
+      expect(store.backfillRunLoopKinds(new Map([["gone", "build"]]))).toBe(1);
+      // a kind already stored is kept
+      expect(store.backfillRunLoopKinds(new Map([["gone", "plan"]]))).toBe(0);
+      store.backfillRunLoopKinds(new Map([["a1", "build"]]));
+
+      const runs = store.audit(until - 7 * DAY, until, gone).tokenOveruse?.runs ?? [];
+      expect(runs.map((r) => r.runId)).toEqual(["m30"]);
+    });
+
     it("returns every qualifying run, however many", () => {
       for (let n = 0; n < 101; n++) {
         store.upsertRun(

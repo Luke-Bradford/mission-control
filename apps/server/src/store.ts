@@ -73,6 +73,7 @@ import {
   type HudState,
   inferTicket,
   type LoopEvent,
+  type LoopKind,
   type MachineSample,
   type MoveColumn,
   memoryTopicKey,
@@ -897,6 +898,7 @@ const toRun = (r: Row): Run => ({
     : { cliVersion: r.cli_version as string }),
   ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
   ...(r.effort == null ? {} : { effort: r.effort as string }),
+  ...(r.loop_kind == null ? {} : { loopKind: r.loop_kind as LoopKind }),
   ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
@@ -1568,6 +1570,20 @@ export class Store {
         r.promptHash ?? null,
         r.loopKind ?? null,
       );
+  }
+
+  /**
+   * Gives runs stored before `loop_kind` existed the loop kind of their seat as configured now, so
+   * a seat removed later still shows as a build seat in Audit. A run that has one keeps it.
+   * Returns how many rows it set.
+   */
+  backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
+    const set = this.db.prepare(
+      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
+    );
+    let n = 0;
+    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
+    return n;
   }
 
   /** Completes immutable launch metadata once the generated prompt file exists. */
