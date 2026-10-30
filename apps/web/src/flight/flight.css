@@ -937,6 +937,10 @@ button.flight-link:hover {
 }
 
 .flight-note-heading h3 a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
   font-size: var(--fs-s);
   color: var(--fg);
   text-decoration: none;
