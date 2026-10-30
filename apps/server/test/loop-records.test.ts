@@ -59,6 +59,14 @@ const loop = (over: Partial<RunLoop> = {}): RunLoop => ({
 });
 
 describe("runs: loop and endedBy", () => {
+  it("keeps the newest bounded loop-event window in public order", () => {
+    for (let i = 0; i <= 5_000; i++) store.addLoopEvent(`event:${i}`, "r1", String(i), i);
+    const events = store.loopEvents(0);
+    expect(events).toHaveLength(5_000);
+    expect(events[0]?.text).toBe("1");
+    expect(events.at(-1)?.text).toBe("5000");
+  });
+
   it("indexes the store's frequent bounded reads", () => {
     const db = new DatabaseSync(dbPath());
     try {

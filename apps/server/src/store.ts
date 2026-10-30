@@ -109,8 +109,6 @@ export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
 export const LIVE_COMMS_LIMIT = 5_000;
 export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
-export const LIVE_REVIEWS_LIMIT = 200;
-export const LIVE_ASIDE_RUNS_LIMIT = 200;
 export const OPERATIONAL_RETENTION_DAYS = 90;
 export const AUDIT_RETENTION_DAYS = 365;
 
@@ -1687,9 +1685,9 @@ export class Store {
       .prepare(
         `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
            AND json_extract(loop, '$.aside') IS NOT NULL
-         ORDER BY started_at, seq LIMIT ?`,
+         ORDER BY started_at, seq`,
       )
-      .all(LIVE_ASIDE_RUNS_LIMIT) as Row[];
+      .all() as Row[];
     return rows.map(toRun);
   }
 
@@ -2090,7 +2088,14 @@ export class Store {
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
-      ["briefs", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      [
+        "briefs",
+        `at < ? AND NOT (
+          id = (SELECT MAX(current.id) FROM briefs current WHERE current.key = briefs.key)
+          AND EXISTS (SELECT 1 FROM attention_notes n WHERE n.key = briefs.key AND n.cleared_at IS NULL)
+        )`,
+        OPERATIONAL_RETENTION_DAYS,
+      ],
       [
         "reviews",
         "ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')",
@@ -3516,17 +3521,11 @@ export class Store {
     if (states.length === 0) return [];
     const rows = this.db
       .prepare(
-        `SELECT * FROM (
-           SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
-           ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
-           ORDER BY created_at DESC, id DESC LIMIT ?
-         ) ORDER BY created_at, id`,
+        `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
+         ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
+         ORDER BY created_at, id`,
       )
-      .all(
-        ...states,
-        ...(window ? [window.repo, window.since, window.until] : []),
-        LIVE_REVIEWS_LIMIT,
-      ) as Row[];
+      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
     return rows.map(toReview);
   }
 
@@ -4519,11 +4518,16 @@ export class Store {
     const rows = this.db
       .prepare(
         targetRunId === undefined
-          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id LIMIT ?"
-          : `SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
-             UNION ALL
-             SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
-             ORDER BY at, id LIMIT ?`,
+          ? `SELECT * FROM (
+               SELECT * FROM comms WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`
+          : `SELECT * FROM (
+               SELECT * FROM (
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
+                 UNION ALL
+                 SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
+               ) ORDER BY at DESC, id DESC LIMIT ?
+             ) ORDER BY at, id`,
       )
       .all(
         since,
@@ -4642,11 +4646,15 @@ export class Store {
     const rows = (
       repoId === undefined
         ? this.db
-            .prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key LIMIT ?")
+            .prepare(`SELECT * FROM (
+              SELECT * FROM loop_events WHERE at >= ? ORDER BY at DESC, key DESC LIMIT ?
+            ) ORDER BY at, key`)
             .all(since, LIVE_LOOP_EVENTS_LIMIT)
         : this.db
-            .prepare(`SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
-          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key LIMIT ?`)
+            .prepare(`SELECT * FROM (
+              SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
+              WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at DESC, e.key DESC LIMIT ?
+            ) ORDER BY at, key`)
             .all(since, repoId, LIVE_LOOP_EVENTS_LIMIT)
     ) as Row[];
     return rows.map((r) => ({
