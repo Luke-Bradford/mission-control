@@ -66,9 +66,21 @@
 
 .overview-work {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 28%);
+  grid-template-columns: minmax(0, 1fr) 31%;
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
+}
+
+@media (max-width: 1280px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 34%;
+  }
+}
+
+@media (min-width: 1920px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 27%;
+  }
 }
 
 .nbanner {
@@ -130,20 +142,20 @@
 .ov {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr) minmax(300px, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
 }
 
+/* Machine and Quota sit beside the Live log, each in its own column. */
 .ov > .col {
-  display: grid;
-  grid-template-rows: repeat(2, fit-content(calc(50% - 6px)));
-  align-content: start;
-  overflow: hidden;
+  display: contents;
 }
 
 .ov > .col > .panel {
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ov > .col > .panel > .pb {
@@ -297,15 +309,6 @@
   top: calc(50% + var(--sub) / 2 + var(--sub-gap));
 }
 
-.overview-tick {
-  position: absolute;
-  top: calc(50% - 8px);
-  height: 16px;
-  width: 1px;
-  background: var(--fg-2);
-  opacity: 0.7;
-}
-
 .overview-legend {
   display: flex;
   flex-wrap: wrap;
@@ -325,12 +328,6 @@
   width: 14px;
   height: 3px;
   border-radius: 0;
-}
-
-.overview-legend .tool-tick {
-  width: 1px;
-  height: 10px;
-  background: var(--fg-2);
 }
 
 #agentsList {
@@ -550,7 +547,7 @@
 
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
+  grid-template-columns: 150px 120px 118px minmax(220px, 1fr) 96px 128px 56px 64px;
   gap: 0 6px;
   padding: 2px 8px;
   grid-template-rows: minmax(0, 1fr);
@@ -676,7 +673,7 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 120px 118px 180px 96px 50px 56px 64px;
+    grid-template-columns: 150px 120px 118px minmax(180px, 1fr) 96px 50px 56px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -692,7 +689,7 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
+    grid-template-columns: 100px 90px 80px minmax(140px, 1fr) 64px 50px 44px 46px;
     column-gap: 4px;
   }
 }
@@ -913,6 +910,10 @@
   gap: 8px;
 }
 
+#quotaP .quotarow[data-windows="1"] {
+  grid-template-columns: minmax(65px, 1fr) minmax(0, 2fr);
+}
+
 #quotaP .quotarow .meter {
   display: flex;
   flex-direction: column;
@@ -1066,10 +1067,9 @@
 }
 
 .pipeline-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  align-content: start;
-  gap: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 /* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
@@ -1080,8 +1080,18 @@
 }
 
 .pipeline-stage {
+  flex: 1 1 0;
   min-width: 0;
   --stage-colour: var(--muted);
+}
+
+/* A lane with no tickets keeps its header and count in a narrow column. */
+.pipeline-stage.empty {
+  flex: 0 0 112px;
+}
+
+.pipeline-stage.empty h3 {
+  border-bottom-color: var(--line);
 }
 
 .pipeline-stage.progress {
@@ -1179,8 +1189,10 @@
 }
 
 .pipeline-more {
-  display: block;
-  padding: 5px 0;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 0;
 }
 
 /* Overview v2 metrics and stream freshness. */
@@ -1325,4 +1337,61 @@
     grid-column: 4;
     flex-wrap: wrap;
   }
+}
+
+/* Observed loops: one compact strip under the crew roster. */
+.loops-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-s);
+}
+
+.loops-strip > strong {
+  font: 11px var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.loop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  max-width: 100%;
+  padding-left: 8px;
+  border-left: 3px solid var(--accent);
+  color: var(--fg-2);
+  text-decoration: none;
+}
+
+.loop-chip:hover {
+  color: var(--fg);
+}
+
+.loop-chip.tone-ok {
+  border-left-color: var(--ok);
+}
+
+.loop-chip.tone-warn {
+  border-left-color: var(--warn-mark);
+}
+
+.loop-chip.tone-crit {
+  border-left-color: var(--crit);
+}
+
+.loop-chip.tone-neutral {
+  border-left-color: var(--line-2);
+}
+
+.loop-chip.sel {
+  background: var(--surface);
+  color: var(--fg);
 }

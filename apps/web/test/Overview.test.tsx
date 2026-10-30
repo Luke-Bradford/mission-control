@@ -34,7 +34,7 @@ import { settled, stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
   CREW_CONFIG,
-  crewRow,
+  crewRow as fixtureRow,
   GITHUB_RATE,
   GITHUB_RATE_LINE,
   HOUR,
@@ -53,6 +53,10 @@ import {
 } from "./fixtures.ts";
 
 const GIB = 2 ** 30;
+
+/** A seat in the roster; observed loops (`kind: "loop"`) sit in the Loops strip, not the table. */
+const crewRow = (over: Parameters<typeof fixtureRow>[0] = {}) =>
+  fixtureRow({ kind: "crew", ...over });
 
 function sample(over: Partial<MachineSample> = {}): MachineSample {
   return {
@@ -181,7 +185,7 @@ describe("Overview panels", () => {
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
     );
-    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
+    expect(container.querySelectorAll(".pipeline-stage:not(.empty)")).toHaveLength(0);
     expect(await screen.findByText("No events yet.")).toBeTruthy();
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     stop();
@@ -678,7 +682,7 @@ describe("Agents panel", () => {
 
   it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
     stub({
-      rows: [seatRow({ hudState: "running" }), crewRow({ id: "other", index: 1 })],
+      rows: [seatRow({ hudState: "running" }), fixtureRow({ id: "other", index: 1 })],
       items: [
         item({ key: "k-seat", agentId: "guido-1", kind: "decision" }),
         item({ key: "k-loop", agentId: "other", kind: "decision" }),
@@ -686,11 +690,13 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findAllByRole("button", { name: "Answer" });
-    const [seat, loop] = agentRows(container) as [HTMLElement, HTMLElement];
+    // An observed loop has no row here (it is in the Loops strip), so no Interrupt or End the run for it.
+    const [seat] = agentRows(container) as [HTMLElement];
+    expect(agentRows(container)).toHaveLength(1);
     expect(within(seat).getByRole("button", { name: "Interrupt" })).toBeTruthy();
     expect(within(seat).getByRole("button", { name: "End the run" })).toBeTruthy();
-    expect(within(loop).queryByRole("button", { name: "Interrupt" })).toBeNull();
-    expect(within(loop).queryByRole("button", { name: "End the run" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Interrupt" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "End the run" })).toHaveLength(1);
   });
 
   describe("the need line of a stalled seat", () => {
@@ -877,7 +883,7 @@ describe("Agents panel", () => {
       within(loop as HTMLElement)
         .getByText("opus 4.1")
         .closest<HTMLElement>(".agent-model")?.title,
-    ).toBe("claude-opus-4-1");
+    ).toBe("claude-opus-4-1 · default");
   });
 
   it.each([
@@ -935,14 +941,22 @@ describe("Agents panel", () => {
     stub({
       rows: [
         seatRow({ hudState: "idle", review: null }),
-        crewRow({ id: "loop", index: 1, hudState: "idle", review: { prNumber: 5, state: "open" } }),
+        fixtureRow({
+          id: "loop",
+          index: 1,
+          hudState: "idle",
+          review: { prNumber: 5, state: "open" },
+        }),
       ],
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
     const lines = agentRows(container).map((r) => r.getAttribute("title"));
     expect(lines[0]).toMatch(/^Idle since/);
-    expect(lines[1]).toMatch(/^Idle since/);
+    expect(lines).toHaveLength(1);
+    const strip = container.querySelector(".loops-strip") as HTMLElement;
+    expect(strip.textContent).toContain("Idle");
+    expect(strip.textContent).not.toContain("review");
   });
 
   it("the doing line shows its text before the timezone has loaded", async () => {
@@ -953,7 +967,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.title).toBe("Idle");
+    expect(row.title).toBe("Free for work");
   });
 
   it("a row with no run and no digest shows No ticket, — tokens and ctx —", async () => {
@@ -975,7 +989,7 @@ describe("Agents panel", () => {
     expect(row.querySelector(".tok")?.textContent).toContain("0/min");
     expect(row.textContent).toContain("ctx —");
     expect(row.querySelector(".meter")?.textContent).toContain("—");
-    expect(row.title).toContain("Idle since");
+    expect(row.title).toBe("Free for work");
     expect(row.querySelector(".spark")).toBeTruthy();
   });
 
@@ -1230,7 +1244,6 @@ describe("Agents panel", () => {
     expect(row.textContent).toContain("#3349");
     expect(row.title).toContain("Bash");
     expect(row.querySelector(".process-line")).toBeNull();
-    expect(row.querySelector('[title="observed loop · ta-loop"]')).toBeTruthy();
     expect(row.querySelector(".tok span[title]")?.getAttribute("title")).toContain(
       "Input 12.0k · Output 3.4k",
     );
@@ -1280,11 +1293,9 @@ describe("Agents panel", () => {
         item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash", ticket: null }),
       ],
     });
-    const { container } = render(<Overview />);
+    render(<Overview />);
     const need = async () => (await screen.findByText(/^Stalled \d+:\d\d/)).textContent;
     expect(await need()).toBe("Stalled 2:05 in Bash");
-    expect(container.querySelector(".need")?.textContent).toContain("observed loop");
-    expect(container.querySelector(".need button")).toBeNull();
     act(() => {
       vi.advanceTimersByTime(3000);
     });
@@ -1761,7 +1772,8 @@ describe("Account quota panel", () => {
     expect(rows.length).toBe(2);
     expect(rows[0]?.textContent).toContain("5h 100%");
     expect(rows[0]?.textContent).toContain("7d 60%");
-    expect(rows[1]?.textContent).toContain("5h —");
+    // Codex is shown at 7d only.
+    expect(rows[1]?.textContent).not.toContain("5h");
     expect(
       quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
     ).toBeTruthy();
@@ -1789,15 +1801,16 @@ describe("Account quota panel", () => {
     expect(rows[0]?.querySelector('[title*="7d: 73%"]')?.getAttribute("title")).toContain(
       "resets Wed 28 Oct 02:00",
     );
-    expect(rows[1]?.textContent).toContain("5h —");
+    // Codex is shown at 7d only.
+    expect(rows[1]?.textContent).not.toContain("5h");
     expect(rows[1]?.querySelector('[title*="7d: 9%"]')?.getAttribute("title")).toContain(
       "resets Thu 29 Oct 16:22",
     );
-    // the none slot is shaped like a bar slot, and the 7d slots match across rows
+    // the Codex row has its 7d bar in the slot after the name, shaped like Claude's 7d slot
     const slot = (r: Element | undefined, i: number) => r?.children[i];
     expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
-    expect(slot(rows[1], 2)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
-    expect(slot(rows[1], 2)?.querySelectorAll("*").length).toBe(
+    expect(slot(rows[1], 1)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
+    expect(slot(rows[1], 1)?.querySelectorAll("*").length).toBe(
       slot(rows[0], 2)?.querySelectorAll("*").length,
     );
   });
@@ -1806,7 +1819,7 @@ describe("Account quota panel", () => {
     stub({
       limits: [
         limit5h({ accountId: "claude-main", used: 40, paceReady: false }),
-        limit5h({ accountId: "codex-main", used: 40, paceReady: true, fullAt: NOW + 2 * HOUR }),
+        limit5h({ accountId: "claude-second", used: 40, paceReady: true, fullAt: NOW + 2 * HOUR }),
       ],
     });
     const { container } = render(<Overview />);
@@ -1816,7 +1829,7 @@ describe("Account quota panel", () => {
         quota.querySelector('[title^="claude-main 5h: 40% used · too little history for a pace"]'),
       ).toBeTruthy(),
     );
-    expect(quota.querySelector('[title^="codex-main 5h: 40% used · ~2h00"]')).toBeTruthy();
+    expect(quota.querySelector('[title^="claude-second 5h: 40% used · ~2h00"]')).toBeTruthy();
   });
 
   it("the GitHub row: what is left, the poll cost and the reset", async () => {
@@ -2589,6 +2602,22 @@ describe("Activity panel", () => {
     expect(f).toHaveBeenCalled();
     fireEvent.click(within(act_).getByRole("button", { name: "Pause" }));
     expect(within(act_).getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  it("a long Comms message is one line of 120 characters with a link to read the rest", async () => {
+    stub({
+      rows: [...rows, seatRow({ index: 2 })],
+      activity: [
+        comms({ at: NOW - MIN, who: "MC", to: "guido-1", text: `${"word ".repeat(80)}ZZEND` }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    fireEvent.click(await within(act_).findByRole("button", { name: "Messages" }));
+    const row = act_.querySelector(".arow.k-comms") as HTMLElement;
+    expect(row.textContent).not.toContain("ZZEND");
+    expect(row.textContent).toContain("…");
+    expect(within(row).getByRole("link", { name: "read ›" }).getAttribute("href")).toBe("/comms");
   });
 
   it("a comms row between agents of another session is hidden", async () => {

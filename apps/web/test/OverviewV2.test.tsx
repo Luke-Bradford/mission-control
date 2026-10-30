@@ -274,6 +274,7 @@ it.each([
   expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
     Array(8).fill("—"),
   );
-  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
+  // Lanes with no cards collapse to their header; none holds a chip.
+  expect(container.querySelectorAll(".pipeline-stage:not(.empty)")).toHaveLength(0);
   expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
 });

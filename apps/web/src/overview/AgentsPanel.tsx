@@ -322,6 +322,50 @@ function FlightRow({
   );
 }
 
+/**
+ * The observed loops (config.yaml loops, not crew seats) as one compact strip under the roster:
+ * name, state in words and what step they are on. Each opens its Agent page.
+ */
+function LoopsStrip({
+  rows,
+  items,
+  selected,
+}: {
+  rows: Crew["rows"];
+  items: AttentionItem[];
+  selected: string | null;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <nav className="loops-strip" aria-label="Loops">
+      <strong>Loops</strong>
+      {rows.map((row) => {
+        const status = seatStatus(row);
+        const asks = seatItems(row, items).length;
+        const step = row.loop && hasActiveRun(row) ? row.loop.text : null;
+        const to = agentPath(row.id);
+        // A loop waiting on the operator says so in words and takes the warn colour.
+        const tone = asks > 0 ? "warn" : status.tone;
+        const state = asks > 0 ? "needs you" : status.label;
+        return (
+          <a
+            key={row.id}
+            className={`loop-chip tone-${tone}${row.id === selected ? " sel" : ""}`}
+            href={to}
+            title={[callSign(row), state, step, status.reason].filter(Boolean).join(" · ")}
+            onClick={(e) => followLink(e, to)}
+          >
+            <span className="ellip">
+              {callSign(row)} · {step ?? state}
+            </span>
+            {step && <span className="xs muted">{state}</span>}
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
 /** A need part whose button stops the seat's turn, so the row needs no second Interrupt. */
 const stopsTheTurn = (p: NeedPart): boolean => p.action === "interrupt" || p.action === "stop";
 
@@ -551,6 +595,9 @@ export function AgentsPanel() {
   const metrics = useMetrics();
   const working = metrics.readings.agentsWorking;
 
+  // Crew seats make the roster; observed loops sit in the Loops strip beneath it.
+  const seatRows = rows?.filter((r) => r.kind === "crew") ?? null;
+  const loopRows = rows?.filter((r) => r.kind === "loop") ?? [];
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
   const placeholders = config
@@ -609,7 +656,7 @@ export function AgentsPanel() {
           tz={tz}
           lock={lock}
         />
-        {rows?.map((row) => (
+        {seatRows?.map((row) => (
           <AgentRow
             key={row.id}
             row={row}
@@ -640,6 +687,7 @@ export function AgentsPanel() {
             </div>
           ))}
       </div>
+      <LoopsStrip rows={loopRows} items={items} selected={selected} />
     </Panel>
   );
 }

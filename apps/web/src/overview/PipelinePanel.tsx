@@ -63,9 +63,14 @@ export function PipelinePanel() {
           const cards = stageCards.slice(0, VISIBLE_CARDS);
           const more = count - cards.length;
           const stageHref = `/board?stage=${key}`;
-          if (data && count === 0) return null;
+          // A lane with nothing in it collapses to its header instead of holding a column's width.
+          const collapsed = data !== undefined && count === 0;
           return (
-            <section key={key} className={`pipeline-stage ${key}`} aria-label={label}>
+            <section
+              key={key}
+              className={`pipeline-stage ${key}${collapsed ? " empty" : ""}`}
+              aria-label={label}
+            >
               <h3>
                 <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
                   {label}
@@ -112,7 +117,7 @@ export function PipelinePanel() {
                   href={stageHref}
                   onClick={(e) => followLink(e, stageHref)}
                 >
-                  +{more}
+                  +{more} · open Board ›
                 </a>
               )}
             </section>

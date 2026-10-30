@@ -72,7 +72,7 @@ const rowsIn = (container: HTMLElement) => [
   ...container.querySelectorAll<HTMLElement>(".trow:not(.head)"),
 ];
 
-it("shows FLIGHT, four crew and two observed loops in eight columns with a live Work line", async () => {
+it("shows FLIGHT and the crew in eight columns with a live Work line, and observed loops in the Loops strip", async () => {
   const loop = {
     phase: "working" as const,
     profile: "feature",
@@ -92,20 +92,24 @@ it("shows FLIGHT, four crew and two observed loops in eight columns with a live 
   ].map((row) => ({ ...row, loop, digest: digest([[NOW, 1200]]), contextWindow: 1000 }));
   stub(rows);
   const { container } = render(<AgentsPanel />);
-  await screen.findByText("observed-running");
+  await screen.findByRole("navigation", { name: "Loops" });
   const table = screen.getByRole("table", { name: "Crew" });
   expect(within(table).getAllByRole("columnheader")).toHaveLength(8);
-  expect(within(table).getAllByRole("row")).toHaveLength(8);
+  expect(within(table).getAllByRole("row")).toHaveLength(6);
   const rendered = rowsIn(container);
   expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
     "FLIGHT",
     "need",
     "running",
-    "observed-running",
     "parked",
-    "observed-waiting",
     "free",
   ]);
+  const strip = screen.getByRole("navigation", { name: "Loops" });
+  expect(
+    within(strip)
+      .getAllByRole("link")
+      .map((a) => a.querySelector(".ellip")?.textContent),
+  ).toEqual(["observed-running · Implementing", "observed-waiting · Implementing"]);
   for (const row of rendered) {
     expect(row.querySelector(".agent-model")?.textContent).toContain("opus 4.1");
     expect(row.querySelector(".state-cell")?.textContent).toContain("25m");
@@ -114,11 +118,7 @@ it("shows FLIGHT, four crew and two observed loops in eight columns with a live 
       row.querySelector(".rowlink")?.textContent === "need" ? 1 : 0,
     );
     const name = row.querySelector(".rowlink")?.textContent;
-    if (
-      ["FLIGHT", "need", "running", "observed-running", "parked", "observed-waiting"].includes(
-        name ?? "",
-      )
-    ) {
+    if (["FLIGHT", "need", "running", "parked"].includes(name ?? "")) {
       expect(row.querySelector(".loopstep")?.textContent).toContain("implement");
       expect(row.querySelector(".stepbar")).toBeTruthy();
     } else {
@@ -196,11 +196,16 @@ it("shows a need and its action inline, leaves a quiet row clear, and keeps row 
   expect(window.location.pathname).toBe("/agent/quiet");
 });
 
-it.each(["stopped", "observed", "flight"])("keeps needs visible for a %s agent", async (kind) => {
-  const row =
-    kind === "observed"
-      ? crewRow({ id: "need" })
-      : seatRow({ id: kind === "flight" ? "flight" : "need", hudState: "stopped" });
+it("says in words that an observed loop needs you, in the Loops strip", async () => {
+  stub([crewRow({ id: "need" })], true, [item({ agentId: "need", ticket: null })]);
+  render(<AgentsPanel />);
+  const link = await screen.findByRole("link", { name: /need.*needs you/ });
+  expect(link.className).toContain("tone-warn");
+  expect(link.getAttribute("href")).toBe("/agent/need");
+});
+
+it.each(["stopped", "flight"])("keeps needs visible for a %s agent", async (kind) => {
+  const row = seatRow({ id: kind === "flight" ? "flight" : "need", hudState: "stopped" });
   stub([row], true, [item({ agentId: row.id, ticket: null })]);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("Decision for you");
@@ -606,11 +611,17 @@ it("sorts working crew and observed loops by the last ten minutes and shares j/k
   ];
   stub(rows);
   const { container } = render(<AgentsPanel />);
-  await screen.findByText("fast-loop");
+  await screen.findByRole("navigation", { name: "Loops" });
   const order = rowsIn(container).map((r) => r.querySelector(".rowlink")?.textContent);
-  expect(order).toEqual(["FLIGHT", "need", "fast-loop", "slow", "waiting", "idle", "stopped"]);
+  expect(order).toEqual(["FLIGHT", "need", "slow", "idle", "stopped"]);
+  const strip = within(screen.getByRole("navigation", { name: "Loops" }));
+  expect(strip.getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual([
+    "/agent/fast-loop",
+    "/agent/waiting",
+  ]);
   const { nextAgent } = await import("../src/shell/selection.ts");
-  const ids = ["flight", ...order.slice(1)] as string[];
+  // j/k keeps its own order, with the loops among the seats by activity
+  const ids = ["flight", "need", "fast-loop", "slow", "waiting", "idle", "stopped"] as string[];
   for (let i = 0; i < ids.length; i++) {
     expect(
       nextAgent(

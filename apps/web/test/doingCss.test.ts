@@ -127,7 +127,7 @@ describe("doing lines and run rows (hud.css)", () => {
       [2000, false],
     ] as const) {
       const main = viewport - 32 - (dock ? 392 : 0);
-      const panel = main - Math.max(260, main * 0.28) - 12 - 18;
+      const panel = main - main * (viewport >= 1920 ? 0.27 : 0.31) - 12 - 18;
       const selector = String.raw`#agentsList \.trow`;
       const cssAtWidth =
         panel < 900

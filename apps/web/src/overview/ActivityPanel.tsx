@@ -21,8 +21,9 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { agentPath, followLink, itemPath } from "../router.ts";
+import { agentPath, commsAgentPath, commsFlightPath, followLink, itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { logLine } from "./logLine.ts";
 
 type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
 
@@ -373,6 +374,8 @@ export function ActivityPanel() {
       >
         {keyed.map(({ e, key }) => {
           if (isComms(e)) {
+            const preview = logLine(e.text, "comms");
+            const readPath = agents.has(e.who) ? commsAgentPath(e.who) : commsFlightPath();
             return (
               <div key={key} className="arow k-comms">
                 <span className="t num" title={tz ? rel(e.at, now, tz) : undefined}>
@@ -382,10 +385,22 @@ export function ActivityPanel() {
                 <span className="log-who ellip">
                   <CommsEnd id={e.who} />
                 </span>
-                <Expandable lines={2}>
+                <Expandable lines={1}>
                   <span className="txt">
                     <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
-                    <MentionText text={e.text} />
+                    <MentionText text={preview.text} />
+                    {preview.cut && (
+                      <>
+                        {" "}
+                        <a
+                          className="log-read"
+                          href={readPath}
+                          onClick={(event) => followLink(event, readPath)}
+                        >
+                          read ›
+                        </a>
+                      </>
+                    )}
                   </span>
                 </Expandable>
                 {e.ref ? (
@@ -433,10 +448,10 @@ export function ActivityPanel() {
                   <span className="muted">{e.who}</span>
                 )}
               </span>
-              <Expandable lines={2}>
+              <Expandable lines={1}>
                 <span className="txt">
                   <ActivityText
-                    event={e}
+                    event={{ ...e, text: logLine(e.text, "step").text }}
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}

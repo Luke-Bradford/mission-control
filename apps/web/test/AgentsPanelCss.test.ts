@@ -7,9 +7,8 @@ it("bounds the Overview rows and lets panel bodies scroll internally", () => {
     /\.overview-grid \{[^}]*grid-template-rows: auto fit-content\(45%\) fit-content\(18%\) minmax\(0, 1fr\)/,
   );
   expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow-y: auto/);
-  expect(css).toMatch(
-    /\.ov > \.col \{[^}]*grid-template-rows: repeat\(2, fit-content\(calc\(50% - 6px\)\)\);[^}]*overflow: hidden/,
-  );
+  // Machine and Quota are the Live log's neighbours, each in a column of its own.
+  expect(css).toMatch(/\.ov > \.col \{\s*display: contents/);
   expect(css).toMatch(/\.overview-grid > \*,[\s\S]*?\.ov > \.panel \{[\s\S]*?overflow: hidden/);
   expect(css).toMatch(/\.ov > \.col > \.panel > \.pb \{\s*min-height: 0;\s*overflow: auto/);
   expect(css).toMatch(/\.panel > \.pb\.scroll \{\s*flex: 1 1 auto/);
@@ -27,9 +26,9 @@ it("keeps eight compact columns with needs on the second Work line", () => {
   expect(css).toContain("prefers-reduced-motion: reduce");
 });
 
-it("uses a fixed Work track and clips its free text", () => {
+it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px/,
+    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 120px 118px minmax\(220px, 1fr\) 96px 128px 56px 64px/,
   );
   expect(css).toMatch(/#agentsList \.work-cell \{[^}]*overflow: hidden/);
 });

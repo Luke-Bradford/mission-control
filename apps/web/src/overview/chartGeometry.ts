@@ -66,6 +66,5 @@ export function timelineGeometry({ from, to }: { from: number; to: number }) {
     baseline: 0,
     position,
     segment,
-    tick: (at: number) => ({ left: position(at), width: 1, borderRadius: 0 }),
   };
 }
