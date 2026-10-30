@@ -393,7 +393,7 @@ function harness(): Harness {
     prResults: [],
     touches: [],
     hardRuleLists: [],
-    gate: { mainSha: "d".repeat(40), containsMain: true, hubOnly: true, strays: [] },
+    gate: { mainSha: "d".repeat(40), containsMain: true, hubOnly: true, strays: [], webChanged: false },
     gateReads: [],
     steps: [],
     stepEnded: {},
