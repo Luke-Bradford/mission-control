@@ -23,6 +23,7 @@ import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { readBaseFile } from "./checkouts.ts";
 import { crewGitBytes, overflowed } from "./git.ts";
+import type { RepoSkills } from "./skills.ts";
 
 /** The most of the repo's CLAUDE.md copied into the prompt. */
 export const CLAUDE_MD_MAX = 64 * 1024;
@@ -333,6 +334,8 @@ export async function readRepoAgentsMd(checkout: string, baseSha: string): Promi
 export interface RepoDocs {
   claudeMd: string | null;
   agentsMd: string | null;
+  /** The repo's skills at the base commit (`readRepoDocsAndSkills`); a seat gets them as a plugin or a Codex skills folder. */
+  skills?: RepoSkills;
 }
 
 export async function readRepoDocs(checkout: string, baseSha: string): Promise<RepoDocs> {

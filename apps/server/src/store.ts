@@ -638,6 +638,17 @@ export function crewCodexDir(dbPath: string, runId: string): string {
 
 export const CREW_CODEX_DIR = /^codex-[0-9a-f]{12}$/;
 
+/**
+ * A Claude run's skills plugin folder (`--plugin-dir`), built by the hub from the repo's commit. It
+ * sits in the data dir, which the seat's sandbox cannot write, and is removed with the run's files.
+ */
+export function crewSkillsDir(dbPath: string, runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return join(crewDir(dbPath), `skills-${hex}`);
+}
+
+export const CREW_SKILLS_DIR = /^skills-[0-9a-f]{12}$/;
+
 /** A keeper folder's name in `{DB dir}/crew/`. */
 export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
 
