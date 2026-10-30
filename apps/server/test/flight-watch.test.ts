@@ -5,6 +5,8 @@ import {
   BACKGROUND_STALL_MS,
   type BoardItem,
   COMMS_CAPCOM,
+  CREW_PAUSE_SETTING,
+  carriedFrom,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
@@ -525,6 +527,313 @@ describe("FLIGHT's evidence", () => {
     park("silent");
     store.addEvidence("r-guido", "note", T0);
     expect(parkedOf()?.report).toBeUndefined();
+  });
+});
+
+describe("FLIGHT's flow queues", () => {
+  it("keeps a review carried across a main merge current", () => {
+    live("guido-1", "r-guido");
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "ci",
+      prNumber: 7,
+      carry: { from: "old-sha", to: "new-sha" },
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "old-sha", ci: "passing" })], T0);
+    const oldReview = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "old-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    if (oldReview === null) throw new Error("review not queued");
+    store.setReviewState(oldReview, ["queued"], "running", { runId: "r-retro", at: T0 });
+    store.recordFindings(oldReview, "r-retro", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: T0,
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "new-sha", ci: "passing" })], T0 + MIN);
+
+    expect(carriedFrom({ from: "old-sha", to: "new-sha" }, null, "new-sha")).toBe("old-sha");
+    expect(flightState({ config, store, busy: [], now: T0 + MIN }).mergeQueue).toEqual([]);
+  });
+
+  it("waits for review when the reported review is from an older PR head", () => {
+    store.upsertPullRequests("mc", [stored(7, { headSha: "old-sha", ci: "passing" })], T0);
+    const oldReview = store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "old-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    if (oldReview === null) throw new Error("review not queued");
+    store.setReviewState(oldReview, ["queued"], "running", { runId: "r-retro", at: T0 });
+    store.recordFindings(oldReview, "r-retro", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: T0,
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "new-sha", ci: "passing" })], T0 + MIN);
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "new-sha",
+      epoch: 1,
+      attempt: 1,
+      round: 1,
+      at: T0 + MIN,
+    });
+
+    expect(flightState({ config, store, busy: [], now: T0 + MIN }).mergeQueue).toEqual([
+      { pr: 7, waitsOn: ["review"] },
+    ]);
+  });
+
+  it("keeps another repository's reviews out of this session's queue", () => {
+    store.requestReview({
+      authorRunId: "r-other-author",
+      repoId: "other",
+      seatId: "retro-other",
+      prNumber: 1,
+      sha: "other-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+
+    const result = flightState({ config, store, busy: [], now: T0 });
+
+    expect(result.reviewQueue).toEqual({
+      queued: 0,
+      running: 0,
+      seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+    });
+  });
+
+  it("names a machine hold that leaves queued reviews without a reviewer", () => {
+    const crew = config.crew;
+    if (crew === undefined) throw new Error("test fixture has no crew");
+    const flowConfig: CcConfig = {
+      ...config,
+      crew: {
+        ...crew,
+        sessions: crew.sessions.map((session) => ({
+          ...session,
+          seats: [...session.seats, seat("retro-2", "RETRO", { mode: "scratch" })],
+        })),
+      },
+    };
+    for (let n = 1; n <= 5; n++) {
+      store.requestReview({
+        authorRunId: `r-author-${n}`,
+        repoId: "mc",
+        seatId: n % 2 === 0 ? "retro-2" : "retro-1",
+        prNumber: n,
+        sha: `sha-${n}`,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      });
+    }
+    store.replaceBoard("mc", [
+      {
+        repoId: "mc",
+        issueNumber: 6,
+        title: "Ready ticket",
+        status: "Ready",
+        state: "planned",
+        labels: [],
+        priority: null,
+        updatedAt: T0,
+        url: "u",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: T0,
+        itemId: "I6",
+        projectId: "P1",
+      },
+    ]);
+    store.addMachineSample({
+      at: T0,
+      cpuPct: null,
+      memUsedBytes: 1,
+      diskFreeBytes: 10 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      swapUsedBytes: 0,
+      memTotalBytes: 100 * 1024 ** 3,
+      memoryPressureFreePct: 90,
+      load1: 0,
+      cores: 8,
+      agents: null,
+    });
+
+    const result = flightState({ config: flowConfig, store, busy: [], now: T0 });
+
+    expect(result.reviewQueue).toEqual({
+      queued: 5,
+      running: 0,
+      seats: [
+        { seat: "retro-1", queued: 3, running: 0, idle: true },
+        { seat: "retro-2", queued: 2, running: 0, idle: true },
+      ],
+    });
+    expect(result.flowHolds).toContainEqual({
+      kind: "machine",
+      reason: "disk free is 10.0 GB (below 15 GB)",
+      blocks: "5 queued reviews for 2 idle review seats; 1 eligible ticket for 2 idle build seats",
+      feedbackLoop: "the hold blocks reviews; held reviews cannot merge",
+      blocking: true,
+    });
+    expect(wakeFacts(result)).toContain("machine");
+  });
+
+  it("keeps a machine hold's wake fact stable while its reading changes", () => {
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 1,
+      sha: "sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    const sample = (at: number, diskFreeBytes: number) =>
+      store.addMachineSample({
+        at,
+        cpuPct: null,
+        memUsedBytes: 1,
+        diskFreeBytes,
+        diskTotalBytes: 100 * 1024 ** 3,
+        memTotalBytes: 100 * 1024 ** 3,
+        cores: 8,
+        agents: null,
+      });
+    sample(T0, 10 * 1024 ** 3);
+    const first = flightState({ config, store, busy: [], now: T0 });
+    sample(T0 + MIN, 9.8 * 1024 ** 3);
+    const second = flightState({ config, store, busy: [], now: T0 + MIN });
+
+    expect(second.flowHolds?.[0]).toMatchObject({
+      kind: "machine",
+      reason: "disk free is 9.8 GB (below 15 GB)",
+      blocking: true,
+    });
+    expect(wakeFacts(second)).toBe(deliveredFacts(first));
+  });
+
+  it("does not claim a build-only pause blocks a review", () => {
+    store.requestReview({
+      authorRunId: "r-author",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 1,
+      sha: "sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    store.setSetting(
+      CREW_PAUSE_SETTING,
+      JSON.stringify({ seats: ["guido-1"], reason: "builders off", at: T0, by: "operator" }),
+    );
+
+    const hold = flightState({ config, store, busy: [], now: T0 }).flowHolds?.find(
+      (candidate) => candidate.kind === "crew-pause",
+    );
+
+    expect(hold).toMatchObject({
+      reason: "builders off",
+      blocks: "1 build seat, 0 review seats and 0 queued reviews",
+      blocking: false,
+    });
+  });
+
+  it("lists merge waits, including pending CI and conflicts, and quota and stopped-seat holds", () => {
+    live("guido-1", "r-guido");
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "review",
+      prNumber: 7,
+      awaitingFlight: "sha",
+    });
+    store.upsertPullRequests(
+      "mc",
+      [
+        stored(7, {
+          checks: [
+            {
+              name: "test",
+              kind: "check",
+              state: "failing",
+              conclusion: "failing",
+              attempt: 1,
+              url: null,
+            },
+            {
+              name: "build",
+              kind: "check",
+              state: "pending",
+              conclusion: "pending",
+              attempt: 1,
+              url: null,
+            },
+          ],
+          mergeable: "CONFLICTING",
+        }),
+      ],
+      T0,
+    );
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: T0,
+      pct: 95,
+      resetAt: T0 + MIN,
+      source: "test",
+    });
+    store.setSeatSession(row("inco-1", null, "stopped"));
+
+    const result = flightState({ config, store, busy: [], now: T0 });
+
+    expect(result.mergeQueue).toEqual([
+      {
+        pr: 7,
+        waitsOn: ["CI: test", "CI pending: build", "merge conflict", "review", "FLIGHT merge"],
+      },
+    ]);
+    expect(result.flowHolds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "quota", reason: "GUIDO-1's 5h quota is 95% (stop 95%)" }),
+        expect.objectContaining({ kind: "seat-stopped", reason: "INCO-1 is stopped" }),
+      ]),
+    );
   });
 });
 

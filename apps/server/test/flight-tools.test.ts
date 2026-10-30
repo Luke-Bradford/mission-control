@@ -3030,6 +3030,13 @@ describe("flight_state", () => {
         },
       ],
       holds: [],
+      reviewQueue: {
+        queued: 0,
+        running: 0,
+        seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+      },
+      mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
+      flowHolds: [],
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
       ],

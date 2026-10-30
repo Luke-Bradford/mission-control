@@ -964,6 +964,24 @@ export interface FlightState {
     prState: "open" | "merged" | "closed" | "unknown";
     told: boolean;
   }[];
+  /** Reviews waiting to start or already assigned, grouped by their review seat. */
+  reviewQueue?: {
+    queued: number;
+    running: number;
+    seats: { seat: string; queued: number; running: number; idle: boolean }[];
+  };
+  /** Open PRs that cannot merge yet, with the concrete condition to clear. */
+  mergeQueue?: { pr: number; waitsOn: string[] }[];
+  /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */
+  flowHolds?: {
+    kind: "machine" | "crew-pause" | "quota" | "seat-stopped";
+    reason: string;
+    blocks: string;
+    /** The feedback loop this hold creates, when it blocks queued reviews. */
+    feedbackLoop?: string;
+    /** True only when this hold currently prevents queued work from moving. */
+    blocking: boolean;
+  }[];
   recent: { id: number; time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
   /** Pending scheduled work; only due entries prompt a wake. */
@@ -1150,7 +1168,11 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${productPass}\n${JSON.stringify(digest)}`;
+  const idleReviewFault =
+    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
+      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+      : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */
