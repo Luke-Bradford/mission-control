@@ -104,7 +104,7 @@ describe("Overview layout (hud.css)", () => {
 
   it("wraps KPI labels without ellipses and keeps eight Crew rows below the 45% cap", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
-    expect(label).toContain("font-size: 10px");
+    expect(label).toContain("font-size: 11px");
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
     const row = rule(String.raw`#agentsList \.trow`);

@@ -156,7 +156,7 @@
   height: 14px;
   margin-left: 100px;
   border-top: 1px solid var(--line-2);
-  font: 10px / 1 var(--mono);
+  font: 11px / 1 var(--mono);
 }
 
 .overview-axis > span {
@@ -311,7 +311,7 @@
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font: 10px var(--mono);
+  font: 11px var(--mono);
   text-transform: lowercase;
 }
 
@@ -577,7 +577,7 @@
   min-height: 24px;
   padding: 0 4px;
   line-height: 12px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 #agentsList .xs {
@@ -622,7 +622,7 @@
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--fg);
 }
 
@@ -1218,7 +1218,7 @@
 }
 
 .overview-kpi .lbl {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 11px;
   color: var(--muted);
   white-space: normal;
@@ -1262,7 +1262,7 @@
   left: 0;
   padding-right: 4px;
   background: var(--surface);
-  font: 9px / 9px var(--mono);
+  font: 11px / 11px var(--mono);
   color: var(--muted);
 }
 
@@ -1275,7 +1275,7 @@
 .kpi-axis {
   display: flex;
   justify-content: space-between;
-  font: 9px / 9px var(--mono);
+  font: 11px / 11px var(--mono);
   color: var(--muted);
 }
 

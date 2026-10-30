@@ -429,7 +429,7 @@ select {
 }
 
 .phase {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   border: 1px solid var(--line-2);
   border-radius: 2px;
@@ -439,7 +439,7 @@ select {
 }
 
 .lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -870,7 +870,7 @@ th {
 
 /* build status overlay */
 .bs {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 4px;
   padding: 0 6px;

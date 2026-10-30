@@ -319,7 +319,7 @@
 .flight-source {
   margin: 0;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -345,7 +345,7 @@
   margin: 0;
   padding: 12px 14px 6px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -371,7 +371,7 @@
 button.flight-link {
   padding: 2px 6px;
   color: var(--accent);
-  font: 600 10.5px / 1.4 var(--mono);
+  font: 600 11px / 1.4 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -428,7 +428,7 @@ button.flight-link:hover {
 .wif-table-head {
   padding: 8px 14px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -498,7 +498,7 @@ button.flight-link:hover {
 }
 
 .wif-stage > .rref {
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .wif-next {
@@ -616,7 +616,7 @@ button.flight-link:hover {
 #wifP .wstep .titer {
   padding: 0 0 0 1px;
   color: var(--accent);
-  font: 600 9px / 0 var(--mono);
+  font: 600 11px / 1 var(--mono);
   vertical-align: super;
   background: none;
 }
@@ -663,7 +663,7 @@ button.flight-link:hover {
   flex: none;
   margin: 0;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -711,7 +711,7 @@ button.flight-link:hover {
 .flight-outcome-head {
   padding: 8px 14px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: var(--surface);
@@ -743,7 +743,7 @@ button.flight-link:hover {
 
 .flight-plan-horizon {
   color: var(--fg-2);
-  font: 600 10.5px / 1.7 var(--mono);
+  font: 600 11px / 1.7 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -887,7 +887,7 @@ button.flight-link:hover {
   position: relative;
   padding: 9px 10px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-decoration: none;
   text-transform: uppercase;
@@ -961,7 +961,7 @@ button.flight-link:hover {
 .flight-markdown-source summary {
   padding-top: 4px;
   color: var(--muted);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -998,7 +998,7 @@ button.flight-link:hover {
   align-items: center;
   gap: 10px;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1012,7 +1012,7 @@ button.flight-link:hover {
 .flight-memory section > h3 {
   margin: 14px 0 0;
   color: var(--fg-2);
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1114,7 +1114,7 @@ button.flight-link:hover {
 }
 
 #outcomesP .flight-tiles dt {
-  font: 600 10.5px / 1.2 var(--mono);
+  font: 600 11px / 1.2 var(--mono);
   letter-spacing: 0.1em;
   overflow-wrap: anywhere;
   text-transform: uppercase;

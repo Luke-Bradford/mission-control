@@ -56,6 +56,15 @@ const PILLS: readonly [TokenName, TokenName][] = [
   ["--accent", "--accent-soft"],
 ];
 const LAMPS: readonly TokenName[] = ["--warn-mark", "--ok", "--crit"];
+const SEATS: readonly TokenName[] = [
+  "--seat-1",
+  "--seat-2",
+  "--seat-3",
+  "--seat-4",
+  "--seat-5",
+  "--seat-6",
+  "--seat-7",
+];
 
 /** The text from the line `header` opens to the `}` that closes it (no nested braces inside). */
 function blockBody(css: string, header: string): string {
@@ -117,6 +126,13 @@ describe("theme tokens", () => {
     const t = THEME_TOKENS[name];
     for (const lamp of LAMPS) {
       expect(contrast(t[lamp], t["--surface"]), `${lamp} on --surface`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it.each(THEMES)("seat colours stand out from a panel (3:1): %s", (name) => {
+    const t = THEME_TOKENS[name];
+    for (const seat of SEATS) {
+      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(3);
     }
   });
 
@@ -217,6 +233,15 @@ describe("theme tokens", () => {
 });
 
 describe("shell styles", () => {
+  it("keeps literal UI text at or above the 11px floor", () => {
+    const css = readStyles();
+    const sizes = [...css.matchAll(/font(?:-size)?:\s*(?:\d+(?:\.\d+)?\s+)?(\d+(?:\.\d+)?)px\b/g)]
+      .map((match) => Number(match[1]))
+      .filter((size) => size < 11);
+
+    expect(sizes).toEqual([]);
+  });
+
   // The header's usage meter is on every page, so its rules live in hud.css, not in a page's own
   // stylesheet (#839's split once moved them into ConfigYaml.css, which only Setup loads).
   it("styles the header usage meter from hud.css", () => {
