@@ -254,6 +254,32 @@ describeRendered("FLIGHT page in a browser", () => {
           undefined,
         ),
       ).toBe(reason);
+      await page.evaluate(
+        async () => new Promise((resolve) => window.setTimeout(resolve, 300)),
+        undefined,
+      );
+      expect(
+        await page.evaluate(
+          () => document.querySelector("button[aria-label='Less waiting reason']") !== null,
+          undefined,
+        ),
+      ).toBe(true);
+      await page.evaluate(
+        () =>
+          (
+            document.querySelector("button[aria-label='Less waiting reason']") as HTMLButtonElement
+          ).click(),
+        undefined,
+      );
+      expect(
+        await page.evaluate(() => {
+          const text = document.querySelector(".wif-stuck-reason .expandable-text") as HTMLElement;
+          return {
+            overflows: text.scrollHeight > text.clientHeight,
+            hasMore: document.querySelector("button[aria-label='More waiting reason']") !== null,
+          };
+        }, undefined),
+      ).toEqual({ overflows: true, hasMore: true });
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

@@ -214,7 +214,7 @@ function WaitingReason({ text }: { text: string }) {
       window.removeEventListener("resize", measure);
     };
   }, []);
-  const hasMore = first !== reason || overflows;
+  const hasMore = open || first !== reason || overflows;
   return (
     <span className="wif-stuck-reason">
       <span ref={box}>
