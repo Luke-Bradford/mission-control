@@ -2456,6 +2456,8 @@ describe("local access", () => {
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
+            .replace("/previews/41/activity", "/previews/:pr/activity")
+            .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
