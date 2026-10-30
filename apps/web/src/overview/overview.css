@@ -264,7 +264,7 @@
 .overview-lane .num {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   color: var(--fg);
 }
 
