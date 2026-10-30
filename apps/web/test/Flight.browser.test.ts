@@ -288,18 +288,20 @@ describeRendered("FLIGHT page in a browser", () => {
   it(
     "gives every working-context heading link a 24px target",
     async () => {
-      const api = apiFor("one");
-      api["/api/flight/brief"] = {
-        session: "s1",
-        sections: [
-          {
-            section: "project",
-            title: "Project",
-            text: "Ship the accessibility target fix.",
-            updatedAt: NOW - MIN,
-            updatedBy: "flight-1",
-          },
-        ],
+      const api = {
+        ...apiFor("one"),
+        "/api/flight/brief": {
+          session: "s1",
+          sections: [
+            {
+              section: "project",
+              title: "Project",
+              text: "Ship the accessibility target fix.",
+              updatedAt: NOW - MIN,
+              updatedBy: "flight-1",
+            },
+          ],
+        },
       };
       const page = await renderAt({
         page: "test/flightBrowser.html",
