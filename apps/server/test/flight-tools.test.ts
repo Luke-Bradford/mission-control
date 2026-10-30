@@ -648,6 +648,35 @@ describe("resume_seat", () => {
     expect(result.text).not.toContain("nothing was changed");
   });
 
+  it("puts the crew pause back when a failed resume ended the run", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+    resumeImpl = async () => {
+      const run = store.run("r-guido");
+      if (run !== null) store.upsertRun({ ...run, endedAt: NOW, status: "failed" });
+    };
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
+  });
+
+  it("leaves the operator's stop alone when the seat is busy", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    store.setSeatSession({ ...row("guido-1", "r-guido"), state: "stopped", reason: "operator" });
+    busyNow = [{ seatId: "guido-1", state: "starting" } as SeatBusy];
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
+    expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
   it.each(["budget", "account", "away quota unknown", "away quota reserve"] as const)(
     "refuses a %s limit before resuming",
     async (limit) => {

@@ -3103,21 +3103,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           )
             return fail(AWAY_QUOTA_REFUSED);
         }
-        if (run !== null && run.endedAt === null && row !== null && row.state === "stopped")
-          store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
-        const afterStopClear = store.seatSession(a.seat);
-        if (run !== null && run.endedAt === null && held(run)) {
-          if (row?.state === "stopped") store.setSeatSession(row);
-          return fail("Run is held.");
-        }
         if (
           run === null ||
           run.endedAt !== null ||
-          afterStopClear === null ||
+          row === null ||
           deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
-          afterStopClear.state === "running"
+          row.state === "running"
         )
           return fail(`${a.seat} is neither stopped, paused nor waiting to resume.`);
+        if (row.state === "stopped")
+          store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
+        if (held(run)) {
+          if (row.state === "stopped") store.setSeatSession(row);
+          return fail("Run is held.");
+        }
         const pause = pausedSeat(store, a.seat);
         if (pause !== null) writeCrewPause(store, pauseWithout(pause, a.seat, "FLIGHT"), at);
         try {
@@ -3128,10 +3127,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const after = store.seatSession(a.seat);
         const live = after?.state === "running" || deps.supervisor.sessionAlive?.(a.seat) === true;
         if (!live) {
-          if (store.run(run.id)?.endedAt === null) {
-            if (pause !== null) writeCrewPause(store, pause, at);
-            if (row?.state === "stopped") store.setSeatSession(row);
-          }
+          if (pause !== null) writeCrewPause(store, pause, at);
+          if (store.run(run.id)?.endedAt === null && row.state === "stopped")
+            store.setSeatSession(row);
           const outcome =
             store.run(run.id)?.endedAt !== null
               ? "ended after the failed resume"
