@@ -145,6 +145,7 @@ let updaterVersion: VersionInfo;
 let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
+let dropUpdateResponse: boolean;
 const stubUpdater = (): Updater => ({
   changes: async () => null,
   version: async () => {
@@ -316,6 +317,7 @@ beforeEach(async () => {
   updaterResult = async () => ({ upToDate: true });
   updaterCalls = [];
   updaterCheckError = null;
+  dropUpdateResponse = false;
   clock = NOW;
   logs = [];
   projectFields = [{ name: "Status", options: [{ name: "Todo" }] }];
@@ -407,6 +409,11 @@ beforeEach(async () => {
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
     updater: stubUpdater(),
+  });
+  app.addHook("onSend", async (req) => {
+    if (dropUpdateResponse && req.url === "/api/update") {
+      throw new Error("client disconnected");
+    }
   });
   // The /api plugin registers its routes at ready(), so this sees every one of them.
   apiRoutes = [];
@@ -6573,11 +6580,12 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
-  it("answers 202 { restarting }, and asks for the restart only after the response", async () => {
+  it("restarts a successful Update when the client disconnects before its response", async () => {
     updaterResult = async () => ({ restarting: true });
-    const r = await post("/api/update");
-    expect(r.statusCode).toBe(202);
-    expect(r.json()).toEqual({ restarting: true });
+    dropUpdateResponse = true;
+
+    await post("/api/update");
+
     expect(updaterCalls).toEqual(["update", "restart"]);
   });
 

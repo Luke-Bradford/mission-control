@@ -8,7 +8,8 @@
  * `dist`, which is swapped in only once the build has succeeded. Any failure leaves the old `dist`
  * serving and the hub running. Counting from the start SHA, not HEAD, means an update that pulled
  * and then failed is not "up to date": the next one skips the pull (unless main has moved again)
- * and installs, builds, swaps and restarts. On success the route answers 202 and then calls `restart()`, which hands over to
+ * and installs, builds, swaps and restarts. On success the route starts `restart()` before it
+ * answers 202, so a disconnected caller cannot leave the old hub running. `restart()` hands over to
  * the hub's shutdown (crew first, then exit 0); launchd's KeepAlive starts it again.
  *
  * When every path changed since the running code is under `apps/web/` or `docs/`, nothing a seat
@@ -45,8 +46,10 @@ export const VERSION_CHECK_MS = 10 * 60_000;
 export const VERSION_CHECK_FLOOR_MS = 15_000;
 /** Every command Update runs (its checks included) is cut off after this. */
 export const UPDATE_STEP_TIMEOUT_MS = 5 * 60_000;
-/** After the 202, how long before the hub shuts down (the response is on its way first). */
+/** After restart is scheduled, how long before the hub shuts down. */
 export const UPDATE_EXIT_DELAY_MS = 500;
+/** If the shutdown did not happen this long after it was due, allow another Update attempt. */
+export const UPDATE_RESTART_GRACE_MS = 5_000;
 /** Beside the database: `{MC_DB dir}/update.log`, rewritten by each update, mode 0600. */
 export const UPDATE_LOG = "update.log";
 /** The web build's output beside the live `dist`, through `MC_WEB_OUTDIR` (apps/web/vite.config.ts). */
@@ -328,7 +331,7 @@ export interface Updater {
    * the last fetch; null when they cannot be read.
    */
   changes(): Promise<HeldRange | null>;
-  /** Schedules the exit, UPDATE_EXIT_DELAY_MS on. Called once the 202 has been sent. */
+  /** Schedules the exit; the route calls it once the successful update flow has completed. */
   restart(): void;
 }
 
@@ -489,6 +492,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
 
   /** Set from the start of an update until it fails; after a success the hub is going down. */
   let updating = false;
+  let restartRecovery: NodeJS.Timeout | null = null;
   let fetchTriedAt: number | null = null;
   let checkedAt: number | null = null;
   /** Whether the last fetch attempt succeeded; null before any. */
@@ -877,6 +881,15 @@ export function createUpdater(deps: UpdaterDeps): Updater {
 
     restart() {
       setTimeout(deps.exit, UPDATE_EXIT_DELAY_MS);
+      if (restartRecovery !== null) return;
+      restartRecovery = setTimeout(() => {
+        restartRecovery = null;
+        updating = false;
+        void log(
+          `restart did not stop the hub after ${UPDATE_EXIT_DELAY_MS + UPDATE_RESTART_GRACE_MS}ms; clearing update state\n`,
+        );
+      }, UPDATE_EXIT_DELAY_MS + UPDATE_RESTART_GRACE_MS);
+      restartRecovery.unref();
     },
   };
 }
