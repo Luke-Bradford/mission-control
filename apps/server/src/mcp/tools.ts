@@ -1409,6 +1409,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       [];
     if (!crew.includes(ctx.seatId))
       return { text: "This seat is no longer in the crew.", isError: true };
+    const flightCall = isFlight(ctx.seatId);
+    if (flightCall) {
+      const tripped = runawayTrip(store);
+      if (tripped !== null) return { text: runawayRefusedText(tripped.reason), isError: true };
+    }
     try {
       reactComms(
         store,
@@ -1420,6 +1425,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       );
       bus.emit("agents");
       bus.emit("attention");
+      if (flightCall) noteFlightWrite(store, bus, now(), MC_TOOL_NAMES.commsReact, parsed.data);
       return { text: "Reaction recorded." };
     } catch (e) {
       return { text: e instanceof Error ? e.message : "Comms reaction refused.", isError: true };
