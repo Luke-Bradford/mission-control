@@ -775,13 +775,13 @@ button.f[aria-pressed="true"] {
 }
 
 /* The side panel is 320px at its narrowest (1200-1439 with FLIGHT's dock). Under the six
-   columns' minimum (32 + 84 + 44 + 52 + 44 + 56 + 5 × 6 = 342px) a run row drops Started and
+   columns' minimum (32 + 84 + 44 + 52 + 44 + 56 + 5 × 4 = 332px) a run row drops Started and
    Tokens, as it does at 390. */
 #loopBody {
   container: runs / inline-size;
 }
 
-@container runs (width < 342px) {
+@container runs (width < 332px) {
   .runrow {
     grid-template-columns: 32px 84px minmax(0, 1fr) 56px;
   }
