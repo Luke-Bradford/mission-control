@@ -204,7 +204,10 @@ function WaitingReason({ text }: { text: string }) {
   useLayoutEffect(() => {
     const el = box.current?.querySelector<HTMLElement>(".expandable-text");
     if (!el) return;
-    const measure = () => setOverflows(el.scrollHeight > el.clientHeight);
+    // The open element fills its content, so it cannot report whether the closed clamp overflows.
+    const measure = () => {
+      if (!open) setOverflows(el.scrollHeight > el.clientHeight);
+    };
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(el);
     window.addEventListener("resize", measure);
@@ -217,7 +220,7 @@ function WaitingReason({ text }: { text: string }) {
       window.removeEventListener("resize", measure);
       window.cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [open]);
   const hasMore = open || first !== reason || overflows;
   return (
     <span className="wif-stuck-reason">

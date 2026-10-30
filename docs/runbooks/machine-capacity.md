@@ -15,5 +15,7 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a
 `warning` string while admission is held. To test safely, temporarily set a floor above the
-current reading, reload the hub configuration, and attempt a start; remove the override after the
-check. The warning and start admission clear automatically after sustained headroom.
+current reading, reload the hub configuration, and attempt a start. The start is held with the
+measured reason. Send `force: true` only to confirm that an operator override can start it; the
+override is recorded in the decision log. Remove the threshold override after the check. The
+warning and start admission clear automatically after sustained headroom.
