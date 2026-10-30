@@ -24,8 +24,6 @@ import {
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
-  READONLY_BUILTINS,
-  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -435,51 +433,12 @@ describe("startWatch", () => {
     expect(start.cwd).toBe(wt);
     const argv = start.argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
-    expect(argv[argv.indexOf("--tools") + 1]).toBe(READONLY_BUILTINS.join(","));
-    expect(
-      argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
-    ).toEqual([
-      ...READONLY_TOOLS,
-      "mcp__mc__log_decision",
-      "mcp__mc__read_ticket",
-      "mcp__mc__answer_question",
-      "mcp__mc__start_seat",
-      "mcp__mc__message_seat",
-      "mcp__mc__comms_pin",
-      "mcp__mc__flight_state",
-      "mcp__mc__screenshot_hud",
-      "mcp__mc__promote",
-      "mcp__mc__end_run",
-      "mcp__mc__accept_ruling",
-      "mcp__mc__merge_pr",
-      "mcp__mc__settle_park",
-      "mcp__mc__hold_pr",
-      "mcp__mc__rerun_ci",
-      "mcp__mc__edit_card",
-      "mcp__mc__dismiss_item",
-      "mcp__mc__sync_main",
-      "mcp__mc__create_ticket",
-      "mcp__mc__comment_ticket",
-      "mcp__mc__close_ticket",
-      "mcp__mc__add_controller_check",
-      "mcp__mc__brief_item",
-      "mcp__mc__read_pr",
-      "mcp__mc__read_ci_log",
-      "mcp__mc__gh_read",
-      "mcp__mc__list_tickets",
-      "mcp__mc__update_brief",
-      "mcp__mc__draft_reply",
-      "mcp__mc__track",
-      "mcp__mc__untrack",
-      "mcp__mc__ledger",
-      "mcp__mc__remember",
-      "mcp__mc__forget",
-      "mcp__mc__recall",
-      "mcp__mc__hold_item",
-      "mcp__mc__release_hold",
-      "mcp__mc__edit_issue",
-      "mcp__mc__set_fields",
-    ]);
+    expect(argv).not.toContain("--tools");
+    expect(argv).not.toContain("--allowedTools");
+    expect(argv).not.toContain("--disallowedTools");
+    expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}").sandbox).toEqual({
+      enabled: false,
+    });
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 
