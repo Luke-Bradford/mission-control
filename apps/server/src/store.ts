@@ -1006,9 +1006,9 @@ export class Store {
     // Store has many small methods. Cache every SQL text here so callers cannot accidentally
     // prepare the same statement on each HUD build.
     this.db = new Proxy(this.rawDb, {
-      get: (target, property, receiver) => {
+      get: (target, property) => {
         if (property === "prepare") return (sql: string) => this.statement(sql);
-        const value = Reflect.get(target, property, receiver);
+        const value = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
