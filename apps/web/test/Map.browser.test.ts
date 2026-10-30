@@ -13,7 +13,7 @@ const SMALLEST_PX = 11;
 
 describeRendered("Map in a browser", () => {
   it.each(WIDTHS)(
-    "keeps every Map text at the smallest type token or above, and shows tile focus, at %i in light and dark",
+    "keeps every Map text at the smallest type token or above, marks a conflict, and shows tile focus, at %i in light and dark",
     async (width) => {
       mkdirSync(SHOTS, { recursive: true });
       for (const colorScheme of ["light", "dark"] as const) {
@@ -24,27 +24,43 @@ describeRendered("Map in a browser", () => {
           colorScheme,
         });
         await page.boxes(".map-treemap-tile");
-        const lenses = ["Changes", "Impact", "History", "Ownership", "Review", "Conflicts"];
-        for (const lens of lenses) {
-          await page.evaluate((name) => {
-            [...document.querySelectorAll("button")]
-              .find((b) => b.textContent?.trim() === name)
-              ?.click();
-          }, lens);
-          const small = await page.evaluate((min) => {
-            const out: string[] = [];
-            for (const el of document.querySelectorAll(
-              ".map-lens *, .map-timeline *, .map-treemap *",
-            )) {
-              if (!el.textContent?.trim()) continue;
-              if (parseFloat(getComputedStyle(el).fontSize) < min)
-                out.push(el.className.toString());
-            }
-            return out;
-          }, SMALLEST_PX);
-          expect(small, `${lens} ${colorScheme} ${width}`).toEqual([]);
-          await page.screenshot(join(SHOTS, `map-${lens}-${colorScheme}-${width}.png`));
-        }
+        const small = await page.evaluate((min) => {
+          const out: string[] = [];
+          for (const el of document.querySelectorAll(
+            ".map-timeline *, .map-treemap *, .map-changes-key *, .map-seats *",
+          )) {
+            if (!el.textContent?.trim()) continue;
+            if (parseFloat(getComputedStyle(el).fontSize) < min) out.push(el.className.toString());
+          }
+          return out;
+        }, SMALLEST_PX);
+        expect(small, `${colorScheme} ${width}`).toEqual([]);
+        // the conflicting tile is outlined flat, says "conflict" inside its own box, and its seat
+        // row carries the count; the key names the pair
+        const conflict = await page.evaluate(() => {
+          const tile = document.querySelector<HTMLElement>(".map-treemap-tile[data-conflict]");
+          const badge = tile?.querySelector<HTMLElement>(".map-treemap-badge");
+          if (!tile || !badge) return null;
+          const t = tile.getBoundingClientRect();
+          const b = badge.getBoundingClientRect();
+          return {
+            inside:
+              b.left >= t.left && b.right <= t.right && b.top >= t.top && b.bottom <= t.bottom,
+            outline: getComputedStyle(tile).outlineStyle,
+            shadow: getComputedStyle(tile).boxShadow,
+            opacity: getComputedStyle(tile).opacity,
+            seat: document.querySelector(".map-seat-conflict")?.textContent ?? "",
+            key: document.querySelector(".map-changes-key")?.textContent ?? "",
+          };
+        }, null);
+        expect(conflict, `${colorScheme} ${width}`).not.toBeNull();
+        expect(conflict?.inside).toBe(true);
+        expect(conflict?.outline).toBe("solid");
+        expect(conflict?.shadow).toBe("none");
+        expect(conflict?.opacity).toBe("1");
+        expect(conflict?.seat).toBe("1 conflict");
+        expect(conflict?.key).toContain("1 file conflicts between open branches");
+        await page.screenshot(join(SHOTS, `map-changes-${colorScheme}-${width}.png`));
         const outline = await page.evaluate((selector) => {
           const tile = document.querySelector(selector) as HTMLElement;
           tile.focus();

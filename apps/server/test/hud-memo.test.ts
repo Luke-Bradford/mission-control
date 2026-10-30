@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TestLockState } from "@mc/core";
+import type { Run, TestLockState } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud.ts";
@@ -43,7 +43,170 @@ afterEach(() => {
 
 const noVersion = () => null;
 
+const storedRun = (over: Partial<Run>): Run => ({
+  id: "run",
+  agentId: "seat",
+  repoId: "shop-app",
+  seq: 1,
+  startedAt: NOW - 1_000,
+  endedAt: NOW - 500,
+  status: "ok",
+  sessionId: null,
+  model: null,
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
 describe("the crew and Needs-you memo", () => {
+  it("shows an open held run even when a newer run exists", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 1,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            { id: "seat-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+          ],
+        },
+      ],
+    };
+    store.upsertRun(
+      storedRun({
+        id: "held",
+        agentId: "seat-1",
+        startedAt: NOW - 10_000,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.upsertRun(storedRun({ id: "newer", agentId: "seat-1", startedAt: NOW - 1_000 }));
+    store.setSeatSession({
+      seatId: "seat-1",
+      runId: "held",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("held");
+    store.upsertRun(
+      storedRun({
+        id: "held",
+        agentId: "seat-1",
+        startedAt: NOW - 10_000,
+        endedAt: NOW - 2_000,
+        status: "ok",
+      }),
+    );
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("newer");
+  });
+
+  it("rejects a held run owned by another seat", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 2,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            { id: "seat-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+            { id: "seat-2", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+          ],
+        },
+      ],
+    };
+    store.upsertRun(storedRun({ id: "own", agentId: "seat-1" }));
+    store.upsertRun(
+      storedRun({ id: "other", agentId: "seat-2", endedAt: null, status: "running" }),
+    );
+    store.setSeatSession({
+      seatId: "seat-1",
+      runId: "other",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("own");
+  });
+
+  it("reads ten seats with fifty runs each through the batched HUD tables", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 10,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: Array.from({ length: 10 }, (_, seat) => ({
+            id: `seat-${seat}`,
+            role: "GUIDO",
+            accountId: "claude-main",
+            model: "sonnet",
+            area: [],
+          })),
+        },
+      ],
+    };
+    for (let seat = 0; seat < 10; seat++) {
+      store.upsertRun(
+        storedRun({
+          id: `held-${seat}`,
+          agentId: `seat-${seat}`,
+          startedAt: NOW - 100_000,
+          endedAt: null,
+          status: "running",
+        }),
+      );
+      store.setSeatSession({
+        seatId: `seat-${seat}`,
+        runId: `held-${seat}`,
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      for (let n = 0; n < 51; n++)
+        store.upsertRun(storedRun({ id: `run-${seat}-${n}`, agentId: `seat-${seat}`, seq: n }));
+    }
+    const runs = vi.spyOn(store, "runs");
+    const singleRun = vi.spyOn(store, "run");
+    const batchedRuns = vi.spyOn(store, "runsForAgents");
+    const started = performance.now();
+    crew(config, store, NOW, undefined, noVersion);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(batchedRuns).toHaveBeenCalledTimes(1);
+    expect(runs).not.toHaveBeenCalled();
+    expect(singleRun).not.toHaveBeenCalled();
+    const warm = performance.now();
+    crew(config, store, NOW + 1, undefined, noVersion);
+    expect(performance.now() - warm).toBeLessThan(20);
+    expect(batchedRuns).toHaveBeenCalledTimes(1);
+  });
   it("builds the crew once for callers asking in the same second at the same version", () => {
     const reads = vi.spyOn(store, "status");
     crew(config, store, NOW, undefined, noVersion);

@@ -98,6 +98,55 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
 });
 
 describe("Store", () => {
+  it("batches recent runs by agent without dropping empty agents", () => {
+    store.upsertRun(run({ id: "a-old", agentId: "a", seq: 1, startedAt: 1 }));
+    store.upsertRun(run({ id: "a-new", agentId: "a", seq: 2, startedAt: 2 }));
+    store.upsertRun(run({ id: "b", agentId: "b", seq: 1, startedAt: 3 }));
+    const rows = store.runsForAgents(["a", "b", "empty"], 1);
+    expect(rows.get("a")).toEqual(store.runs("a", 1));
+    expect(rows.get("b")).toEqual(store.runs("b", 1));
+    expect(rows.get("empty")).toEqual([]);
+  });
+
+  it("partitions batched pull requests and reuses a prepared statement", () => {
+    const pr = (repoId: string, number: number) => ({
+      repoId,
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: "branch",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: null,
+      headSha: "sha",
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    store.upsertPullRequests("one", [pr("one", 1)], 1);
+    store.upsertPullRequests("two", [pr("two", 2)], 1);
+    const batches = store.pullRequestsForRepos(["one", "two"]);
+    expect(batches.get("one")).toEqual(store.pullRequests("one"));
+    expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
+    const prepare = vi.spyOn(raw, "prepare");
+    store.runs("prepared", 1);
+    store.runs("prepared", 1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
     const s = new Store(":memory:");
     s.mapCachePut("tree", "checkout", "a", "1", true);
@@ -2034,6 +2083,13 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")).toEqual(
       seat({ state: "parked", reason: "rate limit", updatedAt: 9 }),
     );
+  });
+
+  it("batches named seat sessions", () => {
+    store.setSeatSession(seat());
+    const rows = store.seatSessions(["guido", "missing"]);
+    expect(rows.get("guido")).toEqual(store.seatSession("guido"));
+    expect(rows.has("missing")).toBe(false);
   });
 
   it("keeps null run, session, reason and worktree", () => {

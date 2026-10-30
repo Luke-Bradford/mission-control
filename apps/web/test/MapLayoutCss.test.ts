@@ -21,17 +21,7 @@ const contrast = (a: string, b: string): number => {
   const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (light + 0.05) / (dark + 0.05);
 };
-const hudCss = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
-/** A palette token's hex: the seats' are the HUD's (hud.css), FLIGHT's tone on the void is the map's. */
-const token = (name: string): string => {
-  const colour = new RegExp(`${name}: (#[0-9a-f]{6})`, "i").exec(
-    name.startsWith("--seat-") && name !== "--seat-flight" ? hudCss : css,
-  )?.[1];
-  if (!colour) throw new Error(`Missing ${name}`);
-  return colour;
-};
-
-it("reserves auto rows for the lens toolbar and deck around the flexible map row", () => {
+it("reserves auto rows for the key bar and deck around the flexible map row", () => {
   expect(rule(String.raw`\.map-body`)).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
 });
 
@@ -48,97 +38,32 @@ const listed = (selector: string) => {
   return "";
 };
 
-it("widens only analytical lens rails to the v3 table proportion", () => {
+it("keeps the Map's rail one width, with no lens rails", () => {
   expect(rule(String.raw`\.map-main`)).toContain("300px");
-  for (const lens of ["impact", "history", "ownership", "review", "conflicts"])
-    expect(listed(`.map-main-${lens}`), lens).toContain(
-      "grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px)",
-    );
+  expect(css).not.toMatch(/\.map-main-/);
 });
 
-it("draws focused direct imports with the v3 dashed relationship outline", () => {
-  expect(rule(String.raw`\.map-treemap-impact \.map-treemap-tile\[data-direct-import\]`)).toContain(
-    "dashed",
-  );
+it("draws a conflicting tile with a flat outline, no overlay, glow or fade", () => {
+  const body = listed(".map-treemap-tile[data-conflict]");
+  expect(body).toContain("outline: 2px solid var(--rem)");
+  expect(body).not.toMatch(/opacity|shadow|gradient/);
+  expect(css).not.toContain("[data-conflict]::before");
+  expect(css).not.toContain("map-treemap-conflicts");
 });
 
-it("keeps analytical keys in the toolbar without changing the Changes stage layout", () => {
-  expect(rule(String.raw`\.map-stage-wrap`)).not.toContain("grid-template-rows");
-  expect(rule(String.raw`\.map-analytical-key`)).toContain("display: flex");
+it("keeps the lens panels' rules out of the Map's stylesheet", () => {
+  for (const lensRule of [".map-lens", ".map-severity", ".map-pr", ".map-analytical-key"])
+    expect(css, lensRule).not.toContain(lensRule);
 });
 
-it("keeps every analytical scale swatch opaque against either theme's page background", () => {
-  for (const step of [1, 2, 3, 4]) {
-    expect(rule(`\\.map-key-steps \\.map-key-swatch-${step}`)).toContain("opacity: 1");
-  }
+it("keeps the Changes key swatches in the seat colour, four steps", () => {
+  for (const step of [1, 2, 3, 4])
+    expect(rule(`\\.map-key-steps-changes \\.map-key-swatch-${step}`)).toContain("opacity");
 });
 
-it("lets the step swatch rules outrank the generic key-icon background", () => {
-  for (const step of [1, 2, 3, 4]) {
-    const body = rule(`\\.map-key-steps \\.map-key-swatch-${step}`);
-    expect(body).toContain(`background: var(--map-key-swatch-${step})`);
-  }
-  // `.map-legend i` / `.map-analytical-key i` is (0,1,1); a bare `.map-key-swatch-N` is (0,1,0) and loses.
-  expect(css).not.toMatch(/^\.map-key-swatch-\d \{/m);
-});
-
-it("scopes the Ownership, Review and Conflicts key swatches under the key so the generic icon rule cannot win", () => {
-  for (const name of [
-    "map-key-area",
-    "map-key-hatch",
-    "map-key-conflict",
-    "map-severity-critical",
-  ]) {
-    expect(css, name).toMatch(new RegExp(`^\\.map-analytical-key \\.${name}[,{ ]`, "m"));
-    expect(css, name).not.toMatch(new RegExp(`^\\.${name} \\{`, "m"));
-  }
-  expect(rule(String.raw`\.map-analytical-key \.map-key-area`)).toContain("var(--map-key-area)");
-});
-
-it("gives the Ownership hatch, the Review dot and the conflict overlay their rules", () => {
-  expect(listed(".map-treemap-ownership .map-treemap-tile[data-hard-rule]")).toContain(
-    "repeating-linear-gradient",
-  );
-  expect(listed(".map-treemap-review .map-treemap-tile[data-severity]::after")).toContain(
-    "border-radius",
-  );
-  expect(listed(".map-treemap-review .map-treemap-tile[data-findings]::after")).toContain(
-    "attr(data-findings)",
-  );
-  expect(listed(".map-treemap-conflicts .map-treemap-tile[data-conflict]::before")).toContain(
-    "position: absolute",
-  );
-  // the label sits above the overlay
-  expect(listed(".map-treemap-conflicts .map-treemap-tile > .map-treemap-label")).toContain(
-    "position: relative",
-  );
-  expect(listed(".map-analytical-key .map-severity-important")).toContain("var(--warn-mark)");
-  expect(listed(".map-lens .map-severity-critical")).toContain("var(--crit)");
-});
-
-it("gives each key's four step swatches four distinct colours", () => {
-  const seat1 = token("--seat-1");
-  for (const block of [String.raw`\.map-key-steps`, String.raw`\.map-key-steps-impact`]) {
-    const colours = [1, 2, 3, 4].map((step) => {
-      const value = new RegExp(`--map-key-swatch-${step}: ([^;]+);`).exec(rule(block))?.[1];
-      if (!value) throw new Error(`Missing step ${step} in ${block}`);
-      return value === "var(--seat-1)" ? seat1 : value;
-    });
-    expect(new Set(colours).size, block).toBe(4);
-  }
-});
-
-it("keeps each Impact seat chip's custom colour above the shared key-icon rule", () => {
-  expect(rule(String.raw`\.map-key-seat-chip i`)).toContain("background: var(--map-key-seat)");
-  expect(css.indexOf(".map-key-seat-chip i")).toBeGreaterThan(css.indexOf(".map-analytical-key i"));
-});
-
-it("keeps every seat and analytical-key swatch at non-text contrast in its theme", () => {
+it("keeps every seat colour at non-text contrast in its theme", () => {
   const dark = "#070a0e";
   const light = "#f3f5f8";
-  const keySwatches = [...css.matchAll(/--map-key-swatch-\d: (#[0-9a-f]{6})/gi)].map(
-    (match) => match[1] as string,
-  );
   for (const name of [
     "--seat-1",
     "--seat-2",
@@ -150,18 +75,5 @@ it("keeps every seat and analytical-key swatch at non-text contrast in its theme
   ] as const) {
     expect(contrast(THEME_TOKENS.dark[name], dark), `${name} dark`).toBeGreaterThanOrEqual(3);
     expect(contrast(THEME_TOKENS.light[name], light), `${name} light`).toBeGreaterThanOrEqual(3);
-  }
-  expect(contrast(token("--seat-flight"), dark), "--seat-flight dark").toBeGreaterThanOrEqual(3);
-  expect(contrast(token("--seat-flight"), light), "--seat-flight light").toBeGreaterThanOrEqual(3);
-  expect(keySwatches).toHaveLength(15);
-  for (const colour of keySwatches.slice(0, 4)) {
-    expect(contrast(colour, dark), colour).toBeGreaterThanOrEqual(3);
-  }
-  for (const colour of keySwatches.slice(4, 7)) {
-    expect(contrast(colour, dark), colour).toBeGreaterThanOrEqual(3);
-    expect(contrast(colour, light), colour).toBeGreaterThanOrEqual(3);
-  }
-  for (const colour of keySwatches.slice(7)) {
-    expect(contrast(colour, light), colour).toBeGreaterThanOrEqual(3);
   }
 });

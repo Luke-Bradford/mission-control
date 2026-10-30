@@ -39,6 +39,14 @@ snapshot.seats = [
     },
   },
 ];
+// the seat's contract.ts is also changed on another open branch
+snapshot.conflicts = [
+  {
+    file: "src/contract.ts",
+    branches: ["feature/7-empty-input", "feature/9-other"],
+    shas: ["a".repeat(40), "b".repeat(40)],
+  },
+];
 // The shell App wraps the Map in: full width, no dock.
 createRoot(root).render(
   <div className="app">

@@ -44,7 +44,7 @@ it("finds a file and shows each seat that touched it: changed with its +/−, re
     "GUIDO-2changed +30 −4 · read",
     "RETRO-1read",
   ]);
-  expect(within(card).getByRole("button", { name: "Show on map" })).toBeTruthy();
+  expect(within(card).queryByRole("button", { name: "Show on map" })).toBeNull();
   expect(screen.getByRole("group", { name: "Changes treemap" })).toBeTruthy();
 });
 it("loads live data, resyncs a gap and reconnect, and closes its subscription", async () => {
@@ -181,22 +181,10 @@ it("finds and focuses individual files in a large tree", async () => {
   fireEvent.change(search, { target: { value: "file-2000" } });
   fireEvent.click(screen.getByRole("button", { name: "src/file-2000.ts" }));
   expect(screen.getByRole("heading", { name: "src/file-2000.ts" })).toBeTruthy();
-  expect(
-    document
-      .querySelector(".map-treemap-tile[title='src/file-2000.ts']")
-      ?.hasAttribute("data-focused"),
-  ).toBe(true);
   fireEvent.change(search, { target: { value: "settings.ts" } });
   fireEvent.keyDown(search, { key: "Enter" });
   expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
-  expect(
-    document.querySelector(".map-treemap-tile[title='settings.ts']")?.hasAttribute("data-focused"),
-  ).toBe(true);
-  expect(
-    document
-      .querySelector(".map-treemap-tile[title='src/file-2000.ts']")
-      ?.hasAttribute("data-focused"),
-  ).toBe(false);
+  expect(screen.queryByRole("heading", { name: "src/file-2000.ts" })).toBeNull();
 }, 20_000);
 
 it("throttles delta-driven refetches to one per 2 s, never holding the first load", async () => {
@@ -277,4 +265,48 @@ it("ignores an old connection's in-flight snapshot after a reconnect", async () 
   await waitFor(() => expect(receive).toHaveBeenCalled());
   expect(receive.mock.calls.map(([s]) => s.seq)).toEqual([5]);
   live.stop();
+});
+
+it("shows Changes and the timeline with no lens tabs, and badges conflicting files and seats", () => {
+  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  snapshot.conflicts = [
+    {
+      file: "src/main.ts",
+      branches: ["feature/7-empty-input", "feature/9-other"],
+      shas: ["a".repeat(40), "b".repeat(40)],
+    },
+  ];
+  render(<CrewMapView snapshot={snapshot} />);
+  for (const name of ["Impact", "History", "Ownership", "Review", "Conflicts"])
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  expect(screen.getByRole("group", { name: "Changes treemap" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Session timeline" })).toBeTruthy();
+
+  const tile = document.querySelector<HTMLElement>(".map-treemap-tile[title='src/main.ts']");
+  expect(tile?.hasAttribute("data-conflict")).toBe(true);
+  expect(tile?.textContent).toContain("conflict");
+  // the seat keeps its colour at full strength under the badge
+  expect(tile?.style.getPropertyValue("--tile-colour")).toBe("var(--seat-1)");
+  expect(tile?.getAttribute("aria-description")).toContain(
+    "conflicts between feature/7-empty-input, feature/9-other",
+  );
+  const seat = screen.getByRole("button", { name: /^GUIDO-1/ });
+  expect(seat.textContent).toContain("1 conflict");
+  expect(seat.getAttribute("aria-label")).toContain(", 1 file in conflict");
+  expect(screen.getByRole("note", { name: "Changes colour key" }).textContent).toContain(
+    "1 file conflicts between open branches · 1 branch pair",
+  );
+
+  fireEvent.click(tile as HTMLElement);
+  const detail = screen.getByRole("complementary", { name: "Selection detail" });
+  expect(detail.textContent).toContain("feature/7-empty-input");
+  expect(detail.textContent).toContain("feature/9-other");
+});
+
+it("shows no conflict badge, and no conflict line in the key, when nothing conflicts", () => {
+  render(<CrewMapView snapshot={structuredClone(mapSnapshotFixture)} />);
+  expect(screen.getByRole("button", { name: /^GUIDO-1/ }).textContent).not.toContain("conflict");
+  expect(screen.getByRole("note", { name: "Changes colour key" }).textContent).not.toMatch(
+    /conflict/i,
+  );
 });

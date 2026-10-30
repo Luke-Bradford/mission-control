@@ -11,6 +11,8 @@ import {
   type LimitRow,
   LOCK_FREE_TEXT,
   LOCK_WAIT_MS,
+  type MapSnapshot,
+  mapSnapshotFixture,
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
@@ -1436,6 +1438,57 @@ const PREVIEW: RepoPreview = {
 };
 
 describe("Setup › Repos & seats cards", () => {
+  it("a crew repo card opens an Ownership table with area globs and hard-rule files", async () => {
+    const value: MapSnapshot = structuredClone(mapSnapshotFixture);
+    value.repoId = "shop-app";
+    value.tree = [
+      { path: "apps/web/a.ts", lines: 10 },
+      { path: "CLAUDE.md", lines: 4 },
+    ];
+    value.rules = { areas: { "area:web": ["apps/web/**"] }, hardRules: ["CLAUDE.md"] };
+    value.seats[0] = {
+      ...value.seats[0],
+      scope: { read: [], modified: [{ file: "CLAUDE.md", add: 2, rem: 0, source: "diff" }] },
+    };
+    load({
+      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
+      "/api/repos/shop-app/map": value,
+    });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    const summary = within(card).getByText("Ownership · areas and hard-rule files");
+    // nothing is read until the section is opened
+    expect(fetchFn.mock.calls.some(([path]) => String(path).endsWith("/map"))).toBe(false);
+    const details = summary.closest("details") as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(await within(card).findByText("Hard-rule files changed · 1 of 1")).toBeTruthy();
+    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/shop-app/map")).toBe(true);
+    expect(card.textContent).toContain("area:web");
+    expect(card.textContent).toContain("apps/web/**");
+    // an observed repo has no crew checkout to map
+    const observed = await screen.findByLabelText("site-builder");
+    expect(within(observed).queryByText("Ownership · areas and hard-rule files")).toBeNull();
+  });
+
+  it("says why Ownership cannot be shown when the map is unreadable", async () => {
+    load({
+      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
+      "/api/repos/shop-app/map": () => ({
+        status: 503,
+        body: { error: "map snapshot unavailable" },
+      }),
+    });
+    at("repos");
+    const card = await screen.findByLabelText("shop-app");
+    const details = within(card)
+      .getByText("Ownership · areas and hard-rule files")
+      .closest("details") as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(await within(card).findByText(/Could not read the map for shop-app/)).toBeTruthy();
+  });
+
   it("shows repo guidance as editable advice without a live board profile", async () => {
     load();
     at("repos");

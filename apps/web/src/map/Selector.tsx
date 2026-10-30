@@ -2,6 +2,7 @@ import type { MapSeat, MapSnapshot } from "@mc/core";
 import type { CSSProperties } from "react";
 import { seatName } from "../crew.ts";
 import { dur, plural } from "../fmt.ts";
+import { ConflictDetail } from "../lenses/lenses.tsx";
 import {
   type ChangeCount,
   changeTotals,
@@ -41,6 +42,14 @@ interface SeatNames {
   indices: Record<string, number>;
   names: Record<string, string>;
 }
+
+/** The distinct files in conflict on a branch the seat works on. */
+const seatConflicts = (snapshot: MapSnapshot, seat: MapSeat) =>
+  new Set(
+    snapshot.conflicts
+      .filter((conflict) => conflict.branches.some((branch) => seat.branches.includes(branch)))
+      .map((conflict) => conflict.file),
+  ).size;
 
 /** A seat's light colour, the one its light and path have on the stage. */
 const lightStyle = (seat: string, { indices }: SeatNames): CSSProperties =>
@@ -83,13 +92,14 @@ export function SeatSelector({
         const on = workLine(work(seat));
         const pressed = selected === seat.seat;
         const name = labelOf(seat.seat, props.names);
+        const conflicts = seatConflicts(props.snapshot, seat);
         return (
           <li key={seat.seat}>
             <button
               type="button"
               className="map-seat"
               aria-pressed={pressed}
-              aria-label={`${name}: ${on ?? "no ticket"}`}
+              aria-label={`${name}: ${on ?? "no ticket"}${conflicts ? `, ${plural(conflicts, "file")} in conflict` : ""}`}
               title={on ?? undefined}
               onClick={() => onSelect(pressed ? null : seat.seat)}
             >
@@ -98,6 +108,9 @@ export function SeatSelector({
                 {name}
               </span>
               <span className={on ? "map-seat-on" : "map-seat-on none"}>{on ?? "no ticket"}</span>
+              {conflicts > 0 && (
+                <span className="map-seat-conflict">{plural(conflicts, "conflict")}</span>
+              )}
             </button>
           </li>
         );
@@ -176,6 +189,12 @@ export function NodeDetail({
       ) : (
         <p className="map-note">No seat has changed or read this.</p>
       )}
+      <ConflictDetail
+        snapshot={props.snapshot}
+        file={path}
+        names={props.names}
+        indices={props.indices}
+      />
     </>
   );
 }

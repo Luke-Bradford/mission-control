@@ -1,5 +1,5 @@
-import type { PullRequestView } from "@mc/core";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { type MapSnapshot, mapSnapshotFixture, type PullRequestView } from "@mc/core";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { QaReadiness } from "../src/pages/QaReadiness.tsx";
@@ -289,5 +289,83 @@ describe("QaReadiness", () => {
       await screen.findByText("Could not load open pull requests: repositories down"),
     ).toBeTruthy();
     expect(screen.queryByText("No open pull requests to check.")).toBeNull();
+  });
+
+  describe("Impact", () => {
+    const MAP = "/api/repos/mission-control/map";
+    /** GUIDO-1 holds feature/987 and changed util.ts, which main.ts imports. */
+    const map = (): MapSnapshot => {
+      const value: MapSnapshot = structuredClone(mapSnapshotFixture);
+      value.repoId = "mission-control";
+      value.seats[0] = {
+        ...value.seats[0],
+        changedOn: ["feature/987"],
+        scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
+      };
+      return value;
+    };
+    const stub = (extra: Record<string, unknown> = {}) =>
+      stubFetch({
+        "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
+        "/api/repos/mission-control/prs": [pr()],
+        "/api/qa/ci-runs?days=90": { runs: [] },
+        "/api/qa/findings?days=90": { findings: [] },
+        "/api/crew": { rows: [] },
+        [MAP]: map(),
+        ...extra,
+      });
+    const requested = (fetch: ReturnType<typeof stubFetch>, path: string) =>
+      fetch.mock.calls.some(([input]) => input === path);
+
+    it("loads the repo map only after Show impact and names what the PR's changes reach", async () => {
+      const fetch = stub();
+      render(<QaReadiness />);
+      const show = await screen.findByRole("button", { name: "Show impact" });
+      expect(requested(fetch, MAP)).toBe(false);
+      fireEvent.click(show);
+      expect(await screen.findByText(/import them/)).toBeTruthy();
+      expect(requested(fetch, MAP)).toBe(true);
+      const lens = screen.getByRole("region", { name: "Impact lens" });
+      expect(lens.textContent).toContain("what this PR’s changes reach through imports");
+      expect(lens.textContent).toContain("depend on them");
+      expect(lens.textContent).toContain("1 file changed");
+    });
+
+    it("says so when no crew seat holds the PR's branch", async () => {
+      stub({ "/api/repos/mission-control/prs": [pr({ branch: "feature/nobody" })] });
+      render(<QaReadiness />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show impact" }));
+      expect(
+        await screen.findByText(
+          "No crew seat holds feature/nobody, so its changed files are not on the map.",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("notes a seat's other unmerged branches, by call sign", async () => {
+      const value = map();
+      value.seats[0] = { ...value.seats[0], changedOn: ["feature/987", "feature/988"] };
+      stub({ [MAP]: value });
+      render(<QaReadiness />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show impact" }));
+      expect(
+        await screen.findByText(
+          "GUIDO-1 has other unmerged branches; their changes are counted here too.",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("explains an unreadable map and leaves the verdict alone", async () => {
+      stub({ [MAP]: () => ({ status: 503, body: { error: "map snapshot unavailable" } }) });
+      render(<QaReadiness />);
+      expect(await screen.findByText("Ready")).toBeTruthy();
+      fireEvent.click(await screen.findByRole("button", { name: "Show impact" }));
+      await waitFor(() =>
+        expect(
+          screen.getByText(/Impact unavailable: the map for mission-control could not be read \(/),
+        ).toBeTruthy(),
+      );
+      expect(screen.getByText("Ready")).toBeTruthy();
+    });
   });
 });

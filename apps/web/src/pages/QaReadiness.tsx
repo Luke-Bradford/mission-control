@@ -13,6 +13,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
 import { checkedHead, markChecked, onCheckedChange, undoChecked } from "../qa/checked.ts";
+import { PrImpact } from "../qa/PrImpact.tsx";
 import { isOpenFinding, prVerdict } from "../qa/readiness.ts";
 import "./qa-readiness.css";
 
@@ -203,6 +204,9 @@ function ReadinessCard({
               <Empty text="Diff link unavailable." />
             )}
           </Evidence>
+          <Evidence title="Impact" className="qa-evidence-impact">
+            <PrImpact pr={pr} />
+          </Evidence>
           <Evidence title="Before and after">
             <Empty text="Before/after evidence is not captured yet." />
           </Evidence>
@@ -250,9 +254,17 @@ function ReadinessCard({
   );
 }
 
-function Evidence({ title, children }: { title: string; children: ReactNode }) {
+function Evidence({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <section className="qa-evidence-section">
+    <section className={className ? `qa-evidence-section ${className}` : "qa-evidence-section"}>
       <h3>{title}</h3>
       {children}
     </section>

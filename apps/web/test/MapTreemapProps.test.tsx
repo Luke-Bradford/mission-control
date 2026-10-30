@@ -45,3 +45,9 @@ it("hands the treemap the same props across a 5 s clock tick, so it is not drawn
     vi.useRealTimers();
   }
 });
+
+it("draws the treemap without a lens, focus or focus links", () => {
+  render(<CrewMapView snapshot={structuredClone(mapSnapshotFixture)} />);
+  const props = seen.at(-1) as Props;
+  for (const gone of ["lens", "focus", "focusLinks"]) expect(props).not.toHaveProperty(gone);
+});

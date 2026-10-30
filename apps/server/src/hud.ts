@@ -180,21 +180,26 @@ function loopViews(
   store: Store,
   now: number,
   lock: TestLockState = NO_LOCK,
+  runsByAgent?: ReadonlyMap<string, Run[]>,
+  seatRows?: ReadonlyMap<string, SeatSessionRow>,
+  digests?: ReadonlyMap<string, RunDigest>,
 ): LoopView[] {
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const inLine = new Set(lock.waiting.map((w) => w.runId));
   const escalations = store.escalations();
   return configuredAgents(config).map((agent) => {
-    const runs = store.runs(agent.id, AGENT_RUNS);
-    const latest = store.seatRun(agent.id);
+    const runs = runsByAgent?.get(agent.id) ?? store.runs(agent.id, AGENT_RUNS);
+    const seatRow =
+      agent.kind === "crew" ? (seatRows?.get(agent.id) ?? store.seatSession(agent.id)) : null;
+    const held = runs.find((run) => run.id === seatRow?.runId && run.agentId === agent.id);
+    const latest = held?.endedAt === null ? held : (runs[0] ?? null);
     const lastOutput = latest
       ? lastOutputAt(
-          store.digest(latest.id)?.lastEventAt ?? null,
+          digests?.get(latest.id)?.lastEventAt ?? store.digest(latest.id)?.lastEventAt ?? null,
           transcriptMtime(latest.transcriptPath),
         )
       : null;
     if (agent.kind === "crew") {
-      const seatRow = store.seatSession(agent.id);
       const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
       const hud = crewHudState(seatRow, lastOutput, now, waiting);
       const reason =
@@ -223,7 +228,7 @@ function loopViews(
         stop: null,
         lastOutputAt: lastOutput,
       };
-      return { agent, runs, latest: latest ?? null, view, seatRow };
+      return { agent, runs, latest, view, seatRow };
     }
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
@@ -252,7 +257,7 @@ function loopViews(
       stop,
       lastOutputAt: lastOutput,
     };
-    return { agent, runs, latest: latest ?? null, view, seatRow: null };
+    return { agent, runs, latest, view, seatRow: null };
   });
 }
 
@@ -269,10 +274,10 @@ function reviewOf(
   repoId: string,
   branch: string | null,
   inFlight: ReviewRow[],
+  prs?: readonly PullRequestView[],
 ): CrewRow["review"] {
   if (branch === null) return null;
-  const open = store
-    .pullRequests(repoId)
+  const open = (prs ?? store.pullRequests(repoId))
     .filter((p) => p.state === "open" && p.branch === branch)
     .sort((a, b) => b.number - a.number)[0];
   if (!open) return null;
@@ -317,6 +322,7 @@ function costEstimate(
   seatId: string,
   run: Run,
   digest: RunDigest | null,
+  previousRuns?: readonly Run[],
 ): number | null {
   if (run.status !== "running" || run.tokens === null) return null;
   const now = allTokens(run.tokens);
@@ -324,7 +330,7 @@ function costEstimate(
   if (run.costUsd !== null && atResult !== null && atResult > 0) {
     return (run.costUsd * now) / atResult;
   }
-  for (const prev of store.runs(seatId, COST_RATE_RUNS)) {
+  for (const prev of previousRuns ?? store.runs(seatId, COST_RATE_RUNS)) {
     if (prev.id === run.id || prev.model !== run.model || prev.costUsd === null) continue;
     if (prev.tokens === null || allTokens(prev.tokens) <= 0) continue;
     return (now * prev.costUsd) / allTokens(prev.tokens);
@@ -515,6 +521,20 @@ function buildCrew(
   };
 
   const prCache: PrCache = new Map();
+  const configured = configuredAgents(config);
+  const seatRows = store.seatSessions(
+    configured.filter((agent) => agent.kind === "crew").map((agent) => agent.id),
+  );
+  const runsByAgent = store.runsForAgents(
+    configured.map((agent) => agent.id),
+    AGENT_RUNS,
+    [...seatRows.values()].flatMap((seat) => (seat.runId === null ? [] : [seat.runId])),
+  );
+  const allRuns = [...runsByAgent.values()].flat();
+  const digestByRun = store.digests(allRuns.map((run) => run.id));
+  const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
+  for (const [repoId, rows] of pullRequests)
+    prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
   const crewLoop = (run: Run, ticket: string | null): CrewLoop | null =>
     run.loop
       ? {
@@ -537,9 +557,9 @@ function buildCrew(
   const eventIndex = runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
-  const rows = loopViews(config, store, now, lock).map(
+  const rows = loopViews(config, store, now, lock, runsByAgent, seatRows, digestByRun).map(
     ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
-      const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
+      const digests = digestByRun;
       const digest = latest ? (digests.get(latest.id) ?? null) : null;
       let contextWindow: number | null = null;
       for (const r of runs) {
@@ -607,7 +627,13 @@ function buildCrew(
             : { version: null, effort: null },
         review:
           agent.kind === "crew"
-            ? reviewOf(store, agent.repoId, latest?.branch ?? null, reviewsInFlight)
+            ? reviewOf(
+                store,
+                agent.repoId,
+                latest?.branch ?? null,
+                reviewsInFlight,
+                pullRequests.get(agent.repoId),
+              )
             : null,
         reviewing: reviewingOf(store, latest),
         paused: view.paused,
@@ -656,7 +682,7 @@ function buildCrew(
               tokens: latest.tokens,
               costUsd: latest.costUsd,
               costEstimateUsd:
-                agent.kind === "crew" ? costEstimate(store, agent.id, latest, digest) : null,
+                agent.kind === "crew" ? costEstimate(store, agent.id, latest, digest, runs) : null,
             }
           : null,
         work:
