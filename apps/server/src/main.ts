@@ -120,6 +120,7 @@ export async function main(): Promise<void> {
     }
     throw e;
   }
+  const preview = isPreview(port, process.env);
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
@@ -129,7 +130,15 @@ export async function main(): Promise<void> {
   const store = new Store(dbPath);
   const bus = new ChangeBus();
   const previewRoot = join(dirname(dbPath), "previews");
-  const previewCheckouts = new Map<string, { checkout: string; worktree: string }>();
+  if (!preview) {
+    await rm(previewRoot, { recursive: true, force: true });
+    await Promise.all(
+      (config.crew?.sessions ?? []).map(({ checkout }) =>
+        runPreviewCommand("git", ["-C", checkout, "worktree", "prune"]).catch(() => {}),
+      ),
+    );
+  }
+  const previewCheckouts = new Map<string, { checkout: string; worktree: string; ref: string }>();
   const previews = isPreview(port, process.env)
     ? undefined
     : new PreviewManager({
@@ -152,6 +161,7 @@ export async function main(): Promise<void> {
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
           const worktree = join(root, "worktree");
+          const previewRef = `refs/mc-preview/${pr}`;
           let child: ChildProcess | null = null;
           try {
             await rm(root, { recursive: true, force: true });
@@ -163,17 +173,24 @@ export async function main(): Promise<void> {
             } finally {
               source.close();
             }
-            await runPreviewCommand("git", ["-C", checkout, "fetch", "origin", `pull/${pr}/head`]);
+            await runPreviewCommand("git", [
+              "-C",
+              checkout,
+              "fetch",
+              "origin",
+              `+pull/${pr}/head:${previewRef}`,
+            ]);
             await runPreviewCommand("git", [
               "-C",
               checkout,
               "worktree",
               "add",
+              "-f",
               "--detach",
               worktree,
-              "FETCH_HEAD",
+              previewRef,
             ]);
-            previewCheckouts.set(previewDb, { checkout, worktree });
+            previewCheckouts.set(previewDb, { checkout, worktree, ref: previewRef });
             await runPreviewCommand(
               "pnpm",
               ["install", "--offline", "--frozen-lockfile"],
@@ -207,6 +224,13 @@ export async function main(): Promise<void> {
                 "--force",
                 checkoutInfo.worktree,
               ]).catch(() => {});
+              await runPreviewCommand("git", [
+                "-C",
+                checkoutInfo.checkout,
+                "update-ref",
+                "-d",
+                checkoutInfo.ref,
+              ]).catch(() => {});
               previewCheckouts.delete(previewDb);
             }
             await rm(root, { recursive: true, force: true });
@@ -223,6 +247,13 @@ export async function main(): Promise<void> {
               "remove",
               "--force",
               checkoutInfo.worktree,
+            ]).catch(() => {});
+            await runPreviewCommand("git", [
+              "-C",
+              checkoutInfo.checkout,
+              "update-ref",
+              "-d",
+              checkoutInfo.ref,
             ]).catch(() => {});
             previewCheckouts.delete(previewDb);
           }
@@ -255,7 +286,6 @@ export async function main(): Promise<void> {
       await supervisor.message(seatId, text, { interrupt: false });
     },
   });
-  const preview = isPreview(port, process.env);
   const previewActivity = (() => {
     const url = process.env.MC_PREVIEW_ACTIVITY_URL;
     const token = process.env.MC_PREVIEW_ACTIVITY_TOKEN;
