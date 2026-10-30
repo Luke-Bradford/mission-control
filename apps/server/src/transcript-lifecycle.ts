@@ -6,7 +6,6 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  unlinkSync,
   utimesSync,
 } from "node:fs";
 import { pipeline } from "node:stream/promises";
@@ -70,21 +69,25 @@ export async function maintainTranscripts(i: {
       } else if (!entry.name.endsWith(".gz") && age >= i.retention.gzipAfterHours * 60 * 60_000) {
         const stamp = `${st.ino}:${st.size}:${st.mtimeMs}`;
         const tmp = `${path}.gz.tmp`;
-        await pipeline(
-          createReadStream(path),
-          createGzip(),
-          createWriteStream(tmp, { flags: "wx", mode: 0o600 }),
-        );
-        const after = lstatSync(path);
-        if (`${after.ino}:${after.size}:${after.mtimeMs}` !== stamp) {
-          unlinkSync(tmp);
-          out.skippedLive++;
-          continue;
+        rmSync(tmp, { force: true });
+        try {
+          await pipeline(
+            createReadStream(path),
+            createGzip(),
+            createWriteStream(tmp, { flags: "wx", mode: 0o600 }),
+          );
+          const after = lstatSync(path);
+          if (`${after.ino}:${after.size}:${after.mtimeMs}` !== stamp) {
+            out.skippedLive++;
+            continue;
+          }
+          renameSync(tmp, `${path}.gz`);
+          utimesSync(`${path}.gz`, st.atime, st.mtime);
+          rmSync(path);
+          out.gzipped++;
+        } finally {
+          rmSync(tmp, { force: true });
         }
-        renameSync(tmp, `${path}.gz`);
-        utimesSync(`${path}.gz`, st.atime, st.mtime);
-        rmSync(path);
-        out.gzipped++;
       }
     } catch (e) {
       out.failed.push({ runId: id, error: message(e) });

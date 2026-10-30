@@ -84,3 +84,20 @@ it("never touches a live transcript", async () => {
   expect(result.skippedLive).toBe(1);
   expect(readFileSync(live.transcriptPath, "utf8")).toBe("live\n");
 });
+
+it("replaces an interrupted gzip temp file", async () => {
+  const endedAt = NOW - 25 * HOUR;
+  const ended = run("interrupted", endedAt);
+  store.upsertRun(ended);
+  writeFileSync(ended.transcriptPath, "done\n");
+  utimesSync(ended.transcriptPath, new Date(endedAt), new Date(endedAt));
+  writeFileSync(`${ended.transcriptPath}.gz.tmp`, "partial");
+  const result = await maintainTranscripts({
+    store,
+    now: NOW,
+    retention: TRANSCRIPT_RETENTION_DEFAULTS,
+  });
+  expect(result.gzipped).toBe(1);
+  expect(existsSync(`${ended.transcriptPath}.gz.tmp`)).toBe(false);
+  expect(gunzipSync(readFileSync(`${ended.transcriptPath}.gz`)).toString()).toBe("done\n");
+});
