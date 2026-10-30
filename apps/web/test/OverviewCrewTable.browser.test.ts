@@ -1,0 +1,127 @@
+// @vitest-environment node
+
+import type { Crew } from "@mc/core";
+import { expect, it } from "vitest";
+import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import { CONFIG, crewRow, METRICS_VIEW, NOW, OVERVIEW } from "./fixtures.ts";
+
+const { renderAt } = browserSession();
+
+const LONG =
+  "apps/server/test/live/skills-live-check.ts stub report_evidence MCP tool Skill call ".repeat(5);
+const loop = (text: string) => ({
+  phase: "working" as const,
+  text,
+  prNumber: null,
+  parked: null,
+  profile: "build",
+  step: "implement",
+  steps: [
+    { name: "implement", phase: "working" as const },
+    { name: "ci", phase: "ci" as const },
+  ],
+});
+
+const crew: Crew = {
+  rows: [
+    crewRow({
+      id: "guido-1",
+      ticketTitle: LONG,
+      loop: loop(LONG),
+      note: LONG,
+      hudState: "running",
+    }),
+    crewRow({
+      id: "guido-2",
+      ticket: null,
+      ticketTitle: null,
+      note: LONG,
+      hudState: "idle",
+      run: null,
+    }),
+    crewRow({ id: "inco-1", ticketTitle: "Short", loop: loop("Editing"), hudState: "running" }),
+  ],
+  firstRunToday: null,
+};
+
+const api = {
+  "/api/overview": OVERVIEW,
+  "/api/metrics": METRICS_VIEW,
+  "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
+  "/api/crew": crew,
+  "/api/attention": [],
+  "/api/machine": { latest: null, warning: null, maxSeats: 8, seats: 0, perSessionMax: 0 },
+  "/api/limits": [],
+  "/api/limits/github": { queries: {}, pollCost: null },
+  "/api/health": [],
+  "/api/activity": [],
+  "/api/settings/away": { on: false, until: "", may: {} },
+  "/api/config": CONFIG,
+  "/api/test-lock": { holder: null, waiting: [] },
+  "/api/crew/status": { enabled: true, note: null },
+  "/api/repos/shop-app/prs?linked=1": [],
+};
+
+describeRendered("Overview Crew table with very long text, rendered", () => {
+  it.each([1366, 1600])(
+    "keeps every cell inside its own row at %ipx",
+    async (width) => {
+      const page = await renderAt({ page: "test/overviewBrowser.html", width, height: 1000, api });
+      const rowBoxes = await page.boxes("#agentsList .trow:not(.head)");
+      const cellBoxes = await page.boxes("#agentsList .trow:not(.head) > [role=cell]");
+      expect(rowBoxes.length).toBeGreaterThanOrEqual(3);
+      const rowHeight = rowBoxes[0].height;
+      for (const row of rowBoxes) expect(row.height).toBeCloseTo(rowHeight, 0);
+      // every cell sits inside some row's box, so nothing spills over a neighbour
+      for (const [i, cell] of cellBoxes.entries()) {
+        const row = rowBoxes.find((r) => cell.y >= r.y - 0.5 && cell.y < r.y + r.height);
+        expect(row, `cell ${i} starts in a row`).toBeDefined();
+        const r = row as (typeof rowBoxes)[number];
+        expect(cell.y + cell.height, `cell ${i} bottom`).toBeLessThanOrEqual(r.y + r.height + 0.5);
+      }
+      // an element wider than its cell must be cut by a clipping ancestor that stays inside the cell
+      const spill = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>("#agentsList .trow:not(.head) *")]
+            .filter((el) => {
+              const cell = el.closest<HTMLElement>("[role=cell]");
+              if (!cell || el === cell) return false;
+              const b = cell.getBoundingClientRect();
+              const a = el.getBoundingClientRect();
+              if (a.width === 0 || (a.right <= b.right + 0.5 && a.bottom <= b.bottom + 0.5))
+                return false;
+              for (let n = el.parentElement; n; n = n.parentElement) {
+                const r = n.getBoundingClientRect();
+                if (getComputedStyle(n).overflow !== "visible" && r.right <= b.right + 0.5)
+                  return false;
+                if (n === cell) break;
+              }
+              return true;
+            })
+            .map(
+              (el) => `${el.tagName}.${el.className} in ${el.closest("[role=cell]")?.className}`,
+            ),
+        undefined,
+      );
+      expect(spill).toEqual([]);
+      // free text is cut on one line with an ellipsis, not wrapped
+      const wrapped = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>("#agentsList .trow:not(.head) .ellip")]
+            .filter((el) => {
+              const s = getComputedStyle(el);
+              return (
+                s.whiteSpace !== "nowrap" ||
+                s.overflow !== "hidden" ||
+                s.textOverflow !== "ellipsis"
+              );
+            })
+            .map((el) => el.className),
+        undefined,
+      );
+      expect(wrapped).toEqual([]);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});

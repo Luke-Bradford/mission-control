@@ -17,7 +17,7 @@ it("bounds the Overview rows and lets panel bodies scroll internally", () => {
 
 it("keeps eight compact columns with needs on the second Work line", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*padding: var\(--sp-1\) var\(--sp-2\);[^}]*grid-template-rows: minmax\(0, 1fr\)/,
+    /#agentsList \.trow \{[^}]*padding: var\(--sp-1\) var\(--sp-2\);[^}]*grid-template-rows: auto/,
   );
   expect(css).toMatch(/#agentsList \.trow > \* \{\s*grid-row: 1/);
   expect(css).toMatch(/#agentsList \.need \{[^}]*font-size: var\(--fs-s\)/);
