@@ -1630,6 +1630,8 @@ describe("Machine panel", () => {
     const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
     expect(swap.textContent).toContain("Swap");
     expect(swap.textContent).toContain("3.5 GB (5% of RAM)");
+    // The bar fills against physical RAM (3.5 of 64 GB), not the 8 GB swap file.
+    expect(swap.querySelector<HTMLElement>(".stack i")?.style.width).toBe("5.5%");
     expect(mach.querySelector(".capwarn")).toBeNull();
   });
 
