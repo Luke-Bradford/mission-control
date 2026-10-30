@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
-import { prLabel } from "../fmt.ts";
+import { cost, elapsed, percent, prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
@@ -28,17 +28,9 @@ type Audit = Omit<AuditView, "longRunners"> & {
   longRunners: (AuditView["longRunners"][number] & { actionable?: boolean })[];
 };
 
-const duration = (ms: number | null | undefined): string => {
-  if (ms === undefined || ms === null) return "—";
-  const h = Math.floor(ms / 3_600_000);
-  return h ? `${h}h ${Math.floor((ms % 3_600_000) / 60_000)}m` : `${Math.floor(ms / 60_000)}m`;
-};
-const cost = (n: number | null | undefined): string =>
-  n === null || n === undefined ? "—" : `$${n.toFixed(2)}`;
 const changes = (s: AuditPrSize): number => s.additions + s.deletions;
 const logPercentOfMax = (value: number, max: number): number =>
   (Math.log1p(value) / Math.log1p(max)) * 100;
-const percent = (n: number | null): string => (n === null ? "—" : `${Math.round(n * 100)}%`);
 
 /** Operator audit: durable evidence over one shared server-bounded period. */
 export function Audit() {
@@ -144,7 +136,7 @@ function Improvements({
     rows.filter((row) => row.agentId !== null && !excludedAgents.has(row.agentId));
   const findings = [
     ...actionable(audit.longRunners.filter((row) => row.actionable !== false)).map((x) => ({
-      label: `Long runner · ${duration(x.durationMs)}`,
+      label: `Long runner · ${elapsed(x.durationMs)}`,
       row: x,
     })),
     ...actionable(audit.deathLoops).map((x) => ({

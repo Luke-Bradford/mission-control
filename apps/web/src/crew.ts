@@ -28,6 +28,8 @@ import {
   seatCallSign,
   type TestLockState,
 } from "@mc/core";
+import { useCallback } from "react";
+import { RESOURCES, useResource } from "./data.ts";
 import { cutText, hhmm, mss, prLabel, shortSha, wkdTime } from "./fmt.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
@@ -756,6 +758,12 @@ export function namedSeat(id: string, rows: readonly CrewRow[] | undefined): Cre
 export function seatName(id: string, rows: readonly CrewRow[] | undefined): string {
   const row = namedSeat(id, rows);
   return row ? callSign(row) : seatCallSign(id);
+}
+
+/** Subscribe labels to crew updates, including a rename. */
+export function useSeatName(): (id: string) => string {
+  const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
+  return useCallback((id: string) => seatName(id, rows), [rows]);
 }
 
 /** Whether Work should show current references rather than the last assignment. */

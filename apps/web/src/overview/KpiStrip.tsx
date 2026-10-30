@@ -1,17 +1,13 @@
 import { type MetricId, type OverviewSummary, usd } from "@mc/core";
+import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { kTokens } from "../fmt.ts";
+import { elapsed, hhmm, kTokens } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { followLink, NEEDS_YOU_PATH, PAGE_PATHS } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
-const duration = (ms: number | null | undefined): string => {
-  if (ms == null) return "—";
-  const minutes = Math.round(ms / 60_000);
-  return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
-};
 const change = (series: (number | null)[] | undefined, format = kTokens): string => {
   if (!series || series.length < 2 || series[0] == null || series.at(-1) == null) return "—";
   const delta = (series.at(-1) ?? 0) - (series[0] ?? 0);
@@ -85,6 +81,7 @@ interface Tile {
 
 /** Live Overview KPIs, scoped by the header's session filter. */
 export function KpiStrip() {
+  const tz = useTz();
   const [session] = useSession();
   const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const metrics = useMetrics();
@@ -136,7 +133,7 @@ export function KpiStrip() {
           ? change(k.inFlight.series)
           : oldestAt == null
             ? "—"
-            : `${duration((metrics.view?.at ?? Date.now()) - oldestAt)} oldest`,
+            : `${elapsed((metrics.view?.at ?? Date.now()) - oldestAt)} oldest`,
       series: k?.inFlight?.series,
       fmt: String,
     }),
@@ -183,7 +180,7 @@ export function KpiStrip() {
           {[
             error &&
               (summary
-                ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
+                ? `Last updated ${tz ? hhmm(summary.at, tz) : "—"} · refresh failed. Showing stale values.`
                 : "Could not load overview metrics."),
             // the registry's figures come from /api/metrics: its failure is said too
             metrics.error &&

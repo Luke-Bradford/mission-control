@@ -17,12 +17,11 @@ import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages
 import type { ComposerPrefill } from "../comms/model.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { Markdown } from "../components/Markdown.tsx";
-import { callSign, seatTurn } from "../crew.ts";
+import { callSign, seatTurn, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur, hhmm, mss } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { useSeatName } from "../seatName.ts";
 import { toast } from "../shell/Toast.tsx";
 import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
 import { messageRun, messageSeat, seatError } from "./seat.ts";

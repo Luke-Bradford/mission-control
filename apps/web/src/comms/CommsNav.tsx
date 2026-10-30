@@ -18,7 +18,7 @@ export function commsAgentRole(row: CrewRow): string {
   return area?.slice("area:".length) || row.role?.toLowerCase() || "crew";
 }
 
-function AgentNavRow({
+export function AgentNavRow({
   row,
   view,
   mentions,

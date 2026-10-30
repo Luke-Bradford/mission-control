@@ -5,6 +5,12 @@ import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { graph, impactFocusLinks, lensVisuals } from "../src/map/Lenses.tsx";
 import { changeIntensity, historyHeat, isFixHeavy, treemapLayout } from "../src/map/MapTreemap.tsx";
 
+// Clock times need the operator's timezone, which the hub would load from /api/config.
+vi.mock("../src/clock.ts", async (original) => ({
+  ...(await original<typeof import("../src/clock.ts")>()),
+  useTz: () => "Europe/London",
+}));
+
 it("derives seed reach, history heat and focused partner confidence from the map payload", () => {
   const value = snapshot();
   const impact = lensVisuals(value, "impact", null);

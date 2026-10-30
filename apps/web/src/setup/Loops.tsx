@@ -10,7 +10,7 @@ import {
   SMALL_SIZES,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
-import { apiGet, apiPost } from "../api.ts";
+import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useResources } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -114,7 +114,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
             profiles={current}
             onCancel={close}
             onRefresh={async () => {
-              const config = await apiGet<ConfigView>(RESOURCES.config.path);
+              const config = await hub.read<ConfigView>(RESOURCES.config);
               if (!config.profiles || config.profiles.error)
                 throw new Error(config.profiles?.error ?? "Templates unavailable");
               setUpdated(config.profiles);

@@ -11,13 +11,13 @@ import {
 } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { hhmm, mss } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { useSeatName } from "../seatName.ts";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 import { MachineReadout } from "./MachineReadout.tsx";

@@ -4,15 +4,6 @@ import { seatColorVar } from "../crew.ts";
 const isDocked = (seat: MapSeat, now: number): boolean =>
   seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
 
-export function duration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds < 60
-    ? `${seconds}s`
-    : seconds < 3600
-      ? `${Math.floor(seconds / 60)}m`
-      : `${Math.floor(seconds / 3600)}h`;
-}
-
 /** A change that moved at least one line (a mode-only or empty entry counts for nothing). */
 const counted = (seat: MapSeat) => seat.scope.modified.filter((c) => c.add + c.rem > 0);
 

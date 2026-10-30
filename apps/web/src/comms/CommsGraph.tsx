@@ -2,6 +2,7 @@ import { COMMS_CREW, type CrewRow, HUD_STATE_LABEL } from "@mc/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import {
@@ -576,7 +577,7 @@ export function CommsGraph({
             <>
               <Stat value={total} unit="msg" label="messages" />
               <Stat
-                value={total ? `${Math.round(((total - capcomCount) / total) * 100)}%` : "—"}
+                value={total ? percent((total - capcomCount) / total) : "—"}
                 label="agent↔agent"
                 tone="think"
               />

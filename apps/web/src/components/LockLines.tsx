@@ -7,9 +7,9 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { useSecond } from "../clock.ts";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { mss } from "../fmt.ts";
-import { useSeatName } from "../seatName.ts";
 
 /** The test lock as `/api/test-lock` last said it; undefined until the first answer. */
 export function useTestLock(): TestLockState | undefined {

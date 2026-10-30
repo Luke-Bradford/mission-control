@@ -521,7 +521,7 @@ it("retains a stale quota reading with its age and the collector note", async ()
   );
   await screen.findByText("86%");
   expect(
-    container.querySelector('[title*="Last reading 8h ago"]')?.classList.contains("stale"),
+    container.querySelector('[title*="Last reading 8h 0m ago"]')?.classList.contains("stale"),
   ).toBe(true);
   await waitFor(() =>
     expect(container.querySelector('[title*="Rate limited; retry later"]')).toBeTruthy(),

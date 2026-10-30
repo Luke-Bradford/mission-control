@@ -1,7 +1,7 @@
 import { errorText } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
-import { apiGet, apiPost } from "../api.ts";
-import { ACTIONS } from "../data.ts";
+import { apiPost } from "../api.ts";
+import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import {
   type BoardSetupResult,
   type BoardSetupStatus,
@@ -46,7 +46,7 @@ export function BoardSetup({ repoId, github }: { repoId: string; github: string 
     setBusy(true);
     setError(null);
     try {
-      setStatus(await apiGet<BoardSetupStatus>(ACTIONS.boardSetup(repoId)));
+      setStatus(await hub.read<BoardSetupStatus>(RESOURCES.boardSetup(repoId)));
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -67,7 +67,7 @@ export function BoardSetup({ repoId, github }: { repoId: string; github: string 
     }
     // Read again even after a failure: fields may have been created before the error.
     try {
-      setStatus(await apiGet<BoardSetupStatus>(ACTIONS.boardSetup(repoId)));
+      setStatus(await hub.read<BoardSetupStatus>(RESOURCES.boardSetup(repoId)));
     } catch (err) {
       setError((prev) => prev ?? errorText(err));
     } finally {

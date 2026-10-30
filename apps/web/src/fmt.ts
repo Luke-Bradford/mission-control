@@ -139,7 +139,22 @@ export const plural = (n: number, one: string, many = `${one}s`): string =>
 export const shortSha = (sha: string): string => sha.slice(0, 7);
 
 /** API-equivalent cost: `~$1.84`, or `—` when no run reported one. */
-export const cost = (usd: number | null): string => (usd === null ? "—" : `~$${usd.toFixed(2)}`);
+export const cost = (usd: number | null | undefined): string =>
+  usd == null ? "—" : `~$${usd.toFixed(2)}`;
+
+/** A fraction (0–1) as a whole percent: `42%`, or `—` for none. */
+export const percent = (fraction: number | null | undefined): string =>
+  fraction == null ? "—" : `${Math.round(fraction * 100)}%`;
+
+/** How long something has run or waited, floored: `42m`, `2h 3m`, `1d 4h`; `—` for none. */
+export function elapsed(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
 
 /** `<0.1s`, `3.4s` (one decimal under 10 s), `42s`, `6m 05s`, `1h 12m`. */
 export function dur(ms: number): string {

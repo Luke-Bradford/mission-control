@@ -12,12 +12,11 @@ import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { openNeedsYou, useNeedsYou } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
-import { needsLamp } from "../crew.ts";
+import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hms, MONTHS, swapOfRam } from "../fmt.ts";
+import { hhmm, hms, MONTHS, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
 import { openAway, useDock } from "./overlays.ts";
@@ -136,13 +135,7 @@ function Usage() {
 function Clock() {
   const now = useSecond();
   const tz = useResource<ConfigView>(RESOURCES.config).data?.operator.timezone;
-  const time = new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: tz,
-  }).format(now);
-  return <time className="top-clock">{time}</time>;
+  return <time className="top-clock">{tz ? hhmm(now, tz) : "—"}</time>;
 }
 
 function SessionSelect() {

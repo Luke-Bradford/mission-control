@@ -1,6 +1,6 @@
 import type { NotificationCategory, NotificationEvent, NotificationPreferences } from "@mc/core";
 import { useState } from "react";
-import { apiGet, apiPost } from "../api.ts";
+import { apiPost } from "../api.ts";
 import { deliverNotification, enableBrowser, permissionState } from "../browserNotifications.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -67,7 +67,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
     setError("");
     setMessage("");
     try {
-      const latest = await apiGet<NotificationPreferences>(RESOURCES.notificationPreferences.path);
+      const latest = await hub.read<NotificationPreferences>(RESOURCES.notificationPreferences);
       await apiPost<NotificationPreferences>(
         ACTIONS.notificationPreferences,
         applyEdits(latest, edits),

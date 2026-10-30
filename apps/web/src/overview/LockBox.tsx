@@ -3,13 +3,13 @@ import { useState } from "react";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useSecond } from "../clock.ts";
 import { LockUsual, useTestLock } from "../components/LockLines.tsx";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 
 /** A seat's ticket as a chip; nothing for a seat the crew does not list or one without a ticket. */
 const TicketChip = ({ row }: { row: CrewRow | undefined }) =>

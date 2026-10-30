@@ -182,6 +182,11 @@ export const RESOURCES = {
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
+  /** A GitHub read of what the board lacks (field and label setup); read fresh, once per check. */
+  boardSetup: (repoId: string): ResourceRef => ({
+    path: `/api/boards/${enc(repoId)}/setup`,
+    topic: null,
+  }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
@@ -264,7 +269,7 @@ export const ACTIONS = {
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
-  boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
+  boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
@@ -530,6 +535,21 @@ class Hub {
       e.fullAgain = false;
       if (e.listeners.size > 0) void this.fetch(e, fullAgain);
     }
+  }
+
+  /**
+   * A fresh read for a decision or a check that must not use a copy that may be stale: it asks the
+   * server now, stores the answer in the cache so every other consumer of the resource shares it,
+   * and returns it.
+   */
+  async read<T>(ref: ResourceRef): Promise<T> {
+    const gen = this.generation;
+    const data = await apiGet<T>(ref.path);
+    const e = this.entry(ref.path, ref.topic);
+    if (gen === this.generation && (e.snap.error !== null || !sameJson(data, e.snap.data))) {
+      this.set(e, { data, error: null, loading: false });
+    }
+    return data;
   }
 
   refetch(path: string): void {

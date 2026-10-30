@@ -550,16 +550,6 @@ td.wrap {
   gap: 6px;
 }
 
-@media (max-width: 1199px) {
-  .shell,
-  .app.dock-hidden .shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .dock .panel {
-    box-shadow: var(--shadow);
-  }
-}
-
 @media (max-width: 999px), (max-height: 559px) {
   .col {
     overflow: visible;

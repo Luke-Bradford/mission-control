@@ -6,10 +6,9 @@ import {
   type RepoView,
 } from "@mc/core";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { freshRecent, isWorking, type SeatWork, seatToken } from "./cards.ts";
 import {
   ConflictsLens,
@@ -53,7 +52,7 @@ export function LiveCrewMap({ repo }: { repo: string }) {
     setError(null);
     const live = new LiveMap(
       repo,
-      () => apiGet<MapSnapshot>(RESOURCES.repoMap(repo).path),
+      () => hub.read<MapSnapshot>(RESOURCES.repoMap(repo)),
       setSnapshot,
       setError,
     );

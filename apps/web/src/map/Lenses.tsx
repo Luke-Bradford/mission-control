@@ -1,4 +1,5 @@
 import { FINDING_SEVERITIES, type FindingSeverity, globMatches, type MapSnapshot } from "@mc/core";
+import { percent } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
 import { seatToken, touchedFiles } from "./cards.ts";
 
@@ -752,7 +753,7 @@ export function HistoryLens({
               <FileButton path={partner.path} onFocus={onFocus} />
               <span>{partner.linked ? "import" : "no import"}</span>
               <span>
-                {partner.count} · {Math.round(partner.share * 100)}%
+                {partner.count} · {percent(partner.share)}
               </span>
             </div>
           ))}
@@ -806,7 +807,7 @@ export function HistoryLens({
         columns="PRs · share"
         rows={unlinked.map((row) => ({
           label: `${name(row.source)} + ${name(row.path)}`,
-          text: `${row.count} PRs · ${Math.round(row.share * 100)}%`,
+          text: `${row.count} PRs · ${percent(row.share)}`,
           focus: row.source,
         }))}
         onFocus={onFocus}

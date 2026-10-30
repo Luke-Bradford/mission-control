@@ -1,4 +1,4 @@
-import type { AttentionBrief, CatchUpKind, PersonMessage } from "@mc/core";
+import type { AttentionBrief, CatchUpKind, PersonMessage, PillTone } from "@mc/core";
 import { ApiError, apiPost } from "./api.ts";
 import { ACTIONS, hub, RESOURCES } from "./data.ts";
 
@@ -45,6 +45,9 @@ export const CATCH_UP_LABEL: Record<CatchUpKind, string> = {
   "follow-up": "Follow-up",
   old: "Old thread",
 };
+
+/** A catch-up pill is plain for a new thread and amber for one the operator has seen before. */
+export const catchUpTone = (kind: CatchUpKind): PillTone => (kind === "new" ? "plain" : "warn");
 
 export const whoOf = (t: { author: string | null }): string => t.author ?? SOMEONE;
 export const sourceOf = (t: { message?: PersonMessage }): string =>

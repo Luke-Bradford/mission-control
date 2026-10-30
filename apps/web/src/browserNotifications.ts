@@ -1,6 +1,7 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
 import { useEffect, useRef } from "react";
 import { hub, RESOURCES, useResource, useResourceSettled } from "./data.ts";
+import { hhmm } from "./fmt.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";
 
@@ -67,12 +68,7 @@ export function createDelivery(show = showNotification) {
   const deliver = (event: NotificationEvent, prefs: NotificationPreferences) => {
     if (seen.has(event.id)) return;
     seen.add(event.id);
-    const time = new Intl.DateTimeFormat("en-GB", {
-      timeZone: prefs.quietHours.timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).format(event.at);
+    const time = hhmm(event.at, prefs.quietHours.timezone);
     const { start, end } = prefs.quietHours;
     const quiet =
       start < end ? time >= start && time < end : start > end && (time >= start || time < end);

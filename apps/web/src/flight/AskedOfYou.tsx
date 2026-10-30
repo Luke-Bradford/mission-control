@@ -12,6 +12,7 @@ import { rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import {
   CATCH_UP_LABEL,
+  catchUpTone,
   handledLine,
   type NotificationsView,
   whereOf,
@@ -121,9 +122,7 @@ export function AskedOfYou({
                 <span className="s">{tz === null ? DASH : rel(t.updatedAt, now, tz)}</span>
               </div>
               <div className="row">
-                <Pill tone={t.catchUp === "new" ? "plain" : "warn"}>
-                  {CATCH_UP_LABEL[t.catchUp]}
-                </Pill>
+                <Pill tone={catchUpTone(t.catchUp)}>{CATCH_UP_LABEL[t.catchUp]}</Pill>
                 <span className="min0">
                   {t.reasonText}: {t.title}
                 </span>

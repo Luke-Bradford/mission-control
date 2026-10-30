@@ -712,6 +712,16 @@ select {
   grid-template-columns: minmax(0, 1fr);
 }
 
+@media (max-width: 1199px) {
+  .shell,
+  .app.dock-hidden .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dock .panel {
+    box-shadow: var(--shadow);
+  }
+}
+
 .app.dock-hidden .dock {
   display: none;
 }
