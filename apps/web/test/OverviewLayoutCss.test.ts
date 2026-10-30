@@ -18,6 +18,42 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: calc(var(--sp-1) / -2)");
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
+    for (const selector of [
+      String.raw`\.comms-actions button,\n\.comms-react-set button`,
+      String.raw`\.comms-metric button`,
+      String.raw`#agentsList \.need button`,
+      String.raw`button\.flight-link`,
+      String.raw`\.ph \.act \.ph-link`,
+      String.raw`\.flight-notebook-index a`,
+      String.raw`\.flight-note-heading h3 a`,
+      String.raw`\.flight-markdown-source summary`,
+      String.raw`\.comms-spider-legend \.away`,
+      String.raw`\.seg button`,
+      String.raw`\.comms-section-head \.comms-needs-link`,
+      String.raw`\.comms-mentions-panel header button`,
+      String.raw`\.comms-ref`,
+      String.raw`\.map-results button`,
+      String.raw`\.map-timeline-controls button`,
+    ]) {
+      expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
+    }
+    const commsActions = rule(String.raw`\.comms-actions button,\n\.comms-react-set button`);
+    expect(commsActions).toContain("min-width: 24px");
+    expect(commsActions).toContain("min-height: 24px");
+    for (const selector of [
+      String.raw`\.ph \.act \.ph-link`,
+      String.raw`\.flight-markdown-source summary`,
+      String.raw`\.comms-spider-legend \.away`,
+      String.raw`\.comms-section-head \.comms-needs-link`,
+    ]) {
+      const action = rule(selector);
+      expect(action, selector).toContain("display: inline-flex");
+      expect(action, selector).toContain("align-items: center");
+      expect(action, selector).toContain("min-height: 24px");
+    }
+    expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
+    expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
+    expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {

@@ -1,8 +1,11 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -258,6 +261,22 @@
   background: var(--accent-soft);
 }
 
+.overview-lane .num {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--fg);
+}
+
+.overview-lane .num::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c, var(--fg-2));
+  content: "";
+}
+
 /*
  * The track: a centre hairline ruled every 5 minutes and 15-minute gridlines matching the axis, so an
  * idle lane still reads as a track. Each kind keeps its own 3px sub-track, so overlaps stay visible.
@@ -464,7 +483,7 @@
 }
 
 #agentsList .agent-identity .ag {
-  color: var(--c, var(--fg));
+  color: var(--fg);
 }
 
 .agent-identity {
