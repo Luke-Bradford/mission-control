@@ -58,14 +58,14 @@
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .map-field select {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   letter-spacing: 0;
   text-transform: none;
   min-width: 260px;
@@ -102,11 +102,11 @@
   min-width: 0;
   min-height: 30px;
   color: var(--fg-2);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 .map-lens-trace {
   padding: 3px 5px;
-  font: 10px var(--mono);
+  font: var(--fs-xs) var(--mono);
   color: var(--fg-2);
   background: var(--surface-2);
 }
@@ -125,7 +125,7 @@
   box-shadow: none;
   padding: 4px 10px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-2);
   background: transparent;
 }
@@ -194,7 +194,7 @@
   border: 1px solid var(--treemap-line);
   background: var(--treemap-folder);
   color: var(--muted);
-  font: 10px var(--mono);
+  font: var(--fs-xs) var(--mono);
   pointer-events: none;
 }
 .map-treemap-folder > .map-treemap-folder-label {
@@ -214,7 +214,7 @@
   border: 1px solid var(--treemap-line);
   border-radius: 1px;
   box-shadow: none;
-  font: 10px var(--mono);
+  font: var(--fs-xs) var(--mono);
   text-align: left;
   color: var(--treemap-ink);
   opacity: calc(0.22 + var(--tile-intensity) * 0.78);
@@ -266,7 +266,7 @@
   border-radius: 8px;
   background: var(--treemap-bg);
   color: var(--treemap-ink);
-  font: 600 9.5px / 12px var(--mono);
+  font: 600 var(--fs-xs) / 12px var(--mono);
   text-align: center;
   transform: translate(-50%, -50%);
 }
@@ -334,7 +334,7 @@
   border-radius: 5px;
   background: var(--tile-colour);
   color: #fff;
-  font: 600 8px / 10px var(--mono);
+  font: 600 var(--fs-xs) / 10px var(--mono);
   text-align: center;
   content: "";
 }
@@ -402,6 +402,11 @@
 .map-treemap-tile[data-dim] {
   opacity: 0.12;
 }
+.map-treemap-tile:focus-visible {
+  z-index: 2;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .map-treemap-tile[data-focused] {
   outline: 2px solid var(--treemap-ink);
   outline-offset: -2px;
@@ -448,7 +453,7 @@
   gap: 4px 16px;
   margin: 0;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.5;
   color: var(--fg-2);
   pointer-events: none;
@@ -589,7 +594,7 @@
   display: inline-block;
   padding: 1px 4px;
   border-radius: 2px;
-  font-size: 9.5px;
+  font-size: var(--fs-xs);
 }
 .map-lens .map-severity-critical {
   color: var(--crit);
@@ -635,7 +640,7 @@
   align-items: center;
   gap: 4px 16px;
   margin: 0;
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   color: var(--fg-2);
 }
 .map-changes-key .map-key-read {
@@ -658,7 +663,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 7px;
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   color: var(--muted);
 }
 .map-timeline-controls strong {
@@ -679,7 +684,7 @@
   align-items: center;
   gap: 8px;
   min-height: 20px;
-  font: 10px var(--mono);
+  font: var(--fs-xs) var(--mono);
 }
 .map-timeline-dot {
   width: 8px;
@@ -721,6 +726,22 @@
   width: 3px;
   height: 10px;
   background: var(--timeline-seat);
+}
+button.map-timeline-tick {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+/* a wider target than the mark itself */
+.map-timeline-tick::after {
+  position: absolute;
+  inset: -7px -10px;
+  content: "";
+}
+.map-timeline-tick:focus-visible,
+.map-timeline-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .map-timeline-tick[data-read] {
   box-sizing: border-box;
@@ -786,7 +807,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-2);
 }
 .map-lens > header {
@@ -799,11 +820,11 @@
   font-weight: 500;
 }
 .map-lens h2 {
-  font-size: 12px;
+  font-size: var(--fs-s);
   color: var(--fg);
 }
 .map-lens h3 {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -859,7 +880,7 @@
   gap: 6px;
   margin-top: 7px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
 }
 .map-lens-columns span:last-child {
@@ -896,7 +917,7 @@
   display: block;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--fs-xs);
   font-weight: 400;
 }
 .map-pr {
@@ -931,7 +952,7 @@
 }
 .map-card > h2 {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -963,7 +984,7 @@
   padding: 5px 6px;
   text-align: left;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   background: transparent;
   border: 0;
   border-radius: var(--r-s);
@@ -991,14 +1012,14 @@
 }
 .map-empty {
   color: var(--fg-2);
-  font-size: 12px;
+  font-size: var(--fs-s);
   margin-block: 4px;
 }
 .map-find {
   width: 100%;
   box-sizing: border-box;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   margin-bottom: 8px;
 }
 .map-results {
@@ -1009,13 +1030,13 @@
   overflow: auto;
   margin-bottom: 8px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 .map-results button {
   text-align: left;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 3px 8px;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1025,7 +1046,7 @@
 }
 .map-detail {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   line-height: 1.55;
   color: var(--fg-2);
 }
@@ -1034,13 +1055,13 @@
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   font-weight: 500;
   color: var(--fg);
   margin-block: 2px 4px;
 }
 .map-detail h4 {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--muted);
   margin-block: 10px 4px;
@@ -1088,7 +1109,7 @@
 }
 .map-note {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* the deck: live status */
@@ -1107,7 +1128,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   color: var(--fg-2);
 }
 .map-live i {

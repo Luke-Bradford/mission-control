@@ -15,6 +15,8 @@ export interface LensVisual {
   }[];
   /** Impact: seat colour index and dependency distance (zero is a changed seed). */
   seat?: number;
+  /** Impact: the changing seat's name, for text that says what its colour does. */
+  seatName?: string;
   distance?: number;
   overlap?: boolean;
   /** Focused Impact: the file the focused file imports directly. */
@@ -334,12 +336,13 @@ export function lensVisuals(
       files: files.filter((path) => isCode(path) && !isTest(path)),
     }));
     const overlap = importOverlaps(codeChanged, forward);
-    codeChanged.forEach(({ files }, seat) => {
+    codeChanged.forEach(({ seat: seatName, files }, seat) => {
       const code = files.filter((path) => reverse.has(path));
       for (const path of code) {
         const prior = out[path];
         out[path] = {
           seat: prior?.seat ?? seat,
+          seatName: prior?.seatName ?? seatName.seat,
           distance: 0,
           overlap: overlap.has(path),
           focused: focus === path,
@@ -349,6 +352,7 @@ export function lensVisuals(
         const prior = out[path];
         out[path] = {
           seat: prior?.seat ?? seat,
+          seatName: prior?.seatName ?? seatName.seat,
           distance: Math.min(prior?.distance ?? Infinity, distance),
           overlap: false,
           focused: focus === path,
@@ -371,7 +375,7 @@ export function lensVisuals(
             dim: false,
           };
         } else {
-          const { distance: _distance, seat: _seat, ...rest } = prior ?? {};
+          const { distance: _distance, seat: _seat, seatName: _seatName, ...rest } = prior ?? {};
           out[path] = { ...rest, directImport: true, focused: false, dim: false };
         }
       }
