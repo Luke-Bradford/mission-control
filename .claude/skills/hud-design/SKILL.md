@@ -30,8 +30,7 @@ is an Important finding; any other no is Minor.
 ## Check
 
 - [ ] Tests cover empty, one, many (50 rows) and long text.
-- [ ] 1280, 1600, 1920 wide, 1600×700, light, dark (§8–9), rendered in a browser test
-      with long text and 50 rows.
+- [ ] 1280, 1600, 1920 wide, 1600×700, light, dark (§8–9), rendered in a browser test.
 
 ## Review
 
@@ -39,5 +38,7 @@ is an Important finding; any other no is Minor.
 - [ ] The first screenful answers the question, key item top left (§1).
 - [ ] No empty panels or lone-number tiles (§5–7).
 
-Record the `design` check: pass (every [I] item is yes on the rendered page), n-a (nothing visible changes) or fail (quote the items). It does not hold the merge; Important findings do. Judge rendered-page items on the page you render;
-only a check against live data is a "Controller check: …".
+Record the `design` check: pass (every [I] item is yes on the rendered page), n-a (nothing
+visible changes, or you could not render it: say why in its note and your summary) or fail
+(quote the items). It does not hold the merge; Important findings do. Judge rendered-page items
+on the page you render. Only a check against live data is a "Controller check: …".

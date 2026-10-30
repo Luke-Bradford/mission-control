@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { REVIEW_CHECK_IDS } from "@mc/core";
 import { expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
@@ -45,11 +46,33 @@ it("the HUD checklist stays a one-minute read", () => {
   expect(words.length).toBeLessThanOrEqual(300);
 });
 
+/** Sentences of a text, split on `.` and `;`. */
+const sentences = (text: string) => text.split(/[.;]\s/);
+
 it("RETRO tries to break each kind of change and renders screens itself", () => {
   const text = read("roles/RETRO.md");
   const section = text.split(/^## /m).find((part) => part.startsWith("Try to break it\n")) ?? "";
-  for (const kind of ["Screens", "APIs", "Database", "Shared code", "Anything with state"])
+  for (const kind of ["Screens", "APIs", "Database", "Shared code", "Shared state"])
     expect(section, kind).toContain(`**${kind}`);
-  expect(text).not.toMatch(/rendered page[^.]*Controller check/);
-  expect(checklist).not.toMatch(/cannot render them/);
+  expect(section).toContain("browser test");
+  expect(section).toContain("could not run");
 });
+
+it("RETRO names only check ids report_findings accepts", () => {
+  const section =
+    read("roles/RETRO.md")
+      .split(/^## /m)
+      .find((part) => part.startsWith("Try to break it\n")) ?? "";
+  const named = [...section.matchAll(/as `([a-z-]+)`/g)].map((m) => m[1]);
+  expect(named.length).toBeGreaterThan(0);
+  for (const id of named) expect(REVIEW_CHECK_IDS as readonly string[], id).toContain(id);
+});
+
+it.each(["roles/RETRO.md", "roles/INCO.md", ".claude/skills/hud-design/SKILL.md"])(
+  "%s keeps rendering with the reviewer; a Controller check is for live data only",
+  (path) => {
+    for (const sentence of sentences(read(path).replace(/\s+/g, " ")))
+      if (/render/i.test(sentence) && /Controller check/.test(sentence))
+        expect(sentence).toMatch(/live/);
+  },
+);
