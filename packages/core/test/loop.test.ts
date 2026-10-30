@@ -2402,32 +2402,14 @@ describe("merge workspace", () => {
     expect(kindsOf(r.actions)).not.toContain("note");
   });
 
-  it("keeps a HUD PR in draft until RETRO records screenshot evidence with the design pass", () => {
-    for (const note of [undefined, "design checked", "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]) {
-      const held = reconcile(
-        merge(
-          { review: rows({ design: { result: "pass", note } as never }) },
-          { gate: gateOf({ webChanged: true }) },
-        ),
-      );
-      expect(kindsOf(held.actions)).not.toContain("mark-ready");
-      expect(kindsOf(held.actions)).not.toContain("merge");
-    }
-
-    const passed = reconcile(
+  it("records HUD design checks without making them a merge gate", () => {
+    const result = reconcile(
       merge(
-        {
-          review: rows({
-            design: {
-              result: "pass",
-              note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            } as never,
-          }),
-        },
+        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } as never }) },
         { gate: gateOf({ webChanged: true }) },
       ),
     );
-    expect(passed.actions.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
+    expect(result.actions.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
       { kind: "mark-ready" },
       { kind: "merge", sha: SHA },
     ]);

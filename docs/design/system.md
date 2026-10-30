@@ -28,9 +28,9 @@ comparison; show common actions without a click.
 
 Controls are keyboard reachable, named, focus-visible and 24×24 px minimum. Shape APIs for the
 page; fetch a tab when opened; do not re-render a page for a clock tick. Check 1280, 1600 and
-1920 widths, 1600×700, light and dark, and empty, long and many-item states. A web PR stays draft
-until RETRO records `design: pass` with a non-empty screenshot-pair note. Screenshot attachment is
-an additional gate when that implementation lands.
+1920 widths, 1600×700, light and dark, and empty, long and many-item states. RETRO records a
+`design` check and its screenshot-pair note for the QA board. It is not a merge gate until PR-head
+rendering is available.
 
 ## 10. Change control
 

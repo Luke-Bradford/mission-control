@@ -2878,15 +2878,15 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
-  it("holds a HUD PR without the stored design check", async () => {
+  it("does not make a HUD design check a readiness gate", async () => {
     h.gate = { ...need(h.gate), webChanged: true };
     await toReview();
     reported(first().id, []);
     await h.engine.reconcileRun(RUN);
-    expect(h.steps).not.toContain("ready");
+    expect(h.steps).toContain("ready");
   });
 
-  it("releases a HUD PR only when RETRO stores screenshot-pair evidence", async () => {
+  it("stores RETRO screenshot-pair evidence for the QA board", async () => {
     h.gate = { ...need(h.gate), webChanged: true };
     await toReview();
     const review = need(store.review(first().id));
