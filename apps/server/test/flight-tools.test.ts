@@ -2208,6 +2208,16 @@ describe("end_run", () => {
     expect(endCalls).toEqual([]);
   });
 
+  it("does not discard uncommitted changes on a standard repo, parked or not", async () => {
+    parked();
+    dirty = ["apps/a.ts"];
+    expect(await call("end_run", E({ discard: true }))).toEqual(
+      refused(needsSuperuserText("o/mc")),
+    );
+    expect(endCalls).toEqual([]);
+    expect(store.run("r-g")?.endedAt).toBeNull();
+  });
+
   it("does not end a working run that is held (a stopped seat, an overdue question)", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-g");
@@ -7964,6 +7974,51 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       ).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
       expect(await call("edit_issue", { issue: 7 })).toHaveProperty("isError", true);
+    });
+    it("edit_issue never drops or changes the Controller check, and reads the ticket first", async () => {
+      board(card(7));
+      const WITH = `${DONE}\n## Controller check\n\n- open the page\n`;
+      fetchImpl = async (n) => ticket(n, { body: WITH });
+      // a body without the section, or with it changed, is refused and writes nothing
+      for (const body of [DONE, WITH.replace("open the page", "nothing")])
+        expect(await call("edit_issue", { issue: 7, body })).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+      // a body that keeps it as it was goes through (the readback sees the new body)
+      const kept = WITH.replace("- it works", "- it works\n- and more");
+      fetchImpl = async (n) => ticket(n, { body: ghCalls.length > 0 ? kept : WITH });
+      expect((await call("edit_issue", { issue: 7, body: kept })).isError).toBeUndefined();
+      // a title-only edit needs no body read; an unreadable ticket stops a body edit
+      ghCalls.length = 0;
+      fetchImpl = async () => null;
+      expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+      board(card(7));
+      for (const status of ["Ready", "Backlog"])
+        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      liveLabels = ["lane:home", "area:server"];
+      expect(
+        await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
+      ).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, labels: ["lane:home"] })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields counts a status move with promote's against the hourly cap", async () => {
+      board(card(7));
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
+      expect(decisions().filter((d) => d.kind === "promote")).toHaveLength(1);
+      for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR; i++) addDecision({ kind: "promote" });
+      moveCalls.length = 0;
+      expect(await call("set_fields", { issue: 7, status: "Blocked" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(moveCalls).toEqual([]);
     });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
       liveLabels = ["lane:home"];

@@ -1675,6 +1675,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const dirty = (await deps.engine?.uncommitted(run.id)) ?? null;
     if (dirty === null) return fail(END_UNREADABLE_TEXT);
     if (dirty.length > 0 && !c.args.discard) return fail(endDirtyText(call, dirty));
+    // throwing away uncommitted work is a controller power, whatever state the run is in
+    if (dirty.length > 0) {
+      const denied = requirePowers(config, run.repoId, "superuser");
+      if (denied) return denied;
+    }
     try {
       if (onSeat) await deps.supervisor.endRun(seat);
       else await deps.supervisor.endAsideRun(run.id);
@@ -3559,7 +3564,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.endRun,
-      description: `End a developer run, working, parked or stalled, on its seat or set aside; basis is the reason. Refused with uncommitted changes unless discard: true, which loses them. ${FLIGHT_ENDS_PER_HOUR} an hour.`,
+      description: `End a developer run, working, parked or stalled, on its seat or set aside; basis is the reason. Refused with uncommitted changes unless discard: true, which loses them and needs a superuser repo. ${FLIGHT_ENDS_PER_HOUR} an hour.`,
       inputSchema: objectSchema(
         { runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA, discard: { type: "boolean" } },
         ["runId", "basis"],

@@ -5,10 +5,13 @@
  * hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the operator.
  */
 import {
+  AREA_LABEL_PREFIX,
   AWAY_WRITES_REFUSED,
   type BoardItem,
   ENGINE_TICK_MS,
+  FLIGHT_HOUR_MS,
   FLIGHT_MOVE_COLUMNS,
+  FLIGHT_PROMOTES_PER_HOUR,
   FLIGHT_SILENT_TICKS,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
@@ -18,6 +21,7 @@ import {
   pauseWithout,
   type RepoRules,
   TICKET_SIZES,
+  ticketControllerCheck,
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
@@ -365,6 +369,20 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         known,
       );
       if (unfit !== null) return fail(unfit);
+      if (a.body !== undefined) {
+        // the Controller check section is the controller's: FLIGHT may add an item (add_controller_check)
+        // but a whole-body edit may not drop or change it, and an unreadable ticket is not edited
+        const current = await stateOf(repo, a.issue);
+        if (current === null || current.bodyTruncated)
+          return fail("Refused: the ticket's current body could not be read whole.");
+        if (
+          ticketControllerCheck(current) !==
+          ticketControllerCheck({ body: a.body, bodyTruncated: false })
+        )
+          return fail(
+            "The Controller check section is the controller's; use add_controller_check to add an item.",
+          );
+      }
       if (away()) return fail(AWAY_WRITES_REFUSED);
       const r = await ghWrite([
         "issue",
@@ -410,6 +428,22 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           .join(",");
       if (a.labels !== undefined && lanes(a.labels) !== lanes(found.labels))
         return fail("Lane labels change with edit_card's lane, not set_fields.");
+      // promote's checks (promote_backlog, needs, areas, dependencies) guard Ready and Backlog
+      if (a.status === "Ready" || a.status === "Backlog")
+        return fail("Use promote to move a card into Ready or back to Backlog.");
+      if (
+        a.labels !== undefined &&
+        a.labels.filter((l) => l.startsWith(AREA_LABEL_PREFIX)).length !== 1
+      )
+        return fail(`A ticket carries exactly one ${AREA_LABEL_PREFIX}* label.`);
+      if (
+        a.status !== undefined &&
+        store.countFlightDecisions({
+          kinds: ["promote", "reorder"],
+          since: now() - FLIGHT_HOUR_MS,
+        }) >= FLIGHT_PROMOTES_PER_HOUR
+      )
+        return fail("You have moved the most tickets allowed in the last hour.");
       if (away()) return fail(AWAY_WRITES_REFUSED);
       const done: string[] = [];
       // a field that fails after others landed says which landed
@@ -432,6 +466,18 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           column: a.status,
         });
         if (!r.ok) return stop(r.reason);
+        // a status move counts with promote's moves against the hourly cap
+        store.addFlightDecision({
+          at: now(),
+          kind: "promote",
+          seatId: null,
+          targetRunId: null,
+          ref,
+          questionId: null,
+          about: `${ref}: ${found.title}`,
+          decision: `Set status to ${a.status}`,
+          basis: a.basis,
+        });
         done.push("status");
       }
       if (a.labels !== undefined || a.milestone !== undefined) {
