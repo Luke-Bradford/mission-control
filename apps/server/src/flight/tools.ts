@@ -322,13 +322,7 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import {
-  type CcConfig,
-  configuredAgents,
-  crewSeatDef,
-  flightPowersOf,
-  SEAT_ID,
-} from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
@@ -3013,7 +3007,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean } = {},
+    options: { engine?: boolean; records?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -3035,7 +3029,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             return fail(AWAY_WRITES_REFUSED);
           const result = await act(c.args, repo, ctx);
           // close_ticket records its own decision (ref, title, URL) once a write has landed.
-          if (kind !== "close" && (kind !== "rerun" || !result.isError))
+          if (
+            kind !== "close" &&
+            options.records !== false &&
+            (kind !== "rerun" || !result.isError)
+          )
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
           bus.emit("flight");
           return result;
@@ -3081,18 +3079,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const superTools = [
     superTool(
       MC_TOOL_NAMES.resumeSeat,
-      "Resume a stopped crew seat and its unfinished run, while preserving budget, account and Away limits.",
+      "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). Lifts the seat's stop or crew pause and names it; a failed resume ends the run. Refuses budget, account, Away-quota, machine-capacity and held runs.",
       ResumeSeatArgs,
       "pause",
       async (a) => {
-        const cfg = configuredAgents(config).find(
-          (agent) => agent.kind === "crew" && agent.id === a.seat,
-        );
-        if (cfg === undefined) return fail(`${a.seat} is not a crew seat.`);
+        const cfg = seatCfg(a.seat);
+        if (cfg === undefined) return fail(notInSessionText(a.seat));
+        const call = seatCallSign(a.seat);
+        const loopKind = seatDef(cfg).loop;
+        if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
         const row = store.seatSession(a.seat);
         const run = row?.runId === null || row === null ? null : store.run(row.runId);
         const at = now();
+        if (loopKind === "plan" && activeAway(store, at, config.operator.timezone))
+          return fail(AWAY_PLANNER_REFUSED);
         if (run !== null && run.endedAt === null) {
+          if (!inRunLane(run)) return fail("Run is in another lane.");
           const accountId = runAccountId(store, run.id, cfg.accountId);
           if (run.loop?.parked?.kind === "budget") return fail("Run is held by its budget.");
           if (accountAtStop(config, store, accountId, at))
@@ -3111,7 +3113,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.supervisor.sessionAlive?.(a.seat) === true ||
           row.state === "running"
         )
-          return fail(`${a.seat} is neither stopped, paused nor waiting to resume.`);
+          return fail(
+            run === null || run.endedAt !== null || row === null
+              ? `${call} holds no unfinished run to resume.`
+              : `${call} is neither stopped, paused nor waiting to resume.`,
+          );
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
         const capacity = machineCapacity(
           store.machineSamples(machineCapacitySince(at, capacityConfig)),
@@ -3120,20 +3126,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
         if (capacity.blocked)
           return fail(`the machine has insufficient headroom: ${capacity.reason}`);
-        const lifted: string[] = [];
-        if (row.state === "stopped") {
+        if (row.state === "stopped")
           store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
-          lifted.push(`the stop (${row.reason ?? "no reason given"})`);
-        }
         if (held(run)) {
           if (row.state === "stopped") store.setSeatSession(row);
           return fail("Run is held.");
         }
         const pause = pausedSeat(store, a.seat);
-        if (pause !== null) {
-          writeCrewPause(store, pauseWithout(pause, a.seat, "FLIGHT"), at);
-          lifted.push(`the crew pause (${pause.reason})`);
-        }
+        const pauseText = unpauseSeat(a.seat, call, at);
+        const lifted = [
+          pauseText,
+          row.state === "stopped" ? "the operator had stopped the seat" : null,
+        ]
+          .filter((t) => t !== null)
+          .join("; ");
+        const filed = (outcome: string): void => {
+          record(now(), {
+            kind: "pause",
+            about: MC_TOOL_NAMES.resumeSeat,
+            decision: `${outcome}${lifted === "" ? "" : `: ${lifted}`}.`,
+            basis: a.basis,
+            seatId: a.seat,
+            targetRunId: run.id,
+          });
+        };
         // What this call wrote; a rollback leaves a newer change by the operator alone.
         const pauseAfter = JSON.stringify(readCrewPause(store));
         const rowAfter = JSON.stringify(store.seatSession(a.seat));
@@ -3153,15 +3169,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             store.run(run.id)?.endedAt !== null
               ? "ended after the failed resume"
               : "is not running";
-          return fail(`${seatCallSign(a.seat)}'s run ${outcome}.`);
+          filed(`${call}'s run ${outcome}`);
+          return fail(`${call}'s run ${outcome}.`);
         }
         bus.emit("settings");
         bus.emit("agents");
-        const liftedText = lifted.length > 0 ? `; lifted ${lifted.join(" and ")}` : "";
-        return { text: `Resumed ${seatCallSign(a.seat)}'s run${liftedText}.` };
+        filed(`Resume started for ${call}'s run`);
+        return {
+          text: `Resume started for ${call}'s run${lifted === "" ? "" : `: ${lifted}`}.`,
+        };
       },
       z.toJSONSchema(ResumeSeatArgs),
-      { engine: false },
+      { engine: false, records: false },
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,

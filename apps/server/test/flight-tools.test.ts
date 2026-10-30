@@ -627,7 +627,7 @@ describe("resume_seat", () => {
     await expect(
       call("resume_seat", { seat: "guido-1", basis: "continue the run" }),
     ).resolves.toEqual({
-      text: "Resumed GUIDO-1's run; lifted the stop (operator).",
+      text: "Resume started for GUIDO-1's run: the operator had stopped the seat.",
     });
   });
 
@@ -644,8 +644,17 @@ describe("resume_seat", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.text).toBe(
-      "Resumed GUIDO-1's run; lifted the stop (operator) and the crew pause (ci).",
+      "Resume started for GUIDO-1's run: FLIGHT lifted the crew pause on GUIDO-1 (ci); the operator had stopped the seat.",
     );
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        kind: "pause",
+        about: "resume_seat",
+        seatId: "guido-1",
+        targetRunId: "r-guido",
+        decision: expect.stringContaining("FLIGHT lifted the crew pause on GUIDO-1 (ci)"),
+      }),
+    ]);
     expect(readCrewPause(store)).toBeNull();
   });
 
@@ -703,6 +712,30 @@ describe("resume_seat", () => {
     expect(result.isError).toBe(true);
     expect(result.text).toContain("insufficient headroom");
     expect(store.seatSession("guido-1")?.state).toBe("stopped");
+    expect(resumeCalls).toEqual([]);
+  });
+
+  it("says a seat with no unfinished run holds none to resume", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.setSeatSession({
+      ...row("guido-1", "r-x"),
+      runId: null,
+      state: "stopped",
+      reason: "operator",
+    });
+
+    const result = await call("resume_seat", { seat: "guido-1", basis: "continue the run" });
+
+    expect(result).toEqual({ text: "GUIDO-1 holds no unfinished run to resume.", isError: true });
+  });
+
+  it("refuses a seat that is not a build or plan seat in FLIGHT's session", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("retro-1", "r-retro");
+
+    const result = await call("resume_seat", { seat: "retro-1", basis: "continue the run" });
+
+    expect(result.isError).toBe(true);
     expect(resumeCalls).toEqual([]);
   });
 
