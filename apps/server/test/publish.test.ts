@@ -1352,6 +1352,7 @@ describe("merge steps", () => {
           containsMain: true,
           hubOnly: true,
           strays: ["docs/b.md", "package.json"],
+          webChanged: false,
         },
       });
       expect(gitCalls).toContainEqual(["ls-remote", "--symref", "origin", "HEAD"]);
@@ -1463,10 +1464,17 @@ describe("merge steps", () => {
 
     it("reuses the known facts when the sha and main's tip are unchanged", async () => {
       gitAnswers = { "ls-remote": lsRemote() };
-      const known = { sha: SHA, mainSha: MAIN, containsMain: true, hubOnly: true, strays: [] };
+      const known = {
+        sha: SHA,
+        mainSha: MAIN,
+        containsMain: true,
+        hubOnly: true,
+        strays: [],
+        webChanged: false,
+      };
       expect(await withArea().gateFacts(R, SHA, known)).toEqual({
         ok: true,
-        facts: { mainSha: MAIN, containsMain: true, hubOnly: true, strays: [] },
+        facts: { mainSha: MAIN, containsMain: true, hubOnly: true, strays: [], webChanged: false },
       });
       expect(gitCalls).toHaveLength(1);
     });

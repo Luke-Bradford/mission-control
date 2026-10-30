@@ -2895,7 +2895,13 @@ describe("the engine runs reviews", () => {
         verdict: { spec: "pass", quality: "pass" },
         summary: "design checked",
         findings: [],
-        checked: [{ check: "design", result: "pass", note: "hud-shot:pair" }],
+        checked: [
+          {
+            check: "design",
+            result: "pass",
+            note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+        ],
         at: clock,
       }),
     ).toBe(true);
@@ -2904,7 +2910,7 @@ describe("the engine runs reviews", () => {
     expect(store.reviewChecks(review.id)).toContainEqual({
       check: "design",
       result: "pass",
-      note: "hud-shot:pair",
+      note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     });
     expect(h.steps).toContain("ready");
   });
