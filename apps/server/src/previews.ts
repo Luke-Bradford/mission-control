@@ -59,6 +59,9 @@ export interface PreviewManagerDeps {
 export class PreviewManager {
   private readonly now: () => number;
   private readonly previews = new Map<number, Preview>();
+  /** Starts reserve a PR and port before asynchronous checkout preparation begins. */
+  private readonly pending = new Map<number, number>();
+  private reservations: Promise<void> = Promise.resolve();
   private readonly deps: PreviewManagerDeps;
 
   constructor(deps: PreviewManagerDeps) {
@@ -85,22 +88,16 @@ export class PreviewManager {
   }
 
   async start(input: PreviewStart): Promise<PreviewView> {
-    const existing = this.previews.get(input.pr);
-    if (existing)
-      throw new PreviewHubError("already-running", "a preview is already running for this PR");
-    const capacity = this.deps.capacity();
-    if (capacity.blocked)
-      throw new PreviewHubError(
-        "capacity",
-        `machine headroom is tight: ${capacity.reason ?? "preview starts are paused"}`,
-      );
-    if (this.previews.size >= PREVIEW_LIMIT)
-      throw new PreviewHubError("limit", `at most ${PREVIEW_LIMIT} previews can run at once`);
-    const port = await this.freePort();
-    if (port === undefined) throw new PreviewHubError("no-port", "no preview port is available");
+    const port = await this.reserve(input.pr);
     const startedAt = this.now();
     const token = randomBytes(32).toString("base64url");
-    const child = await this.deps.start({ ...input, port, token });
+    let child: PreviewProcess & { dbPath?: string };
+    try {
+      child = await this.deps.start({ ...input, port, token });
+    } catch (e) {
+      this.pending.delete(input.pr);
+      throw e;
+    }
     const preview: Preview = {
       pr: input.pr,
       branch: input.branch,
@@ -112,6 +109,7 @@ export class PreviewManager {
       dbPath: child.dbPath ?? "",
       process: child,
     };
+    this.pending.delete(input.pr);
     this.previews.set(input.pr, preview);
     const {
       dbPath: _dbPath,
@@ -161,7 +159,35 @@ export class PreviewManager {
   }
 
   private portInUse(port: number): boolean {
-    return [...this.previews.values()].some((preview) => preview.port === port);
+    return (
+      [...this.previews.values()].some((preview) => preview.port === port) ||
+      [...this.pending.values()].includes(port)
+    );
+  }
+
+  private async reserve(pr: number): Promise<number> {
+    let release: () => void = () => {};
+    const previous = this.reservations;
+    this.reservations = new Promise<void>((resolve) => (release = resolve));
+    await previous;
+    try {
+      if (this.previews.has(pr) || this.pending.has(pr))
+        throw new PreviewHubError("already-running", "a preview is already running for this PR");
+      const capacity = this.deps.capacity();
+      if (capacity.blocked)
+        throw new PreviewHubError(
+          "capacity",
+          `machine headroom is tight: ${capacity.reason ?? "preview starts are paused"}`,
+        );
+      if (this.previews.size + this.pending.size >= PREVIEW_LIMIT)
+        throw new PreviewHubError("limit", `at most ${PREVIEW_LIMIT} previews can run at once`);
+      const port = await this.freePort();
+      if (port === undefined) throw new PreviewHubError("no-port", "no preview port is available");
+      this.pending.set(pr, port);
+      return port;
+    } finally {
+      release();
+    }
   }
 
   private async freePort(): Promise<number | undefined> {

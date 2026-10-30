@@ -15,7 +15,7 @@
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -129,6 +129,7 @@ export async function main(): Promise<void> {
   const store = new Store(dbPath);
   const bus = new ChangeBus();
   const previewRoot = join(dirname(dbPath), "previews");
+  const previewCheckouts = new Map<string, { checkout: string; worktree: string }>();
   const previews = isPreview(port, process.env)
     ? undefined
     : new PreviewManager({
@@ -147,49 +148,84 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, branch, checkout, port: previewPort, token }) => {
+        start: async ({ pr, branch: _branch, checkout, port: previewPort, token }) => {
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
           const worktree = join(root, "worktree");
-          await rm(root, { recursive: true, force: true });
-          mkdirSync(root, { recursive: true, mode: 0o700 });
-          chmodSync(root, 0o700);
-          const source = new DatabaseSync(dbPath);
+          let child: ChildProcess | null = null;
           try {
-            source.prepare("VACUUM INTO ?").run(previewDb);
-          } finally {
-            source.close();
-          }
-          const git = spawn(
-            "git",
-            ["-C", checkout, "worktree", "add", "--detach", worktree, `origin/${branch}`],
-            {
-              stdio: "ignore",
-            },
-          );
-          await new Promise<void>((resolve, reject) => {
-            git.once("error", reject);
-            git.once("exit", (code) =>
-              code === 0 ? resolve() : reject(new Error("could not create preview worktree")),
+            await rm(root, { recursive: true, force: true });
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            chmodSync(root, 0o700);
+            const source = new DatabaseSync(dbPath);
+            try {
+              source.prepare("VACUUM INTO ?").run(previewDb);
+            } finally {
+              source.close();
+            }
+            await runPreviewCommand("git", ["-C", checkout, "fetch", "origin", `pull/${pr}/head`]);
+            await runPreviewCommand("git", [
+              "-C",
+              checkout,
+              "worktree",
+              "add",
+              "--detach",
+              worktree,
+              "FETCH_HEAD",
+            ]);
+            previewCheckouts.set(previewDb, { checkout, worktree });
+            await runPreviewCommand(
+              "pnpm",
+              ["install", "--offline", "--frozen-lockfile"],
+              worktree,
             );
-          });
-          const child = spawn(
-            process.execPath,
-            ["--experimental-strip-types", "apps/server/src/main.ts"],
-            {
-              cwd: worktree,
-              env: previewEnvironment(previewPort, previewDb, pr, token, port),
-              stdio: "ignore",
-            },
-          );
-          return {
-            dbPath: previewDb,
-            stop: () => {
-              child.kill("SIGTERM");
-            },
-          };
+            await runPreviewCommand("pnpm", ["--filter", "@mc/web", "build"], worktree);
+            child = spawn(
+              process.execPath,
+              ["--experimental-strip-types", "apps/server/src/main.ts"],
+              {
+                cwd: worktree,
+                env: previewEnvironment(previewPort, previewDb, pr, token, port),
+                stdio: "ignore",
+              },
+            );
+            const started = child;
+            await waitForPreview(started, previewPort);
+            return {
+              dbPath: previewDb,
+              stop: async () => await stopPreview(started),
+            };
+          } catch (e) {
+            if (child) await stopPreview(child).catch(() => {});
+            const checkoutInfo = previewCheckouts.get(previewDb);
+            if (checkoutInfo) {
+              await runPreviewCommand("git", [
+                "-C",
+                checkoutInfo.checkout,
+                "worktree",
+                "remove",
+                "--force",
+                checkoutInfo.worktree,
+              ]).catch(() => {});
+              previewCheckouts.delete(previewDb);
+            }
+            await rm(root, { recursive: true, force: true });
+            throw e;
+          }
         },
         remove: async (previewDb) => {
+          const checkoutInfo = previewCheckouts.get(previewDb);
+          if (checkoutInfo) {
+            await runPreviewCommand("git", [
+              "-C",
+              checkoutInfo.checkout,
+              "worktree",
+              "remove",
+              "--force",
+              checkoutInfo.worktree,
+            ]).catch(() => {});
+            previewCheckouts.delete(previewDb);
+          }
           await rm(dirname(previewDb), { recursive: true, force: true });
         },
       });
@@ -686,6 +722,49 @@ function previewEnvironment(
     MC_PREVIEW_ACTIVITY_URL: `http://${HOST}:${parentPort}/api/previews/${pr}/activity`,
     MC_PREVIEW_ACTIVITY_TOKEN: token,
   };
+}
+
+const PREVIEW_READY_MS = 30_000;
+const PREVIEW_STOP_MS = 10_000;
+
+async function runPreviewCommand(command: string, args: string[], cwd?: string): Promise<void> {
+  const child = spawn(command, args, { cwd, stdio: "ignore" });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`preview ${command} did not finish successfully`)),
+    );
+  });
+}
+
+async function waitForPreview(child: ChildProcess, previewPort: number): Promise<void> {
+  const deadline = Date.now() + PREVIEW_READY_MS;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error("preview server stopped before it was ready");
+    try {
+      const response = await fetch(`http://${HOST}:${previewPort}/api/health`, {
+        signal: AbortSignal.timeout(500),
+      });
+      if (response.ok) return;
+    } catch {
+      // The child is still loading its server modules.
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("preview server did not become ready");
+}
+
+async function stopPreview(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
+  const timedOut = await Promise.race([
+    exited.then(() => false),
+    new Promise<true>((resolve) => setTimeout(() => resolve(true), PREVIEW_STOP_MS)),
+  ]);
+  if (!timedOut) return;
+  child.kill("SIGKILL");
+  await exited;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

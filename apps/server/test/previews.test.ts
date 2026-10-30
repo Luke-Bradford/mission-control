@@ -9,6 +9,32 @@ import {
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
 describe("PreviewManager", () => {
+  it("reserves distinct ports while concurrent starts are still preparing", async () => {
+    let release: (() => void) | undefined;
+    const preparing = new Promise<void>((resolve) => (release = resolve));
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async () => {
+        await preparing;
+        return { stop: () => {} };
+      },
+      remove: async () => {},
+    });
+
+    const first = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    const second = manager.start({ pr: 42, branch: "feature/42", checkout: "/repo" });
+    await expect(
+      manager.start({ pr: 43, branch: "feature/43", checkout: "/repo" }),
+    ).rejects.toMatchObject({
+      code: "limit",
+    });
+    release?.();
+    expect((await Promise.all([first, second])).map((preview) => preview.port)).toEqual([
+      7431, 7432,
+    ]);
+  });
+
   it("uses the spare-port pool, refuses a third preview, and releases a closed port", async () => {
     let clock = NOW;
     const starts: { port: number; dbPath: string; token: string }[] = [];
