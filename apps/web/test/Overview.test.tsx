@@ -82,6 +82,8 @@ interface Data {
   /** The seats' repo's PRs. */
   prs?: PullRequestView[];
   /** The crew's seat capacity, as `/api/machine` sends it. */
+  /** The machine-capacity admission reason, as `/api/machine` sends it. */
+  warning?: string | null;
   seats?: { maxSeats: number; seats: number; perSessionMax: number };
   /** The activity feed, read at each fetch. */
   activityNow?: () => ActivityRow[];
@@ -97,7 +99,11 @@ function stub(d: Data = {}) {
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
-    "/api/machine": { latest: d.machine === undefined ? sample() : d.machine, ...d.seats },
+    "/api/machine": {
+      latest: d.machine === undefined ? sample() : d.machine,
+      warning: d.warning ?? null,
+      ...d.seats,
+    },
     "/api/limits": d.limits ?? [],
     "/api/limits/github": d.githubRate ?? { queries: {}, pollCost: null },
     "/api/health": d.health ?? [],
@@ -1606,12 +1612,48 @@ describe("Machine panel", () => {
     stub({ machine: null });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(3));
+    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
     for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (—)",
     );
+  });
+
+  it("shows swap used of total next to memory, and no warning when starts are open", async () => {
+    stub({
+      machine: sample({ swapUsedBytes: 3.5 * GIB, swapTotalBytes: 8 * GIB }),
+    });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
+    expect(swap.textContent).toContain("Swap");
+    expect(swap.textContent).toContain("3.5 of 8 GB");
+    expect(mach.querySelector(".capwarn")).toBeNull();
+  });
+
+  it("a swap that was not measured is a dash", async () => {
+    stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
+    expect(swap.textContent).toBe("Swap— of — GB");
+  });
+
+  it("names the reason while the hub is holding new work", async () => {
+    stub({ warning: "swap 21.5 of 22.5 GB used" });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    const warn = await waitFor(() => {
+      const w = mach.querySelector<HTMLElement>(".capwarn");
+      if (!w) throw new Error("no warning");
+      return w;
+    });
+    expect(warn.className).toContain("warn-t");
+    expect(warn.textContent).toContain("Holding new work");
+    expect(warn.title).toBe("swap 21.5 of 22.5 GB used");
   });
 
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {

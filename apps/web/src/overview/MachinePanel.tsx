@@ -122,7 +122,24 @@ function usage(m: MachineSample | null) {
     diskTotal !== null && diskTotal > 0 && diskFree !== null
       ? (100 * (diskTotal - diskFree)) / diskTotal
       : null;
-  return { cores, cpu, agentsCpu, memTotal, memUsed, agentsMem, memPct, diskFree, diskPct };
+  const swapTotal = m?.swapTotalBytes ?? null;
+  const swapUsed = m?.swapUsedBytes ?? null;
+  const swapPct =
+    swapTotal !== null && swapTotal > 0 && swapUsed !== null ? (100 * swapUsed) / swapTotal : null;
+  return {
+    cores,
+    cpu,
+    agentsCpu,
+    memTotal,
+    memUsed,
+    agentsMem,
+    memPct,
+    swapTotal,
+    swapUsed,
+    swapPct,
+    diskFree,
+    diskPct,
+  };
 }
 
 /** The agents row: a dot per seat up to the cap, and whether another agent fits (catalogue 2.1.4). */
@@ -250,6 +267,24 @@ export function MachinePanel() {
             </span>
           </div>
           <div className="resrow">
+            <span className="s fg2">Swap</span>
+            <Bar
+              segs={
+                u.swapPct === null ? [] : [{ pct: u.swapPct, colour: OTHER_COLOUR, label: "used" }]
+              }
+            />
+            <span
+              className="num s"
+              title={none ?? (u.swapUsed === null ? "Not measured" : undefined)}
+            >
+              {u.swapUsed === null ? DASH : (u.swapUsed / GIB).toFixed(1)}
+              <span className="muted">
+                {" "}
+                of {u.swapTotal === null ? DASH : Math.round((u.swapTotal / GIB) * 10) / 10} GB
+              </span>
+            </span>
+          </div>
+          <div className="resrow">
             <span className="s fg2">Disk</span>
             {summary?.machine?.disk?.length ? (
               <MachineAreaChart
@@ -272,6 +307,12 @@ export function MachinePanel() {
               <span className="muted"> free</span>
             </span>
           </div>
+          {view?.warning && (
+            <div className="row s capwarn warn-t" role="status" title={view.warning}>
+              <span>Holding new work</span>
+              <span className="muted"> · {view.warning}</span>
+            </div>
+          )}
           {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
           <LockBox />
         </div>
