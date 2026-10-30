@@ -21,6 +21,8 @@ export const AWAY_DIGEST_KEY = "mc-away-digest";
 
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
+/** PR heads the operator checked locally in this browser. */
+export const QA_CHECKED_HEADS_KEY = "mc-qa-checked-heads";
 
 export function readKey(key: string): string | null {
   try {
