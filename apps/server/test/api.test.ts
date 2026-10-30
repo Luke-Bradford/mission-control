@@ -100,6 +100,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -1295,6 +1296,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits"],
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
+  ["GET", "/api/previews"],
+  ["POST", "/api/previews", { pr: 41 }],
+  ["DELETE", "/api/previews/41", {}],
+  ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
   [
@@ -2167,6 +2172,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -2489,6 +2495,8 @@ describe("local access", () => {
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
+            .replace("/previews/41/activity", "/previews/:pr/activity")
+            .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/prs\/4$/, "/prs/:number")
@@ -4772,7 +4780,7 @@ describe("boards, escalations, health", () => {
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([pr]);
+    expect(r.json()).toEqual([{ ...pr, preview: null }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
@@ -4801,10 +4809,12 @@ describe("boards, escalations, health", () => {
       closingIssues: [] as number[],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
-    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);
+    expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([
+      { ...pr(4, "shop-app#9"), preview: null },
+    ]);
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([
-      pr(5, null),
-      pr(4, "shop-app#9"),
+      { ...pr(5, null), preview: null },
+      { ...pr(4, "shop-app#9"), preview: null },
     ]);
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
@@ -4884,6 +4894,7 @@ describe("boards, escalations, health", () => {
         "createdAt",
         "updatedAt",
         "mergedAt",
+        "preview",
       ].sort(),
     );
     expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
@@ -8904,6 +8915,175 @@ it("labels the test lock route's holder and waiting entries", async () => {
     const view = (await a.inject("/api/test-lock")).json();
     expect(view.holder.label).toBe("make check");
     expect(view.waiting[0].label).toBe("make verify");
+  } finally {
+    await a.close();
+  }
+});
+
+it("starts, lists and closes an operator-only PR preview", async () => {
+  withCrew();
+  store.replacePullRequests(
+    "shop-app",
+    [
+      {
+        repoId: "shop-app",
+        number: 41,
+        title: "Preview me",
+        url: "https://example.test/pr/41",
+        branch: "feature/41",
+        ticket: null,
+        state: "open",
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      },
+    ],
+    NOW,
+  );
+  store.replacePullRequests(
+    "site-builder",
+    store.pullRequests("shop-app").map((pr) => ({ ...pr, repoId: "site-builder" })),
+    NOW,
+  );
+  const [openPr] = store.pullRequests("shop-app");
+  if (!openPr) throw new Error("preview fixture is missing its open PR");
+  store.replacePullRequests(
+    "shop-app",
+    [
+      ...store.pullRequests("shop-app"),
+      {
+        ...openPr,
+        number: 42,
+        branch: "closed/42",
+        state: "closed",
+      },
+    ],
+    NOW,
+  );
+  const heldPreviews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
+    start: async () => ({ stop: () => {} }),
+    remove: async () => {},
+  });
+  const heldApp = buildApp({
+    config,
+    store,
+    bus,
+    previews: heldPreviews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
+  try {
+    const held = await heldApp.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers: { [OPERATOR_HEADER]: "preview-token", ...json },
+      payload: { pr: 41 },
+    });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toMatchObject({ code: "capacity" });
+  } finally {
+    await heldApp.close();
+  }
+  const stop = vi.fn();
+  let activityToken = "";
+  const previews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: false, reason: null }),
+    start: async ({ token }) => {
+      activityToken = token;
+      return { stop, dbPath: join(dir, "preview.sqlite") };
+    },
+    remove: async () => {},
+  });
+  const a = buildApp({
+    config,
+    store,
+    bus,
+    previews,
+    previewRepoId: "shop-app",
+    operatorToken: "preview-token",
+  });
+  try {
+    expect((await a.inject("/api/previews")).statusCode).toBe(401);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers: json, payload: { pr: 41 } }))
+        .statusCode,
+    ).toBe(401);
+    const headers = { [OPERATOR_HEADER]: "preview-token", ...json };
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 42 } }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
+        .statusCode,
+    ).toBe(404);
+    const started = await a.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers,
+      payload: { pr: 41 },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect(
+      (await a.inject("/api/repos/shop-app/prs"))
+        .json()
+        .find((pr: { number: number }) => pr.number === 41),
+    ).toMatchObject({
+      number: 41,
+      preview: { url: "http://127.0.0.1:7431", port: 7431 },
+    });
+    expect((await a.inject({ method: "GET", url: "/api/previews", headers })).json()).toHaveLength(
+      1,
+    );
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: activityToken },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: "wrong" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await a.inject({ method: "DELETE", url: "/api/previews/41" })).statusCode).toBe(401);
+    expect(
+      (
+        await a.inject({
+          method: "DELETE",
+          url: "/api/previews/41",
+          headers: { [OPERATOR_HEADER]: "preview-token" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(stop).toHaveBeenCalledOnce();
+  } finally {
+    await a.close();
+  }
+});
+
+it("reports ordinary child-preview requests to the parent activity callback", async () => {
+  const previewActivity = vi.fn();
+  const a = buildApp({ config, store, bus, previewActivity });
+  try {
+    expect((await a.inject("/api/health")).statusCode).toBe(200);
+    expect(previewActivity).toHaveBeenCalledOnce();
   } finally {
     await a.close();
   }

@@ -1745,6 +1745,21 @@ Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, wr
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
 
+## Branch previews
+
+The live hub can start an open PR as a loopback-only preview with `POST /api/previews {"pr":123}`.
+`GET /api/previews` lists the active preview URLs and `DELETE /api/previews/123` ends one. The
+operator token is required for starting and ending previews.
+
+Each preview uses a SQLite `VACUUM INTO` snapshot in the live hub's private data directory, a
+temporary detached worktree, a spare port from 7431–7439, and `MC_NO_LOOP_WRITES=1` with crew
+off. It receives a newly generated operator token; the live token is never passed to it. At most
+two previews run. A capacity hold refuses new previews with its measured reason. The parent stops
+a preview after 20 minutes without a browser request, and removes its worktree and database on
+expiry, explicit close, or live-hub shutdown. Preparation has a five-minute deadline, and an
+operator close cancels preparation as well as a running child. Previews only run branches from the
+repository checked out by the hub; PR numbers in another configured repository are not eligible.
+
 ## Audit API
 
 `GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
