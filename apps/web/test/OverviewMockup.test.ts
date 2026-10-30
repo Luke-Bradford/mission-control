@@ -57,14 +57,11 @@ describe("Overview v2 mockup", () => {
 
   it("keeps crew and pipeline summaries consistent with their rendered states", () => {
     const document = renderMockup();
-    const counts = [...document.querySelectorAll("#crewRows .pill")].reduce(
-      (totals, pill) => {
-        const state = pill.textContent ?? "";
-        totals.set(state, (totals.get(state) ?? 0) + 1);
-        return totals;
-      },
-      new Map<string, number>(),
-    );
+    const counts = [...document.querySelectorAll("#crewRows .pill")].reduce((totals, pill) => {
+      const state = pill.textContent ?? "";
+      totals.set(state, (totals.get(state) ?? 0) + 1);
+      return totals;
+    }, new Map<string, number>());
     const crewSummary = document.querySelector("#crew .sub")?.textContent ?? "";
     const pipelineSummary = document.querySelector("#pipeline .sub")?.textContent ?? "";
     const stageTotal = [...document.querySelectorAll("#pipeline .stage h3 span")].reduce(
@@ -84,12 +81,14 @@ describe("Overview v2 mockup", () => {
     const quotaLabels = [...document.querySelectorAll(".quotaRow > span")].map(
       (label) => label.textContent,
     );
-    const logEvents = [...document.querySelectorAll(".log .event")].map((event) => event.textContent ?? "");
+    const logEvents = [...document.querySelectorAll(".log .event")].map(
+      (event) => event.textContent ?? "",
+    );
 
     expect(mockup).toContain(".pipeline .stage.empty{flex:0 0 112px}");
     expect(mockup).toContain(".log .line");
     expect(mockup).toContain("white-space:nowrap");
-    expect(mockup).toContain(":root[data-theme=\"light\"]{color-scheme:light;");
+    expect(mockup).toContain(':root[data-theme="light"]{color-scheme:light;');
     expect([...document.querySelectorAll("#crewRows .work")]).toHaveLength(11);
     expect([...document.querySelectorAll("#crewRows .work b")]).toHaveLength(11);
     expect([...document.querySelectorAll("#crewRows .work span")]).toHaveLength(11);
