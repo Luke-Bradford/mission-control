@@ -16,6 +16,20 @@ describe("plainTalkProblems", () => {
     ["a hedge", "I think the tests pass.", 'uses "I think"'],
     ["a banned word", "This was a quick fix.", 'uses "quick"'],
     ["a heavy word", "Escalate to FLIGHT.", 'uses "Escalate"'],
+    ["abort", "Abort the run and flag the issue.", 'uses "Abort"'],
+    ["flag", "Abort the run and flag the issue.", 'uses "flag"'],
+    ["kill", "Kill the process.", 'uses "Kill"'],
+    ["surface", "Surface the error to FLIGHT.", 'uses "Surface"'],
+    ["disable", "Disable the check.", 'uses "Disable"'],
+    ["terminated", "The run was terminated.", 'uses "terminated"'],
+    ["terminating", "Terminating the run.", 'uses "Terminating"'],
+    ["enables", "This enables the lock.", 'uses "enables"'],
+    ["escalated", "GUIDO-1 escalated it.", 'uses "escalated"'],
+    ["escalating", "Escalating now.", 'uses "Escalating"'],
+    ["enabled", "The flag is enabled.", 'uses "enabled"'],
+    ["allows you to", "It allows you to stop.", 'uses "allows you to"'],
+    ["in order to", "Run it in order to pass.", 'uses "in order to"'],
+    ["first person", "I ran the tests.", 'uses "I"'],
   ])("flags %s", (_what, text, problem) => {
     expect(plainTalkProblems(text)).toContain(problem);
   });
@@ -26,5 +40,6 @@ describe("plainTalkProblems", () => {
     expect(plainTalkProblems("Ran `pnpm -s lint && pnpm -s typecheck && pnpm -s test`.")).toEqual(
       [],
     );
+    expect(plainTalkProblems("Ran `git push --flag`.")).toEqual([]);
   });
 });
