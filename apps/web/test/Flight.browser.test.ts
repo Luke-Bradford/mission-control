@@ -285,34 +285,38 @@ describeRendered("FLIGHT page in a browser", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it("gives every working-context heading link a 24px target", async () => {
-    const api = apiFor("one");
-    api["/api/flight/brief"] = {
-      session: "s1",
-      sections: [
-        {
-          section: "project",
-          title: "Project",
-          text: "Ship the accessibility target fix.",
-          updatedAt: NOW - MIN,
-          updatedBy: "flight-1",
-        },
-      ],
-    };
-    const page = await renderAt({
-      page: "test/flightBrowser.html",
-      width: 1600,
-      height: 1000,
-      api,
-    });
-    await page.click("#flight-tab-knows");
-    await page.click("#briefP summary");
-    const boxes = await page.boxes(".flight-note-heading h3 a");
-    expect(boxes).not.toEqual([]);
-    for (const box of boxes) {
-      expect(box.width).toBeGreaterThanOrEqual(24);
-      expect(box.height).toBeGreaterThanOrEqual(24);
-    }
-    await page.close();
-  }, BROWSER_TEST_TIMEOUT_MS);
+  it(
+    "gives every working-context heading link a 24px target",
+    async () => {
+      const api = apiFor("one");
+      api["/api/flight/brief"] = {
+        session: "s1",
+        sections: [
+          {
+            section: "project",
+            title: "Project",
+            text: "Ship the accessibility target fix.",
+            updatedAt: NOW - MIN,
+            updatedBy: "flight-1",
+          },
+        ],
+      };
+      const page = await renderAt({
+        page: "test/flightBrowser.html",
+        width: 1600,
+        height: 1000,
+        api,
+      });
+      await page.click("#flight-tab-knows");
+      await page.click("#briefP summary");
+      const boxes = await page.boxes(".flight-note-heading h3 a");
+      expect(boxes).not.toEqual([]);
+      for (const box of boxes) {
+        expect(box.width).toBeGreaterThanOrEqual(24);
+        expect(box.height).toBeGreaterThanOrEqual(24);
+      }
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
