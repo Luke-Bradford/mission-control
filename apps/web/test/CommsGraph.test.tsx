@@ -764,3 +764,50 @@ it("cancels its frame and drops particles in flight when it unmounts", async () 
     frames.restore();
   }
 });
+
+it("shows each sender's message-length p95 and count against the limit, flagging long ones", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+    "/api/comms/metrics": {
+      from: 0,
+      to: 1,
+      p95BySeat: [
+        { seatId: "guido-1", p95: 400, n: 12 },
+        { seatId: "retro-1", p95: 1100, n: 7 },
+        { seatId: "flight-1", p95: 1500, n: 3 },
+        { seatId: "quiet-1", p95: null, n: 0 },
+      ],
+    },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const panel = await screen.findByRole("region", { name: /Message length p95/ });
+  expect(within(panel).getByText(/1,200 characters/)).toBeTruthy();
+  const items = within(panel).getAllByRole("listitem");
+  expect(items.map((li) => li.textContent)).toEqual([
+    expect.stringMatching(/flight-1/i),
+    expect.stringMatching(/retro-1/i),
+    expect.stringMatching(/guido-1/i),
+    expect.stringContaining("quiet-1"),
+  ]);
+  expect(items[0]?.textContent).toContain("1,500");
+  expect(items[0]?.textContent).toContain("3 msg");
+  expect(items[0]?.className).toContain("over");
+  expect(items[1]?.className).toContain("near");
+  expect(items[2]?.className).not.toMatch(/near|over/);
+  expect(items[3]?.textContent).toContain("—");
+});
+
+it("says so when no sender has a message in the range", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+    "/api/comms/metrics": { from: 0, to: 1, p95BySeat: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const panel = await screen.findByRole("region", { name: /Message length p95/ });
+  expect(within(panel).getByText(/No messages in the last 24h/)).toBeTruthy();
+  expect(within(panel).queryAllByRole("listitem")).toHaveLength(0);
+});

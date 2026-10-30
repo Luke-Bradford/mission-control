@@ -1,4 +1,11 @@
-import { COMMS_CREW, type CrewRow, HUD_STATE_LABEL } from "@mc/core";
+import {
+  COMMS_CREW,
+  COMMS_MESSAGE_MAX,
+  COMMS_METRICS,
+  type CommsMetricsView,
+  type CrewRow,
+  HUD_STATE_LABEL,
+} from "@mc/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -126,6 +133,7 @@ export function CommsGraph({
   const trafficResource = useResource<{ hours: Hour[] }>(RESOURCES.commsTraffic);
   const hours = trafficResource.data?.hours;
   const chatter = useResource<{ pairs: ChatterPair[] }>(RESOURCES.commsChatter).data?.pairs;
+  const lengths = useResource<CommsMetricsView>(RESOURCES.commsMetrics).data?.p95BySeat;
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
   const reduced = useReducedMotion();
   // The raw from/to pairs that gained a message on the last read, the canonical flows they make
@@ -598,8 +606,54 @@ export function CommsGraph({
           />
         )}
       </Panel>
+      <Panel
+        id="commsLength"
+        className="comms-length-panel"
+        title={COMMS_METRICS.messageLengthP95.label}
+        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
+      >
+        {lengths === undefined ? (
+          <p className="comms-traffic-empty">Loading message lengths…</p>
+        ) : lengths.length === 0 ? (
+          <p className="comms-traffic-empty">No messages in the last 24h.</p>
+        ) : (
+          <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
+            {[...lengths]
+              .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
+              .map(({ seatId, p95, n }) => {
+                const row = rows.find((r) => r.id === seatId);
+                const level = lengthLevel(p95);
+                return (
+                  <li key={seatId} className={level}>
+                    <b>{row === undefined ? seatId : callSign(row)}</b>
+                    <span className="comms-length-value">
+                      {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                      {level !== "" && <em>{level === "over" ? " over limit" : " near limit"}</em>}
+                    </span>
+                    <span className="comms-length-n">{n} msg</span>
+                    <span className="comms-watch-bar" aria-hidden="true">
+                      <i
+                        style={{
+                          width: percent(Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100), 0),
+                        }}
+                      />
+                    </span>
+                  </li>
+                );
+              })}
+          </ul>
+        )}
+      </Panel>
     </aside>
   );
+}
+
+/** Near the limit from 80% of it; over once the p95 passes it. */
+const NEAR_LIMIT = 0.8;
+function lengthLevel(p95: number | null): "" | "near" | "over" {
+  if (p95 === null) return "";
+  if (p95 > COMMS_MESSAGE_MAX) return "over";
+  return p95 >= COMMS_MESSAGE_MAX * NEAR_LIMIT ? "near" : "";
 }
 
 function Stat({

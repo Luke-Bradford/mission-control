@@ -143,6 +143,7 @@ export const RESOURCES = {
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
+  commsMetrics: { path: "/api/comms/metrics", topic: "agents" },
   commsChatter: { path: "/api/comms/chatter", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
