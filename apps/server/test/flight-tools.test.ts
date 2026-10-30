@@ -2927,6 +2927,17 @@ describe("flight_state", () => {
     expect(await state()).toEqual({
       signals: [],
       triage: [],
+      // mc#4 is blocked by an open mc#9
+      blocked: [
+        {
+          ref: "mc#4",
+          title: "Ticket 4",
+          column: "Ready",
+          waitsOn: ["mc#9"],
+          chain: ["mc#4", "mc#9"],
+          waitedMin: 0,
+        },
+      ],
       discussions: [],
       time: "13:00",
       repo: "mc",
