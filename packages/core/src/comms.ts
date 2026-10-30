@@ -25,6 +25,9 @@ export const COMMS_TICKET = /^[^#]+#[1-9]\d*$/;
 export const COMMS_TEXT_MAX = 32_000;
 export const COMMS_MESSAGE_MAX = COMMS_TEXT_MAX;
 export const COMMS_MESSAGE_BODY_LIMIT = COMMS_MESSAGE_MAX * 6 + 1024;
+/** A Comms read returns this many newest messages unless `?limit=` says otherwise, up to the max. */
+export const COMMS_PAGE_DEFAULT = 50;
+export const COMMS_PAGE_MAX = 200;
 export const commsCutMarker = (kept: number, total: number): string =>
   `\n[stored text cut at ${kept} of ${total} characters]`;
 
