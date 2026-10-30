@@ -424,6 +424,7 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatusFailures = new Map<string, string>();
   /** PR rows are immutable enough for one engine pass; avoid one whole-table read per run. */
   let tickPrs: Map<RepoId, ReturnType<Store["pullRequests"]>> | null = null;
+  let tickNotes: ReturnType<Store["notes"]> | null = null;
   const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
     const cached = tickPrs?.get(repoId);
     if (cached !== undefined) return cached;
@@ -663,9 +664,11 @@ export function createEngine(deps: EngineDeps): Engine {
   function noteHardRules(repoId: RepoId, set: boolean): void {
     if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return;
     const key = hardRulesUnsetNoteKey(repoId);
-    const open = store.notes().some((n) => n.key === key);
+    const notes = tickNotes ?? store.notes();
+    const open = notes.some((n) => n.key === key);
     if (set && open) {
       store.clearNote(key, now());
+      if (tickNotes) tickNotes = tickNotes.filter((n) => n.key !== key);
       bus.emit("attention");
     } else if (!set && !open) {
       store.raiseNote({
@@ -676,6 +679,17 @@ export function createEngine(deps: EngineDeps): Engine {
         repoId,
         text: hardRulesUnsetText(repoId),
         at: now(),
+      });
+      tickNotes?.push({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId,
+        text: hardRulesUnsetText(repoId),
+        at: now(),
+        clearedAt: null,
+        dismissedAt: null,
       });
       bus.emit("attention");
     }
@@ -1826,9 +1840,9 @@ export function createEngine(deps: EngineDeps): Engine {
     return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
   }
 
-  async function sweepNotes(): Promise<void> {
+  async function sweepNotes(notes = store.notes()): Promise<void> {
     const at = now();
-    for (const n of store.notes()) {
+    for (const n of notes) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
       if (n.key === `${run.id}:file-minor`) continue;
@@ -2339,9 +2353,10 @@ export function createEngine(deps: EngineDeps): Engine {
     async tick() {
       if (!live()) return;
       tickPrs = new Map();
+      tickNotes = store.notes();
       try {
         const runs = loopRuns();
-        const notes = store.notes();
+        const notes = tickNotes;
         await Promise.all(runs.map((r) => wakePendingWork(r.id)));
         await Promise.all(
           store
@@ -2351,12 +2366,13 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         await Promise.all(runs.map((r) => reconcileRun(r.id)));
         await refreshRuleNotes(runs);
-        await sweepNotes();
+        await sweepNotes(notes);
         untakeStale();
         await takeForSeats();
         await kickReviews();
       } finally {
         tickPrs = null;
+        tickNotes = null;
       }
     },
 
