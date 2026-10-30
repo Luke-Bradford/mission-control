@@ -1052,13 +1052,13 @@ describe("Agent page: header and tiles", () => {
     [
       "few, under 1k tokens",
       { count: 3, tokensSaved: 950 },
-      "Re-reads avoided: 3, about 950 tokens saved",
+      "Re-reads avoided: 3, about 1k tokens saved",
     ],
-    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4.2k tokens saved"],
+    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4k tokens saved"],
     [
       "many",
       { count: 128, tokensSaved: 1_234_000 },
-      "Re-reads avoided: 128, about 1.23M tokens saved",
+      "Re-reads avoided: 128, about 1234k tokens saved",
     ],
   ])("context tile re-reads line: %s", async (_name, rereads, line) => {
     stub({

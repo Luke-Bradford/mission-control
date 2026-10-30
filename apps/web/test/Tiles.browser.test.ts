@@ -31,7 +31,7 @@ describeRendered("The Agent tiles' re-reads line in a browser", () => {
               })),
           null,
         );
-        expect(line.text).toContain("Re-reads avoided: 128, about 1.23M tokens saved");
+        expect(line.text).toContain("Re-reads avoided: 128, about 1234k tokens saved");
         expect(line.clipped).toBe(false);
         expect(line.lines).toBe(1);
         expect((await page.unclipped(".tile2")).every(Boolean)).toBe(true);

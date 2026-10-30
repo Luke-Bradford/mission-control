@@ -94,7 +94,7 @@ function Rereads({ d }: { d: CrewRow["digest"] }) {
   return (
     <>
       {" · "}Re-reads avoided: <span className="num">{r.count}</span>, about{" "}
-      <span className="num">{kTokens(r.tokensSaved)}</span> tokens saved
+      <span className="num">{k(r.tokensSaved)}k</span> tokens saved
     </>
   );
 }
