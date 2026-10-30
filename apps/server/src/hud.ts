@@ -191,7 +191,9 @@ function loopViews(
     const seatRow =
       agent.kind === "crew" ? (seatRows?.get(agent.id) ?? store.seatSession(agent.id)) : null;
     const held =
-      seatRow?.runId === null ? undefined : runs.find((run) => run.id === seatRow?.runId);
+      seatRow?.runId === null || seatRow?.runId === undefined
+        ? undefined
+        : (runs.find((run) => run.id === seatRow.runId) ?? store.run(seatRow.runId));
     const latest = held?.endedAt === null ? held : (runs[0] ?? null);
     const lastOutput = latest
       ? lastOutputAt(

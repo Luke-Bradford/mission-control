@@ -98,6 +98,16 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
 });
 
 describe("Store", () => {
+  it("batches recent runs by agent without dropping empty agents", () => {
+    store.upsertRun(run({ id: "a-old", agentId: "a", seq: 1, startedAt: 1 }));
+    store.upsertRun(run({ id: "a-new", agentId: "a", seq: 2, startedAt: 2 }));
+    store.upsertRun(run({ id: "b", agentId: "b", seq: 1, startedAt: 3 }));
+    const rows = store.runsForAgents(["a", "b", "empty"], 1);
+    expect(rows.get("a")).toEqual(store.runs("a", 1));
+    expect(rows.get("b")).toEqual(store.runs("b", 1));
+    expect(rows.get("empty")).toEqual([]);
+  });
+
   it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
     const s = new Store(":memory:");
     s.mapCachePut("tree", "checkout", "a", "1", true);
@@ -2034,6 +2044,13 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")).toEqual(
       seat({ state: "parked", reason: "rate limit", updatedAt: 9 }),
     );
+  });
+
+  it("batches named seat sessions", () => {
+    store.setSeatSession(seat());
+    const rows = store.seatSessions(["guido", "missing"]);
+    expect(rows.get("guido")).toEqual(store.seatSession("guido"));
+    expect(rows.has("missing")).toBe(false);
   });
 
   it("keeps null run, session, reason and worktree", () => {

@@ -64,6 +64,59 @@ const storedRun = (over: Partial<Run>): Run => ({
 });
 
 describe("the crew and Needs-you memo", () => {
+  it("shows an open held run even when a newer run exists", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 1,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            { id: "seat-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+          ],
+        },
+      ],
+    };
+    store.upsertRun(
+      storedRun({
+        id: "held",
+        agentId: "seat-1",
+        startedAt: NOW - 10_000,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.upsertRun(storedRun({ id: "newer", agentId: "seat-1", startedAt: NOW - 1_000 }));
+    store.setSeatSession({
+      seatId: "seat-1",
+      runId: "held",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("held");
+    store.upsertRun(
+      storedRun({
+        id: "held",
+        agentId: "seat-1",
+        startedAt: NOW - 10_000,
+        endedAt: NOW - 2_000,
+        status: "ok",
+      }),
+    );
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("newer");
+  });
+
   it("reads ten seats with fifty runs each through the batched HUD tables", () => {
     config.crew = {
       worktrees: join(dir, "crew"),
