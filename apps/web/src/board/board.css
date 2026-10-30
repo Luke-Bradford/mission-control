@@ -178,7 +178,8 @@
 }
 
 /* The "You:" chip is a pill that opens its Needs-you item's brief; it sits above the cover. */
-.kcard .overlay button.kyou {
+.kcard .overlay button.kyou,
+.kcard .overlay button.preview-start {
   position: relative;
   z-index: 1;
   border: 0;

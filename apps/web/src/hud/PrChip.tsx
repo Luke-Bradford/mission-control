@@ -1,5 +1,5 @@
 import { type PullRequestView, prPill, type RunPr } from "@mc/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiPost } from "../api.ts";
 import { Pill, PillButton } from "./Pill.tsx";
 import { RepoRef } from "./RepoRef.tsx";
@@ -51,6 +51,10 @@ export function PrChip({
   const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
   const hold = "hold" in pr ? pr.hold : undefined;
   const url = previewUrl(preview);
+  const canStart = initialPreview === null && pr.state === "open";
+  useEffect(() => {
+    setPreview(initialPreview ?? null);
+  }, [initialPreview]);
   const start = async () => {
     if (starting) return;
     setStarting(true);
@@ -85,17 +89,20 @@ export function PrChip({
           >
             Preview
           </a>
-        ) : (
+        ) : canStart ? (
           <PillButton
             tone="plain"
             className="preview-start"
             aria-label={`Start preview for PR #${pr.number}`}
             disabled={starting}
-            onClick={() => void start()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void start();
+            }}
           >
             {starting ? "Starting…" : "Start preview"}
           </PillButton>
-        ))}
+        ) : null)}
       {error && (
         <span className="s crit-t preview-error" role="alert">
           {error}

@@ -483,6 +483,55 @@ describe("Agent page: what past runs were", () => {
     expect(chip.closest(".rref")?.getAttribute("title")).toBe("Cache quotes");
     expect(within(container).queryByRole("link", { name: "shop-app PR #9" })).toBeNull();
   });
+
+  it("updates a run PR from Start preview to Preview when its PR row arrives", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    const runPr = {
+      repoId: "shop-app",
+      number: 77,
+      title: "Cache quotes",
+      url: "https://github.com/octo-org/shop-app/pull/77",
+      state: "open" as const,
+      ticket: null,
+    };
+    const view = render(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "shop-app PR #77" })).toBeTruthy();
+
+    view.rerender(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        previewPrs={[
+          {
+            ...prView({
+              number: 77,
+            }),
+            preview: {
+              pr: 77,
+              branch: "feature/77-cache",
+              port: 5175,
+              url: "http://127.0.0.1:5175",
+              startedAt: NOW,
+            },
+          } as ReturnType<typeof prView> & { preview: object },
+        ]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Open preview for PR #77" })).toBeTruthy();
+  });
 });
 
 describe("Agent page: picker and selection", () => {
