@@ -884,6 +884,8 @@ export interface CrewLoop {
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
+  /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
+  waitText?: string | null;
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */

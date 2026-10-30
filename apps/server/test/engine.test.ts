@@ -6204,6 +6204,8 @@ describe("the engine runs reviews", () => {
       const other = "guido-1:other";
       store.upsertRun(run({ id: other, seq: 2 }));
       seatIdle(other);
+      // mid-turn: a run between turns would give way to this rework at once
+      h.facts = { inTurn: true, resumedAt: clock, rateLimitedUntil: null };
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
       await h.engine.onOperatorMessage(RUN);
       await h.engine.reconcileRun(RUN);
@@ -6534,6 +6536,71 @@ describe("the engine runs reviews", () => {
       store.setRunLoop(RUN, { ...loopOf(), aside: { worktree: WT, wake: true } });
       await h.engine.reconcileRun(RUN);
       expect(asideRun()).toEqual({ worktree: WT, wake: false });
+    });
+
+    /** A second ticket the seat is building (no PR yet), between turns. */
+    function building(id: string, issue: number, startedAt = START + MIN): void {
+      store.upsertRun(
+        run({
+          id,
+          startedAt,
+          seq: 2,
+          ticket: `${REPO}#${issue}`,
+          branch: `feature/${issue}-new`,
+          loop: { ...NEW_LOOP, phase: "working" },
+        }),
+      );
+      seatIdle(id);
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: join(dir, `wt-${id}`) });
+    }
+
+    it("findings on a set-aside PR set the ticket being built aside at its turn end, then wake the rework", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 7);
+      const takesBefore = h.taken.length;
+      // the seat is busy with b until b is set aside, as the real wake answers
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.asides).toContain(b));
+      await vi.waitFor(() => expect(store.run(b)?.loop?.aside).toMatchObject({ wake: true }));
+      h.wakeError = null;
+      await h.engine.reconcileRun(RUN);
+      // the rework is back on the seat first; the new ticket waits behind it
+      await vi.waitFor(() => expect(asideRun()).toBeNull());
+      expect(h.wakes.at(-1)).toBe(RUN);
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      expect(h.taken).toHaveLength(takesBefore);
+    });
+
+    it("the ticket being built is not set aside while its turn runs", async () => {
+      await setAside();
+      const b = "guido-1:b";
+      building(b, 7);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      h.facts = { inTurn: true, resumedAt: clock, rateLimitedUntil: null };
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(asideRun()?.wake).toBe(true));
+      await h.engine.reconcileRun(b);
+      expect(h.asides).toEqual([RUN]);
+      expect(store.seatSession(SEAT)?.runId).toBe(b);
+    });
+
+    it("two set-aside reworks come back oldest first", async () => {
+      await setAside();
+      const younger = "guido-1:younger";
+      store.upsertRun(
+        run({
+          id: younger,
+          startedAt: START + MIN,
+          seq: 3,
+          ticket: `${REPO}#8`,
+          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/y", wake: true } },
+        }),
+      );
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+      expect(store.run(younger)?.loop?.aside?.wake).toBe(true);
     });
 
     it("an older run already done does not hold up a younger rework", async () => {

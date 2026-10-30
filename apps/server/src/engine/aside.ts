@@ -42,7 +42,28 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   );
 }
 
-/** The seat's aside run that is due back, oldest first, if any. */
+/** A run set aside while it was still being built (never pushed), to make way for rework. */
+const isDisplaced = (store: Store, run: Run): boolean =>
+  run.loop?.phase === "working" && store.runPush(run.id) === null;
+
+/**
+ * The seat's aside run that is due back, if any: rework on a run with a PR first, oldest first;
+ * a run displaced mid-build comes back after all of that.
+ */
 export function wakeDueAsideRun(store: Store, seatId: string): Run | undefined {
-  return store.asideRuns().find((r) => r.agentId === seatId && asideWakeDue(store, r));
+  const due = store.asideRuns().filter((r) => r.agentId === seatId && asideWakeDue(store, r));
+  return due.find((r) => !isDisplaced(store, r)) ?? due[0];
+}
+
+/** Whether another run of the seat has rework due, so the run being built gives way to it. */
+export function reworkDueBesides(store: Store, run: Run): boolean {
+  return store
+    .asideRuns()
+    .some(
+      (r) =>
+        r.agentId === run.agentId &&
+        r.id !== run.id &&
+        !isDisplaced(store, r) &&
+        asideWakeDue(store, r),
+    );
 }

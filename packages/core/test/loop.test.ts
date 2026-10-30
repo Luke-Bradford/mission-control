@@ -2154,6 +2154,45 @@ describe("set aside", () => {
     expect(kindsOf(reconcile(base({ asideOk: false })).actions)).not.toContain("set-aside");
   });
 
+  describe("rework due on the seat", () => {
+    /** A new ticket being built, its seat between turns, another run of the seat due back. */
+    const building = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, reworkDue: true, ...over },
+        { phase: "working", cardFor: "working:0", ...loop },
+      );
+      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
+    };
+
+    it("sets the working run aside at its turn end, with no review seat needed", () => {
+      for (const s of [building(), building({ asideOk: false })]) {
+        const r = reconcile(s);
+        expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+        expect(r.loop.phase).toBe("working");
+      }
+    });
+
+    it("waits for the turn to end, and for the seat to be free of questions", () => {
+      const b = building();
+      const cases: [string, LoopSnapshot][] = [
+        ["in turn", building({ seat: { ...b.seat, inTurn: true } })],
+        ["open question", building({ seat: { ...b.seat, openQuestion: true } })],
+        ["not idle", building({ seat: { ...b.seat, state: "running" } })],
+        ["seat does not hold the run", building({ seat: { ...b.seat, holdsRun: false } })],
+        ["no rework due", building({ reworkDue: false })],
+        ["ended", building({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("the displaced run is flagged to come back, behind the rework", () => {
+      const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
+      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
+  });
+
   it("not set aside", () => {
     const b = base();
     const cases: [string, LoopSnapshot][] = [
