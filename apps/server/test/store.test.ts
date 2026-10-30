@@ -3130,6 +3130,26 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
+  it("expires settled operational history while retaining open attention", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO attention_notes (key,kind,text,at,cleared_at) VALUES
+        ('old-cleared','test','old',0,1), ('open','test','open',0,NULL);
+        INSERT INTO guard_hits (agent_id,rule,text,at) VALUES ('seat','rule','old',0);
+        INSERT INTO hub_events (at,text) VALUES (0,'old');
+        INSERT INTO drafts (target,kind,text,created_at,state) VALUES ('old','plan','old',0,'done');
+        INSERT INTO crew_errors (agent_id,text,at,acked) VALUES ('seat','old',0,1);`);
+      await store.pruneHistory(91 * 86_400_000);
+      expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
+        { key: "open" },
+      ]);
+      for (const table of ["guard_hits", "hub_events", "drafts", "crew_errors"])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("retains the latest plan while a newer run on the same ticket is kept", async () => {
     const old = run({ id: "planner", ticket: "repo#494", endedAt: 1 });
     const newer = run({ id: "worker", ticket: old.ticket });

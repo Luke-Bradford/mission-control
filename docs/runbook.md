@@ -276,9 +276,10 @@ after both their review and author run end; test-lock holds and CI runs stay 90 
 set-aside runs, unanswered questions, pending drafts and open attention notes protect
 their associated rows. Deletions use transactions of at most 500 rows, yield between
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
-Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
-Activity and Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database
-file on disk.
+Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
+hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
+also expire after 90 days. Runs, reviews and flight decisions remain available to Activity and
+Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database file on disk.
 
 ## First crew
 

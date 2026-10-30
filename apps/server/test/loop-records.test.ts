@@ -59,6 +59,26 @@ const loop = (over: Partial<RunLoop> = {}): RunLoop => ({
 });
 
 describe("runs: loop and endedBy", () => {
+  it("indexes the store's frequent bounded reads", () => {
+    const db = new DatabaseSync(dbPath());
+    try {
+      const plans = [
+        "SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key LIMIT 500",
+        "SELECT key FROM attention_notes WHERE run_id = 'r1' AND cleared_at IS NULL ORDER BY key",
+        "SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL AND json_extract(loop, '$.aside') IS NOT NULL ORDER BY started_at, seq LIMIT 200",
+        "SELECT * FROM comms WHERE at >= 0 AND target_run_id = 'r1' ORDER BY at, id LIMIT 5000",
+        "SELECT * FROM comms WHERE ticket = 'repo#1' ORDER BY at, id LIMIT 5000",
+        "SELECT * FROM pull_requests WHERE ticket = 'repo#1' ORDER BY updated_at DESC LIMIT 200",
+        "SELECT * FROM reviews WHERE ended_at >= 0 ORDER BY ended_at DESC LIMIT 200",
+      ].flatMap((sql) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[]);
+      expect(plans.map((plan) => plan.detail).join("\n")).not.toMatch(
+        /SCAN (?:TABLE )?(?:attention_notes|runs|comms|pull_requests|reviews)/,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("opening the database again changes nothing and loses no rows", () => {
     store.upsertRun(run());
     store.setRunLoop("r1", loop());

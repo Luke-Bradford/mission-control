@@ -107,6 +107,14 @@ export const COMMS_RETENTION_DAYS = 90;
 export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
+export const LIVE_BOARD_LIMIT = 500;
+export const LIVE_COMMS_LIMIT = 5_000;
+export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
+export const LIVE_NOTES_LIMIT = 500;
+export const LIVE_PULL_REQUESTS_LIMIT = 200;
+export const LIVE_REVIEWS_LIMIT = 200;
+export const LIVE_ASIDE_RUNS_LIMIT = 200;
+export const OPERATIONAL_RETENTION_DAYS = 90;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
@@ -1244,6 +1252,14 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
+      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
+      CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
+      CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
+      CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -1333,6 +1349,8 @@ export class Store {
     this.addColumn("comms", "reply_to", "INTEGER");
     this.addColumn("comms", "target_run_id", "TEXT");
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
@@ -1654,9 +1672,9 @@ export class Store {
       .prepare(
         `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
            AND json_extract(loop, '$.aside') IS NOT NULL
-         ORDER BY started_at, seq`,
+         ORDER BY started_at, seq LIMIT ?`,
       )
-      .all() as Row[];
+      .all(LIVE_ASIDE_RUNS_LIMIT) as Row[];
     return rows.map(toRun);
   }
 
@@ -2035,6 +2053,32 @@ export class Store {
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
+    const operationalCutoff = now - OPERATIONAL_RETENTION_DAYS * day;
+    // These rows are operational traces, not the durable Audit and QA records. Keep open work
+    // and the latest brief for each key; settled rows expire together in the hourly maintenance pass.
+    this.transaction(() => {
+      this.db
+        .prepare("DELETE FROM attention_notes WHERE cleared_at IS NOT NULL AND cleared_at < ?")
+        .run(operationalCutoff);
+      this.db
+        .prepare("DELETE FROM attention_episodes WHERE cleared_at IS NOT NULL AND cleared_at < ?")
+        .run(operationalCutoff);
+      this.db.prepare("DELETE FROM board_moves WHERE at < ?").run(operationalCutoff);
+      this.db.prepare("DELETE FROM guard_hits WHERE at < ?").run(operationalCutoff);
+      this.db.prepare("DELETE FROM hub_events WHERE at < ?").run(operationalCutoff);
+      this.db
+        .prepare("DELETE FROM seat_questions WHERE answered_at IS NOT NULL AND answered_at < ?")
+        .run(operationalCutoff);
+      this.db
+        .prepare("DELETE FROM drafts WHERE created_at < ? AND state != 'pending'")
+        .run(operationalCutoff);
+      this.db.prepare("DELETE FROM crew_errors WHERE acked = 1 AND at < ?").run(operationalCutoff);
+      this.db
+        .prepare(`DELETE FROM briefs WHERE at < ? AND id NOT IN (
+          SELECT MAX(id) FROM briefs GROUP BY key
+        )`)
+        .run(operationalCutoff);
+    });
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
       AND json_extract(r.loop, '$.aside') IS NULL
@@ -2241,8 +2285,8 @@ export class Store {
 
   board(repoId: RepoId): BoardItem[] {
     const rows = this.db
-      .prepare("SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number ASC")
-      .all(repoId) as Row[];
+      .prepare("SELECT * FROM board_items WHERE repo_id = ? ORDER BY issue_number ASC LIMIT ?")
+      .all(repoId, LIVE_BOARD_LIMIT) as Row[];
     return rows.map((r) => ({
       repoId: r.repo_id as string,
       issueNumber: r.issue_number as number,
@@ -2715,8 +2759,8 @@ export class Store {
 
   pullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.statement(
-      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
-    ).all(repoId) as Row[];
+      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC LIMIT ?",
+    ).all(repoId, LIVE_PULL_REQUESTS_LIMIT) as Row[];
     return this.pullRequestRows(rows);
   }
 
@@ -3400,9 +3444,13 @@ export class Store {
       .prepare(
         `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
          ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
-         ORDER BY created_at, id`,
+         ORDER BY created_at, id LIMIT ?`,
       )
-      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
+      .all(
+        ...states,
+        ...(window ? [window.repo, window.since, window.until] : []),
+        LIVE_REVIEWS_LIMIT,
+      ) as Row[];
     return rows.map(toReview);
   }
 
@@ -3751,11 +3799,13 @@ export class Store {
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
   planLanded(run: Run): boolean {
+    if (this.statement("SELECT 1 FROM loop_events WHERE key = ?").get(`${run.id}:plan`))
+      return true;
     return (
       this.statement(
-        `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
-           WHERE e.key = ? OR (e.key LIKE '%:plan' AND r.repo_id = ? AND r.ticket = ?) LIMIT 1`,
-      ).get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
+        `SELECT 1 FROM runs r JOIN loop_events e ON e.key = r.id || ':plan'
+           WHERE r.repo_id = ? AND r.ticket = ? LIMIT 1`,
+      ).get(run.repoId, run.ticket) !== undefined
     );
   }
 
@@ -4393,10 +4443,17 @@ export class Store {
     const rows = this.db
       .prepare(
         targetRunId === undefined
-          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id"
-          : "SELECT * FROM comms WHERE at >= ? AND (target_run_id IS NULL OR target_run_id = ?) ORDER BY at, id",
+          ? "SELECT * FROM comms WHERE at >= ? ORDER BY at, id LIMIT ?"
+          : `SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
+             UNION ALL
+             SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
+             ORDER BY at, id LIMIT ?`,
       )
-      .all(since, ...(targetRunId === undefined ? [] : [targetRunId])) as Row[];
+      .all(
+        since,
+        ...(targetRunId === undefined ? [] : [since, targetRunId]),
+        LIVE_COMMS_LIMIT,
+      ) as Row[];
     // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
     // readers use the scoped methods above, which include metadata and related rows.
     return rows.map((r) => ({
@@ -4508,11 +4565,13 @@ export class Store {
   loopEvents(since: number, repoId?: RepoId): LoopEvent[] {
     const rows = (
       repoId === undefined
-        ? this.db.prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key").all(since)
+        ? this.db
+            .prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key LIMIT ?")
+            .all(since, LIVE_LOOP_EVENTS_LIMIT)
         : this.db
             .prepare(`SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
-          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key`)
-            .all(since, repoId)
+          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key LIMIT ?`)
+            .all(since, repoId, LIVE_LOOP_EVENTS_LIMIT)
     ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
@@ -4673,8 +4732,8 @@ export class Store {
   /** The open notes, oldest first. */
   notes(): AttentionNote[] {
     const rows = this.db
-      .prepare("SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key")
-      .all() as Row[];
+      .prepare("SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key LIMIT ?")
+      .all(LIVE_NOTES_LIMIT) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
       kind: r.kind as NoteKind,
