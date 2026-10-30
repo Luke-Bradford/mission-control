@@ -750,7 +750,7 @@ export async function main(): Promise<void> {
 }
 
 /** A branch preview never inherits an explicit live config path, which would permit config writes. */
-function previewEnvironment(
+export function previewEnvironment(
   previewPort: number,
   previewDb: string,
   pr: number,

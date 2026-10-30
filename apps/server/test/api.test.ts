@@ -8690,6 +8690,21 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     store.pullRequests("shop-app").map((pr) => ({ ...pr, repoId: "site-builder" })),
     NOW,
   );
+  const [openPr] = store.pullRequests("shop-app");
+  if (!openPr) throw new Error("preview fixture is missing its open PR");
+  store.replacePullRequests(
+    "shop-app",
+    [
+      ...store.pullRequests("shop-app"),
+      {
+        ...openPr,
+        number: 42,
+        branch: "closed/42",
+        state: "closed",
+      },
+    ],
+    NOW,
+  );
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
@@ -8716,6 +8731,14 @@ it("starts, lists and closes an operator-only PR preview", async () => {
         .statusCode,
     ).toBe(401);
     const headers = { [OPERATOR_HEADER]: "preview-token", ...json };
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 42 } }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/previews", headers, payload: { pr: 999 } }))
+        .statusCode,
+    ).toBe(404);
     const started = await a.inject({
       method: "POST",
       url: "/api/previews",

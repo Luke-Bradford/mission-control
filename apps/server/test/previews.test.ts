@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { previewEnvironment } from "../src/main.ts";
 import {
   PREVIEW_IDLE_MS,
   PREVIEW_START_MS,
@@ -10,6 +11,32 @@ import {
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
 describe("PreviewManager", () => {
+  it("builds an isolated child environment without the live config", () => {
+    const original = process.env.MC_CONFIG;
+    process.env.MC_CONFIG = "/live/config.yaml";
+    try {
+      const environment = previewEnvironment(
+        7431,
+        "/private/preview.sqlite",
+        41,
+        "fresh-token",
+        7420,
+      );
+      expect(environment).toMatchObject({
+        MC_PORT: "7431",
+        MC_DB: "/private/preview.sqlite",
+        MC_NO_LOOP_WRITES: "1",
+        MC_NO_CREW: "1",
+        MC_PREVIEW_ACTIVITY_TOKEN: "fresh-token",
+        MC_PREVIEW_ACTIVITY_URL: "http://127.0.0.1:7420/api/previews/41/activity",
+      });
+      expect(environment.MC_CONFIG).toBeUndefined();
+    } finally {
+      if (original === undefined) delete process.env.MC_CONFIG;
+      else process.env.MC_CONFIG = original;
+    }
+  });
+
   it("reserves distinct ports while concurrent starts are still preparing", async () => {
     let release: (() => void) | undefined;
     const preparing = new Promise<void>((resolve) => (release = resolve));
