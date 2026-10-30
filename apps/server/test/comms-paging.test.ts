@@ -84,6 +84,14 @@ it("pages Comms: the conversation list first, newest 50 per conversation, older 
     );
     expect(oldest.hasMore).toBe(false);
 
+    // The nav's read: the conversation list and counts, no messages.
+    const nav = await get<typeof agent>("/api/comms/agents/guido-1?summary=1");
+    expect(nav.messages).toEqual([]);
+    expect(nav.inbox).toEqual([]);
+    expect(nav.unread).toBe(121);
+    expect(nav.contacts).toEqual(agent.contacts);
+    expect((await app.inject({ url: "/api/comms/agents/guido-1?summary=2" })).statusCode).toBe(400);
+
     const bad = await app.inject({ url: "/api/comms/agents/guido-1?limit=0" });
     expect(bad.statusCode).toBe(400);
   } finally {

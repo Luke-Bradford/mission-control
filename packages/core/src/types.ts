@@ -408,8 +408,30 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
 
-/** A PR as a list sends it; the full `PullRequestView` comes from the PR's own route or `?detail=1`. */
-export type PullRequestSummary = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
+/** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
+export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
+
+/**
+ * A PR as `?shape=summary` sends it: what a list shows (number, title, state, head, checks rollup,
+ * review state), nothing that grows with the PR. The full row is the PR's own route.
+ */
+export type PullRequestSummary = Pick<
+  PullRequestView,
+  | "repoId"
+  | "number"
+  | "title"
+  | "url"
+  | "branch"
+  | "headSha"
+  | "ticket"
+  | "state"
+  | "isDraft"
+  | "review"
+  | "ci"
+  | "createdAt"
+  | "updatedAt"
+  | "mergedAt"
+>;
 
 export interface PullRequestView {
   repoId: RepoId;

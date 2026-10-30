@@ -83,6 +83,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
+  type PullRequestListRow,
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
@@ -598,8 +599,28 @@ const isLocalOrigin = (origin: string): boolean => {
 
 const errCode = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code;
 
-/** A PR as a list sends it: its checks by name and state only. */
-function prSummary(pr: PullRequestView): PullRequestSummary {
+/** A PR as `?shape=summary` sends it: the fields a list shows, the checks as the `ci` rollup. */
+function prSummaryRow(pr: PullRequestView): PullRequestSummary {
+  return {
+    repoId: pr.repoId,
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    branch: pr.branch,
+    headSha: pr.headSha,
+    ticket: pr.ticket,
+    state: pr.state,
+    isDraft: pr.isDraft,
+    review: pr.review,
+    ci: pr.ci,
+    createdAt: pr.createdAt,
+    updatedAt: pr.updatedAt,
+    mergedAt: pr.mergedAt,
+  };
+}
+
+/** A PR as a list sends it by default: its checks by name and state only. */
+function prSummary(pr: PullRequestView): PullRequestListRow {
   const { checks, ...rest } = pr;
   return checks === undefined
     ? rest
@@ -1051,6 +1072,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return crewMemo.value;
   };
 
+  let crewSummaryMemo:
+    | { bucket: number; revision: number; lockKey: string; value: Crew }
+    | undefined;
+  /** The Overview's crew: built without event timelines, so a many-run hub does not pay for them. */
+  const sharedCrewSummary = (at = now()): Crew => {
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewSummaryMemo?.bucket !== bucket ||
+      crewSummaryMemo.revision !== crewRevision ||
+      crewSummaryMemo.lockKey !== lockKey
+    )
+      crewSummaryMemo = {
+        bucket,
+        revision: crewRevision,
+        lockKey,
+        value: crew(config, store, at, lock, undefined, true),
+      };
+    return crewSummaryMemo.value;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
   const sharedAttention = (): AttentionItem[] => {
     const at = now();
@@ -1417,8 +1460,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         scope: CommsReadScope,
         cursorKey: string,
         paging: { limit: number; before: string | undefined },
+        countsOnly = false,
       ) => {
-        const page = store.commsPage(scope, paging.limit, paging.before);
+        const page = countsOnly
+          ? { rows: [], hasMore: false }
+          : store.commsPage(scope, paging.limit, paging.before);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
@@ -1473,15 +1519,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{
         Params: { id: string };
-        Querystring: { limit?: unknown; before?: unknown };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
       }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
         const paging = commsPaging(req.query);
         if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-        const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging);
+        const { summary } = req.query;
+        if (summary !== undefined && summary !== "1")
+          return reply.code(400).send({ error: "summary must be 1" });
+        // `?summary=1`: the conversation list and counts only, no messages (the nav rows' read).
+        const none = { rows: [], hasMore: false };
+        const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
         const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
-        const inbox = store.commsPage({ inbox: id }, paging.limit, paging.before);
+        const inbox =
+          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
         // The conversation list: one line per contact, from counts, never their histories.
         const contacts = store
           .commsContactIds(id)
@@ -2461,12 +2513,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
       // A list is the open PRs plus those updated in the last PR_LIST_DAYS (`?days=N` reaches
       // back further, `?all=1` is every one), each with its checks as name and state; `?detail=1`
-      // or the PR's own route carries the full row (#1192).
+      // or the PR's own route carries the full row; `?shape=summary` is the list's own fields only (#1192).
       api.get<{
         Params: { repoId: string };
-        Querystring: { linked?: unknown; days?: unknown; all?: unknown; detail?: unknown };
+        Querystring: {
+          linked?: unknown;
+          days?: unknown;
+          all?: unknown;
+          detail?: unknown;
+          shape?: unknown;
+        };
       }>("/repos/:repoId/prs", async (req, reply) => {
-        const { linked, days, all, detail } = req.query;
+        const { linked, days, all, detail, shape } = req.query;
+        if (shape !== undefined && shape !== "summary") {
+          return reply.code(400).send({ error: "shape must be summary" });
+        }
         if (linked !== undefined && linked !== "1") {
           return reply.code(400).send({ error: "linked must be 1" });
         }
@@ -2487,6 +2548,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           all === "1" ? null : now() - window * 86_400_000,
         );
         const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
+        if (shape === "summary") return prs.map(prSummaryRow);
         return detail === "1" ? prs : prs.map(prSummary);
       });
       // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's full detail on demand)
@@ -3815,8 +3877,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const { shape } = req.query;
         if (shape !== undefined && shape !== "summary")
           return reply.code(400).send({ error: "shape must be summary" });
-        const rows = sharedCrew();
-        return shape === "summary" ? crewSummary(rows) : rows;
+        return shape === "summary" ? crewSummary(sharedCrewSummary()) : sharedCrew();
       });
       // Reader: docs/hud-response-budgets.md#crew (one crew row in full)
       api.get<{ Params: { id: string } }>("/crew/:id", async (req, reply) => {

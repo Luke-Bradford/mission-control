@@ -4857,6 +4857,27 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/repos/shop-app/prs?detail=1")).json()[0].checks[0]).toEqual(
       check("lint"),
     );
+    // `?shape=summary`: the list's own fields, no checks, no detail that grows with the PR.
+    const [slim] = (await get("/api/repos/shop-app/prs?shape=summary")).json();
+    expect(Object.keys(slim).sort()).toEqual(
+      [
+        "repoId",
+        "number",
+        "title",
+        "url",
+        "branch",
+        "headSha",
+        "ticket",
+        "state",
+        "isDraft",
+        "review",
+        "ci",
+        "createdAt",
+        "updatedAt",
+        "mergedAt",
+      ].sort(),
+    );
+    expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
     const one = await get("/api/repos/shop-app/prs/3");
     expect(one.json().checks[0]).toEqual(check("lint"));
     expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);

@@ -22,6 +22,8 @@ import { Store } from "../src/store.ts";
  * `docs/hud-response-budgets.md` gives; a page that fetches a whole history fails here.
  */
 const DAY = 86_400_000;
+/** A response is built within this long on the large fixture (the page shows data within 1 s). */
+const RESPONSE_MS = 1000;
 const SEAT_IDS = [
   "flight-1",
   ...Array.from({ length: 5 }, (_, i) => `guido-${i + 1}`),
@@ -35,26 +37,27 @@ const HEAVY = SEAT_IDS[1] as string;
 const PAGES: Record<string, string[]> = {
   Overview: [
     "/api/crew?shape=summary",
-    ...REPOS.map((r) => `/api/repos/${r}/prs`),
+    ...REPOS.map((r) => `/api/repos/${r}/prs?shape=summary`),
     `/api/agents/${FLIGHT}/stream?limit=20`,
     "/api/flight",
     "/api/activity",
     "/api/overview",
   ],
   Comms: [
-    ...SEAT_IDS.map((id) => `/api/comms/agents/${id}`),
+    ...SEAT_IDS.map((id) => `/api/comms/agents/${id}?summary=1`),
+    `/api/comms/agents/${HEAVY}`,
     "/api/comms/crew",
     "/api/comms/flight",
     "/api/crew?shape=summary",
   ],
   Board: [
-    ...REPOS.map((r) => `/api/repos/${r}/prs?linked=1`),
+    ...REPOS.map((r) => `/api/repos/${r}/prs?linked=1&shape=summary`),
     "/api/crew?shape=summary",
     `/api/boards/${REPOS[0]}`,
   ],
   Audit: ["/api/audit?range=30d"],
   Agent: [
-    `/api/repos/${REPOS[0]}/prs`,
+    `/api/repos/${REPOS[0]}/prs?shape=summary`,
     `/api/agents/${HEAVY}/runs`,
     "/api/activity",
     `/api/agents/${HEAVY}/stream?limit=20`,
@@ -292,6 +295,8 @@ it.each(Object.entries(PAGES))("%s: first load stays within the budgets", async 
   const total = sizes.reduce((sum, s) => sum + s.bytes, 0);
   const report = sizes.map((s) => `${kb(s.bytes)} ${Math.round(s.ms)}ms ${s.url}`).join("\n");
   console.info(`${page}: ${kb(total)} gzipped\n${report}`);
+  for (const s of sizes)
+    expect(s.ms, `${s.url} took ${Math.round(s.ms)} ms`).toBeLessThan(RESPONSE_MS);
   for (const s of sizes)
     expect(s.bytes, `${s.url} is ${kb(s.bytes)}\n${report}`).toBeLessThanOrEqual(
       HUD_RESPONSE_BUDGET_BYTES,
