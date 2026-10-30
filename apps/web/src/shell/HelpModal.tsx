@@ -34,7 +34,7 @@ export function HelpModal() {
           <p>
             <kbd>f</kbd> show or hide FLIGHT · <kbd>j</kbd> <kbd>k</kbd> next or previous agent ·{" "}
             <kbd>/</kbd> message the selected agent · <kbd>i</kbd> interrupt it · <kbd>Esc</kbd>{" "}
-            close
+            close · <kbd>⌘K</kbd> or <kbd>Ctrl+K</kbd> search and act
           </p>
           <p className="note">
             Amber breathes slowly where something waits on you; green breathes where an agent is

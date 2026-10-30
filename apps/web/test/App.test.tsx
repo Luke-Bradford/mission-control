@@ -169,6 +169,29 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/comms");
   });
 
+  it("starts the dock collapsed on the Board and expands it on click", async () => {
+    localStorage.removeItem("mc-dock-collapsed");
+    act(() => toggleDock(true));
+    const { container } = at("/board");
+    await waitFor(() => expect(container.querySelector("#page-board")).not.toBeNull());
+    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
+    localStorage.removeItem("mc-dock-collapsed");
+  });
+
+  it("hides the dock on the FLIGHT page, which says what it would, and f opens FLIGHT in Comms", async () => {
+    act(() => toggleDock(true));
+    const { container } = at("/flight");
+    await waitFor(() => expect(container.querySelector("#page-flight")).not.toBeNull());
+    expect(container.querySelector(".shell.shell-full")).not.toBeNull();
+    expect(container.querySelector(".dock")).toBeNull();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "f" });
+    });
+    expect(window.location.pathname).toBe("/comms");
+  });
+
   it("i off the agent page toasts", () => {
     at("/");
     act(() => {

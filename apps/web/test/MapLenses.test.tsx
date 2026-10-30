@@ -1210,3 +1210,58 @@ it("squarifies equal root files at the 1600×1000 reference size", () => {
     ),
   ).toBeLessThanOrEqual(2);
 });
+
+it("names the seat, change size and import distance on every active tile", () => {
+  render(<CrewMapView snapshot={snapshot()} />);
+  const description = (path: string) => tile(path).getAttribute("aria-description");
+  // Changes: who changed it and by how much
+  expect(description("src/contract.ts")).toBe("changed by GUIDO-1, +3 −1");
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  // Impact: the seat and how many imports away
+  expect(description("src/contract.ts")).toBe("GUIDO-1, import distance 0");
+  expect(description("test/consumer.test.ts")).toMatch(/^(GUIDO-1|INCO-1), import distance 1$/);
+  // the distance is also drawn as text, where the tile has room
+  expect(tile("test/consumer.test.ts").textContent).toContain("d1");
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  expect(description("src/contract.ts")).toBe("59 merged PRs, 22 fixes");
+});
+
+it("makes every timeline tick a button that selects a window around it", () => {
+  vi.useFakeTimers();
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    const ticks = [...document.querySelectorAll(".map-timeline-tick")];
+    expect(ticks.length).toBe(4);
+    for (const t of ticks) expect(t.tagName).toBe("BUTTON");
+    fireEvent.click(ticks[0] as HTMLElement);
+    expect(window.location.hash).toMatch(/^#win=\d+(\.\d+)?,\d+(\.\d+)?$/);
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});
+
+it("moves, resizes and clears the timeline window with the arrow keys", () => {
+  vi.useFakeTimers();
+  try {
+    reset();
+    render(<CrewMapView snapshot={playSnapshot()} />);
+    const list = screen.getByRole("list", { name: "Working seat timelines" });
+    // no window yet: an arrow starts one at the end of the span
+    fireEvent.keyDown(list, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#win=6,1");
+    fireEvent.keyDown(list, { key: "ArrowLeft" });
+    expect(window.location.hash).toBe("#win=7,2");
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(window.location.hash).toBe("#win=6,1");
+    // shift grows or shrinks the window from its start
+    fireEvent.keyDown(list, { key: "ArrowLeft", shiftKey: true });
+    expect(window.location.hash).toBe("#win=7,1");
+    fireEvent.keyDown(list, { key: "Escape" });
+    expect(window.location.hash).toBe("");
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});

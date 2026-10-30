@@ -1,7 +1,9 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { RESOURCES, useResource } from "../data.ts";
+import { swapOfRam } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 
@@ -122,7 +124,22 @@ function usage(m: MachineSample | null) {
     diskTotal !== null && diskTotal > 0 && diskFree !== null
       ? (100 * (diskTotal - diskFree)) / diskTotal
       : null;
-  return { cores, cpu, agentsCpu, memTotal, memUsed, agentsMem, memPct, diskFree, diskPct };
+  const swapUsed = m?.swapUsedBytes ?? null;
+  const swapPct =
+    memTotal !== null && swapUsed !== null ? Math.min(100, (100 * swapUsed) / memTotal) : null;
+  return {
+    cores,
+    cpu,
+    agentsCpu,
+    memTotal,
+    memUsed,
+    agentsMem,
+    memPct,
+    swapUsed,
+    swapPct,
+    diskFree,
+    diskPct,
+  };
 }
 
 /** The agents row: a dot per seat up to the cap, and whether another agent fits (catalogue 2.1.4). */
@@ -250,6 +267,20 @@ export function MachinePanel() {
             </span>
           </div>
           <div className="resrow">
+            <span className="s fg2">Swap</span>
+            <Bar
+              segs={
+                u.swapPct === null ? [] : [{ pct: u.swapPct, colour: OTHER_COLOUR, label: "used" }]
+              }
+            />
+            <span
+              className="num s"
+              title={none ?? (u.swapUsed === null ? "Not measured" : undefined)}
+            >
+              {swapOfRam(u.swapUsed, u.memTotal)}
+            </span>
+          </div>
+          <div className="resrow">
             <span className="s fg2">Disk</span>
             {summary?.machine?.disk?.length ? (
               <MachineAreaChart
@@ -272,6 +303,14 @@ export function MachinePanel() {
               <span className="muted"> free</span>
             </span>
           </div>
+          {view?.warning && (
+            <div className="row s capwarn warn-t" role="status" title={view.warning}>
+              <Pill tone="warn" title={view.warning}>
+                Holding new work
+              </Pill>
+              <span className="muted"> {view.warning}</span>
+            </div>
+          )}
           {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
           <LockBox />
         </div>

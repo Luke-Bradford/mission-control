@@ -10,11 +10,12 @@ import { githubItemHref } from "../links.ts";
 import { useSeatName } from "../seatName.ts";
 import { decidedToday, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
 export const NO_DECISIONS = "Nothing decided without you today.";
 
-function DecidedRow({
+export function DecidedRow({
   d,
   seatId,
   live,
@@ -101,11 +102,13 @@ function DecidedRow({
 
 /** "Decided without you" (catalogue §2.2.7): the questions FLIGHT answered and the tickets it closed or reordered today, newest first. */
 export function Decided() {
-  const view = useResource<FlightView>(RESOURCES.flight).data;
+  const flight = useResource<FlightView>(RESOURCES.flight);
+  const view = flight.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const tz = useTz();
   const now = useNow();
-  if (view === undefined) return <p className="pb note">{DASH}</p>;
+  if (view === undefined)
+    return <Pending what="decisions" error={flight.error} resource={RESOURCES.flight} />;
   if (!view.seat) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
   const answers = tz === null ? [] : decidedToday(view.decisions, now, tz);
   if (answers.length === 0) return <p className="pb note">{NO_DECISIONS}</p>;

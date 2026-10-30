@@ -471,16 +471,24 @@ export const MapTreemap = memo(function MapTreemap({
             lines={
               lens === "changes" && changed.length
                 ? `+${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
-                : ""
+                : lens === "impact" && active && v?.distance !== undefined
+                  ? `d${v.distance}`
+                  : ""
             }
             note={
-              lens === "ownership"
-                ? `${v?.area ?? "no area"}${v?.hardRule ? ", hard-rule" : ""}`
-                : lens === "review" && v?.severity
-                  ? `${v.findings} finding${v.findings === 1 ? "" : "s"}, top severity ${v.severity}`
-                  : lens === "conflicts" && v?.conflict
-                    ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
-                    : ""
+              lens === "changes" && changed.length
+                ? `changed by ${changed.map((c) => c.seat).join(", ")}, +${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
+                : lens === "impact" && active && v?.distance !== undefined
+                  ? `${v.seatName ? `${v.seatName}, ` : ""}import distance ${v.distance}`
+                  : lens === "history" && v?.hotspot
+                    ? `${v.hotspot} merged PR${v.hotspot === 1 ? "" : "s"}, ${v.fixes ?? 0} fix${v.fixes === 1 ? "" : "es"}`
+                    : lens === "ownership"
+                      ? `${v?.area ?? "no area"}${v?.hardRule ? ", hard-rule" : ""}`
+                      : lens === "review" && v?.severity
+                        ? `${v.findings} finding${v.findings === 1 ? "" : "s"}, top severity ${v.severity}`
+                        : lens === "conflicts" && v?.conflict
+                          ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
+                          : ""
             }
             area={lens === "ownership" ? (v?.area ?? "") : ""}
             hardRule={lens === "ownership" && v?.hardRule === true}

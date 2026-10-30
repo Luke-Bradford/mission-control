@@ -652,15 +652,21 @@ select {
 @media (min-width: 1280px) {
   .top {
     flex-wrap: nowrap;
-    gap: 8px 12px;
+    gap: 8px;
     padding-inline: 14px;
+  }
+  /* 1280 is in scope: the brand's tracking and the tabs' padding give the eight tabs and the
+     status meters room side by side, so no tab sits behind a sideways scroll */
+  .brand {
+    letter-spacing: 0.1em;
   }
   .tabs {
     min-width: 0;
   }
   .tabs a {
     gap: 4px;
-    padding-inline: 7px;
+    padding-inline: 4px;
+    letter-spacing: 0.04em;
   }
   .top-status {
     flex: 0 0 auto;

@@ -4,6 +4,7 @@ import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { toast } from "../shell/Toast.tsx";
+import { Pending } from "./Pending.tsx";
 
 export const NO_DRAFTS = "No drafts to send.";
 export const postedText = (where: string): string =>
@@ -144,7 +145,7 @@ export function Drafts() {
         </p>
       )}
       {pending.data === undefined || history.data === undefined ? (
-        !error && <p className="pb note">—</p>
+        !error && <Pending what="drafts" error={null} resource={RESOURCES.drafts} />
       ) : rows.size === 0 ? (
         <p className="pb note">{NO_DRAFTS}</p>
       ) : null}

@@ -141,7 +141,8 @@ it("shows loading, empty and failed responses", async () => {
       <WatchList />
     </>,
   );
-  expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  expect(screen.getByText("Loading arrivals…")).toBeTruthy();
+  expect(screen.getByText("Loading revisit triggers…")).toBeTruthy();
   await screen.findByText("Nothing has arrived yet.");
   await screen.findByText("FLIGHT is not watching anything yet.");
   view.unmount();
@@ -161,9 +162,9 @@ it("shows loading, empty and failed responses", async () => {
 
 it("keeps long arrival and watch text readable in the narrow single-column layout", () => {
   const css = readStyles();
-  // Plan's lower panels stack into one column when the page is too narrow for three.
+  // Needs you's groups stack into one column when the page is too narrow for three.
   expect(css).toMatch(
-    /@container flight \(width < 900px\)[\s\S]*?\.flight-queue-lower,[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
+    /@container flight \(width < 900px\)[\s\S]*?\.flight-needs-groups,[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
   );
   expect(css).toMatch(/\.watch-row \.min0,\s*\.incoming-row\s*\{\s*overflow-wrap: anywhere/);
   expect(css).toMatch(/\.row \{[^}]*flex-wrap: wrap/);

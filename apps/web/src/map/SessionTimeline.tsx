@@ -1,5 +1,10 @@
 import type { MapSeat } from "@mc/core";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useRef } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useRef,
+} from "react";
 import { useTz } from "../clock.ts";
 import { seatToken } from "./cards.ts";
 import {
@@ -17,6 +22,10 @@ const clockIn = (tz: string | null) => (at: number) =>
     timeZone: tz ?? undefined,
   });
 const AXIS_STEP_MS = 5 * 60_000;
+/** An arrow key moves a window edge by this much; a window is never narrower than it. */
+const KEY_STEP_MS = 60_000;
+/** A tick chosen on its own selects this much time around it. */
+const TICK_WINDOW_MS = 60_000;
 
 /**
  * The session timeline under the Changes map: a row per working seat with its ticks over the hub's
@@ -56,7 +65,12 @@ export function SessionTimeline({
   // a drag over the tracks or the axis picks a window; the presets are the keyboard route
   const startDrag = (event: ReactPointerEvent) => {
     const target = event.target as HTMLElement;
-    if (event.button !== 0 || !target.closest(".map-timeline-track, .map-timeline-axis-track"))
+    // a tick is a button of its own: capturing the pointer would send its click to the list
+    if (
+      event.button !== 0 ||
+      target.closest(".map-timeline-tick") ||
+      !target.closest(".map-timeline-track, .map-timeline-axis-track")
+    )
       return;
     const start = timeAt(event.clientX);
     if (start === null) return;
@@ -76,6 +90,31 @@ export function SessionTimeline({
     if (!commit || start === null || at === null) return;
     // a click, or a sliver of a drag, chooses nothing
     if (Math.abs(at - start) >= TIMELINE_SPAN_MS / 100) timeline.chooseWindow(range(start, at));
+  };
+
+  // the keyboard route to a window: arrows move it (it starts as the last 5 minutes), shift
+  // resizes it from its start, Escape clears it
+  const keyWindow = (event: ReactKeyboardEvent) => {
+    if (event.key === "Escape" && win) {
+      timeline.clearWindow();
+      return event.preventDefault();
+    }
+    const dir = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (!dir) return;
+    event.preventDefault();
+    const [a, b] = win ?? [anchor - PRESETS_MIN[0] * 60_000, anchor];
+    const step = dir * KEY_STEP_MS;
+    if (event.shiftKey) {
+      timeline.chooseWindow([Math.max(from, Math.min(b - KEY_STEP_MS, a + step)), b]);
+      return;
+    }
+    const width = b - a;
+    const start = Math.max(from, Math.min(anchor - width, a + step));
+    timeline.chooseWindow([start, start + width]);
+  };
+  const tickWindow = (at: number): TimeWindow => {
+    const start = Math.max(from, Math.min(anchor - TICK_WINDOW_MS, at - TICK_WINDOW_MS / 2));
+    return [start, start + TICK_WINDOW_MS];
   };
 
   const axis: number[] = [];
@@ -142,8 +181,12 @@ export function SessionTimeline({
       </div>
       <ul
         className="map-timeline-list"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: focusable, so the arrow keys can choose a window
+        tabIndex={0}
         aria-label="Working seat timelines"
+        aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Escape"
         ref={list}
+        onKeyDown={keyWindow}
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
         onPointerUp={(event) => endDrag(event, true)}
@@ -191,7 +234,8 @@ export function SessionTimeline({
                 />
               )}
               {timelineTicks(seat, anchor).map((tick) => (
-                <i
+                <button
+                  type="button"
                   className="map-timeline-tick"
                   data-read={!tick.changed || undefined}
                   data-current={
@@ -203,6 +247,8 @@ export function SessionTimeline({
                   key={`${tick.file}:${tick.at}`}
                   style={{ left: place(tick.at) }}
                   title={`${clock(tick.at)} · ${tick.changed ? "changed" : "read"} ${tick.file}`}
+                  aria-label={`${clock(tick.at)} ${tick.changed ? "changed" : "read"} ${tick.file}`}
+                  onClick={() => timeline.chooseWindow(tickWindow(tick.at))}
                 />
               ))}
               {playback && current && (

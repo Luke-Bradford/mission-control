@@ -153,6 +153,11 @@ export const RESOURCES = {
     path: `/api/repos/${enc(repoId)}/prs?linked=1`,
     topic: "boards",
   }),
+  // Every PR of the repo, linked to a ticket or not: the command palette reaches them all.
+  allPrs: (repoId: string): ResourceRef => ({
+    path: `/api/repos/${enc(repoId)}/prs`,
+    topic: "boards",
+  }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
   files: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/files`,

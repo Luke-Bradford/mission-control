@@ -27,6 +27,7 @@ import {
 } from "./router.ts";
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
+import { CommandPalette } from "./shell/CommandPalette.tsx";
 import { Dock } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
@@ -168,6 +169,7 @@ export function App({
       <Footer />
       <Toast />
       <HelpModal />
+      <CommandPalette />
       <AwayModal />
       <ItemPanel />
     </div>

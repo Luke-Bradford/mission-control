@@ -1,7 +1,6 @@
 import {
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
   type CommsMessage,
@@ -29,7 +28,7 @@ import {
   ticketPath,
 } from "../router.ts";
 import { CommsEnd, MentionText } from "./messages.tsx";
-import type { CommsView } from "./model.ts";
+import { type CommsView, ticketForRef } from "./model.ts";
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
@@ -69,12 +68,6 @@ function viewForMessage(message: CommsMessage, flightId: string | undefined): Co
     agentId: message.from === COMMS_CAPCOM ? message.to : message.from,
     contactId: message.from === COMMS_CAPCOM ? message.from : message.to,
   };
-}
-
-function ticketForRef(ref: string, ticket: string | null): string | undefined {
-  if (ticket === null || !COMMS_TICKET.test(ticket)) return undefined;
-  const issue = /^#(\d+)$/.exec(ref)?.[1];
-  return issue === undefined || ticket.endsWith(`#${issue}`) ? ticket : undefined;
 }
 
 function MessageRefs({ text, ticket }: { text: string; ticket: string | null }) {

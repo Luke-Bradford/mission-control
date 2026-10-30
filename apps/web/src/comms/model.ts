@@ -1,4 +1,4 @@
-import type { CommsThreadMessage } from "@mc/core";
+import { COMMS_TICKET, type CommsThreadMessage } from "@mc/core";
 import type { CommsView } from "../router.ts";
 
 export type { CommsView } from "../router.ts";
@@ -48,4 +48,11 @@ export function breadcrumbs(view: CommsView): string[] {
   if (view.kind === "ticket") return ["Comms", view.ref];
   if (view.kind === "contact") return ["Comms", "Agents", view.agentId, view.contactId];
   return ["Comms", "Agents", view.agentId];
+}
+
+/** The ticket (`repo#n`) a `#n` reference points at, when the message's own ticket agrees; else none. */
+export function ticketForRef(ref: string, ticket: string | null): string | undefined {
+  if (ticket === null || !COMMS_TICKET.test(ticket)) return undefined;
+  const issue = /^#(\d+)$/.exec(ref)?.[1];
+  return issue === undefined || ticket.endsWith(`#${issue}`) ? ticket : undefined;
 }

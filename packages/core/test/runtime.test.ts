@@ -68,6 +68,7 @@ const base: CrewCliInput = {
     home: "/home/you",
     dataDir: "/home/you/.local/share/mission-control",
     denyRead: [],
+    pnpmStoreDir: "/mc/crew/.mc-pnpm-store/shared",
   },
   mcpConfigFile: "/home/you/.local/share/mission-control/crew/guido-1:1.mcp.json",
   hook: {
@@ -826,7 +827,7 @@ describe("crew sandbox and scoped edits", () => {
         expect(
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
-        expect(f.allowRead).toEqual([tempRoot]);
+        expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
         expect(f.denyRead).not.toContain("/tmp");
         expect(f.denyRead).not.toContain("/private/tmp");
       }
@@ -861,13 +862,30 @@ describe("crew sandbox and scoped edits", () => {
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
-      expect(f.allowRead).toEqual([tempRoot]);
+      expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
       expect(f.denyWrite).toContain("/tmp/claude-*");
       expect(f.denyWrite).toContain("/private/tmp/claude-*");
     }
   });
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "lets a %s seat read but never write the hub-owned pnpm store",
+    (mode) => {
+      const store = "/mc/crew/.mc-pnpm-store/shared";
+      const f = JSON.parse(
+        crewSandboxSettings(
+          { ...base.sandbox, tempRoot: "/tmp/mc-runs/seat-test", pnpmStoreDir: store },
+          mode,
+          base.hook,
+        ),
+      ).sandbox.filesystem;
+      expect(f.allowRead).toContain(store);
+      expect(f.allowWrite).not.toContain(store);
+      expect(f.denyWrite).toContain(store);
+    },
+  );
 
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
@@ -884,6 +902,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 
@@ -934,6 +953,7 @@ describe("crew sandbox and scoped edits", () => {
       "/mc/clone/.git",
       "/mc/clone/.git/worktrees/guido-1",
       "/home/you/.local/share/mission-control",
+      base.sandbox.pnpmStoreDir,
     ]);
   });
 

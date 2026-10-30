@@ -1050,14 +1050,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             r.sample.diskTotalBytes > 0
               ? `${((r.sample.diskFreeBytes / r.sample.diskTotalBytes) * 100).toFixed(1)}%`
               : "—";
-          const swapPct =
-            r.sample.swapUsedBytes !== null &&
-            r.sample.swapUsedBytes !== undefined &&
-            r.sample.swapTotalBytes !== null &&
-            r.sample.swapTotalBytes !== undefined &&
-            r.sample.swapTotalBytes > 0
-              ? `${((r.sample.swapUsedBytes / r.sample.swapTotalBytes) * 100).toFixed(1)}%`
-              : "—";
           const consumers = r.sample.topConsumers?.length
             ? r.sample.topConsumers
                 .map(
@@ -1072,7 +1064,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             runId: null,
             seatId: null,
             repoId: null,
-            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap: ${gb(r.sample.swapUsedBytes)} / ${gb(r.sample.swapTotalBytes)} used (${swapPct}). Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
+            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
             at,
           });
         } else {

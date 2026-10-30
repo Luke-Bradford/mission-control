@@ -38,6 +38,7 @@
   border-left: 2px solid var(--warn-mark);
   background: color-mix(in srgb, var(--warn) 7%, var(--surface));
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 2px;
 }
@@ -63,6 +64,12 @@
   font-size: var(--fs-s);
 }
 
+/* only the ask's text gives way; the kind, who and Open stay whole on one line */
+.dask > :not(.min0) {
+  flex: none;
+  white-space: nowrap;
+}
+
 .dask > button.sm {
   padding: 1px 8px;
 }
@@ -85,4 +92,15 @@
     z-index: 31;
     background: var(--scrim);
   }
+}
+
+.dockbody {
+  display: contents;
+}
+
+/* Folded: the title row and the waiting count only; the conversation stays mounted so unread
+   replies still count. */
+.dock.collapsed .dockbody,
+.dock.collapsed .dh .meta {
+  display: none;
 }

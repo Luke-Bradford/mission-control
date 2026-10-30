@@ -142,8 +142,8 @@ describe.skipIf(codexCli === null)("Codex seat floors under the real codex sandb
   it.each(["writer", "read-only"] as const)(
     "a %s seat's profile refuses the floor's paths and allows its own",
     (mode) => {
-      const input: CrewSandboxInput = { ...l, denyRead: [] };
       const store = codexPnpmStoreDir(l.cwd);
+      const input: CrewSandboxInput = { ...l, denyRead: [], pnpmStoreDir: store };
       const seatTmp = join(l.cwd, MC_TMP_DIR_NAME, "run");
       const codexHome = join(l.root, "codex-home");
       for (const path of [store, seatTmp, codexHome, join(l.cwd, CODEX_PROJECT_DIR)])
@@ -219,7 +219,12 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
   it.each(["writer", "read-only"] as const)(
     "a %s seat's settings refuse the floor's paths and allow its own",
     async (mode: Exclude<CrewMode, "scratch">) => {
-      const input: CrewSandboxInput = { ...l, tempRoot, denyRead: [] };
+      const input: CrewSandboxInput = {
+        ...l,
+        tempRoot,
+        denyRead: [],
+        pnpmStoreDir: join(l.root, ".mc-pnpm-store", "shared"),
+      };
       const store = crewPnpmStoreDir(tempRoot, "seat");
       mkdirSync(store, { recursive: true });
       const targets: Targets = {
