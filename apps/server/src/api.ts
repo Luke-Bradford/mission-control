@@ -212,6 +212,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
+import { rereadDenial } from "./guard/rereads.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -504,11 +505,15 @@ const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
+  agent_id: z.string().min(1).max(256).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      pages: z.string().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
     })
     .optional(),
 });
@@ -1682,6 +1687,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
+            // a read that failed gave the seat nothing to scroll back to
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
             return answer();
@@ -1695,6 +1702,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a large file this run already read whole, unchanged, is not given again
+          if (verdict.kind === "allow") {
+            const reread = rereadDenial(
+              store,
+              { ...key, agentId: body.data.agent_id ?? "" },
+              store.seatSession(who.seatId)?.worktree ?? undefined,
+              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              now(),
+            );
+            if (reread !== null) return answer(reread);
+          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too

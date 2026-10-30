@@ -74,6 +74,11 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
   }
   const out: Record<string, unknown> = { hook_event_name: event, tool_name: tool, tool_use_id: id };
   if (event === "PreToolUse") {
+    // a subagent's call carries its id: what it reads is in its context, not the seat's
+    if (e.agent_id !== undefined) {
+      if (typeof e.agent_id !== "string") throw new Unusable();
+      if (e.agent_id !== "") out.agent_id = e.agent_id;
+    }
     const raw = e.tool_input ?? {};
     if (!isObject(raw)) throw new Unusable();
     const input: Record<string, unknown> = {};
@@ -81,11 +86,21 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
     for (const [k, type] of [
       ["command", "string"],
       ["file_path", "string"],
+      ["pages", "string"],
       ["run_in_background", "boolean"],
     ] as const) {
       if (raw[k] === undefined) continue;
       if (typeof raw[k] !== type) throw new Unusable();
       input[k] = raw[k];
+    }
+    // a Read's range: a numeric string is a number to the CLI; anything else fails closed, since
+    // dropping it would make a range look like a whole-file read
+    for (const k of ["offset", "limit"]) {
+      const v = raw[k];
+      if (v === undefined) continue;
+      const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+      if (typeof n !== "number" || !Number.isFinite(n)) throw new Unusable();
+      input[k] = n;
     }
     out.tool_input = input;
   }

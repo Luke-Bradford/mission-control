@@ -17,10 +17,14 @@ import {
   guardDecision,
   isFullSuite,
   MC_WRITER_TOOLS,
+  REREAD_MIN_BYTES,
+  type ReadRecord,
+  rereadVerdict,
   scanSecrets,
   scanText,
   splitCommands,
   unclosedMarkdown,
+  wholeFileRead,
 } from "../src/guard.ts";
 import { MC_TOOLS } from "../src/mcp.ts";
 import { CODEX_SHELL } from "../src/runtime.ts";
@@ -2667,4 +2671,65 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
       expect(ruleOf(bash(c))).toBe("background");
     },
   );
+});
+
+describe("wholeFileRead", () => {
+  const read = (input: GuardEvent["input"], tool = "Read") => wholeFileRead({ tool, input });
+  it("names the file of a Read with no range", () => {
+    expect(read({ file_path: "/w/a.ts" })).toBe("/w/a.ts");
+  });
+  it("passes a Read with an offset or a limit", () => {
+    expect(read({ file_path: "/w/a.ts", offset: 100 })).toBeNull();
+    expect(read({ file_path: "/w/a.ts", limit: 50 })).toBeNull();
+  });
+  it("passes a Read of a page range", () => {
+    expect(read({ file_path: "/w/spec.pdf", pages: "1-5" })).toBeNull();
+  });
+  it.each(["cat a.ts", "cat -- a.ts", "sed -n p a.ts", "sed -n '1,$p' a.ts"])(
+    "names the file of the whole-file shell read %s",
+    (command) => expect(read({ command }, "Bash")).toBe("a.ts"),
+  );
+  it.each([
+    "sed -n '10,40p' a.ts",
+    "sed -n 10,40p a.ts",
+    "cat a.ts b.ts",
+    "cat a.ts | head",
+    "cat a.ts > b.ts",
+    "cat < a.ts",
+    "cat $F",
+    "cat -n a.ts",
+    "head -50 a.ts",
+    "cat a.ts && ls",
+  ])("passes %s", (command) => expect(read({ command }, "Bash")).toBeNull());
+  it("ignores other tools", () => {
+    expect(read({ file_path: "/w/a.ts" }, "Edit")).toBeNull();
+  });
+});
+
+describe("rereadVerdict", () => {
+  const big = REREAD_MIN_BYTES;
+  const prior: ReadRecord = { size: big, mtimeMs: 5, compactions: 0, toolUseId: "toolu_1", at: 1 };
+  const now = { size: big, mtimeMs: 5, compactions: 0 };
+  it("refuses a second whole read of an unchanged large file, naming the earlier read", () => {
+    const v = rereadVerdict("a.ts", now, prior);
+    expect(v.kind).toBe("deny");
+    if (v.kind !== "deny") return;
+    expect(v.text).toContain("toolu_1");
+    expect(v.text).toContain("offset and limit");
+    expect(v.tokensSaved).toBe(Math.ceil(big / 4));
+  });
+  it("passes a first read", () => {
+    expect(rereadVerdict("a.ts", now, undefined)).toEqual({ kind: "allow" });
+  });
+  it("passes a file under the threshold", () => {
+    const small = { ...now, size: big - 1 };
+    expect(rereadVerdict("a.ts", small, { ...prior, size: big - 1 })).toEqual({ kind: "allow" });
+  });
+  it("passes a changed file (mtime or size)", () => {
+    expect(rereadVerdict("a.ts", { ...now, mtimeMs: 6 }, prior)).toEqual({ kind: "allow" });
+    expect(rereadVerdict("a.ts", { ...now, size: big + 1 }, prior)).toEqual({ kind: "allow" });
+  });
+  it("passes after a compaction, when the earlier read is no longer in context", () => {
+    expect(rereadVerdict("a.ts", { ...now, compactions: 1 }, prior)).toEqual({ kind: "allow" });
+  });
 });

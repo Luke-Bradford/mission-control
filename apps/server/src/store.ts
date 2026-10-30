@@ -77,6 +77,7 @@ import {
   QA_RETENTION_DAYS,
   type QaFindingView,
   type QaReviewRoundView,
+  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -310,6 +311,15 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+-- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
+CREATE TABLE IF NOT EXISTS run_reads (
+  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
+  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, path)
+);
+CREATE TABLE IF NOT EXISTS run_rereads (
+  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
+);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
@@ -1944,7 +1954,74 @@ export class Store {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
       | undefined;
-    return row ? parseDigest(row.digest) : null;
+    if (!row) return null;
+    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
+  }
+
+  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
+    return r ? { ...d, rereads: r } : d;
+  }
+
+  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
+  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
+    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
+    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
+      const ids = runIds.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
+      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
+    }
+    return out;
+  }
+
+  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
+  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
+    const r = this.db
+      .prepare(
+        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
+      )
+      .get(runId, agentId, path) as
+      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
+      | undefined;
+    return (
+      r && {
+        size: r.size,
+        mtimeMs: r.mtime_ms,
+        compactions: r.compactions,
+        toolUseId: r.tool_use_id,
+        at: r.at,
+      }
+    );
+  }
+
+  /** Remembers the run's whole read of `path`, replacing an earlier one. */
+  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
+           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
+      )
+      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
+  }
+
+  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
+  forgetRunRead(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
+  /** Counts one refused re-read that saved about `tokens`. */
+  addReread(runId: string, tokens: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
+         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
+      )
+      .run(runId, tokens);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
@@ -1955,6 +2032,10 @@ export class Store {
         `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
       ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
+    }
+    for (const [id, r] of this.rereads(runIds)) {
+      const d = out.get(id);
+      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -2172,7 +2253,14 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
+              for (const child of [
+                "run_commits",
+                "run_pushes",
+                "run_attempts",
+                "run_digests",
+                "run_reads",
+                "run_rereads",
+              ])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);

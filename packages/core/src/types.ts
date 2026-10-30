@@ -603,6 +603,11 @@ export interface RunDigest {
    * measured only when both timestamps exist.
    */
   speed?: { tokensPerSec: number | null; turnMs: number | null; firstTokenMs?: number | null };
+  /**
+   * Whole-file re-reads of a large unchanged file the guard refused this run, and the tokens that
+   * saved (the file's size at about 4 bytes a token). Absent when there are none.
+   */
+  rereads?: { count: number; tokensSaved: number };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
