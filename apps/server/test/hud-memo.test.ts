@@ -117,6 +117,41 @@ describe("the crew and Needs-you memo", () => {
     ).toBe("newer");
   });
 
+  it("rejects a held run owned by another seat", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 2,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: [
+            { id: "seat-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+            { id: "seat-2", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+          ],
+        },
+      ],
+    };
+    store.upsertRun(storedRun({ id: "own", agentId: "seat-1" }));
+    store.upsertRun(
+      storedRun({ id: "other", agentId: "seat-2", endedAt: null, status: "running" }),
+    );
+    store.setSeatSession({
+      seatId: "seat-1",
+      runId: "other",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(
+      crew(config, store, NOW, undefined, noVersion).rows.find((row) => row.id === "seat-1")?.run
+        ?.id,
+    ).toBe("own");
+  });
+
   it("reads ten seats with fifty runs each through the batched HUD tables", () => {
     config.crew = {
       worktrees: join(dir, "crew"),
@@ -136,16 +171,37 @@ describe("the crew and Needs-you memo", () => {
         },
       ],
     };
-    for (let seat = 0; seat < 10; seat++)
-      for (let n = 0; n < 50; n++)
+    for (let seat = 0; seat < 10; seat++) {
+      store.upsertRun(
+        storedRun({
+          id: `held-${seat}`,
+          agentId: `seat-${seat}`,
+          startedAt: NOW - 100_000,
+          endedAt: null,
+          status: "running",
+        }),
+      );
+      store.setSeatSession({
+        seatId: `seat-${seat}`,
+        runId: `held-${seat}`,
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      for (let n = 0; n < 51; n++)
         store.upsertRun(storedRun({ id: `run-${seat}-${n}`, agentId: `seat-${seat}`, seq: n }));
+    }
     const runs = vi.spyOn(store, "runs");
+    const singleRun = vi.spyOn(store, "run");
     const batchedRuns = vi.spyOn(store, "runsForAgents");
     const started = performance.now();
     crew(config, store, NOW, undefined, noVersion);
     expect(performance.now() - started).toBeLessThan(100);
     expect(batchedRuns).toHaveBeenCalledTimes(1);
     expect(runs).not.toHaveBeenCalled();
+    expect(singleRun).not.toHaveBeenCalled();
     const warm = performance.now();
     crew(config, store, NOW + 1, undefined, noVersion);
     expect(performance.now() - warm).toBeLessThan(20);

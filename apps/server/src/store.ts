@@ -1563,16 +1563,21 @@ export class Store {
   }
 
   /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
-  runsForAgents(agentIds: readonly AgentId[], limit: number): Map<AgentId, Run[]> {
+  runsForAgents(
+    agentIds: readonly AgentId[],
+    limit: number,
+    heldRunIds: readonly string[] = [],
+  ): Map<AgentId, Run[]> {
     const out = new Map<AgentId, Run[]>();
     if (agentIds.length === 0) return out;
     for (const agentId of agentIds) out.set(agentId, []);
+    const held = [...new Set(heldRunIds)];
     const rows = this.statement(
       `SELECT * FROM (
          SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
-         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})
-       ) WHERE row_number <= ?`,
-    ).all(...agentIds, limit) as Row[];
+         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
+       ) WHERE row_number <= ?${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}`,
+    ).all(...agentIds, ...held, limit, ...held) as Row[];
     for (const run of rows.map(toRun)) {
       const runs = out.get(run.agentId) ?? [];
       runs.push(run);

@@ -108,6 +108,45 @@ describe("Store", () => {
     expect(rows.get("empty")).toEqual([]);
   });
 
+  it("partitions batched pull requests and reuses a prepared statement", () => {
+    const pr = (repoId: string, number: number) => ({
+      repoId,
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: "branch",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: null,
+      headSha: "sha",
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    store.upsertPullRequests("one", [pr("one", 1)], 1);
+    store.upsertPullRequests("two", [pr("two", 2)], 1);
+    const batches = store.pullRequestsForRepos(["one", "two"]);
+    expect(batches.get("one")).toEqual(store.pullRequests("one"));
+    expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
+    const prepare = vi.spyOn(raw, "prepare");
+    store.runs("prepared", 1);
+    store.runs("prepared", 1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
     const s = new Store(":memory:");
     s.mapCachePut("tree", "checkout", "a", "1", true);

@@ -190,10 +190,7 @@ function loopViews(
     const runs = runsByAgent?.get(agent.id) ?? store.runs(agent.id, AGENT_RUNS);
     const seatRow =
       agent.kind === "crew" ? (seatRows?.get(agent.id) ?? store.seatSession(agent.id)) : null;
-    const held =
-      seatRow?.runId === null || seatRow?.runId === undefined
-        ? undefined
-        : (runs.find((run) => run.id === seatRow.runId) ?? store.run(seatRow.runId));
+    const held = runs.find((run) => run.id === seatRow?.runId && run.agentId === agent.id);
     const latest = held?.endedAt === null ? held : (runs[0] ?? null);
     const lastOutput = latest
       ? lastOutputAt(
@@ -524,15 +521,16 @@ function buildCrew(
 
   const prCache: PrCache = new Map();
   const configured = configuredAgents(config);
-  const runsByAgent = store.runsForAgents(
-    configured.map((agent) => agent.id),
-    AGENT_RUNS,
-  );
-  const allRuns = [...runsByAgent.values()].flat();
-  const digestByRun = store.digests(allRuns.map((run) => run.id));
   const seatRows = store.seatSessions(
     configured.filter((agent) => agent.kind === "crew").map((agent) => agent.id),
   );
+  const runsByAgent = store.runsForAgents(
+    configured.map((agent) => agent.id),
+    AGENT_RUNS,
+    [...seatRows.values()].flatMap((seat) => (seat.runId === null ? [] : [seat.runId])),
+  );
+  const allRuns = [...runsByAgent.values()].flat();
+  const digestByRun = store.digests(allRuns.map((run) => run.id));
   const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
