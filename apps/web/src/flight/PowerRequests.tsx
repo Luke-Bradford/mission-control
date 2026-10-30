@@ -8,6 +8,7 @@ import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
 import { Pending } from "./Pending.tsx";
 
 export const NO_POWER_REQUESTS = "No open requests for the controller";
+export const OLDER_THAN_LISTED = "older than the listed decisions";
 const DASH = "—";
 
 /** Missing powers: what FLIGHT asked the controller for in the last day, newest first. */
@@ -19,6 +20,8 @@ export function PowerRequests() {
   const asks = [
     ...(view?.controllerDecisions ?? view?.decisions.filter(isForTheController) ?? []),
   ].sort((a, b) => b.at - a.at || b.id - a.id);
+  // Only the capped decisions list has a row to land on.
+  const listed = new Set((view?.decisions ?? []).map((d) => d.id));
   return (
     <Panel
       id="powersP"
@@ -43,9 +46,13 @@ export function PowerRequests() {
                   <span className="s">{tz === null ? DASH : hhmm(d.at, tz)}</span>
                   <span className="min0">{d.about}</span>
                   <span className="spacer" />
-                  <a href={to} className="sm" onClick={(e) => followLink(e, to)}>
-                    Decision
-                  </a>
+                  {listed.has(d.id) ? (
+                    <a href={to} className="sm" onClick={(e) => followLink(e, to)}>
+                      Decision
+                    </a>
+                  ) : (
+                    <span className="s note">{OLDER_THAN_LISTED}</span>
+                  )}
                 </div>
               </div>
             );
