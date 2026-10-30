@@ -105,3 +105,8 @@
 .dock.collapsed .dh .meta {
   display: none;
 }
+
+.dolder {
+  align-self: center;
+  flex: none;
+}

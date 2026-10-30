@@ -38,7 +38,7 @@ it.each([false, true])(
       [`/api/activity?since=${since}`]: empty
         ? []
         : [row("First activity", at), row("Delta activity", at + 1)],
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/config": CONFIG,
       "/api/attention": [],
     });
@@ -81,7 +81,7 @@ it("filters each live log chip and remembers the selection", async () => {
       status: null,
       summary: null,
     })),
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/config": CONFIG,
     "/api/attention": [
       { key: "a", at: NOW, text: "Operator call", owner: "operator", agentId: null, repoId: null },
@@ -152,7 +152,7 @@ const attentionItem = {
 function logRoutes(attention: unknown) {
   return {
     "/api/activity": [],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/config": CONFIG,
     "/api/attention": attention,
   };

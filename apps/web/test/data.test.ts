@@ -283,7 +283,7 @@ describe("startStream", () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     sub("/api/limits", "limits", () => {});
-    sub("/api/crew", "agents", () => {});
+    sub("/api/crew?shape=summary", "agents", () => {});
     await settle();
     fetchMock.mockClear();
     start();
@@ -436,7 +436,7 @@ describe("RESOURCES", () => {
   });
 
   it("names the HUD's resources and the topics that refresh them", () => {
-    expect(RESOURCES.crew).toEqual({ path: "/api/crew", topic: "agents" });
+    expect(RESOURCES.crew).toEqual({ path: "/api/crew?shape=summary", topic: "agents" });
     expect(RESOURCES.flightIncoming).toEqual({ path: "/api/flight/incoming", topic: "flight" });
     expect(RESOURCES.attention).toEqual({ path: "/api/attention", topic: "attention" });
     expect(RESOURCES.machine).toEqual({ path: "/api/machine", topic: "machine" });
@@ -445,9 +445,12 @@ describe("RESOURCES", () => {
       path: "/api/telemetry?range=24h",
       topic: "agents",
     });
-    expect(RESOURCES.stream("a b")).toEqual({ path: "/api/agents/a%20b/stream", topic: "agents" });
+    expect(RESOURCES.stream("a b")).toEqual({
+      path: "/api/agents/a%20b/stream?limit=20",
+      topic: "agents",
+    });
     expect(RESOURCES.prs("shop-app")).toEqual({
-      path: "/api/repos/shop-app/prs?linked=1",
+      path: "/api/repos/shop-app/prs?linked=1&shape=summary",
       topic: "boards",
     });
     expect(RESOURCES.files("shop-app-ta")).toEqual({

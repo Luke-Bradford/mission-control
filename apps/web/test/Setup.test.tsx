@@ -109,7 +109,7 @@ let fetchFn: ReturnType<typeof stubFetch>;
 function load(over: Record<string, unknown> = {}) {
   fetchFn = stubFetch({
     "/api/config": CFG,
-    "/api/crew": CREW,
+    "/api/crew?shape=summary": CREW,
     "/api/limits": LIMITS,
     "/api/health": HEALTH,
     "/api/repos": REPOS,
@@ -296,7 +296,7 @@ describe("Setup tabs", () => {
           sessions: [{ ...session, seats: [{ ...retro, mode: "scratch" }] }],
         },
       },
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ id: "retro-1", role: "RETRO", mode: "scratch", area: [] })],
         firstRunToday: null,
       },
@@ -312,7 +312,7 @@ describe("Setup tabs", () => {
   it("Sessions: a panel per crew session with seats, area or read-only, state, and folder owners", async () => {
     load({
       "/api/config": SESSIONS_CFG,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           crewRow(),
           seatRow({ hudState: "running" }),
@@ -375,7 +375,7 @@ describe("Setup tabs", () => {
   it("Sessions: each seat shows model · effort · CLI version", async () => {
     load({
       "/api/config": SESSIONS_CFG,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({ cli: { version: "2.1.302", effort: "high" } }),
           seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", area: [] }),
@@ -402,7 +402,7 @@ describe("Setup tabs", () => {
   it("Sessions: a repo with no observed loops has no loops panel; s/ names crew sessions only", async () => {
     load({
       "/api/config": { ...CREW_CONFIG, loops: [] },
-      "/api/crew": { rows: [seatRow()], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [seatRow()], firstRunToday: null },
       "/api/crew/sessions": sessionsOf([]),
     });
     at("sessions");
@@ -412,14 +412,14 @@ describe("Setup tabs", () => {
   });
 
   it("Sessions: says nothing about missing agents until the crew has loaded", async () => {
-    load({ "/api/crew": { rows: [], firstRunToday: null } });
+    load({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } });
     const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
     let release = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
     });
     fetchFn.mockImplementation(async (...a: unknown[]) => {
-      if (a[0] === "/api/crew") await gate;
+      if (a[0] === "/api/crew?shape=summary") await gate;
       return answer(...a);
     });
     at("sessions");
@@ -430,10 +430,10 @@ describe("Setup tabs", () => {
   });
 
   it("Sessions: says nothing about missing agents when the crew failed to load", async () => {
-    load({ "/api/crew": () => ({ status: 500, body: { error: "boom" } }) });
+    load({ "/api/crew?shape=summary": () => ({ status: 500, body: { error: "boom" } }) });
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(screen.queryByText("No agents yet.")).toBeNull();
   });
 
@@ -478,7 +478,7 @@ describe("Setup tabs", () => {
     load({ "/api/crew/status": { enabled: false, note: null } });
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
-    await settled(fetchFn, "/api/crew");
+    await settled(fetchFn, "/api/crew?shape=summary");
     expect(fetchFn).not.toHaveBeenCalledWith("/api/crew/status", expect.anything());
     expect(screen.queryByRole("status")).toBeNull();
     expect(document.getElementById("page-setup")?.textContent).not.toContain("Crew is off");
@@ -952,7 +952,7 @@ describe("Setup tabs", () => {
       const session = SESSIONS_CFG.crew?.sessions[0];
       if (!SESSIONS_CFG.crew || !session) throw new Error("no session");
       const p = await seats({
-        "/api/crew": {
+        "/api/crew?shape=summary": {
           rows: [
             seatRow({ hudState: "running" }),
             seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", hudState: "idle" }),
@@ -1030,7 +1030,7 @@ describe("Setup tabs", () => {
       "Sessions: shows a %s seat's short state and reason tooltip",
       async (_state, seat, label, reason) => {
         const p = await seats({
-          "/api/crew": { rows: [seat], firstRunToday: null },
+          "/api/crew?shape=summary": { rows: [seat], firstRunToday: null },
         });
         const t = within(p).getByRole("table", { name: "Seats of s/s1 in config.yaml" });
         const row = within(t).getByText(seat.id).closest("tr") as HTMLElement;

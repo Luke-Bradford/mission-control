@@ -115,7 +115,7 @@ describe("page-root render counts", () => {
   it("keeps Overview within its idle budget with an idle seat that has an open run", async () => {
     const crew = { rows: [seatRow({ id: "dev-1", hudState: "idle" })], firstRunToday: null };
     const { commits, requests } = await commitsOverMinute("/", "page-overview", false, {
-      "/api/crew": crew,
+      "/api/crew?shape=summary": crew,
     });
     expect(commits).toBeLessThanOrEqual(12);
     expect(requests).toBe(0);
@@ -127,7 +127,7 @@ describe("page-root render counts", () => {
       firstRunToday: null,
     };
     const { commits, requests } = await commitsOverMinute("/agent/dev-1", "page-agent", false, {
-      "/api/crew": crew,
+      "/api/crew?shape=summary": crew,
     });
     expect(commits).toBeLessThanOrEqual(12);
     expect(requests).toBe(0);

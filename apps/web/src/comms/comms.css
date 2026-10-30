@@ -894,3 +894,8 @@
   display: flex;
   gap: var(--sp-1);
 }
+
+.comms-older {
+  display: flex;
+  justify-content: center;
+}

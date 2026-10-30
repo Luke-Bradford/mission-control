@@ -192,7 +192,7 @@ describe("overlays and build status", () => {
     stubFetch({
       "/api/attention": [],
       "/api/escalations": [],
-      "/api/crew": { rows: [] },
+      "/api/crew?shape=summary": { rows: [] },
       "/api/config": CONFIG,
       "/api/settings/away": DEFAULT_AWAY,
     });

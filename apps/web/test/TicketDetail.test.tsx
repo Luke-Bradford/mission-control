@@ -521,7 +521,7 @@ describe("Start a seat", () => {
     stubFetch({
       "/api/boards/shop-app/items/3349": view(),
       "/api/config": CREW_CONFIG,
-      "/api/crew": { rows: [idle, retro], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [idle, retro], firstRunToday: null },
       ...extra,
     });
 
@@ -593,7 +593,7 @@ describe("Start a seat", () => {
 
   it("leaves busy seats out, and says so when none is free", async () => {
     stubStart({
-      "/api/crew": { rows: [busy("guido-1"), retro], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [busy("guido-1"), retro], firstRunToday: null },
     });
     const { unmount } = render(
       <TicketDetail repoId="shop-app" number={3349} item={boardItem()} agent={null} />,
@@ -603,7 +603,7 @@ describe("Start a seat", () => {
     expect(sec.textContent).not.toContain("GUIDO-1 ·");
     unmount();
     stubStart({
-      "/api/crew": { rows: [busy("guido-1"), busy("retro-1")], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [busy("guido-1"), busy("retro-1")], firstRunToday: null },
     });
     render(<TicketDetail repoId="shop-app" number={3349} item={boardItem()} agent={null} />);
     expect(await screen.findByText("Every seat in s/s1 is busy.")).toBeTruthy();
@@ -627,7 +627,7 @@ describe("Start a seat", () => {
     unmount();
     stubStart({
       "/api/config": cfg,
-      "/api/crew": { rows: [busy("guido-1"), retro], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [busy("guido-1"), retro], firstRunToday: null },
     });
     render(<TicketDetail repoId="shop-app" number={3349} item={boardItem()} agent={null} />);
     expect(await screen.findByText("Every seat in s/s1 is busy.")).toBeTruthy();
@@ -681,7 +681,7 @@ describe("Start a seat", () => {
   it("counts a seat in error with a run still running as busy", async () => {
     const run = crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>;
     stubStart({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({ hudState: "error", run: { ...run, status: "running", endedAt: null } }),
           retro,

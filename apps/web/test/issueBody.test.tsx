@@ -51,7 +51,7 @@ function open(ticket: unknown, { question = null, title, hold = false }: Opts = 
       escalation({ question, ...(title ? { title } : {}) }),
       escalation({ id: "shop-app#4002", issueNumber: 4002, question, title: "Second" }),
     ],
-    "/api/crew": { rows: [crewRow({ id: "shop-app-ta" })], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [crewRow({ id: "shop-app-ta" })], firstRunToday: null },
     "/api/config": CONFIG,
     [TICKET]: ticket,
     [TICKET_B]: ticketView(lines(60), { number: 4002 }),

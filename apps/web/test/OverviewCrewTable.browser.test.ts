@@ -82,7 +82,7 @@ const api = {
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
-  "/api/crew": crew,
+  "/api/crew?shape=summary": crew,
   "/api/runs/r-12/loop": {
     loop: { phase: "parked", parked: PARK, pushFor: "c74cdfc0123456789", prNumber: null },
   },
@@ -104,7 +104,7 @@ const api = {
   "/api/config": CONFIG,
   "/api/test-lock": { holder: null, waiting: [] },
   "/api/crew/status": { enabled: true, note: null },
-  "/api/repos/shop-app/prs?linked=1": [],
+  "/api/repos/shop-app/prs?linked=1&shape=summary": [],
 };
 
 describeRendered("Overview Crew table with very long text, rendered", () => {

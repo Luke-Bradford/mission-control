@@ -54,7 +54,7 @@ function Palette() {
     ? (crew?.rows ?? []).filter((r) => r.kind === "crew" && !watch.has(r.id))
     : [];
   const commsRes = useResources<CommsAgentResponse>(
-    commsSeats.map((r) => RESOURCES.commsAgent(r.id)),
+    commsSeats.map((r) => RESOURCES.commsNav(r.id)),
   );
   const tickets = boards.flatMap((b) => b.data ?? []);
   const openPrs = prs.flatMap((p) => p.data ?? []);
