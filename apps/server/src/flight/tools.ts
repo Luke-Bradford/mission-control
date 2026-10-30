@@ -701,7 +701,6 @@ const StartSeatArgs = z
   });
 /** A developer run by its id: `accept_ruling`, `sync_main` and `end_run` take this. */
 const RunArgs = z.strictObject({ runId: z.string().min(1).max(200), basis: basisArg });
-const EndRunArgs = RunArgs.extend({ discard: z.boolean().optional() });
 const MessageSeatArgs = z
   .strictObject({
     seat: z.string().regex(SEAT_ID),
@@ -1332,6 +1331,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (row !== null && row.runId === null)
         store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
     }
+    // what this start left, so a rollback only undoes its own change
+    const pauseAfter = JSON.stringify(readCrewPause(store));
+    const seatAfter = JSON.stringify(store.seatSession(seat));
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
       if (planner) {
@@ -1352,14 +1354,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
       }
     } catch (e) {
-      if (priorPause !== null && pausedSeat(store, seat) === null) {
+      // an operator who paused or stopped the seat again meanwhile keeps their change
+      if (
+        priorPause !== null &&
+        unpaused !== null &&
+        JSON.stringify(readCrewPause(store)) === pauseAfter
+      ) {
         writeCrewPause(store, priorPause, at);
         bus.emit("settings");
       }
-      if (priorSeat !== null && wasStopped) {
-        const current = store.seatSession(seat);
-        if (current !== null && current.runId === null) store.setSeatSession({ ...priorSeat });
-      }
+      if (priorSeat !== null && wasStopped && JSON.stringify(store.seatSession(seat)) === seatAfter)
+        store.setSeatSession({ ...priorSeat });
       // the supervisor's own eligibility refusal: the same text start_seat gives
       if (e instanceof SupervisorError && e.status === 422) return fail(e.message);
       return fail(
@@ -1620,7 +1625,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   async function endRun(ctx: McToolContext, args: unknown): Promise<Result> {
-    const c = flightCall(deps, ctx, EndRunArgs, args);
+    const c = flightCall(deps, ctx, RunArgs, args);
     if (!c.ok) return c.result;
     const found = devRun(c.args.runId);
     if (isRefusal(found)) return found;
@@ -1642,22 +1647,25 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const ended = lastHour(["end"], at);
     if (ended >= FLIGHT_ENDS_PER_HOUR) return fail(capText("ended runs", ended));
-    // a working seat is still writing: stop its turn before the uncommitted files are read (a
-    // stalled one may have no process, which an interrupt would try to resume)
-    if (working) {
+    // a run with uncommitted changes is the seat's to commit: refuse before touching its process
+    const readDirty = async (): Promise<string[] | Result> => {
+      const files = (await deps.engine?.uncommitted(run.id)) ?? null;
+      return files === null ? fail(END_UNREADABLE_TEXT) : files;
+    };
+    let dirty = await readDirty();
+    if (isRefusal(dirty)) return dirty;
+    if (dirty.length > 0) return fail(endDirtyText(call, dirty));
+    // a seat in a turn is still writing: stop that turn (a stalled or idle seat has no turn to
+    // stop, and an interrupt would try to resume a dead process), then look again
+    if (working && deps.supervisor.busy().some((b) => b.seatId === seat)) {
       try {
         await deps.supervisor.interrupt(seat);
       } catch (e) {
         return fail(endFailedText(e instanceof Error ? e.message : String(e)));
       }
-    }
-    const dirty = (await deps.engine?.uncommitted(run.id)) ?? null;
-    if (dirty === null) return fail(END_UNREADABLE_TEXT);
-    if (dirty.length > 0 && !c.args.discard) return fail(endDirtyText(call, dirty));
-    // throwing away uncommitted work is a controller power, whatever state the run is in
-    if (dirty.length > 0) {
-      const denied = requirePowers(config, run.repoId, "superuser");
-      if (denied) return denied;
+      dirty = await readDirty();
+      if (isRefusal(dirty)) return dirty;
+      if (dirty.length > 0) return fail(endDirtyText(call, dirty));
     }
     try {
       if (onSeat) await deps.supervisor.endRun(seat);
@@ -1677,9 +1685,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       targetRunId: run.id,
       about: aboutRun(call, run),
-      decision: `${onSeat ? endedDecision(call) : endedAsideDecision(call)}${
-        dirty.length > 0 ? `; discarded uncommitted changes in ${dirty.join(", ")}` : ""
-      }`,
+      decision: onSeat ? endedDecision(call) : endedAsideDecision(call),
       basis,
     });
     bus.emit("agents");
@@ -1727,10 +1733,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const at = now();
     const moved = lastHour(["promote", "reorder"], at);
     if (moved >= FLIGHT_PROMOTES_PER_HOUR) return fail(capText("moved tickets", moved));
-    const board = store.board(repo.id);
     // The card as it is now: an edit_card or a poll may have changed it since the cache was filled.
-    const cached = board.find((i) => i.issueNumber === issue);
     const fresh = await deps.board.read?.(repo.id, issue).catch(() => null);
+    // the board is read after that await: a poll may have replaced it while the project was read
+    const board = store.board(repo.id);
+    const cached = board.find((i) => i.issueNumber === issue);
     // a card that cannot be read live is not moved on the cache's word
     if (deps.board.read !== undefined && !fresh) return fail(moveNotOnBoardText(ref));
     const card = fresh ?? cached;
@@ -1790,6 +1797,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: movedText(ref, to) };
+  }
+
+  /** Why one label is not one a ticket may carry, or null. */
+  function labelProblem(label: string): string | null {
+    return SCOPED_LABEL.test(label) || FLIGHT_TICKET_TYPE_LABELS.includes(label)
+      ? null
+      : unknownLabelText(label);
   }
 
   /** The labels' refusal (what is wrong with them), or null. */
@@ -3295,6 +3309,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (item === undefined || protectedDecisionItem(store, item, config, now()))
             return unavailable;
           if (item.owner?.startsWith("lane:")) return "This item belongs to another lane.";
+          // a person's message is the operator's to answer, and FLIGHT's own question stays theirs
+          if (item.kind === "person") return "This item is a person's message, for the operator.";
+          if (
+            item.key.startsWith("ask:") &&
+            store
+              .openQuestions()
+              .some((q) => `ask:${q.id}` === item.key && q.agentId === flightSeat(config)?.seat.id)
+          )
+            return "This is your own question to the operator.";
           // an item FLIGHT briefed for the operator is theirs to settle, not FLIGHT's to dismiss
           if (!own && item.owner === "operator" && item.brief?.for === "operator")
             return "This item was briefed for the operator.";
@@ -3542,11 +3565,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.endRun,
-      description: `End a developer run, working, parked or stalled, on its seat or set aside; basis is the reason. Refused with uncommitted changes unless discard: true, which loses them and needs a superuser repo. ${FLIGHT_ENDS_PER_HOUR} an hour.`,
-      inputSchema: objectSchema(
-        { runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA, discard: { type: "boolean" } },
-        ["runId", "basis"],
-      ),
+      description: `End a developer run, working, parked or stalled, on its seat or set aside; basis is the reason. Refused with uncommitted changes, which only the seat can commit. ${FLIGHT_ENDS_PER_HOUR} an hour.`,
+      inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],
       call: endRun,
@@ -3702,7 +3722,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       fail,
       repoOf,
       cardProblem,
-      labelsProblem,
+      labelProblem,
       textProblem,
       superTool: (name, description, schema, kind, act, options) =>
         superTool(

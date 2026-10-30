@@ -129,6 +129,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
@@ -218,6 +219,7 @@ let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
 let callOrder: string[];
+let onInterrupt: () => void;
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let holdCalls: unknown[][];
@@ -318,6 +320,7 @@ beforeEach(() => {
   endCalls = [];
   interruptCalls = [];
   callOrder = [];
+  onInterrupt = () => {};
   messageCalls = [];
   engineCalls = [];
   holdCalls = [];
@@ -415,6 +418,7 @@ beforeEach(() => {
       interrupt: async (seatId) => {
         interruptCalls.push(seatId);
         callOrder.push("interrupt");
+        onInterrupt();
       },
       endAsideRun: async (runId) => {
         asideEnds.push(runId);
@@ -2213,23 +2217,54 @@ describe("end_run", () => {
     expect((await call("end_run", E({ runId: "r-i" }))).isError).toBe(true);
   });
 
-  it("interrupts a working seat before reading its uncommitted files, then ends it", async () => {
+  it("reads the files, interrupts a seat that is in a turn, reads again, then ends it", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    busyNow = [{ seatId: "guido-1", state: "running" }];
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(callOrder).toEqual(["read", "interrupt", "read", "end"]);
+  });
+
+  it("does not interrupt an idle working seat, which has no turn to stop", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
     expect((await call("end_run", E())).isError).toBeUndefined();
-    expect(callOrder).toEqual(["interrupt", "read", "end"]);
-    expect(interruptCalls).toEqual(["guido-1"]);
+    expect(callOrder).toEqual(["read", "end"]);
+    expect(interruptCalls).toEqual([]);
   });
 
-  it("does not discard uncommitted changes on a standard repo, parked or not", async () => {
+  it("refuses a dirty run on any repo before touching its process, and has no discard", async () => {
     parked();
     dirty = ["apps/a.ts"];
-    expect(await call("end_run", E({ discard: true }))).toEqual(
-      refused(needsSuperuserText("o/mc")),
+    expect(await call("end_run", E())).toEqual(
+      refused("Not ended: GUIDO-1 has uncommitted changes in apps/a.ts."),
     );
+    // discard is no argument at all
+    expect(await call("end_run", E({ discard: true }))).toHaveProperty("isError", true);
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-w");
+    store.setRunLoop("r-w", NEW_LOOP);
+    busyNow = [{ seatId: "guido-1", state: "running" }];
+    callOrder.length = 0;
+    expect((await call("end_run", E({ runId: "r-w" }))).isError).toBe(true);
+    expect(interruptCalls).toEqual([]);
     expect(endCalls).toEqual([]);
-    expect(store.run("r-g")?.endedAt).toBeNull();
+  });
+
+  it("refuses when the interrupted seat wrote files in its last moments", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    busyNow = [{ seatId: "guido-1", state: "running" }];
+    onInterrupt = () => {
+      dirty = ["apps/late.ts"];
+    };
+    const r = await call("end_run", E());
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("apps/late.ts");
+    expect(endCalls).toEqual([]);
   });
 
   it("does not end a working run that is held (a stopped seat, an overdue question)", async () => {
@@ -2244,18 +2279,6 @@ describe("end_run", () => {
     });
     expect((await call("end_run", E())).isError).toBe(true);
     expect(endCalls).toEqual([]);
-  });
-
-  it("ends a working run with uncommitted changes only when told to discard them, and names them", async () => {
-    need(cfg.repos[0]).flightPowers = "superuser";
-    live("guido-1", "r-g");
-    store.setRunLoop("r-g", NEW_LOOP);
-    dirty = ["apps/a.ts"];
-    expect((await call("end_run", E())).isError).toBe(true);
-    expect(endCalls).toEqual([]);
-    expect((await call("end_run", E({ discard: true }))).isError).toBeUndefined();
-    expect(endCalls).toEqual(["guido-1"]);
-    expect(decisions()[0]?.decision).toContain("discarded uncommitted changes in apps/a.ts");
   });
 
   it("refuses FLIGHT's own run, a run outside the session and a non-developer seat's run", async () => {
@@ -3219,6 +3242,26 @@ describe("promote", () => {
     readImpl = (n) => backlog({ issueNumber: n, size: "S" });
     expect((await call("promote", P())).isError).toBeUndefined();
     expect(readCalls).toEqual([7]);
+    expect(store.board("mc").find((c) => c.issueNumber === 7)?.size).toBe("S");
+  });
+
+  it("reads the board again after the live read, so a poll that landed meanwhile is kept", async () => {
+    board(backlog({ size: null }), backlog({ issueNumber: 9 }));
+    readImpl = (n) => {
+      // while the project is read, a poll replaces the board with a new card on it
+      store.replaceBoard("mc", [
+        backlog({ size: null }),
+        backlog({ issueNumber: 9 }),
+        backlog({ issueNumber: 11 }),
+      ]);
+      return backlog({ issueNumber: n, size: "S" });
+    };
+    expect((await call("promote", P())).isError).toBeUndefined();
+    const numbers = store
+      .board("mc")
+      .map((c) => c.issueNumber)
+      .sort((a, b) => a - b);
+    expect(numbers).toEqual([7, 9, 11]);
     expect(store.board("mc").find((c) => c.issueNumber === 7)?.size).toBe("S");
   });
 
@@ -7875,6 +7918,34 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect((await start()).isError).toBe(true);
       expect(readCrewPause(store)).toMatchObject({ seats: ["guido-1"], by: "op" });
     });
+    it("a failed start leaves a pause or stop the operator set meanwhile", async () => {
+      writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
+      startImpl = async () => {
+        // while the start was failing, the operator paused the crew again with a new reason
+        writeCrewPause(
+          store,
+          { seats: "all", reason: "new freeze", at: NOW + 5, by: "op" },
+          NOW + 5,
+        );
+        throw new Error("checkout failed");
+      };
+      expect((await start()).isError).toBe(true);
+      expect(readCrewPause(store)).toMatchObject({ seats: "all", reason: "new freeze" });
+      // and a stop set again meanwhile stays
+      writeCrewPause(store, null, NOW);
+      store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
+      startImpl = async () => {
+        store.setSeatSession({
+          ...row("guido-1", ""),
+          runId: null,
+          state: "stopped",
+          reason: "again",
+        });
+        throw new Error("checkout failed");
+      };
+      expect((await start()).isError).toBe(true);
+      expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", reason: "again" });
+    });
   });
 
   describe("board and decisions", () => {
@@ -7918,7 +7989,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       board(card(7));
       fetchImpl = async (n) => ticket(n, { body: "new body" });
       expect((await call("edit_issue", { issue: 7, body: "new body" })).isError).toBeUndefined();
-      expect(ghCalls[0]).toEqual(["issue", "edit", "7", "--repo=o/mc", "--body=new body"]);
+      // the body goes in on stdin, not as an argument
+      expect(ghCalls[0]).toEqual(["issue", "edit", "7", "--repo=o/mc", "--body-file=-"]);
+      expect(ghInputs[0]).toBe("new body");
+      expect(
+        await call("edit_issue", { issue: 7, body: "x".repeat(TICKET_BODY_MAX + 1) }),
+      ).toHaveProperty("isError", true);
       secrets = ["s3cr3t-token-value"];
       ghCalls.length = 0;
       expect(
@@ -8086,11 +8162,33 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       readImpl = (n) => card(n, { closed: true });
       expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
       readImpl = (n) => card(n, { labels: ["lane:home"] });
-      // no area label, or a label that is not scoped
-      for (const labels of [["lane:home"], ["area:server", "lane:home", "nonsense"]])
+      // an added label that is not scoped, or two area labels
+      for (const labels of [
+        ["area:server", "lane:home", "nonsense"],
+        ["area:server", "area:web", "lane:home"],
+      ])
         expect(await call("set_fields", { issue: 7, labels })).toHaveProperty("isError", true);
       expect(editCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
+    });
+    it("set_fields judges only the labels it adds, so an older odd label does not block it", async () => {
+      board(card(7));
+      readImpl = (n) => card(n, { labels: ["lane:home", "legacy-odd", "area:server"] });
+      const r = await call("set_fields", {
+        issue: 7,
+        labels: ["lane:home", "legacy-odd", "area:server", "bug"],
+      });
+      expect(r.isError).toBeUndefined();
+      expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({
+        labels: ["lane:home", "legacy-odd", "area:server", "bug"],
+      });
+    });
+    it("set_fields moves a card only to Blocked", async () => {
+      board(card(7));
+      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(moveCalls).toEqual([]);
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
     });
     it("edit_issue refuses a ticket with a live run, and a write it cannot read back", async () => {
       board(card(7));
@@ -8151,6 +8249,50 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect((await call("dismiss_item", { key: errKey })).isError).toBeUndefined();
       expect(store.acks().has(errKey)).toBe(true);
       expect(store.crewErrors().some((e) => e.id === errorId)).toBe(false);
+    });
+    it("dismiss_item leaves a person's message and FLIGHT's own question to the operator", async () => {
+      store.upsertNotifications(
+        [
+          {
+            id: "101",
+            repoId: "mc",
+            subjectType: "Issue",
+            title: "Review the plan",
+            number: 7,
+            reason: "mention",
+            url: "https://github.com/o/mc/issues/7#issuecomment-555",
+            author: "catalogue-helper",
+            snippet: "Please review",
+            updatedAt: nowMs - 3600_000,
+            lastReadAt: null,
+            message: {
+              source: { kind: "github" as const, messageId: "555", revision: "v1" },
+              author: "catalogue-helper",
+              at: nowMs - 3600_000,
+              text: "Please review",
+              url: "https://github.com/o/mc/issues/7#issuecomment-555",
+            },
+          },
+        ],
+        false,
+        nowMs,
+      );
+      const personKey = attentionItems(cfg, store, nowMs, undefined, undefined, "me").find(
+        (i) => i.kind === "person",
+      )?.key;
+      expect(personKey).toBeDefined();
+      expect(await call("dismiss_item", { key: personKey ?? "" })).toHaveProperty("isError", true);
+      expect(store.acks().has(personKey ?? "")).toBe(false);
+      // FLIGHT's own question to the operator
+      live("flight-1", "r-flight");
+      const id = store.addQuestion({
+        agentId: "flight-1",
+        runId: "r-flight",
+        text: "Spend?",
+        at: NOW,
+      });
+      expect(await call("dismiss_item", { key: `ask:${id}` })).toHaveProperty("isError", true);
+      expect(store.acks().has(`ask:${id}`)).toBe(false);
     });
     it("edit_issue does not report a title that did not land", async () => {
       board(card(7));

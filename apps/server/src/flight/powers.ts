@@ -9,12 +9,10 @@ import {
   AWAY_WRITES_REFUSED,
   type BoardItem,
   FLIGHT_HOUR_MS,
-  FLIGHT_MOVE_COLUMNS,
   FLIGHT_PROMOTES_PER_HOUR,
   type FlightDecisionKind,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
-  MOVE_COLUMNS,
   PRIORITIES,
   type RepoRules,
   TICKET_SIZES,
@@ -22,6 +20,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
+import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig } from "../config.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
@@ -37,7 +36,7 @@ export interface PowerHelpers {
   fail: (text: string) => Result;
   repoOf: () => CcConfig["repos"][number] | undefined;
   cardProblem: (card: BoardItem, rules: RepoRules) => string | null;
-  labelsProblem: (labels: readonly string[]) => string | null;
+  labelProblem: (label: string) => string | null;
   textProblem: (
     ctx: McToolContext,
     tool: string,
@@ -109,7 +108,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
 
   const EditIssueArgs = z.strictObject({
     issue: issueNumber,
-    body: z.string().min(1).max(60_000).optional(),
+    body: z.string().min(1).max(TICKET_BODY_MAX).optional(),
     title: z.string().min(1).max(200).optional(),
     basis,
   });
@@ -152,14 +151,18 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           );
       }
       if (away()) return fail(AWAY_WRITES_REFUSED);
-      const r = await ghWrite([
-        "issue",
-        "edit",
-        String(a.issue),
-        `--repo=${repo.github}`,
-        ...(a.body === undefined ? [] : [`--body=${a.body}`]),
-        ...(a.title === undefined ? [] : [`--title=${a.title}`]),
-      ]);
+      // the body goes in on stdin: an argument has a size limit and shows in process lists
+      const r = await ghWrite(
+        [
+          "issue",
+          "edit",
+          String(a.issue),
+          `--repo=${repo.github}`,
+          ...(a.body === undefined ? [] : ["--body-file=-"]),
+          ...(a.title === undefined ? [] : [`--title=${a.title}`]),
+        ],
+        a.body,
+      );
       if (!r.ok) return fail("GitHub refused the edit; read the ticket before retrying.");
       const after = await stateOf(repo, a.issue);
       // exit 0 is not proof: the live ticket must show every part that was asked for
@@ -176,7 +179,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
 
   const SetFieldsArgs = z.strictObject({
     issue: issueNumber,
-    status: z.enum([...FLIGHT_MOVE_COLUMNS, ...MOVE_COLUMNS]).optional(),
+    status: z.literal("Blocked").optional(),
     priority: z.enum(PRIORITIES).optional(),
     size: z.enum(TICKET_SIZES).optional(),
     labels: z.array(z.string().min(1).max(100)).max(100).optional(),
@@ -204,11 +207,20 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           .join(",");
       if (a.labels !== undefined && lanes(a.labels) !== lanes(found.labels))
         return fail("Lane labels change with edit_card's lane, not set_fields.");
-      // promote's checks (promote_backlog, needs, areas, dependencies) guard Ready and Backlog
-      if (a.status === "Ready" || a.status === "Backlog")
-        return fail("Use promote to move a card into Ready or back to Backlog.");
-      const badLabels = a.labels === undefined ? null : h.labelsProblem(a.labels);
-      if (badLabels !== null) return fail(badLabels);
+      // only labels being added are judged: a ticket's older labels are not this call's to refuse
+      if (a.labels !== undefined) {
+        const had = new Set(found.labels);
+        for (const l of a.labels.filter((x) => !had.has(x))) {
+          const bad = h.labelProblem(l);
+          if (bad !== null) return fail(bad);
+        }
+        const areas = (ls: readonly string[]) => ls.filter((l) => l.startsWith("area:"));
+        if (
+          areas(a.labels).sort().join() !== areas(found.labels).sort().join() &&
+          areas(a.labels).length !== 1
+        )
+          return fail("A ticket carries exactly one area:* label.");
+      }
       if (
         a.status !== undefined &&
         store.countFlightDecisions({
