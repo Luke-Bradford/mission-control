@@ -35,6 +35,27 @@ describe("PreviewManager", () => {
     ]);
   });
 
+  it("cancels and waits for a preview still preparing during shutdown", async () => {
+    let cleaned = false;
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async ({ signal }) =>
+        await new Promise<PreviewProcess>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            cleaned = true;
+            reject(new Error("cancelled"));
+          });
+        }),
+      remove: async () => {},
+    });
+    const starting = manager.start({ pr: 41, branch: "feature/41", checkout: "/repo" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await manager.closeAll();
+    await expect(starting).rejects.toThrow("cancelled");
+    expect(cleaned).toBe(true);
+  });
+
   it("uses the spare-port pool, refuses a third preview, and releases a closed port", async () => {
     let clock = NOW;
     const starts: { port: number; dbPath: string; token: string }[] = [];

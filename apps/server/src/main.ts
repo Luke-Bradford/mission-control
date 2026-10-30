@@ -157,7 +157,7 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, branch: _branch, checkout, port: previewPort, token }) => {
+        start: async ({ pr, branch: _branch, checkout, port: previewPort, token, signal }) => {
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
           const worktree = join(root, "worktree");
@@ -173,30 +173,26 @@ export async function main(): Promise<void> {
             } finally {
               source.close();
             }
-            await runPreviewCommand("git", [
-              "-C",
-              checkout,
-              "fetch",
-              "origin",
-              `+pull/${pr}/head:${previewRef}`,
-            ]);
-            await runPreviewCommand("git", [
-              "-C",
-              checkout,
-              "worktree",
-              "add",
-              "-f",
-              "--detach",
-              worktree,
-              previewRef,
-            ]);
+            await runPreviewCommand(
+              "git",
+              ["-C", checkout, "fetch", "origin", `+pull/${pr}/head:${previewRef}`],
+              undefined,
+              signal,
+            );
+            await runPreviewCommand(
+              "git",
+              ["-C", checkout, "worktree", "add", "-f", "--detach", worktree, previewRef],
+              undefined,
+              signal,
+            );
             previewCheckouts.set(previewDb, { checkout, worktree, ref: previewRef });
             await runPreviewCommand(
               "pnpm",
               ["install", "--offline", "--frozen-lockfile"],
               worktree,
+              signal,
             );
-            await runPreviewCommand("pnpm", ["--filter", "@mc/web", "build"], worktree);
+            await runPreviewCommand("pnpm", ["--filter", "@mc/web", "build"], worktree, signal);
             child = spawn(
               process.execPath,
               ["--experimental-strip-types", "apps/server/src/main.ts"],
@@ -204,10 +200,11 @@ export async function main(): Promise<void> {
                 cwd: worktree,
                 env: previewEnvironment(previewPort, previewDb, pr, token, port),
                 stdio: "ignore",
+                signal,
               },
             );
             const started = child;
-            await waitForPreview(started, previewPort);
+            await waitForPreview(started, previewPort, signal);
             return {
               dbPath: previewDb,
               stop: async () => await stopPreview(started),
@@ -757,8 +754,13 @@ function previewEnvironment(
 const PREVIEW_READY_MS = 30_000;
 const PREVIEW_STOP_MS = 10_000;
 
-async function runPreviewCommand(command: string, args: string[], cwd?: string): Promise<void> {
-  const child = spawn(command, args, { cwd, stdio: "ignore" });
+async function runPreviewCommand(
+  command: string,
+  args: string[],
+  cwd?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const child = spawn(command, args, { cwd, stdio: "ignore", signal });
   await new Promise<void>((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code) =>
@@ -767,13 +769,18 @@ async function runPreviewCommand(command: string, args: string[], cwd?: string):
   });
 }
 
-async function waitForPreview(child: ChildProcess, previewPort: number): Promise<void> {
+async function waitForPreview(
+  child: ChildProcess,
+  previewPort: number,
+  signal?: AbortSignal,
+): Promise<void> {
   const deadline = Date.now() + PREVIEW_READY_MS;
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("preview start cancelled");
     if (child.exitCode !== null) throw new Error("preview server stopped before it was ready");
     try {
       const response = await fetch(`http://${HOST}:${previewPort}/api/health`, {
-        signal: AbortSignal.timeout(500),
+        signal: signal ?? AbortSignal.timeout(500),
       });
       if (response.ok) return;
     } catch {

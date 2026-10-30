@@ -41,6 +41,12 @@ interface Preview extends PreviewView {
   lastRequestAt: number;
   token: string;
 }
+interface PendingPreview {
+  port: number;
+  controller: AbortController;
+  done: Promise<void>;
+  resolve(): void;
+}
 
 export interface PreviewManagerDeps {
   now?: () => number;
@@ -49,7 +55,7 @@ export interface PreviewManagerDeps {
   capacity(): { blocked: boolean; reason: string | null };
   /** Creates its private DB, worktree and child before returning the live child handle. */
   start(
-    input: PreviewStart & { port: number; token: string },
+    input: PreviewStart & { port: number; token: string; signal: AbortSignal },
   ): Promise<PreviewProcess & { dbPath?: string }>;
   /** Deletes a private preview DB (and any sidecars) after its child ends. */
   remove(path: string): Promise<void>;
@@ -60,7 +66,7 @@ export class PreviewManager {
   private readonly now: () => number;
   private readonly previews = new Map<number, Preview>();
   /** Starts reserve a PR and port before asynchronous checkout preparation begins. */
-  private readonly pending = new Map<number, number>();
+  private readonly pending = new Map<number, PendingPreview>();
   private reservations: Promise<void> = Promise.resolve();
   private readonly deps: PreviewManagerDeps;
 
@@ -88,14 +94,15 @@ export class PreviewManager {
   }
 
   async start(input: PreviewStart): Promise<PreviewView> {
-    const port = await this.reserve(input.pr);
+    const pending = await this.reserve(input.pr);
+    const { port } = pending;
     const startedAt = this.now();
     const token = randomBytes(32).toString("base64url");
     let child: PreviewProcess & { dbPath?: string };
     try {
-      child = await this.deps.start({ ...input, port, token });
+      child = await this.deps.start({ ...input, port, token, signal: pending.controller.signal });
     } catch (e) {
-      this.pending.delete(input.pr);
+      this.release(input.pr);
       throw e;
     }
     const preview: Preview = {
@@ -109,7 +116,7 @@ export class PreviewManager {
       dbPath: child.dbPath ?? "",
       process: child,
     };
-    this.pending.delete(input.pr);
+    this.release(input.pr);
     this.previews.set(input.pr, preview);
     const {
       dbPath: _dbPath,
@@ -155,17 +162,20 @@ export class PreviewManager {
   }
 
   async closeAll(): Promise<void> {
+    const pending = [...this.pending.values()];
+    for (const preview of pending) preview.controller.abort();
+    await Promise.all(pending.map((preview) => preview.done));
     await Promise.all([...this.previews.keys()].map((pr) => this.close(pr)));
   }
 
   private portInUse(port: number): boolean {
     return (
       [...this.previews.values()].some((preview) => preview.port === port) ||
-      [...this.pending.values()].includes(port)
+      [...this.pending.values()].some((preview) => preview.port === port)
     );
   }
 
-  private async reserve(pr: number): Promise<number> {
+  private async reserve(pr: number): Promise<PendingPreview> {
     let release: () => void = () => {};
     const previous = this.reservations;
     this.reservations = new Promise<void>((resolve) => (release = resolve));
@@ -183,11 +193,24 @@ export class PreviewManager {
         throw new PreviewHubError("limit", `at most ${PREVIEW_LIMIT} previews can run at once`);
       const port = await this.freePort();
       if (port === undefined) throw new PreviewHubError("no-port", "no preview port is available");
-      this.pending.set(pr, port);
-      return port;
+      let resolve: () => void = () => {};
+      const pending: PendingPreview = {
+        port,
+        controller: new AbortController(),
+        done: new Promise<void>((done) => (resolve = done)),
+        resolve,
+      };
+      this.pending.set(pr, pending);
+      return pending;
     } finally {
       release();
     }
+  }
+
+  private release(pr: number): void {
+    const pending = this.pending.get(pr);
+    this.pending.delete(pr);
+    pending?.resolve();
   }
 
   private async freePort(): Promise<number | undefined> {
