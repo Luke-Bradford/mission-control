@@ -6,6 +6,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { type DockRow, dockRows } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
+import { Pending } from "./Pending.tsx";
 
 export const NOTHING_LOGGED = "Nothing logged yet.";
 
@@ -33,7 +34,8 @@ function LogRow({ row, tz }: { row: LogEntry; tz: string | null }) {
  * left out: decisions have their one presentation in Decided without you.
  */
 export function WorkingLog() {
-  const view = useResource<FlightView>(RESOURCES.flight).data;
+  const flight = useResource<FlightView>(RESOURCES.flight);
+  const view = flight.data;
   const seat = view?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
@@ -49,7 +51,7 @@ export function WorkingLog() {
       actions={seat ? <span className="flight-count">{entriesLabel(rows.length)}</span> : undefined}
     >
       {view === undefined ? (
-        <p className="pb note">—</p>
+        <Pending what="the log" error={flight.error} resource={RESOURCES.flight} />
       ) : !seat ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
