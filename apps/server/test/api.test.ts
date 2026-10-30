@@ -98,6 +98,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
+import { PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -1265,6 +1266,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits"],
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
+  ["GET", "/api/previews"],
+  ["POST", "/api/previews", { pr: 41 }],
+  ["DELETE", "/api/previews/41", {}],
+  ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
   [
@@ -2134,6 +2139,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -8647,6 +8653,68 @@ it("labels the test lock route's holder and waiting entries", async () => {
     const view = (await a.inject("/api/test-lock")).json();
     expect(view.holder.label).toBe("make check");
     expect(view.waiting[0].label).toBe("make verify");
+  } finally {
+    await a.close();
+  }
+});
+
+it("starts, lists and closes an operator-only PR preview", async () => {
+  withCrew();
+  store.replacePullRequests(
+    "shop-app",
+    [
+      {
+        repoId: "shop-app",
+        number: 41,
+        title: "Preview me",
+        url: "https://example.test/pr/41",
+        branch: "feature/41",
+        ticket: null,
+        state: "open",
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      },
+    ],
+    NOW,
+  );
+  const stop = vi.fn();
+  const previews = new PreviewManager({
+    exists: () => false,
+    capacity: () => ({ blocked: false, reason: null }),
+    start: async () => ({ stop, dbPath: join(dir, "preview.sqlite") }),
+    remove: async () => {},
+  });
+  const a = buildApp({ config, store, bus, previews, operatorToken: "preview-token" });
+  try {
+    expect((await a.inject("/api/previews")).statusCode).toBe(401);
+    const headers = { [OPERATOR_HEADER]: "preview-token", ...json };
+    const started = await a.inject({
+      method: "POST",
+      url: "/api/previews",
+      headers,
+      payload: { pr: 41 },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(started.json().url).toBe("http://127.0.0.1:7431");
+    expect((await a.inject({ method: "GET", url: "/api/previews", headers })).json()).toHaveLength(
+      1,
+    );
+    expect(
+      (
+        await a.inject({
+          method: "DELETE",
+          url: "/api/previews/41",
+          headers: { [OPERATOR_HEADER]: "preview-token" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(stop).toHaveBeenCalledOnce();
   } finally {
     await a.close();
   }

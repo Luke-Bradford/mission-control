@@ -15,9 +15,13 @@
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
 
+import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
@@ -62,12 +66,18 @@ import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./gi
 import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "./machine-capacity.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
@@ -118,6 +128,71 @@ export async function main(): Promise<void> {
   markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
   const bus = new ChangeBus();
+  const previewRoot = join(dirname(dbPath), "previews");
+  const previews = isPreview(port, process.env)
+    ? undefined
+    : new PreviewManager({
+        capacity: () => {
+          const capacityConfig = config.crew?.machineCapacity;
+          const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
+          return machineCapacity(
+            store.machineSamples(machineCapacitySince(Date.now(), c)),
+            Date.now(),
+            c,
+          );
+        },
+        exists: async (candidate) =>
+          await new Promise<boolean>((resolve) => {
+            const probe = createServer();
+            probe.once("error", () => resolve(true));
+            probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
+          }),
+        start: async ({ pr, branch, checkout, port: previewPort, token }) => {
+          const root = join(previewRoot, String(pr));
+          const previewDb = join(root, "mc.sqlite");
+          const worktree = join(root, "worktree");
+          await rm(root, { recursive: true, force: true });
+          mkdirSync(root, { recursive: true, mode: 0o700 });
+          chmodSync(root, 0o700);
+          const source = new DatabaseSync(dbPath);
+          try {
+            source.prepare("VACUUM INTO ?").run(previewDb);
+          } finally {
+            source.close();
+          }
+          const git = spawn(
+            "git",
+            ["-C", checkout, "worktree", "add", "--detach", worktree, `origin/${branch}`],
+            {
+              stdio: "ignore",
+            },
+          );
+          await new Promise<void>((resolve, reject) => {
+            git.once("error", reject);
+            git.once("exit", (code) =>
+              code === 0 ? resolve() : reject(new Error("could not create preview worktree")),
+            );
+          });
+          const child = spawn(
+            process.execPath,
+            ["--experimental-strip-types", "apps/server/src/main.ts"],
+            {
+              cwd: worktree,
+              env: previewEnvironment(previewPort, previewDb, pr, token, port),
+              stdio: "ignore",
+            },
+          );
+          return {
+            dbPath: previewDb,
+            stop: () => {
+              child.kill("SIGTERM");
+            },
+          };
+        },
+        remove: async (previewDb) => {
+          await rm(dirname(previewDb), { recursive: true, force: true });
+        },
+      });
   // per-run bearer tokens for /mcp and the guard: the supervisor issues one at each spawn and
   // revokes it at the process's exit
   const tokens = new RunTokens();
@@ -145,6 +220,16 @@ export async function main(): Promise<void> {
     },
   });
   const preview = isPreview(port, process.env);
+  const previewActivity = (() => {
+    const url = process.env.MC_PREVIEW_ACTIVITY_URL;
+    const token = process.env.MC_PREVIEW_ACTIVITY_TOKEN;
+    if (!url || !token) return undefined;
+    return () => {
+      void fetch(url, { method: "POST", headers: { [PREVIEW_ACTIVITY_HEADER]: token } }).catch(
+        () => {},
+      );
+    };
+  })();
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
   const hubRoot = findHubRoot();
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
@@ -482,6 +567,8 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    previews,
+    previewActivity,
     hudShots,
     queueReorder,
     mapRing,
@@ -526,6 +613,7 @@ export async function main(): Promise<void> {
     drain: () => mcpCalls.drain(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      await previews?.closeAll();
       stopDiscovery();
       stopMapRing();
       crewReloader.stop();
@@ -539,6 +627,11 @@ export async function main(): Promise<void> {
   });
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  const previewExpiry = previews ? setInterval(() => void previews.expire(), 60_000) : null;
+  app.addHook("onClose", async () => {
+    if (previewExpiry) clearInterval(previewExpiry);
+    await previews?.closeAll();
+  });
 
   // before the first request: a seat that kept running meets its token and its hold again
   if (crewEnabled) {
@@ -572,6 +665,27 @@ export async function main(): Promise<void> {
     log,
     models: { dataDir: dirname(dbPath) },
   });
+}
+
+/** A branch preview never inherits an explicit live config path, which would permit config writes. */
+function previewEnvironment(
+  previewPort: number,
+  previewDb: string,
+  pr: number,
+  token: string,
+  parentPort: number,
+): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.MC_CONFIG;
+  return {
+    ...env,
+    MC_PORT: String(previewPort),
+    MC_DB: previewDb,
+    MC_NO_LOOP_WRITES: "1",
+    MC_NO_CREW: "1",
+    MC_PREVIEW_ACTIVITY_URL: `http://${HOST}:${parentPort}/api/previews/${pr}/activity`,
+    MC_PREVIEW_ACTIVITY_TOKEN: token,
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

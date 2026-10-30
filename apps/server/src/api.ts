@@ -239,6 +239,7 @@ import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from 
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import {
   proposeQueueReorder,
@@ -337,6 +338,10 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
+  previews?: PreviewManager;
+  /** A child preview reports browser activity to its parent without exposing an operator token. */
+  previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
@@ -448,6 +453,12 @@ const StartBody = z.strictObject({
     .optional(),
   /** An operator may explicitly start through a temporary machine-capacity hold. */
   force: z.boolean().optional(),
+});
+const PreviewBody = z.strictObject({
+  pr: z
+    .int()
+    .min(1)
+    .max(2 ** 31 - 1),
 });
 
 /**
@@ -898,6 +909,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A preview child owns no live loop. Its parent uses these pings only to expire an unused child.
+  app.addHook("onRequest", async () => deps.previewActivity?.());
+
   // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
   // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
   // check keeps its own run token; /mcp is outside /api.
@@ -911,6 +925,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         req.method !== "OPTIONS" &&
         path.startsWith("/api/") &&
         path !== GUARD_CHECK_PATH &&
+        !(
+          /^\/api\/previews\/\d+\/activity$/.test(path) &&
+          req.headers[PREVIEW_ACTIVITY_HEADER] !== undefined
+        ) &&
         !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
       ) {
         return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
@@ -2371,6 +2389,71 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return linked === "1" ? prs.filter((p) => p.ticket !== null) : prs;
         },
       );
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.get("/previews", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return deps.previews?.list() ?? [];
+      });
+
+      // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
+      api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
+        const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
+        const token = req.headers[PREVIEW_ACTIVITY_HEADER];
+        if (pr === 0 || typeof token !== "string" || !deps.previews?.activity(pr, token))
+          return reply.code(404).send({ error: "preview not found" });
+        return reply.code(204).send();
+      });
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.post("/previews", async (req, reply) => {
+        const parsed = PreviewBody.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send({ error: z.prettifyError(parsed.error) });
+        if (!deps.previews)
+          return reply.code(409).send({ error: "previews are unavailable on this server" });
+        const matches = config.repos.flatMap((repo) =>
+          store
+            .pullRequests(repo.id)
+            .filter((pr) => pr.number === parsed.data.pr && pr.state === "open")
+            .map((pr) => ({
+              repo,
+              pr,
+              checkout: config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout,
+            })),
+        );
+        if (matches.length === 0) return reply.code(404).send({ error: "open PR not found" });
+        if (matches.length > 1)
+          return reply.code(409).send({ error: "PR number is ambiguous across repositories" });
+        const match = matches[0];
+        if (!match) return reply.code(404).send({ error: "open PR not found" });
+        if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
+        try {
+          return await deps.previews.start({
+            pr: match.pr.number,
+            branch: match.pr.branch,
+            checkout: match.checkout,
+          });
+        } catch (e) {
+          if (e instanceof PreviewHubError)
+            return reply.code(409).send({ error: e.message, code: e.code });
+          throw e;
+        }
+      });
+
+      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
+      api.delete<{ Params: { pr: string } }>("/previews/:pr", async (req, reply) => {
+        const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
+        if (pr === 0) return reply.code(404).send({ error: "preview not found" });
+        if (!deps.previews)
+          return reply.code(409).send({ error: "previews are unavailable on this server" });
+        if (!(await deps.previews.close(pr)))
+          return reply.code(404).send({ error: "preview not found" });
+        return reply.code(204).send();
+      });
 
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
