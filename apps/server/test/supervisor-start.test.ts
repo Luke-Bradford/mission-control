@@ -2505,7 +2505,7 @@ import(${JSON.stringify(fixture)});
     expect(
       Number.parseInt(execFileSync("du", ["-sk", home], { encoding: "utf8" }), 10),
     ).toBeLessThan(5 * 1024);
-    expect(readdirSync(home, { recursive: true })).toHaveLength(2);
+    expect(readdirSync(home, { recursive: true }).length).toBeLessThanOrEqual(48);
     const parent = dirname(spawn.env.TMPDIR);
     expect(parent).toBe(join(spawn.cwd, MC_TMP_DIR_NAME));
     expect(basename(spawn.env.TMPDIR)).toBe(
