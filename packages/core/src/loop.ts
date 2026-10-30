@@ -1294,6 +1294,11 @@ const isDecisionPark = (kind: string | undefined): boolean =>
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
+  const verifying =
+    loop.phase === "ci" &&
+    s.verify !== undefined &&
+    (s.verify?.state === "queued" || s.verify?.state === "running") &&
+    s.verify.sha === s.headCommit;
   return (
     s.asideOk &&
     !loop.aside &&
@@ -1306,11 +1311,12 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     seat.state === "idle" &&
     !seat.inTurn &&
     !seat.openQuestion &&
-    pushed !== null &&
-    s.headCommit === pushed.sha &&
-    loop.ciFailedSha !== pushed.sha &&
-    pr?.state === "open" &&
-    pr.headSha === pushed.sha &&
+    (verifying ||
+      (pushed !== null &&
+        s.headCommit === pushed.sha &&
+        loop.ciFailedSha !== pushed.sha &&
+        pr?.state === "open" &&
+        pr.headSha === pushed.sha)) &&
     !fixDue(s, loop) &&
     !owesReport({ ...s, loop })
   );
