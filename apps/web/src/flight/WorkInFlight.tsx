@@ -190,18 +190,20 @@ export function stuckLine(
 
 /** The operator gets the point first; the rest is available without making the row grow. */
 function firstSentence(text: string): string {
-  const sentence = text.trim().match(/^.+?[.!?](?=\s|$)/)?.[0];
-  return sentence ?? text.trim();
+  const firstLine = text.trim().split("\n", 1)[0] ?? "";
+  const sentence = firstLine.match(/^.+?[.!?](?=\s|$)/)?.[0];
+  return sentence ?? firstLine;
 }
 
 function WaitingReason({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const first = firstSentence(text);
-  const hasMore = first !== text.trim();
+  const reason = text.trim();
+  const first = firstSentence(reason);
+  const hasMore = first !== reason || first.length > 240;
   return (
     <span className="wif-stuck-reason">
       <Clamp lines={3} open={open}>
-        {open ? text : first}
+        {open ? reason : first}
       </Clamp>
       {hasMore && (
         <button

@@ -549,6 +549,23 @@ describe("FLIGHT page", () => {
     expect(stuck.textContent).toContain(reason);
   });
 
+  it("Seats keeps more for a multiline waiting reason without sentence punctuation", async () => {
+    const reason = "Waiting on RETRO\nThe branch needs a fresh check after the review fixes land";
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const stuck = (await findSeats()).querySelector(".wif-stuck") as HTMLElement;
+    expect(stuck.textContent).toContain("Waiting on RETRO");
+    expect(stuck.textContent).not.toContain("The branch needs a fresh check");
+    fireEvent.click(within(stuck).getByRole("button", { name: "More waiting reason" }));
+    expect(stuck.textContent).toContain(reason);
+  });
+
   it("Seats shows FLIGHT's last message to a seat as its last instruction", async () => {
     stubFetch({
       "/api/flight": flightView({
