@@ -993,9 +993,14 @@ function buildAttentionItems(
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
-    const repoId = ticket?.[1];
-    const issueNumber = ticket === null ? null : Number(ticket[2]);
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
+    const repoId =
+      ticket?.[1] ??
+      (prNumber === undefined
+        ? undefined
+        : (store.commsForTicket(message.ref ?? "", message.ticket ?? undefined).repoId ??
+          undefined));
+    const issueNumber = ticket === null ? null : Number(ticket[2]);
     const prs = repoId === undefined ? [] : store.pullRequests(repoId);
     const ticketPrs = prs.filter((pr) => pr.ticket === message.ticket);
     const resolvedPr =

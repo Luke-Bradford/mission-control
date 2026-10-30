@@ -2876,6 +2876,74 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     },
   );
 
+  it("clears a production-shaped PR-ref Comms item when its PR merges", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS - COMMS_CAPCOM_ESCALATION_MS,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "PR 1063",
+      ref: "PR 1063",
+      text: "Review the parked PR.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1063,
+          title: "Open",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "shop-app#909",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    expect(all(current).some((item) => item.key === key)).toBe(true);
+    expect(needsYouItems(all(current))).toHaveLength(1);
+
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1063,
+          title: "Merged",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "shop-app#909",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: current,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    const afterMerge = all(current);
+    expect(afterMerge.some((item) => item.key === key)).toBe(false);
+    expect(needsYouItems(afterMerge)).toHaveLength(0);
+  });
+
   it("keeps a Comms item open when an earlier PR closed and a later one is open", () => {
     flight();
     const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
