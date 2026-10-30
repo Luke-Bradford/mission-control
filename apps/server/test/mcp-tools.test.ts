@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
@@ -1035,7 +1036,13 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "flight-1", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
     expect(emitted).toContain("agents");
   });
@@ -1043,8 +1050,24 @@ describe("ask_flight", () => {
   it("with no FLIGHT seat, mirrors it to CAPCOM: nobody else can answer it", async () => {
     await ask({ question: "Lanes per customer?" });
     expect(store.comms(0)).toEqual([
-      { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
+      {
+        at: NOW,
+        from: "guido-1",
+        to: "CAPCOM",
+        ticket: "mc#42",
+        text: ASK_FLIGHT_COMMS_POINTER,
+      },
     ]);
+  });
+
+  it("keeps a long question in its record and sends FLIGHT a short pointer", async () => {
+    tools = make({ config: withFlight() });
+    const question = "x".repeat(2000);
+    await ask({ question });
+    expect(store.openQuestions()[0]?.text).toBe(question);
+    const comms = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(comms).length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
+    expect(comms).not.toBe(question);
   });
 
   it("refuses FLIGHT itself, recording nothing: FLIGHT briefs the operator instead", async () => {

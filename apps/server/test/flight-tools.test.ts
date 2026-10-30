@@ -1009,6 +1009,7 @@ describe("answer_question", () => {
     });
     expect((await call("answer_question", A(id, { answer }))).isError).toBeUndefined();
     expect(decisions()[0]).toMatchObject({ about: `GUIDO-1: ${question}`, decision: answer });
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.recent[0]).toMatchObject({
       about: cut(`GUIDO-1: ${question}`, FLIGHT_STATE_TEXT_MAX),
