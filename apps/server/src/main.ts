@@ -62,6 +62,11 @@ import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./gi
 import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "./machine-capacity.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -73,7 +78,7 @@ import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
 import { prepareScratch, removeCheckout } from "./runtime/checkouts.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
-import { clonePeers, createSupervisor } from "./runtime/supervisor.ts";
+import { clonePeers, createSupervisor, seatDenyRead } from "./runtime/supervisor.ts";
 import { createVerifyQueue } from "./runtime/verify.ts";
 import { runVerifySandbox } from "./runtime/verify-sandbox.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
@@ -133,6 +138,14 @@ export async function main(): Promise<void> {
     store,
     lock,
     checks: (repoId) => config.repos.find((repo) => repo.id === repoId)?.commands?.writer ?? [],
+    capacity: () => {
+      const capacity = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+      return !machineCapacity(
+        store.machineSamples(machineCapacitySince(Date.now(), capacity)),
+        Date.now(),
+        capacity,
+      ).blocked;
+    },
     runner: async ({ id, sha, command }) => {
       const job = store.verifyJobs().find((row) => row.id === id);
       const session = job && config.crew?.sessions.find((row) => row.repoId === job.repoId);
@@ -150,7 +163,11 @@ export async function main(): Promise<void> {
         return await runVerifySandbox({
           scratch: scratch.path,
           command,
-          denied: [dirname(dbPath), ...SANDBOX_DENY_READ_HOME.map((path) => join(homedir(), path))],
+          denied: [
+            dirname(dbPath),
+            ...SANDBOX_DENY_READ_HOME.map((path) => join(homedir(), path)),
+            ...seatDenyRead(config, hubRoot ?? "", session.id),
+          ],
         });
       } finally {
         await removeCheckout(session.checkout, scratch.path, { force: true }).catch(() => {});
