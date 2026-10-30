@@ -4784,6 +4784,55 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
   });
 
+  it("prs/flow returns every open PR with its ownership flow", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 4,
+          title: "Flow row",
+          url: "https://github.com/o/shop-app/pull/4",
+          branch: "feature/4-flow",
+          ticket: "shop-app#4",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "pending",
+          createdAt: NOW - HOUR,
+          updatedAt: NOW,
+          mergedAt: null,
+          mergeCommitSha: null,
+          headSha: null,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          checks: [],
+          closingIssues: [],
+        },
+      ],
+      NOW,
+    );
+
+    const response = await get("/api/prs/flow");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().repos).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          repoId: "shop-app",
+          rows: expect.arrayContaining([
+            expect.objectContaining({
+              pr: 4,
+              ticket: "shop-app#4",
+              owner: "nobody",
+              stage: "building",
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   // #26 A1: the Board reads only the PRs it can put on a card.
   it("repos/:repoId/prs?linked=1 returns only PRs linked to a ticket", async () => {
     const pr = (number: number, ticket: string | null) => ({
