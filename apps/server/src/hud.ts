@@ -111,6 +111,7 @@ import {
 } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
@@ -128,7 +129,7 @@ export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
 export function transcriptMtime(path: string): number | null {
   if (path === "") return null;
   try {
-    return Math.floor(statNoted(path).mtimeMs);
+    return Math.floor(statNoted(transcriptFilePath(path)).mtimeMs);
   } catch {
     return null;
   }

@@ -2050,6 +2050,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     const latest: MachineSample = {
       at: NOW,
@@ -2070,6 +2071,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     await a.close();
   });
