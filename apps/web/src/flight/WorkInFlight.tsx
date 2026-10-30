@@ -9,8 +9,10 @@ import {
   type RunLoopView,
   type TestLockState,
 } from "@mc/core";
+import { useState } from "react";
 import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import {
   doingLine,
@@ -186,6 +188,36 @@ export function stuckLine(
   return null;
 }
 
+/** The operator gets the point first; the rest is available without making the row grow. */
+function firstSentence(text: string): string {
+  const sentence = text.trim().match(/^.+?[.!?](?=\s|$)/)?.[0];
+  return sentence ?? text.trim();
+}
+
+function WaitingReason({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const first = firstSentence(text);
+  const hasMore = first !== text.trim();
+  return (
+    <span className="wif-stuck-reason">
+      <Clamp lines={3} open={open}>
+        {open ? text : first}
+      </Clamp>
+      {hasMore && (
+        <button
+          type="button"
+          className="sm ghost"
+          aria-expanded={open}
+          aria-label={`${open ? "Less" : "More"} waiting reason`}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "less" : "more"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function WorkRow({
   r,
   now,
@@ -246,7 +278,9 @@ function WorkRow({
           DASH
         ) : (
           <>
-            <span className="crit-t">{stuck.text}</span>
+            <span className="crit-t">
+              <WaitingReason text={stuck.text} />
+            </span>
             <span className="s">{` · since ${dur(Math.max(0, now - stuck.since))} ago`}</span>
           </>
         )}

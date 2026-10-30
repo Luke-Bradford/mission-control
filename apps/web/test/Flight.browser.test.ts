@@ -57,9 +57,13 @@ function apiFor(scenario: Scenario) {
   const rows = Array.from({ length: n }, (_, i) =>
     seatRow({
       id: `guido-${i + 1}`,
-      hudState: i % 2 ? "blocked" : "running",
+      hudState: scenario === "long" || i % 2 ? "blocked" : "running",
       ticket: `shop-app#${i + 5}`,
       ticketTitle: text("Stop the race", i),
+      note:
+        scenario === "long"
+          ? "Wait for RETRO's review. The branch needs a fresh check after the review fixes land."
+          : null,
     }),
   );
   return {

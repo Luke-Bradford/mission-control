@@ -70,16 +70,7 @@ export function ItemBrief({
           <TextList title="Be aware" lines={brief.catchUp.aware} />
         </div>
       ) : (
-        (catchUp ??
-        (brief && (
-          <div className="ctx">
-            <div className="bsec">Catch-up</div>
-            <div className="bsec">So far</div>
-            <p className="note">Catch-up unavailable.</p>
-            <div className="bsec">Be aware</div>
-            <p className="note">Awareness unavailable.</p>
-          </div>
-        )))
+        catchUp
       )}
       <BriefSection
         title="The question"

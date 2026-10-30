@@ -531,6 +531,24 @@ describe("FLIGHT page", () => {
     );
   });
 
+  it("Seats starts a long waiting reason with its first sentence and lets you show more", async () => {
+    const reason =
+      "Wait for RETRO's review. The branch needs a fresh check after the review fixes land.";
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const stuck = (await findSeats()).querySelector(".wif-stuck") as HTMLElement;
+    expect(stuck.textContent).toContain("Wait for RETRO's review.");
+    expect(stuck.textContent).not.toContain("The branch needs a fresh check");
+    fireEvent.click(within(stuck).getByRole("button", { name: "More waiting reason" }));
+    expect(stuck.textContent).toContain(reason);
+  });
+
   it("Seats shows FLIGHT's last message to a seat as its last instruction", async () => {
     stubFetch({
       "/api/flight": flightView({
