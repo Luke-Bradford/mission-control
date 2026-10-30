@@ -57,7 +57,7 @@ main{padding:var(--sp-4) var(--sp-5) var(--sp-5);display:grid;gap:var(--sp-4)}
 .age{font:12px/16px var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .age.old{color:var(--warn)}
 /* states and pills */
-.pill{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:0 var(--sp-2);border:1px solid var(--line-2);border-radius:99px;font:11px/16px var(--mono);white-space:nowrap}
+.pill{display:inline-flex;align-items:center;gap:var(--sp-1);min-height:24px;padding:0 var(--sp-2);border:1px solid var(--line-2);border-radius:99px;font:11px/16px var(--mono);white-space:nowrap}
 .pill:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
 .pill.ok{color:var(--ok);background:var(--ok-soft);border-color:transparent}
 .pill.warn{color:var(--warn);background:var(--warn-soft);border-color:transparent}
@@ -141,8 +141,12 @@ pre{margin:0;padding:var(--sp-3);border:1px solid var(--line);border-radius:var(
 .skel i{display:block;height:16px;border-radius:var(--r-s);background:linear-gradient(90deg,var(--line),var(--line-2),var(--line));background-size:200% 100%;animation:sh 1.4s linear infinite}
 @keyframes sh{to{background-position:-200% 0}}
 @media(prefers-reduced-motion:reduce){.skel i{animation:none}}
-body[data-state=empty] .only-queue,body[data-state=loading] .only-queue{display:none!important}
-body[data-state=empty] .st-empty,body[data-state=loading] .st-loading{display:grid}
+body[data-state=empty] .only-queue,body[data-state=loading] .only-queue,body[data-state=error] .only-queue{display:none!important}
+body[data-state=empty] .st-empty,body[data-state=loading] .st-loading,body[data-state=error] .st-error{display:grid}
+.banner{display:none;align-items:center;gap:var(--sp-3);flex-wrap:wrap;padding:var(--sp-2) var(--sp-4);border:1px solid var(--warn);background:var(--warn-soft);border-radius:var(--r)}
+.banner.bad{border-color:var(--crit);background:var(--crit-soft)}
+body[data-state=stale] .banner.st-stale,body[data-state=disconnected] .banner.st-disc{display:flex}
+body[data-state=disconnected] .layout{opacity:.7}
 .st-loading{display:none}
 .skelwrap{display:none}
 body[data-state=loading] .skelwrap{display:block}
@@ -166,6 +170,9 @@ body:not([data-state=nocapture]) .shots-missing{display:none}
       <button aria-pressed="false" data-state="nocapture">Evidence not captured</button>
       <button aria-pressed="false" data-state="loading">Loading</button>
       <button aria-pressed="false" data-state="empty">Empty</button>
+      <button aria-pressed="false" data-state="error">Error</button>
+      <button aria-pressed="false" data-state="stale">Stale</button>
+      <button aria-pressed="false" data-state="disconnected">Disconnected</button>
     </span>
     <span>Theme</span>
     <span class="seg" id="themes">
@@ -181,24 +188,27 @@ body:not([data-state=nocapture]) .shots-missing{display:none}
     <p>One question: which pull request can I accept, and what do I need to decide? Ages count from the moment QA passed the PR into UAT.</p>
   </div>
 
+  <div class="banner st-stale" role="status"><span class="pill warn">stale</span><span>Showing the queue as of 14:02, 9 minutes ago. The last refresh failed.</span><button type="button" class="small">Refresh now</button></div>
+  <div class="banner bad st-disc" role="alert"><span class="pill crit">disconnected</span><span>Lost the connection to the hub. Showing the last queue received at 14:08; Accept, Send back and Ask QA are off until it reconnects.</span><button type="button" class="small">Retry now</button></div>
   <div class="layout">
     <!-- QUEUE: top left -->
     <section class="panel" aria-labelledby="qtitle">
-      <div class="ph"><h2 id="qtitle">Queue</h2><span class="sub">3 in UAT · 4 in review</span></div>
+      <div class="ph"><h2 id="qtitle">Queue</h2><span class="sub" id="qcount">3 in UAT · 4 in review</span></div>
 
       <div class="state st-empty" role="status">
         <h2>Nothing is waiting for you</h2>
         <p>No pull request is in UAT. QA has 4 PRs in review; the next one to pass appears here, oldest first.</p>
         <a href="#review" class="btn">See PRs in review</a>
       </div>
+      <div class="state st-error" role="alert"><span class="pill crit">error</span><h2>The queue did not load</h2><p>The hub answered 500 when asked for pull requests in UAT. Nothing here is out of date; there is simply nothing to show yet.</p><button type="button">Try again</button></div>
       <div class="skelwrap" role="status" aria-label="Loading the queue"><div class="skel"><i></i><i></i><i></i><i></i><i></i></div></div>
 
       <div class="queue-group only-queue" id="uat">
         <div class="qh"><h3>Waiting for you</h3><span class="pill warn">3 in UAT</span><span class="def">oldest first</span></div>
         <ul class="qlist" aria-label="Pull requests in UAT, oldest first">
-          <li><a class="qrow" href="#pr-1011" aria-current="true"><span class="t">Overview crew table: one line per cell, tokens only</span><span class="age old" title="In UAT since 28 Oct 16:10">2d 3h</span><span class="m">mission-control #1011 · GUIDO-1 · 4 pages</span></a></li>
-          <li><a class="qrow" href="#pr-1046"><span class="t">Board: drag a ticket between lanes with the keyboard</span><span class="age old" title="In UAT since 29 Oct 09:40">1d 9h</span><span class="m">mission-control #1046 · INCO-1 · 1 page</span></a></li>
-          <li><a class="qrow" href="#pr-1058"><span class="t">Server: the queue keeps its place on restart</span><span class="age" title="In UAT since 30 Oct 07:55">3h</span><span class="m">mission-control #1058 · SERVER-2 · no visual change</span></a></li>
+          <li><a class="qrow" data-age-hours="51" href="#pr-1011" aria-current="true"><span class="t">Overview crew table: one line per cell, tokens only</span><span class="age old" title="In UAT since 28 Oct 16:10">2d 3h</span><span class="m">mission-control #1011 · GUIDO-1 · 4 pages</span></a></li>
+          <li><a class="qrow" data-age-hours="33" href="#pr-1046"><span class="t">Board: drag a ticket between lanes with the keyboard</span><span class="age old" title="In UAT since 29 Oct 09:40">1d 9h</span><span class="m">mission-control #1046 · INCO-1 · 1 page</span></a></li>
+          <li><a class="qrow" data-age-hours="3" href="#pr-1058"><span class="t">Server: the queue keeps its place on restart</span><span class="age" title="In UAT since 30 Oct 07:55">3h</span><span class="m">mission-control #1058 · SERVER-2 · no visual change</span></a></li>
         </ul>
       </div>
 
@@ -216,6 +226,7 @@ body:not([data-state=nocapture]) .shots-missing{display:none}
     <!-- DETAIL -->
     <div class="stack" id="detail">
       <div class="state st-empty" role="status"><h2>Pick a pull request</h2><p>When something waits in UAT, its evidence shows here.</p></div>
+      <div class="state st-error" role="alert"><h2>No pull request to show</h2><p>The evidence for a PR loads after the queue does. Try again on the left.</p></div>
       <div class="skelwrap" role="status" aria-label="Loading the pull request"><div class="panel"><div class="skel"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
 
       <section class="panel only-queue-detail" aria-labelledby="pr-title" id="pr-1011">
@@ -363,7 +374,7 @@ pnpm -s dev</pre><button type="button" class="small">Copy</button></div>
   function press(group, attr, val) { group.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute(attr) === val)); }); }
   var states = document.getElementById("states"), themes = document.getElementById("themes");
   var params = new URLSearchParams(location.search);
-  function setState(s) { b.setAttribute("data-state", s); press(states, "data-state", s); document.querySelectorAll(".only-queue-detail").forEach(function (e) { e.style.display = (s === "queue" || s === "nocapture") ? "" : "none"; }); }
+  function setState(s) { document.getElementById("qcount").textContent = s === "empty" ? "0 in UAT · 4 in review" : s === "loading" ? "Loading…" : s === "error" ? "Could not load" : "3 in UAT · 4 in review"; document.querySelectorAll("#detail .dhead .actions button, .askrow button, #q").forEach(function (e) { e.disabled = s === "disconnected"; }); b.setAttribute("data-state", s); press(states, "data-state", s); document.querySelectorAll(".only-queue-detail").forEach(function (e) { e.style.display = (s === "queue" || s === "nocapture" || s === "stale" || s === "disconnected") ? "" : "none"; }); }
   function setTheme(t) { if (t) { root.setAttribute("data-theme", t); } else { root.removeAttribute("data-theme"); } press(themes, "data-theme", t || ""); }
   states.addEventListener("click", function (e) { var s = e.target.getAttribute && e.target.getAttribute("data-state"); if (s) setState(s); });
   themes.addEventListener("click", function (e) { var t = e.target.getAttribute && e.target.getAttribute("data-theme"); if (t) setTheme(t); });
