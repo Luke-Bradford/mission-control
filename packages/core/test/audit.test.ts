@@ -92,15 +92,26 @@ describe("overusePrevention and groupOveruse", () => {
     expect(overusePrevention("unexplained").text).not.toBe("");
   });
 
-  it("groups runs by cause, most runs first, with the prevention", () => {
+  it("groups causes that repeat, most runs first, with the prevention", () => {
     const g = groupOveruse([
       { runId: "a", cause: "plan-gap" },
       { runId: "b", cause: "rework-churn" },
       { runId: "c", cause: "rework-churn" },
+      { runId: "d", cause: "plan-gap" },
+      { runId: "e", cause: "plan-gap" },
     ]);
     expect(g.map((x) => [x.cause, x.runIds, x.prevention.kind])).toEqual([
+      ["plan-gap", ["a", "d", "e"], "plan-rule"],
       ["rework-churn", ["b", "c"], "lesson"],
-      ["plan-gap", ["a"], "plan-rule"],
     ]);
+  });
+
+  it("proposes nothing for causes that did not repeat", () => {
+    expect(
+      groupOveruse([
+        { runId: "a", cause: "plan-gap" },
+        { runId: "b", cause: "wide-ticket" },
+      ]),
+    ).toEqual([]);
   });
 });

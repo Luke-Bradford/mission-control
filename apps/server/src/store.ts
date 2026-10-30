@@ -458,9 +458,6 @@ type Row = Record<string, SQLInputValue>;
 
 const DAY_MS = 86_400_000;
 
-/** Most token-overuse findings one Audit range returns. */
-const AUDIT_OVERUSE_LIMIT = 100;
-
 /** The median of the values, or null when there are none. */
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -1273,6 +1270,8 @@ export class Store {
       ["account_id", "TEXT"],
       ["effort", "TEXT"],
       ["prompt_hash", "TEXT"],
+      // The seat's loop kind at the start; `upsertRun` keeps the first value.
+      ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1520,8 +1519,8 @@ export class Store {
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
            ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           account_id, effort, prompt_hash, loop_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1534,7 +1533,8 @@ export class Store {
            latest_plan = COALESCE(excluded.latest_plan, latest_plan),
            account_id = COALESCE(account_id, excluded.account_id),
            effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash)`,
+           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
+           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
       )
       .run(
         r.id,
@@ -1566,6 +1566,7 @@ export class Store {
         r.accountId ?? null,
         r.effort ?? null,
         r.promptHash ?? null,
+        r.loopKind ?? null,
       );
   }
 
@@ -2953,15 +2954,18 @@ export class Store {
     const from = `FROM runs r LEFT JOIN board_items b
          ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
        WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
+    // the loop kind stored at the run's start; a seat since removed still counts, and a row from
+    // before it was stored falls back to the seat's kind now
+    const isBuild = (r: Row): boolean => (r.loopKind ?? kinds.get(r.agentId as string)) === "build";
     const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
     const baselines = tokenBaselines(
       runRows(
-        `SELECT r.agent_id AS agentId, b.size AS size, r.tokens AS tokens ${from}
+        `SELECT r.agent_id AS agentId, r.loop_kind AS loopKind, b.size AS size, r.tokens AS tokens ${from}
            AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
         until - AUDIT_BASELINE_DAYS * DAY_MS,
         until,
       )
-        .filter((r) => kinds.get(r.agentId as string) === "build")
+        .filter(isBuild)
         .map((r) => ({
           size: r.size as string | null,
           tokens: usage(r).input + usage(r).output,
@@ -2971,12 +2975,12 @@ export class Store {
     const runs: AuditTokenOveruse[] = [];
     for (const r of runRows(
       `SELECT r.id AS id, r.agent_id AS agentId, r.ticket AS ticket, r.started_at AS startedAt,
-         r.ended_at AS endedAt, r.tokens AS tokens, b.size AS size ${from}
+         r.ended_at AS endedAt, r.loop_kind AS loopKind, r.tokens AS tokens, b.size AS size ${from}
          AND r.started_at >= ? AND r.started_at <= ? ORDER BY r.started_at DESC`,
       since,
       until,
     )) {
-      if (kinds.get(r.agentId as string) !== "build") continue;
+      if (!isBuild(r)) continue;
       const tokens = usage(r);
       const total = tokens.input + tokens.output;
       const size = r.size as string | null;
@@ -3028,10 +3032,9 @@ export class Store {
       });
     }
     runs.sort((a, b) => b.tokens - a.tokens || a.runId.localeCompare(b.runId));
-    const top = runs.slice(0, AUDIT_OVERUSE_LIMIT);
     return {
-      runs: top,
-      groups: groupOveruse(top),
+      runs,
+      groups: groupOveruse(runs),
       expected: [...TICKET_SIZES, null].map((size) => ({
         size,
         tokens: baselines.expected(size),

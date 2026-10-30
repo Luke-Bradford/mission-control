@@ -1120,6 +1120,7 @@ describe("Store", () => {
           endedAt: startedAt + 10,
           status: "ok",
           tokens: tokens(total),
+          loopKind: "build",
           ...over,
         }),
       );
@@ -1214,7 +1215,8 @@ describe("Store", () => {
         cause: "plan-gap",
         prevention: { kind: "plan-rule" },
       });
-      expect(t.groups).toEqual([expect.objectContaining({ cause: "plan-gap", runIds: ["m6"] })]);
+      // one run is not a repeat
+      expect(t.groups).toEqual([]);
       expect(t.expected).toContainEqual({ size: "M", tokens: 153_750, measured: true });
     });
 
@@ -1261,15 +1263,43 @@ describe("Store", () => {
         ["obs", "ebull", 900_000],
         ["unknown", "gone", 900_000],
       ] as const) {
-        ended(0, until - DAY, total, { id, agentId, ticket: null });
+        ended(0, until - DAY, total, {
+          id,
+          agentId,
+          ticket: null,
+          loopKind: id === "flight" ? "watch" : null,
+        });
       }
       // planner runs on size M tickets would drag its median down to 1k
       for (const n of [1, 2, 3, 4, 5, 6]) {
-        ended(n, until - DAY + n, 1_000, { id: `plan${n}`, agentId: "planner" });
+        ended(n, until - DAY + n, 1_000, { id: `plan${n}`, agentId: "planner", loopKind: "plan" });
       }
       ended(6, until - 2 * DAY, 300_000);
       const t = overuse();
       expect(t.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
+    });
+
+    it("keeps a retired build seat's run in the findings and the baseline", () => {
+      ended(6, until - 2 * DAY, 300_000);
+      const t = store.audit(until - 7 * DAY, until, new Map()).tokenOveruse;
+      expect(t?.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
+    });
+
+    it("returns every qualifying run, however many", () => {
+      for (let n = 0; n < 101; n++) {
+        store.upsertRun(
+          run({
+            id: `open${n}`,
+            ticket: "repo#7",
+            startedAt: until - DAY + n,
+            tokens: tokens(500_000 + n),
+            loopKind: "build",
+          }),
+        );
+      }
+      const t = overuse();
+      expect(t.runs).toHaveLength(101);
+      expect(t.groups[0]?.runIds).toHaveLength(101);
     });
 
     it("groups repeat causes across runs", () => {

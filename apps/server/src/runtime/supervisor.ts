@@ -3035,6 +3035,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         model: info.seat.model,
         accountId: info.seat.accountId,
         effort: info.seat.effort ?? null,
+        loopKind: def.loop,
         ...on,
         branch: planner || readOnly ? null : checkout.branch,
         ticket:

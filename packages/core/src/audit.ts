@@ -103,7 +103,7 @@ export interface AuditView {
   changes: AuditChange[];
   /**
    * Runs in range that passed their expected token use, each with why, and the causes repeated
-   * across them with a prevention to propose. They are findings: no run is stopped for this.
+   * across them (two or more runs with the same cause) with a prevention to propose. They are findings: no run is stopped for this.
    * The server always sets it; optional so web fixtures built before it type-check.
    */
   tokenOveruse?: {
@@ -248,13 +248,14 @@ export function overusePrevention(cause: AuditOveruseCause): AuditPrevention {
   return PREVENTIONS[cause];
 }
 
-/** Repeat causes across runs, the most runs first. */
+/** Causes that repeat across at least two runs, the most runs first. */
 export function groupOveruse(
   runs: { runId: string; cause: AuditOveruseCause }[],
 ): AuditOveruseGroup[] {
   const byCause = new Map<AuditOveruseCause, string[]>();
   for (const r of runs) byCause.set(r.cause, [...(byCause.get(r.cause) ?? []), r.runId]);
   return [...byCause]
+    .filter(([, runIds]) => runIds.length >= 2)
     .map(([cause, runIds]) => ({ cause, runIds, prevention: overusePrevention(cause) }))
     .sort((a, b) => b.runIds.length - a.runIds.length);
 }
