@@ -638,7 +638,9 @@ export function flightState(i: {
       ageMin: Math.floor((now - q.at) / 60_000),
     }));
 
-  const reviewRows = store.reviewsIn(["queued", "starting", "running"]);
+  const reviewRows = store
+    .reviewsIn(["queued", "starting", "running"])
+    .filter((row) => row.repoId === session.repoId);
   const reviewSeats = mine.filter((s) => seatDef(s).loop === "review");
   const reviewQueue = {
     queued: reviewRows.filter((row) => row.state === "queued").length,

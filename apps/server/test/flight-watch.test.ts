@@ -529,6 +529,28 @@ describe("FLIGHT's evidence", () => {
 });
 
 describe("FLIGHT's flow queues", () => {
+  it("keeps another repository's reviews out of this session's queue", () => {
+    store.requestReview({
+      authorRunId: "r-other-author",
+      repoId: "other",
+      seatId: "retro-other",
+      prNumber: 1,
+      sha: "other-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+
+    const result = flightState({ config, store, busy: [], now: T0 });
+
+    expect(result.reviewQueue).toEqual({
+      queued: 0,
+      running: 0,
+      seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+    });
+  });
+
   it("names a machine hold that leaves queued reviews without a reviewer", () => {
     const crew = config.crew;
     if (crew === undefined) throw new Error("test fixture has no crew");
