@@ -8,7 +8,7 @@ import { browserSession, describeRendered } from "./browserRunner.ts";
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "map-shots");
 const WIDTHS = [1366, 1600, 1920] as const;
-/** The HUD's smallest type token, `--fs-xs`. */
+/** The HUD's smallest type token, `--fs-micro`. */
 const SMALLEST_PX = 11;
 
 describeRendered("Map in a browser", () => {

@@ -1,9 +1,9 @@
 /* the severity word in the Review pane */
 .map-severity {
   display: inline-block;
-  padding: 1px 4px;
+  padding: 0 var(--sp-1);
   border-radius: 2px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 .map-lens .map-severity-critical {
   color: var(--crit);
@@ -20,7 +20,7 @@
 .map-lens-covbar {
   display: flex;
   height: 6px;
-  margin: 6px 0 2px;
+  margin: var(--sp-1) 0 var(--sp-1);
   background: var(--surface-2);
 }
 .map-lens-covbar i {
@@ -28,18 +28,18 @@
   height: 100%;
 }
 .map-lens-pair + .map-lens-pair {
-  margin-top: 6px;
+  margin-top: var(--sp-1);
 }
 .map-lens-branch {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .map-lens-seat-dot {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 4px;
+  margin-right: var(--sp-1);
   border-radius: 50%;
 }
 
@@ -51,11 +51,11 @@
   border: 1px solid var(--line);
   border-radius: var(--r);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--fg-2);
 }
 .map-lens > header {
-  padding: 10px 12px 8px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2);
   border-bottom: 1px solid var(--line);
 }
 .map-lens h2,
@@ -68,29 +68,29 @@
   color: var(--fg);
 }
 .map-lens h3 {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .map-lens-section > p {
-  margin: 4px 0 0;
-  line-height: 1.45;
+  margin: var(--sp-1) 0 0;
+  line-height: var(--lh);
 }
 .map-lens header p {
-  margin: 4px 0 0;
-  line-height: 1.45;
+  margin: var(--sp-1) 0 0;
+  line-height: var(--lh);
 }
 .map-lens-section {
-  padding: 9px 12px;
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
 .map-lens-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
-  padding-top: 6px;
+  padding-top: var(--sp-1);
 }
 .map-lens-file,
 .map-lens-back,
@@ -121,10 +121,10 @@
 .map-lens-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  margin-top: 7px;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   text-transform: uppercase;
 }
 .map-lens-columns span:last-child {
@@ -140,7 +140,7 @@
 }
 .map-lens-back {
   color: var(--accent);
-  margin-bottom: 6px;
+  margin-bottom: var(--sp-1);
 }
 .map-lens-kpis {
   display: grid;
@@ -148,9 +148,9 @@
   border-bottom: 1px solid var(--line);
 }
 .map-lens-kpis b {
-  padding: 9px 10px;
+  padding: var(--sp-2) var(--sp-2);
   border-right: 1px solid var(--line);
-  font-size: 16px;
+  font-size: var(--fs-panel);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
@@ -159,15 +159,15 @@
 }
 .map-lens-kpis small {
   display: block;
-  margin-top: 2px;
+  margin-top: var(--sp-1);
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 400;
 }
 .map-pr {
   display: inline-block;
-  margin: 5px 4px 0 0;
-  padding: 1px 4px;
+  margin: var(--sp-1) var(--sp-1) 0 0;
+  padding: 0 var(--sp-1);
   border: 1px solid var(--line-2);
   border-radius: 2px;
   color: var(--fg-2);
@@ -186,15 +186,15 @@
   font-family: var(--mono);
 }
 .map-conflict-detail {
-  margin-top: 10px;
+  margin-top: var(--sp-2);
   padding: 0;
   border-bottom: 0;
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--fg-2);
 }
 .map-conflict-detail h3 {
-  margin: 0 0 4px;
-  font-size: var(--fs-xs);
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-s);
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;

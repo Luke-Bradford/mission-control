@@ -1,22 +1,13 @@
 /*
  * The Crew Activity Map page (docs/design/flight-deck.md around a flat void stage).
  * The page chrome follows the theme; the stage stays the void in both themes, so its overlay text
- * uses the stage's own tokens below, never the theme's. No glows, gradients or text shadows: the
+ * uses the stage's own tokens (--void*, in hud.css), never the theme's. No glows, gradients or text shadows: the
  * seats' lights are the only colour on the stage.
  */
 .map-page {
-  --void: #04060c;
-  --void-2: #0a0f1d;
-  --void-line: #1a2440;
-  --void-ink: #dbe4f5;
-  --void-muted: #8391ad;
-  --add: #4fdc8a;
-  --rem: #ff6b6b;
-  /* the seats' colours are the HUD's (hud.css); FLIGHT's tone on the void is its own */
-  --seat-flight: #707b8c;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -27,12 +18,12 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 18px;
+  gap: var(--sp-2) var(--sp-4);
   min-width: 0;
 }
 .map-head h1 {
   font-family: var(--display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -44,14 +35,14 @@
   letter-spacing: 0.02em;
   text-transform: none;
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--fs-panel);
 }
 .map-field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -69,7 +60,7 @@
   min-height: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--sp-5);
   text-align: center;
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -86,21 +77,21 @@
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 .map-key-bar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--sp-3);
   min-width: 0;
   min-height: 30px;
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 .map-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 10px;
+  gap: var(--sp-2);
   min-height: 0;
 }
 .map-stage-wrap {
@@ -148,12 +139,12 @@
   border: 1px solid var(--treemap-line);
   background: var(--treemap-folder);
   color: var(--muted);
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   pointer-events: none;
 }
 .map-treemap-folder > .map-treemap-folder-label {
   display: block;
-  padding: 2px 4px;
+  padding: var(--sp-1) var(--sp-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -163,12 +154,12 @@
   box-sizing: border-box;
   min-width: 0;
   min-height: 0;
-  padding: 4px;
+  padding: var(--sp-1);
   overflow: hidden;
   border: 1px solid var(--treemap-line);
   border-radius: 1px;
   box-shadow: none;
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   text-align: left;
   color: var(--treemap-ink);
   opacity: calc(0.22 + var(--tile-intensity) * 0.78);
@@ -188,7 +179,7 @@
   );
 }
 .map-treemap-changes .map-treemap-tile[data-strong] {
-  color: #fff;
+  color: var(--on-seat);
 }
 .map-treemap-changes .map-treemap-tile[data-read] {
   box-shadow:
@@ -208,12 +199,12 @@
   position: absolute;
   min-width: 14px;
   box-sizing: border-box;
-  padding: 0 3px;
+  padding: 0 var(--sp-1);
   border: 1.5px solid var(--mark-colour);
   border-radius: 8px;
   background: var(--treemap-bg);
   color: var(--treemap-ink);
-  font: 600 var(--fs-xs) / 12px var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   text-align: center;
   transform: translate(-50%, -50%);
 }
@@ -242,7 +233,7 @@
   color: var(--rem);
 }
 .map-treemap-tile[data-conflict][data-strong] .map-treemap-badge {
-  color: #fff;
+  color: var(--on-seat);
 }
 .map-treemap-tile:focus-visible {
   z-index: 2;
@@ -260,11 +251,11 @@
 .map-key-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 .map-key-steps {
   display: inline-flex;
-  gap: 1px;
+  gap: 0;
 }
 .map-key-swatch {
   width: 11px;
@@ -295,9 +286,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
+  gap: var(--sp-1) var(--sp-4);
   margin: 0;
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--fg-2);
 }
 .map-changes-key .map-key-read {
@@ -310,7 +301,7 @@
 .map-timeline {
   grid-column: 1 / -1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -318,9 +309,9 @@
 .map-timeline-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 7px;
-  font: var(--fs-xs) var(--mono);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 .map-timeline-controls strong {
@@ -328,7 +319,7 @@
 }
 .map-timeline-controls .map-timeline-list {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -339,9 +330,9 @@
   display: grid;
   grid-template-columns: 8px 84px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   min-height: 20px;
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 .map-timeline-dot {
   width: 8px;
@@ -373,7 +364,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  background: var(--accent-soft, rgba(86, 216, 230, 0.14));
+  background: var(--accent-soft);
   border-inline: 1px solid var(--accent);
   pointer-events: none;
 }
@@ -405,7 +396,7 @@ button.map-timeline-tick {
   top: 4.5px;
   width: 7px;
   height: 7px;
-  margin-left: -3px;
+  margin-left: calc(-1 * var(--sp-1));
   border: 1.3px solid var(--timeline-seat);
   border-radius: 50%;
   background: var(--surface);
@@ -452,14 +443,14 @@ button.map-timeline-tick {
 .map-rail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
   min-height: 0;
   min-width: 0;
 }
 .map-card {
   position: relative;
   min-height: 0;
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -475,12 +466,12 @@ button.map-timeline-tick {
 }
 .map-card > h2 {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--fg-2);
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
 }
 /* a seat's light: the same colour as on the stage */
 .map-light {
@@ -493,21 +484,21 @@ button.map-timeline-tick {
 }
 .map-seats {
   list-style: none;
-  margin: 0 -6px;
+  margin: 0 calc(-1 * var(--sp-1));
   padding: 0;
   display: grid;
-  gap: 1px;
+  gap: 0;
 }
 .map-seat {
   width: 100%;
   display: grid;
   grid-template-columns: 8px auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1);
   text-align: left;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   background: transparent;
   border: 0;
   border-radius: var(--r-s);
@@ -541,66 +532,66 @@ button.map-timeline-tick {
 .map-empty {
   color: var(--fg-2);
   font-size: var(--fs-s);
-  margin-block: 4px;
+  margin-block: var(--sp-1);
 }
 .map-find {
   width: 100%;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: var(--fs-s);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 .map-results {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--sp-1);
   max-height: 160px;
   overflow: auto;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--muted);
 }
 .map-results button {
   text-align: left;
   font-family: var(--mono);
-  font-size: var(--fs-xs);
-  padding: 3px 8px;
+  font-size: var(--fs-s);
+  padding: var(--sp-1) var(--sp-2);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 .map-detail {
   font-family: var(--mono);
   font-size: var(--fs-s);
-  line-height: 1.55;
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 .map-detail h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   font-family: var(--mono);
   font-size: var(--fs-s);
   font-weight: 500;
   color: var(--fg);
-  margin-block: 2px 4px;
+  margin-block: var(--sp-1) var(--sp-1);
 }
 .map-detail h4 {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 500;
   color: var(--muted);
-  margin-block: 10px 4px;
+  margin-block: var(--sp-2) var(--sp-1);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 .map-detail-on {
   color: var(--fg);
-  margin-block: 0 8px;
+  margin-block: 0 var(--sp-2);
 }
 .map-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 12px;
+  gap: var(--sp-1) var(--sp-3);
   margin: 0;
 }
 .map-facts dt {
@@ -615,13 +606,13 @@ button.map-timeline-tick {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 .map-who li {
   display: grid;
   grid-template-columns: 8px auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .map-who-count {
   justify-self: end;
@@ -629,12 +620,12 @@ button.map-timeline-tick {
 }
 .map-detail-actions {
   display: flex;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
 }
 .map-note {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 /* the deck: live status */
@@ -642,8 +633,8 @@ button.map-timeline-tick {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 14px;
-  padding: 8px 12px;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -651,7 +642,7 @@ button.map-timeline-tick {
 .map-live {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   font-family: var(--mono);
   font-size: var(--fs-s);
   color: var(--fg-2);
@@ -682,5 +673,5 @@ button.map-timeline-tick {
 .map-timeline-presets {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
 }

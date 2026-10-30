@@ -62,7 +62,7 @@ export function LoopTimeline({
           </span>
         </div>
       ))}
-      <div className="legend" style={{ marginTop: 8 }}>
+      <div className="legend" style={{ marginTop: "var(--sp-2)" }}>
         {LEGEND.map(([cls, label]) => (
           <span key={cls}>
             <i className={cls} />

@@ -34,7 +34,7 @@ describe("Markdown layout (hud.css)", () => {
     const sels = [".md", ".rsummary", ".nrow", ".nowt", ".needpart", ".arow", ".btitle", ".opt"];
     const r = rule(sels.map((s) => `${s} code`).join(",\\n"));
     expect(r).toContain("font-family: var(--mono)");
-    expect(r).toContain("font-size: 0.92em");
+    expect(r).toContain("font-size: inherit");
   });
 
   it("a long token in the loop's text wraps instead of widening the Loop panel", () => {
