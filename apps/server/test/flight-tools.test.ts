@@ -6070,6 +6070,26 @@ describe("superuser housekeeping", () => {
     ).not.toHaveProperty("isError", true);
     expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
   });
+  it("settles FLIGHT's production-shaped PR-ref Comms blocker", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "PR 1063",
+      ref: "PR 1063",
+      text: "The PR is now resolved.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
+  });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();
     need(cfg.crew).lane = "home";

@@ -3043,6 +3043,28 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(needsYouItems(afterDone)).toHaveLength(0);
   });
 
+  it("clears a production-shaped issue-ref Comms item when its ticket reaches Done", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS - COMMS_CAPCOM_ESCALATION_MS,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "#909",
+      ref: "#909",
+      text: "The ticket is waiting.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.replaceBoard("shop-app", [
+      boardItem({ issueNumber: 909, state: "done", status: "Done" }),
+    ]);
+    const afterDone = all(current);
+    expect(afterDone.some((item) => item.key === key)).toBe(false);
+    expect(needsYouItems(afterDone)).toHaveLength(0);
+  });
+
   it("appears when FLIGHT misses the window, counts the items, and clears once FLIGHT triages them", () => {
     flight();
     const id = ask(NOW - 30 * MIN);

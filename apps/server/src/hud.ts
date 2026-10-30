@@ -993,6 +993,7 @@ function buildAttentionItems(
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+    const issueRef = /^#(\d+)$/.exec(message.ref ?? message.ticket ?? "");
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
     const flight = flightSeat(config);
     const senderRepoId =
@@ -1008,7 +1009,8 @@ function buildAttentionItems(
         ? undefined
         : (store.commsForTicket(message.ref ?? "", message.ticket ?? undefined).repoId ??
           undefined));
-    const issueNumber = ticket === null ? null : Number(ticket[2]);
+    const issueNumber =
+      ticket === null ? (issueRef === null ? null : Number(issueRef[1])) : Number(ticket[2]);
     const prs = repoId === undefined ? [] : store.pullRequests(repoId);
     const ticketPrs = prs.filter((pr) => pr.ticket === message.ticket);
     const resolvedPr =
@@ -1030,7 +1032,7 @@ function buildAttentionItems(
       key: `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" ? "blocked" : "question",
       agentId: message.from,
-      repoId: message.ticket?.split("#")[0] ?? null,
+      repoId: repoId ?? null,
       text: message.text,
       tool: null,
       at: message.at,

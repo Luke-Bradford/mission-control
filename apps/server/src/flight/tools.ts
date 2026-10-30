@@ -3206,6 +3206,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (a.key.startsWith("comms-open:")) {
           const messageId = a.key.slice("comms-open:".length);
           const message = store.openCommsItems().find((item) => item.id === messageId);
+          const ticketRepoId = /^(.+)#\d+$/.exec(message?.ticket ?? "")?.[1];
           const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
             (candidate) => candidate.key === a.key,
@@ -3213,7 +3214,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (
             message === undefined ||
             message.from !== ctx.seatId ||
-            (message.ticket !== null && message.ticket.split("#")[0] !== repo.id) ||
+            (ticketRepoId !== undefined && ticketRepoId !== repo.id) ||
             item === undefined ||
             protectedDecisionItem(store, item, config, now())
           )
