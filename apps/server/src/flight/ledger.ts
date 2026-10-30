@@ -13,7 +13,7 @@ import {
   type FlightMetrics,
   type FlightSummaryItem,
   type FlightSummaryView,
-  FOR_THE_CONTROLLER,
+  forTheControllerDecisions,
   isCiFailureEvent,
   orderLedger,
   parkedEventText,
@@ -117,11 +117,9 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
         ).length,
       0,
     );
-  metrics.forTheController = store
-    .flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT)
-    .filter(
-      (d) => d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER),
-    ).length;
+  metrics.forTheController = forTheControllerDecisions(
+    store.flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT),
+  ).length;
   return metrics;
 }
 

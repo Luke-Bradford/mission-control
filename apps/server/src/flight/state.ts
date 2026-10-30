@@ -9,6 +9,7 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
@@ -20,6 +21,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_METRICS_DAY_MS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
@@ -50,6 +52,7 @@ import {
   type FlightWake,
   type FlightWakeList,
   type FlightWakeStatus,
+  forTheControllerDecisions,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -297,6 +300,9 @@ export function flightView(
   const found = flightSeat(config);
   const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
   const live = found === null ? false : flightLive(config, store, alive);
+  const controllerDecisions = forTheControllerDecisions(
+    store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT),
+  );
   return {
     seat:
       found === null
@@ -313,6 +319,7 @@ export function flightView(
                 : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
           },
     decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
+    controllerDecisions,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
   };
 }

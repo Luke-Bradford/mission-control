@@ -10,6 +10,7 @@ import {
   FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_RETROSPECTIVE_SETTING,
+  FLIGHT_VIEW_LIMIT,
   type FlightLedgerEntry,
   FOR_THE_CONTROLLER,
   NEW_LOOP,
@@ -30,7 +31,7 @@ import {
   prepareRetrospective,
 } from "../src/flight/retrospective.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightState, flightWake } from "../src/flight/state.ts";
+import { flightState, flightView, flightWake } from "../src/flight/state.ts";
 import * as gitRuntime from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
@@ -125,6 +126,31 @@ afterEach(() => {
 });
 
 describe("flightMetrics", () => {
+  it("shares every recent controller decision with the daily count beyond the view limit", () => {
+    const decision = (at: number, text: string) =>
+      store.addFlightDecision({
+        at,
+        kind: "note",
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about: "Missing power",
+        decision: text,
+        basis: "operator",
+      });
+    decision(NOW - MIN, `${FOR_THE_CONTROLLER} choose a replacement`);
+    for (let n = 0; n <= FLIGHT_VIEW_LIMIT; n++) decision(NOW - n, `newer ${n}`);
+    decision(NOW - FLIGHT_METRICS_DAY_MS - 1, `${FOR_THE_CONTROLLER} expired request`);
+
+    const view = flightView(config, store, NOW);
+    expect(flightMetrics(config, store, NOW).forTheController).toBe(1);
+    expect(view.decisions).toHaveLength(FLIGHT_VIEW_LIMIT);
+    expect((view.controllerDecisions ?? []).map((d) => d.decision)).toEqual([
+      `${FOR_THE_CONTROLLER} choose a replacement`,
+    ]);
+  });
+
   it("computes daily and live metrics from hub data", () => {
     const mergedAt = NOW - MIN;
     store.upsertPullRequests(
