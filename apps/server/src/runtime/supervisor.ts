@@ -57,7 +57,6 @@ import {
   conflictText,
   crewCliArgs,
   crewMcpConfig,
-  crewPnpmStoreDir,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
@@ -166,7 +165,6 @@ import {
   watchBrief,
 } from "./brief.ts";
 import {
-  codexPnpmStoreDir,
   existingCheckout,
   existingDetached,
   existingReadOnlyCheckout,
@@ -177,8 +175,10 @@ import {
   preparePlanCheckout,
   prepareReadOnlyCheckout,
   prepareScratch,
+  prepareSharedPnpmStore,
   type RepoPeer,
   removeCheckout,
+  sharedPnpmStoreDir,
   sweepPnpmStores,
   syncReusedWorktree,
   writeReviewInputs,
@@ -1221,7 +1221,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
-   * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
+   * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
   function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
@@ -1235,7 +1235,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.TMP = tmp;
     env.TEMP = tmp;
     env.CLAUDE_CODE_TMPDIR = tmp;
-    env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
+    env[PNPM_STORE_ENV] = sharedPnpmStoreDir(crew?.worktrees ?? "");
     Object.assign(env, crewPythonEnv(tmp, seatId));
     return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...CREW_GIT_ENV };
   }
@@ -1384,6 +1384,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       [...(modeOfSeat(info.seat) === "read-only" ? [] : [checkout.path]), seatTmp(run.id)],
       [dirname(deps.dbPath)],
     );
+    // Every seat receives this read-only sandbox grant, even if this repository has no pnpm
+    // lockfile and therefore did not run installation.
+    await prepareSharedPnpmStore(crew?.worktrees ?? "", info.seat.id);
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -1532,26 +1535,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
-      let codexPnpmStore: string | undefined;
-      if (run.vendor === "codex") {
-        const storePath = codexPnpmStoreDir(cwd);
-        for (const path of [dirname(storePath), storePath]) {
-          try {
-            mkdirSync(path, { mode: 0o700 });
-          } catch (e) {
-            if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-          }
-          const stat = lstatSync(path);
-          if (
-            !stat.isDirectory() ||
-            stat.uid !== process.getuid?.() ||
-            (stat.mode & 0o777) !== 0o700 ||
-            realpathSync(path) !== path
-          )
-            throw new Error("Codex pnpm store must be a private directory owned by the server");
-        }
-        codexPnpmStore = realpathSync(storePath);
-      }
+      const pnpmStore = sharedPnpmStoreDir(crew?.worktrees ?? "");
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
       const gitCommonDir = realpathSync(join(info.session.checkout, ".git"));
@@ -1562,6 +1546,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
+        pnpmStoreDir: pnpmStore,
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
           ...profileDenies(),
@@ -1571,7 +1556,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ],
       };
       if (run.vendor === "codex") {
-        if (codexPnpmStore === undefined) throw new Error("Codex pnpm store is unavailable");
         addMcTmpExclude(gitCommonDir);
         const claudeTmpParentPath = dirname(seatTmp(run.id));
         try {
@@ -1621,7 +1605,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           TMPDIR: tmp,
           TMP: tmp,
           TEMP: tmp,
-          [PNPM_STORE_ENV]: codexPnpmStore,
+          [PNPM_STORE_ENV]: pnpmStore,
           UV_CACHE_DIR: join(tmp, "uv-cache"),
           PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
           RUFF_CACHE_DIR: join(tmp, "ruff-cache"),
@@ -3080,7 +3064,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mergedMainText(checkout.baseSha),
             startedAt,
           );
-          installNote = await installAfterSync(info.session.checkout, checkout, result.before);
+          installNote = await installAfterSync(
+            info.session.checkout,
+            checkout,
+            result.before,
+            crew?.worktrees ?? "",
+          );
           if (installNote) {
             log(`${seatId}: ${installNote}`);
             store.addLoopEvent(
