@@ -59,9 +59,9 @@ export interface CallKey {
 
 export interface CheckRecorder {
   /** A shell call is about to start: keep the head and cleanliness it starts on. */
-  begin(key: CallKey, command: string): Promise<void>;
+  begin(key: CallKey, command: string, aliases?: readonly CallKey[]): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
-  end(key: CallKey, ok: boolean): Promise<void>;
+  end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
   /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
   lockedBy(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
@@ -83,7 +83,10 @@ const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
 export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
-  const started = new Map<string, { runId: string; matched: string[]; head: string }>();
+  const started = new Map<
+    string,
+    { runId: string; matched: string[]; command: string; head: string }
+  >();
   return {
     async lockedBy(runId, command) {
       try {
@@ -93,28 +96,38 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
-    async begin(key, command) {
+    async begin(key, command, aliases = []) {
       try {
         const matched = checksRun(command, await d.checks(key.runId));
         if (matched.length === 0) return;
         const at = await d.state(key.runId);
         // a dirty tree: the check ran on something no commit holds
         if (at === null || !at.clean) return;
-        started.set(callId(key), { runId: key.runId, matched, head: at.head });
+        const call = { runId: key.runId, matched, command, head: at.head };
+        started.set(callId(key), call);
+        for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
         d.log?.(`checks: could not start a record for ${key.runId}: ${(e as Error).message}`);
       }
     },
-    async end(key, ok) {
+    async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
       if (call === undefined) return;
-      started.delete(callId(key));
+      for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
         const at = await d.state(key.runId);
         // the head moved, or the call left the tree dirty: it did not check the commit it started on
         if (at === null || at.head !== call.head || !at.clean) return;
         for (const command of call.matched) {
-          d.store.addCheckRun({ runId: key.runId, command, headSha: call.head, ok, at: now() });
+          d.store.addCheckRun({
+            runId: key.runId,
+            command,
+            invokedCommand: call.command,
+            headSha: call.head,
+            ok,
+            exitCode,
+            at: now(),
+          });
         }
       } catch (e) {
         d.log?.(`checks: could not record for ${key.runId}: ${(e as Error).message}`);

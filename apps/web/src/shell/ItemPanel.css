@@ -5,8 +5,9 @@
   bottom: 0;
   width: min(540px, 100%);
   z-index: 36;
-  padding: calc(10px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
-    calc(10px + env(safe-area-inset-bottom, 0px)) 10px;
+  padding: calc(var(--sp-2) + env(safe-area-inset-top, 0px))
+    max(var(--sp-2), env(safe-area-inset-right, 0px))
+    calc(var(--sp-2) + env(safe-area-inset-bottom, 0px)) var(--sp-2);
 }
 
 .flyout .panel {
@@ -16,7 +17,7 @@
 
 #dsBrief {
   border-bottom: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: var(--sp-2);
 }
 
 #dsOpts {
@@ -26,5 +27,5 @@
 #dsBrief blockquote {
   margin: 0;
   border-left: 2px solid var(--line);
-  padding-left: 8px;
+  padding-left: var(--sp-2);
 }

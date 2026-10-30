@@ -89,9 +89,13 @@ const compactionsText = (d: CrewRow["digest"]): string =>
 
 /** A crew seat's Context tile: the CLI's own breakdown (`GET /api/seats/:id/context`). */
 function SeatContext({ row }: { row: CrewRow }) {
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const config = configRes.data;
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
-  const running = seatTurn(row) === "running";
+  // Codex has no context request to answer: asking would draw a 409 into the console on every
+  // load, so wait for the config to say which vendor this seat is.
+  const configKnown = config !== undefined || configRes.error !== null;
+  const running = seatTurn(row) === "running" && configKnown && !codex;
   const contextRef = RESOURCES.seatContext(row.id);
   const ref = running ? contextRef : null;
   const usage = useResource<ContextUsage | null>(ref).data ?? null;

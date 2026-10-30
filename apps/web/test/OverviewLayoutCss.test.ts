@@ -16,7 +16,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`#agentsList \.need button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.repo-pick \.chip button`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
-    expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: -2.5px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: calc(var(--sp-1) / -2)");
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
     for (const selector of [
       String.raw`\.comms-actions button,\n\.comms-react-set button`,
@@ -53,7 +53,7 @@ describe("Overview layout (hud.css)", () => {
     }
     expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
     expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
-    expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-xs)");
+    expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {
@@ -77,7 +77,7 @@ describe("Overview layout (hud.css)", () => {
 
   it("keeps eight full-width graphs and five compact Pipeline lanes at dock widths", () => {
     expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
-    expect(rule(String.raw`\.overview-kpis`)).toContain("gap: 12px");
+    expect(rule(String.raw`\.overview-kpis`)).toContain("gap: var(--sp-3)");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
@@ -140,7 +140,7 @@ describe("Overview layout (hud.css)", () => {
 
   it("wraps KPI labels without ellipses and keeps eight Crew rows below the 45% cap", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
-    expect(label).toContain("font-size: var(--fs-xs)");
+    expect(label).toContain("font-size: var(--fs-s)");
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
     const row = rule(String.raw`#agentsList \.trow`);
@@ -152,10 +152,9 @@ describe("Overview layout (hud.css)", () => {
 
   it("uses the approved header spacing while keeping narrow wrapping", () => {
     const desktop = css.match(/@media \(min-width: 1200px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
-    const gap = Number(desktop.match(/gap: 8px (\d+)px/)?.[1]);
-    expect(gap).toBe(20);
+    expect(desktop).toContain("gap: var(--sp-2) var(--sp-4)");
     expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
-    expect(rule(String.raw`\.top`)).toContain("gap: 8px 20px");
+    expect(rule(String.raw`\.top`)).toContain("gap: var(--sp-2) var(--sp-4)");
     expect(rule(String.raw`\.top-status`)).toContain("margin-left: auto");
     expect(desktop).not.toContain("display: none");
   });

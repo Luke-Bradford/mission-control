@@ -379,6 +379,19 @@ describe("Setup › Loops templates", () => {
     expect(rule(String.raw`\.loop-chain`)).not.toContain("overflow-x:");
   });
 
+  it("reserves the height the chain's routes and FLIGHT box are drawn in (hud.css)", () => {
+    const css = readStyles();
+    const rule = (selector: string) =>
+      css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+    const px = (body: string, prop: string) =>
+      Number(new RegExp(`(?:^|[\\s;])${prop}: (\\d+)px`).exec(body)?.[1]);
+    const routes = px(rule(String.raw`\.loop-routes`), "height");
+    expect(routes).toBeGreaterThan(0);
+    // both are absolutely placed, so only the chain's own height keeps the panels below clear of them
+    expect(px(rule(String.raw`\.loop-chain`), "min-height")).toBeGreaterThanOrEqual(routes);
+    expect(px(rule(String.raw`\.loop-flight`), "top")).toBeLessThan(routes);
+  });
+
   it("template rows wrap within their width (hud.css)", () => {
     const css = readStyles();
     const rule = (selector: string) =>

@@ -393,7 +393,13 @@ function harness(): Harness {
     prResults: [],
     touches: [],
     hardRuleLists: [],
-    gate: { mainSha: "d".repeat(40), containsMain: true, hubOnly: true, strays: [] },
+    gate: {
+      mainSha: "d".repeat(40),
+      containsMain: true,
+      hubOnly: true,
+      strays: [],
+      webChanged: false,
+    },
     gateReads: [],
     steps: [],
     stepEnded: {},
@@ -2872,6 +2878,43 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("does not make a HUD design check a readiness gate", async () => {
+    h.gate = { ...need(h.gate), webChanged: true };
+    await toReview();
+    reported(first().id, []);
+    await h.engine.reconcileRun(RUN);
+    expect(h.steps).toContain("ready");
+  });
+
+  it("stores RETRO screenshot-pair evidence for the QA board", async () => {
+    h.gate = { ...need(h.gate), webChanged: true };
+    await toReview();
+    const review = need(store.review(first().id));
+    expect(
+      store.recordFindings(review.id, need(review.runId), {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "design checked",
+        findings: [],
+        checked: [
+          {
+            check: "design",
+            result: "pass",
+            note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+        ],
+        at: clock,
+      }),
+    ).toBe(true);
+    emit({ kind: "findings", seatId: RETRO, runId: need(review.runId) });
+    await h.engine.reconcileRun(RUN);
+    expect(store.reviewChecks(review.id)).toContainEqual({
+      check: "design",
+      result: "pass",
+      note: "hud-shot:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa hud-shot:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
+    expect(h.steps).toContain("ready");
+  });
+
   it("a paused reviewer keeps its queued review until unpaused", async () => {
     store.setSetting(
       "crew.paused",

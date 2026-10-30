@@ -293,7 +293,7 @@ describe("Codex check records", () => {
   const recorder = () => {
     const begun: unknown[][] = [];
     const checks: CheckRecorder = {
-      begin: async (k, c) => void begun.push([k, c]),
+      begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
       lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
       dropRun: () => {},
@@ -319,8 +319,12 @@ describe("Codex check records", () => {
       ),
     ).toBe("accept");
     expect(begun).toEqual([
-      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint"],
-      [{ runId: "run", toolUseId: "appr-2" }, "pnpm -s typecheck"],
+      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", []],
+      [
+        { runId: "run", toolUseId: "appr-2" },
+        "pnpm -s typecheck",
+        [{ runId: "run", toolUseId: "item-2" }],
+      ],
     ]);
   });
 

@@ -21,6 +21,14 @@ const contrast = (a: string, b: string): number => {
   const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (light + 0.05) / (dark + 0.05);
 };
+const hudCss = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+/** A palette token's hex, from hud.css's first (dark, theme-independent) token block. */
+const token = (name: string): string => {
+  const colour = new RegExp(`${name}: (#[0-9a-f]{6})`, "i").exec(hudCss)?.[1];
+  if (!colour) throw new Error(`Missing ${name}`);
+  return colour;
+};
+
 it("reserves auto rows for the key bar and deck around the flexible map row", () => {
   expect(rule(String.raw`\.map-body`)).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
 });

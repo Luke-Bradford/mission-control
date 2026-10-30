@@ -2,7 +2,7 @@
 @import "./CommsGraph.css";
 
 .msg.peer {
-  padding-left: 32px;
+  padding-left: var(--sp-6);
 }
 
 .msg.peer .body {
@@ -25,7 +25,7 @@
 .comms-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px);
-  gap: 12px;
+  gap: var(--sp-3);
   height: 100%;
   overflow: hidden;
 }
@@ -58,11 +58,11 @@
 .comms-section-head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-s);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -74,7 +74,7 @@
 
 .comms-section-head span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -112,7 +112,7 @@
 
 .comms-nav button,
 .comms-contacts button {
-  padding: 9px 12px 9px 14px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3);
   color: var(--fg);
   text-align: left;
   background: transparent;
@@ -142,7 +142,7 @@
 .comms-nav-row {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: 9px;
+  gap: var(--sp-2);
   align-items: center;
 }
 
@@ -187,7 +187,7 @@
 
 .comms-nav-counts {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--sp-1);
   align-items: center;
 }
 
@@ -195,7 +195,7 @@
   min-width: 2ch;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -215,9 +215,9 @@
 .comms-nav .comms-mention-count {
   min-width: 18px;
   height: 16px;
-  padding: 0 4px;
+  padding: 0 var(--sp-1);
   color: var(--accent);
-  font: 600 var(--fs-xs) / 16px var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: center;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -254,7 +254,7 @@
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
   height: 100%;
   overflow: hidden;
 }
@@ -290,12 +290,12 @@
 
 .comms-breadcrumb {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   min-width: 0;
   color: var(--accent);
   font-family: var(--display);
-  font-size: 20px;
+  font-size: var(--fs-title);
   font-weight: 500;
   letter-spacing: 0.02em;
   text-transform: none;
@@ -304,7 +304,7 @@
 
 .comms-breadcrumb > span {
   display: inline-flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
 }
 
@@ -333,7 +333,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
   width: 100%;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 #page-comms #chatP > .ph {
@@ -407,9 +407,9 @@
   top: -7px;
   right: -7px;
   min-width: 17px;
-  padding: 0 4px;
+  padding: 0 var(--sp-1);
   color: var(--bg);
-  font: 600 var(--fs-xs) / 16px var(--mono);
+  font: 600 var(--fs-micro) / var(--lh-micro) var(--mono);
   background: var(--warn);
   border-radius: 999px;
 }
@@ -429,20 +429,20 @@
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+  box-shadow: var(--shadow);
 }
 
 .comms-mentions-panel header {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  padding: 9px 10px;
+  padding: var(--sp-2) var(--sp-2);
   border-bottom: 1px solid var(--line);
 }
 
 .comms-mentions-panel header span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .comms-mentions-panel header button {
@@ -453,8 +453,8 @@
 .comms-mentions-panel > button {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 2px 7px;
-  padding: 9px 12px;
+  gap: var(--sp-1) var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   text-align: left;
   /* buttons do not wrap by default; the mention's text clamps to two lines instead */
   white-space: normal;
@@ -469,7 +469,7 @@
 
 .comms-mentions-panel > button span {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .comms-mentions-panel > button em {
@@ -484,8 +484,8 @@
 .comms-pins {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 14px;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
   font-size: var(--fs-s);
@@ -493,12 +493,12 @@
 
 .comms-pins b {
   color: var(--warn);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   text-transform: uppercase;
 }
 
 .comms-ticket-strip {
-  padding: 8px 14px;
+  padding: var(--sp-2) var(--sp-3);
   color: var(--fg-2);
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
@@ -509,7 +509,7 @@
   align-self: flex-start;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
   width: fit-content;
   max-width: min(68%, 760px);
   padding: 0;
@@ -530,22 +530,22 @@
 }
 
 .comms-message-stack {
-  gap: 12px;
-  padding: 14px;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
 }
 
 .comms-message-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 /* Bubbles: hairlines only. Who spoke is told by side and tint, never by a coloured outline. */
 .comms-bubble-body {
-  padding: 9px 12px;
+  padding: var(--sp-2) var(--sp-3);
   overflow-wrap: anywhere;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -562,7 +562,7 @@
 
 .comms-message-meta > span:first-child {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
@@ -574,8 +574,8 @@
   bottom: -13px;
   left: 10px;
   display: inline-flex;
-  gap: 1px;
-  padding: 2px;
+  gap: 0;
+  padding: var(--sp-1);
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: 3px;
@@ -599,7 +599,7 @@
 .comms-react-set button {
   min-width: 24px;
   min-height: 24px;
-  padding: 1px 6px;
+  padding: 0 var(--sp-1);
   color: var(--fg-2);
   font-family: var(--mono);
   font-size: var(--fs-s);
@@ -616,19 +616,19 @@
 
 .comms-react-set {
   margin: 0;
-  padding: 0 0 0 2px;
+  padding: 0 0 0 var(--sp-1);
   border: 0;
   border-left: 1px solid var(--line);
 }
 
 .comms-react-set {
   display: inline-flex;
-  gap: 1px;
+  gap: 0;
 }
 
 .comms-quote {
   max-width: 100%;
-  padding: 3px 8px;
+  padding: var(--sp-1) var(--sp-2);
   overflow: hidden;
   color: var(--fg-2);
   font-size: var(--fs-s);
@@ -648,21 +648,21 @@
 
 .decision-meta {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
-  margin-bottom: 7px;
-  font: var(--fs-xs) var(--mono);
+  margin-bottom: var(--sp-2);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 .decision-from {
-  padding: 1px 6px;
+  padding: 0 var(--sp-1);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 2px;
 }
 
 .decision-ticket {
-  padding: 1px 6px;
+  padding: 0 var(--sp-1);
   color: var(--fg-2);
   background: var(--surface-2);
   border-radius: 2px;
@@ -692,14 +692,15 @@
 
 .comms-reactions {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
 }
 
-.comms-reactions span {
-  padding: 1px 6px;
+.comms-reactions span,
+.comms-ref {
+  padding: 0 var(--sp-1);
   color: var(--fg-2);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   background: color-mix(in srgb, var(--fg) 7%, transparent);
   border: 0;
   border-radius: 2px;
@@ -707,12 +708,13 @@
 
 /* Ticket and PR refs: filled chips, tinted, no outline. */
 .comms-ref {
-  margin: 0 1px;
-  padding: 0 4px;
+  margin: 0 0;
+  padding: 0 var(--sp-1);
   color: var(--accent);
   font-size: var(--fs-s);
   font-family: var(--mono);
-  line-height: 1.5;
+  font-size: var(--fs-s);
+  line-height: var(--lh-micro);
   vertical-align: baseline;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   cursor: pointer;
@@ -725,21 +727,21 @@
 
 .comms-composer {
   flex: 0 0 auto;
-  padding: 10px 12px 12px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: var(--surface);
   border-top: 1px solid var(--line);
 }
 
 .comms-composer > label {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: var(--sp-1);
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .comms-composer > div:last-of-type {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .comms-composer input {
@@ -761,7 +763,7 @@
 
 .comms-composer input + button {
   min-height: 40px;
-  padding: 0 18px;
+  padding: 0 var(--sp-4);
   border-radius: 2px;
   color: var(--accent-ink);
   font-weight: 600;
@@ -771,10 +773,10 @@
 
 .comms-replying {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
-  margin-bottom: 6px;
-  padding: 4px 8px;
+  margin-bottom: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
   overflow: hidden;
   color: var(--fg-2);
   white-space: nowrap;
@@ -791,14 +793,14 @@
 }
 
 .decision-card {
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   border-bottom: 0;
 }
 
 .decision-card p,
 .decision-card h3 {
-  margin: 0 0 6px;
+  margin: 0 0 var(--sp-1);
 }
 
 @media (max-width: 1100px) {
@@ -874,9 +876,9 @@
   grid-column: 2;
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 6px 8px;
+  gap: var(--sp-1) var(--sp-2);
   align-items: center;
-  margin: 6px 0 2px;
+  margin: var(--sp-1) 0 var(--sp-1);
 }
 
 .hold-form label {
@@ -891,5 +893,5 @@
 .hold-form .row {
   grid-column: 1 / -1;
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
 }

@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
-import { useSecond, useTz } from "../clock.ts";
+import { useNow, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -179,10 +179,21 @@ function flightSeatId(config: ConfigView | undefined): string | null {
   return null;
 }
 
+/**
+ * Whether a row's text counts seconds (a live tool, a stall, a wait for the test lock). Idle rows
+ * show only minutes and so follow the panel's slower clock.
+ */
+const showsSeconds = (row: Crew["rows"][number] | null, lock: TestLockState | undefined): boolean =>
+  row !== null &&
+  row.run?.status === "running" &&
+  (row.hudState === "running" ||
+    row.hudState === "stalled" ||
+    lockSince(lock, row.run.id) !== null);
+
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
   row,
-  now,
+  now: coarseNow,
   tz,
   configPending,
   selected,
@@ -199,6 +210,7 @@ function FlightRow({
   max: number;
   lock: TestLockState | undefined;
 }) {
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
@@ -363,7 +375,7 @@ function AgentRow({
   row,
   items,
   max,
-  now,
+  now: coarseNow,
   tz,
   selected,
   lock,
@@ -377,6 +389,7 @@ function AgentRow({
   lock: TestLockState | undefined;
 }) {
   const mine = seatItems(row, items);
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const needs = needLine(row, items, now, lock);
   const repoPrs = useReviewPrs(row ?? undefined);
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -517,7 +530,7 @@ export function AgentsPanel() {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
   const tz = useTz();
-  const now = useSecond();
+  const now = useNow();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);

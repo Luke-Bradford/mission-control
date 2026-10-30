@@ -11,14 +11,14 @@
 
 .accounts-table th,
 .accounts-table td {
-  padding: 8px;
+  padding: var(--sp-2);
   vertical-align: top;
   white-space: normal;
 }
 
 .accounts-table th {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -61,7 +61,7 @@
 
 .account-login > span:first-child {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 
 .account-login .pill {
@@ -76,11 +76,11 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 8px;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
   background: var(--panel2);
   border: 1px solid var(--line);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .account-signin-panel code {
@@ -90,7 +90,7 @@
 .account-quota .meter {
   flex-direction: column-reverse;
   align-items: stretch;
-  gap: 3px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -113,9 +113,9 @@
 
 .quota-forecast {
   display: block;
-  margin-top: 3px;
+  margin-top: var(--sp-1);
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -126,7 +126,7 @@
 .accounts-github {
   border-top: 1px solid var(--line);
   color: var(--muted);
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
 }
 
 .accounts-github .githubrate {
@@ -138,21 +138,21 @@
   z-index: 30;
   inset: 0 0 0 auto;
   width: min(430px, 100vw);
-  padding: 16px;
+  padding: var(--sp-4);
   overflow: auto;
   background: var(--panel);
   border-left: 1px solid var(--line);
-  box-shadow: -12px 0 32px #0008;
+  box-shadow: var(--shadow);
 }
 
 .account-editor .seatform {
   display: grid;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .account-editor label {
   display: grid;
-  gap: 5px;
+  gap: var(--sp-1);
 }
 
 .account-editor input,
@@ -168,7 +168,7 @@
 #page-setup {
   display: grid;
   grid-template-columns: 205px minmax(0, 1fr);
-  gap: 14px;
+  gap: var(--sp-3);
   overflow: hidden;
 }
 
@@ -180,8 +180,8 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 3px;
-  padding: 7px;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
   overflow: auto;
 }
 
@@ -191,7 +191,7 @@
   background: transparent;
   box-shadow: none;
   color: var(--fg-2);
-  padding: 9px;
+  padding: var(--sp-2);
   text-align: left;
 }
 
@@ -212,25 +212,25 @@
 }
 
 .setup-content {
-  padding: 14px;
+  padding: var(--sp-3);
 }
 
 .setup-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: var(--sp-3);
 }
 
 .setup-title h2 {
-  font: 600 22px var(--display);
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
 }
 
 .sgrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
-  gap: 12px;
+  gap: var(--sp-3);
   align-content: start;
 }
 
@@ -241,7 +241,7 @@
 .crew {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .tiles.wrap {
@@ -253,14 +253,14 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 /* setup › sessions: a folder tile that picks an area, and the add/edit seat form */
 .tiles .tile .tilepick {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   padding: 0;
   border: 0;
   background: none;
@@ -274,9 +274,9 @@
 .seatform {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
-  padding: 10px;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
 }
@@ -288,7 +288,7 @@
 .setup-repos-head {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--panel);
@@ -299,7 +299,7 @@
 }
 
 .repo-card {
-  padding: 12px;
+  padding: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -309,15 +309,15 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   border: 1px solid var(--line-2);
   background: var(--panel);
 }
 
 .repo-card-title span {
   float: right;
-  font-size: 18px;
-  line-height: 12px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
 }
 
 .repo-fields,
@@ -325,21 +325,21 @@
 .repo-seat-editor {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 10px;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
 }
 
 .repo-fields label,
 .repo-guidance > label,
 .repo-seat-editor label {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   font-size: var(--fs-s);
   color: var(--muted);
 }
 
 .repo-guidance-title {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 
 .repo-guidance fieldset {
@@ -366,9 +366,9 @@
 .repo-pick {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--sp-1);
   min-height: 34px;
-  padding: 4px;
+  padding: var(--sp-1);
   border: 1px dashed var(--line-2);
   border-radius: var(--r-s);
 }
@@ -376,7 +376,7 @@
 .repo-pick input {
   flex: 1 1 64px;
   min-width: 64px;
-  padding: 2px;
+  padding: var(--sp-1);
   border: 0;
   background: transparent;
 }
@@ -389,11 +389,11 @@
 }
 
 .repo-save {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 .repo-seats {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
   overflow-x: auto;
 }
 
@@ -405,18 +405,18 @@
 .repo-seat-editor {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
-  padding-top: 10px;
+  padding-top: var(--sp-2);
 }
 
 .repo-observed {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 
 .repo-stepper {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -429,7 +429,7 @@
 
 .repo-stepper label {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   font-size: var(--fs-s);
   color: var(--muted);
 }
@@ -450,20 +450,20 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .frow label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 .crew button {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   max-width: 100%;
 }
 
@@ -474,12 +474,12 @@
 
 .notif {
   display: grid;
-  gap: 3px;
-  padding: 10px 12px;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   background: var(--surface-2);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
   box-shadow: var(--shadow);
   max-width: 400px;
 }
@@ -499,38 +499,38 @@
 .ptrack {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
   list-style: none;
   margin: 0;
-  padding: 2px 14px;
+  padding: var(--sp-1) var(--sp-3);
 }
 
 .ptrack li {
   background: var(--surface-2);
   border-radius: var(--r-s);
-  padding: 2px 8px;
+  padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-s);
 }
 
 .pcards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-  padding: 8px 14px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
 }
 
 .pcard {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
 }
 
 /* Setup › Loops: the operational chain scrolls as one drawing on narrow screens. */
 .loop-show {
   display: flex;
-  padding: 2px;
+  padding: var(--sp-1);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
 }
@@ -542,16 +542,19 @@
 
 .loop-chain-scroll {
   overflow-x: auto;
-  padding: 12px 14px;
+  padding: var(--sp-3) var(--sp-3);
 }
 
 .loop-chain {
   position: relative;
   display: grid;
   grid-template-columns: repeat(6, 170px);
-  gap: 34px;
+  gap: var(--sp-6);
   min-width: 1200px;
-  padding: 18px 0 210px;
+  /* room under the steps for the routes and the FLIGHT box, drawn 320px tall from the top */
+  min-height: 320px;
+  align-content: start;
+  padding: var(--sp-4) 0 var(--sp-7);
 }
 
 .loop-routes {
@@ -598,12 +601,12 @@
 .loop-route-label {
   position: absolute;
   z-index: 1;
-  padding: 2px 6px;
+  padding: var(--sp-1) var(--sp-1);
   border: 1px solid var(--warn);
   border-radius: 999px;
   background: var(--surface);
   color: var(--warn);
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   white-space: nowrap;
 }
 
@@ -622,9 +625,9 @@
   z-index: 1;
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: var(--sp-1);
   min-height: 96px;
-  padding: 10px;
+  padding: var(--sp-2);
   text-align: left;
   border: 1px solid var(--line-2);
   border-radius: var(--r-s);
@@ -657,7 +660,7 @@
 .loop-flight small {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
 }
 
 .loop-flight {
@@ -667,9 +670,9 @@
   width: 190px;
   display: grid;
   align-content: center;
-  gap: 4px;
-  margin-left: 8px;
-  padding: 9px;
+  gap: var(--sp-1);
+  margin-left: var(--sp-2);
+  padding: var(--sp-2);
   border: 1px solid var(--crit);
   border-radius: var(--r-s);
 }
@@ -682,22 +685,22 @@
 .loop-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .loop-inspector {
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr);
-  gap: 7px 12px;
+  gap: var(--sp-2) var(--sp-3);
   margin: 0;
-  padding: 12px 14px;
+  padding: var(--sp-3) var(--sp-3);
   font-size: var(--fs-s);
 }
 
 .loop-inspector dt {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
 }
 
 .loop-inspector dd {
@@ -707,8 +710,8 @@
 
 .loop-run {
   display: grid;
-  gap: 7px;
-  padding: 12px 14px;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3);
   font-size: var(--fs-s);
 }
 
@@ -735,7 +738,7 @@
 
 @media (max-width: 760px) {
   .setup-content {
-    padding: 10px;
+    padding: var(--sp-2);
   }
 }
 
@@ -751,13 +754,13 @@
 .teams-selection {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-block: 8px;
+  gap: var(--sp-2);
+  margin-block: var(--sp-2);
 }
 
 .teams-selection label {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
   flex: 1 1 160px;
 }
@@ -778,8 +781,8 @@
   display: inline-block;
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  padding: 1px 5px;
-  font-size: var(--fs-xs);
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-s);
   width: fit-content;
   overflow-wrap: anywhere;
 }
@@ -790,13 +793,13 @@
 
 .template-editor fieldset {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
 .template-editor label {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
   min-width: 0;
 }
 
@@ -808,7 +811,7 @@
 
 .template-check {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 @media (max-width: 480px) {
@@ -851,7 +854,7 @@
 }
 
 .repo-ownership {
-  margin-top: 10px;
+  margin-top: var(--sp-2);
 }
 
 .repo-ownership summary {
@@ -863,5 +866,5 @@
 .repo-ownership .map-lens {
   flex: none;
   max-height: 420px;
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }

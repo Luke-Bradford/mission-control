@@ -2,14 +2,14 @@
 #page-audit {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
   overflow: auto;
 }
 
 .audit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .audit-panel:last-child {
@@ -18,7 +18,7 @@
 
 .audit-list {
   display: grid;
-  gap: 7px;
+  gap: var(--sp-2);
 }
 
 .audit-list > a,
@@ -27,7 +27,7 @@
 .audit-proposal,
 .audit-size {
   min-width: 0;
-  padding: 6px 0;
+  padding: var(--sp-1) 0;
   border-bottom: 1px solid var(--line);
 }
 
@@ -39,7 +39,7 @@
 .audit-proposal {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .audit-bar-track {
@@ -59,7 +59,7 @@
 
 .audit-change {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 
 .audit-proposal > :first-child {
@@ -68,7 +68,7 @@
 
 .audit-status {
   text-transform: uppercase;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   letter-spacing: 0.06em;
 }
 

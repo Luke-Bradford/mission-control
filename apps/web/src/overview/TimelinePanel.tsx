@@ -1,6 +1,6 @@
 import { type ConfigView, type Crew, type OverviewTimeline, TIMELINE_WINDOW_MS } from "@mc/core";
 import type { CSSProperties } from "react";
-import { useSecond } from "../clock.ts";
+import { useNow } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
@@ -34,7 +34,7 @@ export function TimelinePanel() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roster = configuredAgents(config);
-  const now = useSecond();
+  const now = useNow();
   const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
   const from = now - TIMELINE_WINDOW_MS;
   const geometry = timelineGeometry({ from, to: now });

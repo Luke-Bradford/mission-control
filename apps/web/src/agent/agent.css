@@ -7,7 +7,7 @@
   border-radius: 50%;
   display: inline-grid;
   place-items: center;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 600;
   background: var(--surface-2);
   color: var(--muted);
@@ -18,7 +18,7 @@
 .tdot.sm {
   width: 20px;
   height: 20px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .vsteps {
@@ -28,7 +28,7 @@
 
 .vstep {
   position: relative;
-  padding: 0 0 12px 34px;
+  padding: 0 0 var(--sp-3) var(--sp-6);
 }
 
 .vstep::before {
@@ -79,7 +79,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   width: 100%;
   min-height: 24px;
   cursor: pointer;
@@ -94,39 +94,39 @@
 .vname {
   font-weight: 500;
   display: inline-flex;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
 }
 
 .vmeta {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
 .vfail {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--crit);
 }
 
 .vrule {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--fg-2);
 }
 
 .atts {
-  margin-top: 6px;
+  margin-top: var(--sp-1);
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
   border-left: 2px solid var(--line);
-  padding-left: 8px;
+  padding-left: var(--sp-2);
 }
 
 .att {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) auto 34px;
-  gap: 6px;
-  font-size: var(--fs-xs);
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
   align-items: baseline;
 }
 
@@ -148,9 +148,9 @@
 .tlrow {
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  padding: 4px 0;
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
 }
 
@@ -192,8 +192,8 @@
 .check {
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr);
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
   align-items: baseline;
 }
@@ -224,8 +224,8 @@
 .qi {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 4px 0;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
   align-items: center;
   font-size: var(--fs-s);
 }
@@ -250,9 +250,9 @@
 .vhold {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  padding: 6px 8px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--r);
   color: var(--warn);
   background: var(--warn-soft);
@@ -266,7 +266,7 @@
 
 .idrow .big .rt {
   font-family: var(--sans, inherit);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 400;
   color: var(--fg-2);
 }
@@ -275,29 +275,29 @@
 #page-agent {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .picker {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
 }
 
 .picker button {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   background: var(--surface);
   border-color: var(--line);
 }
 
 .banner {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   box-shadow: inset 2px 0 0 var(--warn-mark);
   background: linear-gradient(90deg, var(--warn-soft), transparent 70%), var(--surface);
@@ -312,7 +312,7 @@
 
 .idrow {
   display: flex;
-  gap: 8px 14px;
+  gap: var(--sp-2) var(--sp-3);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -322,13 +322,13 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--fs-title);
   font-weight: 600;
   letter-spacing: 0.02em;
-  line-height: 1;
+  line-height: var(--lh-title);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .idrow .big i {
@@ -340,7 +340,7 @@
 
 .idrow .chips {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
   min-width: 0;
   max-width: 100%;
@@ -349,11 +349,11 @@
 /* a long chip (a branch, an area) is cut at the row's width rather than widening the page */
 .idrow .chips span {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   color: var(--fg-2);
   background: var(--surface-2);
   border-radius: 2px;
-  padding: 1px 7px;
+  padding: 0 var(--sp-2);
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -365,31 +365,31 @@
   max-width: 100%;
   margin-left: auto;
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
 }
 
 .tiles2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .tile2 {
   background: var(--surface-2);
   border-radius: var(--r);
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
   align-content: start;
   min-width: 0;
 }
 
 .tile2 .v {
   font-family: var(--display);
-  font-size: 21px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  line-height: 1.1;
+  line-height: var(--lh-title);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -400,11 +400,11 @@
   font-size: var(--fs-s);
   font-weight: 400;
   color: var(--fg-2);
-  margin-left: 4px;
+  margin-left: var(--sp-1);
 }
 
 .tile2 .d {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--fg-2);
   min-width: 0;
 }
@@ -431,11 +431,11 @@
 .ctxbar {
   display: flex;
   height: 8px;
-  gap: 2px;
+  gap: var(--sp-1);
   border-radius: 2px;
   overflow: hidden;
   background: var(--surface);
-  margin: 2px 0;
+  margin: var(--sp-1) 0;
 }
 
 .ctxbar i {
@@ -473,14 +473,14 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .livecall {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: baseline;
-  padding: 7px 14px;
+  padding: var(--sp-2) var(--sp-3);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
@@ -504,8 +504,8 @@
 .ev {
   display: grid;
   grid-template-columns: 44px 58px minmax(0, 1fr);
-  gap: 10px;
-  padding: 5px 14px;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
   border-top: 1px solid var(--line);
   font-size: var(--fs-s);
   align-items: baseline;
@@ -513,12 +513,12 @@
 
 .ev .at {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .ev .who {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 500;
 }
 
@@ -534,7 +534,7 @@
 
 .ev.tool .txt {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .ev.tool .tres {
@@ -572,11 +572,11 @@
 }
 
 .ev details pre {
-  margin: 6px 0 0;
+  margin: var(--sp-1) 0 0;
   white-space: pre-wrap;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .side > #loopP {
@@ -592,8 +592,8 @@
 .subrow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  padding: 7px 0;
+  gap: var(--sp-1) var(--sp-2);
+  padding: var(--sp-2) 0;
   border-top: 1px solid var(--line);
   font-size: var(--fs-s);
 }
@@ -605,8 +605,8 @@
 .f {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
 }
 
@@ -628,24 +628,24 @@ button.f[aria-pressed="true"] {
 }
 
 .fdiff {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 .fdiff-h {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 /* Agent page: the Runs list where the mockup's Loop panel sits */
 .runrow {
   display: grid;
   grid-template-columns: 32px 84px 44px minmax(52px, 1fr) 44px 56px;
-  gap: 2px 6px;
+  gap: var(--sp-1) var(--sp-1);
   white-space: nowrap;
   align-items: center;
-  padding: 5px 0;
+  padding: var(--sp-1) 0;
   border-top: 1px solid var(--line);
 }
 
@@ -662,7 +662,7 @@ button.f[aria-pressed="true"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 6px;
+  gap: var(--sp-1) var(--sp-1);
 }
 
 .runrow .rticket > * {
@@ -671,7 +671,7 @@ button.f[aria-pressed="true"] {
 
 .run-checklist {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -680,9 +680,9 @@ button.f[aria-pressed="true"] {
 .run-checklist > li {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: start;
-  padding-bottom: 5px;
+  padding-bottom: var(--sp-1);
   border-bottom: 1px solid var(--line);
 }
 
@@ -698,7 +698,7 @@ button.f[aria-pressed="true"] {
   display: block;
   max-height: 12em;
   overflow: auto;
-  margin-top: 4px;
+  margin-top: var(--sp-1);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -719,19 +719,19 @@ button.f[aria-pressed="true"] {
 }
 
 .trace-head {
-  margin: 10px 0 14px;
+  margin: var(--sp-2) 0 var(--sp-3);
 }
 
 .trace-head .eyebrow {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   letter-spacing: 0.12em;
   color: var(--muted);
 }
 
 .trace-head h1 {
-  margin: 2px 0;
-  font-size: 18px;
+  margin: var(--sp-1) 0;
+  font-size: var(--fs-title);
 }
 
 /* rows size to their content; each column's sections stack from the top */
@@ -740,22 +740,22 @@ button.f[aria-pressed="true"] {
   grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr);
   grid-auto-rows: auto;
   align-items: start;
-  gap: 14px;
+  gap: var(--sp-3);
 }
 
 .trace-section {
-  padding: 12px 0;
+  padding: var(--sp-3) 0;
   border-top: 1px solid var(--line);
 }
 
 .trace-section h2 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
   font-size: var(--fs);
 }
 
 .trace-section p,
 .trace-event {
-  margin: 4px 0;
+  margin: var(--sp-1) 0;
 }
 
 @media (max-width: 700px) {
@@ -775,13 +775,13 @@ button.f[aria-pressed="true"] {
 }
 
 /* The side panel is 320px at its narrowest (1200-1439 with FLIGHT's dock). Under the six
-   columns' minimum (32 + 84 + 44 + 52 + 44 + 56 + 5 × 6 = 342px) a run row drops Started and
+   columns' minimum (32 + 84 + 44 + 52 + 44 + 56 + 5 × 4 = 332px) a run row drops Started and
    Tokens, as it does at 390. */
 #loopBody {
   container: runs / inline-size;
 }
 
-@container runs (width < 342px) {
+@container runs (width < 332px) {
   .runrow {
     grid-template-columns: 32px 84px minmax(0, 1fr) 56px;
   }
@@ -875,7 +875,7 @@ button.f[aria-pressed="true"] {
 .queue-focus form {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
   width: 100%;
 }

@@ -236,7 +236,7 @@ describe("theme tokens", () => {
 describe("shell styles", () => {
   it("keeps type scale tokens at or above the 11px floor", () => {
     const hud = read("../src/hud.css");
-    for (const token of ["--fs", "--fs-s", "--fs-xs"]) {
+    for (const token of ["--fs", "--fs-s", "--fs-micro"]) {
       const value = Number(hud.match(new RegExp(`${token}: (\\d+(?:\\.\\d+)?)px`))?.[1]);
       expect(value, token).toBeGreaterThanOrEqual(11);
     }
@@ -255,7 +255,7 @@ describe("shell styles", () => {
   // stylesheet (#839's split once moved them into ConfigYaml.css, which only Setup loads).
   it("styles the header usage meter from hud.css", () => {
     const css = read("../src/hud.css");
-    expect(ruleValue(css, ".usage", "font")).toBe("var(--fs-xs) var(--mono)");
+    expect(ruleValue(css, ".usage", "font")).toBe("var(--fs-micro) / var(--lh-micro) var(--mono)");
     expect(ruleValue(css, ".usage", "color")).toBe("var(--fg-2)");
     expect(ruleValue(css, ".usage b", "font-weight")).toBe("500");
   });
