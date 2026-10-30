@@ -652,31 +652,13 @@ describe("cards", () => {
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
-  it("starts a Board preview without opening the card", async () => {
-    const fetch = stub({
+  it("does not offer a Board preview when the payload has none", async () => {
+    stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],
       prs: [{ ...pr(), preview: null } as PullRequestView & { preview: null }],
-      extra: {
-        "POST /api/previews": {
-          pr: 40,
-          branch: "feature/preview",
-          port: 5175,
-          url: "http://127.0.0.1:5175",
-          startedAt: NOW,
-        },
-      },
     });
     await open();
-    const before = window.location.pathname;
-
-    fireEvent.click(await screen.findByRole("button", { name: "Start preview for PR #40" }));
-
-    await screen.findByRole("link", { name: "Open preview for PR #40" });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/previews",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ pr: 40 }) }),
-    );
-    expect(window.location.pathname).toBe(before);
+    expect(screen.queryByRole("button", { name: "Start preview for PR #40" })).toBeNull();
   });
 
   it("a PR with review state shows it; a draft shows Draft; failing CI is red", async () => {

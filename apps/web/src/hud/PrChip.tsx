@@ -1,7 +1,5 @@
 import { type PullRequestView, prPill, type RunPr } from "@mc/core";
-import { useEffect, useState } from "react";
-import { apiPost } from "../api.ts";
-import { Pill, PillButton } from "./Pill.tsx";
+import { Pill } from "./Pill.tsx";
 import { RepoRef } from "./RepoRef.tsx";
 import "./PrChip.css";
 
@@ -45,28 +43,9 @@ export function PrChip({
   /** The Board owns its full PR status line, so it supplies this as false. */
   showState?: boolean;
 }) {
-  const [preview, setPreview] = useState(initialPreview ?? null);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const pill = pr.state === "merged" || pr.state === "closed" ? prPill({ state: pr.state }) : null;
   const hold = "hold" in pr ? pr.hold : undefined;
-  const url = previewUrl(preview);
-  const canStart = initialPreview === null && pr.state === "open";
-  useEffect(() => {
-    setPreview(initialPreview ?? null);
-  }, [initialPreview]);
-  const start = async () => {
-    if (starting) return;
-    setStarting(true);
-    setError(null);
-    try {
-      setPreview(await apiPost<PrPreview>("/api/previews", { pr: pr.number }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start preview.");
-    } finally {
-      setStarting(false);
-    }
-  };
+  const url = previewUrl(initialPreview);
   return (
     <span className="rpr">
       <RepoRef
@@ -89,25 +68,7 @@ export function PrChip({
           >
             Preview
           </a>
-        ) : canStart ? (
-          <PillButton
-            tone="plain"
-            className="preview-start"
-            aria-label={`Start preview for PR #${pr.number}`}
-            disabled={starting}
-            onClick={(event) => {
-              event.stopPropagation();
-              void start();
-            }}
-          >
-            {starting ? "Starting…" : "Start preview"}
-          </PillButton>
         ) : null)}
-      {error && (
-        <span className="s crit-t preview-error" role="alert">
-          {error}
-        </span>
-      )}
       {hold && (
         <Pill tone="warn" title={`merge held by ${hold.by}: ${hold.reason}`}>
           held

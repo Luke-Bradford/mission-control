@@ -37,39 +37,4 @@ describeRendered("Preview chips on Board and Agent", () => {
     },
     BROWSER_TEST_TIMEOUT_MS * 2,
   );
-
-  it(
-    "starts a real Board card preview without leaving the screen",
-    async () => {
-      const page = await renderAt({
-        page: "test/previewChipBrowser.html",
-        width: 1280,
-        height: 700,
-        api: {
-          "/api/config": { repos: [] },
-          "/api/previews": {
-            pr: 1174,
-            branch: "feature/1174-web-the-pr-chip",
-            port: 5175,
-            url: "http://127.0.0.1:5175",
-            startedAt: 1,
-          },
-        },
-      });
-      await page.click("[data-surface=board] .preview-start");
-      await page.box("[data-surface=board] .preview-link");
-      const state = await page.evaluate(
-        () => ({
-          path: window.location.pathname,
-          href: document.querySelector<HTMLAnchorElement>("[data-surface=board] .preview-link")
-            ?.href,
-        }),
-        null,
-      );
-      expect(state.path).toBe("/test/previewChipBrowser.html");
-      expect(state.href).toBe("http://127.0.0.1:5175/");
-      await page.close();
-    },
-    BROWSER_TEST_TIMEOUT_MS,
-  );
 });

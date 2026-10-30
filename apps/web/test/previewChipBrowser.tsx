@@ -1,9 +1,10 @@
 import "@fontsource/barlow-semi-condensed/latin-500.css";
 import "@fontsource/ibm-plex-sans/latin-400.css";
 import "../src/hud.css";
+import type { RunView } from "@mc/core";
 import { createRoot } from "react-dom/client";
-import { Card } from "../src/board/Card.tsx";
 import { RunRow } from "../src/agent/RunsPanel.tsx";
+import { Card } from "../src/board/Card.tsx";
 import { boardItem, crewRow, NOW, run } from "./fixtures.ts";
 
 const root = document.getElementById("root");
@@ -25,7 +26,7 @@ const pr = {
   number: 1174,
   title: "Web preview chip",
   url: "https://github.com/Luke-Bradford/mission-control/pull/1174",
-  state: "open" as const,
+  branch: "feature/1174-web-the-pr-chip",
   ticket: "mission-control#1174",
   state: "open" as const,
   isDraft: false,
@@ -46,6 +47,7 @@ const runPr = {
   state: pr.state,
   ticket: pr.ticket,
 };
+const runView = { ...run(), prs: [runPr], ticket: pr.ticket, ticketTitle: pr.title } as RunView;
 
 createRoot(root).render(
   <div className="app">
@@ -81,7 +83,7 @@ createRoot(root).render(
           <h2>Agent page</h2>
           <RunRow
             row={crewRow({ repoId: "mission-control" })}
-            run={run({ prs: [runPr], ticket: pr.ticket, ticketTitle: pr.title })}
+            run={runView}
             tz="UTC"
             prs={[runPr]}
             previewPrs={[pr]}
