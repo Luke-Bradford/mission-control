@@ -30,6 +30,7 @@ import {
 } from "../src/collectors/usage-claude.ts";
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
+import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import * as hud from "../src/hud.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
@@ -167,6 +168,60 @@ const row = (collector: string) => store.status().find((s) => s.collector === co
 const flushEmits = () => vi.advanceTimersByTime(EMIT_COALESCE_MS);
 
 describe("scheduler", () => {
+  it("runs transcript maintenance with default retention", async () => {
+    const transcripts = vi.fn(async () => ({ gzipped: 1, deleted: 0, skippedLive: 0, failed: [] }));
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts }),
+      log,
+    });
+    await s.tick("transcripts");
+    expect(transcripts).toHaveBeenCalledWith({
+      store,
+      now: NOW,
+      retention: TRANSCRIPT_RETENTION_DEFAULTS,
+    });
+    expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
+  });
+
+  it("starts transcript maintenance after one minute, then every six hours", async () => {
+    vi.useFakeTimers();
+    config.crew = {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 1,
+      transcripts: { gzipAfterHours: 2, deleteAfterDays: 3 },
+      sessions: [],
+    };
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts }),
+      log,
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transcripts).toHaveBeenCalledTimes(1);
+    expect(transcripts).toHaveBeenLastCalledWith({
+      store,
+      now: NOW,
+      retention: { gzipAfterHours: 2, deleteAfterDays: 3 },
+    });
+    expect(log).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+    expect(transcripts).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
   it("skips a job tick while the previous run of that job is still in flight", async () => {
     let release: () => void = () => undefined;
     const ta = vi.fn(

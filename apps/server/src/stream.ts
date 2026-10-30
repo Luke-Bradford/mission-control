@@ -1,4 +1,3 @@
-import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { CrewVendor, StreamEvent } from "@mc/core";
 import { cleanText } from "./clean.ts";
 import {
@@ -9,6 +8,7 @@ import {
 } from "./codex-transcript.ts";
 import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
 import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
+import { openTranscript } from "./transcript-file.ts";
 import { originalBytes } from "./util.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
@@ -239,12 +239,12 @@ export function readStream(
   limit: number,
   vendor?: CrewVendor,
 ): { events: StreamEvent[]; truncated: boolean } {
-  const fd = openSync(path, "r");
+  const fd = openTranscript(path);
   try {
-    const size = fstatSync(fd).size;
+    const size = fd.size;
     if (vendor === undefined) {
       const first = Buffer.alloc(Math.min(size, STREAM_CHUNK_BYTES));
-      readSync(fd, first, 0, first.length, 0);
+      fd.read(first, 0, first.length, 0);
       for (const line of first.toString("utf8").split("\n")) {
         try {
           const ev: unknown = JSON.parse(line);
@@ -282,7 +282,7 @@ export function readStream(
       const chunk = Buffer.allocUnsafe(len);
       let got = 0;
       while (got < len) {
-        const n = readSync(fd, chunk, got, len - got, pos + got);
+        const n = fd.read(chunk, got, len - got, pos + got);
         if (n === 0) break;
         got += n;
       }
@@ -302,7 +302,7 @@ export function readStream(
     const items = lines.reverse().flat();
     return { events: toEvents(items).slice(-limit), truncated: pos > 0 && count < limit };
   } finally {
-    closeSync(fd);
+    fd.close();
   }
 }
 

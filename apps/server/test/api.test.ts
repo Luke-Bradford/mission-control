@@ -2051,6 +2051,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     const latest: MachineSample = {
       at: NOW,
@@ -2071,6 +2072,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     await a.close();
   });
@@ -2098,6 +2100,32 @@ describe("GET /api/machine", () => {
     };
     const r = await get("/api/machine");
     expect(r.json()).toMatchObject({ maxSeats: 8, seats: 4, perSessionMax: 3 });
+  });
+
+  it("carries the crew folder transcript footprint", async () => {
+    const crew = join(dir, "crew");
+    mkdirSync(crew);
+    const path = (id: string, suffix = ".jsonl") => join(crew, `${id}${suffix}`);
+    for (const [id, agentId, bytes] of [
+      ["r1", "a-1", 100],
+      ["r2", "a-1", 40],
+      ["r3", "b-1", 10],
+    ] as const) {
+      const suffix = id === "r2" ? ".jsonl.gz" : ".jsonl";
+      store.upsertRun(run({ id, agentId, transcriptPath: path(id), endedAt: NOW, status: "ok" }));
+      writeFileSync(path(id, suffix), Buffer.alloc(bytes));
+    }
+    writeFileSync(join(crew, "r3.prompt.md"), Buffer.alloc(7));
+    const oldest = NOW - 5 * DAY;
+    utimesSync(path("r3"), new Date(oldest), new Date(oldest));
+    expect((await get("/api/machine")).json().transcripts).toEqual({
+      totalBytes: 157,
+      seats: [
+        { seatId: "a-1", bytes: 140, files: 2 },
+        { seatId: "b-1", bytes: 10, files: 1 },
+      ],
+      oldestAt: oldest,
+    });
   });
 });
 

@@ -270,6 +270,8 @@ import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store 
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -584,6 +586,10 @@ const MAP_CACHE_MS = 15_000;
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  let transcriptFootprintCache: {
+    at: number;
+    value: ReturnType<typeof transcriptFootprint>;
+  } | null = null;
   const mapConflicts = new MapConflicts();
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
@@ -1122,7 +1128,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           const path = run.transcriptPath;
           if (path === "") return missing();
-          const st = await stat(path).catch(() => null);
+          const st = await stat(transcriptFilePath(path)).catch(() => null);
           if (!st?.isFile()) return missing();
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
@@ -2475,6 +2481,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
       });
       api.get("/machine", async (): Promise<MachineView> => {
+        const cached = transcriptFootprintCache;
+        const footprint =
+          cached !== null && now() - cached.at < 60_000
+            ? cached.value
+            : (() => {
+                const value = transcriptFootprint(store);
+                transcriptFootprintCache = { at: now(), value };
+                return value;
+              })();
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
@@ -2492,6 +2507,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),
+          transcripts: footprint,
         };
       });
 
