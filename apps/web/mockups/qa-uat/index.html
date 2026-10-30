@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control · QA UAT queue mockup</title>
+<style>
+/* Tokens mirror apps/web/src/hud.css. Dark is the default; light follows the system unless data-theme pins one. */
+:root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--accent-ink:#021417;--accent-soft:rgba(86,216,230,.14);--ok:#45c486;--ok-soft:rgba(69,196,134,.16);--warn:#f2b53a;--warn-soft:rgba(242,181,58,.15);--crit:#f1706d;--crit-soft:rgba(240,107,104,.15);--think:#b8a8f7;--sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono","Cascadia Mono",Consolas,ui-monospace,monospace;--display:"Barlow Semi Condensed","Arial Narrow",sans-serif;--sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;--r:3px;--r-s:2px}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c6cdd8;--fg:#121720;--fg-2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--accent-ink:#fff;--accent-soft:rgba(10,107,125,.1);--ok:#157246;--ok-soft:rgba(23,128,78,.12);--warn:#8d5b00;--warn-soft:rgba(224,162,28,.18);--crit:#bb2e2b;--crit-soft:rgba(196,48,45,.1);--think:#5b47c4}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c6cdd8;--fg:#121720;--fg-2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--accent-ink:#fff;--accent-soft:rgba(10,107,125,.1);--ok:#157246;--ok-soft:rgba(23,128,78,.12);--warn:#8d5b00;--warn-soft:rgba(224,162,28,.18);--crit:#bb2e2b;--crit-soft:rgba(196,48,45,.1);--think:#5b47c4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/20px var(--sans)}
+h1,h2,h3,p,ul,ol{margin:0;padding:0}ul,ol{list-style:none}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.top{min-height:48px;padding:0 var(--sp-5);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:var(--sp-5);background:var(--surface)}
+.brand{white-space:nowrap;font:700 19px/24px var(--display);letter-spacing:.12em}
+.nav{display:flex;gap:var(--sp-1)}
+.nav a{display:inline-flex;align-items:center;min-height:32px;padding:0 var(--sp-2);color:var(--fg-2);text-decoration:none;border-bottom:2px solid transparent}
+.nav a[aria-current=page]{color:var(--fg);border-bottom-color:var(--accent)}
+.nav .count{margin-left:var(--sp-1);font:11px/16px var(--mono);color:var(--warn)}
+.proto{padding:var(--sp-1) var(--sp-5);border-bottom:1px solid var(--line);background:var(--surface-2);display:flex;gap:var(--sp-2);align-items:center;font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--r)}
+.seg button{border:0;border-right:1px solid var(--line-2);border-radius:0;min-height:24px;min-width:24px;padding:0 var(--sp-2);background:transparent;color:var(--fg-2);font:12px/16px var(--sans);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent)}
+main{padding:var(--sp-4) var(--sp-5) var(--sp-5);display:grid;gap:var(--sp-4)}
+@media(min-width:1600px){main{padding:var(--sp-5)}}
+.title{display:flex;align-items:baseline;gap:var(--sp-4);flex-wrap:wrap}
+.title h1{font:600 20px/28px var(--sans)}
+.title p{color:var(--fg-2);font-size:12px;line-height:16px}
+.layout{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:var(--sp-4);align-items:start}
+@media(min-width:1600px){.layout{gap:var(--sp-5);grid-template-columns:minmax(340px,420px) minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.ph{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line)}
+.ph h2{font:600 14px/20px var(--sans)}
+.ph .sub{margin-left:auto;font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.pb{padding:var(--sp-4)}
+.stack{display:grid;gap:var(--sp-4)}
+.mono{font-family:var(--mono)}
+.micro{font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.sec{display:grid;gap:var(--sp-2)}
+.sec>h3{font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:500}
+/* queue */
+.queue-group{border-bottom:1px solid var(--line)}
+.queue-group:last-child{border-bottom:0}
+.qh{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-4);background:var(--surface-2)}
+.qh h3{font:600 13px/20px var(--sans)}
+.qh .def{margin-left:auto;font-size:12px;line-height:16px;color:var(--muted)}
+.qlist{max-height:calc(var(--sp-7)*6);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+.qrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 var(--sp-2);min-height:48px;padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line);align-items:center;text-decoration:none;color:inherit;border-left:3px solid transparent}
+.qrow:last-child{border-bottom:0}
+.qrow[aria-current=true]{background:var(--accent-soft);border-left-color:var(--accent)}
+.qrow .t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:600}
+.qrow .m{grid-column:1/-1;font:12px/16px var(--mono);color:var(--muted)}
+.age{font:12px/16px var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.age.old{color:var(--warn)}
+/* states and pills */
+.pill{display:inline-flex;align-items:center;gap:var(--sp-1);min-height:24px;padding:0 var(--sp-2);border:1px solid var(--line-2);border-radius:99px;font:11px/16px var(--mono);white-space:nowrap}
+.pill:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ok{color:var(--ok);background:var(--ok-soft);border-color:transparent}
+.pill.warn{color:var(--warn);background:var(--warn-soft);border-color:transparent}
+.pill.crit{color:var(--crit);background:var(--crit-soft);border-color:transparent}
+.pill.info{color:var(--think)}
+/* buttons */
+button,.btn{font:13px/20px var(--sans);min-height:32px;min-width:32px;padding:0 var(--sp-3);border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface-2);color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;gap:var(--sp-2);text-decoration:none}
+button.primary{background:var(--ok);border-color:var(--ok);color:var(--accent-ink);font-weight:600}
+button.send{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+button.small{min-height:24px;padding:0 var(--sp-2);font-size:12px;line-height:16px}
+button[disabled]{opacity:.55;cursor:not-allowed}
+textarea{width:100%;min-height:64px;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line-2);border-radius:var(--r);background:var(--bg);color:var(--fg);font:13px/20px var(--sans);resize:vertical}
+label{font-size:12px;line-height:16px;color:var(--fg-2)}
+/* detail head */
+.dhead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--sp-4);align-items:start}
+.dhead h2{font:600 20px/28px var(--sans);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dmeta{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);font:12px/16px var(--mono);color:var(--muted);margin-top:var(--sp-1)}
+.actions{display:flex;gap:var(--sp-2);flex-wrap:wrap;justify-content:flex-end}
+.summary{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--fg)}
+.sendback{display:none;gap:var(--sp-2);padding-top:var(--sp-3);border-top:1px solid var(--line)}
+.sendback.open{display:grid}
+/* before / after */
+.pairs{display:grid;gap:var(--sp-4)}
+.pair h4{font:600 13px/20px var(--sans);margin-bottom:var(--sp-2);display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
+.pair h4 .path{font:12px/16px var(--mono);color:var(--muted);font-weight:400}
+.shots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-3)}
+.shot{margin:0;border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;background:var(--bg)}
+.shot figcaption{display:flex;justify-content:space-between;gap:var(--sp-2);padding:var(--sp-1) var(--sp-3);background:var(--surface-2);border-bottom:1px solid var(--line);font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.fake{aspect-ratio:16/9;padding:var(--sp-2);display:grid;grid-template-rows:12px 1fr;gap:var(--sp-2)}
+.fake .bar{background:var(--line);border-radius:var(--r-s);width:60%}
+.fake .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-2)}
+.fake .cols i{display:block;border:1px solid var(--line-2);border-radius:var(--r-s);background:var(--surface)}
+.fake .cols i.new{border-color:var(--ok);background:var(--ok-soft)}
+.fake .cols i.gone{border-style:dashed;border-color:var(--crit);background:var(--crit-soft)}
+.noshot{aspect-ratio:16/9;display:grid;place-content:center;gap:var(--sp-1);padding:var(--sp-3);text-align:center;color:var(--fg-2);border:1px dashed var(--line-2);margin:var(--sp-2);border-radius:var(--r)}
+.noshot b{color:var(--warn);font-weight:600}
+/* tables */
+table{width:100%;border-collapse:collapse}
+th,td{height:40px;padding:0 var(--sp-3);border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;font-size:13px}
+th{font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:500;height:32px}
+th.n,td.n{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+th button{min-height:24px;min-width:24px;border:0;background:transparent;padding:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit}
+td.name{font-family:var(--mono);font-size:12px;line-height:16px;overflow-wrap:anywhere}
+tr:last-child td{border-bottom:0}
+.fail{color:var(--crit)}.passc{color:var(--ok)}.newc{color:var(--accent)}
+.scroll{overflow:auto;max-height:calc(var(--sp-7)*6);scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+/* lists */
+.rounds li,.comms li{display:grid;gap:var(--sp-1);padding:var(--sp-2) 0;border-bottom:1px solid var(--line)}
+.rounds li:last-child,.comms li:last-child{border-bottom:0}
+.rounds .rh,.comms .rh{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;font:12px/16px var(--mono);color:var(--muted)}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-4)}
+@media(max-width:1500px){.grid2.wide-stack{grid-template-columns:minmax(0,1fr)}}
+.grid2.tests{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+/* impact */
+.impact{display:grid;gap:var(--sp-2)}
+.impact .row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--sp-3);font:12px/16px var(--mono);padding:var(--sp-1) 0;border-bottom:1px solid var(--line)}
+.impact .row span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.impact .row .n{text-align:right;font-variant-numeric:tabular-nums}
+.minimap{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;padding:var(--sp-3);border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+.minimap .node{padding:var(--sp-1) var(--sp-2);border:1px solid var(--line-2);border-radius:var(--r-s);font:11px/16px var(--mono);color:var(--fg-2)}
+.minimap .node.hit{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+.minimap .node.dep{border-color:var(--accent);color:var(--accent)}
+.minimap .arrow{color:var(--muted)}
+/* try it */
+pre{margin:0;padding:var(--sp-3);border:1px solid var(--line);border-radius:var(--r);background:var(--bg);font:12px/16px var(--mono);overflow:auto;white-space:pre}
+.tryrow{display:flex;gap:var(--sp-2);align-items:flex-start;flex-wrap:wrap}
+.tryrow pre{flex:1 1 280px}
+/* ask */
+.thread{display:grid;gap:var(--sp-2)}
+.msg{padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2)}
+.msg.qa{border-left:3px solid var(--think)}
+.msg.you{border-left:3px solid var(--accent)}
+.msg .who{font:11px/16px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.askrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--sp-2);align-items:end}
+/* states */
+.state{display:none;padding:var(--sp-7) var(--sp-5);text-align:center;gap:var(--sp-2);justify-items:center}
+.state h2{font:600 14px/20px var(--sans)}
+.state p{color:var(--fg-2);max-width:56ch}
+.skel{display:grid;gap:var(--sp-3);padding:var(--sp-4)}
+.skel i{display:block;height:16px;border-radius:var(--r-s);background:linear-gradient(90deg,var(--line),var(--line-2),var(--line));background-size:200% 100%;animation:sh 1.4s linear infinite}
+@keyframes sh{to{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.skel i{animation:none}}
+body[data-state=empty] .only-queue,body[data-state=loading] .only-queue,body[data-state=error] .only-queue{display:none!important}
+body[data-state=empty] .st-empty,body[data-state=loading] .st-loading,body[data-state=error] .st-error{display:grid}
+.banner{display:none;align-items:center;gap:var(--sp-3);flex-wrap:wrap;padding:var(--sp-2) var(--sp-4);border:1px solid var(--warn);background:var(--warn-soft);border-radius:var(--r)}
+.banner.bad{border-color:var(--crit);background:var(--crit-soft)}
+body[data-state=stale] .banner.st-stale,body[data-state=disconnected] .banner.st-disc{display:flex}
+body[data-state=disconnected] .layout{opacity:.7}
+.st-loading{display:none}
+.skelwrap{display:none}
+body[data-state=loading] .skelwrap{display:block}
+body[data-state=nocapture] .shots-ok{display:none}
+body:not([data-state=nocapture]) .shots-missing{display:none}
+</style>
+</head>
+<body data-state="queue">
+<header class="top">
+  <span class="brand">MISSION CONTROL</span>
+  <nav class="nav" aria-label="Pages">
+    <a href="#">Overview</a><a href="#">FLIGHT</a><a href="#">Board</a><a href="#">Agents</a><a href="#">Map</a><a href="#">Comms</a>
+    <a href="#" aria-current="page">QA<span class="count" aria-label="3 waiting for you">3</span></a>
+    <a href="#">Telemetry</a><a href="#">Audit</a>
+  </nav>
+</header>
+  <div class="proto" role="group" aria-label="Mockup controls (not part of the page)">
+    <span>Mockup state</span>
+    <span class="seg" id="states">
+      <button aria-pressed="true" data-state="queue">Queue</button>
+      <button aria-pressed="false" data-state="nocapture">Evidence not captured</button>
+      <button aria-pressed="false" data-state="loading">Loading</button>
+      <button aria-pressed="false" data-state="empty">Empty</button>
+      <button aria-pressed="false" data-state="error">Error</button>
+      <button aria-pressed="false" data-state="stale">Stale</button>
+      <button aria-pressed="false" data-state="disconnected">Disconnected</button>
+    </span>
+    <span>Theme</span>
+    <span class="seg" id="themes">
+      <button aria-pressed="false" data-theme="light">Light</button>
+      <button aria-pressed="false" data-theme="dark">Dark</button>
+    </span>
+  </div>
+
+
+<main>
+  <div class="title">
+    <h1>QA · Waiting for your acceptance</h1>
+    <p>One question: which pull request can I accept, and what do I need to decide? Ages count from the moment QA passed the PR into UAT.</p>
+  </div>
+
+  <div class="banner st-stale" role="status"><span class="pill warn">stale</span><span>Showing the queue as of 14:02, 9 minutes ago. The last refresh failed.</span><button type="button" class="small">Refresh now</button></div>
+  <div class="banner bad st-disc" role="alert"><span class="pill crit">disconnected</span><span>Lost the connection to the hub. Showing the last queue received at 14:08; Accept, Send back and Ask QA are off until it reconnects.</span><button type="button" class="small">Retry now</button></div>
+  <div class="layout">
+    <!-- QUEUE: top left -->
+    <section class="panel" aria-labelledby="qtitle">
+      <div class="ph"><h2 id="qtitle">Queue</h2><span class="sub" id="qcount">3 in UAT · 4 in review</span></div>
+
+      <div class="state st-empty" role="status">
+        <h2>Nothing is waiting for you</h2>
+        <p>No pull request is in UAT. QA has 4 PRs in review; the next one to pass appears here, oldest first.</p>
+        <a href="#review" class="btn">See PRs in review</a>
+      </div>
+      <div class="state st-error" role="alert"><span class="pill crit">error</span><h2>The queue did not load</h2><p>The hub answered 500 when asked for pull requests in UAT. Nothing here is out of date; there is simply nothing to show yet.</p><button type="button">Try again</button></div>
+      <div class="skelwrap" role="status" aria-label="Loading the queue"><div class="skel"><i></i><i></i><i></i><i></i><i></i></div></div>
+
+      <div class="queue-group only-queue" id="uat">
+        <div class="qh"><h3>Waiting for you</h3><span class="pill warn">3 in UAT</span><span class="def">oldest first</span></div>
+        <ul class="qlist" aria-label="Pull requests in UAT, oldest first">
+          <li><a class="qrow" data-age-hours="51" href="#pr-1011" aria-current="true"><span class="t">Overview crew table: one line per cell, tokens only</span><span class="age old" title="In UAT since 28 Oct 16:10">2d 3h</span><span class="m">mission-control #1011 · GUIDO-1 · 4 pages</span></a></li>
+          <li><a class="qrow" data-age-hours="33" href="#pr-1046"><span class="t">Board: drag a ticket between lanes with the keyboard</span><span class="age old" title="In UAT since 29 Oct 09:40">1d 9h</span><span class="m">mission-control #1046 · INCO-1 · 1 page</span></a></li>
+          <li><a class="qrow" data-age-hours="3" href="#pr-1058"><span class="t">Server: the queue keeps its place on restart</span><span class="age" title="In UAT since 30 Oct 07:55">3h</span><span class="m">mission-control #1058 · SERVER-2 · no visual change</span></a></li>
+        </ul>
+      </div>
+
+      <div class="queue-group only-queue" id="review">
+        <div class="qh"><h3>Also in review</h3><span class="pill info">4 in review</span><span class="def">not yours yet</span></div>
+        <ul class="qlist tall" aria-label="Pull requests in review">
+          <li><a class="qrow" href="#"><span class="t">Telemetry: cost per ticket needs a window label</span><span class="age">QA 40m</span><span class="m">#1062 · INCO-1 · CI running</span></a></li>
+          <li><a class="qrow" href="#"><span class="t">Core: lease expiry writes an audit row</span><span class="age">RETRO 2h</span><span class="m">#1060 · CORE-1 · 1 finding open</span></a></li>
+          <li><a class="qrow" href="#"><span class="t">Comms: unread count on the tab</span><span class="age">RETRO 5h</span><span class="m">#1055 · INCO-1 · reviewing</span></a></li>
+          <li><a class="qrow" href="#"><span class="t">Audit: filter by ticket</span><span class="age">QA 1d</span><span class="m">#1049 · SERVER-1 · rework round 2</span></a></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- DETAIL -->
+    <div class="stack" id="detail">
+      <div class="state st-empty" role="status"><h2>Pick a pull request</h2><p>When something waits in UAT, its evidence shows here.</p></div>
+      <div class="state st-error" role="alert"><h2>No pull request to show</h2><p>The evidence for a PR loads after the queue does. Try again on the left.</p></div>
+      <div class="skelwrap" role="status" aria-label="Loading the pull request"><div class="panel"><div class="skel"><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+
+      <section class="panel only-queue-detail" aria-labelledby="pr-title" id="pr-1011">
+        <div class="pb stack">
+          <div class="dhead">
+            <div>
+              <div class="micro">mission-control · PR #1011 · branch feature/1011-overview-crew-table</div>
+              <h2 id="pr-title">Overview crew table: one line per cell, tokens only</h2>
+              <div class="dmeta"><span>by GUIDO-1</span><span>in UAT 2d 3h</span><span>+186 −42 · 5 files</span><span>CI: 2 checks passed on <span class="mono">a1b2c3d</span></span></div>
+            </div>
+            <div class="actions" role="group" aria-label="Decide">
+              <button class="primary" type="button">Accept</button>
+              <button class="send" type="button" id="sendbtn" aria-expanded="false" aria-controls="sendback">Send back…</button>
+            </div>
+          </div>
+          <p class="summary"><b>QA:</b> The crew table now draws every cell on one 40 px line, with controls kept inside the row at 1366 and 1600 wide. Long work titles truncate; the full title is the accessible name.</p>
+          <p class="clamp2" style="color:var(--fg-2)"><b>Watch for:</b> a decision with a 400-character prompt, and a crew seat with Answer, Interrupt and End together.</p>
+          <form class="sendback" id="sendback" onsubmit="return false">
+            <label for="note">Note to the author (required): what should change?</label>
+            <textarea id="note" placeholder="For example: Interrupt overlaps Answer at 1366 wide on a crew row."></textarea>
+            <div class="actions"><button type="button" id="cancel">Cancel</button><button class="send" type="button" disabled>Send back with this note</button></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel only-queue-detail" aria-labelledby="ba">
+        <div class="ph"><h2 id="ba">Before and after</h2><span class="sub">per affected page · captured by QA at PR head</span></div>
+        <div class="pb pairs">
+          <div class="pair shots-ok">
+            <h4>Overview <span class="path">/ · 1600×900 · dark</span><span class="pill warn">changed</span></h4>
+            <div class="shots">
+              <figure class="shot"><figcaption><span>Before</span><span>main 546b4f2</span></figcaption><div class="fake" role="img" aria-label="Before: the crew table, cells wrap to two lines"><div class="bar"></div><div class="cols"><i></i><i></i><i class="gone"></i></div></div></figure>
+              <figure class="shot"><figcaption><span>After</span><span>head a1b2c3d</span></figcaption><div class="fake" role="img" aria-label="After: the crew table, every cell on one line"><div class="bar"></div><div class="cols"><i></i><i></i><i class="new"></i></div></div></figure>
+            </div>
+          </div>
+          <div class="pair shots-ok">
+            <h4>Agent page <span class="path">/agents/guido-1 · 1366×768 · light</span><span class="pill warn">changed</span></h4>
+            <div class="shots">
+              <figure class="shot"><figcaption><span>Before</span><span>main 546b4f2</span></figcaption><div class="fake" role="img" aria-label="Before: the Agent page header"><div class="bar"></div><div class="cols"><i></i><i></i><i></i></div></div></figure>
+              <figure class="shot"><figcaption><span>After</span><span>head a1b2c3d</span></figcaption><div class="fake" role="img" aria-label="After: the Agent page header"><div class="bar"></div><div class="cols"><i></i><i class="new"></i><i></i></div></div></figure>
+            </div>
+          </div>
+          <div class="pair shots-missing">
+            <h4>Overview <span class="path">/ · 1600×900 · dark</span><span class="pill crit">evidence not captured</span></h4>
+            <div class="shots">
+              <figure class="shot"><figcaption><span>Before</span><span>—</span></figcaption><div class="noshot"><b>Not captured</b><span>QA has not rendered main for this page.</span></div></figure>
+              <figure class="shot"><figcaption><span>After</span><span>—</span></figcaption><div class="noshot"><b>Not captured</b><span>The preview was down when QA ran. <a href="#">Ask QA to retake it</a></span></div></figure>
+            </div>
+          </div>
+          <p class="micro shots-ok">2 pages with a visual change · 0 pages without a pair</p>
+          <p class="micro shots-missing">1 page with a visual change · 0 pairs captured · you can still Accept, but QA will say so</p>
+        </div>
+      </section>
+
+      <div class="grid2 tests only-queue-detail">
+        <section class="panel" aria-labelledby="tests">
+          <div class="ph"><h2 id="tests">Tests run</h2><span class="sub">on head a1b2c3d · count of tests</span></div>
+          <div class="scroll" tabindex="0" aria-label="Tests run, scrolls">
+            <table>
+              <thead><tr><th scope="col">Suite</th><th scope="col" class="n">Passed</th><th scope="col" class="n">Failed</th><th scope="col" class="n"><button type="button" aria-label="Sorted by new tests, descending">New ▼</button></th></tr></thead>
+              <tbody>
+                <tr><td class="name" title="test/OverviewCrewTable.browser.test.ts">OverviewCrewTable.browser.test.ts</td><td class="n passc">8</td><td class="n">0</td><td class="n newc">5</td></tr>
+                <tr><td class="name" title="test/OverviewCrew.test.tsx">OverviewCrew.test.tsx</td><td class="n passc">14</td><td class="n">0</td><td class="n newc">2</td></tr>
+                <tr><td class="name" title="test/hudTokens.test.ts">hudTokens.test.ts</td><td class="n passc">6</td><td class="n">0</td><td class="n">0</td></tr>
+                <tr><td class="name" title="test/pageRenderCounts.test.tsx">pageRenderCounts.test.tsx</td><td class="n passc">17</td><td class="n fail">1</td><td class="n">—</td></tr>
+              </tbody>
+              <tfoot><tr><td><b>Total</b></td><td class="n passc">45</td><td class="n fail">1</td><td class="n newc">7</td></tr></tfoot>
+            </table>
+          </div>
+          <div class="pb"><p class="clamp2"><span class="pill crit">1 failing</span> <span class="mono" style="font-size:12px">pageRenderCounts › Agent idle</span> also fails on main; QA marks it known, not caused by this PR.</p></div>
+        </section>
+
+        <section class="panel" aria-labelledby="rw">
+          <div class="ph"><h2 id="rw">Rework</h2><span class="sub">3 rounds · count of reviews</span></div>
+          <div class="pb">
+            <ol class="rounds" aria-label="Rework rounds, oldest first">
+              <li><div class="rh"><span class="pill crit">round 1</span><span>RETRO-CX · 3 findings · fixed</span></div><p class="clamp2">Work cell stacked its controls under the title and ran 42 px past the row.</p></li>
+              <li><div class="rh"><span class="pill crit">round 2</span><span>RETRO-CX · 1 finding · fixed</span></div><p class="clamp2">Answer and Interrupt overlapped by 25 px in the narrow Work column.</p></li>
+              <li><div class="rh"><span class="pill ok">round 3</span><span>RETRO-CX · 0 findings · clean</span></div><p class="clamp2">Clean pass. QA re-rendered at 1366 and 1600.</p></li>
+            </ol>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid2 wide-stack only-queue-detail">
+        <section class="panel" aria-labelledby="impact">
+          <div class="ph"><h2 id="impact">Impact</h2><span class="sub">what the changes reach through imports</span></div>
+          <div class="pb impact">
+            <p class="clamp2">5 files changed → <b>3</b> import them · <b>9</b> depend on them. No other seat changes a dependent file.</p>
+            <div class="minimap" role="img" aria-label="Changed files overview.css and OverviewCrew.tsx reach OverviewPage and AgentPage">
+              <span class="node hit">overview.css</span><span class="arrow" aria-hidden="true">→</span><span class="node hit">OverviewCrew.tsx</span><span class="arrow" aria-hidden="true">→</span><span class="node dep">OverviewPage</span><span class="node dep">AgentPage</span>
+            </div>
+            <div class="row"><span title="apps/web/src/overview/OverviewCrew.tsx">…/overview/<b>OverviewCrew.tsx</b></span><span class="n">3 import</span><span class="n">9 depend</span></div>
+            <div class="row"><span title="apps/web/src/overview/overview.css">…/overview/<b>overview.css</b></span><span class="n">1 import</span><span class="n">2 depend</span></div>
+            <div><a class="btn" href="#">Open in Map, focused on these 5 files</a></div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="try">
+          <div class="ph"><h2 id="try">Try it</h2><span class="sub">play with the branch</span></div>
+          <div class="pb stack">
+            <div class="tryrow"><pre aria-label="Checkout commands">git fetch origin feature/1011-overview-crew-table
+git switch feature/1011-overview-crew-table
+pnpm -s dev</pre><button type="button" class="small">Copy</button></div>
+            <div class="tryrow"><button type="button" disabled aria-describedby="prevnote">Preview</button><p id="prevnote" class="micro" style="text-transform:none;letter-spacing:0;font-size:12px">Not available yet: needs the preview server (#985). Use the commands above.</p></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid2 wide-stack only-queue-detail">
+        <section class="panel" aria-labelledby="comms">
+          <div class="ph"><h2 id="comms">Related Comms</h2><span class="sub">4 messages · this PR</span></div>
+          <div class="pb">
+            <ul class="comms scroll" aria-label="Related messages, newest first">
+              <li><div class="rh"><span>QA → crew</span><span>11:42</span></div><p class="clamp2">Rendered the crew table at 1366 and 1600 with a crew-kind decision; no overlap.</p></li>
+              <li><div class="rh"><span>RETRO-CX → GUIDO-1</span><span>11:20</span></div><p class="clamp2">Round 3 clean. One Minor: name the 24 px compact controls.</p></li>
+              <li><div class="rh"><span>GUIDO-1 → RETRO-CX</span><span>10:58</span></div><p class="clamp2">Fixed the overlap; compact Answer, Interrupt and End fit the 140 px Work track.</p></li>
+              <li><div class="rh"><span>FLIGHT → GUIDO-1</span><span>09:15</span></div><p class="clamp2">Keep it to the ticket: one line per cell, no new columns.</p></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="ask">
+          <div class="ph"><h2 id="ask">Ask QA</h2><span class="sub">about this PR only</span></div>
+          <div class="pb stack">
+            <div class="thread" aria-live="polite" aria-label="Questions and answers">
+              <div class="msg you"><div class="who">You · 10:02</div><p class="clamp2">Did you test the backend path for a stalled seat?</p></div>
+              <div class="msg qa"><div class="who">QA · 10:06</div><p>Yes. The stalled-seat attention route is covered by 3 server tests, all passing on head. I did not run it against a live loop.</p></div>
+              <div class="msg qa"><div class="who">QA · working</div><p class="micro" style="text-transform:none;letter-spacing:0;font-size:12px">Waiting for an answer to your second question…</p></div>
+            </div>
+            <div class="askrow">
+              <div><label for="q">Your question for QA</label><textarea id="q" placeholder="For example: what did you check on the backend?"></textarea></div>
+              <button type="button">Ask QA</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  var b = document.body, root = document.documentElement;
+  function press(group, attr, val) { group.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute(attr) === val)); }); }
+  var states = document.getElementById("states"), themes = document.getElementById("themes");
+  var params = new URLSearchParams(location.search);
+  function setState(s) { document.getElementById("qcount").textContent = s === "empty" ? "0 in UAT · 4 in review" : s === "loading" ? "Loading…" : s === "error" ? "Could not load" : "3 in UAT · 4 in review"; document.querySelectorAll("#detail .dhead .actions button, .askrow button, #q").forEach(function (e) { e.disabled = s === "disconnected"; }); b.setAttribute("data-state", s); press(states, "data-state", s); document.querySelectorAll(".only-queue-detail").forEach(function (e) { e.style.display = (s === "queue" || s === "nocapture" || s === "stale" || s === "disconnected") ? "" : "none"; }); }
+  function setTheme(t) { if (t) { root.setAttribute("data-theme", t); } else { root.removeAttribute("data-theme"); } press(themes, "data-theme", t || ""); }
+  states.addEventListener("click", function (e) { var s = e.target.getAttribute && e.target.getAttribute("data-state"); if (s) setState(s); });
+  themes.addEventListener("click", function (e) { var t = e.target.getAttribute && e.target.getAttribute("data-theme"); if (t) setTheme(t); });
+  var sb = document.getElementById("sendbtn"), form = document.getElementById("sendback"), note = document.getElementById("note");
+  var go = form.querySelector(".send");
+  sb.addEventListener("click", function () { var open = form.classList.toggle("open"); sb.setAttribute("aria-expanded", String(open)); if (open) note.focus(); });
+  document.getElementById("cancel").addEventListener("click", function () { form.classList.remove("open"); sb.setAttribute("aria-expanded", "false"); sb.focus(); });
+  note.addEventListener("input", function () { go.disabled = note.value.trim() === ""; });
+  if (params.get("sendback")) { sb.click(); }
+  setState(params.get("state") || "queue");
+  setTheme(params.get("theme") || "");
+})();
+</script>
+</body>
+</html>

@@ -279,7 +279,8 @@ batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
 Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
 hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
 also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
-merged-PR history remain available to Activity and Telemetry for one year. Deletion makes SQLite
+merged-PR history remain available to Activity and Telemetry for one year. Reported reviews and
+unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
 ## First crew
@@ -362,9 +363,11 @@ What each seat's process starts with:
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
   After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
-  FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
-  its required reason; only this Comms item kind is eligible for that path. Messages from before
-  the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
+  FLIGHT may settle only a stale or already-resolved `comms-open:` item it sent, recording its
+  required reason; a seat's or the operator's item stays protected. A linked PR that merges or
+  closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
+  Messages from before the feature's rollout boundary do not enter the escalation, preventing a
+  rollout backlog.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
@@ -1037,6 +1040,11 @@ This code change does not edit `CLAUDE.md` or your home config.
 run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
+use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
+`300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
+no Claude review did). When a review fails on its budget, the author's next attempt goes to another
+free reviewer of the session, not the same seat, and only a single reviewer retries on itself.
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
@@ -1120,11 +1128,14 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
 - **Milestones.** Each GitHub read also reads the repo's 50 newest milestones (read-only): title, due
   date, state, open and closed issue counts. `GET /api/qa/milestones`. Milestones the repo does not
   use give an empty list.
-- **Findings.** `GET /api/qa/findings?days=` (1..90, default 30) lists review findings with their
-  RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or `waived`; null while
-  unresolved). RETRO sets the resolution of the findings it names when it reports round 2 or later;
-  when a round reports nothing to fix, the engine marks the earlier blocking findings it left
-  unnamed `fixed`. Minor findings are logged, not resolved.
+- **Findings and review rounds.** `GET /api/qa/findings?days=` (1..90, default 30) lists review
+  findings with their RETRO `category` and `resolution` (`fixed`, `reply-accepted`, `held` or
+  `waived`; null while unresolved), plus completed `reviews` with each round's head SHA, verdict,
+  blocking and minor counts, and end time. Resolved findings and closed PRs use the requested
+  window. Unresolved findings and completed rounds for a currently open PR remain available beyond
+  it. RETRO sets the resolution of the findings it names when it reports round 2 or later; when a
+  round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
+  `fixed`. Minor findings are logged, not resolved.
 
 ## The HUD
 

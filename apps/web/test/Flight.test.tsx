@@ -17,12 +17,13 @@ import { controllerCapped } from "../src/flight/DidTab.tsx";
 import { Drafts, draftRowId, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { NO_POWER_REQUESTS, OLDER_THAN_LISTED } from "../src/flight/PowerRequests.tsx";
 import { SUMMARY_EMPTY } from "../src/flight/Summary.tsx";
 import { NO_SEATS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
 import { type PersonThreadView, whereOf } from "../src/notifications.ts";
-import { Flight } from "../src/pages/Flight.tsx";
+import { Flight, tabForHash } from "../src/pages/Flight.tsx";
 import { agentPath, PAGE_PATHS } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
 import { useItem } from "../src/shell/overlays.ts";
@@ -333,6 +334,65 @@ describe("What FLIGHT did: decisions", () => {
     fireEvent.click(tile);
     expect(tile.getAttribute("aria-pressed")).toBe("false");
     expect(screen.getAllByTestId("decided-row")).toHaveLength(2);
+  });
+
+  it("lists the open requests for the controller in Missing powers, each linked to its decision", async () => {
+    const ask = decided("d7", NOW - HOUR, {
+      kind: "pass",
+      about: `${FOR_THE_CONTROLLER} merge shop-app#9`,
+      decision: "Missing power: merge a PR",
+    });
+    stubDecided(
+      flightView({ decisions: [decided("d1", NOW - HOUR), ask], controllerDecisions: [ask] }),
+    );
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    const panel = (await screen.findByRole("heading", { name: "Missing powers" })).closest(
+      "section",
+    );
+    const rows = await within(panel as HTMLElement).findAllByTestId("power-request");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("merge shop-app#9");
+    expect(panel?.textContent).toContain("1 request open");
+    const link = within(rows[0] as HTMLElement).getByRole("link", { name: "Decision" });
+    expect(link.getAttribute("href")).toBe(`${PAGE_PATHS.flight}#decision-7`);
+  });
+
+  it("shows no Decision link for an ask older than the listed decisions", async () => {
+    const old = decided("d8", NOW - HOUR, {
+      kind: "pass",
+      about: `${FOR_THE_CONTROLLER} merge shop-app#10`,
+    });
+    stubDecided(flightView({ decisions: [decided("d1", NOW - HOUR)], controllerDecisions: [old] }));
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    const row = await screen.findByTestId("power-request");
+    expect(within(row).queryByRole("link")).toBeNull();
+    expect(row.textContent).toContain(OLDER_THAN_LISTED);
+  });
+
+  it("opens What FLIGHT did at the decision a #decision-<id> link names", async () => {
+    window.history.replaceState(null, "", "/flight#decision-7");
+    stubDecided(flightView({ decisions: [decided("d7", NOW - HOUR)] }));
+    const { container } = render(<Flight />);
+    expect((container.querySelector("#flight-did") as HTMLElement).hidden).toBe(false);
+    expect(screen.getByRole("tab", { name: "What FLIGHT did" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    await waitFor(() =>
+      expect(
+        document.getElementById("decision-7")?.closest("[data-testid='decision-list']"),
+      ).not.toBeNull(),
+    );
+    expect(tabForHash("#decision-7")).toBe("did");
+  });
+
+  it("says no request is open for the controller when there are none", async () => {
+    stubDecided(flightView({ controllerDecisions: [] }));
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    expect(await screen.findByText(NO_POWER_REQUESTS)).toBeTruthy();
+    expect(screen.queryByTestId("power-request")).toBeNull();
   });
 
   it("says so when the counted asks outnumber the newest decisions the hub lists", async () => {

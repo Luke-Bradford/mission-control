@@ -992,12 +992,47 @@ function buildAttentionItems(
   for (const message of store.openCommsItems()) {
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
+    const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+    const issueRef = /^#(\d+)$/.exec(message.ref ?? message.ticket ?? "");
+    const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
+    const flight = flightSeat(config);
+    const senderRepoId =
+      message.from === flight?.seat.id
+        ? flight.session.repoId
+        : config.crew?.sessions.find((session) =>
+            session.seats.some((seat) => seat.id === message.from),
+          )?.repoId;
+    const repoId =
+      ticket?.[1] ??
+      senderRepoId ??
+      (prNumber === undefined
+        ? undefined
+        : (store.commsForTicket(message.ref ?? "", message.ticket ?? undefined).repoId ??
+          undefined));
+    const issueNumber =
+      ticket === null ? (issueRef === null ? null : Number(issueRef[1])) : Number(ticket[2]);
+    const prs = repoId === undefined ? [] : store.pullRequests(repoId);
+    const ticketPrs = prs.filter((pr) => pr.ticket === message.ticket);
+    const resolvedPr =
+      prNumber === undefined
+        ? ticketPrs.some((pr) => pr.state === "merged") &&
+          !ticketPrs.some((pr) => pr.state === "open")
+        : prs.some((pr) => pr.number === Number(prNumber) && pr.state !== "open");
+    const doneTicket =
+      repoId === undefined || issueNumber === null
+        ? false
+        : store
+            .board(repoId)
+            .some(
+              (item) => item.issueNumber === issueNumber && (item.closed || item.state === "done"),
+            );
+    if (resolvedPr || doneTicket) continue;
     items.push({
       owner: OWNER_OPERATOR,
       key: `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" ? "blocked" : "question",
       agentId: message.from,
-      repoId: message.ticket?.split("#")[0] ?? null,
+      repoId: repoId ?? null,
       text: message.text,
       tool: null,
       at: message.at,

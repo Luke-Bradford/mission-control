@@ -144,11 +144,13 @@ import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
+  CREW_SKILLS_DIR,
   crewCodexDir,
   crewDir,
   crewKeeperDir,
   crewMcpPath,
   crewPromptPath,
+  crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
   type KeeperCursor,
@@ -156,7 +158,6 @@ import {
 } from "../store.ts";
 import {
   type RepoDocs,
-  readRepoDocs,
   repoReferenceIndex,
   reviewBrief,
   rolePrompt,
@@ -208,6 +209,7 @@ import {
   type SessionEvent,
   startSession,
 } from "./session.ts";
+import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
 export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
@@ -1309,8 +1311,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.endedAt === null && r.vendor === "codex")
           .map((r) => basename(crewCodexDir(deps.dbPath, r.id))),
       );
+      const skillsDirs = new Set(
+        store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .filter((r) => r.endedAt === null && r.vendor !== "codex")
+          .map((r) => basename(crewSkillsDir(deps.dbPath, r.id))),
+      );
       for (const name of readdirSync(dir)) {
         if (CREW_CODEX_DIR.test(name) && !codexHomes.has(name)) {
+          rmSync(join(dir, name), { recursive: true, force: true });
+          continue;
+        }
+        if (CREW_SKILLS_DIR.test(name) && !skillsDirs.has(name)) {
           rmSync(join(dir, name), { recursive: true, force: true });
           continue;
         }
@@ -1504,6 +1516,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       // the cursor of an earlier keeper counts that keeper's lines, not this one's
       store.deleteKeeperCursor(run.id);
+      for (const why of repoDocs?.skills?.refused ?? []) {
+        log(`${info.seat.id}: skill left out of the run: ${why}`);
+      }
       writePrivate(tokenPath, token);
       writePrivate(mcpPath, crewMcpConfig(`${hub}${MCP_PATH}`, token));
       const cwd = realpathSync(checkout.path);
@@ -1648,10 +1663,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               ),
             );
             writePrivate(join(home, "auth.json"), auth);
+            // a resume has no skills read; its home already holds the run's
+            if (repoDocs?.skills !== undefined) {
+              copySkillsToCodexHome(home, repoDocs.skills.skills);
+            }
           },
         });
       } else {
+        const skillsDir = crewSkillsDir(deps.dbPath, run.id);
+        // a resume has no skills read; the folder the start built is still there
+        if (repoDocs?.skills !== undefined && repoDocs.skills.skills.length > 0) {
+          writeSkillPlugin(skillsDir, info.repo.id, repoDocs.skills.skills);
+        }
         const args = crewCliArgs({
+          pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
           model,
@@ -1729,6 +1754,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       // The Codex dir (its auth copy) goes first, whatever happens to the temp root.
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
+      rmSync(crewSkillsDir(deps.dbPath, runId), { recursive: true, force: true });
       const codexTmp = store.getSetting(codexTmpKey(runId));
       if (codexTmp === null) rmSync(seatTmp(runId), { recursive: true, force: true });
       else if (!removeCodexTmp(runId, codexTmp))
@@ -2970,7 +2996,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               });
         return {
           checkout: c,
-          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -3231,7 +3257,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         return {
           checkout: c,
-          repoDocs: await readRepoDocs(info.session.checkout, c.baseSha),
+          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -3434,7 +3460,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return {
             scratch: s,
             inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
-            repoDocs: await readRepoDocs(checkout, s.baseSha),
+            repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
             references: await repoReferenceIndex(checkout, s.baseSha),
           };
         } catch (e) {

@@ -76,6 +76,7 @@ import {
   type PullRequestView,
   QA_RETENTION_DAYS,
   type QaFindingView,
+  type QaReviewRoundView,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -636,6 +637,17 @@ export function crewCodexDir(dbPath: string, runId: string): string {
 }
 
 export const CREW_CODEX_DIR = /^codex-[0-9a-f]{12}$/;
+
+/**
+ * A Claude run's skills plugin folder (`--plugin-dir`), built by the hub from the repo's commit. It
+ * sits in the data dir, which the seat's sandbox cannot write, and is removed with the run's files.
+ */
+export function crewSkillsDir(dbPath: string, runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return join(crewDir(dbPath), `skills-${hex}`);
+}
+
+export const CREW_SKILLS_DIR = /^skills-[0-9a-f]{12}$/;
 
 /** A keeper folder's name in `{DB dir}/crew/`. */
 export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
@@ -2103,7 +2115,11 @@ export class Store {
       ],
       [
         "reviews",
-        "ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')",
+        `ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')
+         AND NOT (state = 'reported' AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = reviews.repo_id AND p.number = reviews.pr_number AND p.state = 'open'
+         ))`,
         AUDIT_RETENTION_DAYS,
       ],
       [
@@ -2193,7 +2209,12 @@ export class Store {
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
-            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
+            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})
+          AND NOT (review_findings.resolution IS NULL AND EXISTS (
+            SELECT 1 FROM reviews v JOIN pull_requests p
+              ON p.repo_id = v.repo_id AND p.number = v.pr_number
+            WHERE v.id = review_findings.review_id AND p.state = 'open'
+          ))`
             : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
@@ -3714,13 +3735,20 @@ export class Store {
     }));
   }
 
-  /** Findings of reviews that ended since `since`, newest review first. */
+  /**
+   * Findings of reviews in the requested window, plus unresolved findings on PRs still open now.
+   * The latter protects an open card from losing its blocking review evidence as it ages.
+   */
   qaFindings(since: number): QaFindingView[] {
     const rows = this.db
       .prepare(
         `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
          JOIN reviews v ON v.id = f.review_id
-         WHERE v.ended_at >= ? ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
+         WHERE v.ended_at >= ? OR (f.resolution IS NULL AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
       )
       .all(since) as Row[];
     return rows.map((r) => ({
@@ -3738,6 +3766,32 @@ export class Store {
       summary: r.summary as string,
       resolution: r.resolution as string | null,
       resolvedReviewId: r.resolved_review_id as number | null,
+    }));
+  }
+
+  /** Completed review rounds in the requested window, plus the full history of open PRs. */
+  qaReviewRounds(since: number): QaReviewRoundView[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM reviews v
+         WHERE v.state = 'reported' AND v.ended_at IS NOT NULL AND (v.ended_at >= ? OR EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, v.id DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      sha: r.sha as string,
+      verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
+      blocking: r.blocking as number,
+      minor: r.minor as number,
+      endedAt: r.ended_at as number,
     }));
   }
 

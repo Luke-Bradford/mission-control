@@ -36,10 +36,13 @@ export function SeatControls({
   row,
   interrupt = true,
   hold = false,
+  compact = false,
 }: {
   row: CrewRow;
   interrupt?: boolean;
   hold?: boolean;
+  /** Shows "End" for the end button, which keeps its full name for assistive tech and hover. */
+  compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +80,13 @@ export function SeatControls({
           type="button"
           className="sm warn"
           disabled={busy}
+          title={compact && !hold ? "End the run" : undefined}
+          aria-label={compact && !hold ? "End the run" : undefined}
           onClick={() => {
             if (window.confirm(endConfirm(row, hold))) void run(() => endSeat(row, hold));
           }}
         >
-          {hold ? "Stop" : "End the run"}
+          {hold ? "Stop" : compact ? "End" : "End the run"}
         </button>
       )}
     </>

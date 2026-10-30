@@ -6115,7 +6115,7 @@ describe("crew routes", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ seat: null, decisions: [] });
+      expect(r.json()).toEqual({ seat: null, decisions: [], controllerDecisions: [] });
     });
 
     it("lists the last day's decisions, newest first", async () => {
@@ -6153,6 +6153,38 @@ describe("crew routes", () => {
         turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("lists every recent controller decision beyond the main decision limit", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const d = (at: number, about: string, decision = "d") =>
+        store.addFlightDecision({
+          at,
+          kind: "note",
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about,
+          decision,
+          basis: "b",
+        });
+      d(now - 2 * 60_000, "Missing power", "For the controller: choose a replacement");
+      for (let n = 0; n < 101; n++) d(now - n * 1000, `newer ${n}`);
+      d(now - 25 * 60 * 60_000, "Missing power", "For the controller: expired request");
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.decisions).toHaveLength(FLIGHT_LIST_MAX);
+      expect((body.controllerDecisions ?? []).map((x) => x.decision)).toEqual([
+        "For the controller: choose a replacement",
+      ]);
     });
 
     it("serves FLIGHT's last wake, what woke it and the next scheduled wake", async () => {
@@ -7693,6 +7725,129 @@ describe("QA board data", () => {
       }),
     ]);
     expect((await get("/api/qa/findings?days=91")).statusCode).toBe(400);
+  });
+
+  it("keeps old unresolved findings on open PRs and serves review-round summaries", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [9, 10, 11].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: `PR ${number}`,
+        url: `https://example.test/${number}`,
+        branch: `feature/${number}`,
+        ticket: null,
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: "passing" as const,
+        createdAt: NOW - 100 * DAY,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: String(number).repeat(40),
+        mergeable: null,
+        checks: [],
+      })),
+      NOW,
+    );
+    const record = (
+      prNumber: number,
+      round: number,
+      verdict: { spec: "pass" | "fail"; quality: "pass" | "fail" },
+      findings: { severity: "Important" | "Minor"; summary: string }[],
+      at: number,
+    ) => {
+      const id = store.requestReview({
+        authorRunId: `author-${prNumber}`,
+        repoId: "shop-app",
+        seatId: "retro-1",
+        prNumber,
+        sha: `${prNumber}${round}`.repeat(20),
+        epoch: 0,
+        attempt: round,
+        round,
+        at,
+      });
+      if (id === null) throw new Error("fixture review missing");
+      const runId = `review-${prNumber}-${round}`;
+      store.setReviewState(id, ["queued"], "running", { at, runId });
+      store.recordFindings(id, runId, {
+        verdict,
+        summary: `Round ${round}`,
+        findings: findings.map((finding) => ({
+          ...finding,
+          file: "file.ts",
+          line: 1,
+          scenario: "A scenario",
+          fix: "A fix",
+        })),
+        at,
+      });
+      return id;
+    };
+    const old = NOW - 91 * DAY;
+    const unresolved = record(
+      9,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Open" }],
+      old,
+    );
+    record(
+      10,
+      1,
+      { spec: "fail", quality: "pass" },
+      [{ severity: "Important", summary: "Resolved" }],
+      old,
+    );
+    record(10, 2, { spec: "pass", quality: "pass" }, [], old + 1);
+    const clean = record(11, 1, { spec: "pass", quality: "pass" }, [], NOW - 2);
+    const failing = record(
+      11,
+      2,
+      { spec: "pass", quality: "fail" },
+      [
+        { severity: "Important", summary: "Blocking" },
+        { severity: "Minor", summary: "Minor" },
+      ],
+      NOW - 1,
+    );
+
+    const body = (await get("/api/qa/findings?days=90")).json();
+    expect(body.findings).toEqual([
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Blocking" }),
+      expect.objectContaining({ reviewId: failing, prNumber: 11, summary: "Minor" }),
+      expect.objectContaining({
+        reviewId: unresolved,
+        prNumber: 9,
+        summary: "Open",
+        resolution: null,
+      }),
+    ]);
+    expect(body.reviews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reviewId: clean,
+          prNumber: 11,
+          round: 1,
+          sha: "111".repeat(20),
+          verdict: { spec: "pass", quality: "pass" },
+          blocking: 0,
+          minor: 0,
+          endedAt: NOW - 2,
+        }),
+        expect.objectContaining({
+          reviewId: failing,
+          prNumber: 11,
+          round: 2,
+          sha: "112".repeat(20),
+          verdict: { spec: "pass", quality: "fail" },
+          blocking: 1,
+          minor: 1,
+          endedAt: NOW - 1,
+        }),
+      ]),
+    );
   });
 });
 

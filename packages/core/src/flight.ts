@@ -79,7 +79,7 @@ export interface FlightDecision {
   basis: string;
 }
 
-/** `GET /api/flight`: the watch seat (null when none is configured) and the last day's decisions. */
+/** `GET /api/flight`: the watch seat (null when none is configured) and its recent decisions. */
 export interface FlightView {
   seat: {
     id: string;
@@ -91,8 +91,18 @@ export interface FlightView {
     turns?: { n: number; max: number } | null;
   } | null;
   decisions: FlightDecision[];
+  /** Last day's decisions that ask the controller, from the metrics scan rather than the view cap. */
+  controllerDecisions?: FlightDecision[];
   /** The server always sets it with a seat; optional so older fixtures still type. */
   wake?: FlightWakeStatus;
+}
+
+/** The decisions included in the daily "For the controller" metric. */
+export function forTheControllerDecisions(decisions: readonly FlightDecision[]): FlightDecision[] {
+  return decisions.filter(
+    (decision) =>
+      decision.about.includes(FOR_THE_CONTROLLER) || decision.decision.includes(FOR_THE_CONTROLLER),
+  );
 }
 
 /** What a wake with no changed fact is called: a re-wake backstop. */

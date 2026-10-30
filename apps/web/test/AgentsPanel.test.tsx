@@ -183,6 +183,50 @@ it("names and confirms the waiver for a review-parked seat", async () => {
   confirm.mockRestore();
 });
 
+it("waives the run chosen from the menu when a seat has several review-parked runs", async () => {
+  const loop = (reason: string) => ({
+    phase: "parked" as const,
+    text: reason,
+    prNumber: 9,
+    parked: reason,
+  });
+  const park = (sha: string, reason: string) => ({
+    loop: { parked: { kind: "review", reason, ended: false }, pushFor: sha },
+  });
+  const run = seatRow().run as NonNullable<CrewRow["run"]>;
+  const row = seatRow({
+    hudState: "parked",
+    loop: loop("first"),
+    run: { ...run, id: "r-20" },
+    asideRuns: ["r-21", "r-22"].map((runId) => ({
+      runId,
+      ticket: null,
+      ticketTitle: null,
+      loop: loop("aside"),
+    })),
+  });
+  const f = stub([row], true, [], "CI", undefined, {
+    "/api/runs/r-20/loop": park("aaa1111000", "finding on r-20"),
+    "/api/runs/r-21/loop": park("bbb2222000", "finding on r-21"),
+    "/api/runs/r-22/loop": park("ccc3333000", "finding on r-22"),
+    "POST /api/runs/r-20/resume": { ok: true },
+    "POST /api/runs/r-21/resume": { ok: true },
+    "POST /api/runs/r-22/resume": { ok: true },
+  });
+  render(<AgentsPanel />);
+  const menu = await screen.findByRole("combobox", { name: /Waive review findings/ });
+  const resumed = () =>
+    f.mock.calls.filter(([path]) => String(path).endsWith("/resume")).map(([path]) => path);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  fireEvent.change(menu, { target: { value: "r-21" } });
+  expect(resumed()).toEqual([]);
+  fireEvent.change(menu, { target: { value: "r-21" } });
+  await waitFor(() => expect(resumed()).toEqual(["/api/runs/r-21/resume"]));
+  expect(confirm.mock.calls[1]?.[0]).toContain("bbb2222");
+  expect(confirm.mock.calls[1]?.[0]).toContain("finding on r-21");
+  confirm.mockRestore();
+});
+
 it("shows a need and its action inline, leaves a quiet row clear, and keeps row navigation", async () => {
   stub([seatRow({ id: "need" }), seatRow({ id: "quiet" })]);
   const { container } = render(<AgentsPanel />);

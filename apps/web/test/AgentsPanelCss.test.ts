@@ -14,11 +14,14 @@ it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(/\.panel > \.pb\.scroll \{\s*flex: 1 1 auto/);
 });
 
-it("keeps seven compact columns with needs on the second Work line", () => {
+it("keeps seven compact columns with needs beside the work title on one line", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*padding: var\(--sp-1\) var\(--sp-2\);[^}]*grid-template-rows: minmax\(0, 1fr\)/,
+    /#agentsList \.trow \{[^}]*padding: 0 var\(--sp-2\);[^}]*grid-template-rows: minmax\(0, 1fr\)/,
   );
   expect(css).toMatch(/#agentsList \.trow > \* \{\s*grid-row: 1/);
+  expect(css).toMatch(
+    /#agentsList \.agent-identity,\s*#agentsList \.state-cell,\s*#agentsList \.ticket-cell \{[^}]*flex-direction: row/,
+  );
   expect(css).toMatch(/#agentsList \.need \{[^}]*font-size: var\(--fs-s\)/);
   expect(css).toMatch(/#agentsList \.agent-model \{[^}]*white-space: nowrap/);
   expect(css).not.toContain("#agentsList.no-steps");
@@ -30,7 +33,7 @@ it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
     /#agentsList \.trow \{[^}]*grid-template-columns: 150px 118px minmax\(220px, 1fr\) 128px 56px 64px 64px/,
   );
-  expect(css).toMatch(/#agentsList \.work-cell \{[^}]*overflow: hidden/);
+  expect(css).toMatch(/#agentsList \.ticket-cell \{[^}]*overflow: hidden/);
 });
 
 it("keeps State pills and their age from shrinking", () => {
@@ -88,4 +91,8 @@ it("constrains the crew pause portal to the viewport with scrolling", () => {
   expect(css).toMatch(/\.crew-pause-form \{[^}]*position: fixed/);
   expect(css).toMatch(/\.crew-pause-form \{[^}]*max-height: calc\(100dvh - 32px\)/);
   expect(css).toMatch(/\.crew-pause-form \{[^}]*overflow-y: auto/);
+});
+
+it("sizes the review-waiver menu from spacing tokens", () => {
+  expect(css).toMatch(/\.waive-compact > select \{[^}]*min-height: var\(--sp-5\)/);
 });
