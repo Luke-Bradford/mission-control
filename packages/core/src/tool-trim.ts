@@ -50,7 +50,8 @@ function cutText(text: string, tool: string, fullPath: string): string {
     }
     if (failAt >= 0) {
       const failStart = enc.encode(text.slice(0, failAt)).length;
-      if (failStart < tailStart) {
+      // one inside the head is already shown: the tail stays the output's real end
+      if (failStart >= headEnd && failStart < tailStart) {
         tailStart = failStart;
         tailEnd = failStart + TOOL_TRIM_TAIL;
       }

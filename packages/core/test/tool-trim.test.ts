@@ -129,4 +129,12 @@ describe("trimToolResponse", () => {
     // a built-in tool keeps its shape or stays whole
     expect(trimToolResponse("Read", { type: "image", file: image }, FULL)).toBeNull();
   });
+
+  it("keeps the real end of a Bash output when its only failing line is in the head", () => {
+    const early = `error: early\n${"ok line\n".repeat(10_000)}Tests 5 passed END\n`;
+    expect(stdoutOf(early)).toContain("Tests 5 passed END");
+    // a failing line at byte 7000 of 80 KB sits inside the 8 KB head too
+    const at7000 = `${"x".repeat(6_990)}\nerror: here\n${"ok line\n".repeat(10_000)}Tests 5 passed END\n`;
+    expect(stdoutOf(at7000)).toContain("Tests 5 passed END");
+  });
 });
