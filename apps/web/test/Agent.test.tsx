@@ -870,6 +870,27 @@ describe("Agent page: header and tiles", () => {
     expect(now.textContent).not.toContain("Last");
   });
 
+  it("a parked loop's header status is one line, with the whole park text behind details", async () => {
+    const park = `RETRO-CX reviewed c74cdfc and found 1 issue to resolve. ${"Fix it, then explain. ".repeat(40)}`;
+    stub({
+      rows: [
+        crewRow({
+          hudState: "idle",
+          loop: { phase: "parked", text: `Blocked: ${park}`, prNumber: 77, parked: park },
+          digest: digest(),
+          contextWindow: 200_000,
+        }),
+      ],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await vi.waitFor(() => expect($(container, "#ahead .big")).toBeTruthy());
+    const line = $(container, "#ahead .doing") as HTMLElement;
+    expect(line.textContent).toContain("Parked · review findings on c74cdfc · 1 held");
+    expect(line.textContent).not.toContain("Fix it, then explain");
+    fireEvent.click(within(line).getByRole("button", { name: "details" }));
+    expect($(container, "#ahead .vdetail")?.textContent).toContain("Fix it, then explain");
+  });
+
   it("has no Pause (or any loop control) for a studio loop, only Pop out", async () => {
     stub();
     const { container } = render(<Agent id="studio-builder" />);
@@ -2101,7 +2122,7 @@ describe("Agent page: loop steps", () => {
       await waitFor(() => expect(quiet.querySelector(".vsteps")).not.toBeNull());
     });
 
-    it("shows every step open: passed with outcome and time, current with tries, to come with its rule", async () => {
+    it("lists steps with time and tries; a step's tries open on click, a step to come has none", async () => {
       const tries = [
         triesAt("working", 1, "pass"),
         triesAt("ci", 1, "fail", { reason: "lint" }),
@@ -2109,34 +2130,36 @@ describe("Agent page: loop steps", () => {
       ];
       const panel = await openLoop(
         loopOf({ phase: "ci", text: "CI is running", prNumber: 77 }),
-        viewOf("ci", tries),
+        viewOf("ci", tries, { round: null }),
         { prs: [pr77({ ci: "pending" })] },
       );
-      await waitFor(() => expect(panel.querySelector(".vsteps .att")).not.toBeNull());
+      await waitFor(() => expect(panel.querySelector(".vsteps .vmeta")).not.toBeNull());
       const steps = [...panel.querySelectorAll<HTMLElement>(".vstep")];
       expect(steps.map((s) => $(s, ".vname")?.textContent)).toEqual([
         "Working",
-        "Checks×2",
+        "Checks2 tries",
         "In review",
         "Done",
       ]);
-      // a passed step: its try, outcome and duration, no click needed
+      // tries are folded until asked for
+      expect(panel.querySelector(".att")).toBeNull();
       const passed = steps[0] as HTMLElement;
       expect(passed.className).toContain("done");
+      fireEvent.click(within(passed).getByRole("button", { name: /Working/ }));
       expect($(passed, ".att")?.textContent).toContain("pass");
       expect($(passed, ".att")?.textContent).toContain("10m");
-      // the current step: live text, both tries, time in step
+      // the current step: live text, time in step, both tries once opened
       const current = steps[1] as HTMLElement;
       expect(current.getAttribute("aria-current")).toBe("step");
       expect(current.textContent).toContain("CI is running");
+      fireEvent.click(within(current).getByRole("button", { name: /Checks/ }));
       expect(current.querySelectorAll(".att")).toHaveLength(2);
       expect($(current, ".vmeta")?.textContent).toContain("13m");
-      expect(panel.querySelector("button[aria-expanded]")?.textContent).not.toBe("Checks");
-      // a step still to come: its rule, muted by the todo class
+      // a step still to come: muted, with no tries and nothing to open
       const future = steps[2] as HTMLElement;
       expect(future.className).toContain("todo");
-      expect($(future, ".vrule")?.textContent).toBeTruthy();
       expect(future.querySelector(".att")).toBeNull();
+      expect(future.querySelector("button")?.hasAttribute("disabled")).toBe(true);
     });
 
     it("review round 2 of 3", async () => {
@@ -2206,6 +2229,9 @@ describe("Agent page: loop steps", () => {
         const waive = await within(panel).findByRole("button", {
           name: "Waive findings on abc1234 and resume",
         });
+        // the findings sit behind "details", not in the panel by default
+        expect(panel.textContent).not.toContain("RETRO found a missing regression test");
+        fireEvent.click(within(panel).getByRole("button", { name: "details" }));
         expect(panel.textContent).toContain("RETRO found a missing regression test");
         expect(screen.getByRole("button", { name: "Send rework message" })).toBeTruthy();
         expect(screen.getByText(/does not waive them/)).toBeTruthy();
@@ -2284,7 +2310,7 @@ describe("Agent page: loop steps", () => {
     it("the loop's own counter", async () => {
       const panel = await open(loopOf({ phase: "ci", tries: { n: 2, max: 3 } }));
       const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
-      expect($(ci, ".titer")?.textContent).toBe("×2");
+      expect($(ci, ".titer")?.textContent).toBe("2 tries");
     });
 
     it("budget header", async () => {
@@ -2508,7 +2534,7 @@ describe("Agent page: loop steps", () => {
       loopOf({ phase: "parked", text: "Held: CI failed twice", parked: "CI failed twice" }),
     );
     const held = $(panel, ".vhold") as HTMLElement;
-    expect(held.textContent).toContain("Held: CI failed twice");
+    expect(held.textContent).toContain("parked: CI failed twice");
     expect(held.textContent).toContain("!");
     expect(panel.textContent).not.toContain("●");
     expect(panel.querySelectorAll(".vstep")).toHaveLength(4);

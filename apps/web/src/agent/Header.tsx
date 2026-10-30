@@ -5,6 +5,7 @@ import type {
   CrewRow,
   LimitRow,
   PullRequestView,
+  RunLoopView,
 } from "@mc/core";
 import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
@@ -19,6 +20,8 @@ import { agentPath } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { useIsPopout } from "../shell/popout.ts";
 import { toast } from "../shell/Toast.tsx";
+import { parkNote } from "./loopView.ts";
+import { Reason } from "./Reason.tsx";
 import { endConfirm, endSeat, interruptSeat, seatError } from "./seat.ts";
 import { Tiles } from "./Tiles.tsx";
 import "./Header.css";
@@ -534,15 +537,31 @@ export function Header({
           )}
         </span>
       </div>
-      <p className="s fg2 doing">
-        <CurrentDoingLine row={row} tz={tz} repoPrs={repoPrs} />
-      </p>
+      {row.loop?.phase === "parked" && row.hudState === "idle" ? (
+        <ParkedLine row={row} />
+      ) : (
+        <p className="s fg2 doing">
+          <CurrentDoingLine row={row} tz={tz} repoPrs={repoPrs} />
+        </p>
+      )}
       {row.kind === "loop" && (
         <p className="s muted">Observed loop: Mission Control reads it and never drives it.</p>
       )}
       <Tiles row={row} limits={limits} />
     </section>
   );
+}
+
+/** A parked loop's status in one line (kind, sha, count); the whole park text is behind "details". */
+function ParkedLine({ row }: { row: CrewRow }) {
+  const runLoop = useResource<RunLoopView>(row.run ? RESOURCES.runLoop(row.run.id) : null).data
+    ?.loop;
+  const note = parkNote(
+    runLoop?.parked?.reason ?? row.loop?.parked ?? row.loop?.text ?? "",
+    runLoop?.parked?.kind,
+    runLoop?.pushFor,
+  );
+  return <Reason className="vnow s fg2 doing" line={note.header} full={note.full} />;
 }
 
 function CurrentDoingLine({
