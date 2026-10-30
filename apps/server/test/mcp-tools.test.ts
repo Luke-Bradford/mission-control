@@ -4054,7 +4054,10 @@ describe("report_findings", () => {
   it("records structured checks, test runs, categories and prior-round resolutions", async () => {
     const first = await report(
       args({
-        checked: [{ check: "new-behaviour-tests", result: "pass", note: "covered" }],
+        checked: [
+          { check: "new-behaviour-tests", result: "pass", note: "covered" },
+          { check: "design", result: "pass", note: "hud-shot:design-pair" },
+        ],
         tests: [
           {
             command: "pnpm -s vitest run a.test.ts",
@@ -4092,6 +4095,7 @@ describe("report_findings", () => {
       ),
     ).toEqual({ text: FINDINGS_RECORDED });
     expect(store.reviewChecks(reviewId)).toEqual([
+      { check: "design", result: "pass", note: "hud-shot:design-pair" },
       { check: "new-behaviour-tests", result: "pass", note: "covered" },
     ]);
     expect(store.reviewTests(reviewId)).toEqual([

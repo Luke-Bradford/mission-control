@@ -40,6 +40,7 @@ export const REVIEW_CHECK_IDS = [
   "quality",
   "blast-radius",
   "browser",
+  "design",
 ] as const;
 export type ReviewCheckId = (typeof REVIEW_CHECK_IDS)[number];
 export const REVIEW_CHECK_RESULTS = ["pass", "fail", "n-a"] as const;
@@ -272,6 +273,8 @@ export interface ReviewFact {
   blocking: number;
   minor: number;
   failure: string | null;
+  /** The design pass RETRO recorded for this review, if this PR changed the HUD. */
+  design?: ReviewCheckResult | null;
 }
 
 export interface LoopReviewFacts {

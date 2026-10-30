@@ -800,6 +800,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.hardRulesSet === true &&
     gate?.hubOnly === true &&
     gate.strays.length === 0 &&
+    (gate.webChanged !== true || rv.cur?.design === "pass") &&
     (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
   const awaiting =
     elevated && otherGates && touches !== null && touches.paths.length > 0 && !floor && !cleared;

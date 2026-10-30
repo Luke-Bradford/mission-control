@@ -2402,6 +2402,20 @@ describe("merge workspace", () => {
     expect(kindsOf(r.actions)).not.toContain("note");
   });
 
+  it("keeps a HUD PR in draft until RETRO records a passing design check", () => {
+    const held = reconcile(merge({}, { gate: gateOf({ webChanged: true }) }));
+    expect(kindsOf(held.actions)).not.toContain("mark-ready");
+    expect(kindsOf(held.actions)).not.toContain("merge");
+
+    const passed = reconcile(
+      merge({ review: rows({ design: "pass" }) }, { gate: gateOf({ webChanged: true }) }),
+    );
+    expect(passed.actions.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
+      { kind: "mark-ready" },
+      { kind: "merge", sha: SHA },
+    ]);
+  });
+
   it("skips mark-ready for a PR that is not a draft or already marked", () => {
     const a = reconcile(merge({ pr: pr({ ci: "passing", isDraft: false }) })).actions;
     expect(kindsOf(a).filter((k) => k === "mark-ready" || k === "merge")).toEqual(["merge"]);

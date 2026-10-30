@@ -187,3 +187,8 @@ A rule changes by PR with a screenshot of a page that shows why. `apps/web/src/h
 `theme.ts` carry the values; this document carries the rules; where they differ, the rule is
 fixed first, then the token. A review finding that cites §2–§5, §8 or §9 is Important
 (blocking) for a web PR; a finding on taste alone is Minor and never holds a clean PR.
+
+**Readiness gate.** A PR that changes `apps/web/` stays draft until RETRO records the `design`
+review check as `pass` for its head. Its note names the rendered screenshot pair used for the
+pass. Screenshot attachment becomes a separate enforced condition when the attachment work
+lands; the recorded design pass is the gate until then.

@@ -191,6 +191,8 @@ export interface RunLoop {
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
+    /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
+    webChanged?: boolean;
   } | null;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
