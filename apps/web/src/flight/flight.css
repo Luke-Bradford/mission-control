@@ -1011,12 +1011,25 @@ button.flight-link:hover {
   min-height: 0;
 }
 
+/* The side panels take their content's height and the column scrolls, so the outcomes table shows
+   all its rows; the lists under it are capped and scroll inside. */
 .flight-did-side {
-  display: grid;
-  grid-auto-rows: minmax(160px, auto);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: auto;
+}
+
+.flight-did-side > * {
+  flex: none;
+}
+
+.flight-did-side .flight-panel-scroll {
+  flex: none;
+  max-height: 320px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .flight-filters {
@@ -1101,13 +1114,16 @@ button.flight-link:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.flight-outcome-table {
-  min-width: 620px;
-}
-
+/* The outcomes fit their panel: the text columns share what is left and wrap, so the table never
+   scrolls sideways, and its panel grows to show the rows. */
 .flight-outcome-head,
 .flight-outcome-row {
-  grid-template-columns: minmax(170px, 1.2fr) minmax(170px, 1.2fr) minmax(150px, 1fr) 96px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr) 96px;
+  overflow-wrap: anywhere;
+}
+
+#outcomesP .flight-panel-scroll {
+  max-height: none;
 }
 
 .flight-outcome-row .fg2 {
@@ -1142,19 +1158,11 @@ button.flight-link:hover {
   }
 }
 
-@media (max-width: 999px), (max-height: 559px) {
-  .flight-did-side {
-    display: flex;
-    flex-direction: column;
-  }
-}
-
 @container flight (width < 900px) {
   .flight-needs {
     grid-template-rows: minmax(240px, 1fr) auto auto;
   }
   .flight-needs-groups,
-  .flight-did-side,
   .flight-knows-orders {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: none;

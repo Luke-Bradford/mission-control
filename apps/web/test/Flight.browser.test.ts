@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { brief, CONFIG, HOUR, item, METRICS_VIEW, MIN, NOW, REPOS, seatRow } from "./fixtures.ts";
-import { flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
+import { flightSummary, ledgerEntry, summaryItem, summaryOutcome } from "./flightSummaryFixture.ts";
 
 const decision = (id: number, at: number, over: Record<string, unknown> = {}) => ({
   id,
@@ -74,6 +74,18 @@ function apiFor(scenario: Scenario) {
     "/api/flight/summary": flightSummary({
       headline: scenario === "long" ? LONG : "The crew is shipping; one review needs attention.",
       next: n ? [summaryItem(work)] : [],
+      done: Array.from({ length: n ? 5 : 0 }, (_, i) =>
+        summaryOutcome(
+          ledgerEntry({
+            key: `work:done${i}`,
+            title: text("Shipped the cache", i),
+            status: "done",
+            outcome: text("Merged after a green run", i),
+            basis: text("PR merged and CI passed", i),
+            updatedAt: NOW - i * 5 * MIN,
+          }),
+        ),
+      ),
     }),
     "/api/flight/ledger?status=open": {
       session: "s1",
@@ -143,6 +155,32 @@ describeRendered("FLIGHT page in a browser", () => {
             for (const box of await page.boxes(`#flight-${tab} .panel`)) {
               expect(box.height, label).toBeGreaterThan(40);
               expect(box.x + box.width, label).toBeLessThanOrEqual(width);
+            }
+            if (tab === "did" && scenario !== "empty") {
+              // the Recently done table fits its panel, and all its rows sit inside it
+              const table = await page.evaluate((selector) => {
+                const t = document.querySelector(selector) as HTMLElement | null;
+                const last = t?.querySelector("tbody tr:last-child")?.getBoundingClientRect();
+                const panel = document.querySelector("#outcomesP")?.getBoundingClientRect();
+                return t
+                  ? {
+                      over: t.scrollWidth - t.clientWidth,
+                      // how far the last row ends below its panel (0 or less: every row inside it)
+                      spill: (last?.bottom ?? 0) - (panel?.bottom ?? 0),
+                      rows: t.querySelectorAll("tbody tr").length,
+                    }
+                  : null;
+              }, "#outcomesP .flight-outcome-table");
+              expect(table, `${label} outcomes`).not.toBeNull();
+              expect(table?.over, `${label} outcomes scrolls sideways`).toBeLessThanOrEqual(0);
+              expect(table?.rows, label).toBe(5);
+              expect(table?.spill, `${label} outcomes clipped by their panel`).toBeLessThanOrEqual(
+                0,
+              );
+              expect(
+                await page.reachable("#outcomesP .flight-outcome-row", "#flight-did"),
+                `${label} outcome rows`,
+              ).not.toContain(false);
             }
             await page.screenshot(
               join(SHOTS, `flight-${scenario}-${tab}-${colorScheme}-${width}x${height}.png`),
