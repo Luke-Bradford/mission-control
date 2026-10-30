@@ -100,6 +100,7 @@ function TabPanel({
 export function Flight() {
   const hash = useHash();
   const [tab, setTab] = useState<FlightTab>(() => tabForHash(hash));
+  const [controllerOnly, setControllerOnly] = useState(false);
   // A link to a section opens its tab, on load and when the fragment changes on this page.
   useEffect(() => {
     if (hash === "") return;
@@ -223,17 +224,25 @@ export function Flight() {
       <TabPanel tab="record" current={tab}>
         <Panel id="outcomesP" title="Outcomes" sub="recently completed work and the last 24 hours">
           <div className="flight-panel-scroll">
-            <Summary mode="record" />
+            <Summary
+              mode="record"
+              controllerOnly={controllerOnly}
+              onControllerOnly={setControllerOnly}
+            />
           </div>
         </Panel>
         <div className="flight-record-side">
           <Panel
             id="decidedP"
             title="Decided without you"
-            sub="today · decisions FLIGHT made autonomously"
+            sub={
+              controllerOnly
+                ? "last 24 hours · asks for the controller"
+                : "today · decisions FLIGHT made autonomously"
+            }
           >
             <div className="flight-panel-scroll">
-              <Decided />
+              <Decided controllerOnly={controllerOnly} />
             </div>
           </Panel>
           <WorkingLog />

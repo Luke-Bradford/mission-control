@@ -4,6 +4,7 @@ import {
   FLIGHT_BRIEF_TITLES,
   type FlightBriefSectionKey,
   type FlightBriefView,
+  FOR_THE_CONTROLLER,
   metricHover,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -230,6 +231,42 @@ describe("Decided without you", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Overturn" }));
     expect((await screen.findByRole("alert")).textContent).toBe("seat busy");
     expect(screen.getByRole("button", { name: "Overturn" })).toBeTruthy();
+  });
+
+  it("the For the controller tile counts the asks and filters the list to those notes", async () => {
+    const base = flightSummary();
+    stubDecided(
+      flightView({
+        decisions: [
+          decided("d1", NOW - HOUR),
+          decided("d2", NOW - 20 * HOUR, {
+            kind: "pass",
+            about: `${FOR_THE_CONTROLLER} merge shop-app#9`,
+          }),
+          decided("d3", NOW - 30 * HOUR, {
+            kind: "note",
+            about: `${FOR_THE_CONTROLLER} too old to count`,
+          }),
+        ],
+      }),
+      {
+        "/api/flight/summary": flightSummary({ metrics: { ...base.metrics, forTheController: 1 } }),
+      },
+    );
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "Record" }));
+    const tile = await screen.findByRole("button", { name: /For the controller/ });
+    expect(tile.textContent).toContain("1");
+    expect(tile.getAttribute("aria-pressed")).toBe("false");
+    expect(await screen.findAllByTestId("decided-row")).toHaveLength(1);
+    fireEvent.click(tile);
+    expect(tile.getAttribute("aria-pressed")).toBe("true");
+    const rows = screen.getAllByTestId("decided-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("merge shop-app#9");
+    fireEvent.click(tile);
+    expect(tile.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getAllByTestId("decided-row")[0]?.textContent).toContain("question d1");
   });
 
   it("disables Overturn when FLIGHT is not live", async () => {

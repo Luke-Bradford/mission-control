@@ -270,12 +270,14 @@ it("keeps outcomes and the scorecard together in Record only; cost is the regist
   expect([...tiles.querySelectorAll("dt")].map((el) => el.textContent)).toEqual([
     "CI failures",
     "Parks",
+    "For the controller",
     "Cost · today",
   ]);
   await waitFor(() =>
     expect([...tiles.querySelectorAll("dd")].map((el) => el.textContent)).toEqual([
       "3",
       "2",
+      "0",
       "~$24.31",
     ]),
   );

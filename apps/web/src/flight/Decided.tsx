@@ -8,11 +8,12 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubItemHref } from "../links.ts";
 import { useSeatName } from "../seatName.ts";
-import { decidedToday, overturnText } from "./conversation.ts";
+import { decidedToday, forTheController, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 
 const DASH = "—";
 export const NO_DECISIONS = "Nothing decided without you today.";
+export const NO_CONTROLLER_ASKS = "Nothing was addressed to the controller in the last 24 hours.";
 
 function DecidedRow({
   d,
@@ -99,16 +100,21 @@ function DecidedRow({
   );
 }
 
-/** "Decided without you" (catalogue §2.2.7): the questions FLIGHT answered and the tickets it closed or reordered today, newest first. */
-export function Decided() {
+/** "Decided without you" (catalogue §2.2.7), or with `controllerOnly` the last 24 hours' asks to the controller: the questions FLIGHT answered and the tickets it closed or reordered today, newest first. */
+export function Decided({ controllerOnly = false }: { controllerOnly?: boolean }) {
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const tz = useTz();
   const now = useNow();
   if (view === undefined) return <p className="pb note">{DASH}</p>;
   if (!view.seat) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
-  const answers = tz === null ? [] : decidedToday(view.decisions, now, tz);
-  if (answers.length === 0) return <p className="pb note">{NO_DECISIONS}</p>;
+  const answers = controllerOnly
+    ? forTheController(view.decisions, now)
+    : tz === null
+      ? []
+      : decidedToday(view.decisions, now, tz);
+  if (answers.length === 0)
+    return <p className="pb note">{controllerOnly ? NO_CONTROLLER_ASKS : NO_DECISIONS}</p>;
   const { seat } = view;
   return (
     <div>

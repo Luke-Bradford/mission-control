@@ -1,4 +1,4 @@
-import { type AgentStream, startOfLocalDay } from "@mc/core";
+import { type AgentStream, FOR_THE_CONTROLLER, startOfLocalDay } from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
@@ -42,6 +42,21 @@ export const decidedToday = (
   const from = startOfLocalDay(now, tz);
   return decisions.filter((d) => DECIDED_KINDS.includes(d.kind) && d.at >= from);
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The asks FLIGHT addressed to the controller in the last 24 hours, newest first: what `metrics.forTheController` counts. */
+export const forTheController = (
+  decisions: readonly FlightDecision[],
+  now: number,
+): FlightDecision[] =>
+  decisions
+    .filter(
+      (d) =>
+        d.at >= now - DAY_MS &&
+        (d.about.includes(FOR_THE_CONTROLLER) || d.decision.includes(FOR_THE_CONTROLLER)),
+    )
+    .sort((a, b) => b.at - a.at);
 
 /** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>

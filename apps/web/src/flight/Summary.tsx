@@ -196,7 +196,16 @@ function Table({ children, label }: { children: ReactNode; label: string }) {
  * counts come from the hub; in Plan the open ledger supplies each line's details, while Record's
  * outcomes carry their own result, refs, basis and close time.
  */
-export function Summary({ mode }: { mode: SummaryMode }) {
+export function Summary({
+  mode,
+  controllerOnly = false,
+  onControllerOnly,
+}: {
+  mode: SummaryMode;
+  /** Whether the decision list is filtered to the asks for the controller. */
+  controllerOnly?: boolean;
+  onControllerOnly?: (on: boolean) => void;
+}) {
   const summary = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const ledger = useResource<FlightLedgerView>(
     mode === "queue" ? RESOURCES.flightLedgerOpen : null,
@@ -318,6 +327,21 @@ export function Summary({ mode }: { mode: SummaryMode }) {
                   <div>
                     <dt>Parks</dt>
                     <dd>{view.metrics.parks.day}</dd>
+                  </div>
+                  <div>
+                    <dt>For the controller</dt>
+                    <dd>
+                      <button
+                        type="button"
+                        className="flight-tile-btn"
+                        aria-pressed={controllerOnly}
+                        aria-label={`For the controller: ${view.metrics.forTheController}`}
+                        title="Asks FLIGHT addressed to the controller: show them in the decision list"
+                        onClick={() => onControllerOnly?.(!controllerOnly)}
+                      >
+                        {view.metrics.forTheController}
+                      </button>
+                    </dd>
                   </div>
                   <div title={costText.title}>
                     <dt>{costText.label}</dt>
