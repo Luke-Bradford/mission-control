@@ -1,5 +1,6 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
+  FLIGHT_CHAIN_STALL_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_IDLE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -21,7 +22,7 @@ import {
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
-import { endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
+import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import type { Store } from "../store.ts";
 
@@ -460,6 +461,30 @@ export function flightSignals(i: {
         since,
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
+    }
+  }
+  // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
+  // ended before FLIGHT heard of it is dropped, not told
+  const stalled = blockedWork(store, repo, now, (card) =>
+    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false),
+  ).filter((b) => b.waitedMin * 60_000 >= FLIGHT_CHAIN_STALL_MS);
+  for (const b of stalled) {
+    // a chain that is the tail of a longer one is told with the longer one
+    const tail = stalled.some(
+      (o) =>
+        o !== b && o.chain.length > b.chain.length && o.chain.join(">").endsWith(b.chain.join(">")),
+    );
+    if (tail) continue;
+    raise(
+      "chain_stalled",
+      b.chain.join(">"),
+      now - b.waitedMin * 60_000,
+      `${b.chain.join(" waits on ")} has stood still for ${b.waitedMin} min: ${b.ref} waits on ${b.waitsOn.join(", ")}`,
+    );
+  }
+  for (const [id, signal] of Object.entries(state.signals)) {
+    if (signal.kind === "chain_stalled" && signal.toldAt === null && !active.has(id)) {
+      delete state.signals[id];
     }
   }
   for (const seat of session.seats) {

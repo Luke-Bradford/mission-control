@@ -208,6 +208,29 @@ describe("release on merge", () => {
     expect(synced).toHaveLength(1);
   });
 
+  it("keeps a dependent Blocked when its dependency closed without merging", async () => {
+    seed();
+    await release(T0);
+    store.replaceBoard(REPO, [
+      card(1015, { status: "Todo", state: "planned", closed: true }),
+      card(1139, { status: "Blocked", state: "blocked", after: { issues: [1015], prs: [] } }),
+    ]);
+    store.upsertPullRequests(
+      REPO,
+      [
+        pr(1033, { ticket: "mc#1015", closingIssues: [1015], state: "closed" }),
+        pr(1040, { ticket: "mc#1139", closingIssues: [1139] }),
+      ],
+      T0 + 5 * MIN,
+    );
+    await release(T0 + 6 * MIN);
+    expect(moves).toEqual([]);
+    expect(synced).toEqual([]);
+    expect(blockedWork(store, REPO, T0 + 6 * MIN)[0]?.waitsOn).toEqual([
+      "mc#1015 (closed without merging)",
+    ]);
+  });
+
   it("leaves an incomplete dependent in Blocked", async () => {
     seed();
     await release(T0);

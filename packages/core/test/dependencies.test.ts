@@ -62,10 +62,12 @@ describe("prStageText", () => {
 });
 
 describe("ticketWaits", () => {
+  const open = { status: "In review", state: "review" as const };
+  const done = { status: "Done", state: "done" as const };
   const board = [
-    { issueNumber: 1015, closed: false },
-    { issueNumber: 1016, closed: true },
-    { issueNumber: 1139, closed: false },
+    { issueNumber: 1015, closed: false, ...open },
+    { issueNumber: 1016, closed: true, ...done },
+    { issueNumber: 1139, closed: false, ...open },
   ];
   const prs = [pr({ number: 1033, ticket: "mc#1015", closingIssues: [1015] })];
 
@@ -91,6 +93,36 @@ describe("ticketWaits", () => {
         prs,
       }),
     ).toEqual([]);
+  });
+
+  it("keeps a closed-unmerged issue or PR as a wait", () => {
+    const closedIssue = [
+      ...board,
+      { issueNumber: 1017, closed: true, status: "Todo", state: "planned" as const },
+    ];
+    const unmerged = pr({ number: 9, state: "closed", ticket: "mc#1017", closingIssues: [1017] });
+    const wait = (after: { issues: number[]; prs: number[] }, prs: WaitPr[]) =>
+      ticketWaits({ repoId: "mc", card: card(1139, { after }), board: closedIssue, prs });
+    expect(wait({ issues: [1017], prs: [] }, [unmerged])).toEqual([
+      { ref: "mc#1017", text: "mc#1017 (closed without merging)" },
+    ]);
+    // a manual close with Status not Done is not proof either
+    expect(wait({ issues: [1017], prs: [] }, [])).toHaveLength(1);
+    expect(wait({ issues: [1017], prs: [] }, [{ ...unmerged, state: "merged" }])).toEqual([]);
+    expect(wait({ issues: [], prs: [9] }, [unmerged])).toEqual([
+      { ref: "PR 9", text: "PR 9 (closed without merging)" },
+    ]);
+  });
+
+  it("treats an After PR with no stored row as unresolved", () => {
+    expect(
+      ticketWaits({
+        repoId: "mc",
+        card: card(1139, { after: { issues: [], prs: [1033] } }),
+        board,
+        prs: [],
+      }),
+    ).toEqual([{ ref: "PR 1033", text: "PR 1033 (not read yet)" }]);
   });
 
   it("waits on an open GitHub blocked-by link, once with a body line for the same issue", () => {
@@ -148,7 +180,12 @@ describe("waitChains", () => {
       card(2, { after: { issues: [1], prs: [] } }),
       card(1),
     ];
-    const board = cards.map((c) => ({ issueNumber: c.issueNumber, closed: false }));
+    const board = cards.map((c) => ({
+      issueNumber: c.issueNumber,
+      closed: false,
+      status: "In progress",
+      state: "in progress" as const,
+    }));
     const chains = waitChains({ repoId: "mc", cards, board, prs: [] });
     expect(chains.map((c) => [c.ref, c.chain])).toEqual([
       ["mc#2", ["mc#2", "mc#1"]],
@@ -161,7 +198,12 @@ describe("waitChains", () => {
       card(1, { after: { issues: [2], prs: [] } }),
       card(2, { after: { issues: [1], prs: [] } }),
     ];
-    const board = cards.map((c) => ({ issueNumber: c.issueNumber, closed: false }));
+    const board = cards.map((c) => ({
+      issueNumber: c.issueNumber,
+      closed: false,
+      status: "In progress",
+      state: "in progress" as const,
+    }));
     const chains = waitChains({ repoId: "mc", cards, board, prs: [] });
     expect(chains.every((c) => c.chain.length <= 3)).toBe(true);
   });

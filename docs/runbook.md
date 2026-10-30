@@ -988,7 +988,11 @@ ever adds a hold, and is logged as a `card` decision.
 The hub reads one list of waits per ticket (`ticketWaits` in `packages/core/src/dependencies.ts`) from
 three places: GitHub's "blocked by" links, `Depends on #N` and `After PR N` lines in the issue body (the
 poll stores them on the board card as `after`), and a PR whose base is another open PR's branch (the poll
-stores the base on the PR). A dependency that is closed, or a PR that merged or closed, is not a wait.
+stores the base on the PR). A dependency ends its wait only
+when it merged: a closed issue counts when a merged PR carries it (or, with no PR row left, its card is in
+Done); one closed with its PR unmerged, or an `After PR` that closed unmerged, keeps the wait and shows as
+"closed without merging" for FLIGHT to re-plan. A named PR the PR pages left out is read by number on the
+board poll; until it is read it counts as a wait.
 Every start path applies it: the engine's deal, a hand Start, FLIGHT's `start_seat`, `promote` and the
 queue reorder. The refusal names the wait and where its PR is ("waits on mc#1015 (PR 1033 in CI)").
 
@@ -997,7 +1001,7 @@ to Ready if it is otherwise complete (one area label, Done when, Size) and tells
 merge main, once each. A step that fails or is refused is tried again after five minutes, for a day. FLIGHT's
 wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and `flight_state` and
 `GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
-it has waited. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
+it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
 `Depends on` line for that PR's ticket (or `After PR N`).
 
 ### FLIGHT's controller powers

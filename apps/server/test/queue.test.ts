@@ -577,6 +577,15 @@ describe("refillQueues", () => {
     expect(issues(SERVER)).toEqual([1]);
   });
 
+  it("does not deal a card whose dependency closed without merging", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "Todo", state: "planned", closed: true }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("orders by Priority P0, P1, P2, unset, then by age", async () => {
     store.replaceBoard(REPO, [
       card(1, { priority: null, createdAt: NOW - 9 * DAY }),

@@ -861,6 +861,8 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 15 * 60_000;
+/** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
+export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
@@ -870,6 +872,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
+  "chain_stalled",
   "github_budget",
   "hub_error",
 ] as const;

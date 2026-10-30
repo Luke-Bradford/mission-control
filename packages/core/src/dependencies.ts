@@ -3,6 +3,8 @@
  * and `After PR` lines of its body, and a PR based on another open PR's branch. Pure: the server
  * hands it the stored board and PRs.
  */
+
+import { statusOutOfDate } from "./hud.ts";
 import { dependsOn } from "./repo-rules.ts";
 import type { BoardItem, PullRequestView } from "./types.ts";
 
@@ -66,14 +68,15 @@ export const prCarries = (
 export interface WaitInput {
   repoId: string;
   card: WaitCard;
-  board: Pick<BoardItem, "issueNumber" | "closed">[];
+  board: Pick<BoardItem, "issueNumber" | "closed" | "status" | "state">[];
   prs: readonly WaitPr[];
 }
 
 /**
- * Every open wait of the ticket, each with a reason in plain words. A dependency that is closed (or
- * a PR that merged or closed) is not a wait; an `After PR` the store has no row for is not either,
- * since nothing says it is open.
+ * Every open wait of the ticket, each with a reason in plain words. Closed is not merged: a closed
+ * dependency ends its wait only when a merged PR carries it (or, with no PR row left, its card is in
+ * Done); a closed unmerged PR or a manual close keeps the wait, for FLIGHT to re-plan. An `After PR`
+ * ends only when that PR merged; one the store has no row for is unresolved until it is read.
  */
 export function ticketWaits(i: WaitInput): DependencyWait[] {
   const { repoId, card, board, prs } = i;
@@ -92,12 +95,31 @@ export function ticketWaits(i: WaitInput): DependencyWait[] {
     issueWait(b.ref, m?.[1] === repoId ? Number(m[2]) : null);
   }
   for (const n of card.after?.issues ?? []) {
-    if (board.find((b) => b.issueNumber === n)?.closed === true) continue;
+    const dep = board.find((b) => b.issueNumber === n);
+    if (dep?.closed === true) {
+      // closed is not merged: a merged PR proves the work landed; with no PR row at all (swept as
+      // old) the card's own Done status stands in; a closed unmerged PR, or a manual close, waits
+      const carrying = prs.filter((p) => prCarries(p, repoId, n));
+      const landed =
+        carrying.some((p) => p.state === "merged") ||
+        (carrying.length === 0 && !statusOutOfDate(dep));
+      if (landed) continue;
+      const ref = `${repoId}#${n}`;
+      out.set(ref, { ref, text: `${ref} (closed without merging)` });
+      continue;
+    }
     issueWait(`${repoId}#${n}`, n);
   }
   for (const n of card.after?.prs ?? []) {
     const p = prs.find((x) => x.number === n);
-    if (p?.state === "open") out.set(`PR ${n}`, { ref: `PR ${n}`, text: prStageText(p) });
+    if (p?.state === "merged") continue;
+    const text =
+      p === undefined
+        ? `PR ${n} (not read yet)`
+        : p.state === "open"
+          ? prStageText(p)
+          : `PR ${n} (closed without merging)`;
+    out.set(`PR ${n}`, { ref: `PR ${n}`, text });
   }
   // a PR of this ticket stacked on another open PR's branch
   for (const own of prs) {
