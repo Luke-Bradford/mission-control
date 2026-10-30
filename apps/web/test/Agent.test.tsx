@@ -1046,6 +1046,26 @@ describe("Agent page: header and tiles", () => {
     expect(ctx?.textContent).not.toContain("1 compactions");
   });
 
+  it.each([
+    ["missing", undefined, null],
+    ["zero", { count: 0, tokensSaved: 0 }, null],
+    ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4.2k tokens saved"],
+    [
+      "many",
+      { count: 128, tokensSaved: 1_234_000 },
+      "Re-reads avoided: 128, about 1.23M tokens saved",
+    ],
+  ])("context tile re-reads line: %s", async (_name, rereads, line) => {
+    stub({
+      rows: [crewRow({ digest: digest({ rereads }), contextWindow: 200_000 })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const ctx = tileOf(container, "Context");
+    if (line === null) expect(ctx?.textContent).not.toContain("Re-reads");
+    else expect(ctx?.textContent).toContain(line);
+  });
+
   it("context tile shows — for compactions when there is no digest, not 0", async () => {
     stub({ rows: [crewRow({ digest: null, contextWindow: 200_000 })] });
     const { container } = render(<Agent id="shop-app-ta" />);

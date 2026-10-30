@@ -87,6 +87,18 @@ function splitUsage(u: ContextUsage) {
 const compactionsText = (d: CrewRow["digest"]): string =>
   d ? plural(d.compactions, "compaction") : DASH;
 
+/** The guard's answered re-reads: hidden at 0 and while the digest predates the field. */
+function Rereads({ d }: { d: CrewRow["digest"] }) {
+  const r = d?.rereads;
+  if (!r || r.count <= 0) return null;
+  return (
+    <>
+      {" · "}Re-reads avoided: <span className="num">{r.count}</span>, about{" "}
+      <span className="num">{kTokens(r.tokensSaved)}</span> tokens saved
+    </>
+  );
+}
+
 /** A crew seat's Context tile: the CLI's own breakdown (`GET /api/seats/:id/context`). */
 function SeatContext({ row }: { row: CrewRow }) {
   const configRes = useResource<ConfigView>(RESOURCES.config);
@@ -106,7 +118,12 @@ function SeatContext({ row }: { row: CrewRow }) {
     const timer = setInterval(() => hub.refetch(contextRef.path), SEAT_CONTEXT_REFRESH_MS);
     return () => clearInterval(timer);
   }, [running, contextRef.path]);
-  const tail = compactionsText(row.digest);
+  const tail = (
+    <>
+      {compactionsText(row.digest)}
+      <Rereads d={row.digest} />
+    </>
+  );
   const window = usage?.window ?? row.contextWindow;
   if (codex || !usage || window === null || window <= 0) {
     const pct =
@@ -260,6 +277,7 @@ function TilesBody({
           </span>
           <span className="d">
             Breakdown arrives with the agent runtime (phase 2) · {compactionsText(d)}
+            <Rereads d={d} />
           </span>
         </Tile>
       )}
