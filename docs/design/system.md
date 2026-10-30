@@ -29,10 +29,10 @@ comparison; show common actions without a click.
 Controls are keyboard reachable, named, focus-visible and 24×24 px minimum. Shape APIs for the
 page; fetch a tab when opened; do not re-render a page for a clock tick. Check 1280, 1600 and
 1920 widths, 1600×700, light and dark, and empty, long and many-item states. RETRO records a
-`design` check and its screenshot-pair note for the QA board. It is not a merge gate until PR-head
-rendering is available.
+`design` check for the QA board. It is not a merge gate until PR-head rendering is available.
 
 ## 10. Change control
 
 Change a rule with a PR and screenshot. The catalogue says what a page shows; this document says
-how it behaves. A violation of these rules is an Important review finding, never a taste call.
+how it behaves. A no on an [I] item of the hud-design checklist is an Important finding; any
+other no is Minor. Neither is a taste call.
