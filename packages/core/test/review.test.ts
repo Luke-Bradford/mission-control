@@ -93,10 +93,16 @@ describe("fixCommsText", () => {
       fixCommsText({
         retro: "RETRO",
         sha: "abcdef1234",
-        findings: [fin({ summary: "a" }), fin({ severity: "Critical", summary: "b" })],
+        findings: [
+          fin({ summary: "a" }),
+          fin({ severity: "Critical", summary: "b" }),
+          fin({ severity: "Minor", summary: "c" }),
+          fin({ severity: "Minor", summary: "d" }),
+          fin({ severity: "Minor", summary: "e" }),
+        ],
       }),
     ).toBe(
-      "RETRO reviewed abcdef1: 1 Critical, 1 Important.\nFindings are in RETRO's report_findings record; address them, then report_evidence.",
+      "RETRO reviewed abcdef1: 1 Critical, 1 Important, 3 Minor.\nFindings are in RETRO's report_findings record; address Critical and Important findings, then report_evidence.",
     );
   });
 });

@@ -230,11 +230,11 @@ export function fixCommsText(i: {
   sha: string;
   findings: readonly ReviewFinding[];
 }): string {
-  const counts = BLOCKING_SEVERITIES.flatMap((severity) => {
+  const counts = FINDING_SEVERITIES.flatMap((severity) => {
     const n = i.findings.filter((f) => f.severity === severity).length;
     return n === 0 ? [] : [`${n} ${severity}`];
   });
-  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address them, then report_evidence.`;
+  return `${i.retro} reviewed ${i.sha.slice(0, 7)}: ${counts.join(", ")}.\nFindings are in ${i.retro}'s report_findings record; address Critical and Important findings, then report_evidence.`;
 }
 
 export const MINOR_HEADING = "## Minor findings (logged, not looped)";
