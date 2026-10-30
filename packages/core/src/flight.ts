@@ -855,8 +855,6 @@ export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
 /** FLIGHT's request to the controller, unanswered this long, is a wake reason. */
 export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
-/** The setting that keeps the calls seats made to FLIGHT. */
-export const FLIGHT_CALLS_SETTING = "flight.calls";
 /** The setting that keeps what FLIGHT waits on, by target. */
 export const FLIGHT_WAITS_SETTING = "flight.waits";
 /** The furthest ahead a `wait_on` may look. */

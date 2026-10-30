@@ -1333,15 +1333,42 @@ const decisionOnly = (id: string): boolean =>
 /** A fact that is only a name for what a decision names, not a target. */
 const NOT_A_TARGET = new Set(["true", "false", "open", "merged", "closed", "null"]);
 
+/** Words that name a kind of fact, not the thing it is about: never a target of their own. */
+const GENERIC = new Set(["report", "watch", "loop", "ask"]);
+
+/**
+ * What a decision on this fact would name. A signal's kind and its times are not targets (two
+ * signals of one kind share them); a park's kind is not either. What is left is the seat, run, ref,
+ * question or item key the fact is about.
+ */
 const factTargets = (category: string, item: unknown): string[] => {
   const first = Array.isArray(item) ? item[0] : item;
-  const whole = String(first);
   // a question's decision may name it as its item key, ask:<id>
-  const alias = category === "q" ? [`ask:${whole}`] : [];
-  return [whole, ...alias, ...(typeof first === "string" ? first.split(":") : [])].filter(
-    (t, i, all) => t !== "" && !NOT_A_TARGET.has(t) && all.indexOf(t) === i,
+  if (typeof first !== "string")
+    return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
+  let parts = first.split(":");
+  if (category === "signals") parts = parts.slice(1);
+  if (category === "parked") parts = parts.slice(0, -1);
+  const whole = parts.join(":");
+  return [whole, ...parts].filter(
+    (t, i, all) =>
+      t !== "" &&
+      !NOT_A_TARGET.has(t) &&
+      !GENERIC.has(t) &&
+      !/^\d{10,}$/.test(t) &&
+      all.indexOf(t) === i,
   );
 };
+
+/** The words of a decision's text, lower-cased, trailing punctuation off: a target matches a whole word. */
+const wordsOf = (text: string): Set<string> =>
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[\s,;()"'`]+/)
+      .map((w) => w.replace(/[.:]+$/, ""))
+      .filter((w) => w !== ""),
+  );
 
 /** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
 const accountable = (category: string, item: unknown): boolean => {
@@ -1400,16 +1427,17 @@ export function unhandledReasons(
   open: ReadonlySet<string>,
 ): WakeReason[] {
   const decisions = store.flightDecisions(wokeAt, 500);
+  const words = decisions.map((d) => wordsOf(`${d.about} ${d.decision}`));
   return reasons.filter((r) => {
     if (!decisionOnly(r.id) && !open.has(r.id)) return false;
-    return !decisions.some((d) =>
+    return !decisions.some((d, i) =>
       r.targets.some(
         (t) =>
           d.ref === t ||
           d.seatId === t ||
           d.targetRunId === t ||
           (d.questionId !== null && String(d.questionId) === t) ||
-          (t.length >= 3 && `${d.about} ${d.decision}`.toLowerCase().includes(t.toLowerCase())),
+          (t.length >= 3 && words[i]?.has(t.toLowerCase()) === true),
       ),
     );
   });

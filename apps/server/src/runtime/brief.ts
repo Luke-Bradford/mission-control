@@ -264,6 +264,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
     "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete suggested fix that can be applied without redesigning anything.",
     "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
+    "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
     "",
     `## Ticket ${i.repo}#${i.issue}`,
     "",

@@ -336,7 +336,7 @@ describe("the mc tools", () => {
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
-      ["call_flight", ["writer", "read-only"]],
+      ["call_flight", ["writer", "read-only", "scratch"]],
       ["report_evidence", ["writer", "read-only"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
@@ -1173,7 +1173,7 @@ describe("call_flight", () => {
     expect(JSON.stringify(calls())).toContain("about mc#77");
   });
 
-  it("is offered to every seat but FLIGHT and a review's scratch seat, and refuses FLIGHT itself", async () => {
+  it("is offered to every seat but FLIGHT, a review's scratch seat included, and refuses FLIGHT itself", async () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:1");
     const t = tool("call_flight");
@@ -1184,6 +1184,21 @@ describe("call_flight", () => {
       isError: true,
     });
     expect(calls() ?? {}).toEqual({});
+  });
+
+  it("counts a repeat as a new call once the first has been told, and as one until then", async () => {
+    tools = make({ config: withFlight() });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    expect(Object.values(calls())).toHaveLength(1);
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    for (const x of Object.values(saved.signals) as { toldAt: number | null }[]) x.toldAt = NOW;
+    store.setSetting(`${FLIGHT_SIGNALS_SETTING}:mc`, JSON.stringify(saved));
+    tools = make({ config: withFlight(), now: () => NOW + 30 * 60_000 });
+    await call({ reason: "same blocker", ref: "mc#77" });
+    const kept = Object.values(calls()) as { toldAt: number | null }[];
+    expect(kept).toHaveLength(2);
+    expect(kept.filter((x) => x.toldAt === null)).toHaveLength(1);
   });
 
   it("refuses an empty reason", async () => {

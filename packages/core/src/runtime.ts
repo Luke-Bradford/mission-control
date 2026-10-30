@@ -126,6 +126,7 @@ export const MC_TOOL_GRANTS: Readonly<
   },
   scratch: {
     base: [
+      MC_TOOL_NAMES.callFlight,
       MC_TOOL_NAMES.reportFindings,
       MC_TOOL_NAMES.restoreFile,
       MC_TOOL_NAMES.commsRead,
@@ -346,6 +347,7 @@ export const SCRATCH_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
   MC_TOOLS.commsRead,

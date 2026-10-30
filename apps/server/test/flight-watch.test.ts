@@ -3923,6 +3923,24 @@ describe("every wake ends with each reason handled", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("a decision for one signal's target leaves another of the same kind unhandled", async () => {
+    liveCrew();
+    watch.start();
+    for (const seatId of ["guido-1", "guido-2"])
+      recordSeatCall(store, "mc", { seat: seatId, reason: "stuck", ref: null, at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    flightIdle();
+    // names the kind and one seat only
+    decide({ kind: "note", seatId: "guido-1", about: "seat_call from guido-1", decision: "on it" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const line = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(line).toContain("guido-2");
+    expect(line).not.toContain("guido-1");
+  });
+
   it("a decision about something else leaves the reason unhandled", async () => {
     await wokeOnAQuestion();
     decide({ kind: "note", about: "mc#999 something else", decision: "noted" });

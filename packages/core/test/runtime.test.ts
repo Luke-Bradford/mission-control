@@ -719,10 +719,8 @@ describe("mc tool grants", () => {
     expect(MC_TOOL_GRANTS["read-only"].base).toContain("ask_flight");
     // a scratch review answers with report_findings alone
     expect(MC_TOOL_GRANTS.scratch.base).not.toContain("ask_flight");
-    expect(MC_TOOL_GRANTS.scratch.base).not.toContain("call_flight");
-    // a writer and a read-only seat call FLIGHT
-    expect(MC_TOOL_GRANTS.writer.base).toContain("call_flight");
-    expect(MC_TOOL_GRANTS["read-only"].base).toContain("call_flight");
+    // every seat but FLIGHT may call it
+    for (const mode of Object.values(MC_TOOL_GRANTS)) expect(mode.base).toContain("call_flight");
     expect(Object.values(MC_TOOL_NAMES)).not.toContain("ask_operator");
     for (const g of Object.values(MC_TOOL_GRANTS)) {
       expect([...g.base, ...g.grantable] as string[]).not.toContain("ask_operator");
@@ -848,6 +846,7 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
       "mcp__mc__comms_read",

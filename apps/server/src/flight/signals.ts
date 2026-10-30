@@ -1,7 +1,6 @@
 /** Durable, evidence-backed wake causes. Only successful delivery marks a cause as told. */
 import {
   COMMS_CAPCOM,
-  FLIGHT_CALLS_SETTING,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_HOUR_MS,
@@ -715,20 +714,17 @@ export function recordFlightWait(store: Store, target: string, wait: FlightWait)
  */
 export function recordSeatCall(store: Store, repo: string, call: SeatCall): boolean {
   const state = read(store, repo, call.at);
-  const calls = stored<SeatCall[]>(store, FLIGHT_CALLS_SETTING, []).filter(
-    (c) => c.at > call.at - FLIGHT_HOUR_MS,
-  );
-  if (calls.some((c) => c.seat === call.seat && c.ref === call.ref && c.reason === call.reason))
+  const evidence = `${call.seat} calls FLIGHT${call.ref === null ? "" : ` about ${call.ref}`}: ${call.reason}`;
+  // the same call still waiting to be told is one call; once told, a repeat is a new one
+  if (
+    Object.values(state.signals).some(
+      (x) => x.kind === "seat_call" && x.toldAt === null && x.evidence === evidence,
+    )
+  )
     return false;
-  store.setSetting(FLIGHT_CALLS_SETTING, JSON.stringify([...calls, call]));
   raiseSignal(
     state,
-    {
-      kind: "seat_call",
-      key: `${call.seat}:${call.at}`,
-      since: call.at,
-      evidence: `${call.seat} calls FLIGHT${call.ref === null ? "" : ` about ${call.ref}`}: ${call.reason}`,
-    },
+    { kind: "seat_call", key: `${call.seat}:${call.at}`, since: call.at, evidence },
     call.at,
   );
   save(store, repo, state);

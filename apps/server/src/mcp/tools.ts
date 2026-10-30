@@ -2522,7 +2522,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         required: ["reason"],
         additionalProperties: false,
       },
-      modes: ["writer", "read-only"],
+      modes: ["writer", "read-only", "scratch"],
       offeredTo: (seatId) => !isFlight(seatId),
       call: callFlight,
     },
