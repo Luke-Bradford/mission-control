@@ -362,9 +362,11 @@ What each seat's process starts with:
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
   After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
-  FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
-  its required reason; only this Comms item kind is eligible for that path. Messages from before
-  the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
+  FLIGHT may settle only a stale or already-resolved `comms-open:` item it sent, recording its
+  required reason; a seat's or the operator's item stays protected. A linked PR that merges or
+  closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
+  Messages from before the feature's rollout boundary do not enter the escalation, preventing a
+  rollout backlog.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
