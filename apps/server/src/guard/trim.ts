@@ -5,7 +5,7 @@
  * result whole: unlike the guard hook it never blocks, as the tool has already run.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, constants, lstatSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { trimToolResponse } from "@mc/core";
 
@@ -14,6 +14,28 @@ export const TRIM_ENTRY = "apps/server/src/guard/trim-cli.ts";
 
 /** A `tool_use_id` is a file name here: only what the CLI mints. */
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * Keeps `text` in a new file in `dir`. The hook runs outside the seat's sandbox, so the seat must
+ * not steer the write: `dir` is made by the hub before launch and is denyWrite to the seat, and
+ * here it must still be a real directory we own (not a link), and the file is created exclusively
+ * without following a link.
+ */
+function keepFull(dir: string, file: string, text: string): void {
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || st.uid !== process.getuid?.()) throw new Error("not our folder");
+  const fd = openSync(
+    file,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    const buf = Buffer.from(text);
+    for (let at = 0; at < buf.length; ) at += writeSync(fd, buf, at);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /** The hook's stdout for one call: `""` when the result is left as it is. */
 export function trimMain(stdin: string, dir: string): string {
@@ -35,8 +57,7 @@ export function trimMain(stdin: string, dir: string): string {
     const cut = trimToolResponse(tool, res, file);
     if (cut === null) return "";
     // the cut form is only safe to show once the full text is kept
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(file, cut.full, { mode: 0o600 });
+    keepFull(dir, file, cut.full);
     return JSON.stringify({
       hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: cut.output },
     });

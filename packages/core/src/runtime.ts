@@ -1,6 +1,7 @@
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
+import { TOOL_OUTPUT_DIR } from "./tool-trim.ts";
 import type { AgentId } from "./types.ts";
 
 // What a crew process is started with: the CLI's tool allowlist (in `-p` mode anything not allowed
@@ -998,6 +999,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
           i.dataDir,
           i.pnpmStoreDir,
           ...tempDenies,
+          // the trim hook writes here outside the sandbox: a seat must not swap it for a symlink
+          ...(i.tempRoot === undefined ? [] : [`${i.tempRoot}/${TOOL_OUTPUT_DIR}`]),
         ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
         // read: the hub, the loops, the other crew clones and the operator's own working folders.

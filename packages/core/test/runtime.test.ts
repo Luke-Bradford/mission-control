@@ -887,6 +887,7 @@ describe("crew sandbox and scoped edits", () => {
       expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
+      expect(f.denyWrite).toContain(`${"/tmp/mc-runs/seat-test"}/tool-output`);
       expect(f.denyWrite).toContain("/tmp/claude-*");
       expect(f.denyWrite).toContain("/private/tmp/claude-*");
     }

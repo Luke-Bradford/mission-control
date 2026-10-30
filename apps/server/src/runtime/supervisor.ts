@@ -1539,6 +1539,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      // made here, before the seat runs: the trim hook writes in it outside the sandbox
+      if (run.vendor !== "codex") {
+        const outDir = join(tmp, TOOL_OUTPUT_DIR);
+        try {
+          mkdirSync(outDir, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const st = lstatSync(outDir);
+        if (!st.isDirectory() || st.uid !== process.getuid?.())
+          throw new Error("crew tool-output folder must be a directory owned by the server");
+      }
       const pnpmStore = sharedPnpmStoreDir(crew?.worktrees ?? "");
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));

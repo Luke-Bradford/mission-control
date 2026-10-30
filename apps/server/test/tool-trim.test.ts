@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TOOL_TRIM_HEAD, TOOL_TRIM_TAIL } from "@mc/core";
@@ -8,6 +16,7 @@ import { trimMain } from "../src/guard/trim.ts";
 let dir: string;
 beforeEach(() => {
   dir = join(mkdtempSync(join(tmpdir(), "mc-trim-")), "tool-output");
+  mkdirSync(dir);
 });
 afterEach(() => rmSync(join(dir, ".."), { recursive: true, force: true }));
 
@@ -42,9 +51,24 @@ describe("trimMain", () => {
     expect(trimMain("not json", dir)).toBe("");
   });
 
-  it("leaves the result whole when the full output cannot be kept", () => {
-    const blocker = join(dir, "..", "file");
-    writeFileSync(blocker, "x");
-    expect(trimMain(post({}), join(blocker, "tool-output"))).toBe("");
+  it("leaves the result whole when the folder is missing", () => {
+    expect(trimMain(post({}), join(dir, "..", "absent"))).toBe("");
+  });
+
+  it("does not write through a folder the seat swapped for a link", () => {
+    const outside = join(dir, "..", "outside");
+    mkdirSync(outside);
+    rmSync(dir, { recursive: true });
+    symlinkSync(outside, dir);
+    expect(trimMain(post({}), dir)).toBe("");
+    expect(existsSync(join(outside, "toolu_1.txt"))).toBe(false);
+  });
+
+  it("does not write through a file link, and never overwrites a file", () => {
+    const target = join(dir, "..", "target.txt");
+    writeFileSync(target, "keep");
+    symlinkSync(target, join(dir, "toolu_1.txt"));
+    expect(trimMain(post({}), dir)).toBe("");
+    expect(readFileSync(target, "utf8")).toBe("keep");
   });
 });
