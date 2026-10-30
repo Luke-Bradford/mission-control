@@ -85,4 +85,40 @@ export interface AuditView {
   changes: AuditChange[];
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
+  /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
+  capped?: Record<string, number>;
+}
+
+/** A list in the audit response holds at most this many rows (until the Audit page is redesigned). */
+export const AUDIT_LIST_CAP = 50;
+
+/** The audit with each list cut to AUDIT_LIST_CAP, and `capped` naming the lists it cut. */
+export function capAudit(audit: AuditView): AuditView {
+  const capped: Record<string, number> = {};
+  const cut = <T>(name: string, list: T[]): T[] => {
+    if (list.length <= AUDIT_LIST_CAP) return list;
+    capped[name] = list.length;
+    return list.slice(0, AUDIT_LIST_CAP);
+  };
+  const out: AuditView = {
+    ...audit,
+    longRunners: cut("longRunners", audit.longRunners),
+    deathLoops: cut("deathLoops", audit.deathLoops),
+    reworkRounds: cut("reworkRounds", audit.reworkRounds),
+    refusalsByRule: cut("refusalsByRule", audit.refusalsByRule),
+    refusals: cut("refusals", audit.refusals),
+    refusalSpikes: cut("refusalSpikes", audit.refusalSpikes),
+    spendOutliers: cut("spendOutliers", audit.spendOutliers),
+    costPerMergedTicket: cut("costPerMergedTicket", audit.costPerMergedTicket),
+    modelPromptTimeline: cut("modelPromptTimeline", audit.modelPromptTimeline),
+    prSizes: {
+      prs: cut("prSizes.prs", audit.prSizes.prs),
+      outliers: cut("prSizes.outliers", audit.prSizes.outliers),
+    },
+    chatter: cut("chatter", audit.chatter),
+    flakes: cut("flakes", audit.flakes),
+    changes: cut("changes", audit.changes),
+    surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
+  };
+  return Object.keys(capped).length === 0 ? audit : { ...out, capped };
 }

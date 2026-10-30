@@ -100,6 +100,7 @@ import {
   needsSuperuserText,
   needsYouItems,
   OPERATOR_HEADER,
+  openPrText,
   PROFILE_PAIR_TEXT,
   type PullRequestView,
   passNeedsBriefText,
@@ -1725,6 +1726,59 @@ describe("start_seat", () => {
       expect((await start()).isError).toBeUndefined();
     });
   });
+
+  describe("acts on the live card", () => {
+    it("refuses a ticket closed on GitHub that the cached board still shows open", async () => {
+      board(sc(7, { labels: ["area:server"] }));
+      readImpl = (n) => sc(n, { labels: ["area:server"], closed: true });
+      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "Done")));
+      expect(startCalls).toEqual([]);
+    });
+
+    it("refuses a ticket moved to Blocked since the last poll", async () => {
+      board(sc(7, { labels: ["area:server"], status: "Backlog" }));
+      readImpl = (n) => sc(n, { labels: ["area:server"], status: "Blocked" });
+      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "Blocked")));
+      expect(startCalls).toEqual([]);
+    });
+
+    it("refuses when the live card cannot be read", async () => {
+      board(sc(7, { labels: ["area:server"] }));
+      readImpl = () => {
+        throw new Error("github down");
+      };
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
+    });
+
+    it("refuses a ticket whose previous run's PR is still open, past the 24-hour limit", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      expect(await start()).toEqual(refused(openPrText("mc#7", 9)));
+      expect(startCalls).toEqual([]);
+    });
+  });
 });
 
 describe("start_seat planner", () => {
@@ -3026,6 +3080,13 @@ describe("flight_state", () => {
         },
       ],
       holds: [],
+      reviewQueue: {
+        queued: 0,
+        running: 0,
+        seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+      },
+      mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
+      flowHolds: [],
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
       ],

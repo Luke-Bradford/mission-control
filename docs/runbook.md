@@ -309,6 +309,15 @@ merged-PR history remain available to Activity and Telemetry for one year. Repor
 unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
+### Page-load budget
+
+Every HUD page's first load stays under 500 KB gzipped, and no single response is over 300 KB
+or takes a second to build. `apps/server/test/response-budget.test.ts` builds each page's
+first-load responses from a large fixture and fails above those numbers; run it alone with
+`pnpm -s vitest run apps/server/test/response-budget.test.ts` (it prints each response's size and
+build time). It also runs with the server suite in CI. The routes, paging parameters and summary
+shapes are in `docs/hud-response-budgets.md`.
+
 ## First crew
 
 Mission Control runs its own Claude agents ("seats") only in a clone of its own, never in your
@@ -1777,6 +1786,21 @@ If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery
 Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. Remote plugins are off for seats, so Codex does not download its shared plugin catalog into each isolated home. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
+
+## Branch previews
+
+The live hub can start an open PR as a loopback-only preview with `POST /api/previews {"pr":123}`.
+`GET /api/previews` lists the active preview URLs and `DELETE /api/previews/123` ends one. The
+operator token is required for starting and ending previews.
+
+Each preview uses a SQLite `VACUUM INTO` snapshot in the live hub's private data directory, a
+temporary detached worktree, a spare port from 7431–7439, and `MC_NO_LOOP_WRITES=1` with crew
+off. It receives a newly generated operator token; the live token is never passed to it. At most
+two previews run. A capacity hold refuses new previews with its measured reason. The parent stops
+a preview after 20 minutes without a browser request, and removes its worktree and database on
+expiry, explicit close, or live-hub shutdown. Preparation has a five-minute deadline, and an
+operator close cancels preparation as well as a running child. Previews only run branches from the
+repository checked out by the hub; PR numbers in another configured repository are not eligible.
 
 ## Audit API
 

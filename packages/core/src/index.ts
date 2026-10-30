@@ -9,6 +9,7 @@ export * from "./flight.ts";
 export * from "./flight-memory.ts";
 export * from "./guard.ts";
 export * from "./hud.ts";
+export * from "./hud-paths.ts";
 export * from "./loop.ts";
 export * from "./map.ts";
 export * from "./map-fixture.ts";

@@ -738,6 +738,12 @@ export interface CommsRow {
   replyTo: string | null;
   mentions: string[];
 }
+/** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
+export type CommsReadScope =
+  | { crew: true }
+  | { pair: readonly [string, string] }
+  | { agent: string }
+  | { inbox: string };
 export interface NewCommsRow {
   at: number;
   from: string;
@@ -2965,6 +2971,27 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The repo's open PRs and those updated at or after `since` (all of them when null), newest number first. */
+  pullRequestsSince(repoId: RepoId, since: number | null): PullRequestView[] {
+    const rows =
+      since === null
+        ? (this.statement("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC").all(
+            repoId,
+          ) as Row[])
+        : (this.statement(
+            "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR updated_at >= ? OR merged_at >= ?) ORDER BY number DESC",
+          ).all(repoId, since, since) as Row[]);
+    return this.pullRequestRows(rows);
+  }
+
+  pullRequest(repoId: RepoId, number: number): PullRequestView | null {
+    const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
+      repoId,
+      number,
+    ) as Row | undefined;
+    return row === undefined ? null : (this.pullRequestRows([row])[0] ?? null);
+  }
+
   /** Pull requests for configured repos, indexed after one table read for the HUD. */
   pullRequestsForRepos(repoIds: readonly RepoId[]): Map<RepoId, PullRequestView[]> {
     const out = new Map<RepoId, PullRequestView[]>();
@@ -4320,6 +4347,73 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+  private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
+    if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
+    if ("pair" in scope) {
+      const [a, b] = scope.pair;
+      return { where: "((from_id=? AND to_id=?) OR (from_id=? AND to_id=?))", args: [a, b, b, a] };
+    }
+    if ("agent" in scope)
+      return { where: "(from_id=? OR to_id=?)", args: [scope.agent, scope.agent] };
+    const id = scope.inbox;
+    return {
+      where: `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      args: [id, id, id],
+    };
+  }
+  /**
+   * The newest `limit` messages of a scope, oldest first, strictly older than `before` when given.
+   * `hasMore` says older ones remain, so the HUD can offer "load older".
+   */
+  commsPage(
+    scope: CommsReadScope,
+    limit: number,
+    before?: string,
+  ): { rows: CommsRow[]; hasMore: boolean } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const beforeId = before === undefined ? null : commsMessageNumber(before);
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM comms WHERE ${where}${
+            beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
+          } ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
+    ).map((r) => this.commsRow(r));
+    const hasMore = rows.length > limit;
+    return { rows: rows.slice(0, limit).reverse(), hasMore };
+  }
+  /** How many messages a scope holds, and how many of them come after the read cursor. */
+  commsCounts(scope: CommsReadScope, cursor: string | null): { count: number; unread: number } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+      )
+      .get(offset, ...args) as { count: number; unread: number };
+    return { count: r.count, unread: r.unread };
+  }
+  /** Everyone `id` has exchanged messages with, in first-contact order. */
+  commsContactIds(id: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT CASE WHEN from_id=? THEN to_id ELSE from_id END AS contact
+          FROM comms WHERE from_id=? OR to_id=? GROUP BY contact ORDER BY MIN(id)`,
+        )
+        .all(id, id, id) as { contact: string }[]
+    ).map((r) => r.contact);
   }
   commsForRefs(refs: string[]): CommsRow[] {
     if (!refs.length) return [];
