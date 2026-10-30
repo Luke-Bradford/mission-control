@@ -209,9 +209,13 @@ function WaitingReason({ text }: { text: string }) {
     observer?.observe(el);
     window.addEventListener("resize", measure);
     measure();
+    // The clamp's stylesheet can finish layout after this component's first layout effect.
+    // Recheck in the next frame so an overflowing one-sentence reason keeps its disclosure.
+    const frame = window.requestAnimationFrame(measure);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
+      window.cancelAnimationFrame(frame);
     };
   }, []);
   const hasMore = open || first !== reason || overflows;
