@@ -77,3 +77,12 @@ it("keeps every seat colour at non-text contrast in its theme", () => {
     expect(contrast(THEME_TOKENS.light[name], light), `${name} light`).toBeGreaterThanOrEqual(3);
   }
 });
+
+it("keeps active Map seat names legible on their changed surface", () => {
+  for (const selector of [
+    ".map-seat:hover .map-seat-name",
+    '.map-seat[aria-pressed="true"] .map-seat-name',
+  ]) {
+    expect(listed(selector)).toContain("color: var(--fg)");
+  }
+});
