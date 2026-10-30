@@ -287,6 +287,15 @@ merged-PR history remain available to Activity and Telemetry for one year. Repor
 unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
 
+### Page-load budget
+
+Every HUD page's first load stays under 500 KB gzipped, and no single response is over 300 KB
+or takes a second to build. `apps/server/test/response-budget.test.ts` builds each page's
+first-load responses from a large fixture and fails above those numbers; run it alone with
+`pnpm -s vitest run apps/server/test/response-budget.test.ts` (it prints each response's size and
+build time). It also runs with the server suite in CI. The routes, paging parameters and summary
+shapes are in `docs/hud-response-budgets.md`.
+
 ## First crew
 
 Mission Control runs its own Claude agents ("seats") only in a clone of its own, never in your
