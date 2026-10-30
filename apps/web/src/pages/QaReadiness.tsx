@@ -20,6 +20,7 @@ const NO_REPOS: RepoView[] = [];
 const NO_PRS: PullRequestView[] = [];
 const NO_FINDINGS: QaFindingView[] = [];
 const NO_RUNS: CiRunsView["runs"] = [];
+const QA_EVIDENCE_FOLLOW_UP = "#1082";
 
 type CheckState = "passing" | "failing" | "pending";
 const STATE_TONE: Record<CheckState, "ok" | "crit" | "warn"> = {
@@ -30,7 +31,8 @@ const STATE_TONE: Record<CheckState, "ok" | "crit" | "warn"> = {
 
 /** QA's per-head operator review: it does not claim uncaptured evidence exists. */
 export function QaReadiness() {
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
+  const reposRes = useResource<RepoView[]>(RESOURCES.repos);
+  const repos = reposRes.data ?? NO_REPOS;
   const prResources = useResources<PullRequestView[]>(
     repos.map((repo) => ({
       path: `/api/repos/${encodeURIComponent(repo.id)}/prs`,
@@ -50,7 +52,10 @@ export function QaReadiness() {
         .filter((pr) => pr.state === "open"),
     [prResources],
   );
-  const loading = repos.length === 0 && prResources.some((resource) => resource.loading);
+  const prLoading = prResources.some((resource) => resource.loading);
+  const prError = prResources.find((resource) => resource.error)?.error;
+  const loading = reposRes.loading || prLoading;
+  const loadError = reposRes.error ?? prError;
   return (
     <section id="page-qa-readiness">
       <div className="toolbar">
@@ -60,12 +65,17 @@ export function QaReadiness() {
         </span>
       </div>
       {loading && <p className="s">Loading open pull requests…</p>}
+      {loadError && (
+        <p className="s crit-t">Could not load open pull requests: {loadError.message}</p>
+      )}
       {(ci.error || findings.error) && (
         <p className="s warn-t">
           Some readiness evidence is unavailable. Cards show the latest PR state.
         </p>
       )}
-      {!loading && prs.length === 0 && <p className="s fg2">No open pull requests to check.</p>}
+      {!loading && !loadError && prs.length === 0 && (
+        <p className="s fg2">No open pull requests to check.</p>
+      )}
       <div className="qa-readiness-list">
         {prs.map((pr) => (
           <ReadinessCard
@@ -73,6 +83,7 @@ export function QaReadiness() {
             pr={pr}
             runs={ci.data?.runs ?? NO_RUNS}
             findings={findings.data?.findings ?? NO_FINDINGS}
+            findingsKnown={findings.data !== undefined && findings.error === null}
             revision={revision}
             onChanged={() => setRevision((value) => value + 1)}
           />
@@ -86,12 +97,14 @@ function ReadinessCard({
   pr,
   runs,
   findings,
+  findingsKnown,
   revision: _revision,
   onChanged,
 }: {
   pr: PullRequestView;
   runs: readonly CiRunsView["runs"][number][];
   findings: readonly QaFindingView[];
+  findingsKnown: boolean;
   revision: number;
   onChanged: () => void;
 }) {
@@ -100,7 +113,9 @@ function ReadinessCard({
     (finding) => finding.repoId === pr.repoId && finding.prNumber === pr.number,
   );
   const openFindings = prFindings.filter(isOpenFinding);
-  const verdict = prVerdict(pr, openFindings);
+  const verdict = prVerdict(pr, openFindings, findingsKnown);
+  const currentRuns = pr.headSha === null ? [] : prRuns.filter((run) => run.sha === pr.headSha);
+  const olderRuns = pr.headSha === null ? prRuns : prRuns.filter((run) => run.sha !== pr.headSha);
   const storedHead = checkedHead(pr.repoId, pr.number);
   const checked = pr.headSha !== null && storedHead === pr.headSha;
   const changed = storedHead !== null && storedHead !== pr.headSha;
@@ -125,12 +140,12 @@ function ReadinessCard({
       <div className="pb qa-card-body">
         <div className="qa-evidence">
           <Evidence title="Checks and CI tries">
-            {prRuns.length > 0 ? (
-              prRuns.map((run) => (
+            {currentRuns.length > 0 ? (
+              currentRuns.map((run) => (
                 <span key={`${run.sha}:${run.name}:${run.attempt}`}>
                   <Pill
                     tone={STATE_TONE[run.state]}
-                  >{`${run.name} · try ${run.attempt || 1}`}</Pill>
+                  >{`${run.name} · try ${run.attempt || 1} · ${run.state}`}</Pill>
                 </span>
               ))
             ) : pr.checks?.length ? (
@@ -138,15 +153,22 @@ function ReadinessCard({
                 <span key={`${check.id ?? check.name}:${check.attempt ?? 0}`}>
                   <Pill
                     tone={STATE_TONE[check.state]}
-                  >{`${check.name} · try ${check.attempt ?? "—"}`}</Pill>
+                  >{`${check.name} · try ${check.attempt ?? "—"} · ${check.state}`}</Pill>
                 </span>
               ))
             ) : (
               <Empty text="No CI tries captured for this head." />
             )}
+            {olderRuns.length > 0 && (
+              <span>{`Older heads: ${olderRuns.map((run) => `${run.name} · ${run.sha.slice(0, 7)} · ${run.state}`).join("; ")}`}</span>
+            )}
           </Evidence>
           <Evidence title="Review findings">
-            <span>{`${prFindings.length} total · ${openFindings.length} open · ${prFindings.length - openFindings.length} resolved`}</span>
+            {findingsKnown ? (
+              <span>{`${prFindings.length} total · ${openFindings.length} open · ${prFindings.length - openFindings.length} resolved`}</span>
+            ) : (
+              <Empty text="Review findings are still loading." />
+            )}
             {openFindings.length > 0 && (
               <span>{`Open by severity: ${severitySummary(openFindings)}`}</span>
             )}
@@ -155,14 +177,15 @@ function ReadinessCard({
                 prFindings.filter((finding) => !isOpenFinding(finding)),
               )}`}</span>
             )}
-            {prFindings.length === 0 && <Empty text="No review findings captured." />}
+            {findingsKnown && prFindings.length === 0 && (
+              <Empty text="No review findings captured." />
+            )}
+            <Empty
+              text={`Open findings cover the last 90 days; older unresolved findings are not captured yet (${QA_EVIDENCE_FOLLOW_UP}).`}
+            />
           </Evidence>
           <Evidence title="Review rounds">
-            {prFindings.length ? (
-              <span>{`${new Set(prFindings.map((finding) => finding.round)).size} captured`}</span>
-            ) : (
-              <Empty text="No review round captured." />
-            )}
+            <Empty text={`Clean review rounds are not captured yet (${QA_EVIDENCE_FOLLOW_UP}).`} />
           </Evidence>
           <Evidence title="Change">
             <span>{size}</span>

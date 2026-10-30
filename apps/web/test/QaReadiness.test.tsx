@@ -39,6 +39,17 @@ describe("prVerdict", () => {
     });
   });
 
+  it("waits while review findings are unavailable and when mergeability is unknown", () => {
+    expect(prVerdict(pr(), [], false)).toEqual({
+      tone: "warn",
+      text: "Waiting on review evidence",
+    });
+    expect(prVerdict(pr({ mergeable: null }), [])).toEqual({
+      tone: "warn",
+      text: "Waiting on merge check",
+    });
+  });
+
   it("holds a PR with an unresolved important finding", () => {
     expect(
       prVerdict(pr(), [
@@ -101,5 +112,131 @@ describe("QaReadiness", () => {
     hub.clear();
     rerender(<QaReadiness />);
     expect(await screen.findByText("Changed since your check: new head pushed.")).toBeTruthy();
+  });
+
+  it("shows current and old CI attempts plus finding severity and size evidence", async () => {
+    hub.clear();
+    stubFetch({
+      "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
+      "/api/repos/mission-control/prs": [pr({ additions: 100, deletions: 20, changedFiles: 4 })],
+      "/api/qa/ci-runs?days=90": {
+        runs: [
+          {
+            repoId: "mission-control",
+            prNumber: 987,
+            sha: "head-a",
+            name: "lint",
+            attempt: 1,
+            state: "passing",
+          },
+          {
+            repoId: "mission-control",
+            prNumber: 987,
+            sha: "head-a",
+            name: "unit",
+            attempt: 2,
+            state: "failing",
+          },
+          {
+            repoId: "mission-control",
+            prNumber: 987,
+            sha: "head-a",
+            name: "e2e",
+            attempt: 1,
+            state: "pending",
+          },
+          {
+            repoId: "mission-control",
+            prNumber: 987,
+            sha: "old-head",
+            name: "lint",
+            attempt: 1,
+            state: "passing",
+          },
+        ],
+      },
+      "/api/qa/findings?days=90": {
+        findings: [
+          {
+            reviewId: 1,
+            authorRunId: "retro",
+            repoId: "mission-control",
+            prNumber: 987,
+            round: 1,
+            reviewEndedAt: 0,
+            pos: 0,
+            severity: "Important",
+            category: null,
+            file: "a.ts",
+            line: 1,
+            summary: "open",
+            resolution: null,
+            resolvedReviewId: null,
+          },
+          {
+            reviewId: 1,
+            authorRunId: "retro",
+            repoId: "mission-control",
+            prNumber: 987,
+            round: 1,
+            reviewEndedAt: 0,
+            pos: 1,
+            severity: "Minor",
+            category: null,
+            file: "b.ts",
+            line: 1,
+            summary: "fixed",
+            resolution: "fixed",
+            resolvedReviewId: 2,
+          },
+        ],
+      },
+    });
+    render(<QaReadiness />);
+    expect(await screen.findByText("lint · try 1 · passing")).toBeTruthy();
+    expect(screen.getByText("unit · try 2 · failing")).toBeTruthy();
+    expect(screen.getByText("e2e · try 1 · pending")).toBeTruthy();
+    expect(screen.getByText(/Older heads: lint · old-hea · passing/)).toBeTruthy();
+    expect(screen.getByText("Open by severity: Important 1")).toBeTruthy();
+    expect(screen.getByText("Resolved by severity: Minor 1")).toBeTruthy();
+    expect(screen.getByText("120 lines · 4 files")).toBeTruthy();
+    expect(screen.getByText("Held: 1 open important finding")).toBeTruthy();
+  });
+
+  it("uses explicit error and empty states, and fails closed without findings", async () => {
+    hub.clear();
+    stubFetch({
+      "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
+      "/api/repos/mission-control/prs": [pr()],
+      "/api/qa/ci-runs?days=90": { runs: [] },
+      "/api/qa/findings?days=90": () => ({ status: 500, body: { error: "findings down" } }),
+    });
+    const { unmount } = render(<QaReadiness />);
+    expect(await screen.findByText("Waiting on review evidence")).toBeTruthy();
+    unmount();
+
+    hub.clear();
+    stubFetch({
+      "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
+      "/api/repos/mission-control/prs": [],
+      "/api/qa/ci-runs?days=90": { runs: [] },
+      "/api/qa/findings?days=90": { findings: [] },
+    });
+    render(<QaReadiness />);
+    expect(await screen.findByText("No open pull requests to check.")).toBeTruthy();
+  });
+
+  it("does not present a repository failure as an empty board", async () => {
+    hub.clear();
+    stubFetch({
+      "/api/repos": () => ({ status: 500, body: { error: "repositories down" } }),
+      "/api/qa/ci-runs?days=90": { runs: [] },
+      "/api/qa/findings?days=90": { findings: [] },
+    });
+    render(<QaReadiness />);
+    expect(
+      await screen.findByText("Could not load open pull requests: repositories down"),
+    ).toBeTruthy();
+    expect(screen.queryByText("No open pull requests to check.")).toBeNull();
   });
 });

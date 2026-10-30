@@ -10,7 +10,9 @@ export const isOpenFinding = (finding: QaFindingView): boolean => finding.resolu
 export function prVerdict(
   pr: Pick<PullRequestView, "isDraft" | "mergeable" | "ci" | "review">,
   findings: readonly QaFindingView[],
+  findingsKnown = true,
 ): ReadinessVerdict {
+  if (!findingsKnown) return { tone: "warn", text: "Waiting on review evidence" };
   const important = findings.filter(
     (finding) => isOpenFinding(finding) && IMPORTANT.has(finding.severity.toLowerCase()),
   ).length;
@@ -26,6 +28,6 @@ export function prVerdict(
   if (pr.review === "changes") return { tone: "crit", text: "Held: review changes" };
   if (pr.review === "requested" || pr.review === null)
     return { tone: "warn", text: "Waiting on review" };
-  if (pr.mergeable === "UNKNOWN") return { tone: "warn", text: "Waiting on merge check" };
+  if (pr.mergeable !== "MERGEABLE") return { tone: "warn", text: "Waiting on merge check" };
   return { tone: "ok", text: "Ready" };
 }
