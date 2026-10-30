@@ -260,15 +260,17 @@ the launchd job; do not install it for a manually started hub. Check the expande
 ### FLIGHT runaway breaker
 
 FLIGHT has no hourly, per-run or per-ticket caps on what it does; it makes judgement calls. One
-breaker stops it when it loops. It trips when FLIGHT makes more than 200 write decisions in an
-hour, or the same action on the same target 5 times in 30 minutes. While it is tripped every FLIGHT
+breaker stops it when it loops. It counts every successful FLIGHT write call (the tool and what it
+acted on), whether or not the call leaves a row in Decided without you. It trips when FLIGHT makes
+more than 200 of them in an hour, or the same tool on the same target 5 times in 30 minutes. While it is tripped every FLIGHT
 write is refused with the breaker's text (reads still work), the trip is logged in Decided without
 you, and one flag appears in Needs you. Operator holds, budget and account stops, secret
 redaction and the git safety rules are not affected by it and stay as they were.
 
 Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker with
 `curl -X POST http://localhost:<port>/api/flight/runaway/lift`. The lift is logged and clears the
-flag; it answers 409 when the breaker is not tripped. `flight_state` shows `breaker.tripped`.
+flag and starts the count afresh, so the calls that tripped it do not trip it again; it answers 409
+when the breaker is not tripped. `flight_state` shows `breaker.tripped`.
 
 ### Map payload cache and polling
 

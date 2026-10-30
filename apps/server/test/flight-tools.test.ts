@@ -132,7 +132,7 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { liftRunaway } from "../src/flight/runaway.ts";
+import { liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
@@ -4240,8 +4240,8 @@ describe("brief_item", () => {
     expect(store.briefs().get(KEY)?.recommendation).toBe("Leave it.");
   });
 
-  it("has no hourly limit on briefs", async () => {
-    for (let i = 0; i < 30; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
+  it("has no hourly limit on briefs of its own", async () => {
+    for (let i = 0; i < 4; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
   });
 
   it("refuses a key that is not the operator's item", async () => {
@@ -6284,6 +6284,8 @@ describe("track", () => {
     expect(
       await call("track", { ...entry, next: null, owner: null, refs: null, priority: null }),
     ).not.toHaveProperty("isError");
+    // five tracks of one key in a few minutes tripped the runaway breaker; the operator lifts it
+    expect(liftRunaway(store, bus, nowMs)).toBe(true);
     expect(store.flightLedger("s1")[0]).toMatchObject({
       next: null,
       owner: null,
@@ -6334,9 +6336,10 @@ describe("track", () => {
   });
 
   it("has no hourly edit cap on track or untrack, and records no decisions", async () => {
-    for (let n = 0; n < 70; n++) expect((await call("track", entry)).isError).toBeUndefined();
-    expect(await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).toEqual({
-      text: untrackedText(entry.key),
+    for (let n = 0; n < 70; n++)
+      expect((await call("track", { ...entry, key: `w-${n}` })).isError).toBeUndefined();
+    expect(await call("untrack", { key: "w-69", outcome: "done", basis: "ticket" })).toEqual({
+      text: untrackedText("w-69"),
     });
     expect(decisions()).toEqual([]);
   });
@@ -8236,12 +8239,12 @@ describe("the runaway breaker", () => {
   it("trips on 5 identical actions in 30 minutes, then refuses writes with its text and raises one brief", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
       expect((await same()).isError).toBeUndefined();
-    const reason = runawaySameReason("note", "mc#7", FLIGHT_RUNAWAY.sameActionLimit);
+    const reason = runawaySameReason("log_decision", "mc#7", FLIGHT_RUNAWAY.sameActionLimit);
     expect(await same()).toEqual(refused(runawayRefusedText(reason)));
     // any other write is stopped too, and still no second brief
-    expect(await call("track", { key: "k", kind: "watch", title: "t", status: "open" })).toEqual(
-      refused(runawayRefusedText(reason)),
-    );
+    expect(
+      await call("track", { kind: "work", key: "k", title: "t", status: "active", basis: "b" }),
+    ).toEqual(refused(runawayRefusedText(reason)));
     expect(flags()).toHaveLength(1);
     expect(flags()[0]?.text).toBe(runawayNoteText(reason));
     expect(JSON.parse((await call("flight_state", {})).text).breaker).toEqual({
@@ -8257,16 +8260,43 @@ describe("the runaway breaker", () => {
     expect((await call("recall", { query: "" })).isError).toBeUndefined();
   });
 
-  it("trips on more than 200 write decisions in an hour", async () => {
+  it("trips on five track calls on one key, which leave no decision rows", async () => {
+    const entry = { kind: "work", key: "k", title: "t", status: "active", basis: "b" };
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      expect((await call("track", entry)).isError).toBeUndefined();
+    expect(decisions()).toMatchObject([{ kind: "hub" }]);
+    expect((await call("track", entry)).isError).toBe(true);
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("trips on more than 200 varied writes in an hour, with no decision rows", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.writesPerHour; i++)
-      addDecision({ kind: "note", about: `n${i}`, at: NOW - 60_000 });
-    expect((await call("log_decision", { about: "x", decision: "d", basis: "b" })).isError).toBe(
-      undefined,
-    );
-    expect(await call("log_decision", { about: "y", decision: "d", basis: "b" })).toEqual(
+      recordWrite(store, { at: NOW - 60_000, action: "track", target: `k${i}` });
+    expect(
+      (await call("track", { kind: "work", key: "x", title: "t", status: "active", basis: "b" }))
+        .isError,
+    ).toBeUndefined();
+    const refusal = await call("track", {
+      kind: "work",
+      key: "y",
+      title: "t",
+      status: "active",
+      basis: "b",
+    });
+    expect(refusal).toEqual(
       refused(runawayRefusedText(runawayWritesReason(FLIGHT_RUNAWAY.writesPerHour + 1))),
     );
     expect(flags()).toHaveLength(1);
+  });
+
+  it("stays clear after a lift, even with an unrelated write straight after", async () => {
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
+    expect(liftRunaway(store, bus, nowMs)).toBe(true);
+    expect(
+      (await call("log_decision", { about: "other", decision: "d", basis: "b" })).isError,
+    ).toBeUndefined();
+    expect(flags()).toEqual([]);
+    expect(JSON.parse((await call("flight_state", {})).text).breaker.tripped).toBe(false);
   });
 
   it("lets writes through again once the operator lifts it, and logs the lift", async () => {

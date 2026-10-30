@@ -343,7 +343,13 @@ import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { createPowerTools } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
-import { FLIGHT_READ_TOOLS, runawayTrip, watchRunaway } from "./runaway.ts";
+import {
+  FLIGHT_READ_TOOLS,
+  recordWrite,
+  runawayTrip,
+  watchRunaway,
+  writeTarget,
+} from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   flightArrivalSource,
@@ -3709,7 +3715,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (tripped !== null) return fail(runawayRefusedText(tripped.reason));
       }
       const result = await tool.call(ctx, args);
-      if (write && result.isError !== true) watchRunaway(store, bus, now());
+      if (write && result.isError !== true) {
+        const at = now();
+        recordWrite(store, { at, action: tool.name, target: writeTarget(args) });
+        watchRunaway(store, bus, at);
+      }
       return result;
     },
   }));
