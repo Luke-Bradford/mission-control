@@ -503,11 +503,13 @@ const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
+  agent_id: z.string().min(1).max(256).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      pages: z.string().optional(),
       offset: z.number().optional(),
       limit: z.number().optional(),
     })
@@ -1718,7 +1720,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (verdict.kind === "allow") {
             const reread = rereadDenial(
               store,
-              key,
+              { ...key, agentId: body.data.agent_id ?? "" },
               store.seatSession(who.seatId)?.worktree ?? undefined,
               { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
               now(),

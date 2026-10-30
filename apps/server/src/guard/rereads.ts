@@ -13,7 +13,7 @@ import type { Store } from "../store.ts";
  */
 export function rereadDenial(
   store: Store,
-  run: { runId: string; toolUseId: string },
+  run: { runId: string; toolUseId: string; agentId: string },
   worktree: string | undefined,
   event: GuardEvent,
   at: number,
@@ -30,11 +30,11 @@ export function rereadDenial(
   }
   if (size < REREAD_MIN_BYTES) return null;
   const now = { size, mtimeMs, compactions: store.digest(run.runId)?.compactions ?? 0 };
-  const verdict = rereadVerdict(named, now, store.runRead(run.runId, path));
+  const verdict = rereadVerdict(named, now, store.runRead(run.runId, run.agentId, path));
   if (verdict.kind === "deny") {
     store.addReread(run.runId, verdict.tokensSaved);
     return verdict.text;
   }
-  store.setRunRead(run.runId, path, { ...now, toolUseId: run.toolUseId, at });
+  store.setRunRead(run.runId, run.agentId, path, { ...now, toolUseId: run.toolUseId, at });
   return null;
 }

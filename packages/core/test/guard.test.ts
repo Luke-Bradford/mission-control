@@ -2682,6 +2682,9 @@ describe("wholeFileRead", () => {
     expect(read({ file_path: "/w/a.ts", offset: 100 })).toBeNull();
     expect(read({ file_path: "/w/a.ts", limit: 50 })).toBeNull();
   });
+  it("passes a Read of a page range", () => {
+    expect(read({ file_path: "/w/spec.pdf", pages: "1-5" })).toBeNull();
+  });
   it.each(["cat a.ts", "cat -- a.ts", "sed -n p a.ts", "sed -n '1,$p' a.ts"])(
     "names the file of the whole-file shell read %s",
     (command) => expect(read({ command }, "Bash")).toBe("a.ts"),

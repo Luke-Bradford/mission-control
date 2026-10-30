@@ -614,9 +614,10 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 
 Each refusal is recorded as a guard hit (`/api/guard/hits`, Comms › Guard).
 
-**Re-reads.** A second whole-file read (a `Read` with no `offset` or `limit`, a lone `cat FILE` or
+**Re-reads.** A second whole-file read (a `Read` with no `offset`, `limit` or `pages`, a lone `cat FILE` or
 `sed -n p FILE`) of a file of 32 KB or more that the run already read whole, with the same size and
-mtime and no compaction since, is answered with the earlier read's tool call instead of the file.
+mtime and no compaction since, by the same agent (a subagent has its own context, so its reads are
+kept apart), is answered with the earlier read's tool call instead of the file.
 A range, a smaller file, a changed file and another run's read all pass. This is not a guard hit: it
 is counted in `run_rereads` and shows as `digest.rereads` (`count`, `tokensSaved` at about 4 bytes a
 token) on the run's digest. The ledger is `run_reads`; both tables go with the run.

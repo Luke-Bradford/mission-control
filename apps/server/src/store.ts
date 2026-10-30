@@ -313,9 +313,9 @@ CREATE TABLE IF NOT EXISTS guard_hits (
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
 -- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
 CREATE TABLE IF NOT EXISTS run_reads (
-  run_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
+  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
   compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, path)
+  PRIMARY KEY (run_id, agent_id, path)
 );
 CREATE TABLE IF NOT EXISTS run_rereads (
   run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
@@ -1966,13 +1966,13 @@ export class Store {
     return out;
   }
 
-  /** The run's earlier whole read of `path`, if it made one. */
-  runRead(runId: string, path: string): ReadRecord | undefined {
+  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
+  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
     const r = this.db
       .prepare(
-        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND path = ?",
+        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
       )
-      .get(runId, path) as
+      .get(runId, agentId, path) as
       | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
       | undefined;
     return (
@@ -1987,15 +1987,15 @@ export class Store {
   }
 
   /** Remembers the run's whole read of `path`, replacing an earlier one. */
-  setRunRead(runId: string, path: string, r: ReadRecord): void {
+  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
     this.db
       .prepare(
-        `INSERT INTO run_reads (run_id, path, size, mtime_ms, compactions, tool_use_id, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(run_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
+        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
            compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
       )
-      .run(runId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
+      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
   }
 
   /** Counts one refused re-read that saved about `tokens`. */

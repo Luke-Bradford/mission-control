@@ -508,7 +508,7 @@ describe("POST /api/guard/check", () => {
       const saved = { count: 2, tokensSaved: 2 * (REREAD_MIN_BYTES / 4) };
       expect(store.digest("run-a")?.rereads).toEqual(saved);
       expect(store.digests(["run-a"]).get("run-a")?.rereads).toEqual(saved);
-      expect(store.runRead("run-a", big)?.toolUseId).toBe("r1");
+      expect(store.runRead("run-a", "", big)?.toolUseId).toBe("r1");
       expect(store.guardHitCount("run-a")).toBe(0);
     });
 
@@ -529,6 +529,24 @@ describe("POST /api/guard/check", () => {
       writeFileSync(big, "y".repeat(REREAD_MIN_BYTES + 5));
       expect((await read("r2")).body).toBe("{}");
       expect(reason((await read("r3")).body)).toContain("r2");
+    });
+
+    it("passes a Read of another page range of the same file", async () => {
+      expect((await read("p1", { file_path: big, pages: "1-5" })).body).toBe("{}");
+      expect((await read("p2", { file_path: big, pages: "6-10" })).body).toBe("{}");
+    });
+
+    it("keeps a subagent's reads apart from the parent's", async () => {
+      const as = (id: string, agent?: string) =>
+        check(tokA, {
+          ...pre(id, "Read", { file_path: big }),
+          ...(agent ? { agent_id: agent } : {}),
+        });
+      expect((await as("s1", "sub-1")).body).toBe("{}");
+      expect((await as("m1")).body).toBe("{}");
+      expect((await as("s2", "sub-2")).body).toBe("{}");
+      expect(reason((await as("s3", "sub-1")).body)).toContain("s1");
+      expect(reason((await as("m2")).body)).toContain("m1");
     });
 
     it("passes a file under the threshold and another run's read", async () => {
@@ -1087,6 +1105,21 @@ describe("hookMain", () => {
     });
   });
 
+  it("sends a Read's pages and a subagent's id", async () => {
+    await hookMain(
+      stdinFor({
+        tool_name: "Read",
+        agent_id: "sub-1",
+        tool_input: { file_path: "/w/a.pdf", pages: "1-5" },
+      }),
+      [tokenFile, URL_OK],
+      answer(200, "{}"),
+    );
+    const sent = JSON.parse(posts[0]?.body ?? "");
+    expect(sent.tool_input).toEqual({ file_path: "/w/a.pdf", pages: "1-5" });
+    expect(sent.agent_id).toBe("sub-1");
+  });
+
   it("turns a 1 MB Write's PreToolUse into a small request", async () => {
     const stdin = stdinFor({
       tool_name: "Write",
@@ -1283,6 +1316,10 @@ describe("hookMain", () => {
     [
       "a non-numeric Read offset",
       stdinFor({ tool_name: "Read", tool_input: { file_path: "/w/a", offset: "later" } }),
+    ],
+    [
+      "a non-string Read pages",
+      stdinFor({ tool_name: "Read", tool_input: { file_path: "/w/a", pages: 3 } }),
     ],
     ["an unknown event", stdinFor({ hook_event_name: "Stop" })],
   ])("fails closed, without posting, on stdin with %s", async (_n, stdin) => {

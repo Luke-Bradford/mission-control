@@ -54,6 +54,7 @@ export interface GuardEvent {
     run_in_background?: boolean;
     offset?: number;
     limit?: number;
+    pages?: string;
   };
 }
 
@@ -2842,13 +2843,17 @@ export const REREAD_BYTES_PER_TOKEN = 4;
 const NOT_A_PLAIN_READ = /[;&|<>()`$\n\\*?[{~]/;
 
 /**
- * The path a whole-file read names, else null: a Read with no offset or limit, or a lone `cat FILE`
+ * The path a whole-file read names, else null: a Read with no offset, limit or pages, or a lone `cat FILE`
  * or `sed -n p FILE` (`sed -n '1,$p' FILE`). A range, a pipe, a redirect or an expansion is none.
  */
 export function wholeFileRead(e: GuardEvent): string | null {
-  const { file_path: path, command, offset, limit } = e.input;
+  const { file_path: path, command, offset, limit, pages } = e.input;
   if (e.tool === "Read") {
-    return typeof path === "string" && path !== "" && offset === undefined && limit === undefined
+    return typeof path === "string" &&
+      path !== "" &&
+      offset === undefined &&
+      limit === undefined &&
+      pages === undefined
       ? path
       : null;
   }
