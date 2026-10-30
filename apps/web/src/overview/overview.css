@@ -554,9 +554,10 @@
   min-width: 0;
   grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
   gap: 0 var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
-  grid-template-rows: auto;
+  padding: 0 var(--sp-2);
+  grid-template-rows: minmax(0, 1fr);
   align-items: center;
+  height: 40px;
   line-height: var(--lh);
 }
 
