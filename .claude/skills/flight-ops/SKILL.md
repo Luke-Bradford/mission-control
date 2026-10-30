@@ -1,78 +1,72 @@
 ---
 name: flight-ops
-description: How FLIGHT runs the crew day to day. Use on every wake, and whenever a seat, PR, ticket, comms item or the hub itself is stuck, slow or unclear.
+description: How FLIGHT runs the crew day to day on this repo. Use once per run (and again after a context reset), and whenever a seat, PR, ticket, comms item or the hub is stuck, slow or unclear.
 ---
 
 # FLIGHT operations
 
-Your job: keep every seat unblocked and the work flowing to merged, live code. Think like the lead engineer at the controls. Read the whole system, find the real cause, fix it, then make sure it can't recur. The checks below are the floor, not the ceiling. When something doesn't fit them, investigate: read the code, the logs and the data, and solve it.
+Your job: keep every seat unblocked, and keep the work flowing to merged, live code. Find the real cause of a stall, get it fixed through a tool, a seat or a ticket, and stop it recurring. The playbook below is the minimum. When a stall doesn't fit it, investigate: read the code in your checkout, the CI logs and `mc flight_state`, then solve it.
+
+`roles/FLIGHT.md` sets the order of each wake ("How you run the crew") and what is not yours. Where this skill and the role differ, the role wins.
 
 ## Where to look
 
-| To know | Read |
+| To know | Use |
 |---|---|
-| What each seat is doing, its run, queue, park text | `GET /api/crew` (`rows[].loop`, `asideRuns`, `queue`, `stateSince`) |
-| Your own decisions, wake reasons, notes | `GET /api/flight` |
-| What waits on the operator or you | `GET /api/attention` (`brief.for`) |
-| What seats said | `GET /api/comms`, `/api/comms/agents/<seat>` |
-| Review findings, rounds, tests | `/api/qa`, the reviews tables, RETRO's PR comments |
-| Recurring failures and costs | `/api/audit`, `/api/telemetry` |
-| Is the hub on the merged code | `POST /api/version/check`, then compare `sha` with main |
-| The standing checks and their thresholds | `docs/runbooks/standing-checks.md` |
-| How to do anything by hand | `docs/runbook.md` |
+| Seats, runs, parks, open PRs, questions, recent decisions | `mc flight_state` (`seats[]`, `aside[]`, `prs[]`) |
+| Your tracked work | `mc ledger` |
+| What seats said | `mc comms_inbox`, `mc comms_read` |
+| A PR: diff facts, reviews, threads | `mc read_pr`, `mc gh_read` |
+| Why CI failed | `mc read_ci_log` |
+| Tickets | `mc list_tickets`, `mc read_ticket` |
+| The GitHub rate limit | `mc gh_read { path: "rate_limit" }` |
+| What a page shows | `mc screenshot_hud` |
+| The standing checks and thresholds | `docs/runbooks/standing-checks.md` |
 
-The HUD pages show the same data: Overview (crew, pipeline, live log), Board, Agents, FLIGHT, QA (PR readiness), Comms, Map, Telemetry, Audit, Setup (version, Update and its log).
-
-## Order of each wake
-
-1. Red main or a broken gate: fix or revert it first.
-2. Open PRs: every one has an owner and is moving (see the playbook).
-3. Stuck and failed runs, interrupted seats.
-4. Comms: answer every seat question; settle what is resolved.
-5. Needs you: settle, act on, or brief each item. The operator gets only the decisions that are theirs, with your recommendation.
-6. Free seats: promote and start work, respecting dependencies.
-7. Audit: when the same failure appears twice, file or fold a ticket that removes the cause.
+`docs/runbook.md` and the hub's HTTP routes are for the operator and the controller. You have no network, so read them only to understand what a controller would do.
 
 ## Playbook: what a stop means and how to clear it
 
+Unparks share a limit of two per run. Rows marked **(#1214)** need a power you don't have yet. Until #1214 ships, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket.
+
 | The run says | Cause | Clear it |
 |---|---|---|
-| `the push or PR for <sha> has not shown up … checks … not run on this commit` | the seat committed after running its checks | have the seat run `pnpm -s lint && pnpm -s typecheck` on the newest commit, then push; lift the park |
-| `PR #N has head <a>, not <b>` | the hub's PR copy is stale | once GitHub shows `<b>` as the head, lift the park |
-| `an earlier PR is open on this branch` | another seat's ended run opened the PR | a seat continues only its own PR: close the old PR (its branch carries on), then lift; or hand the ticket back to the first seat |
-| `could not create a worktree for <branch>` | an ended run's worktree still holds the branch | remove that worktree if it is clean (`git worktree remove`; the branch and unpushed commits stay), then start again |
-| `conflicts with main` | main moved under the PR | `sync_main`; the seat resolves; lift if the seat already resolved it and can't push |
-| `RETRO-… found blocking issues in 3 reviews` | review round cap | new findings: grant another round with the exact fixes; the same findings repeating: narrow the ticket to what the PR ships, move the rest to tickets |
-| `controller check on <sha>` | the ticket asks for evidence | produce it (render the page, run the check), then record the verdict |
-| `run ended (the process crashed)` / interrupted | crash or interruption | restart once; on a second failure, read why before restarting |
-| `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | message the exact next step (often "push and report"), then lift |
-| a ticket In review or In progress with no run | its run ended | start it on its branch; clear what blocks the start (worktree, old PR) |
-| a PR green and reviewed, not merging | a clearance or hold | clear hard-rule merges after reading the hunk; merge |
-| merged, not live | auto-Update held (hard-rule change) or a stale version cache | `POST /api/version/check`, then Update; confirm the new sha is served |
+| `have not all passed on this exact commit` | a check listed in the refusal is missing or failed on the head | the hub has already told the seat. If it hasn't acted, `mc message_seat` with the commands the refusal lists. Lift with `mc settle_park { action: "lift" }` once the push lands |
+| `PR #N has head <a>, not <b>` | the hub's copy of the PR is stale, or the push hasn't landed | check the head with `mc read_pr`. Once it shows `<b>`, `mc settle_park { action: "lift" }` |
+| `an earlier PR is open on this branch` | another seat's ended run opened the PR; a seat continues only its own | **(#1214)** close the old PR, then unpark. Or give the ticket back to the seat that opened it |
+| `could not create a worktree for <branch>` (a `start_seat` refusal) | an ended run's worktree still holds the branch | **(#1214)** remove that clean worktree, then start again |
+| `conflicts with main` | main moved under the PR | `mc sync_main { runId }`. If the seat already resolved it and can't push, `mc message_seat { unpark: true }` |
+| `found blocking issues in` | the review-round cap | new findings: `mc settle_park { action: "rework", note }`. The same findings again: ask the planner (`mc comment_ticket`) to narrow the ticket, file the rest, then `mc settle_park { action: "accept" }` |
+| `controller check on <sha>` | the ticket asks for evidence only the controller produces | the controller's to settle. Tell the controller once with a labelled `mc comms_send` (PR ref). It is already in Needs you. Never `end_run` it |
+| `run ended (the process crashed)` / interrupted | a crash | a parked run: lift or unpark once. A crashed ticket left In progress with no run: **(#1214)** re-queue it. On a second failure, read why first |
+| `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
+| a ticket In review or In progress with no run | its run ended with a PR open | **(#1214)** start it on its branch. Never start a different seat on it while that PR is open |
+| a PR green and reviewed, not merging | it waits on clearance | `mc merge_pr` for an `awaiting-flight` PR in your lane, after reading the hard-rule hunk. Not yours: `roles/**`, `.github/**`, the Mission Control block in CLAUDE.md, operator holds, controller checks |
+| merged, not live | auto-Update held (hard-rule change) or a stale version cache | not yours to Update. A held Update is already in Needs you. Otherwise record `Missing power: Update the hub to <sha>. For the controller:` once |
 
-When a stop isn't here, read the engine's code for its text (`rg` the message in `apps/server/src`), find what clears it, act, and add the row here.
+For a stop not listed here, find its text with `rg -F '<text>' apps/server/src packages/core/src`, read what clears it, and act. Write what you learned with `mc remember { kind: "playbook", … }`. If the skill itself should change, file a ticket.
 
 ## Dependencies and conflicts
 
-- Work that builds on an unmerged PR waits: hold it with `promote { to: "Backlog", waits_on: <PR> }`, and promote it when the PR merges.
-- Two seats on the same files make conflicts: compare a ticket's files with active work before you start it.
-- When a dependency merges, release its dependents in the same wake and tell their seats to merge main.
+- Work that builds on an unmerged PR waits. Hold it with `mc promote { issue, to: "Backlog", waits_on: <PR>, basis }`.
+- When that PR merges, promote each held ticket in the same wake (`mc promote { issue, to: "Ready", basis }`). Never ask a seat to merge main; use `mc sync_main` only when a running PR conflicts.
+- Two seats on the same files make conflicts. Compare a ticket's files with active work before you start it.
 
 ## Comms and the operator
 
-- Seats ask you, never the operator. Answer with the source of your answer.
-- Write to the operator with the plain-talk skill: the main thing first, the decision and your recommendation, no hub jargon.
-- Bring the operator only what the repo rules or direction give them. Act on everything else and tell them after.
+- Seats ask you, never the operator. Answer with `mc answer_question`, naming your source.
+- Write to the operator with the `plain-talk` skill: the main thing first, the decision and your recommendation, and no hub state names.
+- Bring the operator only what "What belongs to the operator" in `roles/FLIGHT.md` lists. Act on everything else and tell them after.
 
 ## Repo skills and rules
 
-- Read the repo's `CLAUDE.md` for its areas, hard-rule paths and checks. Hard-rule changes need clearance before merge, and an Update by the operator or a controller after.
-- `hud-design`: any web work. Mockups follow research and a plan the operator has seen.
+- Read the repo's `CLAUDE.md` for its areas, hard-rule paths and checks.
+- `hud-design`: any web work. A big visual change gets a mockup first, offered to the operator with your recommendation.
 - `plain-talk`: anything a person reads.
 
-## Think beyond the playbook
+## Go beyond the playbook
 
-- A stall that recurs is a hub bug: fix the cause with a ticket that names the evidence, not the symptom.
-- Look across the crew, not just at the event that woke you. Check for idle seats with work, a queue behind one seat, and PRs ageing in one stage.
-- Check the machine and the GitHub rate limit when things fail together.
-- If you can't solve something, say exactly what you tried and what you need.
+- When a stall recurs, find its cause: the hub, the ticket or the seat. Fix the cause with a ticket that names the evidence.
+- Look across the crew, not just at the event that woke you: idle seats with work, a queue behind one seat, PRs ageing in one stage.
+- When many things fail at once, check the GitHub rate limit (`mc gh_read`), and ask the controller about the machine.
+- If you can't solve something, follow "When the work needs something your role can't do" in `roles/FLIGHT.md`.
