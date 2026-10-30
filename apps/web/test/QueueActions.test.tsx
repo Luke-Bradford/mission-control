@@ -47,7 +47,7 @@ function setup(extra = {}) {
     ],
     "/api/attention": [proposal],
     "/api/escalations": [],
-    "/api/crew": { rows: [row] },
+    "/api/crew?shape=summary": { rows: [row] },
     "/api/flight": { seat: null },
     ...extra,
   });

@@ -67,7 +67,7 @@ it("updates watch rows with the hold and stops only on activation, reporting ref
   const fetch = stubFetch({
     "/api/flight/brief": { session: "demo", sections: [], watch: [watch] },
     "/api/test-lock": () => ({ status: 200, body: lock }),
-    "/api/crew": { rows: [{ id: "seat", hudState: "stalled" }] },
+    "/api/crew?shape=summary": { rows: [{ id: "seat", hudState: "stalled" }] },
     "POST /api/seats/seat/end": () => ({ status: 409, body: { error: "Target changed" } }),
   });
   render(<WatchList />);
@@ -327,7 +327,7 @@ it.each(["guard", "agents"] as const)(
               : [],
         },
       }),
-      "/api/crew": () => ({
+      "/api/crew?shape=summary": () => ({
         status: 200,
         body: {
           rows: [{ id: "seat", hudState: blocked || topic === "guard" ? "stalled" : "working" }],

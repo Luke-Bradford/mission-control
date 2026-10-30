@@ -5,7 +5,7 @@ import {
   type Crew,
   flightTurnText,
 } from "@mc/core";
-import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { needsYouItems, openNeedsYou, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
@@ -33,6 +33,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { DOCK_COLLAPSED_KEY, readBool, writeBool } from "../storage.ts";
 import { BuildChips } from "./buildStatus.tsx";
+import { useOlderEvents } from "./olderEvents.ts";
 import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
 import "./Dock.css";
 import { hhmm, percent } from "../fmt.ts";
@@ -166,6 +167,8 @@ function Composer({
 
 /** Within this many pixels of the bottom the log follows new messages; further up it stays put. */
 const STICK_PX = 40;
+/** Scrolled this close to the top, the dock asks for the next older events. */
+const LOAD_OLDER_PX = 40;
 
 /** Where a FLIGHT conversation sits, which keeps its DOM ids unique: the dock, or Comms. */
 export type ChatPlace = "dock" | "comms";
@@ -189,7 +192,10 @@ export function FlightChat({
   const msgs = useRef<HTMLDivElement>(null);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
-  const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
+  const streamRef = seat ? RESOURCES.stream(seat.id) : null;
+  const newest = useResource<AgentStream>(streamRef).data;
+  const olderEvents = useOlderEvents(streamRef?.path ?? null, newest);
+  const stream = olderEvents.stream;
   const tz = useTz();
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -213,9 +219,22 @@ export function FlightChat({
     const el = msgs.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [count, asks.length]);
+  // Older events arrive above the reader: keep what they were reading where it was.
+  const firstRow = shown[0]?.id;
+  const heightBefore = useRef<{ first: string | undefined; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = msgs.current;
+    const prev = heightBefore.current;
+    heightBefore.current = { first: firstRow, height: el?.scrollHeight ?? 0 };
+    if (el && prev && prev.first !== undefined && prev.first !== firstRow && !stick.current)
+      el.scrollTop += el.scrollHeight - prev.height;
+  }, [firstRow]);
+  const { hasMore, loading, load } = olderEvents;
   const onScroll = () => {
     const el = msgs.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
+    if (el.scrollTop <= LOAD_OLDER_PX && hasMore && !loading) load();
   };
 
   const send = async (body: string): Promise<boolean> => {
@@ -281,6 +300,12 @@ export function FlightChat({
         ref={msgs}
         onScroll={onScroll}
       >
+        {hasMore && (
+          <button type="button" className="ghost sm dolder" disabled={loading} onClick={load}>
+            {loading ? "Loading older…" : "Load older"}
+          </button>
+        )}
+        {olderEvents.error && <p className="crit-t s">{olderEvents.error}</p>}
         {shown.map((r) => (
           <Msg key={r.id} row={r} tz={tz} />
         ))}

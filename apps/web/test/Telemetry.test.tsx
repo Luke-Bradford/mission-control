@@ -1270,7 +1270,7 @@ describe("engine telemetry", () => {
                 },
                 waiting: [],
               }
-            : args[0] === "/api/crew"
+            : args[0] === "/api/crew?shape=summary"
               ? { rows: [{ id: "inco-1", hudState: state }] }
               : null;
       return data ? new Response(JSON.stringify(data)) : answer(...args);

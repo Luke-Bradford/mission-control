@@ -50,7 +50,7 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/attention": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    "/api/crew": { rows: [], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [], firstRunToday: null },
     "/api/settings/crew-pause": null,
     ...routes,
   });
@@ -143,7 +143,7 @@ function stubDecided(view: FlightView, extra: Record<string, unknown> = {}) {
   return stubFetch({
     "/api/flight": view,
     "/api/config": CONFIG,
-    "/api/crew": { rows: [seatRow()], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [seatRow()], firstRunToday: null },
     ...extra,
   });
 }
@@ -448,14 +448,20 @@ describe("FLIGHT page", () => {
   });
 
   it("Seats says no seats are configured when the crew has none", async () => {
-    stubFetch({ "/api/crew": { rows: [], firstRunToday: null }, "/api/config": CONFIG });
+    stubFetch({
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
+      "/api/config": CONFIG,
+    });
     render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
     expect(await screen.findByText(NO_SEATS)).toBeTruthy();
   });
 
   it("Seats lists an observed loop, marked as one, with its ticket", async () => {
-    stubFetch({ "/api/crew": { rows: [crewRow()], firstRunToday: null }, "/api/config": CONFIG });
+    stubFetch({
+      "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+      "/api/config": CONFIG,
+    });
     render(<Flight />);
     const list = await findSeats();
     const rows = list.querySelectorAll("tbody tr");
@@ -468,7 +474,7 @@ describe("FLIGHT page", () => {
   it("Seats has one row per seat: owner, state, ticket, age cells and the seat's link", async () => {
     const run = { ...(crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>) };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             run: { ...run, startedAt: NOW - 12 * MIN, branch: "feature/5-stop-race" },
@@ -512,12 +518,12 @@ describe("FLIGHT page", () => {
 
   it("Work in flight's doing line is the Overview's: the PR linked, its title, and the line as hover text", async () => {
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" } })],
         firstRunToday: null,
       },
       "/api/config": CONFIG,
-      "/api/repos/shop-app/prs?linked=1": [
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [
         prView({ number: 166, title: "Backfill the quote cache" }),
       ],
     });
@@ -533,7 +539,7 @@ describe("FLIGHT page", () => {
 
   it("Seats keeps a stopped seat, with its state, whether its run merged or you ended it", async () => {
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           stoppedSeat({ merged: true }),
           stoppedSeat({ id: "retro-1", role: "RETRO" }),
@@ -554,7 +560,7 @@ describe("FLIGHT page", () => {
   it("Seats shows a looped run's ticket, phase and a linked PR; a seat with no ticket shows a dash", async () => {
     const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({ hudState: "idle", ticket: "shop-app#5", loop }),
           seatRow({ id: "guido-2", run: null, hudState: "idle", ticket: null, loop: null }),
@@ -586,7 +592,7 @@ describe("FLIGHT page", () => {
       wait: "operator" as const,
     };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             hudState: "blocked",
@@ -612,7 +618,7 @@ describe("FLIGHT page", () => {
 
   it("Seats says a blocked seat with no recorded reason is blocked, since when, and a dash for its stage", async () => {
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "blocked", stateSince: NOW - 5 * MIN, loop: null })],
         firstRunToday: null,
       },
@@ -628,7 +634,7 @@ describe("FLIGHT page", () => {
 
   it("Seats shows a paused seat as stuck with the pause's reason", async () => {
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             crewPause: { seats: "all", reason: "quota low", at: NOW - 10 * MIN, by: "operator" },
@@ -649,7 +655,7 @@ describe("FLIGHT page", () => {
     const reason =
       "Wait for RETRO's review. The branch needs a fresh check after the review fixes land.";
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
         firstRunToday: null,
       },
@@ -666,7 +672,7 @@ describe("FLIGHT page", () => {
   it("Seats keeps more for a multiline waiting reason without sentence punctuation", async () => {
     const reason = "Waiting on RETRO\nThe branch needs a fresh check after the review fixes land";
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
         firstRunToday: null,
       },
@@ -689,7 +695,10 @@ describe("FLIGHT page", () => {
           decided("d3", NOW - HOUR, { kind: "answer", seatId: "guido-1", decision: "yes" }),
         ],
       }),
-      "/api/crew": { rows: [seatRow(), seatRow({ id: "guido-2" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [seatRow(), seatRow({ id: "guido-2" })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
     });
     render(<Flight />);
@@ -701,7 +710,7 @@ describe("FLIGHT page", () => {
   it("Seats keeps a seat whose loop is done, with its Done step", async () => {
     const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ run: null, hudState: "idle", ticket: "shop-app#5", loop: done })],
         firstRunToday: null,
       },
@@ -736,7 +745,7 @@ describe("FLIGHT page", () => {
     });
     const stubWith = (rows: unknown[], extra: Record<string, unknown> = {}) =>
       stubFetch({
-        "/api/crew": { rows, firstRunToday: null },
+        "/api/crew?shape=summary": { rows, firstRunToday: null },
         "/api/config": CONFIG,
         ...extra,
       });
@@ -923,7 +932,7 @@ describe("FLIGHT page", () => {
     const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
     const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({ run: live, hudState: "running", ticket: "shop-app#5", loop }),
           seatRow({
@@ -949,7 +958,7 @@ describe("FLIGHT page", () => {
   it("Seats lists an observed loop that carries a loop once", async () => {
     const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
     stubFetch({
-      "/api/crew": { rows: [crewRow({ loop })], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [crewRow({ loop })], firstRunToday: null },
       "/api/config": CONFIG,
     });
     render(<Flight />);
@@ -960,7 +969,7 @@ describe("FLIGHT page", () => {
   it("the session filter applies to a looped row", async () => {
     const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
     stubFetch({
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "idle", ticket: "shop-app#5", loop })],
         firstRunToday: null,
       },
@@ -976,7 +985,7 @@ describe("FLIGHT page", () => {
 
   it("Work in flight shows the doing text before the timezone has loaded", async () => {
     stubFetch({
-      "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
       "/api/config": () => ({ status: 503, body: { error: "loading" } }),
     });
     render(<Flight />);
@@ -1017,7 +1026,7 @@ describe("FLIGHT page", () => {
         more: false,
         nextOffset: null,
       },
-      "/api/crew": { rows: [seatRow({ hudState: "blocked" })], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [seatRow({ hudState: "blocked" })], firstRunToday: null },
       "/api/attention": [item({ key: "decision:release", text: "Choose a release window" })],
       "/api/notifications": { open: [], handledToday: [] },
       "/api/config": CONFIG,
@@ -1047,7 +1056,7 @@ describe("FLIGHT page", () => {
       entries: ReturnType<typeof ledgerEntry>[],
     ) => {
       stubFetch({
-        "/api/crew": { rows: [row], firstRunToday: null },
+        "/api/crew?shape=summary": { rows: [row], firstRunToday: null },
         "/api/flight/ledger?status=open": openLedger(entries),
         "/api/config": CONFIG,
       });
@@ -1185,7 +1194,10 @@ describe("FLIGHT page", () => {
     ])("says Down and why when its seat is %s, and still shows live work", async (_, view, why) => {
       stubFetch({
         "/api/flight": view,
-        "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+        "/api/crew?shape=summary": {
+          rows: [seatRow({ hudState: "running" })],
+          firstRunToday: null,
+        },
         "/api/config": CONFIG,
       });
       render(<Flight />);
@@ -1251,7 +1263,10 @@ describe("FLIGHT page", () => {
       stubFetch({
         "/api/flight": flightView(),
         "/api/flight/summary": () => ({ status: 500, body: { error: "Summary unavailable" } }),
-        "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+        "/api/crew?shape=summary": {
+          rows: [seatRow({ hudState: "running" })],
+          firstRunToday: null,
+        },
         "/api/config": CONFIG,
       });
       render(<Flight />);
@@ -1389,7 +1404,7 @@ describe("FLIGHT's brief", () => {
   });
 
   it("the system log excludes decisions because Record presents them once", async () => {
-    stubDecided(flightView(), { "/api/agents/flight-1/stream": STREAM });
+    stubDecided(flightView(), { "/api/agents/flight-1/stream?limit=20": STREAM });
     const { container } = render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(1));
@@ -1413,7 +1428,7 @@ describe("FLIGHT's brief", () => {
 
   it("the working log says so when nothing is logged", async () => {
     stubDecided(flightView({ decisions: [] }), {
-      "/api/agents/flight-1/stream": { ...STREAM, events: [] },
+      "/api/agents/flight-1/stream?limit=20": { ...STREAM, events: [] },
     });
     const { container } = render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
@@ -1616,7 +1631,7 @@ describe("FLIGHT's brief", () => {
       "/api/flight/schedule",
       "/api/flight/brief",
       "/api/flight/memory",
-      "/api/agents/flight-1/stream",
+      "/api/agents/flight-1/stream?limit=20",
     ];
     const seen = (paths: string[]) =>
       only.filter((o) => paths.some((p) => p === o || p.startsWith(`${o}?`)));
@@ -1647,7 +1662,7 @@ describe("FLIGHT's brief", () => {
   it("names a loading and a failed request on each of the other tabs", async () => {
     stubFetch({
       "/api/flight": () => ({ status: 500, body: { error: "flight down" } }),
-      "/api/crew": () => ({ status: 500, body: { error: "crew down" } }),
+      "/api/crew?shape=summary": () => ({ status: 500, body: { error: "crew down" } }),
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
@@ -1691,7 +1706,7 @@ describe("FLIGHT's brief", () => {
           decided("d4", NOW - MIN, { kind: "start", about: "Started guido-1", decision: "on #5" }),
         ],
       }),
-      { "/api/agents/flight-1/stream": { ...STREAM, events: [] } },
+      { "/api/agents/flight-1/stream?limit=20": { ...STREAM, events: [] } },
     );
     const { container } = render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));

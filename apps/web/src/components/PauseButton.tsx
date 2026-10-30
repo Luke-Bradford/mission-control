@@ -1,7 +1,7 @@
 import type { CrewRow } from "@mc/core";
 import { useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
-import { ACTIONS, hub, RESOURCES } from "../data.ts";
+import { ACTIONS, hub } from "../data.ts";
 import "./PauseButton.css";
 
 export const STUDIO_PAUSE_TOOLTIP = "pause arrives with cutover";
@@ -29,7 +29,7 @@ export function PauseButton({ row }: { row: Pick<CrewRow, "id" | "loopKind" | "p
       setError(pauseError(e));
     } finally {
       setBusy(false);
-      hub.refetch(RESOURCES.crew.path);
+      hub.refetchCrew(row.id);
     }
   };
 

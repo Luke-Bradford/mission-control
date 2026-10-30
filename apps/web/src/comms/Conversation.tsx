@@ -31,6 +31,9 @@ import {
 } from "../router.ts";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
+import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+
+const NO_MESSAGES: CommsMessage[] = [];
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
@@ -186,9 +189,12 @@ function MessagePane({
   onReply,
   flightId,
   sent = 0,
+  older,
 }: {
   messages: CommsMessage[];
   lookupMessages?: CommsMessage[];
+  /** Older messages the route has not sent: a "Load older" control above the first message. */
+  older?: OlderMessages;
   jumpId: string | null;
   onJumped: () => void;
   onOpenMessage: OpenMessage;
@@ -223,6 +229,22 @@ function MessagePane({
       box.current.scrollTop = box.current.scrollHeight;
     }
   }, [jumpId, latestId]);
+  // Older messages arrive above the reader: keep the message they were reading where it was.
+  const firstId = messages[0]?.id;
+  const before = useRef<{ firstId: string | undefined; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const prev = before.current;
+    before.current = { firstId, height: el?.scrollHeight ?? 0 };
+    if (
+      el &&
+      prev &&
+      prev.firstId !== undefined &&
+      prev.firstId !== firstId &&
+      !followsLatest.current
+    )
+      el.scrollTop += el.scrollHeight - prev.height;
+  }, [firstId]);
   const rememberScrollPosition = () => {
     const el = box.current;
     if (!el) return;
@@ -232,6 +254,18 @@ function MessagePane({
   return (
     <div className="comms-messages scroll" id="convo" ref={box} onScroll={rememberScrollPosition}>
       <div className="comms-message-stack">
+        {older?.hasMore && (
+          <div className="comms-older">
+            <button type="button" className="ghost" disabled={older.loading} onClick={older.load}>
+              {older.loading ? "Loading older…" : "Load older"}
+            </button>
+          </div>
+        )}
+        {older?.error && (
+          <p className="pb crit-t s" role="alert">
+            {older.error}
+          </p>
+        )}
         {messages.length === 0 ? <p className="pb note">No messages yet.</p> : null}
         {messages.map((message) => {
           const quote = message.replyTo ? byId.get(message.replyTo) : undefined;
@@ -501,7 +535,12 @@ function StoredContacts({
         className={view.kind === "agent" ? "on" : ""}
         onClick={() => navigate(commsAgentPath(agentId))}
       >
-        All messages <small>{data?.messages.length ?? 0}</small>
+        All messages{" "}
+        <small>
+          {data?.messages?.length
+            ? data.messages.length
+            : (data?.contacts ?? []).reduce((n, c) => n + c.count, 0)}
+        </small>
       </button>
       {(data?.contacts ?? []).map((contact) => (
         <button
@@ -561,8 +600,13 @@ function ModernConversation({
     view.kind === "flight" ? RESOURCES.commsFlight : null,
   );
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat;
+  // A contact's view needs the agent's conversation list and counts, not its messages too.
   const agent = useResource<CommsAgentResponse>(
-    "agentId" in view ? RESOURCES.commsAgent(view.agentId) : null,
+    "agentId" in view
+      ? view.kind === "contact"
+        ? RESOURCES.commsNav(view.agentId)
+        : RESOURCES.commsAgent(view.agentId)
+      : null,
   );
   const contact = useResource<CommsMessagesResponse>(
     view.kind === "contact" ? RESOURCES.commsContact(view.agentId, view.contactId) : null,
@@ -578,18 +622,38 @@ function ModernConversation({
       : null,
   );
   const pins = useResource<CommsPinsResponse>(RESOURCES.commsPins).data?.messages ?? [];
-  const messages =
+  // The route this view pages, and the newest page it sent.
+  const pageRef =
     view.kind === "crew"
-      ? (crew.data?.messages ?? [])
+      ? RESOURCES.commsCrew
       : view.kind === "flight"
-        ? (flight.data?.messages ?? [])
+        ? RESOURCES.commsFlight
         : view.kind === "contact"
-          ? (contact.data?.messages ?? [])
+          ? RESOURCES.commsContact(view.agentId, view.contactId)
+          : "agentId" in view
+            ? RESOURCES.commsAgent(view.agentId)
+            : null;
+  const page: CommsPage | undefined =
+    view.kind === "crew"
+      ? crew.data
+      : view.kind === "flight"
+        ? flight.data
+        : view.kind === "contact"
+          ? contact.data
           : view.kind === "ticket"
-            ? [...(ticket.data?.messages ?? [])].sort((a, b) => a.at - b.at)
-            : view.kind === "inbox"
-              ? (agent.data?.inbox ?? [])
-              : (agent.data?.messages ?? []);
+            ? undefined
+            : agent.data;
+  const field = view.kind === "inbox" ? "inbox" : "messages";
+  const olderMessages = useOlderMessages(
+    pageRef?.path ?? null,
+    page?.[field] ?? NO_MESSAGES,
+    (field === "inbox" ? page?.inboxHasMore : page?.hasMore) ?? false,
+    field,
+  );
+  const messages =
+    view.kind === "ticket"
+      ? [...(ticket.data?.messages ?? [])].sort((a, b) => a.at - b.at)
+      : olderMessages.messages;
   const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
   const [reply, setReply] = useState<CommsMessage | null>(null);
   const [sent, setSent] = useState(0);
@@ -683,6 +747,7 @@ function ModernConversation({
         onReply={setReply}
         flightId={flightSeat?.id}
         sent={sent}
+        older={view.kind === "ticket" ? undefined : olderMessages}
       />
       {to ? (
         <Composer

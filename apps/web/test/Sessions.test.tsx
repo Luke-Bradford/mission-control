@@ -9,7 +9,7 @@ import { CREW_CONFIG } from "./fixtures.ts";
 function mount(routes: Record<string, unknown> = {}) {
   const fetch = stubFetch({
     "/api/config": CREW_CONFIG,
-    "/api/crew": { rows: [], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [], firstRunToday: null },
     "/api/crew/changes": { sessions: [], pending: [], restartNeeded: [], error: null },
     "/api/crew/sessions": [],
     ...routes,

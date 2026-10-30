@@ -19,7 +19,7 @@ const api = {
   "/api/overview": OVERVIEW,
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
-  "/api/crew": { rows: seats, firstRunToday: null },
+  "/api/crew?shape=summary": { rows: seats, firstRunToday: null },
   "/api/attention": [],
   "/api/machine": { latest: null, warning: null },
   "/api/limits": [],

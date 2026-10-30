@@ -244,7 +244,8 @@ describe("App", () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
-      "/api/crew": { rows: [crewRow()], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+      "/api/crew/shop-app-ta": crewRow(),
     });
     at("/agent/shop-app-ta?popout=1");
     await screen.findByRole("region", { name: "shop-app-ta details" });
@@ -260,10 +261,12 @@ describe("App", () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [crewRow(), crewRow({ id: "other-seat", index: 3 })],
         firstRunToday: null,
       },
+      "/api/crew/shop-app-ta": crewRow(),
+      "/api/crew/other-seat": crewRow({ id: "other-seat", index: 3 }),
     });
     const { container } = at("/agent/shop-app-ta?popout=1");
     await screen.findByRole("region", { name: "shop-app-ta details" });
@@ -279,7 +282,8 @@ describe("App", () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
-      "/api/crew": { rows: [crewRow()], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+      "/api/crew/shop-app-ta": crewRow(),
     });
     at("/agent/shop-app-ta");
     await screen.findByRole("button", { name: "Pop out" });

@@ -74,9 +74,9 @@ function stub(d: Data = {}) {
     "/api/config": d.config ?? CONFIG,
     "/api/boards/shop-app": d.shopApp ?? [],
     "/api/boards/site-builder": d.engine ?? [],
-    "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
-    "/api/repos/site-builder/prs?linked=1": [],
-    "/api/crew": { rows: d.crew ?? [], firstRunToday: null },
+    "/api/repos/shop-app/prs?linked=1&shape=summary": d.prs ?? [],
+    "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+    "/api/crew?shape=summary": { rows: d.crew ?? [], firstRunToday: null },
     "/api/attention": d.attention ?? [],
     "/api/metrics": METRICS_VIEW,
     ...(d.profiles ? { "/api/repos/profiles": d.profiles } : {}),
@@ -335,7 +335,7 @@ describe("cards", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string, init?: RequestInit) =>
-        input === "/api/repos/shop-app/prs?linked=1"
+        input === "/api/repos/shop-app/prs?linked=1&shape=summary"
           ? new Promise<Response>((resolve) => {
               resolvePr = resolve;
             })
@@ -1376,9 +1376,9 @@ describe("missing sources", () => {
       "/api/repos": REPOS,
       "/api/config": CONFIG,
       "/api/boards/site-builder": [todo(2, { repoId: "site-builder", title: "Still here" })],
-      "/api/repos/shop-app/prs?linked=1": [],
-      "/api/repos/site-builder/prs?linked=1": [],
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [],
+      "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/attention": [],
     });
     render(<BoardPage repoId={null} ticket={null} />);
@@ -1390,7 +1390,7 @@ describe("missing sources", () => {
     stubFetch({
       "/api/repos": [],
       "/api/config": CONFIG,
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
@@ -1423,9 +1423,9 @@ describe("render cost", () => {
       "/api/config": CONFIG,
       "/api/boards/shop-app": board,
       "/api/boards/site-builder": [],
-      "/api/repos/shop-app/prs?linked=1": [pr({ number: 41, ticket: "shop-app#3" })],
-      "/api/repos/site-builder/prs?linked=1": [],
-      "/api/crew": () => ({ status: 200, body: { rows: crew, firstRunToday: null } }),
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [pr({ number: 41, ticket: "shop-app#3" })],
+      "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+      "/api/crew?shape=summary": () => ({ status: 200, body: { rows: crew, firstRunToday: null } }),
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
@@ -1447,7 +1447,7 @@ describe("render cost", () => {
 
       // shop-app#2's agent stalls; shop-app#6's agent is unchanged (a new but equal row).
       crew = [crewRow({ ticket: "shop-app#2", hudState: "stalled" }), studio("shop-app#6")];
-      act(() => hub.refetch("/api/crew"));
+      act(() => hub.refetch("/api/crew?shape=summary"));
       const c2 = card(container, "shop-app#2") as HTMLElement;
       await waitFor(() => expect(within(c2).getByText("Stalled")).toBeTruthy());
       expect([...new Set(renders)]).toEqual(["shop-app#2"]);

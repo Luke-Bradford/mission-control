@@ -74,7 +74,7 @@ function apiFor(scenario: Scenario) {
       wake: { lastWakeAt: NOW, wokeOn: ["q (1)"], nextWakeAt: NOW + 30 * MIN },
     },
     "/api/attention": attention,
-    "/api/crew": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/flight/summary": flightSummary({
       headline: scenario === "long" ? LONG : "The crew is shipping; one review needs attention.",
       next: n ? [summaryItem(work)] : [],
@@ -218,7 +218,7 @@ describeRendered("FLIGHT page in a browser", () => {
         .repeat(4)
         .slice(0, 178);
       const api = apiFor("one");
-      api["/api/crew"] = {
+      api["/api/crew?shape=summary"] = {
         rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
         firstRunToday: null,
       };
