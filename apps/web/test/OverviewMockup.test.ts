@@ -20,7 +20,24 @@ afterEach(() => {
 
 describe("Overview v2 mockup", () => {
   it("keeps the desktop pipeline tall enough for its Board controls", () => {
-    expect(mockup).toContain("grid-template-rows:62px 458px 160px minmax(0,1fr)");
+    expect(mockup).toContain("grid-template-rows:62px 458px 176px minmax(0,1fr)");
+  });
+
+  it("uses the live header order and names the data behind its dense samples", () => {
+    const document = renderMockup();
+
+    expect([...document.querySelectorAll(".nav a")].map((tab) => tab.textContent)).toEqual([
+      "Overview",
+      "FLIGHT",
+      "Board",
+      "Agents",
+      "Map",
+      "Comms",
+      "Telemetry",
+      "Audit",
+    ]);
+    expect(document.querySelector(".crewrow.header")?.lastElementChild?.textContent).toBe("Age");
+    expect(mockup).toContain("#1060");
   });
 
   it("has one accurate filtered Board link for every populated pipeline stage", () => {
