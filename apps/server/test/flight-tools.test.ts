@@ -97,6 +97,7 @@ import {
   NEW_LOOP,
   NOT_ON_BOARD,
   needsSuperuserText,
+  needsYouItems,
   OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
   type PullRequestView,
@@ -126,6 +127,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -6006,7 +6008,7 @@ describe("superuser housekeeping", () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
     const message = store.addComms({
-      at: nowMs - 20 * 60_000,
+      at: nowMs - 50 * 60_000,
       from: "flight-1",
       to: "guido-1",
       ticket: "mc#909",
@@ -6015,7 +6017,10 @@ describe("superuser housekeeping", () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(true);
+    expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
+    expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
+      owner: "operator",
+    });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",
       true,
@@ -6025,6 +6030,9 @@ describe("superuser housekeeping", () => {
       reason: "The PR has merged.",
     });
     expect(attentionItems(cfg, store, nowMs + 60 * 60_000).some((item) => item.key === key)).toBe(
+      false,
+    );
+    expect(needsYouItems(attentionItems(cfg, store, nowMs)).some((item) => item.key === key)).toBe(
       false,
     );
 
@@ -6043,6 +6051,24 @@ describe("superuser housekeeping", () => {
         basis: "Not FLIGHT's item.",
       }),
     ).toHaveProperty("isError", true);
+  });
+  it("settles FLIGHT's ticketless Comms blocker with its reason", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: null,
+      text: "Disk capacity is low.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(
+      await call("dismiss_item", { key, basis: "Disk capacity recovered." }),
+    ).not.toHaveProperty("isError", true);
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
   });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();

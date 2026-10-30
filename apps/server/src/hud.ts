@@ -996,17 +996,13 @@ function buildAttentionItems(
     const repoId = ticket?.[1];
     const issueNumber = ticket === null ? null : Number(ticket[2]);
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
+    const prs = repoId === undefined ? [] : store.pullRequests(repoId);
+    const ticketPrs = prs.filter((pr) => pr.ticket === message.ticket);
     const resolvedPr =
-      repoId === undefined
-        ? false
-        : store
-            .pullRequests(repoId)
-            .some(
-              (pr) =>
-                pr.state !== "open" &&
-                (pr.ticket === message.ticket ||
-                  (prNumber !== undefined && pr.number === Number(prNumber))),
-            );
+      prNumber === undefined
+        ? ticketPrs.some((pr) => pr.state === "merged") &&
+          !ticketPrs.some((pr) => pr.state === "open")
+        : prs.some((pr) => pr.number === Number(prNumber) && pr.state !== "open");
     const doneTicket =
       repoId === undefined || issueNumber === null
         ? false
