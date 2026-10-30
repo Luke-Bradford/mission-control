@@ -2171,6 +2171,7 @@ describe("guard hits", () => {
       "full-suite": 0,
       "read-only": 0,
       network: 1,
+      "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });
