@@ -3108,17 +3108,32 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           run.endedAt !== null ||
           row === null ||
           deps.supervisor.busy().some((busy) => busy.seatId === a.seat) ||
+          deps.supervisor.sessionAlive?.(a.seat) === true ||
           row.state === "running"
         )
           return fail(`${a.seat} is neither stopped, paused nor waiting to resume.`);
-        if (row.state === "stopped")
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          store.machineSamples(machineCapacitySince(at, capacityConfig)),
+          at,
+          capacityConfig,
+        );
+        if (capacity.blocked)
+          return fail(`the machine has insufficient headroom: ${capacity.reason}`);
+        const lifted: string[] = [];
+        if (row.state === "stopped") {
           store.setSeatSession({ ...row, state: "idle", reason: null, updatedAt: at });
+          lifted.push(`the stop (${row.reason ?? "no reason given"})`);
+        }
         if (held(run)) {
           if (row.state === "stopped") store.setSeatSession(row);
           return fail("Run is held.");
         }
         const pause = pausedSeat(store, a.seat);
-        if (pause !== null) writeCrewPause(store, pauseWithout(pause, a.seat, "FLIGHT"), at);
+        if (pause !== null) {
+          writeCrewPause(store, pauseWithout(pause, a.seat, "FLIGHT"), at);
+          lifted.push(`the crew pause (${pause.reason})`);
+        }
         // What this call wrote; a rollback leaves a newer change by the operator alone.
         const pauseAfter = JSON.stringify(readCrewPause(store));
         const rowAfter = JSON.stringify(store.seatSession(a.seat));
@@ -3132,11 +3147,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!live) {
           if (pause !== null && JSON.stringify(readCrewPause(store)) === pauseAfter)
             writeCrewPause(store, pause, at);
-          if (
-            store.run(run.id)?.endedAt === null &&
-            row.state === "stopped" &&
-            JSON.stringify(store.seatSession(a.seat)) === rowAfter
-          )
+          if (row.state === "stopped" && JSON.stringify(store.seatSession(a.seat)) === rowAfter)
             store.setSeatSession(row);
           const outcome =
             store.run(run.id)?.endedAt !== null
@@ -3146,7 +3157,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         }
         bus.emit("settings");
         bus.emit("agents");
-        return { text: `Resumed ${seatCallSign(a.seat)}'s run.` };
+        const liftedText = lifted.length > 0 ? `; lifted ${lifted.join(" and ")}` : "";
+        return { text: `Resumed ${seatCallSign(a.seat)}'s run${liftedText}.` };
       },
       z.toJSONSchema(ResumeSeatArgs),
       { engine: false },

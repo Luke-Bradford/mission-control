@@ -987,6 +987,7 @@ operator.
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `resume_seat` | Resume a stopped or paused seat's unfinished run (superuser repo). Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit, a busy or already-live seat and a machine without headroom. It counts a resume only when the seat is running afterwards; the decision names the stop and the pause it lifted, and a resume that does not go live puts them back unless the operator changed them meanwhile |
 | `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
 | `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
