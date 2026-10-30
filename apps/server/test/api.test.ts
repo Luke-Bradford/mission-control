@@ -69,6 +69,7 @@ import {
   stopForecast,
   type Telemetry,
   TYPE_LABELS,
+  UPDATE_LOG_UNREADABLE,
   type UsageSample,
   type VersionInfo,
 } from "@mc/core";
@@ -146,6 +147,7 @@ let updaterVersion: VersionInfo;
 let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
+let updaterLogError: Error | null = null;
 let dropUpdateResponse: boolean;
 const stubUpdater = (): Updater => ({
   changes: async () => null,
@@ -163,6 +165,11 @@ const stubUpdater = (): Updater => ({
     return updaterVersion;
   },
   restart: () => void updaterCalls.push("restart"),
+  log: async () => {
+    updaterCalls.push("log");
+    if (updaterLogError) throw updaterLogError;
+    return "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n";
+  },
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
 /** A map transcript fixture stamped now: the ring reads only the window the map shows. */
@@ -1358,6 +1365,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
+  ["GET", "/api/update/log"],
   ["GET", "/api/seats/guido-1/focus"],
   ["POST", "/api/seats/guido-1/focus", { focus: "lane:work" }],
   ["POST", "/api/seats/guido-1/queue/reorder", { move: "shop-app#2", above: "shop-app#1" }],
@@ -6661,10 +6669,34 @@ describe("update routes", () => {
       };
       const r = await post("/api/update");
       expect(r.statusCode).toBe(status);
-      expect(r.json()).toEqual({ error: text });
+      expect(r.json()).toEqual({ error: text, logged: false });
     }
     expect(updaterCalls).not.toContain("restart");
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("answers the last update's log, so the page can show why it failed", async () => {
+    const r = await get("/api/update/log");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n" });
+    expect(updaterCalls).toEqual(["log"]);
+  });
+
+  it("answers a log it cannot read with fixed text, never the errno or the path", async () => {
+    updaterLogError = Object.assign(
+      new Error("EACCES: permission denied, open '/Users/someone/update.log'"),
+      {
+        code: "EACCES",
+      },
+    );
+    try {
+      const r = await get("/api/update/log");
+      expect(r.statusCode).toBe(500);
+      expect(r.json()).toEqual({ error: UPDATE_LOG_UNREADABLE });
+      expect(r.body).not.toContain("someone");
+    } finally {
+      updaterLogError = null;
+    }
   });
 
   it("hides an unexpected error behind fixed text", async () => {
@@ -6673,7 +6705,7 @@ describe("update routes", () => {
     };
     const r = await post("/api/update");
     expect(r.statusCode).toBe(500);
-    expect(r.json()).toEqual({ error: "update failed; see update.log" });
+    expect(r.json()).toEqual({ error: "update failed; see update.log", logged: false });
   });
 
   it("refuses a body other than {} with 400 and updates nothing", async () => {
@@ -6705,7 +6737,10 @@ describe("update routes", () => {
     });
     const u = await a.inject({ method: "POST", url: "/api/update", headers: json, payload: {} });
     expect(u.statusCode).toBe(409);
-    expect(u.json()).toEqual({ error: "updates are not available on this server" });
+    expect(u.json()).toEqual({ error: "updates are not available on this server", logged: false });
+    expect((await a.inject({ method: "GET", url: "/api/update/log" })).json()).toEqual({
+      text: null,
+    });
     const c = await a.inject({
       method: "POST",
       url: "/api/version/check",
