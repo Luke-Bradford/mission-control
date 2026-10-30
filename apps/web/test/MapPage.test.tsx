@@ -184,7 +184,7 @@ describe("Map page", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Selected" })).toBeTruthy();
   });
 
-  it("consumes live imports and history, including the configured GitHub PR URL", async () => {
+  it("draws the live snapshot as Changes, with no lens tabs", async () => {
     const live: MapSnapshot = structuredClone(idle);
     live.tree = [{ path: "src/live.ts", lines: 8 }];
     const seat = live.seats[0];
@@ -208,15 +208,14 @@ describe("Map page", () => {
     });
     at("/map/sample");
     await screen.findByRole("group", { name: "Changes treemap" });
-    fireEvent.click(screen.getByRole("button", { name: "History" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "src/live.ts" })[0] as HTMLElement);
-    expect(screen.getByRole("link", { name: "#837" }).getAttribute("href")).toBe(
-      "https://github.com/Luke-Bradford/mission-control/pull/837",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Impact" }));
-    expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
-      "1 file changed",
-    );
+    // the analytical lenses live on the QA pages now: the map has no tabs for them
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Impact" })).toBeNull();
+    expect(
+      document
+        .querySelector(".map-treemap-tile[title='src/live.ts']")
+        ?.getAttribute("data-changed"),
+    ).toBe("GUIDO-1");
   });
 
   it("says the map is unavailable, and retrying, when the snapshot fails", async () => {

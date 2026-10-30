@@ -1,7 +1,6 @@
-import type { FindingSeverity, MapSnapshot } from "@mc/core";
+import type { MapSnapshot } from "@mc/core";
 import { type CSSProperties, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { plural } from "../fmt.ts";
-import { type LensVisual, type MapLens, ownershipOf } from "./Lenses.tsx";
+import type { ChangeVisual } from "./changes.ts";
 
 const colours = [
   "var(--seat-1)",
@@ -12,13 +11,6 @@ const colours = [
   "var(--seat-6)",
   "var(--seat-7)",
 ];
-/** Conflicts shows each seat's changes at this strength, under the files that conflict. */
-const conflictFade = 0.3;
-const severityColours: Record<FindingSeverity, string> = {
-  Critical: "var(--rem)",
-  Important: "var(--warn-mark)",
-  Minor: "var(--void-muted)",
-};
 type Rect = { x: number; y: number; width: number; height: number };
 export type TreemapTile = Rect & { path: string; center: [number, number] };
 export type TreemapFolder = Rect & { path: string; name: string };
@@ -36,11 +28,6 @@ const weight = (node: Branch): number =>
         node.children.reduce((n, c) => n + weight(c), 0),
       )
     : Math.max(4, node.lines);
-export const historyHeat = (prs: number) =>
-  prs >= 30 ? 0.85 : prs >= 10 ? 0.6 : prs >= 3 ? 0.36 : prs > 0 ? 0.16 : 0;
-export const isFixHeavy = (fixes: number, prs: number) =>
-  fixes >= 5 || (fixes >= 3 && prs > 0 && fixes / prs >= 0.5);
-
 /** Line-weighted hierarchy; the returned rectangles drive both the tiles and relationship lines. */
 export function treemapLayout(files: MapSnapshot["tree"], width: number, height: number) {
   const root: Branch = { path: "", name: "", children: [] };
@@ -204,7 +191,7 @@ const noMarks = new Map<string, number>();
  */
 export function branchOnlyFiles(
   tree: MapSnapshot["tree"],
-  visual: Record<string, LensVisual>,
+  visual: Record<string, ChangeVisual>,
 ): MapSnapshot["tree"] {
   const known = new Set(tree.map((file) => file.path));
   const candidates = Object.keys(visual).filter((path) => path !== "" && !known.has(path));
@@ -227,26 +214,15 @@ type TileProps = {
   y: number;
   width: number;
   height: number;
-  focused: boolean;
-  dim: boolean;
   neutral: boolean;
-  overlap: boolean;
-  directImport: boolean;
-  fixHeavy: boolean;
   changed: string;
   read: string;
   strong: boolean;
   playCurrent: boolean;
   lines: string;
-  /** What the lens says about the file, for assistive technology. */
+  /** What the tile says about the file, for assistive technology. */
   note: string;
-  /** Ownership: the matching area label ("" for none) and whether the file is hard-rule. */
-  area: string;
-  hardRule: boolean;
-  /** Review: the file's top severity ("" for none) and how many findings it has. */
-  severity: string;
-  findings: number;
-  /** Conflicts: the file is changed on 2+ open branches. */
+  /** The file is changed on 2+ open branches. */
   conflict: boolean;
   intensity: number;
   intensity2: number;
@@ -259,24 +235,16 @@ type TileProps = {
 
 /** One file's tile; primitive props only, so a tile nothing changed for is not drawn again. */
 const Tile = memo(function Tile(t: TileProps) {
+  const roomy = t.width >= 58 && t.height >= 26;
   return (
     <button
       type="button"
       className="map-treemap-tile"
-      data-focused={t.focused || undefined}
-      data-dim={t.dim || undefined}
       data-neutral={t.neutral || undefined}
-      data-overlap={t.overlap || undefined}
-      data-direct-import={t.directImport || undefined}
-      data-fix-heavy={t.fixHeavy || undefined}
       data-changed={t.changed || undefined}
       data-read={t.read || undefined}
       data-strong={t.strong || undefined}
       data-play-current={t.playCurrent || undefined}
-      data-area={t.area || undefined}
-      data-hard-rule={t.hardRule || undefined}
-      data-severity={t.severity || undefined}
-      data-findings={t.findings || undefined}
       data-conflict={t.conflict || undefined}
       style={
         {
@@ -295,19 +263,15 @@ const Tile = memo(function Tile(t: TileProps) {
       aria-description={t.note || undefined}
     >
       <span className="map-treemap-label">{t.path.split("/").at(-1)}</span>
-      {t.lines && t.width >= 58 && t.height >= 26 && (
-        <span className="map-treemap-lines">{t.lines}</span>
-      )}
+      {t.lines && roomy && <span className="map-treemap-lines">{t.lines}</span>}
+      {t.conflict && roomy && <span className="map-treemap-badge">conflict</span>}
     </button>
   );
 });
 
 export const MapTreemap = memo(function MapTreemap({
   snapshot,
-  lens,
   visual,
-  focus,
-  focusLinks = [],
   onSelect,
   indices = noIndices,
   extraFiles = noFiles,
@@ -316,44 +280,30 @@ export const MapTreemap = memo(function MapTreemap({
   markSeat = null,
 }: {
   snapshot: MapSnapshot;
-  lens: MapLens;
-  visual: Record<string, LensVisual>;
-  focus: string | null;
-  focusLinks?: { from: string; to: string; unlinked?: boolean }[];
+  visual: Record<string, ChangeVisual>;
   onSelect: (path: string) => void;
   /** Each seat's colour, its place in config order; a seat not listed takes its place in the snapshot. */
   indices?: Record<string, number>;
-  /** Changes: files absent from the tree that still get a tile (see branchOnlyFiles). */
+  /** Files absent from the tree that still get a tile (see branchOnlyFiles). */
   extraFiles?: MapSnapshot["tree"];
-  /** Changes, playing: the step number of each file revealed so far, the latest one, and whose. */
+  /** Playing: the step number of each file revealed so far, the latest one, and whose. */
   marks?: Map<string, number>;
   currentMark?: string | null;
   markSeat?: string | null;
 }) {
   const [ref, size] = useSize();
-  const files = useMemo(
-    () =>
-      lens === "changes" || lens === "conflicts"
-        ? [...snapshot.tree, ...extraFiles]
-        : snapshot.tree,
-    [lens, snapshot.tree, extraFiles],
-  );
+  const files = useMemo(() => [...snapshot.tree, ...extraFiles], [snapshot.tree, extraFiles]);
   const layout = useMemo(() => treemapLayout(files, size.width, size.height), [files, size]);
-  const owner = useMemo(
-    () => (lens === "ownership" ? ownershipOf(snapshot.rules) : null),
-    [lens, snapshot.rules],
-  );
   // the branches a conflicting file is changed on, for the tile's description
   const conflictBranches = useMemo(() => {
     const out = new Map<string, Set<string>>();
-    if (lens !== "conflicts") return out;
     for (const { file, branches } of snapshot.conflicts) {
       const set = out.get(file) ?? new Set<string>();
       for (const branch of branches) set.add(branch);
       out.set(file, set);
     }
     return out;
-  }, [lens, snapshot.conflicts]);
+  }, [snapshot.conflicts]);
   const colour = (seat: string) =>
     colours[
       Math.max(0, indices[seat] ?? snapshot.seats.findIndex((item) => item.seat === seat)) %
@@ -364,40 +314,14 @@ export const MapTreemap = memo(function MapTreemap({
     <div
       ref={ref}
       role="group"
-      className={`map-treemap map-treemap-${lens}`}
-      aria-label={
-        lens === "changes"
-          ? "Changes treemap"
-          : lens === "impact"
-            ? "Impact reach treemap"
-            : lens === "history"
-              ? "History PR heat treemap"
-              : lens === "ownership"
-                ? "Ownership treemap"
-                : lens === "review"
-                  ? "Review findings treemap"
-                  : "Conflicts treemap"
-      }
+      className="map-treemap map-treemap-changes"
+      aria-label="Changes treemap"
     >
-      {layout.folders.map((folder) => {
-        // Ownership tints a folder with its area, as the mockup does
-        const area = owner?.areaOf(`${folder.path}/x`);
-        return (
-          <div
-            key={folder.path}
-            className="map-treemap-folder"
-            data-area={area}
-            style={
-              {
-                ...style(folder),
-                ...(area ? { "--area-colour": owner?.colours[area] } : {}),
-              } as CSSProperties
-            }
-          >
-            <span className="map-treemap-folder-label">{folder.name}</span>
-          </div>
-        );
-      })}
+      {layout.folders.map((folder) => (
+        <div key={folder.path} className="map-treemap-folder" style={style(folder)}>
+          <span className="map-treemap-folder-label">{folder.name}</span>
+        </div>
+      ))}
       {layout.tiles.map((tile) => {
         const v = visual[tile.path];
         const changes = v?.changes ?? [];
@@ -407,45 +331,19 @@ export const MapTreemap = memo(function MapTreemap({
           second = changed[1];
         const strength = (change?: { lines: number }) =>
           change ? changeIntensity(change.lines) : 0;
-        const directImport = lens === "impact" && v?.directImport === true;
-        const active =
-          lens === "changes" || lens === "conflicts"
-            ? changed.length > 0 || v?.conflict === true
-            : lens === "history"
-              ? v?.hotspot !== undefined
-              : lens === "ownership"
-                ? v?.area !== undefined || v?.hardRule === true
-                : lens === "review"
-                  ? v?.severity !== undefined
-                  : directImport || (v?.seat !== undefined && v.distance !== undefined);
-        const intensity = active
-          ? lens === "history"
-            ? historyHeat(v?.hotspot ?? 0)
-            : lens === "changes"
-              ? strength(first)
-              : lens === "conflicts"
-                ? strength(first) * conflictFade
-                : lens === "ownership" || lens === "review"
-                  ? 1
-                  : 1 / ((v?.distance ?? 0) + 1)
-          : 0;
-        const fixHeavy = lens === "history" && isFixHeavy(v?.fixes ?? 0, v?.hotspot ?? 0);
-        const tileColour =
-          lens === "ownership"
-            ? v?.area !== undefined
-              ? (owner?.colours[v.area] ?? "var(--accent)")
-              : "var(--void-line)"
-            : lens === "review"
-              ? severityColours[v?.severity ?? "Minor"]
-              : first
-                ? colour(first.seat)
-                : active
-                  ? lens === "history"
-                    ? "var(--accent)"
-                    : lens === "conflicts"
-                      ? "var(--rem)"
-                      : (colours[(v?.seat ?? 0) % colours.length] as string)
-                  : "var(--void-line)";
+        const conflict = v?.conflict === true;
+        const added = changed.reduce((n, c) => n + c.add, 0);
+        const removed = changed.reduce((n, c) => n + c.rem, 0);
+        const description = [
+          changed.length
+            ? `changed by ${changed.map((c) => c.seat).join(", ")}, +${added} −${removed}`
+            : "",
+          conflict
+            ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("; ");
         return (
           <Tile
             key={tile.path}
@@ -454,54 +352,17 @@ export const MapTreemap = memo(function MapTreemap({
             y={tile.y}
             width={tile.width}
             height={tile.height}
-            focused={focus === tile.path}
-            dim={v?.dim === true}
-            neutral={!active}
-            overlap={v?.overlap === true}
-            directImport={directImport}
-            fixHeavy={fixHeavy}
+            neutral={changed.length === 0}
             changed={changed.map((change) => change.seat).join(" ")}
-            read={lens === "changes" ? reads.map((change) => change.seat).join(" ") : ""}
-            strong={
-              (lens === "changes" || lens === "conflicts") &&
-              Math.max(strength(first), strength(second)) *
-                (lens === "conflicts" ? conflictFade : 1) >=
-                0.8
-            }
+            read={reads.map((change) => change.seat).join(" ")}
+            strong={Math.max(strength(first), strength(second)) >= 0.8}
             playCurrent={currentMark === tile.path && marks.has(tile.path)}
-            lines={
-              lens === "changes" && changed.length
-                ? `+${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
-                : lens === "impact" && active && v?.distance !== undefined
-                  ? `d${v.distance}`
-                  : ""
-            }
-            note={
-              lens === "changes" && changed.length
-                ? `changed by ${changed.map((c) => c.seat).join(", ")}, +${changed.reduce((n, c) => n + c.add, 0)} −${changed.reduce((n, c) => n + c.rem, 0)}`
-                : lens === "impact" && active && v?.distance !== undefined
-                  ? `${v.seatName ? `${v.seatName}, ` : ""}import distance ${v.distance}`
-                  : lens === "history" && v?.hotspot
-                    ? `${plural(v.hotspot, "merged PR")}, ${plural(v.fixes ?? 0, "fix", "fixes")}`
-                    : lens === "ownership"
-                      ? `${v?.area ?? "no area"}${v?.hardRule ? ", hard-rule" : ""}`
-                      : lens === "review" && v?.severity
-                        ? `${plural(v.findings ?? 0, "finding")}, top severity ${v.severity}`
-                        : lens === "conflicts" && v?.conflict
-                          ? `conflicts between ${[...(conflictBranches.get(tile.path) ?? [])].join(", ")}`
-                          : ""
-            }
-            area={lens === "ownership" ? (v?.area ?? "") : ""}
-            hardRule={lens === "ownership" && v?.hardRule === true}
-            severity={lens === "review" ? (v?.severity ?? "") : ""}
-            findings={lens === "review" ? (v?.findings ?? 0) : 0}
-            conflict={lens === "conflicts" && v?.conflict === true}
-            intensity={intensity}
-            intensity2={
-              (second ? strength(second) : strength(first)) *
-              (lens === "conflicts" ? conflictFade : 1)
-            }
-            colour={tileColour}
+            lines={changed.length ? `+${added} −${removed}` : ""}
+            note={description}
+            conflict={conflict}
+            intensity={strength(first)}
+            intensity2={second ? strength(second) : strength(first)}
+            colour={first ? colour(first.seat) : "var(--void-line)"}
             colour2={second ? colour(second.seat) : first ? colour(first.seat) : "transparent"}
             readColour={reads[0] ? colour(reads[0].seat) : "transparent"}
             readColour2={reads[1] ? colour(reads[1].seat) : "transparent"}
@@ -541,28 +402,6 @@ export const MapTreemap = memo(function MapTreemap({
             );
           })}
         </div>
-      )}
-      {focusLinks.length > 0 && (
-        <svg
-          className="map-treemap-links"
-          viewBox={`0 0 ${size.width} ${size.height}`}
-          aria-hidden="true"
-        >
-          {focusLinks.map((link) => {
-            const from = layout.byPath.get(link.from),
-              to = layout.byPath.get(link.to);
-            return from && to ? (
-              <line
-                key={`${link.from}:${link.to}`}
-                x1={from.center[0]}
-                y1={from.center[1]}
-                x2={to.center[0]}
-                y2={to.center[1]}
-                data-hidden={link.unlinked || undefined}
-              />
-            ) : null;
-          })}
-        </svg>
       )}
     </div>
   );

@@ -26,6 +26,7 @@
 }
 .qa-evidence {
   display: grid;
+  grid-auto-flow: row dense;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
@@ -77,4 +78,17 @@
   .qa-evidence {
     grid-template-columns: 1fr;
   }
+}
+/* Impact is a panel with tables of files: it takes the card's whole width */
+.qa-evidence-impact {
+  grid-column: 1 / -1;
+}
+.qa-impact {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.qa-impact .map-lens {
+  flex: none;
+  max-height: 360px;
 }

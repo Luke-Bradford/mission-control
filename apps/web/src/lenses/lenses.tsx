@@ -1,43 +1,14 @@
-import { FINDING_SEVERITIES, type FindingSeverity, globMatches, type MapSnapshot } from "@mc/core";
+import {
+  FINDING_SEVERITIES,
+  type FindingSeverity,
+  globMatches,
+  type MapSeat,
+  type MapSnapshot,
+} from "@mc/core";
 import { percent, plural } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
-import { seatToken, touchedFiles } from "./cards.ts";
-
-export type MapLens = "changes" | "impact" | "history" | "ownership" | "review" | "conflicts";
-export interface LensVisual {
-  /** Changes: every seat that currently changed or read this file. */
-  changes?: {
-    seat: string;
-    changed: boolean;
-    read: boolean;
-    add: number;
-    rem: number;
-    lines: number;
-  }[];
-  /** Impact: seat colour index and dependency distance (zero is a changed seed). */
-  seat?: number;
-  /** Impact: the changing seat's name, for text that says what its colour does. */
-  seatName?: string;
-  distance?: number;
-  overlap?: boolean;
-  /** Focused Impact: the file the focused file imports directly. */
-  directImport?: boolean;
-  /** History: merged-PR heat and a conspicuous bug-fix signal. */
-  hotspot?: number;
-  fixes?: number;
-  confidence?: number;
-  linked?: boolean;
-  focused?: boolean;
-  dim?: boolean;
-  /** Ownership: the matching configured map area. */
-  area?: string;
-  hardRule?: boolean;
-  /** Review: highest severity and number of findings for this file. */
-  severity?: FindingSeverity;
-  findings?: number;
-  /** Conflicts: this file is in the hub's merge-conflict check. */
-  conflict?: boolean;
-}
+import { seatToken } from "../map/cards.ts";
+import "./lenses.css";
 
 /** The ownership areas' colours, in rules order: the mockup's three first, then other distinct tokens. */
 const AREA_TOKENS = ["--r1", "--r3", "--r2", "--r4", "--r5", "--r6", "--r7", "--r8"] as const;
@@ -146,18 +117,6 @@ export function graph(snapshot: MapSnapshot): Graph {
   return { forward, reverse, cycles };
 }
 
-/** Complete reverse reach and direct imports around a focused file. */
-export function impactFocusLinks(
-  snapshot: MapSnapshot,
-  path: string | null,
-): { from: string; to: string }[] {
-  if (path === null) return [];
-  const { forward, reverse } = graph(snapshot);
-  const related = new Set([...downstream(path, reverse).keys(), ...(forward.get(path) ?? [])]);
-  related.delete(path);
-  return [...related].map((to) => ({ from: path, to }));
-}
-
 export function downstream(path: string, reverse: Map<string, Set<string>>) {
   const distances = new Map([[path, 0]]);
   const queue = [path];
@@ -218,218 +177,15 @@ function linked(a: string, b: string, forward: Graph["forward"], reverse: Graph[
   });
 }
 
-export function historyFocusLinks(snapshot: MapSnapshot, path: string | null) {
-  if (path === null) return [];
-  const { forward, reverse } = graph(snapshot);
-  return snapshot.hist.coupling.flatMap(([left, right, , confidence]) => {
-    const a = snapshot.tree[left]?.path;
-    const b = snapshot.tree[right]?.path;
-    if (!a || !b || (a !== path && b !== path)) return [];
-    return [{ from: a, to: b, unlinked: !linked(a, b, forward, reverse), confidence }];
-  });
-}
-
-function lineCounts(seat: MapSnapshot["seats"][number], path: string) {
-  const change = seat.scope.modified.find((item) => item.file === path);
-  const add = change?.add ?? 0;
-  const rem = change?.rem ?? 0;
-  return { add, rem, lines: add + rem };
-}
-
-/**
- * Changes, inside a time window: a seat keeps a file only if one of its ticks for it falls in the
- * window (the mockup's inWin); a file no seat keeps drops out.
- */
-export function windowVisuals(
-  visual: Record<string, LensVisual>,
-  seats: MapSnapshot["seats"],
-  win: [from: number, to: number],
-): Record<string, LensVisual> {
-  const seen = new Map(
-    seats.map((seat) => [
-      seat.seat,
-      new Set(
-        seat.recent.filter((tick) => tick.at >= win[0] && tick.at <= win[1]).map((t) => t.file),
-      ),
-    ]),
-  );
-  const out: Record<string, LensVisual> = {};
-  for (const [path, v] of Object.entries(visual)) {
-    const changes = (v.changes ?? []).filter((change) => seen.get(change.seat)?.has(path));
-    if (changes.length) out[path] = { ...v, changes };
-  }
-  return out;
-}
-
 const severityOrder = Object.fromEntries(
   FINDING_SEVERITIES.map((severity, i) => [severity, i]),
 ) as Record<FindingSeverity, number>;
-/** The highest severity among a file's findings. */
-const topSeverity = (findings: MapSnapshot["findings"]) =>
-  [...findings].sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])[0]?.severity;
-
-/** Changes: every seat's changed and read files, with the lines it moved. */
-function changesVisuals(snapshot: MapSnapshot): Record<string, LensVisual> {
-  const out: Record<string, LensVisual> = {};
-  snapshot.seats.forEach((seat) => {
-    const changed = new Set(
-      seat.scope.modified
-        .filter((change) => change.add + change.rem > 0)
-        .map((change) => change.file),
-    );
-    const read = new Set([...seat.scope.read, ...touchedFiles(seat)]);
-    for (const path of new Set([...changed, ...read])) {
-      const visual = out[path] ?? { changes: [] };
-      out[path] = visual;
-      visual.changes?.push({
-        seat: seat.seat,
-        changed: changed.has(path),
-        read: read.has(path),
-        ...lineCounts(seat, path),
-      });
-    }
-  });
-  return out;
-}
-
-/** Per-file map styling data for the active lens. */
-export function lensVisuals(
-  snapshot: MapSnapshot,
-  lens: MapLens,
-  focus: string | null,
-): Record<string, LensVisual> {
-  if (lens === "changes") return changesVisuals(snapshot);
-  if (lens === "ownership") {
-    const owner = ownershipOf(snapshot.rules);
-    if (!owner) return {};
-    return Object.fromEntries(
-      snapshot.tree.map(({ path }) => [
-        path,
-        { area: owner.areaOf(path) ?? undefined, hardRule: owner.isHardRule(path) },
-      ]),
-    );
-  }
-  if (lens === "review") {
-    const grouped = new Map<string, MapSnapshot["findings"]>();
-    for (const finding of snapshot.findings) {
-      const rows = grouped.get(finding.file) ?? [];
-      rows.push(finding);
-      grouped.set(finding.file, rows);
-    }
-    return Object.fromEntries(
-      [...grouped].map(([path, findings]) => [
-        path,
-        { severity: topSeverity(findings), findings: findings.length },
-      ]),
-    );
-  }
-  if (lens === "conflicts") {
-    // the seats' changes, faded, with the files that conflict marked on them
-    const out = changesVisuals(snapshot);
-    for (const { file } of snapshot.conflicts) out[file] = { ...out[file], conflict: true };
-    return out;
-  }
-  if (lens === "impact") {
-    const { forward, reverse } = graph(snapshot);
-    const out: Record<string, LensVisual> = {};
-    const codeChanged = changed(snapshot).map(({ seat, files }) => ({
-      seat,
-      files: files.filter((path) => isCode(path) && !isTest(path)),
-    }));
-    const overlap = importOverlaps(codeChanged, forward);
-    codeChanged.forEach(({ seat: seatName, files }, seat) => {
-      const code = files.filter((path) => reverse.has(path));
-      for (const path of code) {
-        const prior = out[path];
-        out[path] = {
-          seat: prior?.seat ?? seat,
-          seatName: prior?.seatName ?? seatName.seat,
-          distance: 0,
-          overlap: overlap.has(path),
-          focused: focus === path,
-        };
-      }
-      for (const [path, distance] of downstreamFrom(code, reverse)) {
-        const prior = out[path];
-        out[path] = {
-          seat: prior?.seat ?? seat,
-          seatName: prior?.seatName ?? seatName.seat,
-          distance: Math.min(prior?.distance ?? Infinity, distance),
-          overlap: false,
-          focused: focus === path,
-        };
-      }
-    });
-    if (focus !== null) {
-      const reaches = downstream(focus, reverse);
-      const imports = forward.get(focus) ?? new Set<string>();
-      const related = new Set([focus, ...reaches.keys(), ...imports]);
-      for (const path of related) {
-        const prior = out[path];
-        if (path === focus || reaches.has(path)) {
-          const focusDistance = path === focus ? 0 : (reaches.get(path) as number);
-          out[path] = {
-            ...prior,
-            seat: prior?.seat ?? 0,
-            distance: Math.min(prior?.distance ?? Infinity, focusDistance),
-            focused: path === focus,
-            dim: false,
-          };
-        } else {
-          const { distance: _distance, seat: _seat, seatName: _seatName, ...rest } = prior ?? {};
-          out[path] = { ...rest, directImport: true, focused: false, dim: false };
-        }
-      }
-      for (const { path } of snapshot.tree)
-        out[path] = { ...(out[path] ?? {}), focused: path === focus, dim: !related.has(path) };
-    }
-    return out;
-  }
-  const out: Record<string, LensVisual> = Object.fromEntries(
-    Object.entries(snapshot.hist.files).flatMap(([index, history]) => {
-      const path = snapshot.tree[Number(index)]?.path;
-      return path
-        ? [[path, { hotspot: history[0], fixes: history[1], focused: focus === path }]]
-        : [];
-    }),
-  );
-  if (focus !== null) {
-    const partners = historyFocusLinks(snapshot, focus);
-    const partnerSet = new Set(partners.flatMap(({ from, to }) => [from, to]));
-    for (const { path } of snapshot.tree) {
-      const partner = partners.find((edge) => edge.from === path || edge.to === path);
-      out[path] = {
-        ...(out[path] ?? {}),
-        focused: path === focus,
-        dim: !partnerSet.has(path),
-        confidence: partner?.confidence,
-        linked: partner ? !partner.unlinked : undefined,
-      };
-    }
-  }
-  return out;
-}
 
 function changed(snapshot: MapSnapshot) {
   return snapshot.seats.map((seat) => ({
     seat,
     files: [...new Set(seat.scope.modified.filter((c) => c.add + c.rem > 0).map((c) => c.file))],
   }));
-}
-
-function importOverlaps(seats: ReturnType<typeof changed>, forward: Graph["forward"]): Set<string> {
-  const paths = new Set<string>();
-  for (const other of seats) {
-    for (const owner of seats) {
-      if (owner.seat.seat === other.seat.seat) continue;
-      for (const path of other.files) {
-        // A shared file is a normal edit conflict, not an import-chain overlap.
-        const targets = new Set(owner.files.filter((target) => target !== path));
-        if (targets.size && importChain(path, targets, forward)) paths.add(path);
-      }
-    }
-  }
-  return paths;
 }
 
 function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) => void }) {
@@ -455,37 +211,23 @@ function FileButton({ path, onFocus }: { path: string; onFocus: (path: string) =
   );
 }
 
-export function LensTabs({ lens, onChange }: { lens: MapLens; onChange: (lens: MapLens) => void }) {
-  return (
-    <fieldset className="map-lens-tabs">
-      <legend className="sr-only">Map lens</legend>
-      {(["changes", "impact", "history", "ownership", "review", "conflicts"] as const).map(
-        (item) => (
-          <button
-            type="button"
-            key={item}
-            aria-pressed={lens === item}
-            onClick={() => onChange(item)}
-          >
-            {item[0].toUpperCase() + item.slice(1)}
-          </button>
-        ),
-      )}
-    </fieldset>
-  );
-}
-
 export function ImpactLens({
   snapshot,
   focus,
   onFocus,
+  seats,
 }: {
   snapshot: MapSnapshot;
   focus: string | null;
   onFocus: (path: string | null) => void;
+  /** Only these seats' changes: a PR's card names the seats whose branch it is. */
+  seats?: readonly string[];
 }) {
-  const { forward, reverse, cycles } = graph(snapshot);
-  const allChanged = changed(snapshot).filter(({ files }) => files.length > 0);
+  const { forward, reverse, cycles: allCycles } = graph(snapshot);
+  const inScope = (seat: string) => seats === undefined || seats.includes(seat);
+  const allChanged = changed(snapshot).filter(
+    ({ seat, files }) => files.length > 0 && inScope(seat.seat),
+  );
   const allChangedCode = allChanged.map(({ seat, files }) => ({
     seat,
     files: files.filter((path) => isCode(path) && !isTest(path)),
@@ -540,9 +282,15 @@ export function ImpactLens({
       .filter((path) => !isTest(path) && ![...downstream(path, reverse).keys()].some(isTest))
       .map((path) => ({ seat: seat.seat, path })),
   );
-  const overlap = allChangedCode.flatMap((owner) =>
-    allChangedCode
+  // the overlap is read across every seat; with `seats`, rows keep only those naming one of them
+  const everyone = changed(snapshot).map(({ seat, files }) => ({
+    seat,
+    files: files.filter((path) => isCode(path) && !isTest(path)),
+  }));
+  const overlap = everyone.flatMap((owner) =>
+    everyone
       .filter((other) => other.seat.seat !== owner.seat.seat)
+      .filter((other) => inScope(owner.seat.seat) || inScope(other.seat.seat))
       .flatMap((other) =>
         other.files.flatMap((path) => {
           const chain = importChain(
@@ -554,11 +302,19 @@ export function ImpactLens({
         }),
       ),
   );
+  const scoped = new Set(allChanged.flatMap(({ files }) => files));
+  const cycles = seats
+    ? allCycles.filter((cycle) => cycle.some((path) => scoped.has(path)))
+    : allCycles;
   return (
     <section className="map-lens" aria-label="Impact lens">
       <header>
         <h2>Impact</h2>
-        <p>what the seats’ changes reach through imports</p>
+        <p>
+          {seats
+            ? "what this PR’s changes reach through imports"
+            : "what the seats’ changes reach through imports"}
+        </p>
       </header>
       {allChanged.map(({ seat, files }, index) => {
         const code = allChangedCode[index]?.files.filter((path) => forward.has(path)) ?? [];
@@ -1052,77 +808,51 @@ export function conflictSummary(snapshot: MapSnapshot): string {
   return `${plural(files, "file")} ${files === 1 ? "conflicts" : "that conflict"} between open branches · ${plural(pairs, "branch pair")}${unchecked ? ` · ${unchecked} unchecked` : ""}`;
 }
 
-export function ConflictsLens({
+/** The seats whose changes sit on a branch: those that list it among the branches they changed on. */
+export function prSeats(snapshot: MapSnapshot, branch: string): MapSeat[] {
+  return snapshot.seats.filter((seat) => seat.changedOn.includes(branch));
+}
+
+/** A conflicting file's block: each branch pair, the seat on each branch, and who changed it here. */
+export function ConflictDetail({
   snapshot,
+  file,
   names = noNames,
   indices = noIndices,
-  onFocus,
-}: SeatProps & {
-  snapshot: MapSnapshot;
-  onFocus: (path: string) => void;
-}) {
-  const byFile = new Map<string, MapSnapshot["conflicts"]>();
-  for (const conflict of snapshot.conflicts) {
-    const rows = byFile.get(conflict.file) ?? [];
-    rows.push(conflict);
-    byFile.set(conflict.file, rows);
-  }
+}: SeatProps & { snapshot: MapSnapshot; file: string }) {
+  const pairs = snapshot.conflicts.filter((conflict) => conflict.file === file);
+  if (pairs.length === 0) return null;
+  // the seats that changed this file
+  const owners = snapshot.seats.filter((seat) =>
+    seat.scope.modified.some((change) => change.file === file),
+  );
+  const seatOn = (branch: string) =>
+    owners.find((seat) => seat.branches.includes(branch)) ??
+    snapshot.seats.find((seat) => seat.branches.includes(branch));
   return (
-    <section className="map-lens" aria-label="Conflicts lens">
-      <header>
-        <h2>Conflicts</h2>
-        <p>{conflictSummary(snapshot)}</p>
-      </header>
-      {[...byFile].map(([file, pairs]) => {
-        // the seats that changed this file
-        const owners = snapshot.seats.filter((seat) =>
-          seat.scope.modified.some((change) => change.file === file),
-        );
-        const seatOn = (branch: string) =>
-          owners.find((seat) => seat.branches.includes(branch)) ??
-          snapshot.seats.find((seat) => seat.branches.includes(branch));
-        return (
-          <div className="map-lens-section" key={file}>
-            <FileButton path={file} onFocus={onFocus} />
-            {pairs.map((pair) => (
-              <div className="map-lens-pair" key={pair.branches.join(":")}>
-                {pair.branches.map((branch) => {
-                  const seat = seatOn(branch);
-                  const ticket = seat?.tickets[branch];
-                  return (
-                    <p className="map-lens-branch" key={branch}>
-                      {ticket !== undefined && <span className="map-lens-note">#{ticket}</span>}
-                      <code>{branch}</code>
-                      {seat && <SeatTag seat={seat.seat} names={names} indices={indices} />}
-                    </p>
-                  );
-                })}
-              </div>
-            ))}
-            {owners.length > 0 && (
-              <p className="map-lens-note">
-                {owners.map((seat) => names[seat.seat] ?? seat.seat).join(", ")} changed it here
+    <div className="map-lens-section map-conflict-detail">
+      <h3>Conflicts</h3>
+      {pairs.map((pair) => (
+        <div className="map-lens-pair" key={pair.branches.join(":")}>
+          {pair.branches.map((branch) => {
+            const seat = seatOn(branch);
+            const ticket = seat?.tickets[branch];
+            return (
+              <p className="map-lens-branch" key={branch}>
+                {ticket !== undefined && <span className="map-lens-note">#{ticket}</span>}
+                <code>{branch}</code>
+                {seat && <SeatTag seat={seat.seat} names={names} indices={indices} />}
               </p>
-            )}
-          </div>
-        );
-      })}
-      {snapshot.conflictsUnchecked.length > 0 && (
-        <div className="map-lens-section">
-          <h3>Unchecked branches</h3>
-          {snapshot.conflictsUnchecked.map((row) => (
-            <p key={row.branch}>
-              <code>{row.branch}</code> · {row.reason}
-            </p>
-          ))}
+            );
+          })}
         </div>
+      ))}
+      {owners.length > 0 && (
+        <p className="map-lens-note">
+          {owners.map((seat) => names[seat.seat] ?? seat.seat).join(", ")} changed it here
+        </p>
       )}
-      {byFile.size === 0 && (
-        <div className="map-lens-section">
-          <p>{conflictSummary(snapshot)}.</p>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }
 

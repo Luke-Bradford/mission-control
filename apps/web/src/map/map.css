@@ -88,7 +88,7 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
 }
-.map-lens-toolbar {
+.map-key-bar {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -97,50 +97,11 @@
   color: var(--fg-2);
   font-size: var(--fs-xs);
 }
-.map-lens-trace {
-  padding: 3px 5px;
-  font: var(--fs-xs) var(--mono);
-  color: var(--fg-2);
-  background: var(--surface-2);
-}
-.map-lens-tabs {
-  display: inline-flex;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-s);
-  background: var(--surface);
-}
-.map-lens-tabs button {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  padding: 4px 10px;
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-  background: transparent;
-}
-.map-lens-tabs button[aria-pressed="true"] {
-  color: var(--surface);
-  background: var(--fg);
-}
 .map-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
   gap: 10px;
   min-height: 0;
-}
-.map-main-impact,
-.map-main-ownership,
-.map-main-review,
-.map-main-conflicts {
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
-}
-
-.map-main-history {
-  grid-template-columns: minmax(0, 1fr) clamp(360px, 27vw, 432px);
 }
 .map-stage-wrap {
   position: relative;
@@ -212,13 +173,6 @@
   color: var(--treemap-ink);
   opacity: calc(0.22 + var(--tile-intensity) * 0.78);
 }
-.map-treemap-impact .map-treemap-tile {
-  background: color-mix(
-    in srgb,
-    var(--tile-colour) calc(var(--tile-intensity) * 85%),
-    var(--treemap-bg)
-  );
-}
 .map-treemap-changes .map-treemap-tile {
   opacity: 1;
   background: linear-gradient(
@@ -272,138 +226,28 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.map-treemap-tile[data-neutral] {
-  background: var(--treemap-folder);
-  opacity: 0.2;
-}
 .map-treemap-changes .map-treemap-tile[data-neutral] {
   background: var(--treemap-folder);
   opacity: 1;
 }
-.map-treemap-history .map-treemap-tile {
-  background: color-mix(
-    in srgb,
-    var(--accent) calc(var(--tile-intensity) * 85%),
-    var(--treemap-bg)
-  );
+/* a file changed on two open branches: a flat outline and a word, at full seat colour */
+.map-treemap-tile[data-conflict] {
+  outline: 2px solid var(--rem);
+  outline-offset: -2px;
 }
-/* Ownership: a tile takes a tint of its area; hard-rule files are hatched; no area, no tint */
-.map-treemap-ownership {
-  --map-hatch: var(--void-muted);
+.map-treemap-badge {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--rem);
 }
-.map-treemap-ownership .map-treemap-folder[data-area] {
-  background: color-mix(in srgb, var(--area-colour) 13%, var(--treemap-folder));
-}
-.map-treemap-ownership .map-treemap-tile {
-  opacity: 1;
-  background: color-mix(in srgb, var(--tile-colour) 34%, var(--treemap-folder));
-}
-.map-treemap-ownership .map-treemap-tile[data-neutral] {
-  background: var(--treemap-folder);
-  color: color-mix(in srgb, var(--treemap-ink) 45%, transparent);
-}
-.map-treemap-ownership .map-treemap-tile[data-hard-rule] {
-  background-image: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--map-hatch) 55%, transparent) 0 1px,
-    transparent 1px 5px
-  );
-}
-/* Review: a tile takes a tint of its top severity and a dot, with the count when above one */
-.map-treemap-review .map-treemap-tile {
-  opacity: 1;
-  background: color-mix(in srgb, var(--tile-colour) 16%, var(--treemap-folder));
-}
-.map-treemap-review .map-treemap-tile[data-neutral] {
-  background: var(--treemap-folder);
-}
-.map-treemap-review .map-treemap-tile[data-severity]::after {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  box-sizing: border-box;
-  min-width: 10px;
-  height: 10px;
-  border-radius: 5px;
-  background: var(--tile-colour);
+.map-treemap-tile[data-conflict][data-strong] .map-treemap-badge {
   color: #fff;
-  font: 600 var(--fs-xs) / 10px var(--mono);
-  text-align: center;
-  content: "";
-}
-.map-treemap-review .map-treemap-tile[data-findings]::after {
-  min-width: 14px;
-  height: 14px;
-  border-radius: 7px;
-  line-height: 14px;
-  content: attr(data-findings);
-}
-.map-treemap-review .map-treemap-tile[data-findings="1"]::after {
-  min-width: 10px;
-  height: 10px;
-  border-radius: 5px;
-  content: "";
-}
-/* Conflicts: the seats' changes, faded, with the conflicting files outlined and tinted */
-.map-treemap-conflicts .map-treemap-tile {
-  opacity: 1;
-  background: linear-gradient(
-    var(--tile-split, 90deg),
-    color-mix(in srgb, var(--tile-colour) calc(var(--tile-intensity) * 100%), var(--treemap-folder))
-      50%,
-    color-mix(
-        in srgb,
-        var(--tile-colour-2) calc(var(--tile-intensity-2) * 100%),
-        var(--treemap-folder)
-      )
-      50%
-  );
-}
-.map-treemap-conflicts .map-treemap-tile[data-neutral] {
-  background: var(--treemap-folder);
-}
-.map-treemap-conflicts .map-treemap-tile[data-conflict] {
-  outline: 2px solid var(--rem);
-  outline-offset: -2px;
-}
-.map-treemap-conflicts .map-treemap-tile[data-conflict]::before {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--rem) 10%, transparent);
-  content: "";
-  pointer-events: none;
-}
-.map-treemap-tile[data-overlap] {
-  outline: 2px solid var(--rem);
-  outline-offset: -2px;
-}
-.map-treemap-impact .map-treemap-tile[data-direct-import] {
-  border: 2px dashed var(--treemap-ink);
-  background: var(--treemap-folder);
-  opacity: 0.9;
-}
-.map-treemap-tile[data-fix-heavy]::after {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 0;
-  height: 0;
-  border-top: 7px solid var(--rem);
-  border-left: 7px solid transparent;
-  content: "";
-}
-.map-treemap-tile[data-dim] {
-  opacity: 0.12;
 }
 .map-treemap-tile:focus-visible {
   z-index: 2;
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-.map-treemap-tile[data-focused] {
-  outline: 2px solid var(--treemap-ink);
-  outline-offset: -2px;
-  opacity: 1;
 }
 .map-treemap-tile > .map-treemap-label {
   display: block;
@@ -411,134 +255,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* the Conflicts overlay sits under the label */
-.map-treemap-conflicts .map-treemap-tile > .map-treemap-label,
-.map-treemap-conflicts .map-treemap-tile > .map-treemap-lines {
-  position: relative;
-}
-/* room for the Review dot */
-.map-treemap-review .map-treemap-tile[data-severity] > .map-treemap-label {
-  padding-right: 14px;
-}
-.map-treemap-links {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-.map-treemap-links line {
-  stroke: var(--treemap-ink);
-  stroke-width: 0.45;
-  opacity: 0.85;
-}
-.map-treemap-links line[data-hidden] {
-  stroke-dasharray: 1.5 1.5;
-  opacity: 0.5;
-}
 
 /* the key: one muted line along the stage's foot */
-.map-analytical-key {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-  margin: 0;
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  line-height: 1.5;
-  color: var(--fg-2);
-  pointer-events: none;
-}
 .map-key-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.map-key-seat-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-2);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.map-key-idle {
-  color: var(--fg-2);
-  white-space: nowrap;
-}
-.map-analytical-key i {
-  display: inline-block;
-  background: var(--void-ink);
-}
-.map-key-seat-chip i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--map-key-seat);
-}
 .map-key-steps {
   display: inline-flex;
   gap: 1px;
-  --map-key-swatch-1: #1d6e79;
-  --map-key-swatch-2: #278f9b;
-  --map-key-swatch-3: #3bb8c5;
-  --map-key-swatch-4: #56d8e6;
 }
 .map-key-swatch {
   width: 11px;
   height: 11px;
   border-radius: 1px;
-  background: var(--map-key-swatch);
-}
-.map-key-steps-impact {
-  --map-key-swatch-1: var(--seat-1);
-  --map-key-swatch-2: #3577c7;
-  --map-key-swatch-3: #306aaf;
-  --map-key-swatch-4: #2d609f;
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .map-key-steps-focus,
-  :root:not([data-theme="dark"]) .map-key-steps-history {
-    --map-key-swatch-1: #0a6b7d;
-    --map-key-swatch-2: #237888;
-    --map-key-swatch-3: #328796;
-    --map-key-swatch-4: #4195a3;
-  }
-}
-:root[data-theme="light"] .map-key-steps-focus,
-:root[data-theme="light"] .map-key-steps-history {
-  --map-key-swatch-1: #0a6b7d;
-  --map-key-swatch-2: #237888;
-  --map-key-swatch-3: #328796;
-  --map-key-swatch-4: #4195a3;
-}
-.map-key-steps .map-key-swatch-1 {
-  background: var(--map-key-swatch-1);
-  opacity: 1;
-}
-.map-key-steps .map-key-swatch-2 {
-  background: var(--map-key-swatch-2);
-  opacity: 1;
-}
-.map-key-steps .map-key-swatch-3 {
-  background: var(--map-key-swatch-3);
-  opacity: 1;
-}
-.map-key-steps .map-key-swatch-4 {
-  background: var(--map-key-swatch-4);
-  opacity: 1;
-}
-.map-analytical-key .map-key-outline {
-  box-sizing: border-box;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--fg-2);
-}
-.map-key-overlap {
-  box-shadow: inset 0 0 0 1.5px var(--rem);
-}
-.map-key-steps-changes .map-key-swatch {
   background: var(--seat-1);
 }
 .map-key-steps-changes .map-key-swatch-1 {
@@ -556,75 +287,8 @@
 .map-changes-key .map-key-muted {
   color: var(--muted);
 }
-.map-key-fix {
-  background: linear-gradient(135deg, var(--rem) 0 50%, transparent 50%);
-}
-/* Specific swatches sit under .map-analytical-key so the generic `.map-analytical-key i` cannot win */
-.map-analytical-key .map-key-area {
-  background: var(--map-key-area);
-}
-.map-analytical-key .map-key-hatch {
-  background:
-    repeating-linear-gradient(135deg, var(--void-muted) 0 1px, transparent 1px 4px),
-    var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--fg-2);
-}
-.map-analytical-key .map-key-dot {
-  border-radius: 50%;
-}
-.map-analytical-key .map-key-conflict,
-.map-analytical-key .map-severity-critical {
-  background: var(--rem);
-}
-.map-analytical-key .map-severity-important {
-  background: var(--warn-mark);
-}
-.map-analytical-key .map-severity-minor {
-  background: var(--void-muted);
-}
-/* the severity word in the Review pane */
-.map-severity {
-  display: inline-block;
-  padding: 1px 4px;
-  border-radius: 2px;
-  font-size: var(--fs-xs);
-}
-.map-lens .map-severity-critical {
-  color: var(--crit);
-  background: var(--crit-soft);
-}
-.map-lens .map-severity-important {
-  color: var(--warn);
-  background: var(--warn-soft);
-}
-.map-lens .map-severity-minor {
-  color: var(--fg-2);
-  background: var(--surface-2);
-}
-.map-lens-covbar {
-  display: flex;
-  height: 6px;
-  margin: 6px 0 2px;
-  background: var(--surface-2);
-}
-.map-lens-covbar i {
-  display: block;
-  height: 100%;
-}
-.map-lens-pair + .map-lens-pair {
-  margin-top: 6px;
-}
-.map-lens-branch {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.map-lens-seat-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 4px;
-  border-radius: 50%;
+.map-changes-key .map-key-conflicts {
+  color: var(--rem);
 }
 .map-changes-key {
   min-width: 0;
@@ -792,140 +456,6 @@ button.map-timeline-tick {
   min-height: 0;
   min-width: 0;
 }
-.map-lens {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  font-family: var(--mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-2);
-}
-.map-lens > header {
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--line);
-}
-.map-lens h2,
-.map-lens h3 {
-  margin: 0;
-  font-weight: 500;
-}
-.map-lens h2 {
-  font-size: var(--fs-s);
-  color: var(--fg);
-}
-.map-lens h3 {
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.map-lens-section > p {
-  margin: 4px 0 0;
-  line-height: 1.45;
-}
-.map-lens header p {
-  margin: 4px 0 0;
-  line-height: 1.45;
-}
-.map-lens-section {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line);
-}
-.map-lens-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
-  padding-top: 6px;
-}
-.map-lens-file,
-.map-lens-back,
-.map-pr {
-  width: fit-content;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  display: flex;
-  min-width: 0;
-  white-space: nowrap;
-}
-.map-lens-directory {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.map-lens-filename {
-  flex: none;
-  white-space: nowrap;
-}
-.map-lens-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  margin-top: 7px;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-}
-.map-lens-columns span:last-child {
-  text-align: right;
-}
-.map-lens-note {
-  color: var(--muted);
-}
-.map-lens-file:hover,
-.map-lens-back:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-.map-lens-back {
-  color: var(--accent);
-  margin-bottom: 6px;
-}
-.map-lens-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-bottom: 1px solid var(--line);
-}
-.map-lens-kpis b {
-  padding: 9px 10px;
-  border-right: 1px solid var(--line);
-  font-size: 16px;
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.map-lens-kpis b:last-child {
-  border-right: 0;
-}
-.map-lens-kpis small {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: 400;
-}
-.map-pr {
-  display: inline-block;
-  margin: 5px 4px 0 0;
-  padding: 1px 4px;
-  border: 1px solid var(--line-2);
-  border-radius: 2px;
-  color: var(--fg-2);
-  text-decoration: none;
-}
-.map-pr:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
 .map-card {
   position: relative;
   min-height: 0;
@@ -971,7 +501,7 @@ button.map-timeline-tick {
 .map-seat {
   width: 100%;
   display: grid;
-  grid-template-columns: 8px auto minmax(0, 1fr);
+  grid-template-columns: 8px auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
@@ -999,6 +529,11 @@ button.map-timeline-tick {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.map-seat-conflict {
+  color: var(--rem);
+  font-weight: 500;
+  white-space: nowrap;
 }
 .map-seat-on.none {
   color: var(--muted);
@@ -1033,9 +568,6 @@ button.map-timeline-tick {
   padding: 3px 8px;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-.map-lens-tabs button + button {
-  border-left: 1px solid var(--line);
 }
 .map-detail {
   font-family: var(--mono);
