@@ -3,7 +3,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { QaReadiness } from "../src/pages/QaReadiness.tsx";
-import { QA_CHECKED_HEADS_KEY } from "../src/qa/checked.ts";
+import { buildEntries } from "../src/palette/entries.ts";
+import { checkedHead, QA_CHECKED_HEADS_KEY } from "../src/qa/checked.ts";
 import { prVerdict } from "../src/qa/readiness.ts";
 import { stubFetch } from "./fetchStub.ts";
 import "../src/hud.css";
@@ -112,6 +113,27 @@ describe("QaReadiness", () => {
     hub.clear();
     rerender(<QaReadiness />);
     expect(await screen.findByText("Changed since your check: new head pushed.")).toBeTruthy();
+  });
+
+  it("agrees with the palette: its Mark checked shows on the card, its Undo clears it, a moved head offers Mark checked again", async () => {
+    const paletteEntry = (open: PullRequestView) =>
+      buildEntries({ prs: [open] }).filter((e) => e.group === "Action");
+    const [mark] = paletteEntry(pr());
+    expect(mark?.title).toBe("Mark mission-control PR 987 checked");
+    await mark?.run();
+
+    render(<QaReadiness />);
+    expect(await screen.findByText("Checked at this head.")).toBeTruthy();
+    const [undo] = paletteEntry(pr());
+    expect(undo?.title).toBe("Undo checked on mission-control PR 987");
+    await undo?.run();
+    expect(checkedHead("mission-control", 987)).toBeNull();
+
+    await mark?.run();
+    expect(paletteEntry(pr({ headSha: "head-b" }))[0]?.title).toBe(
+      "Mark mission-control PR 987 checked",
+    );
+    expect(paletteEntry(pr({ headSha: null }))).toEqual([]);
   });
 
   it("shows current and old CI attempts plus finding severity and size evidence", async () => {
