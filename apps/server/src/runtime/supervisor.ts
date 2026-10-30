@@ -3286,9 +3286,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((s) => seatDef(s).mode === "writer")
           .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
         fullSuite: info.repo.fullSuite ?? [],
-        verifyResults: store
-          .verifyJobs()
-          .find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
       });
       const inbox = withInbox(
         seatId,
@@ -3524,6 +3521,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
+        verifyResults: store
+          .verifyJobs()
+          .find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
       });
       const inbox = withInbox(seatId, runId, brief);
       brief = inbox.text;
