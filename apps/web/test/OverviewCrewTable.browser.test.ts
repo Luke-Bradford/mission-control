@@ -44,7 +44,7 @@ const crew: Crew = {
     // parked on RETRO's findings: the Loop cell offers the waiver beside its step bar
     crewRow({
       id: "retro-1",
-      loop: { ...loop("Waiting"), phase: "parked", parked: PARK },
+      loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
       hudState: "parked",
     }),
   ],
