@@ -46,6 +46,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
@@ -102,6 +103,7 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.askFlight,
+      MC_TOOL_NAMES.callFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsInbox,
@@ -113,6 +115,7 @@ export const MC_TOOL_GRANTS: Readonly<
   "read-only": {
     base: [
       MC_TOOL_NAMES.askFlight,
+      MC_TOOL_NAMES.callFlight,
       "report_evidence",
       MC_TOOL_NAMES.commsRead,
       MC_TOOL_NAMES.commsInbox,
@@ -310,6 +313,7 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.askFlight,
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsInbox,
@@ -325,6 +329,7 @@ export const READONLY_TOOLS = [
   "Bash",
   "Skill",
   MC_TOOLS.askFlight,
+  MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.commsRead,
   MC_TOOLS.commsInbox,

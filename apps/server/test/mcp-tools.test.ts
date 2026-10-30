@@ -22,6 +22,8 @@ import {
   ASKED_FLIGHT,
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
+  CALL_FLIGHT_SELF,
+  CALLED_FLIGHT,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
   commitMarkersText,
@@ -42,6 +44,7 @@ import {
   FINDINGS_FAIL_NEEDS_BLOCKING,
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
+  FLIGHT_SIGNALS_SETTING,
   findingFileText,
   fixKey,
   MC_BAD_ARGS,
@@ -331,6 +334,7 @@ describe("the mc tools", () => {
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
+      ["call_flight", ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
@@ -344,6 +348,7 @@ describe("the mc tools", () => {
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
       MC_TOOLS.askFlight,
+      MC_TOOLS.callFlight,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
@@ -1116,6 +1121,54 @@ describe("ask_flight", () => {
   });
 });
 
+describe("call_flight", () => {
+  const call = (args: unknown, ctx: McToolContext = CTX) => tool("call_flight").call(ctx, args);
+  const calls = () => JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").signals;
+
+  it("keeps the call as a wake reason for FLIGHT, with the seat's reason and its ticket", async () => {
+    tools = make({ config: withFlight() });
+    expect(await call({ reason: "I need a change in apps/web, outside my area" })).toEqual({
+      text: CALLED_FLIGHT,
+    });
+    expect(Object.values(calls())).toEqual([
+      expect.objectContaining({
+        kind: "seat_call",
+        key: `guido-1:${NOW}`,
+        toldAt: null,
+        evidence: "guido-1 calls FLIGHT about mc#42: I need a change in apps/web, outside my area",
+      }),
+    ]);
+    expect(emitted).toContain("attention");
+  });
+
+  it("takes the ref the seat gives, and counts the same call twice as one", async () => {
+    tools = make({ config: withFlight() });
+    await call({ reason: "I dispute the finding", ref: "mc#77" });
+    await call({ reason: "I dispute the finding", ref: "mc#77" });
+    expect(Object.values(calls())).toHaveLength(1);
+    expect(JSON.stringify(calls())).toContain("about mc#77");
+  });
+
+  it("is offered to every seat but FLIGHT and a review's scratch seat, and refuses FLIGHT itself", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:1");
+    const t = tool("call_flight");
+    expect(t.offeredTo?.("flight-1")).toBe(false);
+    for (const seat of ["guido-1", "retro"]) expect(t.offeredTo?.(seat)).toBe(true);
+    expect(await call({ reason: "x" }, { seatId: "flight-1", runId: "flight-1:1" })).toEqual({
+      text: CALL_FLIGHT_SELF,
+      isError: true,
+    });
+    expect(calls() ?? {}).toEqual({});
+  });
+
+  it("refuses an empty reason", async () => {
+    tools = make({ config: withFlight() });
+    expect((await call({ reason: "" })).isError).toBe(true);
+    expect(calls() ?? {}).toEqual({});
+  });
+});
+
 describe("through /mcp", () => {
   it("never offers FLIGHT ask_flight; a seat beside it still has it (#758)", async () => {
     const cfg = withFlight();
@@ -1192,6 +1245,7 @@ describe("through /mcp", () => {
         "commit",
         "sync_main",
         "ask_flight",
+        "call_flight",
         "report_evidence",
       ]);
       expect(
@@ -1208,6 +1262,7 @@ describe("through /mcp", () => {
         "comms_send",
         "comms_react",
         "ask_flight",
+        "call_flight",
         "report_evidence",
       ]);
       write("apps/a.ts", "a2\n");

@@ -13,10 +13,11 @@ import {
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
   FLIGHT_HOUR_MS,
+  FLIGHT_LEFT_HEAD,
+  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
-  FLIGHT_REWAKE_MS,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
@@ -24,6 +25,7 @@ import {
   FLIGHT_WAKE_REMINDER,
   type FlightState,
   flightDownText,
+  flightRewakeMs,
   flightStartFailedText,
   HUD_STATE_LABEL,
   type HudState,
@@ -50,11 +52,15 @@ import {
   flightWakes,
   markPrsShown,
   nextWakeAt,
+  openReasonIds,
   operatorItems,
   pending,
   recordFlightWake,
   recordNextFlightWake,
+  unhandledReasons,
+  type WakeReason,
   wakeFacts,
+  wakeReasons,
 } from "./state.ts";
 
 export interface FlightWatchDeps {
@@ -130,6 +136,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   let lastFacts = "";
   let lastWakeAt = 0;
+  /**
+   * The last wake's reasons, checked when FLIGHT's turn ends: each needs a decision on its target
+   * (or to be settled). `round` 2 is the one re-wake with "You left these".
+   */
+  let audit: { wokeAt: number; reasons: WakeReason[]; round: 1 | 2 } | null = null;
   let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
@@ -182,6 +193,42 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const clearDown = (t: number): void => {
     if (!downOpen()) return;
     store.clearNote(FLIGHT_DOWN_NOTE_KEY, t);
+    bus.emit("attention");
+  };
+
+  /** Whether any run other than FLIGHT's own is live: a seat holds an unended run. */
+  const runLive = (flightId: string): boolean =>
+    (config.crew?.sessions ?? []).some((session) =>
+      session.seats.some((seat) => {
+        if (seat.id === flightId) return false;
+        const row = store.seatSession(seat.id);
+        return (
+          row?.runId != null &&
+          ACTIVE_SEAT_STATES.includes(row.state) &&
+          store.run(row.runId)?.endedAt === null
+        );
+      }),
+    );
+  const leftOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_LEFT_NOTE_KEY);
+  const clearLeft = (t: number): void => {
+    if (!leftOpen()) return;
+    store.clearNote(FLIGHT_LEFT_NOTE_KEY, t);
+    bus.emit("attention");
+  };
+  const raiseLeft = (seatId: string, repoId: string, left: WakeReason[], t: number): void => {
+    if (leftOpen()) return;
+    store.raiseNote({
+      key: FLIGHT_LEFT_NOTE_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId,
+      repoId,
+      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => r.label).join("; ")}`.slice(
+        0,
+        600,
+      ),
+      at: t,
+    });
     bus.emit("attention");
   };
 
@@ -245,6 +292,24 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     await supervisor.endRunByEngine(run.id);
     return false;
   }
+
+  /** The reasons FLIGHT left, when the last audit found some and has not yet re-woken for them. */
+  function leftOf(state: ReturnType<typeof flightState>): WakeReason[] | null {
+    if (audit === null || audit.round !== 1 || lastTurnEndAt < audit.wokeAt) return null;
+    const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
+    return missed.length === 0 ? null : missed;
+  }
+  const leftLine = (left: WakeReason[]): string =>
+    `${FLIGHT_LEFT_HEAD} ${left.map((r) => r.label).join("; ")}`;
+  /** What the wake just sent is held to: its new reasons, and the ones left, on their second round. */
+  const nextAudit = (
+    wokeAt: number,
+    reasons: WakeReason[],
+    left: WakeReason[] | null,
+  ): typeof audit => {
+    const all = [...(left ?? []), ...reasons.filter((r) => !left?.some((l) => l.id === r.id))];
+    return all.length === 0 ? null : { wokeAt, reasons: all, round: left === null ? 1 : 2 };
+  };
 
   async function pass(): Promise<void> {
     if (stopped) return;
@@ -341,9 +406,20 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       try {
         const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
+        const reasons = wakeReasons(lastFacts, wakeFacts(state));
+        const left = leftOf(state);
         const { runId } = await supervisor.startWatch(id, {
-          first: wakeLine(state, digest, causes.length > 0 ? causes : ["initial"]),
+          first: wakeLine(
+            state,
+            digest,
+            left === null
+              ? causes.length > 0
+                ? causes
+                : ["initial"]
+              : [leftLine(left), ...causes],
+          ),
         });
+        audit = nextAudit(t, reasons, left);
         processGone = false;
         store.setSetting(
           FLIGHT_RUN_TOOLS_SETTING,
@@ -356,7 +432,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, causes.length > 0 ? causes : ["initial"]);
-        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t, runLive(id)));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
@@ -413,9 +489,24 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
-    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
+    const live = runLive(id);
+    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t, live));
+    // the turn that followed the last wake has ended: each of its reasons needs a decision
+    let left: WakeReason[] | null = null;
+    if (audit !== null && lastTurnEndAt >= audit.wokeAt) {
+      const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
+      if (missed.length === 0) {
+        audit = null;
+        clearLeft(t);
+      } else if (audit.round === 2) {
+        raiseLeft(id, found.session.repoId, missed, t);
+        audit = null;
+      } else left = missed;
+    }
     const due =
-      (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
+      left !== null ||
+      (wake !== lastFacts && listed) ||
+      ((pending(state) || (live && lastWakeAt > 0)) && t - lastWakeAt >= flightRewakeMs(live));
     const since = Math.max(lastWakeAt, lastTurnEndAt);
     if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {
       later(since + FLIGHT_MIN_WAKE_GAP_MS - t);
@@ -427,11 +518,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
       );
-      const causes = changedWakeFacts(lastFacts, wake);
+      const changed = changedWakeFacts(lastFacts, wake);
+      const causes = left === null ? changed : [leftLine(left), ...changed];
+      const reasons = wakeReasons(lastFacts, wake);
       if (
         (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes))) ===
         "sent"
       ) {
+        audit = nextAudit(t, reasons, left);
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
@@ -444,7 +538,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           t,
           causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER],
         );
-        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t, live));
       }
     } else if (!listed) {
       lastFacts = wake;

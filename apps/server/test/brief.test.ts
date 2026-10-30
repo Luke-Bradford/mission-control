@@ -89,9 +89,9 @@ const input: BriefInput = {
 };
 
 const WRITER_CLOSE =
-  "Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make.";
+  "Commit with the mc commit tool, never git. When the ticket's work is done and committed, call mc report_evidence with a short note of what changed and how to deploy it. Mission Control pushes, opens the draft PR and runs CI; it messages you if CI fails. For a review comment, fix it, commit, and report again. Write package names without the @ (mc/core, not @mc/core); a bare @name reads as a mention and is refused. Ask FLIGHT with mc ask_flight only for a decision you cannot make. Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes.";
 const READONLY_CLOSE =
-  "You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. Reply with your findings, starting with DONE.";
+  "You read and report; you cannot commit, push or open PRs. Ask FLIGHT with mc ask_flight if you need a decision. Call FLIGHT with mc call_flight { reason, ref } when you are blocked on something outside your area, need a decision you cannot make, or dispute a finding; it wakes within 5 minutes. Reply with your findings, starting with DONE.";
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 

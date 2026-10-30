@@ -13,6 +13,8 @@ import {
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
+  FLIGHT_REWAKE_LIVE_MS,
+  FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
@@ -22,7 +24,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { flightWake, wakeFacts } from "../src/flight/state.ts";
+import { flightWake, nextWakeAt, wakeFacts, wakeReasons } from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
@@ -603,5 +605,40 @@ describe("memory in wake deltas", () => {
     expect(next.digest.memory.titles.lesson.entries[0]?.topic).toBe(
       notes[FLIGHT_MEMORY_TITLES_MAX]?.topic,
     );
+  });
+});
+
+describe("the re-wake interval", () => {
+  const waiting = (): FlightState => ({
+    ...busyBoard(),
+    questions: [{ id: 1, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
+  });
+  const T = 1_000_000_000;
+
+  it("is 15 minutes while a run is live, and 60 when none is", () => {
+    expect(nextWakeAt(waiting(), T, T, true)).toBe(T + FLIGHT_REWAKE_LIVE_MS);
+    expect(nextWakeAt(waiting(), T, T, false)).toBe(T + FLIGHT_REWAKE_MS);
+    expect(FLIGHT_REWAKE_LIVE_MS).toBe(15 * 60_000);
+    expect(FLIGHT_REWAKE_MS).toBe(60 * 60_000);
+  });
+
+  it("schedules nothing for an idle crew with nothing waiting, and a live one still looks", () => {
+    const quiet = { ...busyBoard(), questions: [], tickets: [], prs: [], seats: [] };
+    expect(nextWakeAt(quiet, T, T, false)).toBeNull();
+    expect(nextWakeAt(quiet, T, T, true)).toBe(T + FLIGHT_REWAKE_LIVE_MS);
+  });
+});
+
+describe("wake reasons", () => {
+  it("lists what is new against the last facts, with the targets a decision would name", () => {
+    const before = wakeFacts({ ...busyBoard(), questions: [] });
+    const after = wakeFacts({
+      ...busyBoard(),
+      questions: [{ id: 7, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
+    });
+    expect(wakeReasons(before, after)).toEqual([
+      { id: "q:7", label: "q 7", targets: ["7", "ask:7"] },
+    ]);
+    expect(wakeReasons(after, after)).toEqual([]);
   });
 });
