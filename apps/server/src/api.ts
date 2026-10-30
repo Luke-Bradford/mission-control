@@ -101,6 +101,7 @@ import {
   type Topic,
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
+  type UpdateLog,
   type UsageSample,
   type VersionInfo,
   watchStartRefusedText,
@@ -3715,7 +3716,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       });
 
-      // The Update button. Texts are fixed; the commands' output goes to update.log only.
+      // The Update button. Texts are fixed; the commands' output goes to update.log, read below.
       const updater = deps.updater;
       const unavailableVersion: VersionInfo = {
         sha: "",
@@ -3759,6 +3760,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(500).send({ error: UPDATE_FAILED });
         }
       });
+      // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
+      api.get(
+        "/update/log",
+        async (): Promise<UpdateLog> => ({ text: updater ? await updater.log() : null }),
+      );
 
       api.get(
         "/attention",

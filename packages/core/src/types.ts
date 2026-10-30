@@ -1220,6 +1220,11 @@ export interface VersionInfo {
   reason: string | null;
 }
 
+/** `GET /api/update/log`: the last update's commands and output; null before any update. */
+export interface UpdateLog {
+  text: string | null;
+}
+
 /** Provider CLI status in the same binding used by usage collection. */
 export interface CliAccountStatus {
   accountId: AccountId;

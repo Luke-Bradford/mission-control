@@ -44,6 +44,7 @@ import {
   realExec,
   UPDATE_EXIT_DELAY_MS,
   UPDATE_KILL_GRACE_MS,
+  UPDATE_LOG_SHOWN,
   UPDATE_MAX_BUFFER,
   UPDATE_PIPE_GRACE_MS,
   UPDATE_RESTART_GRACE_MS,
@@ -763,6 +764,18 @@ describe("update", () => {
     expect(log).toContain("built");
     expect(log).not.toContain("an older update");
     expect(statSync(logPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("reads update.log back for the page: null before any update, its tail when long", async () => {
+    expect(await updater().u.log()).toBeNull();
+    upstreamCommit("b.txt");
+    await updater().u.update();
+    expect(await updater().u.log()).toBe(readFileSync(logPath, "utf8"));
+    writeFileSync(logPath, `${"x".repeat(UPDATE_LOG_SHOWN)}the decisive line\n`);
+    const tail = await updater().u.log();
+    expect(tail?.startsWith("…\n")).toBe(true);
+    expect(tail?.endsWith("the decisive line\n")).toBe(true);
+    expect(tail?.length).toBe(2 + UPDATE_LOG_SHOWN);
   });
 
   it("refuses a second update while one is running", async () => {

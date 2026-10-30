@@ -52,6 +52,8 @@ export const UPDATE_EXIT_DELAY_MS = 500;
 export const UPDATE_RESTART_GRACE_MS = 5_000;
 /** Beside the database: `{MC_DB dir}/update.log`, rewritten by each update, mode 0600. */
 export const UPDATE_LOG = "update.log";
+/** The most of update.log the page is shown: its end, where a failed step says why. */
+export const UPDATE_LOG_SHOWN = 64 * 1024;
 /** The web build's output beside the live `dist`, through `MC_WEB_OUTDIR` (apps/web/vite.config.ts). */
 export const WEB_OUTDIR_NEXT = "dist-next";
 const WEB_OUTDIR = "dist";
@@ -333,6 +335,8 @@ export interface Updater {
   changes(): Promise<HeldRange | null>;
   /** Schedules the exit; the route calls it once the successful update flow has completed. */
   restart(): void;
+  /** update.log, cut to its last `UPDATE_LOG_SHOWN` characters after "…"; null before any update. */
+  log(): Promise<string | null>;
 }
 
 /**
@@ -877,6 +881,16 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         await log(`failed: ${errText(e)}\n`);
         throw new UpdateError(500, UPDATE_FAILED, { cause: e });
       }
+    },
+
+    async log() {
+      let text: string;
+      try {
+        text = await readFile(logPath, "utf8");
+      } catch {
+        return null;
+      }
+      return text.length > UPDATE_LOG_SHOWN ? `…\n${text.slice(-UPDATE_LOG_SHOWN)}` : text;
     },
 
     restart() {

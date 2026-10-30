@@ -68,7 +68,9 @@ refusal below applies). After you confirm, the hub runs, in its own checkout:
 Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within the 30 s
 `ThrottleInterval`), crew runs resume, and the HUD reconnects. Each command's output goes to
 `update.log` beside the database (mode 0600), rewritten by each update. A failed step answers
-`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving.
+`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving,
+and Setup opens the log so the failed command's output is on the page. **Update log** beside
+the button shows the last update's log at any time.
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
@@ -170,7 +172,7 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
-| Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
+| Update log | `update.log` beside the database: the last update's commands and output, mode 0600; Setup → **Update log** shows its end |
 | launchd logs | `~/Library/Logs/mission-control/server.log`, `server.err.log` |
 
 The server never writes a `config.yaml` that is a symbolic link: it refuses the write and says so, so keep the real file at the config path (`~/.config/mission-control/config.yaml`, or `MC_CONFIG`), not a link to it.

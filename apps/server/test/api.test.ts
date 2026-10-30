@@ -162,6 +162,10 @@ const stubUpdater = (): Updater => ({
     return updaterVersion;
   },
   restart: () => void updaterCalls.push("restart"),
+  log: async () => {
+    updaterCalls.push("log");
+    return "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n";
+  },
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
 /** A map transcript fixture stamped now: the ring reads only the window the map shows. */
@@ -1357,6 +1361,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
+  ["GET", "/api/update/log"],
   ["GET", "/api/seats/guido-1/focus"],
   ["POST", "/api/seats/guido-1/focus", { focus: "lane:work" }],
   ["POST", "/api/seats/guido-1/queue/reorder", { move: "shop-app#2", above: "shop-app#1" }],
@@ -6651,6 +6656,13 @@ describe("update routes", () => {
     }
     expect(updaterCalls).not.toContain("restart");
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("answers the last update's log, so the page can show why it failed", async () => {
+    const r = await get("/api/update/log");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n" });
+    expect(updaterCalls).toEqual(["log"]);
   });
 
   it("hides an unexpected error behind fixed text", async () => {

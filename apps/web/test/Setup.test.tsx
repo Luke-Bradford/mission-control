@@ -1830,10 +1830,11 @@ describe("Setup toolbar: Update", () => {
       at("sessions");
       await within(toolbar()).findByText(/^Version/);
       const all = [...toolbar().querySelectorAll("span.s, button")].map((e) => e.textContent);
-      expect(all.slice(-3)).toEqual([
+      expect(all.slice(-4)).toEqual([
         "Version 0123456 · 3 commits behind main · checked just now",
         "Check for updates",
         "Update",
+        "Update log",
       ]);
     });
 
@@ -1975,6 +1976,40 @@ describe("Setup toolbar: Update", () => {
     expect(await screen.findByText("update failed at build; see update.log")).toBeTruthy();
     expect((updateBtn() as HTMLButtonElement).disabled).toBe(false);
     ask.mockRestore();
+  });
+
+  it("opens the update log when an update fails, so the reason is on the page", async () => {
+    load({
+      "/api/version": version(),
+      "/api/update/log": {
+        text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted\n",
+      },
+      "POST /api/update": () => ({
+        status: 500,
+        body: { error: "update failed at install; see update.log" },
+      }),
+    });
+    render(<Toast />);
+    at("sessions");
+    await within(toolbar()).findByText(/^Version/);
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(updateBtn());
+    const dialog = await screen.findByRole("dialog", { name: "Update log" });
+    expect(
+      await within(dialog).findByText(/ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY/),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Update log" })).toBeNull();
+    ask.mockRestore();
+  });
+
+  it("shows the last update's log from the toolbar, or says none has run", async () => {
+    load({ "/api/version": version(), "/api/update/log": { text: null } });
+    at("sessions");
+    await within(toolbar()).findByText(/^Version/);
+    fireEvent.click(within(toolbar()).getByRole("button", { name: "Update log" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update log" });
+    expect(await within(dialog).findByText("No update has run on this hub yet.")).toBeTruthy();
   });
 
   it("toasts when the hub is already up to date", async () => {

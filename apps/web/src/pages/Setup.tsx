@@ -19,6 +19,7 @@ import { Repos } from "../setup/Repos.tsx";
 import { Roles } from "../setup/Roles.tsx";
 import { Sessions } from "../setup/Sessions.tsx";
 import { Sources } from "../setup/Sources.tsx";
+import { UpdateLogModal } from "../setup/UpdateLog.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { toast } from "../shell/Toast.tsx";
 import "../setup/setup.css";
@@ -74,6 +75,7 @@ function UpdateControl() {
   const now = useNow();
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   if (!v) return null;
   const behind =
     v.behind === null
@@ -117,6 +119,8 @@ function UpdateControl() {
       hub.refetch(RESOURCES.version.path);
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
+      // a failed step: its output is the why
+      if (err instanceof ApiError && err.status === 500) setLogOpen(true);
     }
     setBusy(false);
   }
@@ -141,6 +145,10 @@ function UpdateControl() {
       >
         Update
       </button>
+      <button type="button" className="sm" onClick={() => setLogOpen(true)}>
+        Update log
+      </button>
+      <UpdateLogModal open={logOpen} onClose={() => setLogOpen(false)} />
     </>
   );
 }
