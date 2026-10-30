@@ -444,6 +444,8 @@ const StartBody = z.strictObject({
     .min(1)
     .max(2 ** 31 - 1)
     .optional(),
+  /** An operator may explicitly start through a temporary machine-capacity hold. */
+  force: z.boolean().optional(),
 });
 
 /**
@@ -2956,21 +2958,49 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
         const pause = pausedSeat(store, id);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+        const at = now();
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          store.machineSamples(machineCapacitySince(at, capacityConfig)),
+          at,
+          capacityConfig,
+        );
+        if (capacity.blocked && b.force !== true)
+          throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;
+        let started: unknown;
         // the watch seat runs the crew and takes no ticket; every other seat needs one
         if (loop === "watch") {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          return sup.startWatch(id);
+          started = await sup.startWatch(id);
+        } else {
+          if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          started = await (deps.engine?.status().on === true && loop === "build"
+            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
         }
-        if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
-        return deps.engine?.status().on === true && loop === "build"
-          ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-          : startUnpausedRun(store, sup, id, b.issue, { operator: true });
+        if (capacity.blocked && b.force === true) {
+          const repoId = configuredAgents(config).find(
+            (agent) => agent.kind === "crew" && agent.id === id,
+          )?.repoId;
+          store.addFlightDecision({
+            at,
+            kind: "start",
+            seatId: id,
+            targetRunId: null,
+            ref: repoId === undefined || b.issue === undefined ? null : `${repoId}#${b.issue}`,
+            questionId: null,
+            about: "machine capacity",
+            decision: `Operator override: started ${seatCallSign(id)} despite machine capacity hold.`,
+            basis: capacity.reason ?? "machine capacity held",
+          });
+        }
+        return started;
       });
       seatAction(
         "/seats/:id/message",
