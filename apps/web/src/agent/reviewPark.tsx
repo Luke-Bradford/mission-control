@@ -3,6 +3,7 @@ import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS } from "../data.ts";
 import { shortSha } from "../fmt.ts";
+import { Reason } from "./Reason.tsx";
 import { seatError } from "./seat.ts";
 
 const REVIEW_PARK_KINDS = new Set(["review", "review-ruling"]);
@@ -28,11 +29,14 @@ export function WaiveReviewFindings({
   runId,
   park,
   compact = false,
+  findings = true,
 }: {
   runId: string;
   park: ReviewPark;
   /** One line for a table cell: a short button whose full name and the findings sit in its title. */
   compact?: boolean;
+  /** False where the page already shows the findings (the current step's details). */
+  findings?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,9 +76,13 @@ export function WaiveReviewFindings({
     );
   return (
     <div className="s">
-      <div className="xs muted">
-        Findings on {reviewParkSha(park)}: {park.reason}
-      </div>
+      {findings && (
+        <Reason
+          className="vnow xs muted"
+          line={`Findings on ${reviewParkSha(park)}`}
+          full={park.reason}
+        />
+      )}
       <button
         type="button"
         className="sm warn"
