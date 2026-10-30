@@ -1632,7 +1632,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const parked = run.loop?.phase === "parked";
     if (!(onSeat || parked) || (!onSeat && !run.loop?.aside)) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
-    if (onSeat && !parked && !stalledSeats(config, store, at).has(seat)) {
+    const stalled = onSeat && stalledSeats(config, store, at).has(seat);
+    const working = onSeat && !parked && !stalled;
+    if (working) {
       const denied = requirePowers(config, run.repoId, "superuser");
       if (denied) return denied;
       if (held(run))
@@ -1640,8 +1642,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const ended = lastHour(["end"], at);
     if (ended >= FLIGHT_ENDS_PER_HOUR) return fail(capText("ended runs", ended));
-    // a working seat is still writing: stop its turn before the uncommitted files are read
-    if (onSeat && !parked) {
+    // a working seat is still writing: stop its turn before the uncommitted files are read (a
+    // stalled one may have no process, which an interrupt would try to resume)
+    if (working) {
       try {
         await deps.supervisor.interrupt(seat);
       } catch (e) {

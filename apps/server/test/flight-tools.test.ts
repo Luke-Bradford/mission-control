@@ -143,7 +143,7 @@ import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -2204,6 +2204,8 @@ describe("end_run", () => {
     });
     expect((await call("end_run", E())).isError).toBeUndefined();
     expect(endCalls).toEqual(["guido-1"]);
+    // no interrupt: a stalled seat may have no process, and an interrupt would try to resume it
+    expect(interruptCalls).toEqual([]);
     // a seat that wrote just now is working, not stalled: a controller power the standard repo lacks
     live("inco-1", "r-i", { ticket: "mc#8" });
     store.setRunLoop("r-i", NEW_LOOP);
@@ -8102,6 +8104,53 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       const r = await call("edit_issue", { issue: 7, body: "new" });
       expect(r.isError).toBe(true);
       expect(r.text).toContain("could not be confirmed");
+    });
+    it("dismiss_item acks an open PR of the hub's own login, and a crew error", async () => {
+      store.replacePullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 41,
+            title: "Mine",
+            url: "u",
+            branch: "mc/41",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "passing",
+            createdAt: NOW,
+            updatedAt: NOW - 3 * 3600_000,
+            mergedAt: null,
+            headSha: SHA,
+            mergeable: "MERGEABLE",
+            author: "me",
+          },
+        ],
+        NOW,
+      );
+      board(card(7));
+      const items = () => attentionItems(cfg, store, nowMs, undefined, undefined, "me");
+      const pr = items().find((i) => i.key.startsWith("pr:mc#41:"));
+      expect(pr).toBeDefined();
+      const key = pr?.key ?? "";
+      expect((await call("dismiss_item", { key })).isError).toBeUndefined();
+      expect(store.acks().has(key)).toBe(true);
+      // acked, so it no longer asks for anyone
+      expect(items().find((i) => i.key === key)?.acked ?? true).toBe(true);
+      // a crew error is acked and its row marked
+      const errorId = store.addCrewError({
+        agentId: "guido-1",
+        runId: null,
+        at: NOW,
+        text: "an mc tool failed",
+      });
+      const errKey = `${CREW_ERROR_KEY}${errorId}`;
+      expect(items().some((i) => i.key === errKey)).toBe(true);
+      expect((await call("dismiss_item", { key: errKey })).isError).toBeUndefined();
+      expect(store.acks().has(errKey)).toBe(true);
+      expect(store.crewErrors().some((e) => e.id === errorId)).toBe(false);
     });
     it("edit_issue does not report a title that did not land", async () => {
       board(card(7));
