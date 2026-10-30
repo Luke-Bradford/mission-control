@@ -12,7 +12,11 @@ const renderMockup = () => {
   return dom.window.document;
 };
 
-afterEach(() => doms.splice(0).forEach((dom) => dom.window.close()));
+afterEach(() => {
+  doms.splice(0).forEach((dom) => {
+    dom.window.close();
+  });
+});
 
 describe("Overview v2 mockup", () => {
   it("keeps the desktop pipeline tall enough for its Board controls", () => {
@@ -23,12 +27,9 @@ describe("Overview v2 mockup", () => {
     const document = renderMockup();
     const stages = [...document.querySelectorAll(".pipeline .stage")];
 
-    expect(stages.map((stage) => stage.querySelector(".more")?.getAttribute("href") ?? null)).toEqual([
-      "/board?stage=ready",
-      "/board?stage=progress",
-      null,
-      "/board?stage=merged",
-    ]);
+    expect(
+      stages.map((stage) => stage.querySelector(".more")?.getAttribute("href") ?? null),
+    ).toEqual(["/board?stage=ready", "/board?stage=progress", null, "/board?stage=merged"]);
     expect(stages.map((stage) => stage.querySelector(".more")?.textContent ?? null)).toEqual([
       "+4 · open Board ›",
       "+6 · open Board ›",
@@ -43,13 +44,11 @@ describe("Overview v2 mockup", () => {
     const logLink = document.querySelector<HTMLAnchorElement>(".why");
     const detail = document.querySelector<HTMLElement>("#log-detail");
 
-    expect(theme).not.toBeNull();
-    expect(logLink).not.toBeNull();
-    expect(detail).not.toBeNull();
-    theme!.click();
-    expect(theme!.getAttribute("aria-label")).toBe("Toggle dark theme");
-    logLink!.click();
-    expect(detail!.hidden).toBe(false);
-    expect(document.activeElement).toBe(detail!.querySelector("button"));
+    if (!theme || !logLink || !detail) throw new Error("Mockup controls are missing");
+    theme.click();
+    expect(theme.getAttribute("aria-label")).toBe("Toggle dark theme");
+    logLink.click();
+    expect(detail.hidden).toBe(false);
+    expect(document.activeElement).toBe(detail.querySelector("button"));
   });
 });
