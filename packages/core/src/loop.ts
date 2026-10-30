@@ -28,6 +28,7 @@ import {
 import type { SeatState } from "./runtime.ts";
 import { globMatches } from "./runtime.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
+import type { VerifyCheckResult, VerifyState } from "./verify.ts";
 import type { TicketView } from "./views.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
@@ -416,12 +417,20 @@ export const LOOP_TEXT_DONE = "Done";
 export const LOOP_NO_TICKET_REF = "the ticket";
 
 /** What a crew row says about a looped run's step; `ref` is the row's ticket, or null. */
-export const loopText = (ref: string | null, loop: RunLoop): string => {
+export const loopText = (
+  ref: string | null,
+  loop: RunLoop,
+  verify?: { position: number } | null,
+): string => {
   const at = ref ?? LOOP_NO_TICKET_REF;
   switch (loop.phase) {
     case "working":
       return fillLoopText(LOOP_TEXT_WORKING, { ref: at });
     case "ci":
+      if (verify !== null && verify !== undefined)
+        return verify.position === 0
+          ? "Verifying"
+          : `Verifying · ${verify.position}${verify.position === 1 ? "st" : verify.position === 2 ? "nd" : verify.position === 3 ? "rd" : "th"} in queue`;
       return loop.pushFor === null
         ? fillLoopText(LOOP_TEXT_CI_REF, { ref: at })
         : fillLoopText(LOOP_TEXT_CI, { sha7: loop.pushFor.slice(0, 7) });
@@ -626,12 +635,21 @@ export interface LoopSnapshot {
   ended: { reason: string } | null;
   /** null or absent: no reviewer for this run's session (7a behaviour). */
   review?: LoopReviewFacts | null;
+  /** The hub-run check job for the current head; absent retains legacy push behaviour. */
+  verify?: {
+    jobId: number;
+    sha: string;
+    state: VerifyState;
+    reason: string | null;
+    checks: VerifyCheckResult[];
+  } | null;
 }
 
 /** The Needs-you kinds the loop raises as notes. */
 export type LoopNoteKind = "blocked" | "flag" | "review" | "ready" | "ratelimit";
 
 export type LoopAction =
+  | { kind: "verify"; sha: string }
   | { kind: "push" }
   | { kind: "open-pr" }
   | { kind: "send"; key: string; text: string }
@@ -1460,8 +1478,12 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
-    if (s.headCommit !== null && s.pushed?.sha !== s.headCommit) actions.push({ kind: "push" });
-    else if (s.pushed !== null && s.pr === null) actions.push({ kind: "open-pr" });
+    if (s.headCommit !== null && s.pushed?.sha !== s.headCommit) {
+      if (s.verify === undefined) actions.push({ kind: "push" });
+      else if (s.verify === null || s.verify.sha !== s.headCommit)
+        actions.push({ kind: "verify", sha: s.headCommit });
+      else if (s.verify.state === "passed") actions.push({ kind: "push" });
+    } else if (s.pushed !== null && s.pr === null) actions.push({ kind: "open-pr" });
   }
   if (rv.on && rv.R !== null && rv.P !== null) {
     const { R, P, cur } = rv;

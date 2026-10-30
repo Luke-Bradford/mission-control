@@ -198,6 +198,8 @@ export interface EngineDeps {
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
   takeNext: (seatId: string) => Promise<void>;
+  /** The serial pre-push validation queue. */
+  verify?: { enqueue: (runId: string, seatId: string, repoId: string, sha: string) => number };
   /** false: crew is off, or this is a preview, or loop writes are disabled. */
   enabled: boolean;
   /** Whether this process may act on crew right now (it holds the crew lock); default true. */
@@ -705,6 +707,12 @@ export function createEngine(deps: EngineDeps): Engine {
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
     const reviewer = reviewerFor(run);
+    const headCommit = store.newestRunCommit(run.id)?.sha ?? null;
+    const verifyRow =
+      headCommit === null
+        ? null
+        : (store.verifyJobs().find((job) => job.runId === run.id && job.sha === headCommit) ??
+          null);
     let review: LoopReviewFacts | null = null;
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map(reviewFact);
@@ -766,7 +774,21 @@ export function createEngine(deps: EngineDeps): Engine {
               note: evidence.note,
             },
       evidenceCount: store.evidenceCount(run.id),
-      headCommit: store.newestRunCommit(run.id)?.sha ?? null,
+      headCommit,
+      ...(repo?.commands?.writer && repo.commands.writer.length > 0 && deps.verify
+        ? {
+            verify:
+              verifyRow === null
+                ? null
+                : {
+                    jobId: verifyRow.id,
+                    sha: verifyRow.sha,
+                    state: verifyRow.state,
+                    reason: verifyRow.reason,
+                    checks: verifyRow.checks,
+                  },
+          }
+        : {}),
       pushed,
       pr:
         pr === null
@@ -989,6 +1011,10 @@ export function createEngine(deps: EngineDeps): Engine {
     const at = now();
     const issue = issueOf(run) ?? 0;
     const repo = config.repos.find((r) => r.id === run.repoId);
+    if (a.kind === "verify") {
+      if (deps.verify !== undefined) deps.verify.enqueue(run.id, run.agentId, run.repoId, a.sha);
+      return;
+    }
     /**
      * A refused push or PR: a transient one is counted, any other parks the run. A refused merge
      * step (`step`) parks it as `merge-step`; housekeeping gets ten transient tries.
