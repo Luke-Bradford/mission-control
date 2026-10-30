@@ -2713,6 +2713,15 @@ describe("comms", () => {
     });
   });
 
+  it.each([undefined, "run-1"])("keeps the newest Comms window for target %s", (targetRunId) => {
+    for (let i = 1; i <= 5_001; i++)
+      store.addComms({ ...row(String(i), i), ...(targetRunId ? { targetRunId } : {}) });
+    const rows = store.comms(0, targetRunId);
+    expect(rows).toHaveLength(5_000);
+    expect(rows[0]?.text).toBe("2");
+    expect(rows.at(-1)?.text).toBe("5001");
+  });
+
   it("keeps a run-targeted message out of another run's pending Comms", () => {
     store.addComms({ ...row("rework"), targetRunId: "r1" });
     store.addComms({ ...row("general"), at: 101 });
@@ -3161,6 +3170,41 @@ describe("hub retention", () => {
         { key: "open" },
       ]);
       for (const table of ["guard_hits", "hub_events", "drafts", "crew_errors"])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("expires every settled audit child with its completed owner", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO runs (id,agent_id,repo_id,seq,started_at,ended_at,status,transcript_path)
+        VALUES ('old-run','seat','repo',1,0,1,'done','/old');
+        INSERT INTO reviews (id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at)
+        VALUES (1,'old-run','repo','seat',1,'sha',1,1,1,'reported',0,1);
+        INSERT INTO review_checks VALUES (1,'check','pass',NULL);
+        INSERT INTO review_tests (review_id,command,passed,failed,skipped,duration) VALUES (1,'test',1,0,0,1);
+        INSERT INTO review_resolutions VALUES (1,1,1,'fixed');
+        INSERT INTO review_findings (review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,state)
+        VALUES (1,'old-run',1,'minor','f',1,'s','s','f','open');
+        INSERT INTO run_commits (run_id,repo_id,branch,sha,at) VALUES ('old-run','repo','b','sha',0);
+        INSERT INTO run_pushes VALUES ('old-run','sha',0);
+        INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
+        INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * 86_400_000);
+      for (const table of [
+        "runs",
+        "reviews",
+        "review_checks",
+        "review_tests",
+        "review_resolutions",
+        "review_findings",
+        "run_commits",
+        "run_pushes",
+        "run_attempts",
+        "pr_history",
+      ])
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
     } finally {
       db.close();
