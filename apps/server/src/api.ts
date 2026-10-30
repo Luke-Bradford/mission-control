@@ -702,7 +702,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const head = await mapHead(checkout);
     if (!stopMapRing) stopMapRing = mapRing.start();
     mapRing.poll();
-    const crewRows = sharedCrew()
+    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
+    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
+    const crewRows = crew(config, store, now(), deps.lock?.state() ?? NO_LOCK)
       .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
       .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
     const lock = deps.lock?.state() ?? NO_LOCK;
