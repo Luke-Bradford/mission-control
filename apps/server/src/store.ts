@@ -4834,7 +4834,21 @@ export class Store {
       queuedAt: r.queued_at as number,
       startedAt: r.started_at as number | null,
       endedAt: r.ended_at as number | null,
-      checks: [],
+      checks: (
+        this.db
+          .prepare(
+            "SELECT command, ok, duration_ms, failing FROM check_runs WHERE verify_job_id = ? ORDER BY id",
+          )
+          .all(r.id) as Row[]
+      ).map((check) => ({
+        command: check.command as string,
+        ok: check.ok === 1,
+        durationMs: check.duration_ms as number,
+        ...(JSON.parse(check.failing as string) as Pick<
+          VerifyCheckResult,
+          "failingTests" | "errorLines" | "files"
+        >),
+      })),
       reason: r.reason as string | null,
     }));
   }

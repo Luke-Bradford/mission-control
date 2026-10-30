@@ -29,6 +29,7 @@ import type { SeatState } from "./runtime.ts";
 import { globMatches } from "./runtime.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
 import type { VerifyCheckResult, VerifyState } from "./verify.ts";
+import { verifyFixKey, verifyReworkText } from "./verify.ts";
 import type { TicketView } from "./views.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
@@ -900,6 +901,24 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (loop.phase === "parked") return unchanged(loop);
+  if (
+    loop.phase === "ci" &&
+    s.verify?.state === "failed" &&
+    s.verify.sha === headCommit &&
+    s.verify.checks.length > 0
+  ) {
+    return {
+      loop: {
+        ...loop,
+        phase: "working",
+        pendingLine: {
+          key: verifyFixKey(s.runId, loop.epoch, s.verify.jobId),
+          text: verifyReworkText({ sha: s.verify.sha, checks: s.verify.checks }),
+        },
+      },
+      actions: [{ kind: "event", text: `verify failed on ${sha7(s.verify.sha)}` }],
+    };
+  }
   if (pr?.state === "closed") {
     return park(loop, "pr-closed", `PR #${prNumber} was closed without merging`);
   }

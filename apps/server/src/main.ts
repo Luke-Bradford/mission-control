@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LOOPBACK_HOST, type RepoId } from "@mc/core";
+import { LOOPBACK_HOST, type RepoId, SANDBOX_DENY_READ_HOME } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
@@ -70,9 +70,12 @@ import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import { prepareScratch, removeCheckout } from "./runtime/checkouts.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
-import { createSupervisor } from "./runtime/supervisor.ts";
+import { clonePeers, createSupervisor } from "./runtime/supervisor.ts";
+import { createVerifyQueue } from "./runtime/verify.ts";
+import { runVerifySandbox } from "./runtime/verify-sandbox.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { setSeatFocus } from "./seat-focus.ts";
 import { onSignal } from "./shutdown.ts";
@@ -126,6 +129,39 @@ export async function main(): Promise<void> {
   // one full suite at a time across every seat; the supervisor frees a run's hold when its call
   // ends, its turn ends or its process exits
   const lock = new TestLock({ onChange: lockChanged(bus), holds: store, log: (line) => log(line) });
+  const verify = createVerifyQueue({
+    store,
+    lock,
+    checks: (repoId) => config.repos.find((repo) => repo.id === repoId)?.commands?.writer ?? [],
+    runner: async ({ id, sha, command }) => {
+      const job = store.verifyJobs().find((row) => row.id === id);
+      const session = job && config.crew?.sessions.find((row) => row.repoId === job.repoId);
+      if (!job || !session || !config.crew) throw new Error("verify checkout is not configured");
+      const scratch = await prepareScratch({
+        checkout: session.checkout,
+        worktreesRoot: config.crew.worktrees,
+        sessionId: session.id,
+        seatId: "verify",
+        reviewId: id,
+        sha,
+        peers: clonePeers(config, hubRoot ?? ""),
+      });
+      try {
+        return await runVerifySandbox({
+          scratch: scratch.path,
+          command,
+          denied: [dirname(dbPath), ...SANDBOX_DENY_READ_HOME.map((path) => join(homedir(), path))],
+        });
+      } finally {
+        await removeCheckout(session.checkout, scratch.path, { force: true }).catch(() => {});
+      }
+    },
+    onChange: () => {
+      bus.emit("agents");
+      bus.emit("guard");
+    },
+  });
+  verify.restore();
   // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
   const cliHold = new CliHold();
   const scheduler = createScheduler({
@@ -321,6 +357,7 @@ export async function main(): Promise<void> {
         },
         seatId,
       ),
+    verify,
     enabled: engineOn,
     crewOn: () => supervisor.status().enabled,
     hubStartedAt,
