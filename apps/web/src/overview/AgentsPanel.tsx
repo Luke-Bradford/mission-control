@@ -11,7 +11,7 @@ import {
 } from "@mc/core";
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
-import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
+import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -36,7 +36,7 @@ import {
   seatStatus,
   waitText,
 } from "../crew.ts";
-import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
+import { RESOURCES, useResource, useResources, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
 import { cutText, elapsed, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -505,23 +505,23 @@ function AgentRow({
 
 /** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
 function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
-  const current = row.loop?.phase === "parked" && row.run ? [{ id: row.run.id }] : [];
-  const aside = (row.asideRuns ?? [])
-    .filter((run) => run.loop.phase === "parked")
-    .map((run) => ({ id: run.runId }));
+  const ids = [
+    ...(row.loop?.phase === "parked" && row.run ? [row.run.id] : []),
+    ...(row.asideRuns ?? []).filter((run) => run.loop.phase === "parked").map((run) => run.runId),
+  ];
+  const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
+  const parks = ids.flatMap((runId, i) => {
+    const park = reviewPark(loops[i]?.data?.loop);
+    return park ? [{ runId, park }] : [];
+  });
   return (
     <span className="acts">
-      {[...current, ...aside].map(({ id }) => (
-        <ReviewParkSeatAction key={id} runId={id} />
-      ))}
+      {parks.length === 1 && (
+        <WaiveReviewFindings runId={parks[0].runId} park={parks[0].park} compact />
+      )}
+      {parks.length > 1 && <WaiveReviewMenu parks={parks} />}
     </span>
   );
-}
-
-function ReviewParkSeatAction({ runId }: { runId: string }) {
-  const loop = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop;
-  const park = reviewPark(loop);
-  return park ? <WaiveReviewFindings runId={runId} park={park} compact /> : null;
 }
 
 /** FLIGHT heads the crew, observed loops and stopped seats. */

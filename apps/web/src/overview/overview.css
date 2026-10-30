@@ -1374,3 +1374,9 @@
 .waive-compact > button {
   flex: none;
 }
+
+.waive-compact > select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px;
+}

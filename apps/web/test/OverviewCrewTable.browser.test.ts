@@ -1,8 +1,13 @@
 // @vitest-environment node
 
-import type { Crew } from "@mc/core";
+import type { Crew, CrewRow } from "@mc/core";
 import { expect, it } from "vitest";
-import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import {
+  type Box,
+  BROWSER_TEST_TIMEOUT_MS,
+  browserSession,
+  describeRendered,
+} from "./browserRunner.ts";
 import { CONFIG, crewRow, item, METRICS_VIEW, NOW, OVERVIEW, seatRow } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
@@ -47,6 +52,19 @@ const crew: Crew = {
       loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
       hudState: "parked",
     }),
+    // a parked current run plus two parked set-aside runs: one menu lists all three waivers
+    crewRow({
+      id: "retro-2",
+      loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
+      hudState: "parked",
+      run: { ...(crewRow().run as NonNullable<CrewRow["run"]>), id: "r-20" },
+      asideRuns: ["r-21", "r-22"].map((runId) => ({
+        runId,
+        ticket: null,
+        ticketTitle: null,
+        loop: { ...loop("Waiting"), phase: "parked", parked: PARK.reason },
+      })),
+    }),
   ],
   firstRunToday: null,
 };
@@ -59,6 +77,12 @@ const api = {
   "/api/runs/r-12/loop": {
     loop: { phase: "parked", parked: PARK, pushFor: "c74cdfc0123456789", prNumber: null },
   },
+  ...Object.fromEntries(
+    ["r-20", "r-21", "r-22"].map((id, i) => [
+      `/api/runs/${id}/loop`,
+      { loop: { phase: "parked", parked: PARK, pushFor: `c74cdf${i}0123456789`, prNumber: null } },
+    ]),
+  ),
   "/api/attention": [
     item({ key: "ask:guido-1", kind: "decision", agentId: "guido-1", text: LONG, ticket: null }),
   ],
@@ -141,6 +165,21 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
       );
       expect(hanging).toEqual([]);
       expect(await page.boxes("#agentsList .waive-compact button")).toHaveLength(1);
+      // three parked runs on one seat give one menu in the row, with an action for each run
+      const [menu] = await page.boxes("#agentsList .waive-compact select");
+      const menuRow = (await page.boxes("#agentsList .trow:not(.head)")).find(
+        (r) => menu.y >= r.y && menu.y < r.y + r.height,
+      ) as Box;
+      expect(menu.y + menu.height).toBeLessThanOrEqual(menuRow.y + menuRow.height + 0.5);
+      expect(
+        await page.evaluate(
+          () =>
+            [...document.querySelectorAll<HTMLOptionElement>("#agentsList .waive-compact option")]
+              .filter((o) => o.value)
+              .map((o) => o.value),
+          undefined,
+        ),
+      ).toEqual(["r-20", "r-21", "r-22"]);
       // the crew seat's Work cell carries Answer, Interrupt and End, each whole and apart
       const buttons = await page.boxes("#agentsList .work-cell .need button");
       const cell = await page.box("#agentsList .work-cell:has(.need)");

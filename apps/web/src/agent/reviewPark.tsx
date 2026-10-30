@@ -93,3 +93,45 @@ export function WaiveReviewFindings({
     </div>
   );
 }
+
+/** Several review-parked runs on one seat: one menu in a table cell, an action per run. */
+export function WaiveReviewMenu({ parks }: { parks: { runId: string; park: ReviewPark }[] }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (runId: string) => {
+    const found = parks.find((p) => p.runId === runId);
+    if (!found || !window.confirm(reviewParkConfirm(found.park))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost(ACTIONS.runResume(runId), {});
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="waive-compact">
+      <select
+        className="sm warn"
+        value=""
+        disabled={busy}
+        aria-label={`Waive review findings: ${parks.length} parked runs`}
+        onChange={(e) => void pick(e.target.value)}
+      >
+        <option value="">Waive ({parks.length})…</option>
+        {parks.map(({ runId, park }) => (
+          <option key={runId} value={runId} title={park.reason}>
+            Waive {reviewParkSha(park)}
+          </option>
+        ))}
+      </select>
+      {error && (
+        <span className="ellip crit-t s" role="alert" title={error}>
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
