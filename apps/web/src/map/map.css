@@ -139,7 +139,7 @@
   border: 1px solid var(--treemap-line);
   background: var(--treemap-folder);
   color: var(--muted);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   pointer-events: none;
 }
 .map-treemap-folder > .map-treemap-folder-label {
@@ -159,7 +159,7 @@
   border: 1px solid var(--treemap-line);
   border-radius: 1px;
   box-shadow: none;
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   text-align: left;
   color: var(--treemap-ink);
   opacity: calc(0.22 + var(--tile-intensity) * 0.78);
@@ -288,7 +288,7 @@
   align-items: center;
   gap: var(--sp-1) var(--sp-4);
   margin: 0;
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--fg-2);
 }
 .map-changes-key .map-key-read {
@@ -311,7 +311,7 @@
   align-items: center;
   gap: var(--sp-2);
   margin-bottom: var(--sp-2);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 .map-timeline-controls strong {
@@ -332,7 +332,7 @@
   align-items: center;
   gap: var(--sp-2);
   min-height: 20px;
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 .map-timeline-dot {
   width: 8px;
@@ -555,7 +555,7 @@ button.map-timeline-tick {
 .map-results button {
   text-align: left;
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   padding: var(--sp-1) var(--sp-2);
   white-space: normal;
   overflow-wrap: anywhere;

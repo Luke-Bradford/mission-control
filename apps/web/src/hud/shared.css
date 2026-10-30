@@ -401,7 +401,7 @@ pre.diff .h {
 /* instruments: mono ticks, dashed grid, a solid axis and a "now" cursor (hud/charts) */
 .ct {
   fill: var(--muted);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
 }
 
 .ct.now {

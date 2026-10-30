@@ -224,7 +224,7 @@
 }
 
 .setup-title h2 {
-  font: 600 var(--fs-title) var(--display);
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
 }
 
 .sgrid {
@@ -606,7 +606,7 @@
   border-radius: 999px;
   background: var(--surface);
   color: var(--warn);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   white-space: nowrap;
 }
 

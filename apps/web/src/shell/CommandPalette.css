@@ -10,7 +10,7 @@
 }
 
 .palette-input {
-  font: var(--fs) var(--sans);
+  font: var(--fs) / var(--lh) var(--sans);
   background: transparent;
   color: var(--fg);
   border: 0;
@@ -61,7 +61,7 @@
 }
 
 .palette-hint {
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
   max-width: 220px;
   overflow: hidden;

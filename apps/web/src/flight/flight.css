@@ -1004,7 +1004,7 @@ button.flight-link:hover {
 }
 
 #page-flight .memory-repo select {
-  font: var(--fs) var(--sans, inherit);
+  font: var(--fs) / var(--lh) var(--sans, inherit);
   letter-spacing: 0;
   text-transform: none;
 }

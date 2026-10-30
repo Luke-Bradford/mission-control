@@ -88,7 +88,7 @@ function offences(file: string, text: string): string[] {
       )
         found.push(at);
       if (prop === "line-height" && !LINE_HEIGHT_OK.test(value)) found.push(at);
-      if (prop === "font" && /\/\s*(?!\s|var\(--lh)/.test(value)) found.push(at);
+      if (prop === "font" && value !== "inherit" && !/\/\s*var\(--lh/.test(value)) found.push(at);
       if (prop === "font" && /\d\s*(px|em|rem)\b/.test(value)) found.push(at);
       if (SPACING_PROP.test(prop) && /\d(px|rem|em)\b/.test(value.replace(/\b0(px)?\b/g, "")))
         found.push(at);
@@ -151,6 +151,8 @@ describe("the web source uses only the tokens", () => {
     expect(offences("a.css", ".a { line-height: 16px; }")).toHaveLength(1);
     expect(offences("a.css", ".a { line-height: 1.45; }")).toHaveLength(1);
     expect(offences("a.css", ".a { line-height: var(--lh); }")).toEqual([]);
+    expect(offences("a.css", ".a { font: var(--fs-s) var(--mono); }")).toHaveLength(1);
+    expect(offences("a.css", ".a { font: inherit; }")).toEqual([]);
     expect(offences("a.css", ".a { font: var(--fs-s) / 1.4 var(--mono); }")).toHaveLength(1);
     expect(offences("a.css", ":root {\n  --a: #fff;\n  --fs: 13px;\n}")).toEqual([]);
     expect(offences("a.css", "/* font-size: 10px; #fff */ .a { font-size: var(--fs-s); }")).toEqual(
@@ -179,6 +181,7 @@ describe("readable content is at least 12px", () => {
     ["lenses/lenses.css", ".map-lens"],
     ["lenses/lenses.css", ".map-conflict-detail"],
     ["map/map.css", ".map-results"],
+    ["map/map.css", ".map-results button"],
     ["components/config/Glossary.css", ".gloss code"],
   ] as const;
 

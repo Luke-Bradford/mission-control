@@ -313,7 +313,7 @@
   flex-wrap: wrap;
   gap: var(--sp-3);
   margin-top: var(--sp-2);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   text-transform: lowercase;
 }
 

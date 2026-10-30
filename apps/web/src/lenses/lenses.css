@@ -189,7 +189,7 @@
   margin-top: var(--sp-2);
   padding: 0;
   border-bottom: 0;
-  font: var(--fs-s) var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--fg-2);
 }
 .map-conflict-detail h3 {

@@ -581,7 +581,7 @@ select {
   display: inline-flex;
   gap: var(--sp-3);
   color: var(--fg-2);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   white-space: nowrap;
 }
 .usage b {
@@ -597,7 +597,7 @@ select {
 
 .top-clock {
   color: var(--fg);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   line-height: var(--lh-micro);
   height: 16px;
   min-width: 5ch;
@@ -650,7 +650,7 @@ select {
   max-width: min(320px, calc(100vw - 28px));
   padding: var(--sp-1) var(--sp-2);
   color: var(--fg);
-  font: var(--fs-micro) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   line-height: var(--lh-micro);
   text-align: left;
   white-space: normal;
