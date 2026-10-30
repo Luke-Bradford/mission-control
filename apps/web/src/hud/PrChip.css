@@ -5,3 +5,13 @@
   gap: var(--sp-1);
   white-space: nowrap;
 }
+
+.preview-link,
+.preview-start {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.preview-error {
+  white-space: normal;
+}

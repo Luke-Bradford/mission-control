@@ -1,5 +1,5 @@
 import type { RunPr } from "@mc/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrChip } from "../src/hud/PrChip.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -17,6 +17,65 @@ const pr: RunPr = {
 };
 
 describe("PrChip", () => {
+  it("links to the running preview supplied by the PR payload", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    render(
+      <PrChip
+        pr={pr}
+        preview={{
+          pr: 7,
+          branch: "feature/preview",
+          port: 5175,
+          url: "http://127.0.0.1:5175",
+          startedAt: 1,
+        }}
+      />,
+    );
+
+    const link = await screen.findByRole("link", { name: "Open preview for PR #7" });
+    expect(link.textContent).toBe("Preview");
+    expect(link.getAttribute("href")).toBe("http://127.0.0.1:5175");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("starts a preview when the PR payload has none", async () => {
+    const fetch = stubFetch({
+      "/api/config": CONFIG,
+      "POST /api/previews": {
+        pr: 7,
+        branch: "feature/preview",
+        port: 5175,
+        url: "http://127.0.0.1:5175",
+        startedAt: 1,
+      },
+    });
+    render(<PrChip pr={pr} preview={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start preview for PR #7" }));
+
+    const link = await screen.findByRole("link", { name: "Open preview for PR #7" });
+    expect(link.getAttribute("href")).toBe("http://127.0.0.1:5175");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/previews",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ pr: 7 }) }),
+    );
+  });
+
+  it.each(["at most 2 previews can run at once", "the machine guard is holding previews"])(
+    "shows a preview refusal as text: %s",
+    async (error) => {
+      stubFetch({
+        "/api/config": CONFIG,
+        "POST /api/previews": () => ({ status: 409, body: { error } }),
+      });
+      render(<PrChip pr={pr} preview={null} />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Start preview for PR #7" }));
+
+      expect((await screen.findByRole("alert")).textContent).toContain(error);
+    },
+  );
+
   it("shows a warn held pill naming who holds the merge and why", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(<PrChip pr={{ ...pr, hold: { by: "CAPCOM", reason: "wait for the release" } }} />);
