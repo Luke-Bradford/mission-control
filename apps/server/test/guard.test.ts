@@ -850,6 +850,7 @@ describe("POST /api/guard/check", () => {
       "merge-push": 0,
       "flight-powers": 0,
       "full-suite": 0,
+      "verify-queue": 0,
       "read-only": 0,
       network: 1,
       unreadable: 0,
