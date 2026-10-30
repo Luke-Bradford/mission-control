@@ -7,7 +7,8 @@ const mockup = readFileSync(join(import.meta.dirname, "../mockups/qa-uat/index.h
 const doms: JSDOM[] = [];
 const typeInto = (field: HTMLTextAreaElement, value: string) => {
   field.value = value;
-  field.dispatchEvent(new (doms[0]?.window ?? window).Event("input"));
+  const view = field.ownerDocument.defaultView as unknown as { Event: typeof Event };
+  field.dispatchEvent(new view.Event("input"));
 };
 
 const renderMockup = (search = "", html = mockup) => {
