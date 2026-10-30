@@ -85,12 +85,12 @@ describe("a seat is one colour on every page", () => {
     expect(defining.map((f) => f.slice(SRC.length + 1))).toEqual(["hud.css"]);
   });
 
-  it("gives each seat one hex in every theme", () => {
+  it("gives each seat one hex for each theme", () => {
     const byToken = new Map<string, Set<string>>();
     for (const [, n, hex] of hudCss.matchAll(/--seat-([1-7]):\s*(#[0-9a-f]{6})/gi)) {
       byToken.set(`${n}`, (byToken.get(`${n}`) ?? new Set()).add((hex ?? "").toLowerCase()));
     }
     expect(byToken.size).toBe(7);
-    for (const hexes of byToken.values()) expect(hexes.size).toBe(1);
+    for (const hexes of byToken.values()) expect(hexes.size).toBe(2);
   });
 });

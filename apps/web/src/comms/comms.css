@@ -594,11 +594,12 @@
 
 .comms-actions button,
 .comms-react-set button {
-  min-height: 20px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 1px 6px;
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-s);
   background: transparent;
   border: 0;
   border-radius: 2px;

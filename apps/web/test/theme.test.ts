@@ -129,10 +129,10 @@ describe("theme tokens", () => {
     }
   });
 
-  it.each(THEMES)("seat colours stand out from a panel (3:1): %s", (name) => {
+  it.each(THEMES)("seat-coloured text meets AA on a panel: %s", (name) => {
     const t = THEME_TOKENS[name];
     for (const seat of SEATS) {
-      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(3);
+      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -144,7 +144,6 @@ describe("theme tokens", () => {
     expect(THEME_TOKENS.dark).toMatchObject({
       "--bg": "#070a0e",
       "--fg": "#e7eaef",
-      "--seat-1": "#3987e5",
     });
     expect(THEME_TOKENS.light).toMatchObject({ "--bg": "#f3f5f8", "--surface": "#ffffff" });
   });

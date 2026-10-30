@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { THEME_TOKENS } from "../src/theme.ts";
 
 const css = readFileSync(join(import.meta.dirname, "../src/map/map.css"), "utf8");
 const rule = (selector: string) => css.match(new RegExp(`${selector} \\{([^}]+)\\}`))?.[1] ?? "";
@@ -146,11 +147,12 @@ it("keeps every seat and analytical-key swatch at non-text contrast in its theme
     "--seat-5",
     "--seat-6",
     "--seat-7",
-    "--seat-flight",
-  ]) {
-    expect(contrast(token(name), dark), name).toBeGreaterThanOrEqual(3);
-    expect(contrast(token(name), light), name).toBeGreaterThanOrEqual(3);
+  ] as const) {
+    expect(contrast(THEME_TOKENS.dark[name], dark), `${name} dark`).toBeGreaterThanOrEqual(3);
+    expect(contrast(THEME_TOKENS.light[name], light), `${name} light`).toBeGreaterThanOrEqual(3);
   }
+  expect(contrast(token("--seat-flight"), dark), "--seat-flight dark").toBeGreaterThanOrEqual(3);
+  expect(contrast(token("--seat-flight"), light), "--seat-flight light").toBeGreaterThanOrEqual(3);
   expect(keySwatches).toHaveLength(15);
   for (const colour of keySwatches.slice(0, 4)) {
     expect(contrast(colour, dark), colour).toBeGreaterThanOrEqual(3);

@@ -18,6 +18,17 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-lane`)).toContain("min-height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("margin-block: -2.5px");
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
+    for (const selector of [
+      String.raw`\.comms-actions button,\n\.comms-react-set button`,
+      String.raw`\.comms-metric button`,
+      String.raw`#agentsList \.need button`,
+      String.raw`button\.flight-link`,
+    ]) {
+      expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
+    }
+    const commsActions = rule(String.raw`\.comms-actions button,\n\.comms-react-set button`);
+    expect(commsActions).toContain("min-width: 24px");
+    expect(commsActions).toContain("min-height: 24px");
   });
 
   it("caps content-sized rows and gives unused height to the Live log", () => {
