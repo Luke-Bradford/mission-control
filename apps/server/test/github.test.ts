@@ -847,6 +847,26 @@ describe("collectGithub board fields", () => {
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
   });
 
+  it("reads what the issue body waits on, and a PR's base branch", async () => {
+    const { gql } = stub({
+      pages: [
+        page([
+          item(1, "Todo", {
+            extra: { body: "## Outcome\nDepends on #12\nAfter PR 1033\n" },
+          }),
+          item(2, "Todo"),
+        ]),
+      ],
+      prPages: [prPage([pull(7, { baseRefName: "feature/15-x" })])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.after)).toEqual([
+      { issues: [12], prs: [1033] },
+      undefined,
+    ]);
+    expect(store.pullRequests("shop-app")[0]?.base).toBe("feature/15-x");
+  });
+
   it("reads each card's assignee logins", async () => {
     const assignees = { assignees: { nodes: [{ login: "luke" }, { login: "sam" }] } };
     const { gql } = stub({

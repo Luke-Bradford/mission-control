@@ -108,6 +108,21 @@ export interface FlightView {
   controllerDecisions?: FlightDecision[];
   /** The server always sets it with a seat; optional so older fixtures still type. */
   wake?: FlightWakeStatus;
+  /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
+  blocked?: FlightBlocked[];
+}
+
+/** A ticket that waits on other work: what it waits on, the chain to the root, and the wait so far. */
+export interface FlightBlocked {
+  ref: string;
+  title: string;
+  column: HudColumn;
+  /** Each open wait in plain words, e.g. "mc#1015 (PR 1033 in CI)". */
+  waitsOn: string[];
+  /** The ticket, then what it waits on first, and so on to the work at the root. */
+  chain: string[];
+  /** Minutes since the hub first saw the wait. */
+  waitedMin: number;
 }
 
 /** The decisions included in the daily "For the controller" metric. */
@@ -510,6 +525,8 @@ export const wrongColumnText = (ref: string, column: string): string =>
 export const ticketHasRunText = (ref: string): string => `Not started: ${ref} already has a run.`;
 export const claimedText = (ref: string, logins: readonly string[]): string =>
   `Not started: ${ref} is assigned to ${logins.join(", ")}; another hub or person has it.`;
+export const createDependsText = (pr: number, line: string): string =>
+  `Not filed: the body builds on PR ${pr}, which is still open. Add the line "${line}" so no seat starts it before that merges.`;
 export const waitsOnText = (ref: string, open: readonly string[]): string =>
   `Not started: ${ref} waits on ${open.join(", ")}.`;
 export const otherLaneText = (ref: string, laneLabels: readonly string[], lane: string): string =>
@@ -875,6 +892,8 @@ export interface FlightState {
   retrospective?: FlightRetrospective;
   signals: FlightSignal[];
   triage: FlightTriage[];
+  /** Tickets waiting on unmerged work, each with its chain and wait so far. */
+  blocked?: FlightBlocked[];
   /** Current one-line brief, written with update_brief; empty until set or after clearing. */
   headline: string;
   /** Minutes since the headline was written; null when the headline is empty. */

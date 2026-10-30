@@ -4,6 +4,7 @@
  * files. The parser is the server's; this is the shape, the defaults and the label match.
  */
 import { AWAY_START_REFUSED, awayTicketType } from "./away.ts";
+import type { DependencyWait } from "./dependencies.ts";
 import {
   claimedText,
   hasDoneWhenSection,
@@ -226,6 +227,8 @@ export interface StartCheck {
   /** The ticket body; null skips the checks that read it. */
   body: string | null;
   closed: (issue: number) => boolean | undefined;
+  /** The open waits the hub read from its stored board and PRs (`ticketWaits`); each is refused by name. */
+  waits?: readonly DependencyWait[];
 }
 
 /**
@@ -255,11 +258,14 @@ export function eligibleToStart(c: StartCheck): string | null {
       (card.assignees ?? []).filter((a) => a !== c.login),
     );
   }
-  const waits = new Set(card.blockedBy.filter((b) => !b.closed).map((b) => b.ref));
+  const waits = new Map(card.blockedBy.filter((b) => !b.closed).map((b) => [b.ref, b.ref]));
   if (body !== null) {
-    for (const n of dependsOn(body)) if (c.closed(n) !== true) waits.add(`${c.repoId}#${n}`);
+    for (const n of dependsOn(body)) {
+      if (c.closed(n) !== true) waits.set(`${c.repoId}#${n}`, `${c.repoId}#${n}`);
+    }
   }
-  if (waits.size > 0) return waitsOnText(ref, [...waits]);
+  for (const w of c.waits ?? []) waits.set(w.ref, w.text);
+  if (waits.size > 0) return waitsOnText(ref, [...waits.values()]);
   const build = seat.loop === "build";
   if (build && card.labels.some((l) => RESEARCH_LABELS.includes(l))) return researchText(ref);
   if (

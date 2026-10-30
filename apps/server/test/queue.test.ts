@@ -562,6 +562,21 @@ describe("refillQueues", () => {
     expect(issues(SERVER)).toEqual([2]);
   });
 
+  it("leaves out a card whose body says it depends on an open issue, until that closes", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "In progress", state: "in progress" }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+    store.replaceBoard(REPO, [
+      card(1, { after: { issues: [2], prs: [] } }),
+      card(2, { status: "Done", state: "done", closed: true }),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
   it("orders by Priority P0, P1, P2, unset, then by age", async () => {
     store.replaceBoard(REPO, [
       card(1, { priority: null, createdAt: NOW - 9 * DAY }),

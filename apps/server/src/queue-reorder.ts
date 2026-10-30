@@ -17,6 +17,7 @@ import {
 } from "@mc/core";
 import { activeAway } from "./away.ts";
 import { type CcConfig, type CrewSeatConfig, seatInput, seatUnavailable } from "./config.ts";
+import { waitReader } from "./dependencies.ts";
 import { refillQueues } from "./engine/queue.ts";
 import { RepoRulesError } from "./engine/rules.ts";
 import { matchesFocus } from "./focus.ts";
@@ -139,6 +140,7 @@ async function validate(
         laneDefault: deps.config.crew?.laneDefault ?? false,
         body: ticket.body,
         closed: (n) => board.find((c) => c.issueNumber === n)?.closed,
+        waits: waitReader(deps.store, repo.id)(card),
       }) !== null
     )
       refuse("Card no longer eligible for this seat.");

@@ -378,6 +378,11 @@ export interface BoardItem {
   subIssues: { done: number; total: number } | null;
   /** `ref` is `repo#number`; closed blockers are kept and flagged. */
   blockedBy: { ref: string; closed: boolean }[];
+  /**
+   * What the issue body says it waits on: issues on `Depends on` lines, PRs on `After PR` lines.
+   * Absent means none (a card stored before the field, or built by hand).
+   */
+  after?: { issues: number[]; prs: number[] };
   milestone: string | null;
   /** The project's single-select `Size` field; null when the project has none or the item has no value. */
   size: string | null;
@@ -439,6 +444,8 @@ export interface PullRequestView {
   title: string;
   url: string;
   branch: string;
+  /** The branch the PR merges into; another open PR's branch means it is stacked on that PR. Absent before it was read. */
+  base?: string | null;
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";

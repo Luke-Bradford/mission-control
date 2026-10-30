@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import {
   BOARD_KEEP_DONE_MS,
   type BoardItem,
+  bodyDependencies,
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
   ciVerdict,
@@ -74,7 +75,7 @@ const ITEM_FIELDS = `
 /** What the board reads from an issue. */
 const ISSUE_FIELDS = `
               author { login }
-              number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
+              number title body url state updatedAt createdAt labels(first: 20) { nodes { name } }
               assignees(first: 10) { nodes { login } }
               repository { name owner { login } }
               parent { number repository { name } }
@@ -207,7 +208,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
-        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable additions deletions changedFiles
+        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName mergeable additions deletions changedFiles
         mergeCommit { oid }
         author { login }
         assignees(first: 10) { nodes { login } }
@@ -525,6 +526,12 @@ function option<T extends string>(v: unknown, known: readonly T[]): T | null {
 
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 
+/** What an issue body waits on, as the card's `after`; nothing when it names no dependency. */
+function afterOf(body: unknown): { after?: NonNullable<BoardItem["after"]> } {
+  const after = bodyDependencies(str(body, ""));
+  return after.issues.length > 0 || after.prs.length > 0 ? { after } : {};
+}
+
 function blockers(v: unknown): BoardItem["blockedBy"] {
   const nodes = isObj(v) && Array.isArray(v.nodes) ? v.nodes : [];
   return nodes.flatMap((n) =>
@@ -739,6 +746,7 @@ function boardItem(
           }
         : null,
     blockedBy: blockers(c.blockedBy),
+    ...afterOf(c.body),
     milestone:
       typeof path(c, "milestone", "title") === "string"
         ? str(path(c, "milestone", "title"), "")
@@ -1107,6 +1115,7 @@ function mapPr(
     title: str(n.title, ""),
     url: str(n.url, ""),
     branch,
+    ...(str(n.baseRefName, "") === "" ? {} : { base: str(n.baseRefName, "") }),
     // The loops name the ticket in the branch and almost never write "Closes #n".
     ticket:
       inferTicket(branch, repo.id) ?? (typeof first === "number" ? `${repo.id}#${first}` : null),
