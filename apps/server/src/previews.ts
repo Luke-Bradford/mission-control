@@ -116,8 +116,8 @@ export class PreviewManager {
       dbPath: child.dbPath ?? "",
       process: child,
     };
-    this.release(input.pr);
     this.previews.set(input.pr, preview);
+    this.release(input.pr);
     const {
       dbPath: _dbPath,
       process: _process,
