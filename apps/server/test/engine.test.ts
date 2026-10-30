@@ -2743,6 +2743,32 @@ describe("review round", () => {
       expect(tickLogOf(store).running()).toBeNull();
     });
 
+    it("logs a tick whose synchronous work starved the timer, naming that work", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += ENGINE_TICK_MS + 1;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      await h.engine.tick();
+      expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+        expect.stringContaining("on load notes"),
+      ]);
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        expect.objectContaining({ overranOn: ["load notes"] }),
+      ]);
+    });
+
+    it("finishes the tick it records when the tick throws", async () => {
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        throw new Error("db gone");
+      });
+      const before = tickLogOf(store).recent().length;
+      await expect(h.engine.tick()).rejects.toThrow("db gone");
+      expect(tickLogOf(store).running()).toBeNull();
+      expect(tickLogOf(store).recent()).toHaveLength(before + 1);
+    });
+
     it("logs a tick still running past its interval once, with the run it is on", async () => {
       report();
       h.pushHang = true;

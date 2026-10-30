@@ -2402,28 +2402,29 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!live()) return;
       const startedAt = now();
       ticks.begin(startedAt);
-      const cache = {
-        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
-        notes: store.notes(),
-      };
+      let timer: ReturnType<typeof setTimeout> | null = null;
       // a tick past its interval is logged once, with what it is on (the scheduler skips the next)
-      const overrun = setTimeout(() => {
+      const noteOverrun = () => {
         const steps = ticks.overrun();
         if (steps !== null) log(overrunText(startedAt, steps));
-      }, ENGINE_TICK_MS);
-      overrun.unref();
-      const phase = async (label: string, fn: () => Promise<unknown> | unknown) => {
+      };
+      // work that blocks the event loop starves the timer, so each step also checks the clock
+      const phase = async <T>(label: string, fn: () => Promise<T> | T): Promise<T> => {
         const done = ticks.step(label);
         try {
-          await fn();
+          return await fn();
         } finally {
+          if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
           done();
         }
       };
       try {
+        timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
+        timer.unref();
+        const notes = await phase("load notes", () => store.notes());
+        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
         await tickCache.run(cache, async () => {
-          const runs = loopRuns();
-          const notes = cache.notes;
+          const runs = await phase("list runs", loopRuns);
           await phase("wake pending work", () =>
             Promise.all(runs.map((r) => wakePendingWork(r.id))),
           );
@@ -2438,12 +2439,13 @@ export function createEngine(deps: EngineDeps): Engine {
           await Promise.all(runs.map((r) => reconcileRun(r.id)));
           await phase("refresh rule notes", () => refreshRuleNotes(runs));
           await phase("sweep notes", () => sweepNotes(notes));
-          untakeStale();
+          await phase("untake stale", untakeStale);
           await phase("take for seats", takeForSeats);
           await phase("kick reviews", kickReviews);
         });
       } finally {
-        clearTimeout(overrun);
+        if (timer !== null) clearTimeout(timer);
+        if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
         ticks.end(now());
       }
     },
