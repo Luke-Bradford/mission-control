@@ -104,7 +104,7 @@ import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStream } from "../src/stream.ts";
+import { readStreamPage } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
@@ -246,7 +246,7 @@ const stubSupervisor = (): Supervisor => {
     inClone: (_checkout, fn) => fn(),
   };
 };
-let streamReads: ReturnType<typeof vi.fn<typeof readStream>>;
+let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
 /** The app's config.yaml: a copy of the example (the in-memory `config` is the fixture's own). */
 let configPath: string;
 const EXAMPLE_CONFIG = resolve(import.meta.dirname, "../../../config.example.yaml");
@@ -338,7 +338,7 @@ beforeEach(async () => {
   gqlNoOwner = false;
   gqlFailField = null;
   refreshed = 0;
-  streamReads = vi.fn(readStream);
+  streamReads = vi.fn(readStreamPage);
   issueNode = (n) => ({ number: n, title: "t", url: "", state: "OPEN", body: "" });
   const fakeGql: Gql = async (query, vars) => {
     gqlCalls.push({ query, vars });
@@ -412,7 +412,10 @@ beforeEach(async () => {
     now: () => clock,
     logger: { stream: { write: (s: string) => void logs.push(s) } },
     heartbeatMs: 50,
-    readStream: (path, limit, vendor) => streamReads(path, limit, vendor),
+    readStream: (path, limit, vendor, before) =>
+      before === undefined
+        ? streamReads(path, limit, vendor)
+        : streamReads(path, limit, vendor, before),
     configPath,
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
@@ -532,6 +535,18 @@ describe("audit", () => {
     expect(byId.stale).toMatchObject({ endedAt: null, kind: "build", actionable: false });
     expect(byId.watch).toMatchObject({ endedAt: null, kind: "watch", actionable: false });
     expect(byId.loop).toMatchObject({ endedAt: null, kind: "observed", actionable: false });
+  });
+
+  // #1192: until the Audit page is redesigned, each list answers with its first 50 and says how many it cut.
+  it("caps each list at 50 and reports the full counts of the lists it cut", async () => {
+    for (let i = 0; i < 60; i++)
+      store.upsertRun(run({ id: `long-${i}`, startedAt: NOW - HOUR - i * 1000, endedAt: NOW }));
+    const audit = (await get("/api/audit")).json<AuditView & { capped?: Record<string, number> }>();
+    expect(audit.longRunners).toHaveLength(50);
+    // each run also records a model, so that timeline is cut too
+    expect(audit.capped).toEqual({ longRunners: 60, modelPromptTimeline: 60 });
+    const sorted = audit.longRunners.map((r) => r.durationMs);
+    expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
   });
 
   it("rejects an invalid range", async () => {
@@ -1309,6 +1324,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/items/7"],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
+  ["GET", "/api/repos/shop-app/prs/4"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
@@ -1355,6 +1371,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/pause"],
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
+  ["GET", "/api/crew/shop-app-ta"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
   ["GET", "/api/metrics"],
@@ -2183,6 +2200,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url === "/api/repos/shop-app/prs/4") {
+        // the fixture has no such PR: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
       if (url.endsWith("/discussion")) {
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
         continue;
@@ -2460,6 +2482,7 @@ describe("local access", () => {
             .replace("/comms/agents/guido-1", "/comms/agents/:id")
             .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
             .replace("/comms/tickets/%237", "/comms/tickets/:ref")
+            .replace(/\/crew\/shop-app-ta$/, "/crew/:id")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
@@ -2468,6 +2491,7 @@ describe("local access", () => {
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/prs\/4$/, "/prs/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
@@ -2830,6 +2854,7 @@ describe("agent stream", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "hello" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });
@@ -2865,6 +2890,21 @@ describe("agent stream", () => {
     store.upsertRun(run({ id: "r2", startedAt: NOW, transcriptPath: "" }));
     expect((await stream("/api/agents/shop-app-ta/stream")).reason).toBe("transcript not found");
     expect(streamReads).not.toHaveBeenCalled();
+  });
+
+  it("pages the stream older: ?before an event's id returns the events ahead of it", async () => {
+    const lines = [1, 2, 3, 4, 5].map((i) => line(`e${i}`, NOW - (6 - i) * 1000));
+    const p = transcript("page.jsonl", lines.join(""), NOW - 1000);
+    store.upsertRun(run({ id: "r1", transcriptPath: p }));
+    const newest = await stream("/api/agents/shop-app-ta/stream?limit=2");
+    expect(newest.events.map((e: { text: string }) => e.text)).toEqual(["e4", "e5"]);
+    expect(newest.hasMore).toBe(true);
+    const older = await stream(
+      `/api/agents/shop-app-ta/stream?limit=2&before=${newest.events[0].id}`,
+    );
+    expect(older.events.map((e: { text: string }) => e.text)).toEqual(["e2", "e3"]);
+    expect(older.hasMore).toBe(true);
+    expect((await get("/api/agents/shop-app-ta/stream?before=abc")).statusCode).toBe(400);
   });
 
   it("validates limit (1..500, default 200) and 404s an unknown agent", async () => {
@@ -3018,6 +3058,46 @@ describe("crew and attention", () => {
     expect(c.rows[0]?.prs).toEqual([]);
     expect(c.rows[0]?.summary).toBeNull();
     expect(c.rows[1]).toMatchObject({ ticket: null, prs: [], summary: null });
+  });
+
+  // #1192: the Overview reads a summary row; the full row (events, whole digest) is one request away.
+  it("GET /api/crew?shape=summary drops each row's events and digest bulk; /api/crew/:id is the full row", async () => {
+    store.upsertRun(run({ id: "a", startedAt: NOW - 30 * 60e3, ticket: "shop-app#7" }));
+    store.setDigest(
+      "a",
+      digest({
+        lastEventAt: NOW - 1000,
+        minuteTokens: [[NOW - 60e3, 500]],
+        lastText: "Reading the plan.",
+        contextTokens: 900,
+        turnUsage: Array.from({ length: 60 }, () => ({ input: 1, output: 2, cacheRead: 3 })),
+        tools: { Bash: { calls: 3, failed: 0, durationsMs: [1, 2, 3] } },
+      }),
+    );
+    const full = (await get("/api/crew")).json() as Crew;
+    expect(full.rows[0]?.digest?.turnUsage).toHaveLength(60);
+    const res = await get("/api/crew?shape=summary");
+    expect(res.statusCode).toBe(200);
+    const summary = res.json() as Crew;
+    const row = summary.rows[0];
+    expect(row).toMatchObject({ id: "shop-app-ta", hudState: "running", ticket: "shop-app#7" });
+    expect(row?.run?.id).toBe("a");
+    expect(row?.events).toBeUndefined();
+    expect(row?.digest).toEqual({
+      lastEventAt: NOW - 1000,
+      minuteTokens: [[NOW - 60e3, 500]],
+      liveTool: null,
+      lastText: "Reading the plan.",
+      background: [],
+      contextTokens: 900,
+      contextWindow: null,
+      compactions: 0,
+    });
+    expect(summary.firstRunToday).toBe(full.firstRunToday);
+    expect((await get("/api/crew?shape=other")).statusCode).toBe(400);
+    const one = await get("/api/crew/shop-app-ta");
+    expect(one.json()).toEqual(full.rows[0]);
+    expect((await get("/api/crew/nope")).statusCode).toBe(404);
   });
 
   const boardItem = (issueNumber: number, title: string): BoardItem => ({
@@ -4729,6 +4809,89 @@ describe("boards, escalations, health", () => {
     const bad = await get("/api/repos/shop-app/prs?linked=yes");
     expect(bad.statusCode).toBe(400);
     expect(bad.json()).toEqual({ error: "linked must be 1" });
+  });
+
+  // #1192: a list answers with open PRs and the last week, in a summary shape; detail on demand.
+  it("repos/:repoId/prs lists open PRs plus the last 7 days, summary checks, full detail by number", async () => {
+    const DAY = 86_400_000;
+    const check = (name: string) => ({
+      id: `node-${name}`,
+      workflow: "CI",
+      name,
+      kind: "check" as const,
+      state: "passing" as const,
+      conclusion: "success",
+      attempt: 1,
+      url: `https://github.com/o/shop-app/runs/${name}`,
+    });
+    const pr = (number: number, state: "open" | "merged", ageDays: number) => ({
+      repoId: "shop-app",
+      number,
+      title: `t${number}`,
+      url: `https://github.com/o/shop-app/pull/${number}`,
+      branch: "chore/x",
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: clock - (ageDays + 1) * DAY,
+      updatedAt: clock - ageDays * DAY,
+      mergedAt: state === "merged" ? clock - ageDays * DAY : null,
+      mergeCommitSha: null,
+      headSha: null,
+      mergeable: null,
+      author: null,
+      assignees: [] as string[],
+      checks: [check("lint"), check("test")],
+      closingIssues: [] as number[],
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [pr(1, "merged", 40), pr(2, "merged", 3), pr(3, "open", 90), pr(4, "merged", 8)],
+      0,
+    );
+    const numbers = async (query: string) =>
+      ((await get(`/api/repos/shop-app/prs${query}`)).json() as { number: number }[]).map(
+        (p) => p.number,
+      );
+    expect(await numbers("")).toEqual([3, 2]);
+    expect(await numbers("?days=10")).toEqual([4, 3, 2]);
+    expect(await numbers("?all=1")).toEqual([4, 3, 2, 1]);
+    const [listed] = (await get("/api/repos/shop-app/prs")).json();
+    expect(listed.checks).toEqual([
+      { name: "lint", kind: "check", state: "passing", attempt: 1 },
+      { name: "test", kind: "check", state: "passing", attempt: 1 },
+    ]);
+    expect((await get("/api/repos/shop-app/prs?detail=1")).json()[0].checks[0]).toEqual(
+      check("lint"),
+    );
+    // `?shape=summary`: the list's own fields, no checks, no detail that grows with the PR.
+    const [slim] = (await get("/api/repos/shop-app/prs?shape=summary")).json();
+    expect(Object.keys(slim).sort()).toEqual(
+      [
+        "repoId",
+        "number",
+        "title",
+        "url",
+        "branch",
+        "headSha",
+        "ticket",
+        "state",
+        "isDraft",
+        "review",
+        "ci",
+        "createdAt",
+        "updatedAt",
+        "mergedAt",
+      ].sort(),
+    );
+    expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
+    const one = await get("/api/repos/shop-app/prs/3");
+    expect(one.json().checks[0]).toEqual(check("lint"));
+    expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);
+    expect((await get("/api/repos/shop-app/prs?days=0")).statusCode).toBe(400);
+    expect((await get("/api/repos/shop-app/prs?all=2")).statusCode).toBe(400);
   });
 
   it("repos returns the configured repos as id, github, project and projectUrl", async () => {
@@ -6779,6 +6942,7 @@ describe("seat ids in the agent routes", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "brief read" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });
