@@ -9,7 +9,7 @@ import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubItemHref } from "../links.ts";
-import { decidedToday, overturnText } from "./conversation.ts";
+import { decidedToday, decisionAnchor, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 import { Pending } from "./Pending.tsx";
 
@@ -61,7 +61,7 @@ export function DecidedRow({
     }
   };
   return (
-    <div className="drow" data-testid="decided-row">
+    <div className="drow" id={decisionAnchor(d.id)} data-testid="decided-row">
       <div className="row">
         {call !== null && <AgentTag id={call} index={index} sm />}
         <span className="s">{tz === null ? DASH : hhmm(d.at, tz)}</span>

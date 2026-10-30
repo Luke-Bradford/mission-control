@@ -15,6 +15,7 @@ export * from "./map-fixture.ts";
 export * from "./mcp.ts";
 export * from "./metrics.ts";
 export * from "./needs-you.ts";
+export * from "./plain-talk.ts";
 export * from "./profiles.ts";
 export * from "./repo-rules.ts";
 export * from "./repos.ts";
