@@ -2303,6 +2303,8 @@ describe("wakeSummary", () => {
     area: [],
     state: null,
     free: false,
+    pause: null,
+    stop: null,
     ticket: null,
     title: null,
     phase: null,

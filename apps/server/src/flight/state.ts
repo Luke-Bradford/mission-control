@@ -72,7 +72,7 @@ import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
-import { readCrewPause } from "../crew-pause.ts";
+import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
 import {
@@ -594,6 +594,7 @@ export function flightState(i: {
 
   const seats = mine.map((s): FlightSeatState => {
     const row = store.seatSession(s.id);
+    const pause = pausedSeat(store, s.id);
     const run = unended(s.id);
     const loop = run?.loop ?? null;
     const t = run?.ticket == null ? null : parseTicket(run.ticket);
@@ -606,7 +607,16 @@ export function flightState(i: {
       loop: seatDef(s).loop,
       area: s.area,
       state: row?.state ?? null,
-      free: !seatUnavailable(s) && seatFree(store, busy, s.id),
+      free:
+        !seatUnavailable(s) &&
+        pause === null &&
+        row?.state !== "stopped" &&
+        seatFree(store, busy, s.id),
+      pause: pause === null ? null : { by: pause.by, reason: pause.reason, at: pause.at },
+      stop:
+        row?.state === "stopped" && row.stop != null
+          ? { by: row.stop.by, reason: row.stop.reason, at: row.stop.at }
+          : null,
       ticket: run?.ticket ?? null,
       title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
       phase: loop?.phase ?? null,
@@ -654,7 +664,12 @@ export function flightState(i: {
         queued: reviews.filter((row) => row.state === "queued").length,
         running: reviews.filter((row) => row.state === "starting" || row.state === "running")
           .length,
-        idle: !seatUnavailable(seat) && held === null && !busy.some((b) => b.seatId === seat.id),
+        idle:
+          !seatUnavailable(seat) &&
+          pausedSeat(store, seat.id) === null &&
+          store.seatSession(seat.id)?.state !== "stopped" &&
+          held === null &&
+          !busy.some((b) => b.seatId === seat.id),
       };
     }),
   };

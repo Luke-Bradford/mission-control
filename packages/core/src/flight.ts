@@ -832,6 +832,10 @@ export interface FlightSeatState {
   area: string[];
   state: SeatState | null;
   free: boolean;
+  /** The crew pause that holds this seat, when any. */
+  pause: { by: string; reason: string; at: number } | null;
+  /** The operator Stop that holds this seat, never a crash or ordinary end. */
+  stop: { by: string; reason: string | null; at: number } | null;
   ticket: string | null;
   title: string | null;
   phase: LoopPhase | null;

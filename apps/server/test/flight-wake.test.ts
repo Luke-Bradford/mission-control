@@ -63,6 +63,8 @@ const busyBoard = (): FlightState => ({
     area: ["apps/server/**"],
     state: "idle",
     free: false,
+    pause: null,
+    stop: null,
     ticket: `mc#${n + 40}`,
     title: `Build ticket ${n + 40}`,
     phase: "working",
