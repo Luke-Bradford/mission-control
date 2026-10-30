@@ -93,3 +93,7 @@ it("constrains the crew pause portal to the viewport with scrolling", () => {
   expect(css).toMatch(/\.crew-pause-form \{[^}]*max-height: calc\(100dvh - 32px\)/);
   expect(css).toMatch(/\.crew-pause-form \{[^}]*overflow-y: auto/);
 });
+
+it("sizes the review-waiver menu from spacing tokens", () => {
+  expect(css).toMatch(/\.waive-compact > select \{[^}]*min-height: var\(--sp-5\)/);
+});
