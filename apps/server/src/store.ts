@@ -1562,6 +1562,25 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  runsForAgents(agentIds: readonly AgentId[], limit: number): Map<AgentId, Run[]> {
+    const out = new Map<AgentId, Run[]>();
+    if (agentIds.length === 0) return out;
+    for (const agentId of agentIds) out.set(agentId, []);
+    const rows = this.statement(
+      `SELECT * FROM (
+         SELECT runs.*, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
+         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})
+       ) WHERE row_number <= ?`,
+    ).all(...agentIds, limit) as Row[];
+    for (const run of rows.map(toRun)) {
+      const runs = out.get(run.agentId) ?? [];
+      runs.push(run);
+      out.set(run.agentId, runs);
+    }
+    return out;
+  }
+
   /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
   mapAsideRuns(agentId: AgentId): Run[] {
     return (
@@ -2694,6 +2713,21 @@ export class Store {
       "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
     ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
+  }
+
+  /** Pull requests for configured repos, indexed after one table read for the HUD. */
+  pullRequestsForRepos(repoIds: readonly RepoId[]): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>();
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(
+      `SELECT * FROM pull_requests WHERE repo_id IN (${repoIds.map(() => "?").join(", ")}) ORDER BY number DESC`,
+    ).all(...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) {
+      const prs = out.get(pr.repoId) ?? [];
+      prs.push(pr);
+      out.set(pr.repoId, prs);
+    }
+    return out;
   }
 
   overviewPullRequests(repoId: RepoId, since: number): PullRequestView[] {
@@ -4683,6 +4717,20 @@ export class Store {
       | Row
       | undefined;
     return r ? seatRow(r) : null;
+  }
+
+  /** Seat sessions for the configured HUD rows, indexed after one table read. */
+  seatSessions(seatIds: readonly AgentId[]): Map<AgentId, SeatSessionRow> {
+    const out = new Map<AgentId, SeatSessionRow>();
+    if (seatIds.length === 0) return out;
+    const rows = this.statement(
+      `SELECT * FROM seat_sessions WHERE seat_id IN (${seatIds.map(() => "?").join(", ")})`,
+    ).all(...seatIds) as Row[];
+    for (const row of rows) {
+      const seat = seatRow(row);
+      out.set(seat.seatId, seat);
+    }
+    return out;
   }
 
   setSeatSession(row: SeatSessionRow): void {

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TestLockState } from "@mc/core";
+import type { Run, TestLockState } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud.ts";
@@ -43,7 +43,61 @@ afterEach(() => {
 
 const noVersion = () => null;
 
+const storedRun = (over: Partial<Run>): Run => ({
+  id: "run",
+  agentId: "seat",
+  repoId: "shop-app",
+  seq: 1,
+  startedAt: NOW - 1_000,
+  endedAt: NOW - 500,
+  status: "ok",
+  sessionId: null,
+  model: null,
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
 describe("the crew and Needs-you memo", () => {
+  it("reads ten seats with fifty runs each through the batched HUD tables", () => {
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 10,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "checkout"),
+          seats: Array.from({ length: 10 }, (_, seat) => ({
+            id: `seat-${seat}`,
+            role: "GUIDO",
+            accountId: "claude-main",
+            model: "sonnet",
+            area: [],
+          })),
+        },
+      ],
+    };
+    for (let seat = 0; seat < 10; seat++)
+      for (let n = 0; n < 50; n++)
+        store.upsertRun(storedRun({ id: `run-${seat}-${n}`, agentId: `seat-${seat}`, seq: n }));
+    const runs = vi.spyOn(store, "runs");
+    const batchedRuns = vi.spyOn(store, "runsForAgents");
+    const started = performance.now();
+    crew(config, store, NOW, undefined, noVersion);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(batchedRuns).toHaveBeenCalledTimes(1);
+    expect(runs).not.toHaveBeenCalled();
+    const warm = performance.now();
+    crew(config, store, NOW + 1, undefined, noVersion);
+    expect(performance.now() - warm).toBeLessThan(20);
+    expect(batchedRuns).toHaveBeenCalledTimes(1);
+  });
   it("builds the crew once for callers asking in the same second at the same version", () => {
     const reads = vi.spyOn(store, "status");
     crew(config, store, NOW, undefined, noVersion);
