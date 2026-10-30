@@ -458,7 +458,8 @@ What each seat's process starts with:
   long strings are cut) and its tail starts at the last `FAIL` or `error` line when there is one.
   The full output is `<run temp root>/tool-output/<tool_use_id>.txt` (0600), removed with the
   run's temp root. Unlike the guard hook it never blocks: any failure, or a full output that cannot
-  be written, leaves the result whole. Codex seats are not covered.
+  be written, leaves the result whole. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,
   env and settings carry only their paths. When the process exits, for any reason, the token is
