@@ -31,7 +31,11 @@ export interface RepoSkills {
 }
 
 /** The skills in commit `baseSha` of the clone at `checkout`; the writable worktree is never read. */
-export async function readRepoSkills(checkout: string, baseSha: string): Promise<RepoSkills> {
+export async function readRepoSkills(
+  checkout: string,
+  baseSha: string,
+  maxFiles = MAX_FILES,
+): Promise<RepoSkills> {
   const common = await realpath(join(checkout, ".git"));
   const tree = await crewGitBytes(
     checkout,
@@ -46,13 +50,16 @@ export async function readRepoSkills(checkout: string, baseSha: string): Promise
       const m = /^([0-7]+) (\w+) [0-9a-f]+\t([\s\S]+)$/.exec(e);
       return m === null ? [] : [{ mode: m[1] as string, path: m[3] as string }];
     });
+  // a cut list could pass a skill whose refused file sits past the cut: no skill reaches the seat
+  if (entries.length > maxFiles) {
+    return { skills: [], refused: [`${SKILLS_DIR}: more than ${maxFiles} files`] };
+  }
   const byName = new Map<string, { mode: string; path: string }[]>();
   const refused: string[] = [];
-  for (const e of entries.slice(0, MAX_FILES)) {
+  for (const e of entries) {
     const name = e.path.slice(SKILLS_DIR.length + 1).split("/")[0] as string;
     byName.set(name, [...(byName.get(name) ?? []), e]);
   }
-  if (entries.length > MAX_FILES) refused.push(`${SKILLS_DIR}: more than ${MAX_FILES} files`);
   const skills: RepoSkill[] = [];
   for (const [name, files] of byName) {
     const folder = `${SKILLS_DIR}/${name}/`;

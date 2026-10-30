@@ -87,6 +87,19 @@ describe("the repo's skills reach a seat (#1051)", () => {
     expect(refused.join("\n")).toMatch(/SKILL\.md/);
   });
 
+  it("passes no skill when the repo has more files than the cap, so none is half-checked", async () => {
+    put(".claude/skills/zzz/SKILL.md", "ok");
+    put(".claude/skills/zzz/run.sh", "#!/bin/sh\n");
+    const base = snapshot();
+    // 5 files in all: a cap of 4 would cut `run.sh` off and pass `zzz` with only its SKILL.md
+    const cut = await readRepoSkills(dir, base, 4);
+    expect(cut.skills).toEqual([]);
+    expect(cut.refused).toEqual([".claude/skills: more than 4 files"]);
+    const whole = await readRepoSkills(dir, base);
+    expect(whole.skills.map((s) => s.name)).toEqual(["hud-design", "plain-talk"]);
+    expect(whole.refused.join()).toMatch(/zzz/);
+  });
+
   it("builds a read-only plugin folder with skills only: no hooks, bin or MCP", async () => {
     const { skills } = await readRepoSkills(dir, snapshot());
     const plugin = join(out, "plugin");
