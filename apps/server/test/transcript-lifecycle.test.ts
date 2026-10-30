@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
@@ -131,4 +131,21 @@ it("honours configured ages and ignores unknown, outside, and symlinked files", 
   expect(readFileSync(outside.transcriptPath, "utf8")).toBe("outside\n");
   expect(existsSync(join(dir, "crew", "unknown.jsonl"))).toBe(true);
   expect(existsSync(join(dir, "crew", "link.jsonl"))).toBe(true);
+});
+
+it("deletes an expired gzip without deleting its run row", async () => {
+  const endedAt = NOW - 15 * 24 * HOUR;
+  const expired = run("expired-gzip", endedAt);
+  store.upsertRun(expired);
+  writeFileSync(`${expired.transcriptPath}.gz`, gzipSync("expired\n"));
+  // The contents are irrelevant to retention; only the regular gzip sibling is eligible.
+  utimesSync(`${expired.transcriptPath}.gz`, new Date(endedAt), new Date(endedAt));
+  const result = await maintainTranscripts({
+    store,
+    now: NOW,
+    retention: TRANSCRIPT_RETENTION_DEFAULTS,
+  });
+  expect(result.deleted).toBe(1);
+  expect(existsSync(`${expired.transcriptPath}.gz`)).toBe(false);
+  expect(store.run(expired.id)?.id).toBe(expired.id);
 });
