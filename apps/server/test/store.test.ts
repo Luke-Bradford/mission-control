@@ -3130,6 +3130,23 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
+  it("keeps an old current brief only while its attention item remains open", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO attention_notes (key,kind,text,at,cleared_at) VALUES
+        ('brief:open','test','open',0,NULL), ('brief:cleared','test','cleared',0,1);
+        INSERT INTO briefs (key,context,recommendation,options,basis,at) VALUES
+        ('brief:open','context','recommendation','[]','basis',0),
+        ('brief:cleared','context','recommendation','[]','basis',0);`);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      expect(db.prepare("SELECT key FROM briefs ORDER BY key").all()).toEqual([
+        { key: "brief:open" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("expires settled operational history while retaining open attention", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     try {
