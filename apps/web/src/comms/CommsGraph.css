@@ -7,7 +7,7 @@
 }
 .comms-graph-panel {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 0 auto;
   flex-direction: column;
   min-height: 390px;
 }
@@ -957,9 +957,14 @@
 
 /* Message length p95: one row per sender, a bar against the limit; near and over are marked. */
 .comms-length-panel {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
 }
 .comms-length-list {
+  max-height: calc(6 * 35px);
+  overflow-y: auto;
   display: grid;
   gap: var(--sp-2);
   margin: 0;
@@ -1011,4 +1016,19 @@
 }
 .comms-length-list li.over .comms-watch-bar i {
   background: var(--crit);
+}
+.comms-length-stale {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3) 0;
+  color: var(--warn);
+  font-size: var(--fs-s);
+}
+.comms-length-stale i {
+  width: 6px;
+  height: 6px;
+  background: var(--warn);
+  transform: rotate(45deg);
 }

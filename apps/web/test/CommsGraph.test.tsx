@@ -811,3 +811,15 @@ it("says so when no sender has a message in the range", async () => {
   expect(within(panel).getByText(/No messages in the last 24h/)).toBeTruthy();
   expect(within(panel).queryAllByRole("listitem")).toHaveLength(0);
 });
+
+it("says the message lengths could not be loaded instead of loading for good", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+    "/api/comms/metrics": () => ({ status: 500, body: { error: "boom" } }),
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/Couldn't load message lengths/)).toBeTruthy();
+  expect(screen.queryByText(/Loading message lengths/)).toBeNull();
+});

@@ -133,7 +133,8 @@ export function CommsGraph({
   const trafficResource = useResource<{ hours: Hour[] }>(RESOURCES.commsTraffic);
   const hours = trafficResource.data?.hours;
   const chatter = useResource<{ pairs: ChatterPair[] }>(RESOURCES.commsChatter).data?.pairs;
-  const lengths = useResource<CommsMetricsView>(RESOURCES.commsMetrics).data?.p95BySeat;
+  const lengthsResource = useResource<CommsMetricsView>(RESOURCES.commsMetrics);
+  const lengths = lengthsResource.data?.p95BySeat;
   const [metric, setMetric] = useState<"messages" | "tokens">("messages");
   const reduced = useReducedMotion();
   // The raw from/to pairs that gained a message on the last read, the canonical flows they make
@@ -612,36 +613,53 @@ export function CommsGraph({
         title={COMMS_METRICS.messageLengthP95.label}
         sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
       >
-        {lengths === undefined ? (
+        {lengths === undefined && lengthsResource.error !== null ? (
+          <p className="comms-traffic-empty" role="alert">
+            Couldn't load message lengths. Retrying.
+          </p>
+        ) : lengths === undefined ? (
           <p className="comms-traffic-empty">Loading message lengths…</p>
         ) : lengths.length === 0 ? (
           <p className="comms-traffic-empty">No messages in the last 24h.</p>
         ) : (
-          <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
-            {[...lengths]
-              .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
-              .map(({ seatId, p95, n }) => {
-                const row = rows.find((r) => r.id === seatId);
-                const level = lengthLevel(p95);
-                return (
-                  <li key={seatId} className={level}>
-                    <b>{row === undefined ? seatId : callSign(row)}</b>
-                    <span className="comms-length-value">
-                      {p95 === null ? "—" : Math.round(p95).toLocaleString()}
-                      {level !== "" && <em>{level === "over" ? " over limit" : " near limit"}</em>}
-                    </span>
-                    <span className="comms-length-n">{n} msg</span>
-                    <span className="comms-watch-bar" aria-hidden="true">
-                      <i
-                        style={{
-                          width: percent(Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100), 0),
-                        }}
-                      />
-                    </span>
-                  </li>
-                );
-              })}
-          </ul>
+          <>
+            {lengthsResource.error !== null && (
+              <p className="comms-length-stale" role="status">
+                <i aria-hidden="true" />
+                Stale · couldn't refresh. Retrying.
+              </p>
+            )}
+            <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
+              {[...lengths]
+                .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
+                .map(({ seatId, p95, n }) => {
+                  const row = rows.find((r) => r.id === seatId);
+                  const level = lengthLevel(p95);
+                  return (
+                    <li key={seatId} className={level}>
+                      <b>{row === undefined ? seatId : callSign(row)}</b>
+                      <span className="comms-length-value">
+                        {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                        {level !== "" && (
+                          <em>{level === "over" ? " over limit" : " near limit"}</em>
+                        )}
+                      </span>
+                      <span className="comms-length-n">{n} msg</span>
+                      <span className="comms-watch-bar" aria-hidden="true">
+                        <i
+                          style={{
+                            width: percent(
+                              Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100),
+                              0,
+                            ),
+                          }}
+                        />
+                      </span>
+                    </li>
+                  );
+                })}
+            </ul>
+          </>
         )}
       </Panel>
     </aside>
