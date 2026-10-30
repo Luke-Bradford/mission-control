@@ -120,6 +120,12 @@ describe("Overview v2 mockup", () => {
     expect(logEvents.every((event) => event.length <= 120)).toBe(true);
     expect(quotaLabels).toContain("Codex 7d");
     expect(quotaLabels).not.toContain("Codex 5h");
+    expect(document.querySelector(".quotaRow b")?.textContent).toContain(
+      "full in ~2d at this rate",
+    );
+    expect(document.querySelectorAll(".quotaRow b")[2]?.textContent).toContain(
+      "full in ~6d at this rate",
+    );
   });
 
   it("draws metric-specific dense sample paths with dots and accessible windows", () => {

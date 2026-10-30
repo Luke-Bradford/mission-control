@@ -28,6 +28,39 @@ describeRendered("Overview v2 mockup in a browser", () => {
           }, null),
         ).toBe(true);
         expect((await page.reachable(".pipeline .more", ".pipeline")).every(Boolean)).toBe(true);
+        expect((await page.reachable(".loops", "#crew")).every(Boolean)).toBe(true);
+        expect(
+          await page.evaluate(() => {
+            const body = document.querySelector<HTMLElement>(".crewBody");
+            const last = document.querySelector<HTMLElement>("#crewRows .crewrow:last-child");
+            if (!body || !last) return false;
+            body.scrollTop = body.scrollHeight;
+            return (
+              getComputedStyle(body).overflowY !== "hidden" &&
+              last.getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom + 1
+            );
+          }, null),
+        ).toBe(true);
+        expect(
+          await page.evaluate(
+            () =>
+              [...document.querySelectorAll<HTMLElement>(".guardLabel")].every(
+                (label) =>
+                  getComputedStyle(label).fontSize === "12px" &&
+                  label.textContent?.includes("guard"),
+              ),
+            null,
+          ),
+        ).toBe(true);
+        expect(
+          await page.evaluate(() => {
+            const quota = document.querySelector<HTMLElement>(".quota");
+            const last = document.querySelector<HTMLElement>(".quotaRow:last-child .meter");
+            if (!quota || !last) return false;
+            quota.scrollTop = quota.scrollHeight;
+            return last.getBoundingClientRect().bottom <= quota.getBoundingClientRect().bottom + 1;
+          }, null),
+        ).toBe(true);
         expect(
           await page.evaluate(() => {
             const sub = document.querySelector(".sub");
