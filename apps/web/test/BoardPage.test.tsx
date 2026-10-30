@@ -632,6 +632,35 @@ describe("cards", () => {
     expect(container.querySelectorAll(".overlay .pill").length).toBe(1);
   });
 
+  it("uses the Board PR payload's running preview URL", async () => {
+    const preview = {
+      pr: 40,
+      branch: "feature/preview",
+      port: 5175,
+      url: "http://127.0.0.1:5175",
+      startedAt: NOW,
+    };
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [{ ...pr(), preview } as PullRequestView & { preview: typeof preview }],
+    });
+    await open();
+
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    const link = within(c).getByRole("link", { name: "Open preview for PR #40" });
+    expect(link.getAttribute("href")).toBe(preview.url);
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("does not offer a Board preview when the payload has none", async () => {
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [{ ...pr(), preview: null } as PullRequestView & { preview: null }],
+    });
+    await open();
+    expect(screen.queryByRole("button", { name: "Start preview for PR #40" })).toBeNull();
+  });
+
   it("a PR with review state shows it; a draft shows Draft; failing CI is red", async () => {
     stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],

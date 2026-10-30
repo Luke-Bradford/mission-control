@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   type AttentionItem,
   type BoardItem,
+  carriedFrom,
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
@@ -72,9 +73,15 @@ import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
+import { readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "../machine-capacity.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -572,6 +579,9 @@ export function flightState(i: {
       prs: [],
       items: [],
       holds: [],
+      reviewQueue: { queued: 0, running: 0, seats: [] },
+      mergeQueue: [],
+      flowHolds: [],
       recent,
       limits,
       brief,
@@ -641,6 +651,26 @@ export function flightState(i: {
       ageMin: Math.floor((now - q.at) / 60_000),
     }));
 
+  const reviewRows = store
+    .reviewsIn(["queued", "starting", "running"])
+    .filter((row) => row.repoId === session.repoId);
+  const reviewSeats = mine.filter((s) => seatDef(s).loop === "review");
+  const reviewQueue = {
+    queued: reviewRows.filter((row) => row.state === "queued").length,
+    running: reviewRows.filter((row) => row.state === "starting" || row.state === "running").length,
+    seats: reviewSeats.map((seat) => {
+      const reviews = reviewRows.filter((row) => row.seatId === seat.id);
+      const held = unended(seat.id);
+      return {
+        seat: seat.id,
+        queued: reviews.filter((row) => row.state === "queued").length,
+        running: reviews.filter((row) => row.state === "starting" || row.state === "running")
+          .length,
+        idle: !seatUnavailable(seat) && held === null && !busy.some((b) => b.seatId === seat.id),
+      };
+    }),
+  };
+
   const active = store.activeTickets();
   const waitsOf = waitReader(store, session.repoId);
   const tickets = board
@@ -704,6 +734,10 @@ export function flightState(i: {
     .map((p) => {
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
       const reviewed = store.latestReportedReview(session.repoId, p.number);
+      const carried =
+        p.headSha === null
+          ? null
+          : carriedFrom(holder?.loop?.carry, holder?.loop?.reviewWaivedSha, p.headSha);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -722,12 +756,38 @@ export function flightState(i: {
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
         review:
-          reviewed?.verdict == null
+          reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
       };
     });
+
+  const mergeFacts = new Map(
+    store
+      .pullRequests(session.repoId)
+      .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
+  );
+  const mergeQueue = prs
+    .filter((p) => p.state === "open")
+    .map((p) => {
+      const facts = mergeFacts.get(p.pr);
+      const pendingChecks = facts?.checks.filter((check) => check.state === "pending") ?? [];
+      const waitsOn = [
+        ...(p.failingChecks.length > 0 ? [`CI: ${p.failingChecks.join(", ")}`] : []),
+        ...(pendingChecks.length
+          ? [`CI pending: ${pendingChecks.map((check) => check.name).join(", ")}`]
+          : []),
+        ...(facts?.mergeable === "CONFLICTING" ? ["merge conflict"] : []),
+        ...(p.review === null ? ["review"] : []),
+        ...(p.review?.blocking
+          ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
+          : []),
+        ...(p.awaitingFlight === null || p.awaitingFlight === undefined ? [] : ["FLIGHT merge"]),
+      ];
+      return { pr: p.pr, waitsOn };
+    })
+    .filter((p) => p.waitsOn.length > 0);
 
   const aside = store
     .loopRuns(now)
@@ -777,6 +837,105 @@ export function flightState(i: {
       },
     ];
   });
+
+  const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+  const capacity = machineCapacity(
+    store.machineSamples(machineCapacitySince(now, capacityConfig)),
+    now,
+    capacityConfig,
+  );
+  const queuedReviews = reviewQueue.queued;
+  const idleReviewers = reviewQueue.seats.filter((seat) => seat.idle).length;
+  const eligibleBuilds = tickets.filter((ticket) => ticket.ready).length;
+  const idleBuilds = seats.filter((seat) => seat.loop === "build" && seat.free).length;
+  const machineBlocks = [
+    ...(queuedReviews > 0
+      ? [
+          `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`,
+        ]
+      : []),
+    ...(eligibleBuilds > 0
+      ? [
+          `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+        ]
+      : []),
+  ].join("; ");
+  const flowHolds: NonNullable<FlightState["flowHolds"]> = [
+    ...(capacity.blocked && capacity.reason !== null
+      ? [
+          {
+            kind: "machine" as const,
+            reason: capacity.reason,
+            blocks: machineBlocks,
+            ...(queuedReviews > 0
+              ? { feedbackLoop: "the hold blocks reviews; held reviews cannot merge" }
+              : {}),
+            blocking: queuedReviews > 0 || eligibleBuilds > 0,
+          },
+        ]
+      : []),
+    ...(() => {
+      const pause = readCrewPause(store);
+      if (pause === null) return [];
+      const pausedReviews = reviewQueue.seats.filter((seat) =>
+        pause.seats === "all" ? true : pause.seats.includes(seat.seat),
+      );
+      const pausedBuilds = seats.filter(
+        (seat) => seat.loop === "build" && (pause.seats === "all" || pause.seats.includes(seat.id)),
+      );
+      const pausedQueuedReviews = pausedReviews.reduce((total, seat) => total + seat.queued, 0);
+      return [
+        {
+          kind: "crew-pause" as const,
+          reason: pause.reason,
+          blocks: `${pausedBuilds.length} build seat${pausedBuilds.length === 1 ? "" : "s"}, ${pausedReviews.length} review seat${pausedReviews.length === 1 ? "" : "s"} and ${pausedQueuedReviews} queued review${pausedQueuedReviews === 1 ? "" : "s"}`,
+          blocking: (pausedBuilds.length > 0 && eligibleBuilds > 0) || pausedQueuedReviews > 0,
+        },
+      ];
+    })(),
+    ...seats
+      .filter((seat) => seat.atStop)
+      .map((seat) => {
+        const accountId = mine.find((source) => source.id === seat.id)?.accountId;
+        const account = config.accounts.find((source) => source.id === accountId);
+        const reading =
+          account === undefined || accountId === undefined
+            ? null
+            : (["5h", "7d"] as const)
+                .map((window) => ({ window, usage: store.latestUsage(accountId, window) }))
+                .find(
+                  ({ usage }) =>
+                    usage !== null && usage.resetAt > now && usage.pct >= account.stopAt,
+                );
+        const reason =
+          reading === null ||
+          reading === undefined ||
+          reading.usage === null ||
+          account === undefined
+            ? `${seat.call}'s account is at its quota stop`
+            : `${seat.call}'s ${reading.window} quota is ${reading.usage.pct}% (stop ${account.stopAt}%)`;
+        return {
+          kind: "quota" as const,
+          reason,
+          blocks: `${seat.loop} work assigned to ${seat.call}`,
+          blocking:
+            (seat.loop === "build" && eligibleBuilds > 0) ||
+            (seat.loop === "review" &&
+              reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
+        };
+      }),
+    ...seats
+      .filter((seat) => seat.state === "stopped")
+      .map((seat) => ({
+        kind: "seat-stopped" as const,
+        reason: `${seat.call} is stopped`,
+        blocks: `${seat.loop} work assigned to ${seat.call}`,
+        blocking:
+          (seat.loop === "build" && eligibleBuilds > 0) ||
+          (seat.loop === "review" &&
+            reviewQueue.seats.some((review) => review.seat === seat.id && review.queued > 0)),
+      })),
+  ];
 
   const outcomes = store.flightIncoming();
   const digestMatches = store.notifications().flatMap((n) => {
@@ -863,6 +1022,9 @@ export function flightState(i: {
     prs,
     items,
     holds,
+    reviewQueue,
+    mergeQueue,
+    flowHolds,
     recent,
     limits,
     brief,
@@ -1051,6 +1213,8 @@ export function wakeFacts(
     startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
+  const reviewFault =
+    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle);
   return JSON.stringify({
     retrospective: s.retrospective ? [s.retrospective.day] : [],
     signals: s.signals
@@ -1075,6 +1239,13 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
+    reviews: reviewFault ? ["idle-reviewers"] : [],
+    merge: s.mergeQueue?.map((pr) => `${pr.pr}:${pr.waitsOn.join(",")}`).sort() ?? [],
+    holdsInForce:
+      s.flowHolds
+        ?.filter((hold) => hold.blocking)
+        .map((hold) => hold.kind)
+        .sort() ?? [],
     prs: s.prs
       .map(
         (p) =>
