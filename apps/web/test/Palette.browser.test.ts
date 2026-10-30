@@ -9,7 +9,7 @@ const api = {
   "/api/config": { loops: [], crew: { sessions: [] } },
   "/api/attention": [],
   "/api/boards/shop-app": [],
-  "/api/repos/shop-app/prs?linked=1": [],
+  "/api/repos/shop-app/prs": [],
 };
 
 const { renderAt } = browserSession();
@@ -21,6 +21,11 @@ describeRendered("The command palette in a browser", () => {
       async () => {
         const page = await renderAt({ page: "test/paletteBrowser.html", width, api });
         await page.box(".palette-row");
+        // the healthy state: every source answered, so no loading line and no failure alert
+        await page.evaluate(() => new Promise((r) => setTimeout(r, 300)), null);
+        expect(
+          await page.evaluate(() => document.querySelectorAll(".palette-empty").length, null),
+        ).toBe(0);
         const dialog = await page.box(".palette");
         expect(dialog.x).toBeGreaterThanOrEqual(0);
         expect(dialog.x + dialog.width).toBeLessThanOrEqual(width);
