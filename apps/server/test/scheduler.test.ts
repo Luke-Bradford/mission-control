@@ -1046,6 +1046,20 @@ describe("scheduler", () => {
       await u.stop();
     });
 
+    it("does not sample an idle hub without a browser or machine guard", async () => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+      await s.tick("machine");
+      expect(c.machine).not.toHaveBeenCalled();
+    });
+
     it("writes the first sample of each minute to the store, not every tick", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       let t = minute + 1000;

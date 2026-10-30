@@ -259,6 +259,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
+  hasViewClients?: () => boolean;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
@@ -550,6 +552,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   const afterLoopTick = () => {
+    if (deps.hasViewClients?.() === false) return;
     const at = now();
     const rows = crew(config, store, at, deps.lockState?.() ?? NO_LOCK).rows;
     recordStateChanges(rows, at);
@@ -1036,6 +1039,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         );
     },
     machine: async () => {
+      if (deps.hasViewClients?.() === false && config.crew?.machineCapacity === undefined) return;
       const at = now();
       const r = await c.machine(
         machineCpus,

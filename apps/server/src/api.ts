@@ -358,6 +358,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** Receives the number of open browser event streams. */
+  onStreamCount?: (count: number) => void;
   now?: () => number;
   /** true: log to stdout; an object: log to that stream; false/absent: no logging. */
   logger?: boolean | { stream: { write(msg: string): void } };
@@ -4114,12 +4116,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           unsubscribe();
           unsubscribeMap?.();
           streams.delete(end);
+          deps.onStreamCount?.(streams.size);
         };
         const end = () => {
           cleanup();
           res.end();
         };
         streams.add(end);
+        deps.onStreamCount?.(streams.size);
         res.on("close", cleanup);
       });
     },
