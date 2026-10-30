@@ -371,6 +371,7 @@ const FAILED_PARK_KINDS = new Set([
   "gate",
   "merge-step",
   "pr-closed",
+  "stuck",
 ]);
 export const isFailedPark = (kind: string | null | undefined): boolean =>
   kind != null && FAILED_PARK_KINDS.has(kind);

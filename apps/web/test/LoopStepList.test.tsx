@@ -162,6 +162,7 @@ describe("the held step's count and mark", () => {
       return [held.className, held.querySelector(".tdot")?.textContent];
     };
     expect(marks("ci", "ci")).toEqual(["vstep fail", "✗"]);
+    expect(marks("stuck", "ci")).toEqual(["vstep fail", "✗"]);
     expect(marks("review", "review")).toEqual(["vstep warn", "!"]);
   });
 });
