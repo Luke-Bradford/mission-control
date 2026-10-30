@@ -242,7 +242,10 @@ describeRendered("FLIGHT page in a browser", () => {
       expect(closed.overflows).toBe(true);
       expect(closed.hasMore).toBe(true);
       await page.evaluate(
-        () => (document.querySelector("button[aria-label='More waiting reason']") as HTMLButtonElement).click(),
+        () =>
+          (
+            document.querySelector("button[aria-label='More waiting reason']") as HTMLButtonElement
+          ).click(),
         undefined,
       );
       expect(
