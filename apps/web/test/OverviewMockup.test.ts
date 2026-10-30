@@ -92,7 +92,7 @@ describe("Overview v2 mockup", () => {
     );
 
     expect(mockup).toContain(".pipeline .stage.empty{flex:0 0 112px}");
-    expect(mockup).toContain(".pipeline .body{padding:8px 12px;display:flex");
+    expect(mockup).toContain(".pipeline .body{padding:8px 16px;display:flex");
     expect(mockup).toContain("line-height:16px");
     expect(mockup).toContain(".bar.review");
     expect(mockup).toContain("--crit:#a73838");
@@ -102,12 +102,27 @@ describe("Overview v2 mockup", () => {
     expect([...document.querySelectorAll("#crewRows .work")]).toHaveLength(11);
     expect([...document.querySelectorAll("#crewRows .work b")]).toHaveLength(11);
     expect([...document.querySelectorAll("#crewRows .work span")]).toHaveLength(11);
+    expect(
+      [...document.querySelectorAll("#crewRows .work b")].every((value) =>
+        value.hasAttribute("title"),
+      ),
+    ).toBe(true);
+    expect(
+      [...document.querySelectorAll("#crewRows .work span")].every((value) =>
+        value.hasAttribute("aria-label"),
+      ),
+    ).toBe(true);
+    expect(
+      [...document.querySelectorAll(".owner")].every((owner) =>
+        owner.getAttribute("aria-label")?.startsWith("Owner "),
+      ),
+    ).toBe(true);
     expect(logEvents.every((event) => event.length <= 120)).toBe(true);
     expect(quotaLabels).toContain("Codex 7d");
     expect(quotaLabels).not.toContain("Codex 5h");
   });
 
-  it("draws distinct dense sample paths with dots on each rendered chart", () => {
+  it("draws metric-specific dense sample paths with dots and accessible windows", () => {
     const document = renderMockup();
     const charts = [...document.querySelectorAll(".spark,.chart")];
 
@@ -120,7 +135,11 @@ describe("Overview v2 mockup", () => {
       expect(dots).toHaveLength(60);
       expect(dots[0]?.getAttribute("cx")).toBe(points[0]?.split(",")[0]);
       expect(dots[0]?.getAttribute("cy")).toBe(points[0]?.split(",")[1]);
+      expect(chart.querySelector("svg")?.getAttribute("aria-label")).toContain("last 60 minutes");
     }
+    expect(
+      new Set(charts.map((chart) => chart.querySelector("polyline")?.getAttribute("points"))).size,
+    ).toBe(12);
   });
 
   it("updates the theme action name and opens a focusable log detail panel", () => {
