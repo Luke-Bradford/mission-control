@@ -11,11 +11,17 @@ import { prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
+import { QaReadiness } from "./QaReadiness.tsx";
 import "./audit.css";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
 type AuditRange = (typeof RANGES)[number];
 const RANGE_OPTIONS = RANGES.map((value) => ({ value, label: value }));
+const QA_TABS = [
+  { value: "quality", label: "Quality trends" },
+  { value: "readiness", label: "PR readiness" },
+] as const;
+type QaTab = (typeof QA_TABS)[number]["value"];
 
 /** `actionable` is supplied by newer Audit responses; old servers omit it. */
 type Audit = Omit<AuditView, "longRunners"> & {
@@ -36,6 +42,20 @@ const percent = (n: number | null): string => (n === null ? "—" : `${Math.roun
 
 /** Operator audit: durable evidence over one shared server-bounded period. */
 export function Audit() {
+  const [tab, setTab] = useState<QaTab>("quality");
+  return (
+    <section id="page-audit">
+      <div className="toolbar">
+        <h1 className="toolbar-heading">Audit</h1>
+        <Seg label="QA view" options={QA_TABS} value={tab} onChange={setTab} />
+      </div>
+      {tab === "quality" ? <AuditDashboard /> : <QaReadiness />}
+    </section>
+  );
+}
+
+/** Operator quality trends, kept as the first QA tab. */
+function AuditDashboard() {
   const [range, setRange] = useState<AuditRange>("30d");
   const res = useResource<Audit>(RESOURCES.audit(range));
   const configRes = useResource<ConfigView>(RESOURCES.config);
@@ -47,9 +67,8 @@ export function Audit() {
   const loading = res.loading && audit === undefined;
   const staleRange = res.data === undefined && last?.range !== undefined && last.range !== range;
   return (
-    <section id="page-audit" className={res.data === undefined && audit ? "refetching" : undefined}>
+    <div className={res.data === undefined && audit ? "refetching" : undefined}>
       <div className="toolbar">
-        <h1 className="toolbar-heading">Audit</h1>
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
         <span className="note">
           One range applies to every finding, distribution and comparison.
@@ -73,7 +92,7 @@ export function Audit() {
           <Proposals />
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
