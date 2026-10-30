@@ -21,6 +21,7 @@ import {
   scanText,
   splitCommands,
   unclosedMarkdown,
+  VERIFY_QUEUE_DENY_TEXT,
 } from "../src/guard.ts";
 import { MC_TOOLS } from "../src/mcp.ts";
 import { CODEX_SHELL } from "../src/runtime.ts";
@@ -211,8 +212,32 @@ describe("GUARD_RULES", () => {
     );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(12);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
+  });
+});
+
+describe("verify queue", () => {
+  const verifyWriter: GuardContext = {
+    ...writer,
+    verifyChecks: ["pnpm -s test", "pnpm -s typecheck"],
+  };
+  it.each(["pnpm -s test", "pnpm -s typecheck", "pnpm -s test && pnpm -s typecheck"])(
+    "keeps whole checks in the queue: %s",
+    (command) =>
+      expect(guardDecision({ tool: "Bash", input: { command } }, verifyWriter)).toEqual({
+        kind: "deny",
+        rule: "verify-queue",
+        text: VERIFY_QUEUE_DENY_TEXT,
+      }),
+  );
+  it("allows related tests", () => {
+    expect(
+      guardDecision(
+        { tool: "Bash", input: { command: "pnpm -s vitest related --run apps/server/src/x.ts" } },
+        verifyWriter,
+      ),
+    ).toEqual({ kind: "allow" });
   });
 });
 

@@ -27,4 +27,5 @@ export * from "./topics.ts";
 export type * from "./types.ts";
 export * from "./usage.ts";
 export * from "./util.ts";
+export * from "./verify.ts";
 export type * from "./views.ts";

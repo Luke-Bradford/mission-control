@@ -102,6 +102,7 @@ import {
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
   type UsageSample,
+  type VerifyQueueView,
   type VersionInfo,
   watchStartRefusedText,
 } from "@mc/core";
@@ -1761,6 +1762,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         "/test-lock",
         async (): Promise<TestLockView> => lockView(config, store, lock?.state() ?? NO_LOCK, now()),
       );
+
+      // Reader: docs/runbook.md#verify-queue (the follow-up QA panel reads this queue view)
+      api.get("/verify-queue", async (): Promise<VerifyQueueView> => {
+        const jobs = store.verifyJobs();
+        const running = jobs.find((job) => job.state === "running") ?? null;
+        const queued = jobs
+          .filter((job) => job.state === "queued")
+          .map((job, index) => ({ ...job, position: index + 1 }));
+        const recent = jobs
+          .filter((job) => job.endedAt !== null && job.endedAt >= now() - 24 * 60 * 60_000)
+          .slice(-20)
+          .reverse();
+        return { running: running && { ...running, position: 0 }, queued, recent };
+      });
 
       // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table), Kpis.tsx (Lock wait) and components/LockLines.tsx (usually about)
       api.get<{ Querystring: { days?: unknown } }>(

@@ -99,6 +99,9 @@ import {
   TITLE_MARKERS,
   type TokenUsage,
   type UsageSample,
+  type VerifyCheckResult,
+  type VerifyJobView,
+  type VerifyState,
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
@@ -365,6 +368,12 @@ CREATE TABLE IF NOT EXISTS check_runs (
   head_sha TEXT NOT NULL, ok INTEGER NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
+CREATE TABLE IF NOT EXISTS verify_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seat_id TEXT NOT NULL, repo_id TEXT NOT NULL,
+  sha TEXT NOT NULL, state TEXT NOT NULL, queued_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER,
+  reason TEXT, UNIQUE(run_id, sha)
+);
+CREATE INDEX IF NOT EXISTS verify_jobs_queue ON verify_jobs(state, queued_at, id);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
 CREATE TABLE IF NOT EXISTS keeper_cursors (
   run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
@@ -1252,6 +1261,9 @@ export class Store {
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("check_runs", "verify_job_id", "INTEGER");
+    this.addColumn("check_runs", "failing", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("check_runs", "duration_ms", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("review_findings", "category", "TEXT");
     this.addColumn("review_findings", "resolution", "TEXT");
     this.addColumn("review_findings", "resolved_review_id", "INTEGER");
@@ -4765,10 +4777,79 @@ export class Store {
     headSha: string;
     ok: boolean;
     at: number;
+    verifyJobId?: number;
+    failing?: Pick<VerifyCheckResult, "failingTests" | "errorLines" | "files">;
+    durationMs?: number;
   }): void {
     this.db
-      .prepare("INSERT INTO check_runs (run_id, command, head_sha, ok, at) VALUES (?, ?, ?, ?, ?)")
-      .run(c.runId, c.command, c.headSha, c.ok ? 1 : 0, c.at);
+      .prepare(
+        "INSERT INTO check_runs (run_id, command, head_sha, ok, at, verify_job_id, failing, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        c.runId,
+        c.command,
+        c.headSha,
+        c.ok ? 1 : 0,
+        c.at,
+        c.verifyJobId ?? null,
+        JSON.stringify(c.failing ?? { failingTests: [], errorLines: [], files: [] }),
+        c.durationMs ?? 0,
+      );
+  }
+
+  enqueueVerifyJob(i: {
+    runId: string;
+    seatId: string;
+    repoId: string;
+    sha: string;
+    at: number;
+  }): number {
+    this.db
+      .prepare(
+        "UPDATE verify_jobs SET state = 'superseded', ended_at = ? WHERE run_id = ? AND state = 'queued' AND sha <> ?",
+      )
+      .run(i.at, i.runId, i.sha);
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO verify_jobs (run_id, seat_id, repo_id, sha, state, queued_at) VALUES (?, ?, ?, ?, 'queued', ?)",
+      )
+      .run(i.runId, i.seatId, i.repoId, i.sha, i.at);
+    return (
+      this.db
+        .prepare("SELECT id FROM verify_jobs WHERE run_id = ? AND sha = ?")
+        .get(i.runId, i.sha) as Row
+    ).id as number;
+  }
+
+  verifyJobs(): VerifyJobView[] {
+    const rows = this.db.prepare("SELECT * FROM verify_jobs ORDER BY queued_at, id").all() as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      seatId: r.seat_id as string,
+      repoId: r.repo_id as string,
+      sha: r.sha as string,
+      state: r.state as VerifyState,
+      position: null,
+      queuedAt: r.queued_at as number,
+      startedAt: r.started_at as number | null,
+      endedAt: r.ended_at as number | null,
+      checks: [],
+      reason: r.reason as string | null,
+    }));
+  }
+
+  setVerifyJob(id: number, state: VerifyState, at: number, reason: string | null = null): void {
+    const time = state === "running" ? "started_at" : "ended_at";
+    this.db
+      .prepare(`UPDATE verify_jobs SET state = ?, ${time} = ?, reason = ? WHERE id = ?`)
+      .run(state, at, reason, id);
+  }
+
+  resetRunningVerifyJobs(): void {
+    this.db
+      .prepare("UPDATE verify_jobs SET state = 'queued', started_at = NULL WHERE state = 'running'")
+      .run();
   }
 
   /** The newest run of `command` by this run on exactly `headSha`, or null if there is none. */

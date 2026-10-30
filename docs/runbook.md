@@ -1653,6 +1653,13 @@ Known limits: pipelines such as `a | b` are declined for now. `unified_exec = fa
 
 ## Audit API
 
+## Verify queue
+
+`GET /api/verify-queue` reports the single-machine validation queue. A queued job owns a committed
+SHA and waits behind the current job; a running job holds the shared test lock. Writer seats do not
+run configured whole checks themselves: after `mc report_evidence`, the queue records the result for
+that SHA and returns failed checks in one rework message. The web QA panel is the reader for this route.
+
 `GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
 
 - `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.

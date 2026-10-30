@@ -29,6 +29,7 @@ export function crewGuardDecision(
     event,
     {
       mode,
+      verifyChecks: config.repos.find((r) => r.id === repoId)?.commands?.writer ?? [],
       gitDirectoryAllowed:
         worktree === undefined
           ? undefined

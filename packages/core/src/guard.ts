@@ -17,6 +17,7 @@ export const GUARD_RULES = {
     "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
   "flight-powers": "Only repos with flight_powers: superuser may use these tools",
   "full-suite": "Full test suites only through Mission Control (one at a time)",
+  "verify-queue": "The verify queue runs this",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
   unreadable: "Commands the guard cannot read to the end are refused",
@@ -24,6 +25,8 @@ export const GUARD_RULES = {
 } as const;
 
 export type GuardRule = keyof typeof GUARD_RULES;
+export const VERIFY_QUEUE_DENY_TEXT =
+  "The verify queue runs this: commit, then call mc report_evidence. To check your change now, run it on the files you changed (tests: pnpm -s vitest related --run <files>).";
 
 /** The push of a branch that is not the run's own (it cannot come from a tool argument). */
 export const MC_PUSH_NOT_OWN_BRANCH = `Not pushed: ${GUARD_RULES["merge-push"]}`;
@@ -80,6 +83,8 @@ export interface GuardContext {
   /** The repo's current `flight_powers`, read from the live config on each call. */
   flightPowers: FlightPowers;
   fullSuite: readonly string[];
+  /** Exact configured checks which writer seats leave to the verify queue. */
+  verifyChecks?: readonly string[];
   /** Extra role grants; FLIGHT shares sync_main with writers through its own tool. */
   mcTools?: readonly string[];
   /** Resolve each segment’s git paths against the seat worktree. */
@@ -2267,6 +2272,10 @@ export function guardDecision(
       githubDenied ??= ghText(args);
     } else if (program === "curl" || program === "wget") {
       return deny("network", program);
+    }
+    const verifyCheck = matchedSuite(argv, ctx.verifyChecks ?? []);
+    if (ctx.mode === "writer" && verifyCheck !== null) {
+      return { kind: "deny", rule: "verify-queue", text: VERIFY_QUEUE_DENY_TEXT };
     }
     const suite =
       matchedSuite(argv, ctx.fullSuite) ??

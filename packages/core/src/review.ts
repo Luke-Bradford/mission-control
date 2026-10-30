@@ -1,6 +1,7 @@
 import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop.ts";
 import type { ReviewDepth } from "./profiles.ts";
 import type { SeatState } from "./runtime.ts";
+import type { VerifyCheckResult } from "./verify.ts";
 
 export const REVIEW_STATES = [
   "queued",
@@ -200,10 +201,16 @@ export function fixText(i: {
   retro: string;
   sha: string;
   findings: readonly ReviewFinding[];
+  checks?: readonly VerifyCheckResult[];
 }): string {
   const ordered = BLOCKING_SEVERITIES.flatMap((s) => i.findings.filter((f) => f.severity === s));
   const n = ordered.length;
-  const head = `${i.retro} reviewed ${i.sha.slice(0, 7)} and found ${n} ${n === 1 ? "issue" : "issues"} to resolve before this PR can merge. Please address each finding below, or explain in your evidence note why you think it should not change. Commit any fix with mc commit, then call mc report_evidence and say what changed or which finding you are responding to and why. ${i.retro} will review the response.`;
+  const checkHead = i.checks
+    ? `Checks on ${i.sha.slice(0, 7)}: all ${i.checks.length} passed.\n\n`
+    : "";
+  const head =
+    checkHead +
+    `${i.retro} reviewed ${i.sha.slice(0, 7)} and found ${n} ${n === 1 ? "issue" : "issues"} to resolve before this PR can merge. Please address each finding below, or explain in your evidence note why you think it should not change. Commit any fix with mc commit, then call mc report_evidence and say what changed or which finding you are responding to and why. ${i.retro} will review the response.`;
   const entries = ordered.map(
     (f, k) =>
       `${k + 1}. [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n   Why: ${f.scenario}\n   Suggested fix: ${f.fix}`,
