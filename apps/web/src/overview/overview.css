@@ -622,9 +622,21 @@
   flex: 1 1 0;
 }
 
+/* the need text takes what the title and controls leave; its button and the controls never shrink */
 #agentsList .ticket-cell .need {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart {
+  flex: 1 1 auto;
+  min-width: min-content;
+}
+
+#agentsList .ticket-cell .needpart > .ellip {
+  flex: 1 1 0;
   min-width: 0;
+  contain: inline-size;
 }
 
 #agentsList .agent-cli {
@@ -705,7 +717,7 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
+    grid-template-columns: 100px 90px 80px 176px 64px 50px 44px 46px;
     column-gap: var(--sp-1);
   }
 }

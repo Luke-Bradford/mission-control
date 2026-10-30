@@ -3,7 +3,7 @@
 import type { Crew } from "@mc/core";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { CONFIG, crewRow, item, METRICS_VIEW, NOW, OVERVIEW } from "./fixtures.ts";
+import { CONFIG, crewRow, item, METRICS_VIEW, NOW, OVERVIEW, seatRow } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 
@@ -24,7 +24,7 @@ const loop = (text: string) => ({
 
 const crew: Crew = {
   rows: [
-    crewRow({
+    seatRow({
       id: "guido-1",
       ticketTitle: LONG,
       loop: loop(LONG),
@@ -65,7 +65,7 @@ const api = {
 };
 
 describeRendered("Overview Crew table with very long text, rendered", () => {
-  it.each([1366, 1600])(
+  it.each([1100, 1366, 1600])(
     "keeps every cell inside its own row at %ipx",
     async (width) => {
       const page = await renderAt({ page: "test/overviewBrowser.html", width, height: 1000, api });
@@ -106,8 +106,16 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
         undefined,
       );
       expect(spill).toEqual([]);
-      // the long-text seat's Work cell carries its Needs controls
-      expect((await page.boxes("#agentsList .work-cell .need button")).length).toBeGreaterThan(0);
+      // the crew seat's Work cell carries Answer, Interrupt and End, each whole and apart
+      const buttons = await page.boxes("#agentsList .work-cell .need button");
+      const cell = await page.box("#agentsList .work-cell:has(.need)");
+      expect(buttons.length).toBeGreaterThanOrEqual(3);
+      for (const [i, b] of buttons.entries()) {
+        expect(b.x, `button ${i} left`).toBeGreaterThanOrEqual(cell.x - 0.5);
+        expect(b.x + b.width, `button ${i} right`).toBeLessThanOrEqual(cell.x + cell.width + 0.5);
+        for (const o of buttons.slice(i + 1))
+          expect(b.x + b.width, `button ${i} clear of the next`).toBeLessThanOrEqual(o.x + 0.5);
+      }
       // Agent, State and Work (with its Needs controls) lay their content on one visual line
       const stacked = await page.evaluate(
         () =>

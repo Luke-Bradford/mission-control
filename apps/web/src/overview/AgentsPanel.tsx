@@ -364,7 +364,7 @@ function AgentNeeds({
         // biome-ignore lint/a11y/useKeyWithClickEvents: the buttons inside are the keyboard route
         // biome-ignore lint/a11y/noStaticElementInteractions: a click on them must not open the Agent page
         <span className="needctl" onClick={(e) => e.stopPropagation()}>
-          <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} />
+          <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} compact />
         </span>
       )}
     </span>
