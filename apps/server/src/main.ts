@@ -517,8 +517,6 @@ export async function main(): Promise<void> {
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
-  const stopMapRing = mapRing.start();
-  app.addHook("onClose", async () => stopMapRing());
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
 
@@ -527,7 +525,6 @@ export async function main(): Promise<void> {
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
       stopDiscovery();
-      stopMapRing();
       crewReloader.stop();
       flightWatch.stop();
       engine.stop();
