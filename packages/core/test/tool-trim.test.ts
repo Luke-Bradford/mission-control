@@ -96,4 +96,24 @@ describe("trimToolResponse", () => {
     const r = trimToolResponse("mcp__x__y", `a${"é".repeat(60_000)}`, FULL);
     expect(r?.output).not.toContain("�");
   });
+
+  it("leaves a result whole when its shape cannot be kept and the tool may not return text", () => {
+    const filenames = Array.from({ length: 1500 }, (_, i) => `/repo/deep/path/file-${i}.ts`);
+    expect(trimToolResponse("Grep", { mode: "files_with_matches", filenames }, FULL)).toBeNull();
+  });
+
+  it("never trims the file-edit tools: their bulk does not reach the model", () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `line ${i}`);
+    const write = {
+      type: "update",
+      filePath: "/a.ts",
+      content: "x",
+      originalFile: lines.join("\n"),
+    };
+    expect(trimToolResponse("Write", { ...write, structuredPatch: [{ lines }] }, FULL)).toBeNull();
+    for (const tool of ["Edit", "MultiEdit", "NotebookEdit"]) {
+      const big = { filePath: "/a.ts", originalFile: "x".repeat(100_000), structuredPatch: [] };
+      expect(trimToolResponse(tool, big, FULL), tool).toBeNull();
+    }
+  });
 });

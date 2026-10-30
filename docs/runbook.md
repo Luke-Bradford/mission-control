@@ -463,7 +463,9 @@ What each seat's process starts with:
   run's temp root. The hub makes that folder before the seat starts and the sandbox denies the
   seat writes to it; the hook, which runs outside the sandbox, refuses a folder that is a link or
   not ours and creates each file exclusively without following a link. Unlike the guard hook it never blocks: any failure, or a full output that cannot
-  be written, leaves the result whole. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  be written, leaves the result whole. So does a built-in tool's result that cannot be cut in its
+  own shape (the CLI rejects a plain text there), and Edit, Write, MultiEdit and NotebookEdit,
+  whose bulk never reaches the model. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
   limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,

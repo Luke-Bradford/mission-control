@@ -16,6 +16,13 @@ export const TOOL_OUTPUT_DIR = "tool-output";
 
 /** A line a build or test command printed about a failure. */
 const FAILING_LINE = /\bFAIL(?:ED)?\b|\berror\b/i;
+/**
+ * Tools whose bulk (`originalFile`, a whole-file patch) never reaches the model: their result text
+ * names the path only, so there is nothing to save and a cut would only cost a copy per call.
+ */
+const UNSHOWN_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+/** Only an MCP tool's output may become one plain text; the CLI rejects that shape for the rest. */
+const MCP_PREFIX = "mcp__";
 /** The one tool whose output is a build or test run. */
 const COMMAND_TOOL = "Bash";
 
@@ -74,19 +81,22 @@ const sizeOf = (s: string): number => enc.encode(s).length;
 
 /**
  * The cut form of a tool's `tool_response` and the full text to keep, or null when the result is
- * not over `TOOL_TRIM_OVER`. The cut form keeps the response's shape (a Bash result stays an object,
- * an MCP result stays a content array) by cutting its long strings; a result with no such string
- * becomes one cut text.
+ * not over `TOOL_TRIM_OVER` (or cannot be cut in its own shape). The cut form keeps the response's shape (a Bash result stays an object,
+ * an MCP result stays a content array) by cutting its long strings; an MCP result with no such
+ * string becomes one cut text, and any other tool's is left whole.
  */
 export function trimToolResponse(
   tool: string,
   response: unknown,
   fullPath: string,
 ): { output: unknown; full: string } | null {
+  if (UNSHOWN_TOOLS.has(tool)) return null;
   const full = typeof response === "string" ? response : JSON.stringify(response);
   if (full === undefined || sizeOf(full) <= TOOL_TRIM_OVER) return null;
   const cut = cutLeaves(response, tool, fullPath);
   const shaped = typeof cut === "string" ? cut : JSON.stringify(cut);
   if (sizeOf(shaped) <= TOOL_TRIM_OVER) return { output: cut, full };
+  // the shape cannot be kept: only a tool that may return plain text is given one, else it stays whole
+  if (!tool.startsWith(MCP_PREFIX)) return null;
   return { output: cutText(full, tool, fullPath), full };
 }
