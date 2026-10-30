@@ -137,6 +137,9 @@ export async function sweepPnpmStores(roots: readonly string[]): Promise<number>
     const kind = await lstat(storeRoot).catch(() => null);
     if (kind === null || !kind.isDirectory()) continue;
     for (const name of await readdir(storeRoot).catch(() => [])) {
+      // The hub-owned shared store has no matching worktree directory. It is deliberately
+      // retained across restarts; every other entry is a legacy per-worktree store.
+      if (name === SHARED_PNPM_STORE_NAME) continue;
       if (
         await lstat(join(root, name)).then(
           () => true,
@@ -236,7 +239,7 @@ async function addMcTmpExclude(gitCommonDir: string): Promise<void> {
 }
 
 /** Create the shared store only through real directories below crew.worktrees. */
-async function prepareSharedPnpmStore(worktreesRoot: string, name: string): Promise<string> {
+export async function prepareSharedPnpmStore(worktreesRoot: string, name: string): Promise<string> {
   const privateDirectory = async (path: string, expected: string) => {
     try {
       await mkdir(path, { mode: 0o700 });

@@ -1903,6 +1903,7 @@ describe("a checkout's private pnpm store", () => {
   it("sweeps stores whose worktree is gone, keeps live ones and never follows a link", async () => {
     await prepareCheckout(input());
     plant(wtPath());
+    mkdirSync(sharedPnpmStore(), { recursive: true });
     const gone = join(dirname(wtPath()), "gone-7");
     plant(gone);
     const outside = join(dir, "outside");
@@ -1912,7 +1913,19 @@ describe("a checkout's private pnpm store", () => {
     await sweepPnpmStores([dirname(wtPath())]);
     expect(existsSync(storeOf(gone))).toBe(false);
     expect(existsSync(storeOf(wtPath()))).toBe(true);
+    expect(existsSync(sharedPnpmStore())).toBe(true);
     expect(existsSync(join(outside, "keep"))).toBe(true);
+  });
+
+  it("keeps the hub-owned shared store while removing an orphaned legacy store", async () => {
+    mkdirSync(sharedPnpmStore(), { recursive: true });
+    const orphan = join(root, "gone-7");
+    plant(orphan);
+
+    await sweepPnpmStores([root]);
+
+    expect(existsSync(sharedPnpmStore())).toBe(true);
+    expect(existsSync(storeOf(orphan))).toBe(false);
   });
 
   it("sweeps nothing when the store folder is itself a link", async () => {

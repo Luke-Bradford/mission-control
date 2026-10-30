@@ -175,6 +175,7 @@ import {
   preparePlanCheckout,
   prepareReadOnlyCheckout,
   prepareScratch,
+  prepareSharedPnpmStore,
   type RepoPeer,
   removeCheckout,
   sharedPnpmStoreDir,
@@ -1383,6 +1384,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       [...(modeOfSeat(info.seat) === "read-only" ? [] : [checkout.path]), seatTmp(run.id)],
       [dirname(deps.dbPath)],
     );
+    // Every seat receives this read-only sandbox grant, even if this repository has no pnpm
+    // lockfile and therefore did not run installation.
+    await prepareSharedPnpmStore(crew?.worktrees ?? "", info.seat.id);
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {

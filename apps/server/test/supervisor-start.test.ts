@@ -710,6 +710,7 @@ describe("startRun", () => {
   });
 
   it("points pnpm at the hub-owned store outside the seat worktree", async () => {
+    expect(existsSync(join(clone, "pnpm-lock.yaml"))).toBe(false);
     const { sup } = make();
     sup.start();
     await sup.startRun("guido-1", 42);
@@ -717,6 +718,7 @@ describe("startRun", () => {
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
     expect(store).toBe(join(root, CODEX_PNPM_STORES_DIR, "shared"));
+    expect(statSync(store).isDirectory()).toBe(true);
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
