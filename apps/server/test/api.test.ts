@@ -4532,6 +4532,7 @@ describe("boards, escalations, health", () => {
       { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
     ]);
     const a = buildApp({ config, store, bus, mapRing: ring });
+    const unsubscribe = ring.subscribe("shop-app", () => {});
     const stop = ring.start();
     try {
       await expect
@@ -4558,6 +4559,7 @@ describe("boards, escalations, health", () => {
       expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
       expect(ring.diff("unknown")).toBeNull();
     } finally {
+      unsubscribe();
       stop();
       await a.close();
     }
