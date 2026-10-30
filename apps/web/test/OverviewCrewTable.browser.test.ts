@@ -3,7 +3,7 @@
 import type { Crew } from "@mc/core";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { CONFIG, crewRow, METRICS_VIEW, NOW, OVERVIEW } from "./fixtures.ts";
+import { CONFIG, crewRow, item, METRICS_VIEW, NOW, OVERVIEW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 
@@ -49,7 +49,9 @@ const api = {
   "/api/metrics": METRICS_VIEW,
   "/api/overview/timeline": { from: NOW - 3_600_000, to: NOW, lanes: [] },
   "/api/crew": crew,
-  "/api/attention": [],
+  "/api/attention": [
+    item({ key: "ask:guido-1", kind: "decision", agentId: "guido-1", text: LONG, ticket: null }),
+  ],
   "/api/machine": { latest: null, warning: null, maxSeats: 8, seats: 0, perSessionMax: 0 },
   "/api/limits": [],
   "/api/limits/github": { queries: {}, pollCost: null },
@@ -104,6 +106,30 @@ describeRendered("Overview Crew table with very long text, rendered", () => {
         undefined,
       );
       expect(spill).toEqual([]);
+      // the long-text seat's Work cell carries its Needs controls
+      expect((await page.boxes("#agentsList .work-cell .need button")).length).toBeGreaterThan(0);
+      // Agent, State and Work (with its Needs controls) lay their content on one visual line
+      const stacked = await page.evaluate(
+        () =>
+          [
+            ...document.querySelectorAll<HTMLElement>(
+              "#agentsList .trow:not(.head) :is(.agent-identity, .state-cell, .work-cell)",
+            ),
+          ]
+            .filter((cell) => {
+              const leaves = [...cell.querySelectorAll<HTMLElement>("*")]
+                .filter((el) => el.children.length === 0)
+                .map((el) => el.getBoundingClientRect())
+                .filter((r) => r.width > 0 && r.height > 0);
+              if (leaves.length < 2) return false;
+              return (
+                Math.max(...leaves.map((r) => r.top)) >= Math.min(...leaves.map((r) => r.bottom))
+              );
+            })
+            .map((cell) => cell.className),
+        undefined,
+      );
+      expect(stacked).toEqual([]);
       // free text is cut on one line with an ellipsis, not wrapped
       const wrapped = await page.evaluate(
         () =>

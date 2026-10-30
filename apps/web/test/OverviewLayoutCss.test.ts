@@ -102,16 +102,15 @@ describe("Overview layout (hud.css)", () => {
     expect(rule("#timelineP .ph")).toContain("flex-wrap: nowrap");
   });
 
-  it("wraps KPI labels without ellipses and keeps Crew rows to the 40px system row", () => {
+  it("wraps KPI labels without ellipses and keeps Crew rows to the system row", () => {
     const label = rule(String.raw`\.overview-kpi .lbl`);
     expect(label).toContain("font-size: var(--fs-s)");
     expect(label).toContain("white-space: normal");
     expect(label).not.toContain("ellipsis");
     const row = rule(String.raw`#agentsList \.trow`);
-    const height = Number(row.match(/height: (\d+)px/)?.[1]);
-    expect(height).toBeLessThanOrEqual(40);
-    // A row holds two lines (20 + 16 px) plus its Needs line below the cap; the list scrolls past it.
-    expect(height).toBeGreaterThanOrEqual(36);
+    // the 40px system row, spelled from the spacing tokens (32 + 8)
+    expect(row).toContain("height: calc(var(--sp-6) + var(--sp-2))");
+    expect(row).not.toMatch(/\bheight: \d+px/);
   });
 
   it("uses the approved header spacing while keeping narrow wrapping", () => {

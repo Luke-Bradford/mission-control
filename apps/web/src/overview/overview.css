@@ -557,7 +557,7 @@
   padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
   align-items: center;
-  height: 40px;
+  height: calc(var(--sp-6) + var(--sp-2));
   line-height: var(--lh);
 }
 
@@ -596,25 +596,35 @@
 #agentsList .state-cell,
 #agentsList .ticket-cell {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-}
-
-#agentsList .work-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
 }
 
+#agentsList .agent-identity > *,
 #agentsList .ticket-cell > * {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
 }
 
-#agentsList .agent-identity > :nth-child(2)::before {
-  content: none;
+#agentsList .agent-identity > :first-child,
+#agentsList .state-cell > *,
+#agentsList .ticket-cell .need,
+#agentsList .ticket-cell .needctl {
+  flex: none;
 }
 
-#agentsList .agent-identity > :nth-child(2) {
-  padding-left: var(--sp-4);
+#agentsList .ticket-cell > .ellip:first-child {
+  flex: 1 1 0;
+}
+
+#agentsList .ticket-cell .need {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 #agentsList .agent-cli {
