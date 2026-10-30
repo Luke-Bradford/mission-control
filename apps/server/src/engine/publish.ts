@@ -947,7 +947,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             containsMain,
             hubOnly,
             strays,
-            webChanged: names.some((p) => p === "apps/web" || p.startsWith("apps/web/")),
+            ...(names.some((p) => p === "apps/web" || p.startsWith("apps/web/"))
+              ? { webChanged: true }
+              : {}),
             ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
           },
         };
