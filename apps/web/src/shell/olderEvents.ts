@@ -34,6 +34,13 @@ export function useOlderEvents(path: string | null, live: AgentStream | undefine
   const key = path === null || live === undefined ? null : `${path}|${live.runId}`;
   const [state, setState] = useState<Paging>(NONE);
   const cur = key !== null && state.key === key ? state : NONE;
+  // Once older pages are held, each live page is folded in: an event that slides out of the
+  // newest window as new ones arrive stays shown (adjusted during render, so no frame drops it).
+  if (key !== null && live !== undefined && cur.events.length > 0) {
+    const known = new Set(cur.events.map((e) => e.id));
+    const fresh = live.events.filter((e) => !known.has(e.id));
+    if (fresh.length > 0) setState({ ...cur, events: [...cur.events, ...fresh] });
+  }
   const kept = cur.events;
   const events = useMemo(() => {
     const liveEvents = live?.events ?? [];

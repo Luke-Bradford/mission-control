@@ -50,4 +50,28 @@ describe("useOlderEvents", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
   });
+
+  it("keeps events that slide out of the newest page once older ones are loaded", async () => {
+    const ev = (n: number) => ({ id: `e${n}`, at: n, kind: "msg" as const, text: `e${n}` });
+    const live = (from: number, to: number) => ({
+      ...stream("r1"),
+      events: Array.from({ length: to - from + 1 }, (_, i) => ev(from + i)),
+    });
+    stubFetch({ [`${PATH}&before=e4`]: { ...stream("r1"), events: [ev(1), ev(2), ev(3)] } });
+    const { result, rerender } = renderHook(({ l }) => useOlderEvents(PATH, l), {
+      initialProps: { l: live(4, 6) },
+    });
+    act(() => result.current.load());
+    await waitFor(() => expect(result.current.stream?.events).toHaveLength(6));
+    rerender({ l: live(5, 7) });
+    expect(result.current.stream?.events.map((e) => e.id)).toEqual([
+      "e1",
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+    ]);
+  });
 });

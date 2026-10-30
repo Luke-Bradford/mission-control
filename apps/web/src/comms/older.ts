@@ -49,6 +49,13 @@ export function useOlderMessages(
   // a route that is no longer shown is dropped.
   const [state, setState] = useState<Paging>(NONE);
   const cur = path !== null && state.path === path ? state : NONE;
+  // Once older pages are held, each live page is folded in: a message that slides out of the
+  // newest page as new ones arrive stays shown (adjusted during render, so no frame drops it).
+  if (path !== null && cur.older.length > 0) {
+    const known = new Set(cur.older.map((m) => m.id));
+    const fresh = live.filter((m) => !known.has(m.id));
+    if (fresh.length > 0) setState({ ...cur, older: [...cur.older, ...fresh] });
+  }
   // Stable while nothing changes: effects keyed on the messages must not run on every render.
   const messages = useMemo(() => {
     if (cur.older.length === 0) return live;
