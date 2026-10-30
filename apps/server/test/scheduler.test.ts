@@ -188,6 +188,40 @@ describe("scheduler", () => {
     expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
   });
 
+  it("starts transcript maintenance after one minute, then every six hours", async () => {
+    vi.useFakeTimers();
+    config.crew = {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 1,
+      transcripts: { gzipAfterHours: 2, deleteAfterDays: 3 },
+      sessions: [],
+    };
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts }),
+      log,
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transcripts).toHaveBeenCalledTimes(1);
+    expect(transcripts).toHaveBeenLastCalledWith({
+      store,
+      now: NOW,
+      retention: { gzipAfterHours: 2, deleteAfterDays: 3 },
+    });
+    expect(log).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+    expect(transcripts).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
   it("skips a job tick while the previous run of that job is still in flight", async () => {
     let release: () => void = () => undefined;
     const ta = vi.fn(

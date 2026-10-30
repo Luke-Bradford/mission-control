@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -100,4 +101,34 @@ it("replaces an interrupted gzip temp file", async () => {
   expect(result.gzipped).toBe(1);
   expect(existsSync(`${ended.transcriptPath}.gz.tmp`)).toBe(false);
   expect(gunzipSync(readFileSync(`${ended.transcriptPath}.gz`)).toString()).toBe("done\n");
+});
+
+it("honours configured ages and ignores unknown, outside, and symlinked files", async () => {
+  const gzip = run("gzip", NOW - 2 * HOUR);
+  const deleteRun = run("delete", NOW - 2 * 24 * HOUR);
+  const gzipEndedAt = NOW - 2 * HOUR;
+  const deleteEndedAt = NOW - 2 * 24 * HOUR;
+  const outside = run("outside", NOW - 2 * 24 * HOUR);
+  outside.transcriptPath = join(dir, "outside.jsonl");
+  store.upsertRun(gzip);
+  store.upsertRun(deleteRun);
+  store.upsertRun(outside);
+  writeFileSync(gzip.transcriptPath, "gzip\n");
+  writeFileSync(deleteRun.transcriptPath, "delete\n");
+  utimesSync(gzip.transcriptPath, new Date(gzipEndedAt), new Date(gzipEndedAt));
+  utimesSync(deleteRun.transcriptPath, new Date(deleteEndedAt), new Date(deleteEndedAt));
+  writeFileSync(outside.transcriptPath, "outside\n");
+  writeFileSync(join(dir, "crew", "unknown.jsonl"), "unknown\n");
+  symlinkSync(outside.transcriptPath, join(dir, "crew", "link.jsonl"));
+  const result = await maintainTranscripts({
+    store,
+    now: NOW,
+    retention: { gzipAfterHours: 1, deleteAfterDays: 1 },
+  });
+  expect(result).toMatchObject({ gzipped: 1, deleted: 1 });
+  expect(existsSync(`${gzip.transcriptPath}.gz`)).toBe(true);
+  expect(existsSync(deleteRun.transcriptPath)).toBe(false);
+  expect(readFileSync(outside.transcriptPath, "utf8")).toBe("outside\n");
+  expect(existsSync(join(dir, "crew", "unknown.jsonl"))).toBe(true);
+  expect(existsSync(join(dir, "crew", "link.jsonl"))).toBe(true);
 });
