@@ -49,7 +49,7 @@
   z-index: 1;
   padding: 8px 0 4px;
   color: var(--warn);
-  font: 600 11px / 1.2 var(--mono);
+  font: 600 var(--fs-xs) / 1.2 var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   background: inherit;

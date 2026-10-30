@@ -36,13 +36,13 @@
   --crit-soft: rgba(240, 107, 104, 0.15);
   --think: #b8a8f7;
   --scrim: rgba(5, 8, 12, 0.6);
-  --seat-1: #0680f9;
-  --seat-2: #f28b0d;
-  --seat-3: #00ff00;
-  --seat-4: #f47171;
-  --seat-5: #f20d74;
-  --seat-6: #00ff99;
-  --seat-7: #248f49;
+  --seat-1: #3987e5;
+  --seat-2: #e15d2a;
+  --seat-3: #199e70;
+  --seat-4: #a86f06;
+  --seat-5: #fa3791;
+  --seat-6: #008300;
+  --seat-7: #7567cb;
   --r1: #3fd0e8;
   --r2: #e6dc6e;
   --r3: #f5b5d0;
@@ -86,13 +86,13 @@
     --crit-soft: rgba(196, 48, 45, 0.1);
     --think: #5b47c4;
     --scrim: rgba(20, 28, 40, 0.35);
-    --seat-1: #0667f9;
-    --seat-2: #e60000;
-    --seat-3: #0f8a0f;
-    --seat-4: #bf06e0;
-    --seat-5: #df2020;
-    --seat-6: #0000ff;
-    --seat-7: #000066;
+    --seat-1: #3987e5;
+    --seat-2: #e15d2a;
+    --seat-3: #199e70;
+    --seat-4: #a86f06;
+    --seat-5: #fa3791;
+    --seat-6: #008300;
+    --seat-7: #7567cb;
     --r1: #0e6a8a;
     --r2: #586018;
     --r3: #a2308f;
@@ -128,13 +128,13 @@
   --crit-soft: rgba(196, 48, 45, 0.1);
   --think: #5b47c4;
   --scrim: rgba(20, 28, 40, 0.35);
-  --seat-1: #0667f9;
-  --seat-2: #e60000;
-  --seat-3: #0f8a0f;
-  --seat-4: #bf06e0;
-  --seat-5: #df2020;
-  --seat-6: #0000ff;
-  --seat-7: #000066;
+  --seat-1: #3987e5;
+  --seat-2: #e15d2a;
+  --seat-3: #199e70;
+  --seat-4: #a86f06;
+  --seat-5: #fa3791;
+  --seat-6: #008300;
+  --seat-7: #7567cb;
   --r1: #0e6a8a;
   --r2: #586018;
   --r3: #a2308f;
@@ -169,13 +169,13 @@
   --crit-soft: rgba(240, 107, 104, 0.15);
   --think: #b8a8f7;
   --scrim: rgba(5, 8, 12, 0.6);
-  --seat-1: #0680f9;
-  --seat-2: #f28b0d;
-  --seat-3: #00ff00;
-  --seat-4: #f47171;
-  --seat-5: #f20d74;
-  --seat-6: #00ff99;
-  --seat-7: #248f49;
+  --seat-1: #3987e5;
+  --seat-2: #e15d2a;
+  --seat-3: #199e70;
+  --seat-4: #a86f06;
+  --seat-5: #fa3791;
+  --seat-6: #008300;
+  --seat-7: #7567cb;
   --r1: #3fd0e8;
   --r2: #e6dc6e;
   --r3: #f5b5d0;
@@ -429,7 +429,7 @@ select {
 }
 
 .phase {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   border: 1px solid var(--line-2);
   border-radius: 2px;
@@ -439,7 +439,7 @@ select {
 }
 
 .lbl {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -557,7 +557,7 @@ select {
   display: inline-flex;
   gap: 14px;
   color: var(--fg-2);
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   white-space: nowrap;
 }
 .usage b {
@@ -573,7 +573,7 @@ select {
 
 .top-clock {
   color: var(--fg);
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   line-height: 16px;
   height: 16px;
   min-width: 5ch;
@@ -626,7 +626,7 @@ select {
   max-width: min(320px, calc(100vw - 28px));
   padding: 6px 8px;
   color: var(--fg);
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   line-height: 1.35;
   text-align: left;
   white-space: normal;
@@ -870,7 +870,7 @@ th {
 
 /* build status overlay */
 .bs {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   border-radius: 4px;
   padding: 0 6px;

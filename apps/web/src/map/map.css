@@ -524,7 +524,7 @@ button.map-timeline-tick {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .map-seat-name {
-  color: var(--light);
+  color: var(--fg);
   font-weight: 500;
 }
 .map-seat:hover .map-seat-name,

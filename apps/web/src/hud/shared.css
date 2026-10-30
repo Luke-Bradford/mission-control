@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
 .titer {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-soft);
@@ -266,7 +266,7 @@ pre.diff {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  font: 11px / 1.5 var(--mono);
+  font: var(--fs-xs) / 1.5 var(--mono);
   overflow-x: auto;
   white-space: pre;
 }
@@ -409,7 +409,7 @@ pre.diff .h {
 /* instruments: mono ticks, dashed grid, a solid axis and a "now" cursor (hud/charts) */
 .ct {
   fill: var(--muted);
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
 }
 
 .ct.now {
@@ -488,7 +488,7 @@ td.wrap {
 }
 
 .bsec {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;

@@ -129,12 +129,12 @@ describe("theme tokens", () => {
     }
   });
 
-  it.each(THEMES)("seat-coloured text meets AA on a panel: %s", (name) => {
+  it.each(THEMES)("seat swatches meet non-text contrast on a panel: %s", (name) => {
     const t = THEME_TOKENS[name];
     const seats = seatTokens();
     expect(seats).toEqual(TOKEN_NAMES.filter((token) => /^--seat-\d+$/.test(token)));
     for (const seat of seats) {
-      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t[seat], t["--surface"]), `${seat} on --surface`).toBeGreaterThanOrEqual(3);
     }
   });
 
@@ -255,7 +255,7 @@ describe("shell styles", () => {
   // stylesheet (#839's split once moved them into ConfigYaml.css, which only Setup loads).
   it("styles the header usage meter from hud.css", () => {
     const css = read("../src/hud.css");
-    expect(ruleValue(css, ".usage", "font")).toBe("11px var(--mono)");
+    expect(ruleValue(css, ".usage", "font")).toBe("var(--fs-xs) var(--mono)");
     expect(ruleValue(css, ".usage", "color")).toBe("var(--fg-2)");
     expect(ruleValue(css, ".usage b", "font-weight")).toBe("500");
   });

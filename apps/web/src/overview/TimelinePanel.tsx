@@ -88,7 +88,7 @@ export function TimelinePanel() {
         <span
           className="num ellip"
           title={lane.agentId}
-          style={{ color: agentColor(agent?.index ?? "flight") }}
+          style={{ "--c": agentColor(agent?.index ?? "flight") } as CSSProperties}
         >
           {agent ? callSign(agent) : (name ?? (pending ? "Loading…" : lane.agentId))}
         </span>

@@ -87,6 +87,11 @@ it("keeps active Map seat names legible on their changed surface", () => {
   }
 });
 
+it("keeps Map seat names readable while the adjacent light carries seat identity", () => {
+  expect(listed(".map-seat-name")).toContain("color: var(--fg)");
+  expect(listed(".map-light")).toContain("background: var(--light)");
+});
+
 it("uses the action type size for Map result and timeline controls", () => {
   for (const selector of [".map-results button", ".map-timeline-controls button"])
     expect(listed(selector)).toContain("font-size: var(--fs-s)");

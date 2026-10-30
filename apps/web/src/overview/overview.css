@@ -159,7 +159,7 @@
   height: 14px;
   margin-left: 100px;
   border-top: 1px solid var(--line-2);
-  font: 11px / 1 var(--mono);
+  font: var(--fs-xs) / 1 var(--mono);
 }
 
 .overview-axis > span {
@@ -259,6 +259,22 @@
   background: var(--accent-soft);
 }
 
+.overview-lane .num {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg);
+}
+
+.overview-lane .num::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c, var(--fg-2));
+  content: "";
+}
+
 /*
  * The track: a centre hairline ruled every 5 minutes and 15-minute gridlines matching the axis, so an
  * idle lane still reads as a track. Each kind keeps its own 3px sub-track, so overlaps stay visible.
@@ -314,7 +330,7 @@
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font: 11px var(--mono);
+  font: var(--fs-xs) var(--mono);
   text-transform: lowercase;
 }
 
@@ -465,7 +481,7 @@
 }
 
 #agentsList .agent-identity .ag {
-  color: var(--c, var(--fg));
+  color: var(--fg);
 }
 
 .agent-identity {
@@ -570,7 +586,7 @@
 }
 
 #agentsList .need {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 14px;
   max-width: 100%;
   gap: 4px;
@@ -584,7 +600,7 @@
 }
 
 #agentsList .xs {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 14px;
 }
 
@@ -625,7 +641,7 @@
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg);
 }
 
@@ -1111,7 +1127,7 @@
   margin: 0;
   padding-bottom: 4px;
   border-bottom: 2px solid var(--stage-colour);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1145,7 +1161,7 @@
 .pipeline-ticket {
   flex: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .pipeline-skeleton {
@@ -1170,7 +1186,7 @@
   gap: 4px;
   min-width: 0;
   max-width: 42%;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .pipeline-assignee i {
@@ -1216,12 +1232,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
 .overview-kpi .lbl {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 11px;
   color: var(--muted);
   white-space: normal;
@@ -1265,7 +1281,7 @@
   left: 0;
   padding-right: 4px;
   background: var(--surface);
-  font: 11px / 11px var(--mono);
+  font: var(--fs-xs) / 11px var(--mono);
   color: var(--muted);
 }
 
@@ -1278,13 +1294,13 @@
 .kpi-axis {
   display: flex;
   justify-content: space-between;
-  font: 11px / 11px var(--mono);
+  font: var(--fs-xs) / 11px var(--mono);
   color: var(--muted);
 }
 
 .kpi-secondary {
   grid-row: 3 / 5;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--fg-2);
   align-self: end;
   line-height: 1.4;

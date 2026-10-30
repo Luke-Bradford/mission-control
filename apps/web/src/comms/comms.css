@@ -217,7 +217,7 @@
   height: 16px;
   padding: 0 4px;
   color: var(--accent);
-  font: 600 11px / 16px var(--mono);
+  font: 600 var(--fs-xs) / 16px var(--mono);
   font-variant-numeric: tabular-nums;
   text-align: center;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -409,7 +409,7 @@
   min-width: 17px;
   padding: 0 4px;
   color: var(--bg);
-  font: 600 11px / 16px var(--mono);
+  font: 600 var(--fs-xs) / 16px var(--mono);
   background: var(--warn);
   border-radius: 999px;
 }
@@ -562,7 +562,7 @@
 
 .comms-message-meta > span:first-child {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
