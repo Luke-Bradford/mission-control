@@ -1983,13 +1983,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return true;
       const snapshots = new Map<number, string>();
-      // Reviews only wait on a live earlier run. Loading the whole run history here made each
-      // idle engine tick grow with the database.
-      const runs = store.runsActiveSince(now());
       const candidates = older.flatMap((pr) => {
-        const run = runs.find(
-          (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
-        );
+        const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
         return run === undefined ? [] : [{ pr, run }];
       });
       const terminalKey = (number: number) => `review-merged:${author.repoId}:${number}`;

@@ -1607,6 +1607,15 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Every recorded run on a branch; review ordering needs merged predecessors too. */
+  runsOnBranch(repoId: RepoId, branch: string): Run[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM runs WHERE repo_id = ? AND branch = ? ORDER BY started_at, seq")
+        .all(repoId, branch) as Row[]
+    ).map(toRun);
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db
