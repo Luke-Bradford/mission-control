@@ -18,4 +18,10 @@ describe("verify queue text", () => {
       "Tests: apps/server/test/x.test.ts > x",
     );
   });
+
+  it("captures Vitest's × failure line", () => {
+    expect(parseCheckOutput("× suite > reports the failure").failingTests).toEqual([
+      "suite > reports the failure",
+    ]);
+  });
 });
