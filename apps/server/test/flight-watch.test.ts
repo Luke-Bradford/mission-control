@@ -37,7 +37,6 @@ import {
   type PullRequestView,
   type Run,
   type SeatSessionRow,
-  wakeLine,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
