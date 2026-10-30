@@ -1,10 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, OVERVIEW } from "./fixtures.ts";
+import { CONFIG, OVERVIEW, seatRow } from "./fixtures.ts";
 
 it("uses every KPI's minute series instead of hourly history", async () => {
   const kpis = Object.fromEntries(
@@ -84,4 +84,36 @@ it("links run chips to the specific run and preserves chips without a run", asyn
     "/agent/seat?run=run%2Fone",
   );
   expect(screen.getByText("Without run").closest(".arow")?.querySelector(".log-who a")).toBeNull();
+});
+
+it("shows only the call sign in the log's agent column, with the role in its tooltip", async () => {
+  const [role] = CONFIG.crew?.roles ?? [];
+  stubFetch({
+    "/api/activity": [
+      {
+        at: Date.now(),
+        who: "backend-1",
+        kind: "run-start",
+        ref: null,
+        url: null,
+        prs: [],
+        status: null,
+        summary: null,
+        text: "Started",
+        runId: null,
+      },
+    ],
+    "/api/crew": { rows: [seatRow({ id: "backend-1", role: "BACKEND", index: 1 })] },
+    "/api/config": {
+      ...CONFIG,
+      crew: { ...CONFIG.crew, roles: [{ ...role, name: "BACKEND", here: "Backend developer" }] },
+    },
+    "/api/attention": [],
+  });
+  render(<ActivityPanel />);
+  const who = (await screen.findByText("Started")).closest(".arow")?.querySelector(".log-who");
+  await waitFor(() =>
+    expect(who?.querySelector(".ag")?.getAttribute("title")).toBe("Backend developer"),
+  );
+  expect(who?.textContent).toBe("backend-1");
 });
