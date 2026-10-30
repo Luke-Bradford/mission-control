@@ -9,7 +9,7 @@ import {
   type RunLoopView,
   type TestLockState,
 } from "@mc/core";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { Clamp } from "../components/Expandable.tsx";
@@ -197,14 +197,31 @@ function firstSentence(text: string): string {
 
 function WaitingReason({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const [overflows, setOverflows] = useState(false);
   const reason = text.trim();
   const first = firstSentence(reason);
-  const hasMore = first !== reason || first.length > 240;
+  useLayoutEffect(() => {
+    const el = box.current?.querySelector<HTMLElement>(".expandable-text");
+    if (!el) return;
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const hasMore = first !== reason || overflows;
   return (
     <span className="wif-stuck-reason">
-      <Clamp lines={3} open={open}>
-        {open ? reason : first}
-      </Clamp>
+      <span ref={box}>
+        <Clamp lines={3} open={open}>
+          {open ? reason : first}
+        </Clamp>
+      </span>
       {hasMore && (
         <button
           type="button"
@@ -281,7 +298,7 @@ function WorkRow({
         ) : (
           <>
             <span className="crit-t">
-              <WaitingReason text={stuck.text} />
+              <WaitingReason key={stuck.text} text={stuck.text} />
             </span>
             <span className="s">{` · since ${dur(Math.max(0, now - stuck.since))} ago`}</span>
           </>
