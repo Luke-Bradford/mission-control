@@ -1368,6 +1368,22 @@ describe("merge steps", () => {
       ]);
     });
 
+    it("marks only HUD diffs for the design readiness gate", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "apps/web/src/pages/Overview.tsx\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        ok: true,
+        facts: { webChanged: true },
+      });
+    });
+
     it("counts a file the repo lists as protected as a stray", async () => {
       store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
       gitAnswers = {

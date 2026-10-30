@@ -2872,6 +2872,37 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("holds a HUD PR without the stored design check", async () => {
+    h.gate = { ...need(h.gate), webChanged: true };
+    await toReview();
+    reported(first().id, []);
+    await h.engine.reconcileRun(RUN);
+    expect(h.steps).not.toContain("ready");
+  });
+
+  it("releases a HUD PR only when RETRO stores screenshot-pair evidence", async () => {
+    h.gate = { ...need(h.gate), webChanged: true };
+    await toReview();
+    const review = need(store.review(first().id));
+    expect(
+      store.recordFindings(review.id, need(review.runId), {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "design checked",
+        findings: [],
+        checked: [{ check: "design", result: "pass", note: "hud-shot:pair" }],
+        at: clock,
+      }),
+    ).toBe(true);
+    emit({ kind: "findings", seatId: RETRO, runId: need(review.runId) });
+    await h.engine.reconcileRun(RUN);
+    expect(store.reviewChecks(review.id)).toContainEqual({
+      check: "design",
+      result: "pass",
+      note: "hud-shot:pair",
+    });
+    expect(h.steps).toContain("ready");
+  });
+
   it("a paused reviewer keeps its queued review until unpaused", async () => {
     store.setSetting(
       "crew.paused",
