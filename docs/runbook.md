@@ -867,9 +867,10 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
-action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
-the configured review-round cap for a head, optionally adding a short fix list; a second grant for
-that head is left to the controller.
+action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
+configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
+cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
@@ -905,7 +906,7 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
+A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
@@ -937,6 +938,29 @@ removes an identical line from `## Done when`. Nothing else in the body changes.
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
+
+### FLIGHT's controller powers
+
+FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
+product direction, a security exception, an irreversible external action, and a floor approval the
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
+repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
+guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
+operator.
+
+| Tool | What it does |
+|---|---|
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
+| `sync_main` | Merge main into a run's branch |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
+| `promote` | Reads the live card, and refuses when it cannot be read |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+
+A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
+watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
+started before the set was recorded rotates on its wake count as before.
 
 ## What it observes
 

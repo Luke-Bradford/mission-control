@@ -59,7 +59,8 @@ export interface Move {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn | FlightMoveColumn;
+  /** Any board column: the hub moves a run's card, FLIGHT promotes it or puts it back. */
+  column: HudColumn;
 }
 
 export type MoveResult = { ok: true; changed: boolean } | { ok: false; reason: string };

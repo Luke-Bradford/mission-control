@@ -312,6 +312,8 @@ describe("the allowlist in phase 2b", () => {
       ghRead: "mcp__mc__gh_read",
       listTickets: "mcp__mc__list_tickets",
       updateBrief: "mcp__mc__update_brief",
+      editIssue: "mcp__mc__edit_issue",
+      setFields: "mcp__mc__set_fields",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -624,6 +626,8 @@ describe("crew constants", () => {
           "recall",
           "hold_item",
           "release_hold",
+          "edit_issue",
+          "set_fields",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -743,6 +747,8 @@ describe("mc tool grants", () => {
       "recall",
       "hold_item",
       "release_hold",
+      "edit_issue",
+      "set_fields",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

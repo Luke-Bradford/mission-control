@@ -52,7 +52,7 @@ export interface MainCi {
   checks?: { name: string; url: string | null }[];
   episode?: string | null;
 }
-interface LoopHeartbeat {
+export interface LoopHeartbeat {
   at: number;
   interval: number;
   completed: boolean;
