@@ -13,6 +13,8 @@ const record = z.strictObject({
   reason: z.string().trim().min(1).max(500),
   at: z.number().finite().nonnegative(),
   by: z.string().min(1),
+  except: z.array(z.string().min(1)).optional(),
+  liftedBy: z.string().min(1).optional(),
 });
 
 export function readCrewPause(store: Store): CrewPause | null {

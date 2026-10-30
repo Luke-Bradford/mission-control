@@ -53,7 +53,6 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
-  type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightWatchEntry,
@@ -65,11 +64,11 @@ import {
   type GuardHit,
   type GuardRule,
   type HealthRow,
+  type HudColumn,
   type HudState,
   inferTicket,
   type LoopEvent,
   type MachineSample,
-  type MoveColumn,
   memoryTopicKey,
   type PrCheck,
   type ProfileOverride,
@@ -77,6 +76,7 @@ import {
   QA_RETENTION_DAYS,
   type QaFindingView,
   type QaReviewRoundView,
+  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -310,6 +310,15 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+-- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
+CREATE TABLE IF NOT EXISTS run_reads (
+  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
+  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, agent_id, path)
+);
+CREATE TABLE IF NOT EXISTS run_rereads (
+  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
+);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
@@ -696,7 +705,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn | FlightMoveColumn;
+  column: HudColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -729,6 +738,12 @@ export interface CommsRow {
   replyTo: string | null;
   mentions: string[];
 }
+/** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
+export type CommsReadScope =
+  | { crew: true }
+  | { pair: readonly [string, string] }
+  | { agent: string }
+  | { inbox: string };
 export interface NewCommsRow {
   at: number;
   from: string;
@@ -1648,6 +1663,15 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Every recorded run on a branch; review ordering needs merged predecessors too. */
+  runsOnBranch(repoId: RepoId, branch: string): Run[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM runs WHERE repo_id = ? AND branch = ? ORDER BY started_at, seq")
+        .all(repoId, branch) as Row[]
+    ).map(toRun);
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db
@@ -1935,7 +1959,74 @@ export class Store {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
       | undefined;
-    return row ? parseDigest(row.digest) : null;
+    if (!row) return null;
+    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
+  }
+
+  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
+    return r ? { ...d, rereads: r } : d;
+  }
+
+  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
+  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
+    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
+    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
+      const ids = runIds.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
+      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
+    }
+    return out;
+  }
+
+  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
+  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
+    const r = this.db
+      .prepare(
+        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
+      )
+      .get(runId, agentId, path) as
+      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
+      | undefined;
+    return (
+      r && {
+        size: r.size,
+        mtimeMs: r.mtime_ms,
+        compactions: r.compactions,
+        toolUseId: r.tool_use_id,
+        at: r.at,
+      }
+    );
+  }
+
+  /** Remembers the run's whole read of `path`, replacing an earlier one. */
+  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
+           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
+      )
+      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
+  }
+
+  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
+  forgetRunRead(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
+  /** Counts one refused re-read that saved about `tokens`. */
+  addReread(runId: string, tokens: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
+         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
+      )
+      .run(runId, tokens);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
@@ -1946,6 +2037,10 @@ export class Store {
         `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
       ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
+    }
+    for (const [id, r] of this.rereads(runIds)) {
+      const d = out.get(id);
+      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -2061,7 +2156,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn | FlightMoveColumn,
+      column: r.board_column as HudColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,
@@ -2163,7 +2258,14 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
+              for (const child of [
+                "run_commits",
+                "run_pushes",
+                "run_attempts",
+                "run_digests",
+                "run_reads",
+                "run_rereads",
+              ])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
@@ -2867,6 +2969,27 @@ export class Store {
       "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
     ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
+  }
+
+  /** The repo's open PRs and those updated at or after `since` (all of them when null), newest number first. */
+  pullRequestsSince(repoId: RepoId, since: number | null): PullRequestView[] {
+    const rows =
+      since === null
+        ? (this.statement("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC").all(
+            repoId,
+          ) as Row[])
+        : (this.statement(
+            "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR updated_at >= ? OR merged_at >= ?) ORDER BY number DESC",
+          ).all(repoId, since, since) as Row[]);
+    return this.pullRequestRows(rows);
+  }
+
+  pullRequest(repoId: RepoId, number: number): PullRequestView | null {
+    const row = this.statement("SELECT * FROM pull_requests WHERE repo_id = ? AND number = ?").get(
+      repoId,
+      number,
+    ) as Row | undefined;
+    return row === undefined ? null : (this.pullRequestRows([row])[0] ?? null);
   }
 
   /** Pull requests for configured repos, indexed after one table read for the HUD. */
@@ -4224,6 +4347,73 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+  private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
+    if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
+    if ("pair" in scope) {
+      const [a, b] = scope.pair;
+      return { where: "((from_id=? AND to_id=?) OR (from_id=? AND to_id=?))", args: [a, b, b, a] };
+    }
+    if ("agent" in scope)
+      return { where: "(from_id=? OR to_id=?)", args: [scope.agent, scope.agent] };
+    const id = scope.inbox;
+    return {
+      where: `id IN (
+        SELECT id FROM comms WHERE to_id=?
+        UNION
+        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
+        UNION
+        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
+        UNION
+        SELECT message_id FROM comms_pins
+      )`,
+      args: [id, id, id],
+    };
+  }
+  /**
+   * The newest `limit` messages of a scope, oldest first, strictly older than `before` when given.
+   * `hasMore` says older ones remain, so the HUD can offer "load older".
+   */
+  commsPage(
+    scope: CommsReadScope,
+    limit: number,
+    before?: string,
+  ): { rows: CommsRow[]; hasMore: boolean } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const beforeId = before === undefined ? null : commsMessageNumber(before);
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM comms WHERE ${where}${
+            beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
+          } ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
+    ).map((r) => this.commsRow(r));
+    const hasMore = rows.length > limit;
+    return { rows: rows.slice(0, limit).reverse(), hasMore };
+  }
+  /** How many messages a scope holds, and how many of them come after the read cursor. */
+  commsCounts(scope: CommsReadScope, cursor: string | null): { count: number; unread: number } {
+    const { where, args } = this.commsScopeWhere(scope);
+    const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+      )
+      .get(offset, ...args) as { count: number; unread: number };
+    return { count: r.count, unread: r.unread };
+  }
+  /** Everyone `id` has exchanged messages with, in first-contact order. */
+  commsContactIds(id: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT CASE WHEN from_id=? THEN to_id ELSE from_id END AS contact
+          FROM comms WHERE from_id=? OR to_id=? GROUP BY contact ORDER BY MIN(id)`,
+        )
+        .all(id, id, id) as { contact: string }[]
+    ).map((r) => r.contact);
   }
   commsForRefs(refs: string[]): CommsRow[] {
     if (!refs.length) return [];

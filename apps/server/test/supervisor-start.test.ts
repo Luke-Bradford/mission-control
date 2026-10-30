@@ -61,6 +61,7 @@ import {
   startClosedText,
   startMissingNeedsText,
   type TicketView,
+  TOOL_OUTPUT_DIR,
   ticketHasRunText,
   twoAreasText,
   waitsOnText,
@@ -72,6 +73,7 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
@@ -854,7 +856,12 @@ describe("startRun", () => {
       join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
+      // the trim hook writes here outside the sandbox: the hub made it, the seat cannot swap it
+      `${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`,
     ]);
+    expect(
+      lstatSync(`${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`).isDirectory(),
+    ).toBe(true);
     // the DB, transcripts and prompt files: no seat reads another's (or its own)
     expect(fs.denyRead).toContain(join(dir, "db"));
     // then the hub's own checkout and its git dir (no loops, no other session, no crew.deny_read)
@@ -1934,6 +1941,12 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
+    // the trim hook (#1045): after every tool, never given the token
+    expect(hooks.PostToolUse?.[1]?.matcher).toBe("*");
+    const trim = hooks.PostToolUse?.[1]?.hooks[0]?.command ?? "";
+    expect(trim).toContain(`'${join(HUB_ROOT, TRIM_ENTRY)}' '`);
+    expect(trim).toMatch(/\/tool-output'$/);
+    expect(trim).not.toContain(tokenOf(runId));
     expect(hooks.PreToolUse?.[0]?.hooks[0]?.timeout).toBe(GUARD_HOOK_TIMEOUT_S);
     expect(hookCommand()).not.toContain(tokenOf(runId));
   });

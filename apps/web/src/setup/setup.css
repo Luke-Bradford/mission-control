@@ -868,3 +868,8 @@
   max-height: 420px;
   margin-top: var(--sp-2);
 }
+
+/* long paths and URLs in the update log wrap instead of scrolling sideways */
+.update-log-text {
+  overflow-wrap: anywhere;
+}

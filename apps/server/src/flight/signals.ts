@@ -21,6 +21,7 @@ import {
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
+import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -51,7 +52,7 @@ export interface MainCi {
   checks?: { name: string; url: string | null }[];
   episode?: string | null;
 }
-interface LoopHeartbeat {
+export interface LoopHeartbeat {
   at: number;
   interval: number;
   completed: boolean;
@@ -232,6 +233,17 @@ function heartbeats(store: Store) {
     heartbeatCache.set(store, cache);
   }
   return cache;
+}
+
+/** What the engine's running tick is on, or the last tick that overran; for a silent engine's evidence. */
+function tickCause(store: Store): string {
+  const ticks = tickLogOf(store);
+  const running = ticks.running();
+  if (running !== null) return `; ${overrunText(running.startedAt, running.steps)}`;
+  const last = ticks.lastOverrun();
+  return last === null
+    ? ""
+    : `; its tick at ${new Date(last.startedAt).toISOString()} ran ${last.durationMs} ms, on ${last.overranOn?.join(", ") || "no step"}`;
 }
 
 /** A scheduled hub loop's first due time or last completion, and its interval. */
@@ -504,7 +516,7 @@ export function flightSignals(i: {
         "hub_error",
         `loop:${source}:${loop.at}`,
         loop.at,
-        `${source} ${loop.completed ? "last completed" : "first due"} ${new Date(loop.at).toISOString()}; silent for twice its ${loop.interval} ms interval`,
+        `${source} ${loop.completed ? "last completed" : "first due"} ${new Date(loop.at).toISOString()}; silent for twice its ${loop.interval} ms interval${source === "engine" ? tickCause(store) : ""}`,
       );
     }
   }

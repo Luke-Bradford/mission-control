@@ -199,9 +199,20 @@ export function protectedDecisionItem(
   item: AttentionItem,
   config?: CcConfig,
   at?: number,
+  /**
+   * `runFlags`: a flag the engine raised about a run (a note with a run behind it, such as minor
+   * findings that could not be filed) is an ordinary note, not a decision to hold; a flag with no
+   * run behind it still is. dismiss_item sets it; everything else keeps every flag protected.
+   */
+  opts: { runFlags?: boolean } = {},
 ): boolean {
   if (item.key.startsWith("esc:")) return true;
-  if (item.kind === "approval" || item.kind === "flag" || item.kind === "ratelimit") return true;
+  const runFlag =
+    opts.runFlags === true &&
+    item.kind === "flag" &&
+    store.notes().some((n) => `${NOTE_KEY}${n.key}` === item.key && n.runId !== null);
+  if (item.kind === "approval" || (item.kind === "flag" && !runFlag) || item.kind === "ratelimit")
+    return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key.startsWith(`${NOTE_KEY}${GUARD_ACK_PREFIX}`)) return true;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);

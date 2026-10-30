@@ -63,8 +63,21 @@ export const FLIGHT_DECISION_KINDS = [
   "dismiss",
   "brief",
   "hold",
+  "pause",
+  "status",
+  "issue",
+  "hub",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
+
+/**
+ * The extra rework rounds FLIGHT may grant after the review-round cap: per pushed head, and over a
+ * whole run. The cap is raised for FLIGHT, not removed: past either, the park stays.
+ */
+export const FLIGHT_REWORKS_PER_HEAD = 3;
+export const FLIGHT_REWORKS_PER_RUN = 9;
+/** The setting that keeps which tool set FLIGHT's live run was started with. */
+export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
 
 export interface FlightDecision {
   id: number;
@@ -490,6 +503,8 @@ export const accountStoppedText = (call: string, accountId: string): string =>
 export const restartRefusedText = (ref: string): string =>
   `Not started: you started ${ref} in the last 24 hours; ask the operator before starting it again.`;
 export const notOnBoardText = (ref: string): string => `Not started: ${ref} is not on the board.`;
+export const restartDoneText = (ref: string): string =>
+  `Not restarted: ${ref} is closed; reopen_issue first.`;
 export const wrongColumnText = (ref: string, column: string): string =>
   `Not started: ${ref} is in ${column}.`;
 export const ticketHasRunText = (ref: string): string => `Not started: ${ref} already has a run.`;
@@ -1255,3 +1270,6 @@ export interface FlightArrivalOperation {
   outcome: "No action" | "Queued";
   detail: string;
 }
+
+export const reworkCapText = (byHead: number, total: number): string =>
+  `FLIGHT's rework rounds are used up here (${byHead}/${FLIGHT_REWORKS_PER_HEAD} on this head, ${total}/${FLIGHT_REWORKS_PER_RUN} on this run); accept the findings, end the run or log why.`;

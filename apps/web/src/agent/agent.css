@@ -73,6 +73,12 @@
   border-color: var(--warn-mark);
 }
 
+.vstep.fail .tdot {
+  background: var(--crit-soft);
+  color: var(--crit);
+  border-color: var(--crit);
+}
+
 .vhead {
   all: unset;
   box-sizing: border-box;
@@ -236,9 +242,30 @@
   overflow-wrap: anywhere;
 }
 
+.vnow,
+.vholdtext {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .vnow {
   font-size: var(--fs-s);
   color: var(--fg-2);
+}
+
+.vdetail {
+  margin: var(--sp-1) 0;
+  padding: var(--sp-2);
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: var(--fs-s);
+  background: var(--surface-2);
+  border-radius: var(--r);
 }
 
 @media (prefers-reduced-motion: no-preference) {

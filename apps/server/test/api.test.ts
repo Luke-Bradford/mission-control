@@ -69,6 +69,7 @@ import {
   stopForecast,
   type Telemetry,
   TYPE_LABELS,
+  UPDATE_LOG_UNREADABLE,
   type UsageSample,
   type VersionInfo,
 } from "@mc/core";
@@ -92,6 +93,7 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -103,7 +105,7 @@ import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStream } from "../src/stream.ts";
+import { readStreamPage } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
@@ -146,6 +148,8 @@ let updaterVersion: VersionInfo;
 let updaterResult: () => Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
+let updaterLogError: Error | null = null;
+let dropUpdateResponse: boolean;
 const stubUpdater = (): Updater => ({
   changes: async () => null,
   version: async () => {
@@ -162,6 +166,11 @@ const stubUpdater = (): Updater => ({
     return updaterVersion;
   },
   restart: () => void updaterCalls.push("restart"),
+  log: async () => {
+    updaterCalls.push("log");
+    if (updaterLogError) throw updaterLogError;
+    return "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n";
+  },
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
 /** A map transcript fixture stamped now: the ring reads only the window the map shows. */
@@ -238,7 +247,7 @@ const stubSupervisor = (): Supervisor => {
     inClone: (_checkout, fn) => fn(),
   };
 };
-let streamReads: ReturnType<typeof vi.fn<typeof readStream>>;
+let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
 /** The app's config.yaml: a copy of the example (the in-memory `config` is the fixture's own). */
 let configPath: string;
 const EXAMPLE_CONFIG = resolve(import.meta.dirname, "../../../config.example.yaml");
@@ -317,6 +326,7 @@ beforeEach(async () => {
   updaterResult = async () => ({ upToDate: true });
   updaterCalls = [];
   updaterCheckError = null;
+  dropUpdateResponse = false;
   clock = NOW;
   logs = [];
   projectFields = [{ name: "Status", options: [{ name: "Todo" }] }];
@@ -329,7 +339,7 @@ beforeEach(async () => {
   gqlNoOwner = false;
   gqlFailField = null;
   refreshed = 0;
-  streamReads = vi.fn(readStream);
+  streamReads = vi.fn(readStreamPage);
   issueNode = (n) => ({ number: n, title: "t", url: "", state: "OPEN", body: "" });
   const fakeGql: Gql = async (query, vars) => {
     gqlCalls.push({ query, vars });
@@ -403,11 +413,19 @@ beforeEach(async () => {
     now: () => clock,
     logger: { stream: { write: (s: string) => void logs.push(s) } },
     heartbeatMs: 50,
-    readStream: (path, limit, vendor) => streamReads(path, limit, vendor),
+    readStream: (path, limit, vendor, before) =>
+      before === undefined
+        ? streamReads(path, limit, vendor)
+        : streamReads(path, limit, vendor, before),
     configPath,
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
     updater: stubUpdater(),
+  });
+  app.addHook("onSend", async (req) => {
+    if (dropUpdateResponse && req.url === "/api/update") {
+      throw new Error("client disconnected");
+    }
   });
   // The /api plugin registers its routes at ready(), so this sees every one of them.
   apiRoutes = [];
@@ -518,6 +536,18 @@ describe("audit", () => {
     expect(byId.stale).toMatchObject({ endedAt: null, kind: "build", actionable: false });
     expect(byId.watch).toMatchObject({ endedAt: null, kind: "watch", actionable: false });
     expect(byId.loop).toMatchObject({ endedAt: null, kind: "observed", actionable: false });
+  });
+
+  // #1192: until the Audit page is redesigned, each list answers with its first 50 and says how many it cut.
+  it("caps each list at 50 and reports the full counts of the lists it cut", async () => {
+    for (let i = 0; i < 60; i++)
+      store.upsertRun(run({ id: `long-${i}`, startedAt: NOW - HOUR - i * 1000, endedAt: NOW }));
+    const audit = (await get("/api/audit")).json<AuditView & { capped?: Record<string, number> }>();
+    expect(audit.longRunners).toHaveLength(50);
+    // each run also records a model, so that timeline is cut too
+    expect(audit.capped).toEqual({ longRunners: 60, modelPromptTimeline: 60 });
+    const sorted = audit.longRunners.map((r) => r.durationMs);
+    expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
   });
 
   it("rejects an invalid range", async () => {
@@ -1299,6 +1329,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/items/7"],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
+  ["GET", "/api/repos/shop-app/prs/4"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
   ["GET", "/api/repos/shop-app/map/diff"],
@@ -1345,6 +1376,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/pause"],
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
+  ["GET", "/api/crew/shop-app-ta"],
   ["GET", "/api/overview/timeline"],
   ["GET", "/api/overview"],
   ["GET", "/api/metrics"],
@@ -1355,6 +1387,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
+  ["GET", "/api/update/log"],
   ["GET", "/api/seats/guido-1/focus"],
   ["POST", "/api/seats/guido-1/focus", { focus: "lane:work" }],
   ["POST", "/api/seats/guido-1/queue/reorder", { move: "shop-app#2", above: "shop-app#1" }],
@@ -2173,6 +2206,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url === "/api/repos/shop-app/prs/4") {
+        // the fixture has no such PR: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
       if (url.endsWith("/discussion")) {
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
         continue;
@@ -2450,6 +2488,7 @@ describe("local access", () => {
             .replace("/comms/agents/guido-1", "/comms/agents/:id")
             .replace("/comms/pairs/guido-1/CAPCOM", "/comms/pairs/:a/:b")
             .replace("/comms/tickets/%237", "/comms/tickets/:ref")
+            .replace(/\/crew\/shop-app-ta$/, "/crew/:id")
             .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
@@ -2460,6 +2499,7 @@ describe("local access", () => {
             .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/prs\/4$/, "/prs/:number")
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
@@ -2822,6 +2862,7 @@ describe("agent stream", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "hello" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });
@@ -2857,6 +2898,21 @@ describe("agent stream", () => {
     store.upsertRun(run({ id: "r2", startedAt: NOW, transcriptPath: "" }));
     expect((await stream("/api/agents/shop-app-ta/stream")).reason).toBe("transcript not found");
     expect(streamReads).not.toHaveBeenCalled();
+  });
+
+  it("pages the stream older: ?before an event's id returns the events ahead of it", async () => {
+    const lines = [1, 2, 3, 4, 5].map((i) => line(`e${i}`, NOW - (6 - i) * 1000));
+    const p = transcript("page.jsonl", lines.join(""), NOW - 1000);
+    store.upsertRun(run({ id: "r1", transcriptPath: p }));
+    const newest = await stream("/api/agents/shop-app-ta/stream?limit=2");
+    expect(newest.events.map((e: { text: string }) => e.text)).toEqual(["e4", "e5"]);
+    expect(newest.hasMore).toBe(true);
+    const older = await stream(
+      `/api/agents/shop-app-ta/stream?limit=2&before=${newest.events[0].id}`,
+    );
+    expect(older.events.map((e: { text: string }) => e.text)).toEqual(["e2", "e3"]);
+    expect(older.hasMore).toBe(true);
+    expect((await get("/api/agents/shop-app-ta/stream?before=abc")).statusCode).toBe(400);
   });
 
   it("validates limit (1..500, default 200) and 404s an unknown agent", async () => {
@@ -3010,6 +3066,46 @@ describe("crew and attention", () => {
     expect(c.rows[0]?.prs).toEqual([]);
     expect(c.rows[0]?.summary).toBeNull();
     expect(c.rows[1]).toMatchObject({ ticket: null, prs: [], summary: null });
+  });
+
+  // #1192: the Overview reads a summary row; the full row (events, whole digest) is one request away.
+  it("GET /api/crew?shape=summary drops each row's events and digest bulk; /api/crew/:id is the full row", async () => {
+    store.upsertRun(run({ id: "a", startedAt: NOW - 30 * 60e3, ticket: "shop-app#7" }));
+    store.setDigest(
+      "a",
+      digest({
+        lastEventAt: NOW - 1000,
+        minuteTokens: [[NOW - 60e3, 500]],
+        lastText: "Reading the plan.",
+        contextTokens: 900,
+        turnUsage: Array.from({ length: 60 }, () => ({ input: 1, output: 2, cacheRead: 3 })),
+        tools: { Bash: { calls: 3, failed: 0, durationsMs: [1, 2, 3] } },
+      }),
+    );
+    const full = (await get("/api/crew")).json() as Crew;
+    expect(full.rows[0]?.digest?.turnUsage).toHaveLength(60);
+    const res = await get("/api/crew?shape=summary");
+    expect(res.statusCode).toBe(200);
+    const summary = res.json() as Crew;
+    const row = summary.rows[0];
+    expect(row).toMatchObject({ id: "shop-app-ta", hudState: "running", ticket: "shop-app#7" });
+    expect(row?.run?.id).toBe("a");
+    expect(row?.events).toBeUndefined();
+    expect(row?.digest).toEqual({
+      lastEventAt: NOW - 1000,
+      minuteTokens: [[NOW - 60e3, 500]],
+      liveTool: null,
+      lastText: "Reading the plan.",
+      background: [],
+      contextTokens: 900,
+      contextWindow: null,
+      compactions: 0,
+    });
+    expect(summary.firstRunToday).toBe(full.firstRunToday);
+    expect((await get("/api/crew?shape=other")).statusCode).toBe(400);
+    const one = await get("/api/crew/shop-app-ta");
+    expect(one.json()).toEqual(full.rows[0]);
+    expect((await get("/api/crew/nope")).statusCode).toBe(404);
   });
 
   const boardItem = (issueNumber: number, title: string): BoardItem => ({
@@ -4042,7 +4138,7 @@ describe("boards, escalations, health", () => {
     }
   });
 
-  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+  it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
@@ -4070,11 +4166,10 @@ describe("boards, escalations, health", () => {
         supervisor: stubSupervisor(),
         warmMap: true,
       });
-    // built before anyone asks
     const warmed = start();
     try {
       await warmed.ready();
-      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(builds()).toBe(0);
       expect(
         (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
       ).toBe(200);
@@ -4082,11 +4177,12 @@ describe("boards, escalations, health", () => {
     } finally {
       await warmed.close();
     }
-    // asked for while the warm-up is still building: the same build, not a second
+    // A new hub also leaves the map cold until its first map request.
     supervisorCalls = [];
     const racing = start();
     try {
       await racing.ready();
+      expect(builds()).toBe(0);
       const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
       expect(response.statusCode).toBe(200);
       expect(builds()).toBe(1);
@@ -4540,6 +4636,7 @@ describe("boards, escalations, health", () => {
       { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
     ]);
     const a = buildApp({ config, store, bus, mapRing: ring });
+    const unsubscribe = ring.subscribe("shop-app", () => {});
     const stop = ring.start();
     try {
       await expect
@@ -4566,6 +4663,7 @@ describe("boards, escalations, health", () => {
       expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
       expect(ring.diff("unknown")).toBeNull();
     } finally {
+      unsubscribe();
       stop();
       await a.close();
     }
@@ -4723,6 +4821,90 @@ describe("boards, escalations, health", () => {
     expect(bad.json()).toEqual({ error: "linked must be 1" });
   });
 
+  // #1192: a list answers with open PRs and the last week, in a summary shape; detail on demand.
+  it("repos/:repoId/prs lists open PRs plus the last 7 days, summary checks, full detail by number", async () => {
+    const DAY = 86_400_000;
+    const check = (name: string) => ({
+      id: `node-${name}`,
+      workflow: "CI",
+      name,
+      kind: "check" as const,
+      state: "passing" as const,
+      conclusion: "success",
+      attempt: 1,
+      url: `https://github.com/o/shop-app/runs/${name}`,
+    });
+    const pr = (number: number, state: "open" | "merged", ageDays: number) => ({
+      repoId: "shop-app",
+      number,
+      title: `t${number}`,
+      url: `https://github.com/o/shop-app/pull/${number}`,
+      branch: "chore/x",
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: clock - (ageDays + 1) * DAY,
+      updatedAt: clock - ageDays * DAY,
+      mergedAt: state === "merged" ? clock - ageDays * DAY : null,
+      mergeCommitSha: null,
+      headSha: null,
+      mergeable: null,
+      author: null,
+      assignees: [] as string[],
+      checks: [check("lint"), check("test")],
+      closingIssues: [] as number[],
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [pr(1, "merged", 40), pr(2, "merged", 3), pr(3, "open", 90), pr(4, "merged", 8)],
+      0,
+    );
+    const numbers = async (query: string) =>
+      ((await get(`/api/repos/shop-app/prs${query}`)).json() as { number: number }[]).map(
+        (p) => p.number,
+      );
+    expect(await numbers("")).toEqual([3, 2]);
+    expect(await numbers("?days=10")).toEqual([4, 3, 2]);
+    expect(await numbers("?all=1")).toEqual([4, 3, 2, 1]);
+    const [listed] = (await get("/api/repos/shop-app/prs")).json();
+    expect(listed.checks).toEqual([
+      { name: "lint", kind: "check", state: "passing", attempt: 1 },
+      { name: "test", kind: "check", state: "passing", attempt: 1 },
+    ]);
+    expect((await get("/api/repos/shop-app/prs?detail=1")).json()[0].checks[0]).toEqual(
+      check("lint"),
+    );
+    // `?shape=summary`: the list's own fields, no checks, no detail that grows with the PR.
+    const [slim] = (await get("/api/repos/shop-app/prs?shape=summary")).json();
+    expect(Object.keys(slim).sort()).toEqual(
+      [
+        "repoId",
+        "number",
+        "title",
+        "url",
+        "branch",
+        "headSha",
+        "ticket",
+        "state",
+        "isDraft",
+        "review",
+        "ci",
+        "createdAt",
+        "updatedAt",
+        "mergedAt",
+        "preview",
+      ].sort(),
+    );
+    expect((await get("/api/repos/shop-app/prs?shape=x")).statusCode).toBe(400);
+    const one = await get("/api/repos/shop-app/prs/3");
+    expect(one.json().checks[0]).toEqual(check("lint"));
+    expect((await get("/api/repos/shop-app/prs/99")).statusCode).toBe(404);
+    expect((await get("/api/repos/shop-app/prs?days=0")).statusCode).toBe(400);
+    expect((await get("/api/repos/shop-app/prs?all=2")).statusCode).toBe(400);
+  });
+
   it("repos returns the configured repos as id, github, project and projectUrl", async () => {
     const r = await get("/api/repos");
     expect(r.statusCode).toBe(200);
@@ -4767,6 +4949,19 @@ describe("boards, escalations, health", () => {
     ];
     expect(await urlsOf("/api/repos")).toEqual(want);
     expect(await urlsOf("/api/repos/profiles")).toEqual(want);
+  });
+
+  it("health carries the engine's recent tick durations", async () => {
+    const ticks = tickLogOf(store);
+    ticks.begin(1000);
+    ticks.end(1450);
+    const row = (await get("/api/health"))
+      .json()
+      .find((h: { collector: string }) => h.collector === "engine:ticks");
+    expect(row).toMatchObject({
+      ok: true,
+      ticks: [{ startedAt: 1000, endedAt: 1450, durationMs: 450, overranOn: null }],
+    });
   });
 
   it("escalations and health return the store rows", async () => {
@@ -5500,6 +5695,40 @@ describe("SSE stream", () => {
     };
     return { res, until, text: () => text };
   }
+
+  it("reports browser stream opens and closes", async () => {
+    await app.close();
+    const counts: number[] = [];
+    app = buildApp({ config, store, bus, onStreamCount: (count) => counts.push(count) });
+    const first = await open();
+    const second = await open();
+    await Promise.all([first.until(": connected"), second.until(": connected")]);
+    expect(counts).toEqual([1, 2]);
+
+    first.res.raw.res.emit("close");
+    second.res.raw.res.emit("close");
+
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+
+  it("stops map polling after the last map stream closes", async () => {
+    vi.useFakeTimers();
+    await app.close();
+    const poll = vi.spyOn(CallRing.prototype, "poll");
+    app = buildApp({ config, store, bus });
+    try {
+      const client = await open("/api/stream?map=shop-app");
+      await client.until(": connected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+
+      client.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
@@ -6583,11 +6812,12 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
-  it("answers 202 { restarting }, and asks for the restart only after the response", async () => {
+  it("restarts a successful Update when the client disconnects before its response", async () => {
     updaterResult = async () => ({ restarting: true });
-    const r = await post("/api/update");
-    expect(r.statusCode).toBe(202);
-    expect(r.json()).toEqual({ restarting: true });
+    dropUpdateResponse = true;
+
+    await post("/api/update");
+
     expect(updaterCalls).toEqual(["update", "restart"]);
   });
 
@@ -6613,10 +6843,34 @@ describe("update routes", () => {
       };
       const r = await post("/api/update");
       expect(r.statusCode).toBe(status);
-      expect(r.json()).toEqual({ error: text });
+      expect(r.json()).toEqual({ error: text, logged: false });
     }
     expect(updaterCalls).not.toContain("restart");
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("answers the last update's log, so the page can show why it failed", async () => {
+    const r = await get("/api/update/log");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_X] no\n" });
+    expect(updaterCalls).toEqual(["log"]);
+  });
+
+  it("answers a log it cannot read with fixed text, never the errno or the path", async () => {
+    updaterLogError = Object.assign(
+      new Error("EACCES: permission denied, open '/Users/someone/update.log'"),
+      {
+        code: "EACCES",
+      },
+    );
+    try {
+      const r = await get("/api/update/log");
+      expect(r.statusCode).toBe(500);
+      expect(r.json()).toEqual({ error: UPDATE_LOG_UNREADABLE });
+      expect(r.body).not.toContain("someone");
+    } finally {
+      updaterLogError = null;
+    }
   });
 
   it("hides an unexpected error behind fixed text", async () => {
@@ -6625,7 +6879,7 @@ describe("update routes", () => {
     };
     const r = await post("/api/update");
     expect(r.statusCode).toBe(500);
-    expect(r.json()).toEqual({ error: "update failed; see update.log" });
+    expect(r.json()).toEqual({ error: "update failed; see update.log", logged: false });
   });
 
   it("refuses a body other than {} with 400 and updates nothing", async () => {
@@ -6657,7 +6911,10 @@ describe("update routes", () => {
     });
     const u = await a.inject({ method: "POST", url: "/api/update", headers: json, payload: {} });
     expect(u.statusCode).toBe(409);
-    expect(u.json()).toEqual({ error: "updates are not available on this server" });
+    expect(u.json()).toEqual({ error: "updates are not available on this server", logged: false });
+    expect((await a.inject({ method: "GET", url: "/api/update/log" })).json()).toEqual({
+      text: null,
+    });
     const c = await a.inject({
       method: "POST",
       url: "/api/version/check",
@@ -6696,6 +6953,7 @@ describe("seat ids in the agent routes", () => {
       tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "brief read" }],
       truncated: false,
+      hasMore: false,
       lastOutputAt: NOW - 60e3,
       reason: null,
     });

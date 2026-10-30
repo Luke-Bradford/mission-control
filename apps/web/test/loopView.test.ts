@@ -222,3 +222,28 @@ describe("reasonLine", () => {
     expect(reasonLine("first\nsecond")).toEqual({ line: "first", full: "first\nsecond" });
   });
 });
+
+describe("parkNote and tryCode", () => {
+  it("names a review park by its count and sha, and a refusal by a code", async () => {
+    const { parkNote, tryCode } = await import("../src/agent/loopView.ts");
+    const note = parkNote(
+      "RETRO reviewed c74cdfc and found 2 issues. Long text.",
+      "review",
+      "c74cdfc99",
+    );
+    expect(note.step).toBe("waiting: 2 findings held on c74cdfc");
+    expect(note.header).toBe("Parked · review findings on c74cdfc · 2 held");
+    expect(parkNote("whatever\nmore", "no-ci").step).toBe("parked: no CI reported");
+    expect(parkNote("x".repeat(500)).step.length).toBeLessThanOrEqual(60);
+    const t = {
+      step: "ci",
+      fix: false,
+      n: 1,
+      startedAt: 0,
+      endedAt: 1,
+      outcome: "fail",
+      reason: "lint\nmore",
+    } as const;
+    expect(tryCode(t)).toBe("CI failed: lint");
+  });
+});

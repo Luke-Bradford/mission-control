@@ -146,7 +146,8 @@ export const JOBS: readonly Job[] = [
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
 export const LOOP_INTERVAL_MS = 15_000;
-export const MACHINE_INTERVAL_MS = 2000;
+/** Machine collection is expensive (it reads process state); capacity decisions need no finer cadence. */
+export const MACHINE_INTERVAL_MS = 10_000;
 /** The machine collector status is rewritten at most this often while it does not change. */
 export const MACHINE_STATUS_MS = 60_000;
 export const MAINTENANCE_INTERVAL_MS = 60 * 60_000;
@@ -258,6 +259,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
+  hasViewClients?: () => boolean;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
@@ -1035,6 +1038,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         );
     },
     machine: async () => {
+      if (deps.hasViewClients?.() === false && !config.crew?.sessions.length) return;
       const at = now();
       const r = await c.machine(
         machineCpus,

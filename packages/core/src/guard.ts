@@ -48,7 +48,14 @@ export interface GuardHit {
 
 export interface GuardEvent {
   tool: string;
-  input: { command?: string; file_path?: string; run_in_background?: boolean };
+  input: {
+    command?: string;
+    file_path?: string;
+    run_in_background?: boolean;
+    offset?: number;
+    limit?: number;
+    pages?: string;
+  };
 }
 
 /** What FLIGHT may do on a repo: `superuser` is set only in the user config, never by the repo. */
@@ -67,6 +74,8 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.closeTicket,
   MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.screenshotHud,
+  MC_TOOL_NAMES.editIssue,
+  MC_TOOL_NAMES.setFields,
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
@@ -2825,4 +2834,82 @@ export function firstCommitNotifier(
     ...allMatches(GITHUB_URL, t, oddGithubUrl),
   ]);
   return asWritten(d, message, hit);
+}
+
+/** A file at least this big, read whole twice unchanged, is answered the second time with the first. */
+export const REREAD_MIN_BYTES = 32 * 1024;
+/** Bytes per token for the estimate of what a refused re-read saved. */
+export const REREAD_BYTES_PER_TOKEN = 4;
+
+/** Characters a whole-file shell read may not hold: pipes, redirects, lists, expansions, globs. */
+const NOT_A_PLAIN_READ = /[;&|<>()`$\n\\*?[{~]/;
+
+/**
+ * The path a whole-file read names, else null: a Read with no offset, limit or pages, or a lone `cat FILE`
+ * or `sed -n p FILE` (`sed -n '1,$p' FILE`). A range, a pipe, a redirect or an expansion is none.
+ */
+export function wholeFileRead(e: GuardEvent): string | null {
+  const { file_path: path, command, offset, limit, pages } = e.input;
+  if (e.tool === "Read") {
+    return typeof path === "string" &&
+      path !== "" &&
+      offset === undefined &&
+      limit === undefined &&
+      pages === undefined
+      ? path
+      : null;
+  }
+  if (e.tool !== "Bash" || typeof command !== "string") return null;
+  if (NOT_A_PLAIN_READ.test(command.replace("'1,$p'", "p"))) return null;
+  const lines = splitCommands(command);
+  if (lines.length !== 1) return null;
+  const [program, ...args] = lines[0];
+  const operands = args[0] === "--" ? args.slice(1) : args;
+  if (program === "cat") {
+    return operands.length === 1 && !operands[0].startsWith("-") ? operands[0] : null;
+  }
+  if (program === "sed" && args[0] === "-n" && ["p", "1,$p"].includes(args[1] ?? "")) {
+    return args.length === 3 && !args[2].startsWith("-") ? args[2] : null;
+  }
+  return null;
+}
+
+/** What the guard remembers of a run's earlier whole-file read. */
+export interface ReadRecord {
+  size: number;
+  mtimeMs: number;
+  /** The run's compactions then: a compaction drops the earlier read from the seat's context. */
+  compactions: number;
+  toolUseId: string;
+  at: number;
+}
+
+export type RereadVerdict = { kind: "allow" } | { kind: "deny"; text: string; tokensSaved: number };
+
+/**
+ * A second whole read of a file of REREAD_MIN_BYTES or more whose size and mtime are as they were
+ * and that no compaction has dropped from context is answered with the earlier read.
+ */
+export function rereadVerdict(
+  path: string,
+  now: Pick<ReadRecord, "size" | "mtimeMs" | "compactions">,
+  prior: ReadRecord | undefined,
+): RereadVerdict {
+  if (
+    prior === undefined ||
+    now.size < REREAD_MIN_BYTES ||
+    prior.size !== now.size ||
+    prior.mtimeMs !== now.mtimeMs ||
+    prior.compactions !== now.compactions
+  ) {
+    return { kind: "allow" };
+  }
+  return {
+    kind: "deny",
+    tokensSaved: Math.ceil(now.size / REREAD_BYTES_PER_TOKEN),
+    text:
+      `${path} is unchanged since you read it whole earlier in this run (tool call ${prior.toolUseId}, ` +
+      `${Math.round(now.size / 1024)} KB). That read still stands: scroll back to it, or read a range ` +
+      `(Read with offset and limit, or sed -n 'A,Bp').`,
+  };
 }

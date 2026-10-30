@@ -1016,10 +1016,10 @@ describe("scheduler", () => {
       expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
     });
 
-    it("runs every 2 s, keeps the latest sample in memory and emits machine", async () => {
+    it("runs every 10 s, keeps the latest sample in memory and emits machine", async () => {
       vi.useFakeTimers();
       expect(JOBS).toContain("machine");
-      expect(MACHINE_INTERVAL_MS).toBe(2000);
+      expect(MACHINE_INTERVAL_MS).toBe(10_000);
       let t = NOW;
       const c = stubs();
       const s = createScheduler({ config, store, bus, now: () => t, collectors: c });
@@ -1028,9 +1028,9 @@ describe("scheduler", () => {
       expect(s.machine()).toMatchObject({ at: NOW, cpuPct: null });
       flushEmits();
       expect(topics).toContain("machine");
-      t += 2000;
+      t += MACHINE_INTERVAL_MS;
       await s.tick("machine");
-      expect(s.machine()).toMatchObject({ at: NOW + 2000, cpuPct: 5 });
+      expect(s.machine()).toMatchObject({ at: NOW + MACHINE_INTERVAL_MS, cpuPct: 5 });
       // The previous sample is handed back to the collector.
       expect(vi.mocked(c.machine).mock.calls[1]?.[1]).toMatchObject({ at: NOW });
 
@@ -1044,6 +1044,41 @@ describe("scheduler", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(c.machine).toHaveBeenCalledTimes(calls + 2);
       await u.stop();
+    });
+
+    it("does not sample an idle hub without a browser or machine guard", async () => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+      await s.tick("machine");
+      expect(c.machine).not.toHaveBeenCalled();
+    });
+
+    it("samples the default capacity guard without a browser", async () => {
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [{ id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] }],
+      } as NonNullable<CcConfig["crew"]>;
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        hasViewClients: () => false,
+      });
+
+      await s.tick("machine");
+
+      expect(c.machine).toHaveBeenCalledOnce();
     });
 
     it("writes the first sample of each minute to the store, not every tick", async () => {
@@ -2530,6 +2565,23 @@ it("releases crew holds from a durable idle seat session after the hold", async 
   store.setSeatSession({ ...seat, updatedAt: NOW + 1 });
   await s.tick("ta");
   expect(holds(store)["ask:1"]?.releasedAt).toBe(NOW + 10);
+});
+
+it("releases an expired hold from a no-client loop tick", async () => {
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  holdItem(store, "ask:expired", "Waiting", { kind: "date", at: NOW }, "operator", NOW);
+  const s = createScheduler({
+    config,
+    store,
+    bus,
+    now: () => NOW + 1,
+    collectors: stubs(),
+    hasViewClients: () => false,
+  });
+
+  await s.tick("ta");
+
+  expect(holds(store)["ask:expired"]?.releasedAt).toBe(NOW + 1);
 });
 
 it("releases a ci hold when the stored PR reaches the state, and an item hold when the item is gone", async () => {

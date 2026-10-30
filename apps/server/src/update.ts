@@ -8,7 +8,8 @@
  * `dist`, which is swapped in only once the build has succeeded. Any failure leaves the old `dist`
  * serving and the hub running. Counting from the start SHA, not HEAD, means an update that pulled
  * and then failed is not "up to date": the next one skips the pull (unless main has moved again)
- * and installs, builds, swaps and restarts. On success the route answers 202 and then calls `restart()`, which hands over to
+ * and installs, builds, swaps and restarts. On success the route starts `restart()` before it
+ * answers 202, so a disconnected caller cannot leave the old hub running. `restart()` hands over to
  * the hub's shutdown (crew first, then exit 0); launchd's KeepAlive starts it again.
  *
  * When every path changed since the running code is under `apps/web/` or `docs/`, nothing a seat
@@ -19,7 +20,7 @@
  * `GIT_*` settings, like every other git call the server makes.
  */
 import { spawn } from "node:child_process";
-import { access, appendFile, chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   errorText as errText,
@@ -32,6 +33,7 @@ import {
   type VersionInfo,
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
+import { cleanText } from "./clean.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
 import { gitEnv } from "./files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
@@ -45,10 +47,26 @@ export const VERSION_CHECK_MS = 10 * 60_000;
 export const VERSION_CHECK_FLOOR_MS = 15_000;
 /** Every command Update runs (its checks included) is cut off after this. */
 export const UPDATE_STEP_TIMEOUT_MS = 5 * 60_000;
-/** After the 202, how long before the hub shuts down (the response is on its way first). */
+/** After restart is scheduled, how long before the hub shuts down. */
 export const UPDATE_EXIT_DELAY_MS = 500;
+/** If the shutdown did not happen this long after it was due, allow another Update attempt. */
+export const UPDATE_RESTART_GRACE_MS = 5_000;
 /** Beside the database: `{MC_DB dir}/update.log`, rewritten by each update, mode 0600. */
 export const UPDATE_LOG = "update.log";
+/** The most of update.log the page is shown, in bytes: its end, where a failed step says why. */
+export const UPDATE_LOG_SHOWN_BYTES = 64 * 1024;
+
+/**
+ * A log tail cut at a byte offset, from its first whole line (the caller keeps a tail that starts
+ * on a line already). With no newline at all, the leading run of token characters goes, so a
+ * credential cut in half (its prefix lost) is not shown without its redaction.
+ */
+export function fromWholeLine(tail: string): string {
+  // a cut inside a multi-byte character decodes as U+FFFD at the start: drop it with the line
+  const nl = tail.indexOf("\n");
+  if (nl >= 0) return tail.slice(nl + 1);
+  return tail.replace(/^[\uFFFD]*[A-Za-z0-9_\-.=+/]*/, "");
+}
 /** The web build's output beside the live `dist`, through `MC_WEB_OUTDIR` (apps/web/vite.config.ts). */
 export const WEB_OUTDIR_NEXT = "dist-next";
 const WEB_OUTDIR = "dist";
@@ -159,6 +177,8 @@ export class UpdateError extends Error {
   readonly checkedAt?: number | null;
   /** A 409 from an auto update: the range it left for a person. */
   readonly held?: HeldRange;
+  /** Raised after update.log was started, which then says why: the page may show the log. */
+  logged = false;
   constructor(
     status: 409 | 500 | 502,
     message: string,
@@ -328,8 +348,13 @@ export interface Updater {
    * the last fetch; null when they cannot be read.
    */
   changes(): Promise<HeldRange | null>;
-  /** Schedules the exit, UPDATE_EXIT_DELAY_MS on. Called once the 202 has been sent. */
+  /** Schedules the exit; the route calls it once the successful update flow has completed. */
   restart(): void;
+  /**
+   * update.log made safe to show (`cleanText`); a longer one keeps the whole lines in its last
+   * `UPDATE_LOG_SHOWN_BYTES` bytes, after "…". null before any update; another read error throws.
+   */
+  log(): Promise<string | null>;
 }
 
 /**
@@ -489,6 +514,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
 
   /** Set from the start of an update until it fails; after a success the hub is going down. */
   let updating = false;
+  let restartRecovery: NodeJS.Timeout | null = null;
   let fetchTriedAt: number | null = null;
   let checkedAt: number | null = null;
   /** Whether the last fetch attempt succeeded; null before any. */
@@ -754,10 +780,12 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     async update(opts) {
       if (updating) throw new UpdateError(409, UPDATE_RUNNING);
       updating = true;
+      let logStarted = false;
       try {
         const reason = await refusal(true, false); // the crew's turn comes once the change is known
         if (reason !== null) throw new UpdateError(409, reason);
         await startLog();
+        logStarted = true;
         if (fetching) await fetching; // a version() fetch in flight: never two at once
         await log(`\n$ git fetch origin ${MAIN}\n`);
         const fetched = await fetchMain();
@@ -869,14 +897,60 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         return { restarting: true };
       } catch (e) {
         updating = false;
-        if (e instanceof UpdateError) throw e;
+        if (e instanceof UpdateError) {
+          // after the log started, a refusal says why in it too, so the page can show the log
+          if (logStarted) {
+            if (e.status === 409) await log(`held: ${e.message}\n`);
+            e.logged = true;
+          }
+          throw e;
+        }
         await log(`failed: ${errText(e)}\n`);
-        throw new UpdateError(500, UPDATE_FAILED, { cause: e });
+        const failed = new UpdateError(500, UPDATE_FAILED, { cause: e });
+        failed.logged = logStarted;
+        throw failed;
+      }
+    },
+
+    async log() {
+      // only the file's end is read: a failed step's output can make the log tens of MB
+      let fh: Awaited<ReturnType<typeof open>>;
+      try {
+        fh = await open(logPath, "r");
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; // no update has run
+        throw e;
+      }
+      try {
+        const { size } = await fh.stat();
+        if (size <= UPDATE_LOG_SHOWN_BYTES) {
+          const all = Buffer.alloc(size);
+          const { bytesRead } = await fh.read(all, 0, size, 0);
+          return cleanText(all.subarray(0, bytesRead).toString("utf8"), UPDATE_LOG_SHOWN_BYTES);
+        }
+        // one byte more than shown: a newline there means the tail starts on a whole line
+        const buf = Buffer.alloc(UPDATE_LOG_SHOWN_BYTES + 1);
+        const { bytesRead } = await fh.read(buf, 0, buf.length, size - buf.length);
+        // a log rewritten since the stat (a new update started) is shorter: show what was read
+        const tail = buf.subarray(1, Math.max(1, bytesRead)).toString("utf8");
+        const shown = buf[0] === 0x0a ? tail : fromWholeLine(tail);
+        return `…\n${cleanText(shown, UPDATE_LOG_SHOWN_BYTES)}`;
+      } finally {
+        await fh.close();
       }
     },
 
     restart() {
       setTimeout(deps.exit, UPDATE_EXIT_DELAY_MS);
+      if (restartRecovery !== null) return;
+      restartRecovery = setTimeout(() => {
+        restartRecovery = null;
+        updating = false;
+        void log(
+          `restart did not stop the hub after ${UPDATE_EXIT_DELAY_MS + UPDATE_RESTART_GRACE_MS}ms; clearing update state\n`,
+        );
+      }, UPDATE_EXIT_DELAY_MS + UPDATE_RESTART_GRACE_MS);
+      restartRecovery.unref();
     },
   };
 }

@@ -405,6 +405,34 @@ export interface PrCheck {
   url: string | null;
 }
 
+/** A check as a PR list shows it: the name and state, not the run's ids and links. */
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+
+/** A PR as a list sends it by default: every field, with the checks cut to `PrCheckSummary`. */
+export type PullRequestListRow = Omit<PullRequestView, "checks"> & { checks?: PrCheckSummary[] };
+
+/**
+ * A PR as `?shape=summary` sends it: what a list shows (number, title, state, head, checks rollup,
+ * review state), nothing that grows with the PR. The full row is the PR's own route.
+ */
+export type PullRequestSummary = Pick<
+  PullRequestView,
+  | "repoId"
+  | "number"
+  | "title"
+  | "url"
+  | "branch"
+  | "headSha"
+  | "ticket"
+  | "state"
+  | "isDraft"
+  | "review"
+  | "ci"
+  | "createdAt"
+  | "updatedAt"
+  | "mergedAt"
+>;
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
@@ -603,6 +631,11 @@ export interface RunDigest {
    * measured only when both timestamps exist.
    */
   speed?: { tokensPerSec: number | null; turnMs: number | null; firstTokenMs?: number | null };
+  /**
+   * Whole-file re-reads of a large unchanged file the guard refused this run, and the tokens that
+   * saved (the file's size at about 4 bytes a token). Absent when there are none.
+   */
+  rereads?: { count: number; tokensSaved: number };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
@@ -647,6 +680,8 @@ export interface AgentStream {
   events: StreamEvent[];
   /** The scan stopped at its byte cap before reaching `limit` events. */
   truncated: boolean;
+  /** Older events remain: ask again with `?before=` the first event's id. Absent when no read happened. */
+  hasMore?: boolean;
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
@@ -822,6 +857,8 @@ export interface HealthRow {
   lastOkAt: number | null;
   /** When its current run of failures began, UTC ms; null while it succeeds. */
   failingSince?: number | null;
+  /** The `engine:ticks` row only: the last engine ticks, oldest first. */
+  ticks?: EngineTick[];
 }
 
 /**
@@ -968,6 +1005,31 @@ export interface CrewRow {
 export interface Crew {
   rows: CrewRow[];
   /** Earliest run start since local midnight (operator timezone) across loops, for the MET clock. */
+  firstRunToday: number | null;
+}
+
+/** The digest fields the Overview reads: activity, the tool in flight, context. */
+export type CrewSummaryDigest = Pick<
+  RunDigest,
+  | "lastEventAt"
+  | "minuteTokens"
+  | "liveTool"
+  | "lastText"
+  | "background"
+  | "contextTokens"
+  | "contextWindow"
+  | "compactions"
+>;
+
+/** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns"> & {
+  digest: CrewSummaryDigest | null;
+  asideRuns?: Omit<CrewAsideRun, "events">[];
+};
+
+/** `GET /api/crew?shape=summary`. */
+export interface CrewSummary {
+  rows: CrewSummaryRow[];
   firstRunToday: number | null;
 }
 
@@ -1215,6 +1277,11 @@ export interface VersionInfo {
   reason: string | null;
 }
 
+/** `GET /api/update/log`: the last update's commands and output; null before any update. */
+export interface UpdateLog {
+  text: string | null;
+}
+
 /** Provider CLI status in the same binding used by usage collection. */
 export interface CliAccountStatus {
   accountId: AccountId;
@@ -1344,4 +1411,13 @@ export interface AttentionHold {
   by: string;
   at: number;
   releasedAt?: number;
+}
+
+/** One finished engine tick, as `/api/health` serves it. */
+export interface EngineTick {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  /** The steps it was still on when it passed its interval; null for a tick that stayed within it. */
+  overranOn: string[] | null;
 }

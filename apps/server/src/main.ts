@@ -267,6 +267,7 @@ export async function main(): Promise<void> {
   const lock = new TestLock({ onChange: lockChanged(bus), holds: store, log: (line) => log(line) });
   // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
   const cliHold = new CliHold();
+  let browserStreamCount = 0;
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
@@ -277,6 +278,7 @@ export async function main(): Promise<void> {
       process.env.MC_DEBUG === "1" ? (line) => process.stderr.write(`cc: ${line}\n`) : undefined,
     log: (line) => log(line),
     lockState: () => lock.state(),
+    hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
     deliverDefault: async (seatId, text) => {
@@ -671,6 +673,9 @@ export async function main(): Promise<void> {
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
     refreshBoards: () => scheduler.refreshBoards(),
     machine: () => scheduler.machine(),
+    onStreamCount: (count) => {
+      browserStreamCount = count;
+    },
     hubLogin: () => hubLogin,
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
@@ -689,8 +694,6 @@ export async function main(): Promise<void> {
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
-  const stopMapRing = mapRing.start();
-  app.addHook("onClose", async () => stopMapRing());
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
 
@@ -700,7 +703,6 @@ export async function main(): Promise<void> {
     stop: async () => {
       await previews?.closeAll();
       stopDiscovery();
-      stopMapRing();
       crewReloader.stop();
       flightWatch.stop();
       engine.stop();

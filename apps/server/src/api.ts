@@ -27,6 +27,8 @@ import {
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_PAGE_DEFAULT,
+  COMMS_PAGE_MAX,
   COMMS_REACTIONS,
   COMMS_REF,
   COMMS_TICKET,
@@ -40,9 +42,13 @@ import {
   type CrewPause,
   type CrewRow,
   type CrewSessionFolders,
+  type CrewVendor,
+  capAudit,
+  crewSummary,
   DEFAULT_REPO_RULES,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
+  ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
   fixesSent,
@@ -76,6 +82,10 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  PR_LIST_DAYS,
+  PR_LIST_DAYS_MAX,
+  type PullRequestListRow,
+  type PullRequestSummary,
   type PullRequestView,
   pace5h,
   projectAtReset,
@@ -89,6 +99,7 @@ import {
   type RunLoopView,
   type RunView,
   reviewStatusOf,
+  type StreamEvent,
   seatCallSign,
   seatDef,
   startOfLocalDay,
@@ -101,7 +112,9 @@ import {
   type TestLockView,
   type Topic,
   TYPE_LABELS,
+  UPDATE_LOG_UNREADABLE,
   UPDATE_UNAVAILABLE,
+  type UpdateLog,
   type UsageSample,
   type VersionInfo,
   watchStartRefusedText,
@@ -196,6 +209,7 @@ import {
 } from "./crew-pause.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   changedFiles,
   committedLines,
@@ -213,6 +227,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { CheckRecorder } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
+import { rereadDenial } from "./guard/rereads.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -268,8 +283,15 @@ import {
   runView,
 } from "./runview.ts";
 import { setSeatFocus } from "./seat-focus.ts";
-import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
-import { lastOutputAt, readStream } from "./stream.ts";
+import {
+  type CommsReadScope,
+  commsMessageNumber,
+  commsPosition,
+  crewDir,
+  crewPrBodyPath,
+  type Store,
+} from "./store.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
@@ -366,6 +388,8 @@ export interface AppDeps {
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
   machine?: () => MachineSample | null;
+  /** Receives the number of open browser event streams. */
+  onStreamCount?: (count: number) => void;
   now?: () => number;
   /** true: log to stdout; an object: log to that stream; false/absent: no logging. */
   logger?: boolean | { stream: { write(msg: string): void } };
@@ -380,8 +404,13 @@ export interface AppDeps {
   refreshBoards?: () => void;
   /** The built web app (apps/web/dist), served for unmatched GET/HEAD outside /api; absent: none. */
   webRoot?: string;
-  /** Reads a transcript for `/api/agents/:id/stream`; default: `readStream`. */
-  readStream?: typeof readStream;
+  /** Reads a transcript for `/api/agents/:id/stream`; default: `readStreamPage`. */
+  readStream?: (
+    path: string,
+    limit: number,
+    vendor?: CrewVendor,
+    before?: string,
+  ) => { events: StreamEvent[]; truncated: boolean; more?: boolean };
   /** Reads a worktree's changed files for `/api/agents/:id/files`; default: read-only git. */
   changedFiles?: (worktree: string, exec?: GitExec) => Promise<ChangedFiles>;
   /** Reads one listed file's diff for `/api/agents/:id/files/diff`; default: read-only git. */
@@ -516,11 +545,15 @@ const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
   tool_use_id: z.string().min(1).max(256),
+  agent_id: z.string().min(1).max(256).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
       file_path: z.string().optional(),
       run_in_background: z.boolean().optional(),
+      pages: z.string().optional(),
+      offset: z.number().optional(),
+      limit: z.number().optional(),
     })
     .optional(),
 });
@@ -560,7 +593,8 @@ interface StreamCacheEntry {
   size: number;
   mtimeMs: number;
   limit: number;
-  result: ReturnType<typeof readStream>;
+  before: string | undefined;
+  result: ReturnType<NonNullable<AppDeps["readStream"]>>;
 }
 
 /** Projection applies to 7d windows only (ruling); a 5h row shows `used` and `resetAt`. */
@@ -582,6 +616,37 @@ const isLocalOrigin = (origin: string): boolean => {
 };
 
 const errCode = (e: unknown): unknown => (e as NodeJS.ErrnoException | null)?.code;
+
+/** A PR as `?shape=summary` sends it: the fields a list shows, the checks as the `ci` rollup. */
+function prSummaryRow(pr: PullRequestView): PullRequestSummary {
+  return {
+    repoId: pr.repoId,
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    branch: pr.branch,
+    headSha: pr.headSha,
+    ticket: pr.ticket,
+    state: pr.state,
+    isDraft: pr.isDraft,
+    review: pr.review,
+    ci: pr.ci,
+    createdAt: pr.createdAt,
+    updatedAt: pr.updatedAt,
+    mergedAt: pr.mergedAt,
+  };
+}
+
+/** A PR as a list sends it by default: its checks by name and state only. */
+function prSummary(pr: PullRequestView): PullRequestListRow {
+  const { checks, ...rest } = pr;
+  return checks === undefined
+    ? rest
+    : {
+        ...rest,
+        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+      };
+}
 
 /** `?limit=` as an integer 1..max (absent: `fallback`), or null when invalid. */
 function parseLimit(raw: unknown, fallback: number, max: number): number | null {
@@ -816,7 +881,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   };
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
-  const readTranscript = deps.readStream ?? readStream;
+  const readTranscript = deps.readStream ?? readStreamPage;
   const worktreeFiles = deps.changedFiles ?? changedFiles;
   const worktreeDiff = deps.fileDiff ?? fileDiff;
   const streamCache = new Map<string, StreamCacheEntry>();
@@ -1034,6 +1099,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return crewMemo.value;
   };
 
+  let crewSummaryMemo:
+    | { bucket: number; revision: number; lockKey: string; value: Crew }
+    | undefined;
+  /** The Overview's crew: built without event timelines, so a many-run hub does not pay for them. */
+  const sharedCrewSummary = (at = now()): Crew => {
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewSummaryMemo?.bucket !== bucket ||
+      crewSummaryMemo.revision !== crewRevision ||
+      crewSummaryMemo.lockKey !== lockKey
+    )
+      crewSummaryMemo = {
+        bucket,
+        revision: crewRevision,
+        lockKey,
+        value: crew(config, store, at, lock, undefined, true),
+      };
+    return crewSummaryMemo.value;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
   const sharedAttention = (): AttentionItem[] => {
     const at = now();
@@ -1087,25 +1174,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     scheduleNotifications();
   });
   app.addHook("onReady", async () => {
-    stopMapRing = mapRing.start();
-  });
-  // Warm each repo's map in the background so the first viewer after a start finds it built or
-  // being built (the same promise a request shares), not a cold rebuild.
-  app.addHook("onReady", async () => {
-    if (!deps.warmMap) return;
-    for (const repo of config.repos) {
-      const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-      if (!checkout) continue;
-      void (async () => {
-        if (!(await stat(checkout).catch(() => null))?.isDirectory()) return;
-        await mapPayloadFor(repo, checkout, app.log);
-      })().catch((e) =>
-        app.log.warn(
-          { reason: e instanceof Error ? e.message : String(e) },
-          "map warm-up unavailable",
-        ),
-      );
-    }
+    // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
   });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
@@ -1142,7 +1211,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
       // text, never the path.
-      api.get<{ Params: { id: string }; Querystring: { limit?: unknown } }>(
+      // `?before=<event id>`: the events ahead of that one, for the dock's older-on-scroll (#1192).
+      api.get<{ Params: { id: string }; Querystring: { limit?: unknown; before?: unknown } }>(
         "/agents/:id/stream",
         async (req, reply): Promise<AgentStream | FastifyReply> => {
           const limit = parseLimit(req.query.limit, DEFAULT_STREAM_LIMIT, MAX_STREAM_LIMIT);
@@ -1150,6 +1220,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(400)
               .send({ error: `limit must be an integer 1..${MAX_STREAM_LIMIT}` });
+          }
+          const { before } = req.query;
+          if (before !== undefined && (typeof before !== "string" || !/^\d+:\d+$/.test(before))) {
+            return reply.code(400).send({ error: "before must be an event id" });
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
@@ -1183,15 +1257,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             entry.path !== path ||
             entry.size !== size ||
             entry.mtimeMs !== mtimeMs ||
-            entry.limit !== limit
+            entry.limit !== limit ||
+            entry.before !== before
           ) {
             let result: StreamCacheEntry["result"];
             try {
-              result = readTranscript(path, limit, run.vendor);
+              result =
+                before === undefined
+                  ? readTranscript(path, limit, run.vendor)
+                  : readTranscript(path, limit, run.vendor, before);
             } catch {
               return missing();
             }
-            entry = { path, size, mtimeMs, limit, result };
+            entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
           return {
@@ -1199,6 +1277,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
             truncated: entry.result.truncated,
+            hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
           };
@@ -1369,22 +1448,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (operator pins)
       api.delete<{ Params: { id: string } }>("/comms/:id/pin", pinRoute(false));
 
-      const storedCommsMessage = (row: ReturnType<Store["commsMessage"]>) => {
+      const storedCommsMessage = (
+        row: ReturnType<Store["commsMessage"]>,
+        pins: ReadonlySet<string> = new Set(store.commsPins().map((pin) => pin.id)),
+      ) => {
         if (row === null) throw new Error("Unknown Comms message.");
         return {
           ...row,
           reactions: store.commsReactions(row.id),
-          pinned: store.commsPins().some((pin) => pin.id === row.id),
+          pinned: pins.has(row.id),
           operator: row.from === COMMS_CAPCOM,
         };
       };
-      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) =>
-        rows.map((row) => storedCommsMessage(row));
+      const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) => {
+        const pins = new Set(store.commsPins().map((pin) => pin.id));
+        return rows.map((row) => storedCommsMessage(row, pins));
+      };
       const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
       const pairScope = (a: string, b: string) => `pair:${[a, b].sort().join(":")}`;
-      const unreadAfter = (rows: ReturnType<Store["commsForCrew"]>, cursor: string | null) => {
-        const offset = cursor === null ? 0 : Number(cursor.slice("comms:".length));
-        return rows.filter((row) => Number(row.id.slice("comms:".length)) > offset).length;
+      /** `?limit=&before=` of a Comms read; null when either is malformed (the caller answers 400). */
+      const commsPaging = (query: {
+        limit?: unknown;
+        before?: unknown;
+      }): { limit: number; before: string | undefined } | null => {
+        const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
+        const { before } = query;
+        if (limit === null) return null;
+        if (
+          before !== undefined &&
+          (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
+        )
+          return null;
+        return { limit, before };
+      };
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
+      const commsScopePage = (
+        scope: CommsReadScope,
+        cursorKey: string,
+        paging: { limit: number; before: string | undefined },
+        countsOnly = false,
+      ) => {
+        const page = countsOnly
+          ? { rows: [], hasMore: false }
+          : store.commsPage(scope, paging.limit, paging.before);
+        const cursor = store.commsScopeCursor(cursorKey);
+        return {
+          messages: storedCommsMessages(page.rows),
+          hasMore: page.hasMore,
+          cursor,
+          unread: store.commsCounts(scope, cursor).unread,
+        };
       };
       const commsScope = (
         scope: string,
@@ -1409,47 +1523,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get("/comms/crew", () => {
-        const rows = store.commsForCrew();
-        const cursor = store.commsScopeCursor("crew");
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-      });
+      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+        "/comms/crew",
+        (req, reply) => {
+          const paging = commsPaging(req.query);
+          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+          return commsScopePage({ crew: true }, "crew", paging);
+        },
+      );
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get("/comms/flight", () => {
-        const flight = flightSeat(config)?.seat.id;
-        const rows = flight === undefined ? [] : store.commsForPair(COMMS_CAPCOM, flight);
-        const cursor = store.commsScopeCursor("flight");
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-      });
+      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+        "/comms/flight",
+        (req, reply) => {
+          const paging = commsPaging(req.query);
+          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+          const flight = flightSeat(config)?.seat.id;
+          if (flight === undefined)
+            return { messages: [], hasMore: false, cursor: null, unread: 0 };
+          return commsScopePage({ pair: [COMMS_CAPCOM, flight] }, "flight", paging);
+        },
+      );
       // Reader: apps/web/src/App.tsx#App (agent Comms)
-      api.get<{ Params: { id: string } }>("/comms/agents/:id", (req, reply) => {
+      api.get<{
+        Params: { id: string };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+      }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
-        const rows = store.commsForAgent(id);
-        const inboxRows = store.commsInbox(id);
-        const messages = storedCommsMessages(rows);
-        const inbox = storedCommsMessages(inboxRows);
-        const contacts = [...new Set(messages.flatMap((m) => [m.from, m.to]))]
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        const { summary } = req.query;
+        if (summary !== undefined && summary !== "1")
+          return reply.code(400).send({ error: "summary must be 1" });
+        // `?summary=1`: the conversation list and counts only, no messages (the nav rows' read).
+        const none = { rows: [], hasMore: false };
+        const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
+        const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
+        const inbox =
+          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+        // The conversation list: one line per contact, from counts, never their histories.
+        const contacts = store
+          .commsContactIds(id)
           .filter((contact) => contact !== id && contact !== COMMS_CREW)
           .map((contact) => {
-            const contactRows = store.commsForPair(id, contact);
-            const cursor = store.commsScopeCursor(pairScope(id, contact));
-            const contactMessages = storedCommsMessages(contactRows);
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
+            const last = store.commsPage(scope, 1).rows[0];
             return {
               id: contact,
-              lastMessage: contactMessages.at(-1) ?? null,
-              count: contactMessages.length,
-              unread: unreadAfter(contactRows, cursor),
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              unread: counts.unread,
             };
           });
         return {
-          messages,
-          inbox,
+          ...all,
+          inbox: storedCommsMessages(inbox.rows),
+          inboxHasMore: inbox.hasMore,
           contacts,
-          cursor: store.commsScopeCursor(`agent-all:${id}`),
-          unread: unreadAfter(rows, store.commsScopeCursor(`agent-all:${id}`)),
-          inboxCursor: store.commsScopeCursor(`inbox:${id}`),
-          inboxUnread: unreadAfter(inboxRows, store.commsScopeCursor(`inbox:${id}`)),
+          inboxCursor,
+          inboxUnread: store.commsCounts({ inbox: id }, inboxCursor).unread,
           // Needs you no longer counts direct-line replies; the thread does (#757)
           directUnread:
             id === COMMS_CAPCOM
@@ -1459,23 +1592,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
-      api.get<{ Params: { id: string; contact: string } }>(
-        "/comms/agents/:id/contacts/:contact",
-        (req, reply) => {
-          if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
-            return reply.code(404).send({ error: "unknown Comms agent" });
-          const rows = store.commsForPair(req.params.id, req.params.contact);
-          const cursor = store.commsScopeCursor(pairScope(req.params.id, req.params.contact));
-          return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
-        },
-      );
+      api.get<{
+        Params: { id: string; contact: string };
+        Querystring: { limit?: unknown; before?: unknown };
+      }>("/comms/agents/:id/contacts/:contact", (req, reply) => {
+        if (!knownCommsAgent(req.params.id) || !knownCommsAgent(req.params.contact))
+          return reply.code(404).send({ error: "unknown Comms agent" });
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        return commsScopePage(
+          { pair: [req.params.id, req.params.contact] },
+          pairScope(req.params.id, req.params.contact),
+          paging,
+        );
+      });
       // Reader: apps/web/src/App.tsx#App (pair Comms)
-      api.get<{ Params: { a: string; b: string } }>("/comms/pairs/:a/:b", (req, reply) => {
+      api.get<{
+        Params: { a: string; b: string };
+        Querystring: { limit?: unknown; before?: unknown };
+      }>("/comms/pairs/:a/:b", (req, reply) => {
         if (!knownCommsAgent(req.params.a) || !knownCommsAgent(req.params.b))
           return reply.code(404).send({ error: "unknown Comms agent" });
-        const rows = store.commsForPair(req.params.a, req.params.b);
-        const cursor = store.commsScopeCursor(pairScope(req.params.a, req.params.b));
-        return { messages: storedCommsMessages(rows), cursor, unread: unreadAfter(rows, cursor) };
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        return commsScopePage(
+          { pair: [req.params.a, req.params.b] },
+          pairScope(req.params.a, req.params.b),
+          paging,
+        );
       });
       // Reader: apps/web/src/App.tsx#App (ticket Comms)
       api.get<{ Params: { ref: string }; Querystring: { ticket?: string } }>(
@@ -1721,6 +1865,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .send(deny === undefined ? GUARD_ALLOW_OUTPUT : guardDenyOutput(deny));
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
+            // a read that failed gave the seat nothing to scroll back to
+            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             lock?.release(key, failed);
             await checks?.end(key, !failed);
             return answer();
@@ -1734,6 +1880,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.runGrants?.(who) ?? deps.seatGrants?.(who.seatId),
             store.seatSession(who.seatId)?.worktree ?? undefined,
           );
+          // a large file this run already read whole, unchanged, is not given again
+          if (verdict.kind === "allow") {
+            const reread = rereadDenial(
+              store,
+              { ...key, agentId: body.data.agent_id ?? "" },
+              store.seatSession(who.seatId)?.worktree ?? undefined,
+              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
+              now(),
+            );
+            if (reread !== null) return answer(reread);
+          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
@@ -2381,22 +2538,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
-      api.get<{ Params: { repoId: string }; Querystring: { linked?: unknown } }>(
-        "/repos/:repoId/prs",
+      // A list is the open PRs plus those updated in the last PR_LIST_DAYS (`?days=N` reaches
+      // back further, `?all=1` is every one), each with its checks as name and state; `?detail=1`
+      // or the PR's own route carries the full row; `?shape=summary` is the list's own fields only (#1192).
+      api.get<{
+        Params: { repoId: string };
+        Querystring: {
+          linked?: unknown;
+          days?: unknown;
+          all?: unknown;
+          detail?: unknown;
+          shape?: unknown;
+        };
+      }>("/repos/:repoId/prs", async (req, reply) => {
+        const { linked, days, all, detail, shape } = req.query;
+        if (shape !== undefined && shape !== "summary") {
+          return reply.code(400).send({ error: "shape must be summary" });
+        }
+        if (linked !== undefined && linked !== "1") {
+          return reply.code(400).send({ error: "linked must be 1" });
+        }
+        if (all !== undefined && all !== "1") {
+          return reply.code(400).send({ error: "all must be 1" });
+        }
+        if (detail !== undefined && detail !== "1") {
+          return reply.code(400).send({ error: "detail must be 1" });
+        }
+        const window = parseLimit(days, PR_LIST_DAYS, PR_LIST_DAYS_MAX);
+        if (window === null) {
+          return reply.code(400).send({ error: `days must be an integer 1..${PR_LIST_DAYS_MAX}` });
+        }
+        const repo = config.repos.find((r) => r.id === req.params.repoId);
+        if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        const listed = store.pullRequestsSince(
+          repo.id,
+          all === "1" ? null : now() - window * 86_400_000,
+        );
+        const prs = linked === "1" ? listed.filter((p) => p.ticket !== null) : listed;
+        const previewFor = (number: number) =>
+          repo.id === deps.previewRepoId ? (deps.previews?.get(number) ?? null) : null;
+        if (shape === "summary")
+          return prs.map((pr) => ({ ...prSummaryRow(pr), preview: previewFor(pr.number) }));
+        return detail === "1"
+          ? prs.map((pr) => ({ ...pr, preview: previewFor(pr.number) }))
+          : prs.map((pr) => ({ ...prSummary(pr), preview: previewFor(pr.number) }));
+      });
+      // Reader: docs/hud-response-budgets.md#pull-request-lists (a PR's full detail on demand)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/repos/:repoId/prs/:number",
         async (req, reply) => {
-          const { linked } = req.query;
-          if (linked !== undefined && linked !== "1") {
-            return reply.code(400).send({ error: "linked must be 1" });
-          }
           const repo = config.repos.find((r) => r.id === req.params.repoId);
           if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const prs = store.pullRequests(repo.id);
-          const rows = linked === "1" ? prs.filter((p) => p.ticket !== null) : prs;
-          return rows.map((pr) => ({
+          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
+            ? store.pullRequest(repo.id, Number(req.params.number))
+            : null;
+          if (!pr) return reply.code(404).send({ error: "unknown pull request" });
+          return {
             ...pr,
             preview:
               repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
-          }));
+          };
         },
       );
 
@@ -2579,7 +2780,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       }
 
-      api.get("/health", async () => store.status());
+      api.get("/health", async () => {
+        const ticks = tickLogOf(store);
+        const recent = ticks.recent();
+        const last = recent.at(-1);
+        const running = ticks.running();
+        if (recent.length === 0 && running === null) return store.status();
+        return [
+          ...store.status(),
+          // the engine's recent tick durations; `error` names a tick still running past its interval
+          {
+            collector: TICKS_COLLECTOR,
+            ok: running === null || now() - running.startedAt < ENGINE_TICK_MS,
+            error: running === null ? null : overrunText(running.startedAt, running.steps),
+            at: last?.endedAt ?? 0,
+            lastOkAt: last?.endedAt ?? null,
+            ticks: recent,
+          },
+        ];
+      });
       // Reader: docs/reviews/2026-10-28/audit-qa-datamap.md#audit-board (operator audit board)
       api.get<{ Querystring: { range?: string } }>("/audit", async (req, reply) => {
         const range = req.query.range ?? "30d";
@@ -2592,7 +2811,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
           ]),
         );
-        return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
+        return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
       });
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
@@ -3769,7 +3988,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/overview/timeline", async () => overviewTimeline(config, store, now()));
 
-      api.get("/crew", async (): Promise<Crew> => sharedCrew());
+      // `?shape=summary`: what the Overview reads, without each row's event timelines and whole
+      // digest (#1192); `/crew/:id` is one row in full, for the Agent page.
+      api.get<{ Querystring: { shape?: unknown } }>("/crew", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "summary")
+          return reply.code(400).send({ error: "shape must be summary" });
+        return shape === "summary" ? crewSummary(sharedCrewSummary()) : sharedCrew();
+      });
+      // Reader: docs/hud-response-budgets.md#crew (one crew row in full)
+      api.get<{ Params: { id: string } }>("/crew/:id", async (req, reply) => {
+        const row = sharedCrew().rows.find((r) => r.id === req.params.id);
+        return row ?? reply.code(404).send({ error: "unknown agent" });
+      });
 
       // The header's session filter: its repo, else every repo (the pipeline: the crew's repos).
       const viewScope = (selected: string | undefined) => {
@@ -3803,7 +4034,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       });
 
-      // The Update button. Texts are fixed; the commands' output goes to update.log only.
+      // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
+      // /update/log returns as raw output (paths and stderr included) with credentials redacted.
       const updater = deps.updater;
       const unavailableVersion: VersionInfo = {
         sha: "",
@@ -3831,30 +4063,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(500).send({ error: CHECK_FAILED });
         }
       });
-      api.post(
-        "/update",
-        {
-          // The exit is scheduled only once the 202 has gone out.
-          onResponse: async (_req, reply) => {
-            if (reply.statusCode === 202) updater?.restart();
-          },
-        },
-        async (req, reply) => {
-          const body = NoBody.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-          if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
-          try {
-            const out = await updater.update();
-            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
-            return "restarting" in out ? reply.code(202).send(out) : out;
-          } catch (e) {
-            captureError(reply, e);
-            if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
-            reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
-            return reply.code(500).send({ error: UPDATE_FAILED });
-          }
-        },
-      );
+      api.post("/update", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE, logged: false });
+        try {
+          const out = await updater.update();
+          if ("restarting" in out) updater.restart();
+          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          return "restarting" in out ? reply.code(202).send(out) : out;
+        } catch (e) {
+          captureError(reply, e);
+          // logged: update.log says why (the page opens it); false for a refusal before the log
+          if (e instanceof UpdateError)
+            return reply.code(e.status).send({ error: e.message, logged: e.logged });
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
+          return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        }
+      });
+      // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
+      api.get("/update/log", async (_req, reply) => {
+        try {
+          const log: UpdateLog = { text: updater ? await updater.log() : null };
+          return log;
+        } catch (e) {
+          // never the errno text or the path: the page says only that it could not be read
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update log read failed");
+          return reply.code(500).send({ error: UPDATE_LOG_UNREADABLE });
+        }
+      });
 
       api.get(
         "/attention",
@@ -4209,12 +4446,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }, 10_000);
         });
         // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        const unsubscribeMap =
-          repoId === undefined
-            ? undefined
-            : mapRing.subscribe(repoId, (delta) => {
-                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-              });
+        let unsubscribeMap: (() => void) | undefined;
+        if (repoId !== undefined) {
+          stopMapRing ??= mapRing.start();
+          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
+            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+          });
+        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
@@ -4222,12 +4460,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           unsubscribe();
           unsubscribeMap?.();
           streams.delete(end);
+          deps.onStreamCount?.(streams.size);
         };
         const end = () => {
           cleanup();
           res.end();
         };
         streams.add(end);
+        deps.onStreamCount?.(streams.size);
         res.on("close", cleanup);
       });
     },
