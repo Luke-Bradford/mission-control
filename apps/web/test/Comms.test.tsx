@@ -585,6 +585,32 @@ describe("Comms routes", () => {
     expect(screen.getByRole("button", { name: "Load older" })).toBeTruthy();
   });
 
+  it("shows a nav row's conversation total from the summary counts", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": {
+        rows: [seatRow({ id: "alpha", displayCallSign: "alpha" })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/alpha?summary=1": {
+        contacts: [
+          { id: "beta", count: 4, unread: 0, lastMessage: null },
+          { id: "gamma", count: 3, unread: 0, lastMessage: null },
+        ],
+        unread: 0,
+      },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    expect((await within(nav).findByTitle("7 messages")).textContent).toBe("7");
+  });
+
   it("opens on the nav summaries and fetches only the selected conversation's messages", async () => {
     const fetch = stubFetch({
       "/api/attention": [],
