@@ -261,7 +261,17 @@ export const minorNotPostedText = (why: string): string =>
 /** Activity keys: one per review and step. */
 export const reviewEventKey = (authorRunId: string, reviewId: number, step: string): string =>
   `${authorRunId}:review:${reviewId}:${step}`;
+/** The input + output tokens a review run may use: the default for a Claude account. */
 export const REVIEW_TOKEN_BUDGET = 120_000;
+/** The default for a Codex account: its runs count more tokens for the same PR (7 of 142 went over 120000). */
+export const CODEX_REVIEW_TOKEN_BUDGET = 300_000;
+/** The review budget of an account: its own `review_token_budget`, else its vendor's default. */
+export const reviewTokenBudgetOf = (vendor: "claude" | "codex", configured?: number): number =>
+  configured ?? (vendor === "codex" ? CODEX_REVIEW_TOKEN_BUDGET : REVIEW_TOKEN_BUDGET);
+export const reviewBudgetFailure = (budget: number): string => `over its ${budget}-token budget`;
+/** Whether a review's failure text is the budget failure: its retry goes to another reviewer. */
+export const isReviewBudgetFailure = (failure: string | null): boolean =>
+  failure !== null && /^over its \d+-token budget$/.test(failure);
 export const REVIEW_RUN_MAX_MS = 60 * 60_000;
 
 export interface ReviewFact {
@@ -477,6 +487,8 @@ export interface ReviewRunSnapshot {
   };
   claimed: Record<string, number>;
   lastEngineLineAt: number | null;
+  /** The input + output tokens the run may use (see reviewTokenBudgetOf). */
+  tokenBudget: number;
 }
 
 export type ReviewRunAction =
@@ -496,8 +508,8 @@ export function reviewRunStep(s: ReviewRunSnapshot): ReviewRunAction | null {
   if (!seat.holdsRun && !seat.starting) {
     return { kind: "fail", reason: "the review run lost its seat" };
   }
-  if (run.tokens > REVIEW_TOKEN_BUDGET) {
-    return { kind: "fail", reason: `over its ${REVIEW_TOKEN_BUDGET}-token budget` };
+  if (run.tokens > s.tokenBudget) {
+    return { kind: "fail", reason: reviewBudgetFailure(s.tokenBudget) };
   }
   if (s.now - s.startedAt > REVIEW_RUN_MAX_MS && seat.state !== "parked") {
     return { kind: "fail", reason: `no findings after ${REVIEW_RUN_MAX_MS / 60_000} minutes` };

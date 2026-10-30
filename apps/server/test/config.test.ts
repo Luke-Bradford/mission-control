@@ -305,6 +305,16 @@ describe("loadConfig", () => {
     expect(c.repos[1]?.needsYouLabels).toBeUndefined();
   });
 
+  it("takes an optional positive integer review_token_budget on an account", () => {
+    expect(loadConfig(EXAMPLE).accounts[1]?.reviewTokenBudget).toBeUndefined();
+    const set = (v: string) =>
+      tmpConfig((y) => y.replace("stop_at: 80", `stop_at: 80\n    review_token_budget: ${v}`));
+    expect(loadConfig(set("250000")).accounts[1]?.reviewTokenBudget).toBe(250000);
+    for (const bad of ["0", "1.5", "lots"]) {
+      expect(errorOf(() => loadConfig(set(bad))).path).toBe("accounts[1].reviewTokenBudget");
+    }
+  });
+
   it("rejects a statusMap value outside TicketState", () => {
     const p = tmpConfig((y) => y.replace("Todo: planned", "Todo: someday"));
     const e = errorOf(() => loadConfig(p));

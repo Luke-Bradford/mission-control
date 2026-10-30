@@ -62,6 +62,7 @@ import {
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   hudColumnOf,
+  isReviewBudgetFailure,
   type LoopAction,
   type LoopReviewFacts,
   type LoopSnapshot,
@@ -112,6 +113,7 @@ import {
   reviewRunStep,
   reviewStartedText,
   reviewStatusOf,
+  reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
@@ -342,13 +344,15 @@ const REVIEWS_CHAIN = "\0reviews";
  * profile names one), the first such seat of that role is preferred. With `avail`, the first of those
  * whose account is not at its stop and has no review starting or running is preferred. When every
  * available reviewer is busy, the first non-stopped seat keeps the queued review; when every account
- * is at its stop, the first stands, so its reviews wait rather than vanish.
+ * is at its stop, the first stands, so its reviews wait rather than vanish. With `avail.avoid`, seats
+ * in it are passed over while any other seat qualifies (a review that went over its token budget on a
+ * seat is retried on another).
  */
 export function reviewerOf(
   config: CcConfig,
   seatId: string,
   role?: string,
-  avail?: { store: Store; now: number },
+  avail?: { store: Store; now: number; avoid?: ReadonlySet<string> },
 ): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
@@ -362,7 +366,27 @@ export function reviewerOf(
   const busy = new Set(
     avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
   );
-  return notStopped.find((x) => !busy.has(x.id)) ?? notStopped[0] ?? pool[0] ?? null;
+  const others = notStopped.filter((x) => !avail.avoid?.has(x.id));
+  const from = others.length > 0 ? others : notStopped;
+  return from.find((x) => !busy.has(x.id)) ?? from[0] ?? pool[0] ?? null;
+}
+
+/** The seats whose review of the run's pushed sha, this epoch, failed on its token budget. */
+function budgetFailedSeats(store: Store, run: Run): Set<string> {
+  const sha = store.runPush(run.id)?.sha;
+  const epoch = run.loop?.epoch;
+  const seats = new Set<string>();
+  if (sha === undefined || epoch === undefined) return seats;
+  for (const r of store.reviewsOfRun(run.id)) {
+    if (
+      r.sha === sha &&
+      r.epoch === epoch &&
+      r.state === "failed" &&
+      isReviewBudgetFailure(r.failure)
+    )
+      seats.add(r.seatId);
+  }
+  return seats;
 }
 
 /** The review seat's role the run's profile asks for, if it has a profile. */
@@ -401,7 +425,16 @@ export function createEngine(deps: EngineDeps): Engine {
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
   const reviewerFor = (run: Run): CrewSeatConfig | null =>
-    reviewerOf(config, run.agentId, reviewRoleOf(run), { store, now: now() });
+    reviewerOf(config, run.agentId, reviewRoleOf(run), {
+      store,
+      now: now(),
+      avoid: budgetFailedSeats(store, run),
+    });
+  /** The input + output tokens a review run on this seat's account may use. */
+  const reviewBudgetOf = (seatId: string): number => {
+    const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
+    return reviewTokenBudgetOf(account?.vendor ?? "claude", account?.reviewTokenBudget);
+  };
   const chains = new Map<string, Promise<void>>();
   const ruleNotes = new Map<RepoId, string>();
   /** Whether each repo's rules set `hard_rules` at their last good read. */
@@ -2137,6 +2170,7 @@ export function createEngine(deps: EngineDeps): Engine {
         },
         claimed: store.claimedKeys(rrun.id),
         lastEngineLineAt: store.lastEngineLineAt(rrun.id),
+        tokenBudget: reviewBudgetOf(row.seatId),
       });
       if (action === null) continue;
       if (action.kind === "send") {
