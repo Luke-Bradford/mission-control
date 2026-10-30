@@ -293,6 +293,19 @@ export async function main(): Promise<void> {
       );
     };
   })();
+  const previewParentPid = process.env.MC_PREVIEW_PARENT_PID;
+  if (preview && previewParentPid !== undefined) {
+    const parentPid = Number(previewParentPid);
+    if (Number.isSafeInteger(parentPid) && parentPid > 1) {
+      setInterval(() => {
+        try {
+          process.kill(parentPid, 0);
+        } catch {
+          process.exit(0);
+        }
+      }, 15_000).unref();
+    }
+  }
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
   const hubRoot = findHubRoot();
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
@@ -748,6 +761,7 @@ function previewEnvironment(
     MC_NO_CREW: "1",
     MC_PREVIEW_ACTIVITY_URL: `http://${HOST}:${parentPort}/api/previews/${pr}/activity`,
     MC_PREVIEW_ACTIVITY_TOKEN: token,
+    MC_PREVIEW_PARENT_PID: String(process.pid),
   };
 }
 
