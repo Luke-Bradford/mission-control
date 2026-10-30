@@ -252,7 +252,10 @@ export function reviewBrief(i: ReviewBriefInput): string {
     ...(i.verifyResults?.length
       ? [
           `- Verify results for ${sha7}: ${i.verifyResults
-            .map((r) => `${r.command} ${r.ok ? "passed" : "failed"} in ${(r.durationMs / 1000).toFixed(1)}s`)
+            .map(
+              (r) =>
+                `${r.command} ${r.ok ? "passed" : "failed"} in ${(r.durationMs / 1000).toFixed(1)}s`,
+            )
             .join("; ")}.`,
         ]
       : []),

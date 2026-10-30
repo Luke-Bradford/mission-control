@@ -3133,7 +3133,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? (info.repo.commands?.writer ?? [])
             : (info.repo.commands?.review ?? []),
         fullSuite: info.repo.fullSuite ?? [],
-        verifyResults: store.verifyJobs().find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
+        verifyResults: store
+          .verifyJobs()
+          .find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
