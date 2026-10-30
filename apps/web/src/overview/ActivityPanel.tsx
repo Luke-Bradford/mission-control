@@ -429,13 +429,13 @@ export function ActivityPanel() {
                     }
                   >
                     {agent ? (
-                      <AgentTag id={agent.id} index={agent.index} sm />
+                      <AgentTag bare id={agent.id} index={agent.index} sm />
                     ) : (
                       <span className="muted">{e.who}</span>
                     )}
                   </a>
                 ) : agent ? (
-                  <AgentTag id={agent.id} index={agent.index} sm />
+                  <AgentTag bare id={agent.id} index={agent.index} sm />
                 ) : (
                   <span className="muted">{e.who}</span>
                 )}

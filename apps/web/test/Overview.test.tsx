@@ -258,7 +258,7 @@ describe("Agents panel", () => {
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
         (cell) => cell.textContent,
       ),
-    ).toEqual(["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"]);
+    ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
   });
 
   it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
@@ -1479,7 +1479,7 @@ describe("Machine panel", () => {
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
     await within(mach).findByText("37%");
-    expect(mach.textContent).toContain("this Mac · every 2 s");
+    expect(mach.textContent).toContain("every 2 s");
     expect(mach.textContent).toContain("37% of 16 threads");
     expect(mach.textContent).toContain("20.5 of 64 GB");
     expect(mach.textContent).toContain("412 GB free");

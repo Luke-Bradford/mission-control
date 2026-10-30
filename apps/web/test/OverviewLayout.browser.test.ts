@@ -166,7 +166,7 @@ describeRendered("Overview v2 layout in a browser", () => {
               ),
             undefined,
           ),
-        ).toEqual(["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"]);
+        ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
 
         // The page stays on one screen.
         const bottom = await page.evaluate(

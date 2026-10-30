@@ -589,7 +589,7 @@
 
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
+  grid-template-columns: 190px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
   gap: 0 var(--sp-1);
   padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
@@ -738,7 +738,7 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 118px minmax(180px, 1fr) 50px 56px 64px 64px;
+    grid-template-columns: 190px 118px minmax(180px, 1fr) 56px 56px 64px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -756,6 +756,10 @@
   #agentsList .trow {
     grid-template-columns: 100px 80px minmax(140px, 1fr) 50px 44px 46px 46px;
     column-gap: var(--sp-1);
+  }
+  /* no room for the role beside the call sign: it stays in the tooltip, never cut mid-word */
+  #agentsList .agent-identity > :nth-child(2) {
+    display: none;
   }
 }
 
