@@ -55,6 +55,7 @@ import {
   seatDef,
   skillFileProblem,
   skillPluginManifest,
+  trimHookCommand,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
 
@@ -312,6 +313,8 @@ describe("the allowlist in phase 2b", () => {
       ghRead: "mcp__mc__gh_read",
       listTickets: "mcp__mc__list_tickets",
       updateBrief: "mcp__mc__update_brief",
+      editIssue: "mcp__mc__edit_issue",
+      setFields: "mcp__mc__set_fields",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
@@ -371,6 +374,27 @@ describe("guardHookCommand", () => {
   it("refuses a relative node, entry or token file", () => {
     for (const k of ["node", "entry", "tokenFile"] as const) {
       expect(() => guardHookCommand({ ...ok, [k]: "rel/path" }), k).toThrow("must be absolute");
+    }
+  });
+});
+
+describe("trimHookCommand", () => {
+  const ok = {
+    node: "/opt/homebrew/bin/node",
+    entry: "/hub/apps/server/src/guard/trim-cli.ts",
+    dir: "/tmp/mc-runs/seat/tool-output",
+  };
+
+  it("single-quotes each part", () => {
+    expect(trimHookCommand(ok)).toBe(
+      "'/opt/homebrew/bin/node' --experimental-strip-types '/hub/apps/server/src/guard/trim-cli.ts' '/tmp/mc-runs/seat/tool-output'",
+    );
+  });
+
+  it("refuses a quote, a line break or a relative path", () => {
+    for (const k of ["node", "entry", "dir"] as const) {
+      expect(() => trimHookCommand({ ...ok, [k]: `${ok[k]}'x` }), k).toThrow("quote");
+      expect(() => trimHookCommand({ ...ok, [k]: "rel" }), k).toThrow("absolute");
     }
   });
 });
@@ -624,6 +648,8 @@ describe("crew constants", () => {
           "recall",
           "hold_item",
           "release_hold",
+          "edit_issue",
+          "set_fields",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -743,6 +769,8 @@ describe("mc tool grants", () => {
       "recall",
       "hold_item",
       "release_hold",
+      "edit_issue",
+      "set_fields",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
@@ -885,6 +913,7 @@ describe("crew sandbox and scoped edits", () => {
       expect(f.allowRead).toEqual([tempRoot, base.sandbox.pnpmStoreDir]);
       expect(f.denyRead).toContain("/tmp/claude-*");
       expect(f.denyRead).toContain("/private/tmp/claude-*");
+      expect(f.denyWrite).toContain(`${"/tmp/mc-runs/seat-test"}/tool-output`);
       expect(f.denyWrite).toContain("/tmp/claude-*");
       expect(f.denyWrite).toContain("/private/tmp/claude-*");
     }
@@ -990,6 +1019,17 @@ describe("crew sandbox and scoped edits", () => {
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }
+  });
+
+  it("adds the trim hook after every tool's call, beside the Bash one, when given", () => {
+    const trim = { command: "trim-cmd", timeoutS: 10 };
+    const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", { ...base.hook, trim }));
+    expect(j.hooks.PostToolUse).toEqual([
+      { matcher: "Bash", hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
+      { matcher: "*", hooks: [{ type: "command", command: "trim-cmd", timeout: 10 }] },
+    ]);
+    expect(j.hooks.PreToolUse).toHaveLength(1);
+    expect(j.hooks.PostToolUseFailure).toHaveLength(1);
   });
 
   it("denies reading credential folders and the hub's data dir, in every mode", () => {

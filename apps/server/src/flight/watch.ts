@@ -4,6 +4,8 @@
  * FLIGHT_MAX_WAKES wakes, and writes it a digest line, between turns, when what needs FLIGHT
  * changes. The operator's Stop holds. It starts only the watch seat, never another seat or a loop.
  */
+
+import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
   FLIGHT_DEBOUNCE_MS,
@@ -15,8 +17,10 @@ import {
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_REWAKE_MS,
+  FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
+  FLIGHT_TOOLS,
   FLIGHT_WAKE_REMINDER,
   type FlightState,
   flightDownText,
@@ -111,6 +115,13 @@ export const changedWakeFacts = (previous: string, current: string): string[] =>
       return `${key} (${count})`;
     });
 };
+
+/** The tool set a FLIGHT run started with is what it keeps: a digest of the names it was offered. */
+export const flightToolsDigest = (): string =>
+  createHash("sha256")
+    .update([...FLIGHT_TOOLS].sort().join(","))
+    .digest("hex")
+    .slice(0, 16);
 
 export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const { config, store, bus, supervisor, enabled } = deps;
@@ -334,6 +345,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           first: wakeLine(state, digest, causes.length > 0 ? causes : ["initial"]),
         });
         processGone = false;
+        store.setSetting(
+          FLIGHT_RUN_TOOLS_SETTING,
+          JSON.stringify({ runId, tools: flightToolsDigest() }),
+        );
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
@@ -381,7 +396,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
     const n = flightWakes(store, runId);
-    if (rotationRequested || n >= FLIGHT_MAX_WAKES) {
+    if (rotationRequested || n >= FLIGHT_MAX_WAKES || toolsStale(runId)) {
       rotating = true;
       await supervisor.endRunByEngine(runId);
       rotationRequested = false;
@@ -433,6 +448,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
     } else if (!listed) {
       lastFacts = wake;
+    }
+  }
+
+  /**
+   * Whether the run was started with fewer or other tools than FLIGHT is granted now (a tool that
+   * went live after it began): it is rotated at its next idle wake, the fresh run seeing them all.
+   * A run with no record (started before this was kept) is left to rotate on its wake count.
+   */
+  function toolsStale(runId: string): boolean {
+    const raw = store.getSetting(FLIGHT_RUN_TOOLS_SETTING);
+    if (raw === null) return false;
+    try {
+      const kept = JSON.parse(raw) as { runId?: unknown; tools?: unknown };
+      return kept.runId === runId && kept.tools !== flightToolsDigest();
+    } catch {
+      return false;
     }
   }
 

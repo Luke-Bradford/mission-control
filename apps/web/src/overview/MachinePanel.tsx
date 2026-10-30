@@ -188,7 +188,7 @@ export function MachinePanel() {
   const none = m === null ? NO_SAMPLE : undefined;
 
   return (
-    <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
+    <Panel id="machP" title="Machine" sub="every 2 s">
       <div className="pb">
         <div
           className="res"

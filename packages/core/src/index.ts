@@ -24,6 +24,7 @@ export * from "./roles.ts";
 export * from "./runs.ts";
 export * from "./runtime.ts";
 export * from "./summary.ts";
+export * from "./tool-trim.ts";
 export * from "./topics.ts";
 export type * from "./types.ts";
 export * from "./usage.ts";

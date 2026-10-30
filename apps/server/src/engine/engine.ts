@@ -55,6 +55,8 @@ import {
   evidenceNoteKey,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_FLOOR_ENFORCING_PATHS,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fillLoopText,
   fixSentText,
   fixText,
@@ -158,6 +160,7 @@ import {
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
+import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
@@ -992,6 +995,21 @@ export function createEngine(deps: EngineDeps): Engine {
     "delete-local-branch",
     "update-branch",
   ]);
+
+  /** RETRO's latest reported findings as the author's fix list, else FLIGHT's own request. */
+  function reworkFindings(runId: string, reason: string): string {
+    const review = store
+      .reviewsOfRun(runId)
+      .filter((r) => r.state === "reported")
+      .at(-1);
+    return review
+      ? fixText({
+          retro: seatCallSign(review.seatId),
+          sha: review.sha,
+          findings: store.findingsOf(review.id),
+        })
+      : `FLIGHT requests rework: ${reason}`;
+  }
 
   /**
    * Whether the run's ticket holds this merge for the controller: null merges; otherwise `park` is
@@ -1829,9 +1847,19 @@ export function createEngine(deps: EngineDeps): Engine {
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }
 
+  const ticks = tickLogOf(store);
+
   const reconcileRun = (runId: string): Promise<void> => {
     if (!live()) return Promise.resolve();
-    return onChain(runId, () => pass(runId));
+    return onChain(runId, async () => {
+      const run = store.run(runId);
+      const done = ticks.step(`reconcile ${run?.repoId} ${runId} ${run?.loop?.phase ?? "no loop"}`);
+      try {
+        await pass(runId);
+      } finally {
+        done();
+      }
+    });
   };
 
   /** Whether an ended run's Blocked move and note are settled, or no longer wanted. */
@@ -2389,27 +2417,54 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async tick() {
       if (!live()) return;
-      const cache = {
-        prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
-        notes: store.notes(),
+      const startedAt = now();
+      ticks.begin(startedAt);
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      // a tick past its interval is logged once, with what it is on (the scheduler skips the next)
+      const noteOverrun = () => {
+        const steps = ticks.overrun();
+        if (steps !== null) log(overrunText(startedAt, steps));
       };
-      await tickCache.run(cache, async () => {
-        const runs = loopRuns();
-        const notes = cache.notes;
-        await Promise.all(runs.map((r) => wakePendingWork(r.id)));
-        await Promise.all(
-          store
-            .runsActiveSince(now())
-            .filter((r) => r.loop !== null && r.loop !== undefined)
-            .map((run) => watchGreenEvidence(run, notes)),
-        );
-        await Promise.all(runs.map((r) => reconcileRun(r.id)));
-        await refreshRuleNotes(runs);
-        await sweepNotes(notes);
-        untakeStale();
-        await takeForSeats();
-        await kickReviews();
-      });
+      // work that blocks the event loop starves the timer, so each step also checks the clock
+      const phase = async <T>(label: string, fn: () => Promise<T> | T): Promise<T> => {
+        const done = ticks.step(label);
+        try {
+          return await fn();
+        } finally {
+          if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+          done();
+        }
+      };
+      try {
+        timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
+        timer.unref();
+        const notes = await phase("load notes", () => store.notes());
+        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
+        await tickCache.run(cache, async () => {
+          const runs = await phase("list runs", loopRuns);
+          await phase("wake pending work", () =>
+            Promise.all(runs.map((r) => wakePendingWork(r.id))),
+          );
+          await phase("watch green evidence", () =>
+            Promise.all(
+              store
+                .runsActiveSince(now())
+                .filter((r) => r.loop !== null && r.loop !== undefined)
+                .map((run) => watchGreenEvidence(run, notes)),
+            ),
+          );
+          await Promise.all(runs.map((r) => reconcileRun(r.id)));
+          await phase("refresh rule notes", () => refreshRuleNotes(runs));
+          await phase("sweep notes", () => sweepNotes(notes));
+          await phase("untake stale", untakeStale);
+          await phase("take for seats", takeForSeats);
+          await phase("kick reviews", kickReviews);
+        });
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+        if (now() - startedAt >= ENGINE_TICK_MS) noteOverrun();
+        ticks.end(now());
+      }
     },
 
     reconcileRun,
@@ -2474,7 +2529,12 @@ export function createEngine(deps: EngineDeps): Engine {
             return refuse("wrong-action");
           if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2)
             return refuse("round-granted");
-          if (opts.action === "rework" && (loop.flightReworks?.[pushed.sha] ?? 0) >= 1)
+          if (
+            opts.action === "rework" &&
+            ((loop.flightReworks?.[pushed.sha] ?? 0) >= FLIGHT_REWORKS_PER_HEAD ||
+              Object.values(loop.flightReworks ?? {}).reduce((n, v) => n + v, 0) >=
+                FLIGHT_REWORKS_PER_RUN)
+          )
             return refuse("round-granted");
           if (opts.action === "accept") {
             const review = store
@@ -2546,33 +2606,48 @@ export function createEngine(deps: EngineDeps): Engine {
                 ...loop.flightReworks,
                 [pushed.sha]: (loop.flightReworks?.[pushed.sha] ?? 0) + 1,
               };
+            const findings = reworkFindings(run.id, loop.parked.reason);
+            const message =
+              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
+            // a run set aside is woken first; its seat on another run (a 409) queues the rework
+            let queue = false;
             if (next.aside) {
               try {
                 await supervisor.wakeRun(run.id);
-              } catch {
-                return refuse("rework-undelivered");
+                next.aside = null;
+              } catch (e) {
+                if ((e as { status?: unknown }).status !== 409) return refuse("rework-undelivered");
+                queue = true;
               }
-              next.aside = null;
             }
-            const review = store
-              .reviewsOfRun(run.id)
-              .filter((r) => r.state === "reported")
-              .at(-1);
-            const findings = review
-              ? fixText({
-                  retro: seatCallSign(review.seatId),
-                  sha: review.sha,
-                  findings: store.findingsOf(review.id),
-                })
-              : `FLIGHT requests rework: ${loop.parked.reason}`;
-            const message =
-              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
-            const sent = await supervisor.send(
-              run.id,
-              `${run.id}:flight-rework:${next.epoch}`,
-              message,
-            );
-            if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            if (queue && next.aside) {
+              // the rework waits in Comms for this run, and the engine wakes it, in working, once
+              // its seat is free (as a failed controller check does)
+              const stored = store.addComms({
+                at,
+                // the rework is FLIGHT's request, filed from its seat
+                from:
+                  config.crew?.sessions
+                    .flatMap((x) => x.seats)
+                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_CAPCOM,
+                to: run.agentId,
+                ticket: run.ticket ?? null,
+                ref: run.ticket ?? null,
+                targetRunId: run.id,
+                text: message,
+              });
+              if (stored === null) return refuse("rework-undelivered");
+              store.markCommsInboxRead(run.agentId, [stored.id]);
+              next.pendingLine = { key: `${run.id}:flight-rework:${next.epoch}`, text: message };
+              next.aside = { ...next.aside, wake: true };
+            } else {
+              const sent = await supervisor.send(
+                run.id,
+                `${run.id}:flight-rework:${next.epoch}`,
+                message,
+              );
+              if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
+            }
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };

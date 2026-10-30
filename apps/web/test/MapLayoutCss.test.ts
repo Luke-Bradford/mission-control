@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { THEME_TOKENS } from "../src/theme.ts";
 
 const css = readFileSync(join(import.meta.dirname, "../src/map/map.css"), "utf8");
 const rule = (selector: string) => css.match(new RegExp(`${selector} \\{([^}]+)\\}`))?.[1] ?? "";
@@ -20,14 +21,6 @@ const contrast = (a: string, b: string): number => {
   const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (light + 0.05) / (dark + 0.05);
 };
-const hudCss = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
-/** A palette token's hex, from hud.css's first (dark, theme-independent) token block. */
-const token = (name: string): string => {
-  const colour = new RegExp(`${name}: (#[0-9a-f]{6})`, "i").exec(hudCss)?.[1];
-  if (!colour) throw new Error(`Missing ${name}`);
-  return colour;
-};
-
 it("reserves auto rows for the key bar and deck around the flexible map row", () => {
   expect(rule(String.raw`\.map-body`)).toContain("grid-template-rows: auto minmax(0, 1fr) auto");
 });
@@ -79,9 +72,27 @@ it("keeps every seat colour at non-text contrast in its theme", () => {
     "--seat-5",
     "--seat-6",
     "--seat-7",
-    "--seat-flight",
-  ]) {
-    expect(contrast(token(name), dark), name).toBeGreaterThanOrEqual(3);
-    expect(contrast(token(name), light), name).toBeGreaterThanOrEqual(3);
+  ] as const) {
+    expect(contrast(THEME_TOKENS.dark[name], dark), `${name} dark`).toBeGreaterThanOrEqual(3);
+    expect(contrast(THEME_TOKENS.light[name], light), `${name} light`).toBeGreaterThanOrEqual(3);
   }
+});
+
+it("keeps active Map seat names legible on their changed surface", () => {
+  for (const selector of [
+    ".map-seat:hover .map-seat-name",
+    '.map-seat[aria-pressed="true"] .map-seat-name',
+  ]) {
+    expect(listed(selector)).toContain("color: var(--fg)");
+  }
+});
+
+it("keeps Map seat names readable while the adjacent light carries seat identity", () => {
+  expect(listed(".map-seat-name")).toContain("color: var(--fg)");
+  expect(listed(".map-light")).toContain("background: var(--light)");
+});
+
+it("uses the action type size for Map result and timeline controls", () => {
+  for (const selector of [".map-results button", ".map-timeline-controls button"])
+    expect(listed(selector)).toContain("font-size: var(--fs-s)");
 });

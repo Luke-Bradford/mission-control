@@ -317,6 +317,9 @@
 .map-timeline-controls strong {
   color: var(--fg);
 }
+.map-timeline-controls button {
+  font-size: var(--fs-s);
+}
 .map-timeline-controls .map-timeline-list {
   display: grid;
   gap: var(--sp-1);
@@ -512,8 +515,12 @@ button.map-timeline-tick {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .map-seat-name {
-  color: var(--light);
+  color: var(--fg);
   font-weight: 500;
+}
+.map-seat:hover .map-seat-name,
+.map-seat[aria-pressed="true"] .map-seat-name {
+  color: var(--fg);
 }
 .map-seat-on {
   color: var(--fg-2);

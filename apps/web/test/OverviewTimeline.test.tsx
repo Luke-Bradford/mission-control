@@ -19,7 +19,7 @@ function stub(lanes: OverviewTimeline["lanes"] = [], rows: CrewRow[] = []) {
   });
 }
 
-it("clips spans and ticks to the last hour and extends open spans to now", async () => {
+it("clips spans to the last hour and extends open spans to now", async () => {
   stub([
     {
       agentId: "dev-1",
@@ -41,29 +41,18 @@ it("clips spans and ticks to the last hour and extends open spans to now", async
     ["75%", "25%"],
     ["90%", "10%"],
   ]);
-  const ticks = container.querySelectorAll<HTMLElement>(".overview-tick");
-  expect(ticks).toHaveLength(1);
-  expect(ticks[0]?.style.left).toBe("50%");
+  // The hub still sends tool-call times; the Timeline draws no ticks for them.
+  expect(container.querySelectorAll(".overview-tick")).toHaveLength(0);
 });
 
 it("shows the axis and legend even for an empty window", async () => {
   stub();
   render(<TimelinePanel />);
   await screen.findByText("No activity in the last hour.");
-  for (const label of [
-    "-60m",
-    "-45m",
-    "-30m",
-    "-15m",
-    "now",
-    "turn",
-    "checks",
-    "lock",
-    "review",
-    "tool calls",
-  ]) {
+  for (const label of ["-60m", "-45m", "-30m", "-15m", "now", "turn", "checks", "lock", "review"]) {
     expect(screen.getByText(label)).toBeTruthy();
   }
+  expect(screen.queryByText("tool calls")).toBeNull();
   // no lane links in an empty window; only the head's link to the activity map
   const links = screen.queryAllByRole("link");
   expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
@@ -157,13 +146,17 @@ it("uses live crew names and colours and resizes its lane grid after updates", a
   stub(lanes, [seatRow({ id: "seat-1", displayCallSign: "guido-cx", index: 2 })]);
   const { container } = render(<TimelinePanel />);
   const lane = await screen.findByRole("link", { name: "guido-cx" });
-  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-3)");
+  expect(lane.querySelector<HTMLElement>(".num")?.style.getPropertyValue("--c")).toBe(
+    "var(--seat-3)",
+  );
   const grid = () => container.querySelector<HTMLElement>(".overview-lanes");
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("2");
   stub(lanes.slice(0, 1), [seatRow({ id: "seat-1", displayCallSign: "renamed", index: 4 })]);
   await act(async () => hub.refetchTopic("agents"));
   const renamed = await screen.findByRole("link", { name: "renamed" });
-  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-5)");
+  expect(renamed.querySelector<HTMLElement>(".num")?.style.getPropertyValue("--c")).toBe(
+    "var(--seat-5)",
+  );
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("1");
   stub();
   await act(async () => hub.refetchTopic("agents"));

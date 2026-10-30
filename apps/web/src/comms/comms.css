@@ -82,6 +82,9 @@
 
 /* The Needs-you count beside Decisions: the whole inbox, linked to its home on FLIGHT. */
 .comms-section-head .comms-needs-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--accent);
   font-size: var(--fs-s);
   font-weight: 400;
@@ -594,11 +597,12 @@
 
 .comms-actions button,
 .comms-react-set button {
-  min-height: 20px;
+  min-width: 24px;
+  min-height: 24px;
   padding: 0 var(--sp-1);
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   background: transparent;
   border: 0;
   border-radius: 2px;
@@ -707,8 +711,8 @@
   margin: 0 0;
   padding: 0 var(--sp-1);
   color: var(--accent);
+  font-size: var(--fs-s);
   font-family: var(--mono);
-  font-size: var(--fs-micro);
   line-height: var(--lh-micro);
   vertical-align: baseline;
   background: color-mix(in srgb, var(--accent) 14%, transparent);

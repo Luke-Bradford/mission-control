@@ -104,8 +104,11 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
+  TOOL_OUTPUT_DIR,
+  TRIM_HOOK_TIMEOUT_S,
   ticketControllerCheck,
   ticketInReviewText,
+  trimHookCommand,
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
@@ -134,6 +137,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
+import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -1550,6 +1554,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new Error("crew temp root must be a private directory owned by the server");
       }
       const tmp = realpathSync(tmpPath);
+      // made here, before the seat runs: the trim hook writes in it outside the sandbox
+      if (run.vendor !== "codex") {
+        const outDir = join(tmp, TOOL_OUTPUT_DIR);
+        try {
+          mkdirSync(outDir, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const st = lstatSync(outDir);
+        if (!st.isDirectory() || st.uid !== process.getuid?.())
+          throw new Error("crew tool-output folder must be a directory owned by the server");
+      }
       const pnpmStore = sharedPnpmStoreDir(crew?.worktrees ?? "");
       if (run.vendor === "codex")
         store.setSetting(codexTmpKey(run.id), JSON.stringify({ worktree: cwd, tmp }));
@@ -1692,7 +1708,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           area: info.seat.area,
           sandbox,
           mcpConfigFile: mcpPath,
-          hook: { command: hookCommand, timeoutS: GUARD_HOOK_TIMEOUT_S },
+          hook: {
+            command: hookCommand,
+            timeoutS: GUARD_HOOK_TIMEOUT_S,
+            trim: {
+              command: trimHookCommand({
+                node: crew?.node ?? DEFAULT_CREW_NODE,
+                entry: join(deps.hubRoot, TRIM_ENTRY),
+                dir: join(tmp, TOOL_OUTPUT_DIR),
+              }),
+              timeoutS: TRIM_HOOK_TIMEOUT_S,
+            },
+          },
         });
         session = startSession({
           command: deps.command,

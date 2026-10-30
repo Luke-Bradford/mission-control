@@ -57,6 +57,8 @@ export const MC_TOOL_NAMES = {
   holdItem: "hold_item",
   releaseHold: "release_hold",
   screenshotHud: "screenshot_hud",
+  editIssue: "edit_issue",
+  setFields: "set_fields",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -116,6 +118,8 @@ export const MC_TOOLS = {
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
+  editIssue: mcTool(MC_TOOL_NAMES.editIssue),
+  setFields: mcTool(MC_TOOL_NAMES.setFields),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

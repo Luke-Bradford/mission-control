@@ -7,6 +7,11 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const FIVE_HOURS = 5 * HOUR;
 
+/** The windows each vendor's quota is shown in: Codex has no 5-hour window worth showing. */
+export function quotaWindows(vendor: "claude" | "codex" | undefined): readonly ("5h" | "7d")[] {
+  return vendor === "codex" ? ["7d"] : ["5h", "7d"];
+}
+
 /** What a 5h window too young for a pace says, whether the hub or the clock found it so. */
 const TOO_YOUNG = "too little history for a pace";
 
