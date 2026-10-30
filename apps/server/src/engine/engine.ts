@@ -2602,11 +2602,6 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
-          if (opts.action === "rereview" && pushed)
-            next.flightRereviews = {
-              ...loop.flightRereviews,
-              [pushed.sha]: (loop.flightRereviews?.[pushed.sha] ?? 0) + 1,
-            };
           if (opts.action === "rework") {
             if (pushed)
               next.flightReworks = {
@@ -2890,14 +2885,9 @@ export function createEngine(deps: EngineDeps): Engine {
           pr.ci !== "failing"
         )
           return no("No failed CI on this run's current head.");
-        const count = run.loop.flightReruns?.[sha] ?? 0;
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);
-        store.setRunLoop(runId, {
-          ...run.loop,
-          flightReruns: { ...run.loop.flightReruns, [sha]: count + 1 },
-        });
         return { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` };
       });
     },

@@ -71,6 +71,7 @@ import {
   type ReviewState,
   type Run,
   type RunDigest,
+  runawayRefusedText,
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
@@ -100,6 +101,7 @@ import { pausedSeat } from "./crew-pause.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
+import { runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loophistory.ts";
 import {
@@ -820,6 +822,22 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
   const found = flightSeat(config);
   if (found === null) return null;
   const flightId = found.seat.id;
+  // FLIGHT's writes are stopped until the operator lifts the breaker, so it triages nothing:
+  // items reach the operator at once
+  const tripped = runawayTrip(store);
+  if (tripped !== null) {
+    return {
+      flightId,
+      repoId: found.session.repoId,
+      triaging: false,
+      live: false,
+      cause: "down",
+      detail: runawayRefusedText(tripped.reason),
+      since: tripped.at,
+      liveSince: 0,
+      showsAt: null,
+    };
+  }
   const live = flightLive(config, store);
   const notes = store.notes().filter((n) => n.dismissedAt === null);
   const note =

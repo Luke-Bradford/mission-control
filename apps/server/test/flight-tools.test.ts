@@ -134,7 +134,7 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { liftRunaway, recordWrite, writeTarget } from "../src/flight/runaway.ts";
+import { canonicalArgs, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
@@ -2110,6 +2110,22 @@ describe("message_seat unpark", () => {
 });
 
 describe("end_run", () => {
+  it("five identical end_run calls trip the runaway breaker", async () => {
+    const end = async () => {
+      // each end frees the seat: the same ticket is parked again for the next one
+      live("guido-1", "r-g", { ticket: "mc#7" });
+      store.setRunLoop("r-g", {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "nothing", reason: "nothing to push", ended: false },
+      });
+      return call("end_run", { runId: "r-g", basis: "nothing left to do" });
+    };
+    for (let i = 0; i < 5; i++) expect((await end()).isError).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toHaveLength(1);
+    expect((await end()).text).toContain("runaway breaker");
+  });
+
   const E = (over: Record<string, unknown> = {}) => ({
     runId: "r-g",
     basis: "its ticket needs a docs note the planning lane wrote",
@@ -2441,6 +2457,15 @@ describe("accept_ruling", () => {
 });
 
 describe("sync_main", () => {
+  it("five identical sync_main calls trip the runaway breaker", async () => {
+    engineOn = true;
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    const sync = () => call("sync_main", { runId: "r-g", basis: "conflicts with main" });
+    for (let i = 0; i < 5; i++) expect((await sync()).isError).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toHaveLength(1);
+    expect((await sync()).text).toContain("runaway breaker");
+  });
+
   const S = (over: Record<string, unknown> = {}) => ({
     runId: "r-g",
     basis: "the PR conflicts with main and the author is not needed",
@@ -5837,6 +5862,40 @@ describe("superuser housekeeping", () => {
     });
     expect(engineCalls).toHaveLength(5);
   });
+  it("keeps a budget park, an operator stop and an operator hold in force next to the breaker", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "budget", reason: "tokens", ended: false },
+    });
+    expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    store.setSeatSession({ ...row("guido-1", "r-pr"), state: "stopped" });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    store.raiseNote({
+      key: "blocked:r-pr:0",
+      kind: "blocked",
+      runId: "r-pr",
+      seatId: null,
+      repoId: null,
+      text: "check",
+      at: NOW - 1,
+    });
+    expect(
+      (
+        await call("hold_item", {
+          key: "note:blocked:r-pr:0",
+          reason: "Waiting",
+          condition: { kind: "manual" },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(store.getSetting("flight.runaway")).toBeNull();
+  });
   it("keeps budget, ruling and operator-held parks out of rework", async () => {
     elevated();
     runPr();
@@ -8307,8 +8366,11 @@ describe("the runaway breaker", () => {
   it("trips on 5 identical calls in 30 minutes, then refuses writes with its text and raises one brief", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
       expect((await same()).isError).toBeUndefined();
-    const target = writeTarget("message_seat", msg);
-    const reason = runawaySameReason("message_seat", target, FLIGHT_RUNAWAY.sameActionLimit);
+    const reason = runawaySameReason(
+      "message_seat",
+      canonicalArgs(msg).slice(0, 80),
+      FLIGHT_RUNAWAY.sameActionLimit,
+    );
     expect(await same()).toEqual(refused(runawayRefusedText(reason)));
     // any other write is stopped too, and still no second brief
     expect(await call("track", entry)).toEqual(refused(runawayRefusedText(reason)));
@@ -8326,16 +8388,19 @@ describe("the runaway breaker", () => {
     expect(flags()).toEqual([]);
   });
 
-  it("counts a queue reorder by the ticket it moves", async () => {
+  it("six moves of one ticket above different tickets do not trip; five identical ones do", async () => {
     reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
-    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
-      await call("promote", {
+    const reorder = (above: string) =>
+      call("promote", {
         action: "queue-reorder",
         seat: "guido-1",
         move: "mc#2",
-        above: `mc#${10 + i}`,
+        above,
         basis: "b",
       });
+    for (let i = 0; i < 6; i++) expect((await reorder(`mc#${10 + i}`)).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await reorder("mc#99");
     expect(flags()).toHaveLength(1);
   });
 
@@ -8388,6 +8453,13 @@ describe("the runaway breaker", () => {
     expect((await call("message_seat", { ...msg, text: "other" })).isError).toBeUndefined();
     expect(flags()).toEqual([]);
     expect(JSON.parse((await call("flight_state", {})).text).breaker.tripped).toBe(false);
+  });
+
+  it("does not trip on six headline updates, and trips on five identical end_run or sync_main calls", async () => {
+    const headline = () =>
+      call("update_brief", { section: FLIGHT_HEADLINE, text: "H", basis: "wake" });
+    for (let i = 0; i < 6; i++) expect((await headline()).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
   });
 
   it("lets writes through again once the operator lifts it, and logs the lift", async () => {

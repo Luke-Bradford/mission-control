@@ -3477,7 +3477,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
       // Reader: docs/runbook.md#flight-runaway-breaker (the operator lifts a tripped breaker)
-      api.post("/flight/runaway/lift", async (_req, reply) => {
+      api.post("/flight/runaway/lift", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         if (!liftRunaway(store, bus, now()))
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };

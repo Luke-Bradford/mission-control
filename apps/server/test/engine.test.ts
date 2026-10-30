@@ -5088,7 +5088,6 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
-      expect(loopOf().flightReruns).toEqual({ [SHA]: 3 });
     });
 
     it("an accepted head waits until the waived status has been written", async () => {

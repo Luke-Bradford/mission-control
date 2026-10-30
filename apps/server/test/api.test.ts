@@ -8685,6 +8685,13 @@ describe("operator token", () => {
 });
 
 describe("POST /api/flight/runaway/lift", () => {
+  it("refuses a body with fields", async () => {
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    const res = await post("/api/flight/runaway/lift", json, { extra: 1 });
+    expect(res.statusCode).toBe(400);
+    expect(store.getSetting(FLIGHT_RUNAWAY_SETTING)).not.toBeNull();
+  });
+
   it("answers 409 when the breaker is not tripped", async () => {
     const res = await post("/api/flight/runaway/lift");
     expect(res.statusCode).toBe(409);

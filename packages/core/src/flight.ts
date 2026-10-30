@@ -663,7 +663,7 @@ export const closeComment = (replacement: number): string =>
 export const CLOSED_PREFIX = "Closed as";
 export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
   `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
-/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both count as writes for the runaway breaker. */
+/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both count as writes for the runaway breaker even though the call returns an error. */
 export const CLOSE_UNCONFIRMED_DECISION =
   "Close unconfirmed; the comment and close may have landed";
 export const CLOSE_FAILED_DECISION = "Close failed; the replacement comment may have posted";

@@ -16,6 +16,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_SETTING,
   FLIGHT_TRIAGE_WAIT_MS,
   NEW_LOOP,
   needsYouItems,
@@ -2748,6 +2749,30 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
           i.kind === "question" && i.owner === "operator" && i.agentId === "guido-1" && !i.brief,
       ),
     ).toEqual([]);
+
+  it("does not triage while the runaway breaker is tripped: a stuck run reaches the operator at once", () => {
+    flight();
+    store.raiseNote({
+      key: "blocked:r-guido:0",
+      kind: "blocked",
+      runId: "r-guido",
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: "blocked",
+      at: NOW - MIN,
+    });
+    const item = () => all().find((i) => i.key === "note:blocked:r-guido:0");
+    expect(item()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+    store.setSetting(
+      FLIGHT_RUNAWAY_SETTING,
+      JSON.stringify({ at: NOW - 30_000, reason: "a loop" }),
+    );
+    expect(item()).toMatchObject({ owner: "operator" });
+    expect(item()?.flightTriage).toBeUndefined();
+    expect(aggregate()?.text).toContain("runaway breaker");
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
+    expect(item()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+  });
 
   it("is absent while FLIGHT is live and within its window; the question is FLIGHT's", () => {
     flight();

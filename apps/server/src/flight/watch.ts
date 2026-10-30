@@ -415,7 +415,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const listed = hasFacts(wake);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
     // FLIGHT's writes are stopped until the operator lifts the breaker: a wake could only idle
-    if (state.breaker.tripped) return;
+    if (state.breaker.tripped) {
+      // what the breaker is holding back is not delivered: a lift alone wakes FLIGHT
+      lastFacts = wake;
+      return;
+    }
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);

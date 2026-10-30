@@ -908,6 +908,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
   const fail = (t: string): Result => ({ text: t, isError: true });
+  /** A call that waited in a queue runs after the breaker may have tripped: its refusal, or null. */
+  const breakerRefusal = (): Result | null => {
+    const tripped = runawayTrip(store);
+    return tripped === null ? null : fail(runawayRefusedText(tripped.reason));
+  };
   const screenshotHud = async (ctx: McToolContext, args: unknown): Promise<Result> => {
     const c = flightCall(deps, ctx, ScreenshotHudArgs, args);
     if (!c.ok) return c.result;
@@ -926,6 +931,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const renderer = deps.screenshotHud;
     return queued(hudRenderQueue, "host", async () => {
+      const stopped = breakerRefusal();
+      if (stopped) return stopped;
       // The call may have waited for another FLIGHT; a live downgrade takes effect before launch.
       const liveDenied = requirePowers(config, repo.id, "superuser");
       if (liveDenied) return liveDenied;
@@ -1816,6 +1823,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // one at a time per repo, so the duplicate check sees the earlier call's issue; the
     // check lists the repo's open issues, not GitHub search, whose index lags and reads qualifiers
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
+      const stopped = breakerRefusal();
+      if (stopped) return stopped;
       const at = now();
       const cwd = crewDir(deps.dbPath);
       const failed = (step: string, r: { code: number | null; stderr: string }): Result => {
@@ -1921,6 +1930,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if (unfit !== null) return fail(commentTextText(unfit));
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
+      const stopped = breakerRefusal();
+      if (stopped) return stopped;
       const at = now();
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const r = await deps.gh(
@@ -2863,6 +2874,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       grantable: ["read-only"],
       call: (ctx, args) => {
         const run = async (): Promise<Result> => {
+          const stopped = breakerRefusal();
+          if (stopped) return stopped;
           const c = flightCall(deps, ctx, schema, args);
           if (!c.ok) return c.result;
           const repo = repoOf();
@@ -3401,7 +3414,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       },
       modes: [],
       grantable: ["read-only"],
-      call: (ctx, args) => queued(ticketQueue, repoOf()?.id ?? "", () => promote(ctx, args)),
+      call: (ctx, args) =>
+        queued(ticketQueue, repoOf()?.id ?? "", async () => breakerRefusal() ?? promote(ctx, args)),
     },
     {
       name: MC_TOOL_NAMES.endRun,
@@ -3417,7 +3431,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],
-      call: (ctx, args) => queued(ticketQueue, repoOf()?.id ?? "", () => acceptRuling(ctx, args)),
+      call: (ctx, args) =>
+        queued(
+          ticketQueue,
+          repoOf()?.id ?? "",
+          async () => breakerRefusal() ?? acceptRuling(ctx, args),
+        ),
     },
     {
       name: MC_TOOL_NAMES.syncMain,
@@ -3736,7 +3755,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : // an attempt may have written before it failed
             tool.name === MC_TOOL_NAMES.screenshotHud ||
             (tool.name === MC_TOOL_NAMES.closeTicket &&
-              result.text.includes(closeUnconfirmedText()));
+              (result.text.includes(closeUnconfirmedText()) ||
+                result.text.includes(closeFailedText())));
       if (landed) noteFlightWrite(store, bus, now(), tool.name, args);
       return result;
     },

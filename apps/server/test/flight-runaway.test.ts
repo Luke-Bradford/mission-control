@@ -101,20 +101,23 @@ describe("runawayReason", () => {
 });
 
 describe("writeTarget", () => {
-  it("is the arguments without the basis, in a stable order", () => {
-    expect(writeTarget("end_run", { runId: "r-1", basis: "one" })).toBe(
-      writeTarget("end_run", { basis: "two", runId: "r-1" }),
+  it("is a sha256 of the arguments without the basis, in a stable order", () => {
+    expect(writeTarget({ runId: "r-1", basis: "one" })).toBe(
+      writeTarget({ basis: "two", runId: "r-1" }),
     );
-    expect(writeTarget("message_seat", { seat: "g", text: "a" })).not.toBe(
-      writeTarget("message_seat", { seat: "g", text: "b" }),
-    );
-    expect(writeTarget("end_run", undefined)).toBe("{}");
+    expect(writeTarget({ runId: "r-1" })).toMatch(/^[0-9a-f]{64}$/);
+    expect(writeTarget({ seat: "g", text: "a" })).not.toBe(writeTarget({ seat: "g", text: "b" }));
   });
 
-  it("is the ticket moved for a queue reorder, whatever it moved above", () => {
+  it("tells apart arguments that share a long prefix", () => {
+    const long = "x".repeat(300);
+    expect(writeTarget({ text: `${long}a` })).not.toBe(writeTarget({ text: `${long}b` }));
+  });
+
+  it("is the full arguments for a queue reorder too: another ticket above is another call", () => {
     const a = { action: "queue-reorder", seat: "g", move: "mc#2", above: "mc#1", basis: "b" };
-    expect(writeTarget("promote", a)).toBe("mc#2");
-    expect(writeTarget("promote", { ...a, above: "mc#9", seat: "i" })).toBe("mc#2");
+    expect(writeTarget({ ...a, above: "mc#9" })).not.toBe(writeTarget(a));
+    expect(writeTarget({ ...a, basis: "other" })).toBe(writeTarget(a));
   });
 });
 
@@ -174,6 +177,20 @@ describe("the breaker", () => {
     expect(flags[0]?.text).toContain(runawaySameReason("end_run", "k", 5));
     expect(store.flightDecisions(0, 20).filter((d) => d.kind === "hub")).toHaveLength(1);
     expect(seen).toContain("attention");
+  });
+
+  it("survives reopening the store", () => {
+    write(5);
+    watchRunaway(store, bus, NOW);
+    const path = join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "again.sqlite");
+    store.close();
+    store = new Store(path);
+    expect(runawayTrip(store)).toBeNull();
+    const reopened = join(mkdtempSync(join(tmpdir(), "mc-flight-runaway-")), "kept.sqlite");
+    const first = new Store(reopened);
+    first.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: NOW, reason: "a loop" }));
+    first.close();
+    expect(runawayTrip(new Store(reopened))).toEqual({ at: NOW, reason: "a loop" });
   });
 
   it("treats an unreadable stored trip as tripped", () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   FLIGHT_HOUR_MS,
   FLIGHT_RUNAWAY,
@@ -33,7 +34,10 @@ const EVENTS_SETTING = "flight.runaway-events";
 export interface WriteEvent {
   at: number;
   action: string;
+  /** A sha256 of the call's full canonical arguments: two calls match only when all of them do. */
   target: string;
+  /** The start of those arguments, for the words that name a trip; not matched on. */
+  label?: string;
 }
 
 /**
@@ -69,17 +73,18 @@ const canonical = (v: unknown): unknown =>
         )
       : v;
 
+/** A write call's arguments without the free-text basis, in a stable key order. */
+export function canonicalArgs(args: unknown): string {
+  const { basis: _basis, ...rest } = argsOf(args);
+  return JSON.stringify(canonical(rest));
+}
+
 /**
- * What a write call acted on: its arguments, without the free-text basis, so the same message or
- * the same edit repeated is a loop but different work on one ticket is not. A queue reorder is
- * the ticket it moves.
+ * What a write call acted on: a sha256 of its full canonical arguments, so the same message or the
+ * same edit repeated is a loop but different work on one ticket is not.
  */
-export function writeTarget(name: string, args: unknown): string {
-  const a = argsOf(args);
-  if (name === MC_TOOL_NAMES.promote && a.action === "queue-reorder" && typeof a.move === "string")
-    return a.move.slice(0, 200);
-  const { basis: _basis, ...rest } = a;
-  return JSON.stringify(canonical(rest)).slice(0, 200);
+export function writeTarget(args: unknown): string {
+  return createHash("sha256").update(canonicalArgs(args)).digest("hex");
 }
 
 /** Records one successful FLIGHT write and trips the breaker if it is now a loop. */
@@ -90,7 +95,12 @@ export function noteFlightWrite(
   action: string,
   args: unknown,
 ): void {
-  recordWrite(store, { at, action, target: writeTarget(action, args) });
+  recordWrite(store, {
+    at,
+    action,
+    target: writeTarget(args),
+    label: canonicalArgs(args).slice(0, 80),
+  });
   watchRunaway(store, bus, at);
 }
 
@@ -136,7 +146,8 @@ export function runawayReason(events: readonly WriteEvent[], now: number): strin
     const key = JSON.stringify([e.action, e.target]);
     const n = (counts.get(key) ?? 0) + 1;
     counts.set(key, n);
-    if (n >= FLIGHT_RUNAWAY.sameActionLimit) return runawaySameReason(e.action, e.target, n);
+    if (n >= FLIGHT_RUNAWAY.sameActionLimit)
+      return runawaySameReason(e.action, e.label ?? e.target, n);
   }
   return null;
 }
