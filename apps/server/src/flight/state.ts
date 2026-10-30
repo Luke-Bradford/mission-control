@@ -71,8 +71,14 @@ import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import { type CcConfig, seatUnavailable } from "../config.ts";
+import { readCrewPause } from "../crew-pause.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_CLI_VERSION, NO_LOCK, questionWithOperator } from "../hud.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+  machineCapacitySince,
+} from "../machine-capacity.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -560,6 +566,9 @@ export function flightState(i: {
       prs: [],
       items: [],
       holds: [],
+      reviewQueue: { queued: 0, running: 0, seats: [] },
+      mergeQueue: [],
+      flowHolds: [],
       recent,
       limits,
       brief,
@@ -628,6 +637,24 @@ export function flightState(i: {
       text: q.text,
       ageMin: Math.floor((now - q.at) / 60_000),
     }));
+
+  const reviewRows = store.reviewsIn(["queued", "starting", "running"]);
+  const reviewSeats = mine.filter((s) => seatDef(s).loop === "review");
+  const reviewQueue = {
+    queued: reviewRows.filter((row) => row.state === "queued").length,
+    running: reviewRows.filter((row) => row.state === "starting" || row.state === "running").length,
+    seats: reviewSeats.map((seat) => {
+      const reviews = reviewRows.filter((row) => row.seatId === seat.id);
+      const held = unended(seat.id);
+      return {
+        seat: seat.id,
+        queued: reviews.filter((row) => row.state === "queued").length,
+        running: reviews.filter((row) => row.state === "starting" || row.state === "running")
+          .length,
+        idle: !seatUnavailable(seat) && held === null && !busy.some((b) => b.seatId === seat.id),
+      };
+    }),
+  };
 
   const active = store.activeTickets();
   const tickets = board
@@ -716,6 +743,21 @@ export function flightState(i: {
       };
     });
 
+  const mergeQueue = prs
+    .filter((p) => p.state === "open")
+    .map((p) => {
+      const waitsOn = [
+        ...(p.failingChecks.length > 0 ? [`CI: ${p.failingChecks.join(", ")}`] : []),
+        ...(p.review === null ? ["review"] : []),
+        ...(p.review?.blocking
+          ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
+          : []),
+        ...(p.awaitingFlight === null || p.awaitingFlight === undefined ? [] : ["FLIGHT merge"]),
+      ];
+      return { pr: p.pr, waitsOn };
+    })
+    .filter((p) => p.waitsOn.length > 0);
+
   const aside = store
     .loopRuns(now)
     .filter(
@@ -764,6 +806,79 @@ export function flightState(i: {
       },
     ];
   });
+
+  const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+  const capacity = machineCapacity(
+    store.machineSamples(machineCapacitySince(now, capacityConfig)),
+    now,
+    capacityConfig,
+  );
+  const queuedReviews = reviewQueue.queued;
+  const idleReviewers = reviewQueue.seats.filter((seat) => seat.idle).length;
+  const eligibleBuilds = tickets.filter((ticket) => ticket.ready).length;
+  const idleBuilds = seats.filter((seat) => seat.loop === "build" && seat.free).length;
+  const flowHolds: NonNullable<FlightState["flowHolds"]> = [
+    ...(capacity.blocked && capacity.reason !== null
+      ? [
+          {
+            kind: "machine" as const,
+            reason: capacity.reason,
+            blocks:
+              queuedReviews > 0
+                ? `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`
+                : `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+          },
+        ]
+      : []),
+    ...(() => {
+      const pause = readCrewPause(store);
+      if (pause === null) return [];
+      const blocked = reviewQueue.seats.filter((seat) =>
+        pause.seats === "all" ? true : pause.seats.includes(seat.seat),
+      ).length;
+      return [
+        {
+          kind: "crew-pause" as const,
+          reason: pause.reason,
+          blocks: `${blocked} review seat${blocked === 1 ? "" : "s"} and ${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"}`,
+        },
+      ];
+    })(),
+    ...seats
+      .filter((seat) => seat.atStop)
+      .map((seat) => {
+        const accountId = mine.find((source) => source.id === seat.id)?.accountId;
+        const account = config.accounts.find((source) => source.id === accountId);
+        const reading =
+          account === undefined || accountId === undefined
+            ? null
+            : (["5h", "7d"] as const)
+                .map((window) => ({ window, usage: store.latestUsage(accountId, window) }))
+                .find(
+                  ({ usage }) =>
+                    usage !== null && usage.resetAt > now && usage.pct >= account.stopAt,
+                );
+        const reason =
+          reading === null ||
+          reading === undefined ||
+          reading.usage === null ||
+          account === undefined
+            ? `${seat.call}'s account is at its quota stop`
+            : `${seat.call}'s ${reading.window} quota is ${reading.usage.pct}% (stop ${account.stopAt}%)`;
+        return {
+          kind: "quota" as const,
+          reason,
+          blocks: `${seat.loop} work assigned to ${seat.call}`,
+        };
+      }),
+    ...seats
+      .filter((seat) => seat.state === "stopped")
+      .map((seat) => ({
+        kind: "seat-stopped" as const,
+        reason: `${seat.call} is stopped`,
+        blocks: `${seat.loop} work assigned to ${seat.call}`,
+      })),
+  ];
 
   const outcomes = store.flightIncoming();
   const digestMatches = store.notifications().flatMap((n) => {
@@ -849,6 +964,9 @@ export function flightState(i: {
     prs,
     items,
     holds,
+    reviewQueue,
+    mergeQueue,
+    flowHolds,
     recent,
     limits,
     brief,
@@ -1037,6 +1155,8 @@ export function wakeFacts(
     startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
+  const reviewFault =
+    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle);
   return JSON.stringify({
     retrospective: s.retrospective ? [s.retrospective.day] : [],
     signals: s.signals
@@ -1061,6 +1181,18 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
+    reviews: reviewFault
+      ? [
+          s.reviewQueue?.queued ?? 0,
+          s.reviewQueue?.running ?? 0,
+          ...(s.reviewQueue?.seats ?? []).map(
+            (seat) => `${seat.seat}:${seat.queued}:${seat.running}:${seat.idle}`,
+          ),
+        ]
+      : [],
+    merge: s.mergeQueue?.map((pr) => `${pr.pr}:${pr.waitsOn.join(",")}`).sort() ?? [],
+    holdsInForce:
+      s.flowHolds?.map((hold) => `${hold.kind}:${hold.reason}:${hold.blocks}`).sort() ?? [],
     prs: s.prs
       .map(
         (p) =>

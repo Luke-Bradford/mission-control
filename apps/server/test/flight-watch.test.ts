@@ -36,6 +36,7 @@ import {
   type PullRequestView,
   type Run,
   type SeatSessionRow,
+  wakeLine,
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -523,6 +524,67 @@ describe("FLIGHT's evidence", () => {
     park("silent");
     store.addEvidence("r-guido", "note", T0);
     expect(parkedOf()?.report).toBeUndefined();
+  });
+});
+
+describe("FLIGHT's flow queues", () => {
+  it("names a machine hold that leaves queued reviews without a reviewer", () => {
+    const crew = config.crew;
+    if (crew === undefined) throw new Error("test fixture has no crew");
+    const flowConfig: CcConfig = {
+      ...config,
+      crew: {
+        ...crew,
+        sessions: crew.sessions.map((session) => ({
+          ...session,
+          seats: [...session.seats, seat("retro-2", "RETRO", { mode: "scratch" })],
+        })),
+      },
+    };
+    for (let n = 1; n <= 5; n++) {
+      store.requestReview({
+        authorRunId: `r-author-${n}`,
+        repoId: "mc",
+        seatId: n % 2 === 0 ? "retro-2" : "retro-1",
+        prNumber: n,
+        sha: `sha-${n}`,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      });
+    }
+    store.addMachineSample({
+      at: T0,
+      cpuPct: null,
+      memUsedBytes: 1,
+      diskFreeBytes: 10 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      swapUsedBytes: 0,
+      memTotalBytes: 100 * 1024 ** 3,
+      memoryPressureFreePct: 90,
+      load1: 0,
+      cores: 8,
+      agents: null,
+    });
+
+    const result = flightState({ config: flowConfig, store, busy: [], now: T0 });
+
+    expect(result.reviewQueue).toEqual({
+      queued: 5,
+      running: 0,
+      seats: [
+        { seat: "retro-1", queued: 3, running: 0, idle: true },
+        { seat: "retro-2", queued: 2, running: 0, idle: true },
+      ],
+    });
+    expect(result.flowHolds).toContainEqual({
+      kind: "machine",
+      reason: "disk free is 10.0 GB (below 15 GB)",
+      blocks: "5 queued reviews for 2 idle review seats",
+    });
+    expect(wakeFacts(result)).toContain("machine");
+    expect(wakeLine(result)).toContain("name the hold and feedback loop");
   });
 });
 
