@@ -45,16 +45,16 @@ const edgeCounts = (tries: readonly LoopTry[]): readonly [string, number][] => {
 
 /** A visit's outcome and its reason as one line; the whole text opens on a click. */
 function VisitNote({ visit }: { visit: LoopTry }) {
-  if (!visit.reason) return <span className="run-checklist-note">{visit.outcome}</span>;
+  if (!visit.reason) return <div className="run-checklist-note">{visit.outcome}</div>;
   const { line, full } = reasonLine(visit.reason);
   const text = `${visit.outcome}: ${line}`;
-  if (full === null) return <span className="run-checklist-note">{text}</span>;
+  if (full === null) return <div className="run-checklist-note">{text}</div>;
   return (
-    <span className="run-checklist-note">
+    <div className="run-checklist-note">
       <Expandable summary={text}>
         <span className="run-checklist-full">{full}</span>
       </Expandable>
-    </span>
+    </div>
   );
 }
 
@@ -84,10 +84,10 @@ export function RunChecklist({ view, now }: { view: RunLoopView; now: number }) 
       {visits(tries).map((visit) => (
         <li key={`${visit.step}:${visit.fix ? "fix" : "try"}:${visit.n}:${visit.startedAt}`}>
           <span className={tryClass(visit)}>{visit.outcome === "pass" ? "✓" : "●"}</span>
-          <span>
+          <div>
             <b>{stepLabel(visit.step)}</b>
             <VisitNote visit={visit} />
-          </span>
+          </div>
           <span className="num muted">
             {tokenText(visit.tokens)} · {tryMinutes(visit, now)}m
             {visit.next && (
@@ -213,7 +213,7 @@ export function RunTrace({
               {view.events.map((event) => {
                 const { line, full } = eventLine(event.text, view.tries);
                 return (
-                  <p key={event.key}>
+                  <div className="trace-event" key={event.key}>
                     {full === null ? (
                       line
                     ) : (
@@ -221,7 +221,7 @@ export function RunTrace({
                         <span className="run-checklist-full">{full}</span>
                       </Expandable>
                     )}
-                  </p>
+                  </div>
                 );
               })}
             </section>

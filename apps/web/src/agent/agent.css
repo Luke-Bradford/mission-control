@@ -753,7 +753,8 @@ button.f[aria-pressed="true"] {
   font-size: var(--fs);
 }
 
-.trace-section p {
+.trace-section p,
+.trace-event {
   margin: 4px 0;
 }
 

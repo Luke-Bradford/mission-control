@@ -7,7 +7,7 @@ import {
   type RunView,
 } from "@mc/core";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunChecklist, RunTrace } from "../src/agent/RunTrace.tsx";
 
 const NOW = 1_730_000_000_000;
@@ -237,5 +237,25 @@ describe("Run trace", () => {
     fireEvent.click(disclosure.querySelector("summary") as HTMLElement);
     expect(disclosure.textContent).toContain(suffix);
     expect(container.textContent?.split(suffix)).toHaveLength(2);
+  });
+
+  it("nests its disclosures in valid HTML", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refusal = pushChecksText("80001f8abcdef", [
+      { command: "pnpm -s test", state: "missing" },
+    ]);
+    const parked = {
+      ...view,
+      events: [
+        { key: "m", runId: "run/alpha", text: `merge held: ${"wait. ".repeat(40)}`, at: NOW },
+      ],
+      tries: [{ ...tries[1], endedAt: null, outcome: "parked" as const, reason: refusal }],
+    };
+    render(<RunTrace runId="p" view={parked} startedAt={NOW - 9_000} endedAt={null} now={NOW} />);
+    expect(document.querySelectorAll("details")).toHaveLength(2);
+    // a disclosure is block content: never inside a paragraph or an inline span
+    expect(document.querySelectorAll("p details, span details")).toHaveLength(0);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 });

@@ -26,12 +26,21 @@ const tries: LoopTry[] = STEPS.map((step, index) => ({
 const view: RunLoopView = {
   runId: RUN,
   loop: { phase: "review", ciFails: 1, parked: null } as RunLoopView["loop"] & object,
-  events: tries.map((try_, index) => ({
-    key: `e${index}`,
-    runId: RUN,
-    text: try_.reason ? `parked: ${try_.reason}` : `${try_.step} finished`,
-    at: try_.endedAt ?? START,
-  })),
+  events: [
+    ...tries.map((try_, index) => ({
+      key: `e${index}`,
+      runId: RUN,
+      text: try_.reason ? `parked: ${try_.reason}` : `${try_.step} finished`,
+      at: try_.endedAt ?? START,
+    })),
+    // a long event no visit owns: one line, the whole text behind a click
+    {
+      key: "held",
+      runId: RUN,
+      text: `merge held by CAPCOM: ${"wait for the freeze to lift, ".repeat(8)}then release it`,
+      at: START + 9 * 60_000,
+    },
+  ],
   tries,
   round: 2,
   budget: 20_000,
@@ -95,6 +104,10 @@ describeRendered("Run Trace, rendered", () => {
       // A parked step's refusal is one line: the full text is behind a click, and shown once.
       expect(await page.boxes(".run-checklist details:not([open])")).toHaveLength(1);
       expect(await page.unclipped(".run-checklist-note")).not.toContain(false);
+      // Every disclosure's click target, in the timeline and in Run events, is at least 24px tall.
+      const targets = await page.boxes(".trace-section summary");
+      expect(targets.length, "timeline and event disclosures").toBeGreaterThanOrEqual(2);
+      for (const target of targets) expect(target.height).toBeGreaterThanOrEqual(24);
       // The header's tabs all fit: none ends past the tabs' own box or runs under the status meters.
       const tabs = await page.box(".top .tabs");
       const status = await page.box(".top .top-status");
