@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AuditRunKind,
   AuditView,
   BoardItem,
   Escalation,
@@ -1156,8 +1157,15 @@ describe("Store", () => {
         category,
       }) as ReviewFinding;
 
+    const builders = new Map<string, AuditRunKind>([
+      ["a1", "build"],
+      ["guido", "build"],
+      ["planner", "plan"],
+      ["flight", "watch"],
+      ["ebull", "observed"],
+    ]);
     const overuse = () => {
-      const t = store.audit(until - 7 * DAY, until).tokenOveruse;
+      const t = store.audit(until - 7 * DAY, until, builders).tokenOveruse;
       if (t === undefined) throw new Error("audit has no tokenOveruse");
       return t;
     };
@@ -1245,6 +1253,23 @@ describe("Store", () => {
         ["m8", 400_000, "wide-ticket"],
       ]);
       expect(t.expected).toContainEqual({ size: "L", tokens: 400_000, measured: false });
+    });
+
+    it("counts only build runs, in the findings and in the baseline", () => {
+      for (const [id, agentId, total] of [
+        ["flight", "flight", 3_000_000],
+        ["obs", "ebull", 900_000],
+        ["unknown", "gone", 900_000],
+      ] as const) {
+        ended(0, until - DAY, total, { id, agentId, ticket: null });
+      }
+      // planner runs on size M tickets would drag its median down to 1k
+      for (const n of [1, 2, 3, 4, 5, 6]) {
+        ended(n, until - DAY + n, 1_000, { id: `plan${n}`, agentId: "planner" });
+      }
+      ended(6, until - 2 * DAY, 300_000);
+      const t = overuse();
+      expect(t.runs.map((r) => [r.runId, r.expected])).toEqual([["m6", 153_750]]);
     });
 
     it("groups repeat causes across runs", () => {

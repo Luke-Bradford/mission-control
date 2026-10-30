@@ -2834,7 +2834,7 @@ export class Store {
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
-      tokenOveruse: this.auditTokenOveruse(since, until),
+      tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       surgeonProposals: [],
     };
   }
@@ -2938,9 +2938,15 @@ export class Store {
   /**
    * Runs started in range whose input + output tokens pass their size's expected use (see
    * `tokenBaselines`, built from build runs of the last `AUDIT_BASELINE_DAYS` days), largest first.
+   * Only runs of agents `kinds` marks as build count: watch, plan and review seats and observed
+   * loops have other shapes of use.
    * A finding only: it reads the run, never changes it.
    */
-  private auditTokenOveruse(since: number, until: number): AuditView["tokenOveruse"] {
+  private auditTokenOveruse(
+    since: number,
+    until: number,
+    kinds: ReadonlyMap<string, AuditRunKind>,
+  ): AuditView["tokenOveruse"] {
     const runRows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
     // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
@@ -2950,14 +2956,16 @@ export class Store {
     const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
     const baselines = tokenBaselines(
       runRows(
-        `SELECT b.size AS size, r.tokens AS tokens ${from}
+        `SELECT r.agent_id AS agentId, b.size AS size, r.tokens AS tokens ${from}
            AND r.ended_at IS NOT NULL AND r.started_at >= ? AND r.started_at <= ?`,
         until - AUDIT_BASELINE_DAYS * DAY_MS,
         until,
-      ).map((r) => ({
-        size: r.size as string | null,
-        tokens: usage(r).input + usage(r).output,
-      })),
+      )
+        .filter((r) => kinds.get(r.agentId as string) === "build")
+        .map((r) => ({
+          size: r.size as string | null,
+          tokens: usage(r).input + usage(r).output,
+        })),
     );
     const blocking = BLOCKING_SEVERITIES.map(() => "?").join(", ");
     const runs: AuditTokenOveruse[] = [];
@@ -2968,6 +2976,7 @@ export class Store {
       since,
       until,
     )) {
+      if (kinds.get(r.agentId as string) !== "build") continue;
       const tokens = usage(r);
       const total = tokens.input + tokens.output;
       const size = r.size as string | null;
