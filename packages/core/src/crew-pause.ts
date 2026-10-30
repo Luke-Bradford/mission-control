@@ -5,21 +5,30 @@ export interface CrewPause {
   reason: string;
   at: number;
   by: string;
-  /** Seats an "all" pause leaves running. */
+  /** Seats an "all" pause leaves running (FLIGHT's own, or one it let out). */
   except?: string[];
+  /** Who last let a seat out of the pause (FLIGHT, starting a paused seat); `by` stays who set it. */
+  liftedBy?: string;
 }
 
 export function seatIsPaused(pause: CrewPause | null, seatId: string): boolean {
   if (pause === null) return false;
-  return pause.seats === "all"
-    ? pause.except?.includes(seatId) !== true
-    : pause.seats.includes(seatId);
+  if (pause.seats === "all") return pause.except?.includes(seatId) !== true;
+  return pause.seats.includes(seatId);
 }
 
-/** Let one seat out of a pause, preserving who set it and why. */
-export function pauseWithout(pause: CrewPause, seatId: string): CrewPause | null {
+/**
+ * The pause with one seat let out; the same record (reason, time, who set it) otherwise, or null
+ * when none is left. `liftedBy` names who let the seat out, so the record shows that actor.
+ */
+export function pauseWithout(
+  pause: CrewPause,
+  seatId: string,
+  liftedBy?: string,
+): CrewPause | null {
+  const named = liftedBy === undefined ? {} : { liftedBy };
   if (pause.seats === "all")
-    return { ...pause, except: [...new Set([...(pause.except ?? []), seatId])] };
-  const seats = pause.seats.filter((id) => id !== seatId);
-  return seats.length === 0 ? null : { ...pause, seats };
+    return { ...pause, ...named, except: [...new Set([...(pause.except ?? []), seatId])] };
+  const rest = pause.seats.filter((id) => id !== seatId);
+  return rest.length === 0 ? null : { ...pause, ...named, seats: rest };
 }

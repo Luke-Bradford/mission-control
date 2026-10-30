@@ -1,8 +1,11 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: later rules override earlier ones by order here, as in hud.css */
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   font-family: var(--mono);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-s);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -32,8 +35,10 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto fit-content(45%) fit-content(18%) minmax(0, 1fr);
+  /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
+  grid-template-rows: max-content minmax(160px, 1fr) max-content 280px;
   gap: var(--sp-3);
+  overflow-y: auto;
 }
 
 .overview-grid > *,
@@ -50,7 +55,26 @@
 
 .overview-grid .ph {
   flex-shrink: 0;
+  flex-wrap: nowrap;
   padding: var(--sp-2) var(--sp-3) var(--sp-2);
+}
+
+/* A header is one line: the title and controls keep their size and the subtitle gives way. */
+.overview-grid .ph h2 {
+  flex: none;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-grid .ph .act {
+  flex: none;
+  flex-wrap: nowrap;
 }
 
 .overview-grid .ph h2 {
@@ -66,9 +90,21 @@
 
 .overview-work {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 28%);
+  grid-template-columns: minmax(0, 1fr) 31%;
   grid-template-rows: minmax(0, 1fr);
   gap: var(--sp-3);
+}
+
+@media (max-width: 1280px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 34%;
+  }
+}
+
+@media (min-width: 1920px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 27%;
+  }
 }
 
 .nbanner {
@@ -130,20 +166,20 @@
 .ov {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr);
   grid-template-rows: minmax(0, 1fr);
   gap: var(--sp-3);
 }
 
+/* Machine and Quota sit beside the Live log, each in its own column. */
 .ov > .col {
-  display: grid;
-  grid-template-rows: repeat(2, fit-content(calc(50% - 6px)));
-  align-content: start;
-  overflow: hidden;
+  display: contents;
 }
 
 .ov > .col > .panel {
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ov > .col > .panel > .pb {
@@ -258,6 +294,22 @@
   background: var(--accent-soft);
 }
 
+.overview-lane .num {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--fg);
+}
+
+.overview-lane .num::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c, var(--fg-2));
+  content: "";
+}
+
 /*
  * The track: a centre hairline ruled every 5 minutes and 15-minute gridlines matching the axis, so an
  * idle lane still reads as a track. Each kind keeps its own 3px sub-track, so overlaps stay visible.
@@ -299,15 +351,6 @@
   top: calc(50% + var(--sub) / 2 + var(--sub-gap));
 }
 
-.overview-tick {
-  position: absolute;
-  top: calc(50% - 8px);
-  height: 16px;
-  width: 1px;
-  background: var(--fg-2);
-  opacity: 0.7;
-}
-
 .overview-legend {
   display: flex;
   flex-wrap: wrap;
@@ -327,12 +370,6 @@
   width: 14px;
   height: 3px;
   border-radius: 0;
-}
-
-.overview-legend .tool-tick {
-  width: 1px;
-  height: 10px;
-  background: var(--fg-2);
 }
 
 #agentsList {
@@ -464,7 +501,7 @@
 }
 
 #agentsList .agent-identity .ag {
-  color: var(--c, var(--fg));
+  color: var(--fg);
 }
 
 .agent-identity {
@@ -552,7 +589,7 @@
 
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
+  grid-template-columns: 190px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
   gap: 0 var(--sp-1);
   padding: 0 var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
@@ -701,7 +738,7 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 120px 118px 180px 96px 50px 56px 64px;
+    grid-template-columns: 190px 118px minmax(180px, 1fr) 56px 56px 64px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -717,8 +754,12 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px 176px 64px 50px 44px 46px;
+    grid-template-columns: 100px 80px minmax(140px, 1fr) 50px 44px 46px 46px;
     column-gap: var(--sp-1);
+  }
+  /* no room for the role beside the call sign: it stays in the tooltip, never cut mid-word */
+  #agentsList .agent-identity > :nth-child(2) {
+    display: none;
   }
 }
 
@@ -865,7 +906,7 @@
 }
 
 #machP .resrow {
-  grid-template-columns: 42px minmax(24px, 1fr) 128px;
+  grid-template-columns: 56px minmax(24px, 1fr) 128px;
   gap: var(--sp-1);
   align-items: center;
 }
@@ -933,15 +974,24 @@
   border-radius: 2px;
 }
 
+/* One line per meter (its text), then a full-width bar. */
 #quotaP .quotarow {
-  grid-template-columns: minmax(65px, 1fr) repeat(2, minmax(0, 1fr));
-  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  align-items: stretch;
 }
 
 #quotaP .quotarow .meter {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: stretch;
+  gap: var(--sp-1);
+}
+
+#quotaP .quotarow .meter .num {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #quotaP .quotarow .track {
@@ -949,7 +999,7 @@
 }
 
 #quotaP .quotarow + .quotarow {
-  margin-top: var(--sp-1);
+  margin-top: var(--sp-2);
 }
 
 .arow {
@@ -998,6 +1048,21 @@
 .arow .txt {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* A Comms preview is one line; its read link sits in the row's action column. */
+.arow .log-line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.arow .log-read {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  white-space: nowrap;
 }
 
 @media (min-width: 761px) {
@@ -1091,22 +1156,29 @@
 }
 
 .pipeline-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  align-content: start;
-  gap: var(--sp-2);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
 }
 
-/* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
+/* Lanes show whole cards only (three, then Show more), so the panel is as tall as they are. */
 #pipelineP > .pipeline-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
 }
 
 .pipeline-stage {
+  flex: 1 1 0;
   min-width: 0;
   --stage-colour: var(--muted);
+}
+
+/* A lane with no tickets keeps its header and count in a narrow column. */
+.pipeline-stage.empty {
+  flex: 0 0 112px;
+}
+
+.pipeline-stage.empty h3 {
+  border-bottom-color: var(--line);
 }
 
 .pipeline-stage.progress {
@@ -1203,8 +1275,18 @@
   background: var(--c);
 }
 
+.pipeline-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
 .pipeline-more {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
   padding: var(--sp-1) 0;
 }
 
@@ -1352,12 +1434,65 @@
   }
 }
 
-/* a parked review's waiver takes the step label's line, so the cell stays within its row */
-#agentsList .loopstep .acts:empty {
-  display: none;
+/* Observed loops: one compact strip under the crew roster. */
+.loops-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-s);
 }
 
-#agentsList .loopstep .acts,
+.loops-strip > strong {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.loop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  max-width: 100%;
+  padding-left: var(--sp-2);
+  border-left: 3px solid var(--accent);
+  color: var(--fg-2);
+  text-decoration: none;
+}
+
+.loop-chip:hover {
+  color: var(--fg);
+}
+
+.loop-chip.tone-ok {
+  border-left-color: var(--ok);
+}
+
+.loop-chip.tone-warn {
+  border-left-color: var(--warn-mark);
+}
+
+.loop-chip.tone-crit {
+  border-left-color: var(--crit);
+}
+
+.loop-chip.tone-neutral {
+  border-left-color: var(--line-2);
+}
+
+.loop-chip.sel {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+/* a parked review's waiver sits under the work lines, inside the cell */
+#agentsList .work-cell .acts,
 .waive-compact {
   display: flex;
   align-items: center;
@@ -1365,10 +1500,6 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-}
-
-#agentsList .loopstep:has(.acts > *) > .ellip {
-  display: none;
 }
 
 .waive-compact > button {

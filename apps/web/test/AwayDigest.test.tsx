@@ -250,10 +250,12 @@ it("uses the observed away start when the server omits startedAt and acknowledge
   on = false;
   act(() => hub.refetch(RESOURCES.away.path));
   await screen.findByRole("region", { name: "When you come back" });
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(`/api/away/digest?since=${NOW}`, expect.anything()),
+  );
   const periodPath = fetch.mock.calls
     .map(([path]) => String(path))
     .find((path) => path.startsWith("/api/away/digest?since="));
-  expect(periodPath).toBeDefined();
   expect(periodPath).toBe(`/api/away/digest?since=${NOW}`);
   await screen.findByRole("button", { name: "Acknowledge digest" });
   fireEvent.click(screen.getByRole("button", { name: "Acknowledge digest" }));

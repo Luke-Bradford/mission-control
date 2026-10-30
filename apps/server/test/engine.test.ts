@@ -32,6 +32,8 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
+  FLIGHT_REWORKS_PER_HEAD,
+  FLIGHT_REWORKS_PER_RUN,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -131,6 +133,7 @@ import {
 import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -154,6 +157,7 @@ const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 const SHA_C = "c".repeat(40);
+const SHA_D = "d".repeat(40);
 const MIN = 60_000;
 
 let dir: string;
@@ -2726,6 +2730,68 @@ describe("review round", () => {
     expect(loopOf()).toMatchObject({ phase: "ci", reportedEvidenceId: 1 });
   });
 
+  describe("tick diagnostics", () => {
+    it("records each tick's start, end and duration", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += 700;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      const startedAt = clock;
+      await h.engine.tick();
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        { startedAt, endedAt: startedAt + 700, durationMs: 700, overranOn: null },
+      ]);
+      expect(tickLogOf(store).running()).toBeNull();
+    });
+
+    it("logs a tick whose synchronous work starved the timer, naming that work", async () => {
+      const notes = store.notes.bind(store);
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        clock += ENGINE_TICK_MS + 1;
+        return notes();
+      });
+      const before = tickLogOf(store).recent().length;
+      await h.engine.tick();
+      expect(h.logs.filter((l) => l.includes("still running"))).toEqual([
+        expect.stringContaining("on load notes"),
+      ]);
+      expect(tickLogOf(store).recent().slice(before)).toEqual([
+        expect.objectContaining({ overranOn: ["load notes"] }),
+      ]);
+    });
+
+    it("finishes the tick it records when the tick throws", async () => {
+      vi.spyOn(store, "notes").mockImplementation(() => {
+        throw new Error("db gone");
+      });
+      const before = tickLogOf(store).recent().length;
+      await expect(h.engine.tick()).rejects.toThrow("db gone");
+      expect(tickLogOf(store).running()).toBeNull();
+      expect(tickLogOf(store).recent()).toHaveLength(before + 1);
+    });
+
+    it("logs a tick still running past its interval once, with the run it is on", async () => {
+      report();
+      h.pushHang = true;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        void h.engine.tick();
+        await vi.advanceTimersByTimeAsync(ENGINE_TICK_MS - 1);
+        expect(h.logs.filter((l) => l.includes("still running"))).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(3 * ENGINE_TICK_MS);
+        const lines = h.logs.filter((l) => l.includes("still running"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(`reconcile ${REPO} ${RUN} `);
+        expect(tickLogOf(store).running()?.steps.join()).toContain(RUN);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("an ended run settles only when both the move and the note have landed", () => {
     const stop = () => {
       store.setRunEnded(RUN, clock, "ok", "operator");
@@ -5074,7 +5140,7 @@ describe("the engine runs reviews", () => {
       },
     );
 
-    it("grants one capped rework per head and appends FLIGHT's fix list", async () => {
+    it("grants capped reworks per head and per run, and appends FLIGHT's fix list", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
       await h.engine.reconcileRun(RUN);
@@ -5100,9 +5166,38 @@ describe("the engine runs reviews", () => {
         "FLIGHT fix list: Exercise the invalid input branch before reporting again.",
       );
 
+      // further rounds are granted on the same head, up to the raised cap
+      for (let n = 2; n <= FLIGHT_REWORKS_PER_HEAD; n++) {
+        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf().flightReworks).toEqual({ [SHA]: n });
+      }
       setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
       expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(false);
       expect(loopOf().parked).not.toBeNull();
+    });
+
+    const parkedForRework = async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "Findings", ended: false } });
+    };
+
+    it("stops granting rework once the run has had its cap over all its heads", async () => {
+      await parkedForRework();
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "again", ended: false },
+        flightReworks: { [SHA_B]: 3, [SHA_C]: 3, [SHA_D]: FLIGHT_REWORKS_PER_RUN - 6 },
+      });
+      const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+        kinds: ["review"],
+        action: "rework",
+      });
+      expect(result).toEqual({ lifted: false, reason: "round-granted" });
     });
 
     it("lift verifies that the current head descends from the push", async () => {
@@ -5193,8 +5288,11 @@ describe("the engine runs reviews", () => {
 
       it("round already granted on this head", async () => {
         await parkedReview();
-        expect(await operate(RUN, "FLIGHT", { action: "rework" })).toBe(true);
-        setLoop({ phase: "parked", parked: { kind: "review", reason: "again", ended: false } });
+        setLoop({
+          phase: "parked",
+          parked: { kind: "review", reason: "again", ended: false },
+          flightReworks: { [SHA]: FLIGHT_REWORKS_PER_HEAD },
+        });
         expect(await refusal("FLIGHT", { action: "rework" })).toBe("round-granted");
       });
 
@@ -6155,6 +6253,49 @@ describe("the engine runs reviews", () => {
       expect(loopOf().pendingLine ?? null).toBeNull();
       const noted = store.commsInbox(SEAT).filter((m) => m.text === text);
       expect(noted.every((m) => store.commsInboxRead(SEAT, m.id))).toBe(true);
+    });
+
+    it("queues FLIGHT's rework for a run set aside while its seat is on another run", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      seats().push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      await setAside();
+      const other = "guido-1:other";
+      store.upsertRun(run({ id: other, seq: 2 }));
+      seatIdle(other);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "findings", ended: false } });
+      expect(
+        await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework", note: "do the thing" }),
+      ).toBe(true);
+      // refused before; now queued: it waits in Comms and the aside flag wakes it later
+      const rework = () => h.sent.filter((l) => l.key.includes("flight-rework"));
+      expect(rework()).toEqual([]);
+      expect(loopOf()).toMatchObject({
+        phase: "working",
+        aside: { worktree: WT, wake: true },
+        pendingLine: { text: expect.stringContaining("FLIGHT fix list: do the thing") },
+        flightReworks: { [SHA]: 1 },
+      });
+      expect(store.comms(0, RUN).at(-1)?.text).toContain("FLIGHT fix list: do the thing");
+      // filed from FLIGHT's seat, not the controller's
+      expect(store.comms(0, RUN).at(-1)?.from).toBe("flight-1");
+      // the seat frees: the run is woken and sent the rework, once
+      h.wakeError = null;
+      h.asideOn = false;
+      store.setRunEnded(other, clock, "ok", "operator");
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+      emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
+      await vi.waitFor(() => expect(loopOf().aside).toBeNull());
+      await vi.waitFor(() => expect(rework()).toHaveLength(1));
+      expect(rework()[0]?.text).toContain("FLIGHT fix list: do the thing");
     });
 
     it("stores rework before waking a free aside run, and leaves a failed write parked", async () => {

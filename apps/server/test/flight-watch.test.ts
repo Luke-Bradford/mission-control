@@ -20,6 +20,7 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
+  FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_STARTS_PER_HOUR,
@@ -42,6 +43,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
+import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
@@ -61,7 +63,7 @@ import {
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
-import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
+import { createFlightWatch, type FlightWatch, flightToolsDigest } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -1871,6 +1873,30 @@ describe("the FLIGHT watcher", () => {
     expect(notesOpen()).toHaveLength(1);
   });
 
+  it("rotates a run whose tool set is older than FLIGHT's, and records the set a fresh run starts with", async () => {
+    liveCrew();
+    ask();
+    // no record (a run from before the set was kept): not rotated for it
+    await watch.check();
+    expect(endCalls).toEqual([]);
+    const sent = sendCalls.length;
+    // a record for this run from another tool set: rotated at its next idle pass
+    store.setSetting(
+      FLIGHT_RUN_TOOLS_SETTING,
+      JSON.stringify({ runId: "r-flight", tools: "an-older-set" }),
+    );
+    await watch.check();
+    expect(endCalls).toEqual(["r-flight"]);
+    expect(sendCalls).toHaveLength(sent);
+    // the fresh run is recorded with today's set, so it is not rotated again
+    noFlight();
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    expect(JSON.parse(store.getSetting(FLIGHT_RUN_TOOLS_SETTING) ?? "{}")).toMatchObject({
+      tools: flightToolsDigest(),
+    });
+  });
+
   it("debounces checks after attention", async () => {
     watch.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -3172,6 +3198,18 @@ describe("ops review regressions", () => {
     expect(signalState().signals.filter((s) => s.key.startsWith("watch:"))).toEqual([
       expect.objectContaining({ key: `watch:flight-1:${nowMs}`, told: false }),
     ]);
+  });
+
+  it("names what a stuck engine tick is doing in the silent-engine signal", () => {
+    flightLoopHeartbeat(store, "engine", T0 - 3 * MIN, MIN);
+    flightLoopHeartbeat(store, "sessions", T0, MIN);
+    expect(signalState().signals[0]?.evidence).not.toContain("still running");
+    const ticks = tickLogOf(store);
+    ticks.begin(T0 - 2 * MIN);
+    ticks.step("reconcile mc guido-1:run-1 ci");
+    expect(signalState().signals[0]?.evidence).toContain(
+      "still running; on reconcile mc guido-1:run-1 ci",
+    );
   });
 
   it("guards sleep/wake silence and writes each source heartbeat at most once a minute", () => {

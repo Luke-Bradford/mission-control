@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RepoRef, TicketRef } from "../src/hud/RepoRef.tsx";
@@ -7,8 +9,20 @@ import { CONFIG } from "./fixtures.ts";
 afterEach(() => vi.unstubAllGlobals());
 
 const chipOf = (el: HTMLElement) => el.querySelector<HTMLElement>(".rchip");
+const sharedCss = readFileSync(join(import.meta.dirname, "../src/hud/shared.css"), "utf8");
+const rule = (selector: string) =>
+  sharedCss.match(new RegExp(`${selector} \\{([^}]+)\\}`))?.[1] ?? "";
 
 describe("RepoRef", () => {
+  it("makes ticket links 12px, 24px targets", () => {
+    const link = rule(String.raw`\.rref > a`);
+    expect(link).toContain("display: inline-flex");
+    expect(link).toContain("align-items: center");
+    expect(link).toContain("min-width: 24px");
+    expect(link).toContain("min-height: 24px");
+    expect(link).toContain("font-size: var(--fs-s)");
+  });
+
   it("is the repo as a chip, then the number apart from it as a link to the issue", async () => {
     stubFetch({ "/api/config": CONFIG });
     const { container } = render(<RepoRef repoId="site-builder" number={1600} />);

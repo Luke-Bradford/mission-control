@@ -68,7 +68,13 @@ refusal below applies). After you confirm, the hub runs, in its own checkout:
 Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within the 30 s
 `ThrottleInterval`), crew runs resume, and the HUD reconnects. Each command's output goes to
 `update.log` beside the database (mode 0600), rewritten by each update. A failed step answers
-`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving.
+`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving,
+and Setup opens the log (credentials redacted; paths and command output shown as they are) so
+the failed command's output is on the page. A refusal after the log started (a seat starting, a
+change held for a person) adds a `held: <reason>` line and opens the log too. A refusal before
+it (another update running, uncommitted changes) only toasts, since the log would be the previous
+update's. **Update log** beside the button shows the last update's log at any time.
+
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
@@ -91,6 +97,22 @@ pnpm install        # first: dependencies change
 pnpm build
 launchctl kickstart -k gui/$(id -u)/com.missioncontrol.server   # if it runs under launchd
 ```
+
+#### Update fails at install every time
+
+If every Update fails at `install` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, pnpm wants to
+rebuild `node_modules` and can't ask without a terminal. A hub started before #876 (merged 29 Oct
+2026) points pnpm at the crew's store and hits this every time, so it can never install the fix.
+From a terminal, in the hub's checkout:
+
+1. Stop the hub: `launchctl bootout gui/$(id -u)/com.missioncontrol.server` (with it running,
+   launchd's `KeepAlive` restarts it during the install).
+2. `git pull --ff-only origin main`
+3. `pnpm install --frozen-lockfile`, and answer yes when pnpm asks to remove `node_modules`.
+4. `pnpm --filter @mc/web build`
+5. Start the hub: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`.
+
+Check `/api/version` shows the new sha.
 
 ## Configure
 
@@ -170,7 +192,7 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
-| Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
+| Update log | `update.log` beside the database: the last update's commands and output, mode 0600; Setup → **Update log** shows its end |
 | launchd logs | `~/Library/Logs/mission-control/server.log`, `server.err.log` |
 
 The server never writes a `config.yaml` that is a symbolic link: it refuses the write and says so, so keep the real file at the config path (`~/.config/mission-control/config.yaml`, or `MC_CONFIG`), not a link to it.
@@ -458,6 +480,19 @@ What each seat's process starts with:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/hook-cli.ts' '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2`.
   `crew.node` defaults to `/opt/homebrew/bin/node`. A start is refused if one of those paths holds
   a `'` or a line break.
+- **The trim hook** (#1045) after every tool call (`PostToolUse`, matcher `*`), for Claude seats:
+  `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/trim-cli.ts' '<run temp root>/tool-output'`.
+  A result over 32 KB is answered as `updatedToolOutput` with its first 8 KB, its last 4 KB and a
+  line `[mc: N bytes cut; the full output is at <path>]`; a Bash result keeps its shape (only the
+  long strings are cut) and its tail starts at the last `FAIL` or `error` line when there is one.
+  The full output is `<run temp root>/tool-output/<tool_use_id>.txt` (0600), removed with the
+  run's temp root. The hub makes that folder before the seat starts and the sandbox denies the
+  seat writes to it; the hook, which runs outside the sandbox, refuses a folder that is a link or
+  not ours and creates each file exclusively without following a link. Unlike the guard hook it never blocks: any failure, or a full output that cannot
+  be written, leaves the result whole. So does a built-in tool's result that cannot be cut in its
+  own shape (the CLI rejects a plain text there), and Edit, Write, MultiEdit and NotebookEdit,
+  whose bulk never reaches the model. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,
   env and settings carry only their paths. When the process exits, for any reason, the token is
@@ -867,9 +902,10 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
-action, which sends the findings back to the author. FLIGHT may grant one extra rework round after
-the configured review-round cap for a head, optionally adding a short fix list; a second grant for
-that head is left to the controller.
+action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
+configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
+cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
@@ -905,7 +941,7 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT. A paused seat's verdict is
+A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
@@ -937,6 +973,29 @@ removes an identical line from `## Done when`. Nothing else in the body changes.
 run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
+
+### FLIGHT's controller powers
+
+FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
+product direction, a security exception, an irreversible external action, and a floor approval the
+repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
+repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
+guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
+operator.
+
+| Tool | What it does |
+|---|---|
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
+| `sync_main` | Merge main into a run's branch |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, an item FLIGHT briefed for the operator, a person's message, or FLIGHT's own question |
+| `promote` | Reads the live card, and refuses when it cannot be read |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces and closed cards are refused; status moves only to Blocked, everything else is `promote`; only labels being added are judged, and the area label rule applies when the area labels change; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions, and a body is capped at the ticket body limit and sent on stdin. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
+
+A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
+watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
+started before the set was recorded rotates on its wake count as before.
 
 ## What it observes
 
