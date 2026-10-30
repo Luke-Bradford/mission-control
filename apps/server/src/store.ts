@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
@@ -982,6 +982,18 @@ function compactFlightWake(text: string): string {
 
 export class Store {
   private readonly db: DatabaseSync;
+  private readonly rawDb: DatabaseSync;
+  /** Statements used by read-heavy views stay prepared for this Store's lifetime. */
+  private readonly statements = new Map<string, StatementSync>();
+
+  private statement(sql: string): StatementSync {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.rawDb.prepare(sql);
+      this.statements.set(sql, statement);
+    }
+    return statement;
+  }
 
   /** `busyTimeoutMs` is shortened only by tests that hold a lock on purpose. */
   /** The database file. */
@@ -990,7 +1002,16 @@ export class Store {
   constructor(path: string, busyTimeoutMs = BUSY_TIMEOUT_MS) {
     this.path = path;
     // Wait up to the timeout for another writer's lock instead of failing at once.
-    this.db = new DatabaseSync(path, { timeout: busyTimeoutMs });
+    this.rawDb = new DatabaseSync(path, { timeout: busyTimeoutMs });
+    // Store has many small methods. Cache every SQL text here so callers cannot accidentally
+    // prepare the same statement on each HUD build.
+    this.db = new Proxy(this.rawDb, {
+      get: (target, property, receiver) => {
+        if (property === "prepare") return (sql: string) => this.statement(sql);
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
     this.db.exec("PRAGMA journal_mode = WAL");
     const hasEpisodes = this.db
       .prepare("SELECT 1 FROM sqlite_master WHERE name = 'attention_episodes'")
@@ -1062,6 +1083,7 @@ export class Store {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.statements.clear();
     this.db.close();
   }
 
@@ -1534,9 +1556,9 @@ export class Store {
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
-    const rows = this.db
-      .prepare("SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?")
-      .all(agentId, limit) as Row[];
+    const rows = this.statement(
+      "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?",
+    ).all(agentId, limit) as Row[];
     return rows.map(toRun);
   }
 
@@ -1848,11 +1870,9 @@ export class Store {
     const out = new Map<string, RunDigest>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows = this.db
-        .prepare(
-          `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
-        )
-        .all(...ids) as { run_id: string; digest: string }[];
+      const rows = this.statement(
+        `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
+      ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
     }
     return out;
@@ -1978,12 +1998,10 @@ export class Store {
 
   /** Each agent's state after its latest recorded change. */
   latestAgentStates(): Map<AgentId, HudState> {
-    const rows = this.db
-      .prepare(
-        `SELECT agent_id, to_state FROM agent_events e
+    const rows = this.statement(
+      `SELECT agent_id, to_state FROM agent_events e
          WHERE at = (SELECT MAX(at) FROM agent_events WHERE agent_id = e.agent_id)`,
-      )
-      .all() as Row[];
+    ).all() as Row[];
     return new Map(rows.map((r) => [r.agent_id as AgentId, r.to_state as HudState]));
   }
 
@@ -2672,9 +2690,9 @@ export class Store {
   }
 
   pullRequests(repoId: RepoId): PullRequestView[] {
-    const rows = this.db
-      .prepare("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC")
-      .all(repoId) as Row[];
+    const rows = this.statement(
+      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
+    ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
   }
 
@@ -3695,20 +3713,18 @@ export class Store {
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
   planLanded(run: Run): boolean {
     return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
+      this.statement(
+        `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
            WHERE e.key = ? OR (e.key LIKE '%:plan' AND r.repo_id = ? AND r.ticket = ?) LIMIT 1`,
-        )
-        .get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
+      ).get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
     );
   }
 
   /** The run's loop events, oldest first. */
   loopEventsOfRun(runId: string): LoopEvent[] {
-    const rows = this.db
-      .prepare("SELECT * FROM loop_events WHERE run_id = ? ORDER BY at, key")
-      .all(runId) as Row[];
+    const rows = this.statement("SELECT * FROM loop_events WHERE run_id = ? ORDER BY at, key").all(
+      runId,
+    ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
       runId: r.run_id as string,
@@ -4355,9 +4371,9 @@ export class Store {
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
   commsCountTo(from: string, to: string, since: number): number {
-    const r = this.db
-      .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?")
-      .get(from, to, since) as { n: number };
+    const r = this.statement(
+      "SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?",
+    ).get(from, to, since) as { n: number };
     return r.n;
   }
 
@@ -5131,7 +5147,7 @@ export class Store {
 
   /** The run's last push, or null when it has not pushed. */
   runPush(runId: string): { sha: string; at: number } | null {
-    const r = this.db.prepare("SELECT sha, at FROM run_pushes WHERE run_id = ?").get(runId) as
+    const r = this.statement("SELECT sha, at FROM run_pushes WHERE run_id = ?").get(runId) as
       | { sha: string; at: number }
       | undefined;
     return r ? { sha: r.sha, at: r.at } : null;

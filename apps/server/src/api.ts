@@ -977,11 +977,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
-  let crewMemo: { key: string; value: Crew } | undefined;
+  // The configured crew changes only through routes and reloads, which emit one of these topics.
+  // Keep a small local revision rather than serialising the full config for every GET /api/crew.
+  let crewRevision = 0;
+  const crewTopics = new Set<Topic>([
+    "agents",
+    "boards",
+    "escalations",
+    "health",
+    "settings",
+    "config",
+    "guard",
+  ]);
+  let crewMemo: { bucket: number; revision: number; lockKey: string; value: Crew } | undefined;
   const sharedCrew = (at = now()): Crew => {
-    const key = JSON.stringify([Math.floor(at / HUD_MEMO_MS), config, deps.lock?.state()]);
-    if (crewMemo?.key !== key)
-      crewMemo = { key, value: crew(config, store, at, deps.lock?.state() ?? NO_LOCK) };
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewMemo?.bucket !== bucket ||
+      crewMemo.revision !== crewRevision ||
+      crewMemo.lockKey !== lockKey
+    )
+      crewMemo = { bucket, revision: crewRevision, lockKey, value: crew(config, store, at, lock) };
     return crewMemo.value;
   };
 
@@ -1025,8 +1043,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseRevision++;
       responseCache.clear();
       attentionMemo = undefined;
-      crewMemo = undefined;
       forgetViews(store);
+    }
+    if (crewTopics.has(topic)) {
+      crewRevision++;
+      crewMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
