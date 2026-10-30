@@ -2500,6 +2500,7 @@ import(${JSON.stringify(fixture)});
       expect(statSync(join(home, name)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
+    const config = readFileSync(join(home, "config.toml"), "utf8");
     expect(
       Number.parseInt(execFileSync("du", ["-sk", home], { encoding: "utf8" }), 10),
     ).toBeLessThan(5 * 1024);
