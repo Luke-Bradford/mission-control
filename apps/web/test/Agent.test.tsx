@@ -1049,6 +1049,11 @@ describe("Agent page: header and tiles", () => {
   it.each([
     ["missing", undefined, null],
     ["zero", { count: 0, tokensSaved: 0 }, null],
+    [
+      "few, under 1k tokens",
+      { count: 3, tokensSaved: 950 },
+      "Re-reads avoided: 3, about 950 tokens saved",
+    ],
     ["one", { count: 1, tokensSaved: 4_200 }, "Re-reads avoided: 1, about 4.2k tokens saved"],
     [
       "many",
