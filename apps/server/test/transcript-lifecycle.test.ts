@@ -86,6 +86,36 @@ it("never touches a live transcript", async () => {
   expect(readFileSync(live.transcriptPath, "utf8")).toBe("live\n");
 });
 
+it("never touches set-aside or active-seat transcripts", async () => {
+  const aside = run("aside", NOW - 20 * 24 * HOUR);
+  aside.loop = { aside: { worktree: join(dir, "aside"), wake: false } } as Run["loop"];
+  const active = run("active", NOW - 20 * 24 * HOUR);
+  store.upsertRun(aside);
+  store.upsertRun(active);
+  writeFileSync(aside.transcriptPath, "aside\n");
+  writeFileSync(active.transcriptPath, "active\n");
+  const old = new Date(NOW - 20 * 24 * HOUR);
+  utimesSync(aside.transcriptPath, old, old);
+  utimesSync(active.transcriptPath, old, old);
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: active.id,
+    cliSessionId: null,
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW,
+  });
+  const result = await maintainTranscripts({
+    store,
+    now: NOW,
+    retention: TRANSCRIPT_RETENTION_DEFAULTS,
+  });
+  expect(result.skippedLive).toBe(2);
+  expect(readFileSync(aside.transcriptPath, "utf8")).toBe("aside\n");
+  expect(readFileSync(active.transcriptPath, "utf8")).toBe("active\n");
+});
+
 it("replaces an interrupted gzip temp file", async () => {
   const endedAt = NOW - 25 * HOUR;
   const ended = run("interrupted", endedAt);
