@@ -1,5 +1,5 @@
 import type { OverviewSummary, PipelineStage } from "@mc/core";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
@@ -61,6 +61,10 @@ describe("Pipeline", () => {
     render(<PipelinePanel />);
 
     const readyLane = await screen.findByRole("region", { name: "Ready" });
+    // Three cards show; the rest expand in place, then the Board link counts what the hub did not send.
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(3);
+    expect(within(readyLane).queryByRole("link", { name: /open Board/ })).toBeNull();
+    fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
     expect(within(readyLane).getAllByRole("link")).toHaveLength(10);
     expect(
       within(readyLane).getByRole("link", { name: "+2 · open Board ›" }).getAttribute("href"),
@@ -69,6 +73,9 @@ describe("Pipeline", () => {
       "/board?stage=ready",
     );
     expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
+    fireEvent.click(within(readyLane).getByRole("button", { name: "Show less, Ready" }));
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(3);
+    fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--seat-4)",
     );
