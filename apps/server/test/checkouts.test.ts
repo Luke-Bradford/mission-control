@@ -72,6 +72,31 @@ const installedKb = (worktree: string) =>
     10,
   );
 
+/** Disk blocks for the worktrees and their shared store, not the source-only crew clone. */
+const worktreeDiskKb = () =>
+  Number.parseInt(execFileSync("du", ["-sk", root], { encoding: "utf8" }), 10);
+
+const PACKAGE_PAYLOAD_KB = 21 * 1024;
+const PAYLOAD_PKG = `${JSON.stringify({
+  name: "x",
+  version: "1.0.0",
+  private: true,
+  dependencies: { "fixture-payload": "1.0.0" },
+})}\n`;
+
+/** A deterministic fetched package: private stores add 21 MiB; a warm shared store adds none. */
+const payloadInstall: InstallRunner = async (command, _args, options) => {
+  if (command !== "pnpm") return;
+  const store = options.env.pnpm_config_store_dir;
+  if (store === undefined) throw new Error("pnpm store missing");
+  const payload = join(store, "fixture-payload", "payload.bin");
+  if (!existsSync(payload)) {
+    mkdirSync(dirname(payload), { recursive: true });
+    writeFileSync(payload, Buffer.alloc(PACKAGE_PAYLOAD_KB * 1024));
+  }
+  mkdirSync(join(options.cwd, "node_modules"), { recursive: true });
+};
+
 /** Commits `files` in `repo` (paths may be nested) and returns the new SHA. */
 function commit(repo: string, files: Record<string, string>, msg = "c"): string {
   for (const [f, body] of Object.entries(files)) {
@@ -838,6 +863,15 @@ describe("prepareCheckout", () => {
     expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
     expect(installedKb(wtPath())).toBeLessThan(20 * 1024);
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
+  });
+
+  it("adds under 20 MiB for a checkout after warming the shared package payload", async () => {
+    commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input(), payloadInstall);
+    const before = worktreeDiskKb();
+    await prepareCheckout({ ...input(), issue: 43 }, payloadInstall);
+    expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
   it("refuses a shared-store symlink below crew.worktrees", async () => {
@@ -1745,6 +1779,16 @@ describe("review scratch checkouts", () => {
     expect(existsSync(join(scratchPath(), "node_modules"))).toBe(true);
     expect(existsSync(join(root, CODEX_PNPM_STORES_DIR, "shared"))).toBe(true);
     expect(installedKb(scratchPath())).toBeLessThan(20 * 1024);
+  });
+
+  it("adds under 20 MiB for a review after warming the shared package payload", async () => {
+    commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input(), payloadInstall);
+    const { head } = pr({ "a.txt": "a\n" });
+    const before = worktreeDiskKb();
+    await prepareScratch(scratchInput(head), payloadInstall);
+    expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
   it("a PR head that changes an install input is refused and removed", async () => {
