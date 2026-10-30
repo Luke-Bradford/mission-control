@@ -3,6 +3,8 @@ import {
   ATTENTION_KINDS,
   ATTENTION_LABEL,
   type AttentionItem,
+  type ConfigView,
+  type Crew,
   type CrewLoop,
   type CrewMode,
   type CrewRow,
@@ -705,6 +707,18 @@ export function seatStatus(row: CrewRow): SeatStatus {
 /** Whether a seat has a run in flight: its latest run is running and has not ended. */
 export const hasActiveRun = (row: Pick<CrewRow, "run">): boolean =>
   row.run !== null && row.run.status === "running" && row.run.endedAt === null;
+
+/**
+ * The seats of the repo's crew session that can take a ticket now: not a scratch copy, not the
+ * watch seat, and without a run in flight. Empty when the repo has no session.
+ */
+export function freeSeats(config: ConfigView, crew: Crew, repoId: string) {
+  const session = config.crew?.sessions.find((s) => s.repoId === repoId);
+  return (session?.seats ?? []).filter((seat) => {
+    const row = crew.rows.find((r) => r.id === seat.id);
+    return seat.mode !== "scratch" && seat.loop !== "watch" && (!row || !hasActiveRun(row));
+  });
+}
 
 /** A crew seat's session as the composer sees it. */
 export type SeatTurn = "running" | "idle" | "none";

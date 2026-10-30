@@ -1,10 +1,11 @@
 /**
  * Keyboard shortcuts (catalogue §1.6): `g` then a page letter within 900 ms, `f` the dock, `j`/`k`
  * the selected agent, `/` the Agent page, `i` interrupt (the page may take it over), `?` help, and
- * `Esc` closes the topmost overlay. All are ignored while typing, where `Esc` blurs the field.
+ * `Esc` closes the topmost overlay. All are ignored while typing, where `Esc` blurs the field,
+ * except ⌘K / Ctrl+K, which opens the command palette from anywhere, typing included.
  */
 import { PAGE_PATHS, type Page } from "../router.ts";
-import { closeTopOverlay } from "./overlays.ts";
+import { closeTopOverlay, togglePalette } from "./overlays.ts";
 
 const G_MS = 900;
 
@@ -62,6 +63,17 @@ export function installKeys(app: KeyApp): () => void {
   };
 
   const onKey = (e: KeyboardEvent) => {
+    if (
+      !e.defaultPrevented &&
+      (e.metaKey || e.ctrlKey) &&
+      !e.altKey &&
+      !e.shiftKey &&
+      e.key.toLowerCase() === "k"
+    ) {
+      e.preventDefault(); // the browser's own ⌘K / Ctrl+K (focus the search bar)
+      togglePalette();
+      return;
+    }
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     if (typing(e.target)) {
       if (e.key === "Escape") e.target.blur();

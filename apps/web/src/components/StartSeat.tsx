@@ -2,7 +2,7 @@ import { branchFor, type ConfigView, type Crew, ROLES } from "@mc/core";
 import { useId, useState } from "react";
 import { seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
-import { callSign, hasActiveRun } from "../crew.ts";
+import { callSign, freeSeats } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { agentPath, navigate } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
@@ -31,11 +31,8 @@ export function StartSeat({
   const [busy, setBusy] = useState(false);
 
   const session = config?.crew?.sessions.find((s) => s.repoId === repoId);
-  if (!session || !crew) return null;
-  const free = session.seats.filter((seat) => {
-    const row = crew.rows.find((r) => r.id === seat.id);
-    return seat.mode !== "scratch" && seat.loop !== "watch" && (!row || !hasActiveRun(row));
-  });
+  if (!config || !session || !crew) return null;
+  const free = freeSeats(config, crew, repoId);
   const seat = free.find((s) => s.id === picked) ?? free[0];
   const call = seat ? callSign({ id: seat.id, kind: "crew" }) : "";
 

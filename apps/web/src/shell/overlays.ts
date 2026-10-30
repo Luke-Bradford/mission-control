@@ -104,6 +104,12 @@ export const openHelp = (): void => help.set(true);
 export const closeHelp = (): void => help.set(false);
 export const useHelpOpen = (): boolean => useStore(help);
 
+const palette = store(false);
+export const openPalette = (): void => palette.set(true);
+export const closePalette = (): void => palette.set(false);
+export const togglePalette = (): void => palette.set(!palette.get());
+export const usePaletteOpen = (): boolean => useStore(palette);
+
 const away = store(false);
 export const openAway = (): void => away.set(true);
 export const closeAway = (): void => away.set(false);
@@ -283,6 +289,7 @@ export function resetOverlays(): void {
   flightUnread.set(0);
   stack.length = 0;
   help.set(false);
+  palette.set(false);
   away.set(false);
   openedItem.set(null);
   item.set(null);
