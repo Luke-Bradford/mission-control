@@ -218,4 +218,24 @@ describe("Run trace", () => {
     // the complete refusal appears in one place only
     expect(container.textContent?.split("have not all passed")).toHaveLength(2);
   });
+
+  it("keeps a long event that no visit owns: one line, the whole text on a click", () => {
+    const suffix = "release it once the migration window opens on Friday";
+    const held = `merge held by CAPCOM: ${"the operator asked to wait for the freeze to lift, ".repeat(4)}${suffix}`;
+    const long = {
+      ...view,
+      events: [{ key: "m", runId: "run/alpha", text: held, at: NOW - 1_000 }],
+    };
+    const { container } = render(
+      <RunTrace runId="held" view={long} startedAt={NOW - 9_000} endedAt={null} now={NOW} />,
+    );
+    const section = screen.getByText("Run events").closest("section") as HTMLElement;
+    const disclosure = section.querySelector("details") as HTMLDetailsElement;
+    expect(disclosure.querySelector("summary")?.textContent?.length).toBeLessThanOrEqual(121);
+    expect(disclosure.querySelector("summary")?.textContent).toContain("merge held by CAPCOM");
+    expect(disclosure.hasAttribute("open")).toBe(false);
+    fireEvent.click(disclosure.querySelector("summary") as HTMLElement);
+    expect(disclosure.textContent).toContain(suffix);
+    expect(container.textContent?.split(suffix)).toHaveLength(2);
+  });
 });

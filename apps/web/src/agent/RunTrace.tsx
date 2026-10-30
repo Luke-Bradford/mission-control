@@ -50,13 +50,16 @@ function VisitNote({ visit }: { visit: LoopTry }) {
   );
 }
 
-/** A run event with each recorded reason in it cut to its line: the visit above holds the whole. */
-const eventText = (text: string, tries: readonly LoopTry[]): string => {
+/**
+ * A run event as one line. Each recorded reason inside it is cut to its line (its visit holds the
+ * whole); any other long text keeps its whole in `full`, for a disclosure.
+ */
+const eventLine = (text: string, tries: readonly LoopTry[]): ReasonLine => {
   let shown = text;
   for (const { reason } of tries) {
     if (reason) shown = shown.split(reason).join(reasonLine(reason).line);
   }
-  return reasonLine(shown).line;
+  return reasonLine(shown);
 };
 
 /** A compact history: every recorded try is a visit, so a return is never hidden in an aggregate. */
@@ -199,9 +202,20 @@ export function RunTrace({
           {view.events.length > 0 && (
             <section className="trace-section">
               <h2>Run events</h2>
-              {view.events.map((event) => (
-                <p key={event.key}>{eventText(event.text, view.tries)}</p>
-              ))}
+              {view.events.map((event) => {
+                const { line, full } = eventLine(event.text, view.tries);
+                return (
+                  <p key={event.key}>
+                    {full === null ? (
+                      line
+                    ) : (
+                      <Expandable summary={line}>
+                        <span className="run-checklist-full">{full}</span>
+                      </Expandable>
+                    )}
+                  </p>
+                );
+              })}
             </section>
           )}
         </div>
