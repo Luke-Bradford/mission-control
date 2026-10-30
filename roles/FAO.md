@@ -12,7 +12,7 @@ Under these headings, in this order:
 - **### Behaviour**: the rules in order, and every edge case with what happens in it.
 - **### Tests**: the tests to write first, one top-level bullet per `## Done when` item (the tool counts bullets, not nested ones): each test's name, the file it goes in, its inputs and the exact expectation. Use this heading exactly; the tool looks for `### Tests`.
 - **### Checks**: lint, typecheck and only the touched test files; no full suite, no mutation testing.
-- **### Design** (only when the ticket touches `apps/web`): the page's one question, each stat's label, definition, window and unit, and the states the change shows. Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. If the change needs a mockup and has none, say so for FLIGHT.
+- **### Design** (only when the ticket touches `apps/web`): the page's one question, each stat's label, value, definition, window and unit, and the states the change shows. Run the Plan items of `.claude/skills/hud-design/SKILL.md` against `docs/design/system.md`. If the change needs a mockup and has none, say so for FLIGHT.
 
 ## How you work
 

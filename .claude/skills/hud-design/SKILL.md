@@ -21,7 +21,7 @@ is an Important finding; any other no is Minor.
       labels (§2–4).
 - [ ] **[I]** Nothing clips; lists scroll visibly (§5–7).
 - [ ] **[I]** Every state has a word or shape as well as colour (§2–4).
-- [ ] **[I]** Empty, loading, error, stale and disconnected states exist (§5–7).
+- [ ] **[I]** Empty, loading, error, stale and disconnected states exist; never "No data" (§5–7).
 - [ ] **[I]** Every control is keyboard reachable, named, focus-visible and 24×24 px (§8–9).
 - [ ] At most four lines of text per box (§5–7).
 - [ ] Tables: 40 px rows, right-aligned numbers, a visible sort, `—` for unknown (§5–7).
@@ -39,6 +39,6 @@ is an Important finding; any other no is Minor.
 - [ ] The first screenful answers the question, key item top left (§1).
 - [ ] No empty panels or lone-number tiles (§5–7).
 
-Record the `design` check: pass (every [I] yes), n-a (nothing visible changes) or fail (quote
-the items). It does not hold the merge; Important findings do. A rendered-page item is a
+Record the `design` check: pass (every [I] item the diff shows is yes; list the rest as
+Controller checks), n-a (nothing visible changes) or fail (quote the items). It does not hold the merge; Important findings do. A rendered-page item is a
 "Controller check: …", not a finding.
