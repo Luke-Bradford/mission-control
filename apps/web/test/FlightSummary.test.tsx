@@ -366,3 +366,35 @@ it("does not fetch the historical ledger or render a nested ledger disclosure in
   expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightLedger.path)).toBe(false);
   expect(screen.queryByText("All commitments and watches")).toBeNull();
 });
+
+it("names outcomes, not the queue, while the Outcomes panel loads", async () => {
+  const answers = stub();
+  let resolveSummary!: (r: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string, init?: RequestInit) =>
+      path === RESOURCES.flightSummary.path
+        ? new Promise<Response>((resolve) => {
+            resolveSummary = resolve;
+          })
+        : answers(path, init),
+    ),
+  );
+  render(<Summary mode="record" />);
+  expect(await screen.findByText("Loading outcomes…")).toBeTruthy();
+  expect(screen.queryByText(/the queue/)).toBeNull();
+  await act(async () => resolveSummary(new Response(JSON.stringify(summary))));
+  await waitFor(() => expect(screen.queryByText("Loading outcomes…")).toBeNull());
+});
+
+it("names outcomes, not the queue, when the Outcomes panel fails, with Retry", async () => {
+  stub({
+    [RESOURCES.flightSummary.path]: () => ({ status: 500, body: { error: "Summary unavailable" } }),
+  });
+  render(<Summary mode="record" />);
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load outcomes: Summary unavailable",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByText(/the queue/)).toBeNull();
+});

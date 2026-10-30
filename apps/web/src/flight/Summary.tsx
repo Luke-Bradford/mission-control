@@ -254,7 +254,11 @@ export function Summary({ mode }: { mode: SummaryMode }) {
   return (
     <div className={`flight-summary ${mode}`}>
       {!view ? (
-        <Pending what="the queue" error={summary.error} resource={RESOURCES.flightSummary} />
+        <Pending
+          what={mode === "queue" ? "the queue" : "outcomes"}
+          error={summary.error}
+          resource={RESOURCES.flightSummary}
+        />
       ) : view.session === null ? (
         <p className="sittext note">{FLIGHT_NO_SEAT}</p>
       ) : (
