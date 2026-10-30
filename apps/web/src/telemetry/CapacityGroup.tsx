@@ -20,6 +20,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { useSeatName } from "../seatName.ts";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
+import { MachineReadout } from "./MachineReadout.tsx";
 
 const MINUTE_MS = 60_000;
 
@@ -212,9 +213,13 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>
         ) : machine.length === 0 ? (
-          <p className="pb s muted">No machine samples in the last {scope.range}.</p>
+          <div className="pb">
+            <p className="s muted">No machine samples in the last {scope.range}.</p>
+            <MachineReadout />
+          </div>
         ) : (
           <div className="pb">
+            <MachineReadout />
             <LineChart
               series={machineLines}
               label="Machine load"

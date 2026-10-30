@@ -1652,7 +1652,10 @@ describe("Machine panel", () => {
       return w;
     });
     expect(warn.className).toContain("warn-t");
-    expect(warn.textContent).toContain("Holding new work");
+    const pill = warn.querySelector(".pill");
+    expect(pill?.className).toContain("warn");
+    expect(pill?.textContent).toBe("Holding new work");
+    expect(pill?.getAttribute("title")).toBe("swap 21.5 of 22.5 GB used");
     expect(warn.title).toBe("swap 21.5 of 22.5 GB used");
   });
 

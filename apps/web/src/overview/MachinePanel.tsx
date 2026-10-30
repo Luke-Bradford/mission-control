@@ -2,6 +2,7 @@ import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
 import { LockBox } from "./LockBox.tsx";
 
@@ -309,8 +310,10 @@ export function MachinePanel() {
           </div>
           {view?.warning && (
             <div className="row s capwarn warn-t" role="status" title={view.warning}>
-              <span>Holding new work</span>
-              <span className="muted"> · {view.warning}</span>
+              <Pill tone="warn" title={view.warning}>
+                Holding new work
+              </Pill>
+              <span className="muted"> {view.warning}</span>
             </div>
           )}
           {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
