@@ -8,7 +8,7 @@ describe("Setup Accounts usage layout (hud.css)", () => {
   it("keeps the top-bar clock's line box fixed between ticks", () => {
     const clock = rule(String.raw`\.top-clock`);
 
-    expect(clock).toContain("line-height: 16px");
+    expect(clock).toContain("line-height: var(--lh-micro)");
     expect(clock).toContain("height: 16px");
   });
 

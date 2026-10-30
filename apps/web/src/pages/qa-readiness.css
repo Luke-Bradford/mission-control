@@ -1,17 +1,17 @@
 #page-qa-readiness {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 .qa-readiness-list {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 .qa-readiness-card .ph {
   align-items: flex-start;
 }
 .qa-title {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
 }
 .qa-title > span {
@@ -22,18 +22,18 @@
 }
 .qa-card-body {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 .qa-evidence {
   display: grid;
   grid-auto-flow: row dense;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--sp-4);
 }
 .qa-evidence-section {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
   font-size: var(--fs-s);
   color: var(--fg-2);
@@ -42,22 +42,22 @@
 .qa-evidence-section h3 {
   margin: 0;
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .qa-check-action {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
   flex-wrap: wrap;
   border-top: 1px solid var(--line);
-  padding-top: 12px;
+  padding-top: var(--sp-3);
   font-size: var(--fs-s);
 }
 .qa-check-action button {
   min-height: 24px;
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   font: inherit;
   color: var(--accent);
   background: var(--accent-soft);
@@ -85,7 +85,7 @@
 }
 .qa-impact {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 .qa-impact .map-lens {

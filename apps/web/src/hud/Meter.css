@@ -2,7 +2,7 @@
 .meter {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   width: 100%;
 }
 
@@ -32,7 +32,7 @@
 
 #quotaP .meter .num {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
 
 .meter .track {

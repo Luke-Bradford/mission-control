@@ -3,7 +3,7 @@
 #page-telemetry {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
   overflow: auto;
 }
 
@@ -31,21 +31,21 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 .kpi .v {
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--fs-title);
   font-weight: 600;
-  line-height: 1.05;
+  line-height: var(--lh-title);
   font-variant-numeric: tabular-nums;
 }
 
 .kpi .d {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   color: var(--fg-2);
 }
 
@@ -92,14 +92,14 @@
 .grp {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-top: 6px;
+  margin-top: var(--sp-1);
 }
 
 .grp::after {
@@ -112,7 +112,7 @@
 .tgrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .tgrid .wide {
@@ -128,7 +128,7 @@
   height: 6px;
   border-radius: 0;
   overflow: hidden;
-  gap: 2px;
+  gap: var(--sp-1);
   background: var(--line);
 }
 
@@ -148,7 +148,7 @@
 
 /* the registry's p50 over every size, above the per-size rows */
 .tcycle-all {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
 }
 
 /* a long agent tag is cut at its column instead of running under the bar */
@@ -160,7 +160,7 @@
 }
 
 .tnote {
-  margin-top: 6px;
+  margin-top: var(--sp-1);
 }
 
 #page-telemetry.refetching .kpis,

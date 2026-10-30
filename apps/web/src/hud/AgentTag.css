@@ -1,10 +1,10 @@
 .ag {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   font-family: var(--display);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-panel);
   letter-spacing: 0.02em;
   white-space: nowrap;
   color: var(--fg);
@@ -19,12 +19,12 @@
 }
 
 .ag.sm {
-  font-size: 13px;
+  font-size: var(--fs);
 }
 
 .ag .rt {
   font-family: var(--sans, inherit);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 400;
   color: var(--fg-2);
 }

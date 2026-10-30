@@ -1,7 +1,7 @@
 .crew-pause {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
   position: relative;
 }
@@ -15,19 +15,19 @@
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   box-sizing: border-box;
-  padding: 12px;
+  padding: var(--sp-3);
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
-  box-shadow: 0 8px 24px #0005;
+  box-shadow: var(--shadow);
 }
 
 .crew-pause-form label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .crew-pause-form input:not([type="checkbox"]) {

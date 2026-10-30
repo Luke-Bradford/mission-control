@@ -10,12 +10,12 @@
 }
 
 .palette-input {
-  font: var(--fs) var(--sans);
+  font: var(--fs) / var(--lh) var(--sans);
   background: transparent;
   color: var(--fg);
   border: 0;
   border-bottom: 1px solid var(--line);
-  padding: 12px 14px;
+  padding: var(--sp-3) var(--sp-3);
   outline: none;
 }
 
@@ -26,7 +26,7 @@
 .palette-list {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: var(--sp-1);
   overflow-y: auto;
   min-height: 0;
 }
@@ -34,9 +34,9 @@
 .palette-row {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: baseline;
-  padding: 6px 10px;
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--r);
   cursor: pointer;
   font-size: var(--fs);
@@ -48,7 +48,7 @@
 }
 
 .palette-group {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
@@ -61,7 +61,7 @@
 }
 
 .palette-hint {
-  font: var(--fs-xs) var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
   max-width: 220px;
   overflow: hidden;
@@ -72,7 +72,7 @@
 .palette-empty,
 .palette-keys {
   margin: 0;
-  padding: 8px 14px;
+  padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-s);
 }
 
