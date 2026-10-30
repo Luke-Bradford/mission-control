@@ -207,7 +207,7 @@ export function LoopSteps({
                 </div>
               )}
               {checks.length > 0 && (
-                <div style={{ marginTop: 4 }}>
+                <div style={{ marginTop: "var(--sp-1)" }}>
                   {checks.map((c) => (
                     <div className="check" key={c.text}>
                       <span className={CHECK_CLASS[c.state]}>{CHECK_ICON[c.state]}</span>

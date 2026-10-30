@@ -1,9 +1,9 @@
 .hrow {
   display: grid;
   grid-template-columns: minmax(0, 120px) minmax(0, 1fr) 56px 56px;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  padding: 3px 0;
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
 }
 

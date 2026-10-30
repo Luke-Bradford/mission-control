@@ -28,7 +28,7 @@
 }
 
 .expandable .sm {
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .dmsg:has(.expandable) {

@@ -1,15 +1,15 @@
 .labels {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
 }
 
 .lb {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   border: 0;
   border-radius: 2px;
-  padding: 0 6px;
+  padding: 0 var(--sp-1);
   background: var(--surface-2);
   color: var(--fg-2);
   white-space: nowrap;
@@ -17,7 +17,7 @@
 
 /* decision briefs and the Item panel */
 .btitle {
-  font-size: 14px;
+  font-size: var(--fs-panel);
 }
 
 /* ticket beside the board (components/TicketDetail.tsx) */
@@ -33,12 +33,12 @@
 
 .tart {
   display: grid;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .thead {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .tbody {
@@ -48,7 +48,7 @@
   overflow-wrap: anywhere;
   background: var(--surface-2);
   border-radius: var(--r-s);
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   font-size: var(--fs-s);
 }
 
@@ -57,13 +57,13 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   font-size: var(--fs-s);
 }
 
 /* in a panel body the list keeps .pb's padding */
 .pb.tlist {
-  padding: 2px 14px 12px;
+  padding: var(--sp-1) var(--sp-3) var(--sp-3);
 }
 
 @media (max-width: 999px) {

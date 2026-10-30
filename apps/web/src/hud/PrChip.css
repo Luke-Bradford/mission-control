@@ -2,6 +2,6 @@
 .rpr {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   white-space: nowrap;
 }

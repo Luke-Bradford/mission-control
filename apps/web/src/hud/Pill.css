@@ -2,10 +2,10 @@
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 1px 8px 1px 7px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2) 0 var(--sp-2);
   border-radius: 2px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   font-weight: 500;
   background: var(--surface-2);
   color: var(--fg-2);

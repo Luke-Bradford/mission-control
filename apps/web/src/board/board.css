@@ -8,20 +8,20 @@
 #page-board {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .query {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   font-family: var(--mono);
   font-size: var(--fs-s);
   color: var(--fg-2);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
-  padding: 3px 4px 3px 8px;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-2);
   max-width: 100%;
   min-width: 0;
 }
@@ -37,9 +37,9 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   overflow-x: auto;
-  padding: 4px 4px 6px;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1);
 }
 
 .kcol {
@@ -58,8 +58,8 @@
 .kcol .kh {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   margin: 0;
   font-size: inherit;
   font-weight: 600;
@@ -73,14 +73,14 @@
 
 .kcol.empty .kh {
   writing-mode: vertical-rl;
-  padding: 12px 0;
+  padding: var(--sp-3) 0;
   align-self: center;
   color: var(--muted);
   font-weight: 500;
 }
 
 .kcol .knot {
-  padding: 0 12px 6px;
+  padding: 0 var(--sp-3) var(--sp-1);
 }
 
 .kcol.empty .knot {
@@ -95,7 +95,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--sp-3);
   overflow: auto;
 }
 
@@ -109,8 +109,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 12px;
-  padding: 2px 4px 4px;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1);
 }
 
 .repokanban .rkh h3 {
@@ -125,8 +125,8 @@
 
 .kcol .kb {
   display: grid;
-  gap: 8px;
-  padding: 2px 8px 8px;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
   overflow: auto;
   min-height: 0;
   align-content: start;
@@ -145,9 +145,9 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
-  padding: 9px 11px;
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: 6px;
+  gap: var(--sp-1);
   cursor: pointer;
   text-align: left;
 }
@@ -183,7 +183,7 @@
   z-index: 1;
   border: 0;
   line-height: inherit;
-  padding: 1px 8px 1px 7px;
+  padding: 0 var(--sp-2) 0 var(--sp-2);
   color: var(--warn);
 }
 
@@ -211,9 +211,9 @@
 .kref {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-micro);
   color: var(--muted);
 }
 
@@ -238,7 +238,7 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .boardsplit.withdetail {
@@ -277,7 +277,7 @@
   .kcol.empty .knot {
     writing-mode: horizontal-tb;
     align-self: stretch;
-    padding: 9px 12px;
+    padding: var(--sp-2) var(--sp-3);
   }
   .kcol .kh > button {
     width: 100%;

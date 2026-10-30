@@ -1,7 +1,7 @@
 .ph .sub {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -10,7 +10,7 @@
 .ph .act {
   margin-left: auto;
   display: flex;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
   flex-wrap: wrap;
 }

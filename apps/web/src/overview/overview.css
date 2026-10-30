@@ -2,7 +2,7 @@
 /* A link in a panel head to the page that goes deeper (the Timeline's to the activity map). */
 .ph .act .ph-link {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -20,7 +20,7 @@
 #page-overview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
   overflow: hidden;
 }
 
@@ -33,7 +33,7 @@
   min-height: 0;
   display: grid;
   grid-template-rows: auto fit-content(45%) fit-content(18%) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .overview-grid > *,
@@ -50,12 +50,12 @@
 
 .overview-grid .ph {
   flex-shrink: 0;
-  padding: 10px 14px 8px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2);
 }
 
 .overview-grid .ph h2 {
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--fs);
   font-weight: 600;
 }
 
@@ -68,15 +68,15 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 28%);
   grid-template-rows: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .nbanner {
   display: flex;
   align-items: center;
-  gap: 10px 14px;
+  gap: var(--sp-2) var(--sp-3);
   flex-wrap: wrap;
-  padding: 9px 14px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--warn-mark);
   background: var(--warn-soft);
   border-radius: var(--r);
@@ -92,14 +92,14 @@
 
 .nbanner b {
   font-family: var(--display);
-  font-size: 18px;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--warn);
 }
 
 .nbanner .bits {
   display: flex;
-  gap: 6px 14px;
+  gap: var(--sp-1) var(--sp-3);
   flex-wrap: wrap;
   color: var(--fg-2);
   font-size: var(--fs-s);
@@ -116,7 +116,7 @@
 }
 
 .nbanner .bit {
-  font-size: 14px;
+  font-size: var(--fs-panel);
 }
 
 .nbanner .accent {
@@ -124,7 +124,7 @@
 }
 
 .quotawarn {
-  margin-top: 6px;
+  margin-top: var(--sp-1);
 }
 
 .ov {
@@ -132,7 +132,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
   grid-template-rows: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .ov > .col {
@@ -154,9 +154,9 @@
 .overview-axis {
   position: relative;
   height: 14px;
-  margin-left: 100px;
+  margin-left: var(--sp-7);
   border-top: 1px solid var(--line-2);
-  font: 10px / 1 var(--mono);
+  font: var(--fs-micro) / 1 var(--mono);
 }
 
 .overview-axis > span {
@@ -240,16 +240,16 @@
 .overview-lane {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   height: 100%;
   /* Keep the 19px visual lane while extending its pointer target to 24px. */
   min-height: 24px;
   max-height: var(--lane-max);
-  margin-block: -2.5px;
+  margin-block: calc(-1 * var(--sp-1));
   color: var(--fg-2);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 
 .overview-lane:hover {
@@ -309,16 +309,16 @@
 .overview-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 10px;
-  font: 10px var(--mono);
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  font: var(--fs-micro) var(--mono);
   text-transform: lowercase;
 }
 
 .overview-legend > span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
 }
 
 .overview-legend i {
@@ -346,10 +346,10 @@
 
 .trow {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  row-gap: 2px;
-  padding: 8px 10px;
+  row-gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-2);
   border-top: 1px solid var(--line);
   cursor: pointer;
   position: relative;
@@ -361,10 +361,10 @@
 
 .trow.head {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   cursor: default;
   border-top: 0;
-  padding-block: 2px 6px;
+  padding-block: var(--sp-1) var(--sp-1);
 }
 
 .trow:not(.head):hover,
@@ -428,7 +428,7 @@
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: nowrap;
   overflow: hidden;
   color: var(--warn);
@@ -438,7 +438,7 @@
 .trow .needpart {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 100%;
 }
@@ -454,7 +454,7 @@
 .trow .need .needctl {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .trow > * {
@@ -468,7 +468,7 @@
 .agent-identity {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: nowrap;
 }
 
@@ -495,7 +495,7 @@
 .state-cell {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   white-space: nowrap;
 }
 
@@ -504,8 +504,8 @@
   min-width: 0;
   overflow: hidden;
   max-width: 100%;
-  padding-inline: 5px;
-  gap: 4px;
+  padding-inline: var(--sp-1);
+  gap: var(--sp-1);
 }
 
 .state-cell > .xs {
@@ -551,11 +551,11 @@
 #agentsList .trow {
   min-width: 0;
   grid-template-columns: 150px 120px 118px 260px 96px 128px 56px 64px;
-  gap: 0 6px;
-  padding: 2px 8px;
+  gap: 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
   height: 34px;
-  line-height: 15px;
+  line-height: var(--lh-micro);
 }
 
 #agentsList .trow > * {
@@ -567,22 +567,22 @@
 }
 
 #agentsList .need {
-  font-size: 11px;
-  line-height: 14px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-micro);
   max-width: 100%;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 #agentsList .need button {
   min-height: 24px;
-  padding: 0 4px;
-  line-height: 12px;
-  font-size: 10px;
+  padding: 0 var(--sp-1);
+  line-height: var(--lh-micro);
+  font-size: var(--fs-s);
 }
 
 #agentsList .xs {
-  font-size: 11px;
-  line-height: 14px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-micro);
 }
 
 .crew-skeleton .kpi-skeleton {
@@ -611,7 +611,7 @@
 }
 
 #agentsList .agent-identity > :nth-child(2) {
-  padding-left: 15px;
+  padding-left: var(--sp-4);
 }
 
 #agentsList .agent-cli {
@@ -622,7 +622,7 @@
   display: block;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--fg);
 }
 
@@ -634,14 +634,14 @@
 #agentsList .state-cell .pill {
   flex: none;
   border-radius: 10px;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
 }
 
 #agentsList .meter {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 
 #agentsList .meter .track {
@@ -693,7 +693,7 @@
 @container agents (width < 900px) {
   #agentsList .trow {
     grid-template-columns: 100px 90px 80px 140px 64px 50px 44px 46px;
-    column-gap: 4px;
+    column-gap: var(--sp-1);
   }
 }
 
@@ -727,7 +727,7 @@
 #agentsList .loopstep {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
   align-items: stretch;
 }
 
@@ -760,35 +760,35 @@
 
 .meters2 {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-1);
 }
 
 .tok {
   display: grid;
-  gap: 1px;
+  gap: 0;
   justify-items: end;
 }
 
 .tok .row {
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: nowrap;
 }
 
 .res {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .resrow {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) 128px;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
 }
 
 .slots {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .slots i {
@@ -807,9 +807,9 @@
 .lock {
   border: 1px solid var(--line-2);
   border-radius: var(--r);
-  padding: 10px 12px;
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .lock.hot {
@@ -820,7 +820,7 @@
 .lockq {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   font-size: var(--fs-s);
 }
@@ -828,20 +828,20 @@
 .quotarow {
   display: grid;
   grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  padding: 3px 0;
+  padding: var(--sp-1) 0;
   font-size: var(--fs-s);
 }
 
 #timelineP .ph {
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-2);
   flex-wrap: nowrap;
 }
 
 #machP .resrow {
   grid-template-columns: 42px minmax(24px, 1fr) 128px;
-  gap: 6px;
+  gap: var(--sp-1);
   align-items: center;
 }
 
@@ -884,7 +884,7 @@
 }
 
 #machP .resrow .num {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
   white-space: nowrap;
 }
 
@@ -894,12 +894,12 @@
 
 #machP .agentslots {
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 #machP .slots {
   min-width: 0;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 #machP .slots i {
@@ -910,7 +910,7 @@
 
 #quotaP .quotarow {
   grid-template-columns: minmax(65px, 1fr) repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 #quotaP .quotarow .meter {
@@ -924,22 +924,22 @@
 }
 
 #quotaP .quotarow + .quotarow {
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .arow {
   display: grid;
   grid-template-columns: 44px 16px minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: baseline;
-  padding: 5px 14px;
+  padding: var(--sp-1) var(--sp-3);
   border-top: 1px solid var(--line);
   font-size: var(--fs-s);
 }
 
 .arow .t {
   color: var(--muted);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-s);
 }
 
 .arow .g {
@@ -967,7 +967,7 @@
 .arow .arefs {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .arow .txt {
@@ -988,7 +988,7 @@
 #actList .arow {
   grid-template-columns: 44px 14px 110px minmax(0, 1fr) auto;
   justify-content: stretch;
-  padding-block: 4px;
+  padding-block: var(--sp-1);
 }
 
 #actList .log-who {
@@ -998,15 +998,15 @@
 /* away mode */
 .awaystrip {
   display: flex;
-  gap: 10px;
+  gap: var(--sp-2);
   align-items: center;
   flex-wrap: wrap;
-  padding: 7px 14px;
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   border-radius: var(--r);
   font-size: var(--fs-s);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 @media (max-width: 999px) {
@@ -1069,7 +1069,7 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   align-content: start;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 /* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
@@ -1104,11 +1104,11 @@
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: var(--sp-1) var(--sp-1);
   margin: 0;
-  padding-bottom: 4px;
+  padding-bottom: var(--sp-1);
   border-bottom: 2px solid var(--stage-colour);
-  font-size: 11px;
+  font-size: var(--fs-s);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1127,22 +1127,22 @@
 .pipeline-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   min-width: 0;
-  padding: 5px 6px;
-  margin-top: 6px;
+  padding: var(--sp-1) var(--sp-1);
+  margin-top: var(--sp-1);
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   background: var(--surface-2);
   color: var(--fg);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-ticket {
   flex: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-skeleton {
@@ -1164,10 +1164,10 @@
 .pipeline-assignee {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   min-width: 0;
   max-width: 42%;
-  font-size: 11px;
+  font-size: var(--fs-s);
 }
 
 .pipeline-assignee i {
@@ -1180,14 +1180,14 @@
 
 .pipeline-more {
   display: block;
-  padding: 5px 0;
+  padding: var(--sp-1) 0;
 }
 
 /* Overview v2 metrics and stream freshness. */
 .overview-kpis {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .overview-kpi {
@@ -1195,8 +1195,8 @@
   min-width: 0;
   /* the label row grows when a narrow tile wraps its name above its window */
   grid-template-rows: minmax(22px, auto) 26px 14px 34px;
-  gap: 3px;
-  padding: 9px 12px;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -1213,13 +1213,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--fs-s);
   color: var(--muted);
 }
 
 .overview-kpi .lbl {
-  font-size: 10px;
-  line-height: 11px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-micro);
   color: var(--muted);
   white-space: normal;
   overflow-wrap: break-word;
@@ -1230,7 +1230,7 @@
 .overview-kpi .v {
   grid-row: 2;
   font-family: var(--display);
-  font-size: 26px;
+  font-size: var(--fs-title);
   font-weight: 600;
   line-height: 1.05;
   letter-spacing: 0.01em;
@@ -1246,7 +1246,7 @@
   position: relative;
   display: grid;
   grid-template-rows: 24px 9px;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -1260,9 +1260,9 @@
   position: absolute;
   top: -1px;
   left: 0;
-  padding-right: 4px;
+  padding-right: var(--sp-1);
   background: var(--surface);
-  font: 9px / 9px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 
@@ -1275,13 +1275,13 @@
 .kpi-axis {
   display: flex;
   justify-content: space-between;
-  font: 9px / 9px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
 
 .kpi-secondary {
   grid-row: 3 / 5;
-  font-size: 11px;
+  font-size: var(--fs-s);
   color: var(--fg-2);
   align-self: end;
   line-height: 1.4;
@@ -1291,7 +1291,7 @@
   display: block;
   width: 70%;
   height: 16px;
-  margin: 5px 0;
+  margin: var(--sp-1) 0;
   border-radius: 3px;
   background: var(--line);
 }
