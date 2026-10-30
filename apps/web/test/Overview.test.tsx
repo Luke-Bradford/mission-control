@@ -5,7 +5,6 @@ import {
   type CommsEvent,
   type CrewLoop,
   type CrewRow,
-  DEFAULT_PROFILES,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
   type HealthRow,
