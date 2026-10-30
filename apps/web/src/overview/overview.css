@@ -33,7 +33,7 @@
   min-height: 0;
   display: grid;
   /* KPIs, Pipeline and the bottom row take what their content needs; the crew roster scrolls in what is left. */
-  grid-template-rows: auto minmax(160px, 1fr) auto 280px;
+  grid-template-rows: max-content minmax(160px, 1fr) max-content 280px;
   gap: var(--sp-3);
   overflow-y: auto;
 }

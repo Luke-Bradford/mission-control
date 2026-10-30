@@ -190,4 +190,25 @@ describeRendered("Overview panels never clip or wrap their header", () => {
       );
     }
   }
+
+  // A short screen scrolls the page instead of cutting content off.
+  for (const colorScheme of ["light", "dark"] as const) {
+    it(
+      `at 1600x700, ${colorScheme}, the page scrolls and every Board link is reachable`,
+      async () => {
+        const page = await renderAt({
+          page: "test/overviewBrowser.html",
+          width: 1600,
+          height: 700,
+          colorScheme,
+          api,
+        });
+        expect(await page.reachable("#pipelineP .pipeline-more")).not.toContain(false);
+        expect(await page.reachable(".overview-metrics")).toEqual([true]);
+        expect(await page.reachable("#pipelineP .pipeline-chip")).not.toContain(false);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
 });

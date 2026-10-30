@@ -24,7 +24,7 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
     expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
     expect(rule(String.raw`\.overview-grid`)).toContain(
-      "grid-template-rows: auto minmax(160px, 1fr) auto 280px",
+      "grid-template-rows: max-content minmax(160px, 1fr) max-content 280px",
     );
     // Crew beside Timeline: 31% for the Timeline, 34% at 1280 and under, 27% at 1920 and over.
     expect(rule(String.raw`\.overview-work`)).toContain(
