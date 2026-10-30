@@ -8250,6 +8250,46 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(store.acks().has(errKey)).toBe(true);
       expect(store.crewErrors().some((e) => e.id === errorId)).toBe(false);
     });
+    it("dismiss_item settles an ordinary flag the engine raised about a run, but not one with no run", async () => {
+      live("guido-1", "r-fm", { ticket: "mc#7" });
+      for (const [key, runId] of [
+        ["r-fm:file-minor", "r-fm"],
+        ["r-fm:evidence-reminder", "r-fm"],
+      ] as const)
+        store.raiseNote({
+          key,
+          kind: "flag",
+          runId,
+          seatId: "guido-1",
+          repoId: "mc",
+          text: "Minor findings could not be filed",
+          at: NOW,
+        });
+      expect(await call("dismiss_item", { key: "note:r-fm:file-minor" })).not.toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(await call("dismiss_item", { key: "note:r-fm:evidence-reminder" })).not.toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(store.notes().filter((n) => n.dismissedAt !== null)).toHaveLength(2);
+      // a flag with no run behind it is still a decision held for the operator
+      store.raiseNote({
+        key: "decision-flag",
+        kind: "flag",
+        runId: null,
+        seatId: null,
+        repoId: "mc",
+        text: "Decision",
+        at: NOW,
+      });
+      expect(await call("dismiss_item", { key: "note:decision-flag" })).toHaveProperty(
+        "isError",
+        true,
+      );
+      expect(store.notes().find((n) => n.key === "decision-flag")?.dismissedAt).toBeNull();
+    });
     it("dismiss_item leaves a person's message and FLIGHT's own question to the operator", async () => {
       store.upsertNotifications(
         [

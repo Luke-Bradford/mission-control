@@ -3306,7 +3306,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const unavailable = "This item is protected or unavailable.";
         /** The refusal for an item FLIGHT may not dismiss, or null: it must be found, and not another lane's or briefed for the operator. */
         const dismissProblem = (item: AttentionItem | undefined, own = false): string | null => {
-          if (item === undefined || protectedDecisionItem(store, item, config, now()))
+          if (
+            item === undefined ||
+            protectedDecisionItem(store, item, config, now(), { runFlags: true })
+          )
             return unavailable;
           if (item.owner?.startsWith("lane:")) return "This item belongs to another lane.";
           // a person's message is the operator's to answer, and FLIGHT's own question stays theirs
