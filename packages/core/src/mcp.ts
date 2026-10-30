@@ -376,10 +376,10 @@ export const pushChecksText = (
 ): string => {
   const lines = found.map((c) => {
     const result = c.state === "failed" ? "failed" : "not run";
-    return `- ${result}: ${c.command}; ${
+    return `- ${result}: ${c.command}\n  ${
       c.recorded == null
         ? "nothing recorded"
-        : `recorded exit ${c.recorded.ok ? 0 : 1} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
+        : `recorded: ${c.command} exited ${c.recorded.ok ? 0 : 1} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
     }`;
   });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;

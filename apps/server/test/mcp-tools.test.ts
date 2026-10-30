@@ -2430,8 +2430,10 @@ describe("push and draft_pr", () => {
         const sha = await commitOk("apps/a.ts", "a3\n");
         const r = await push(gated());
         expect(r.isError).toBe(true);
-        expect(r.text).toContain(`not run: ${LINT}; recorded exit 0 on ${old.slice(0, 7)}`);
-        expect(r.text).toContain(`not run: ${TYPES}; nothing recorded`);
+        expect(r.text).toContain(
+          `not run: ${LINT}\n  recorded: ${LINT} exited 0 on ${old.slice(0, 7)}`,
+        );
+        expect(r.text).toContain(`not run: ${TYPES}\n  nothing recorded`);
         expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
       });
 
