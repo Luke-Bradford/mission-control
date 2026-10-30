@@ -3947,7 +3947,7 @@ describe("the engine runs reviews", () => {
         from: RETRO,
         to: SEAT,
         ticket: `${REPO}#7`,
-        text: "RETRO-1 reviewed aaaaaaa: 1 Critical, 1 Important.\nFindings are in RETRO-1's report_findings record; address them, then report_evidence.",
+        text: "RETRO-1 reviewed aaaaaaa: 1 Critical, 1 Important, 1 Minor.\nFindings are in RETRO-1's report_findings record; address Critical and Important findings, then report_evidence.",
       },
     ]);
   });
