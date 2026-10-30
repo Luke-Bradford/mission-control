@@ -4,7 +4,7 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { followLink } from "../router.ts";
+import { followLink, ticketPath } from "../router.ts";
 import { useSession } from "../shell/session.ts";
 
 /**
@@ -62,7 +62,7 @@ export function PipelinePanel() {
           );
           const cards = stageCards.slice(0, VISIBLE_CARDS);
           const more = count - cards.length;
-          const href = `/board?stage=${key}`;
+          const stageHref = `/board?stage=${key}`;
           return (
             <section
               key={key}
@@ -70,7 +70,7 @@ export function PipelinePanel() {
               aria-label={label}
             >
               <h3>
-                <a href={href} onClick={(e) => followLink(e, href)}>
+                <a href={stageHref} onClick={(e) => followLink(e, stageHref)}>
                   {label}
                 </a>
                 <span className="num">{data ? count : "—"}</span>
@@ -85,6 +85,7 @@ export function PipelinePanel() {
                 ))}
               {cards.map((card) => {
                 const owner = assignee(card.who, crew);
+                const href = ticketPath(card.repoId, card.ticket);
                 return (
                   <a
                     key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
@@ -111,8 +112,8 @@ export function PipelinePanel() {
               {more > 0 && (
                 <a
                   className="pipeline-more mono xs"
-                  href={href}
-                  onClick={(e) => followLink(e, href)}
+                  href={stageHref}
+                  onClick={(e) => followLink(e, stageHref)}
                 >
                   +{more}
                 </a>
