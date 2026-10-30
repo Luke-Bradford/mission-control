@@ -26,7 +26,7 @@ it("uses every KPI's minute series instead of hourly history", async () => {
     expect(graph.getAttribute("aria-label")).toMatch(/peak .+ · latest /);
     expect(graph.querySelectorAll("circle")).toHaveLength(0);
   }
-  expect(screen.getByText("+~$3.00 · 30m")).toBeTruthy();
+  expect(screen.getByText("+$3.00 · 30m")).toBeTruthy();
   expect(screen.getByText("+3 pp · 30m")).toBeTruthy();
 });
 

@@ -98,7 +98,7 @@ it("shows FLIGHT and the crew in seven columns with a live Work line, and observ
     within(table)
       .getAllByRole("columnheader")
       .map((h) => h.textContent),
-  ).toEqual(["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"]);
+  ).toEqual(["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"]);
   expect(within(table).getAllByRole("row")).toHaveLength(6);
   const rendered = rowsIn(container);
   expect(rendered.map((row) => row.querySelector(".rowlink")?.textContent)).toEqual([
@@ -530,7 +530,7 @@ it("keeps a second Work line for free seats", async () => {
   const { container } = render(<AgentsPanel />);
   await screen.findByText("free");
   const row = rowsIn(container)[1] as HTMLElement;
-  expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toBe("—");
+  expect(row.querySelector(".ticket-cell > :first-child")?.textContent).toBe("Free for work");
   expect(row.querySelector(".doing, .need")).toBeNull();
   expect(container.querySelector("#agentsList")?.classList.contains("no-steps")).toBe(false);
 });
@@ -795,7 +795,8 @@ it.each(["ci", "review", "parked"] as const)(
 );
 
 it.each([
-  { ticket: null, review: null, expected: "—" },
+  // no references: the status line leads, rather than a dash pushing it to the right edge
+  { ticket: null, review: null, expected: "Run ended" },
   { ticket: "shop-app#460", review: null, expected: "last #460" },
   { ticket: null, review: { prNumber: 524, state: "open" as const }, expected: "last PR #524" },
 ])("handles inactive work references: $expected", async ({ expected, ...refs }) => {
