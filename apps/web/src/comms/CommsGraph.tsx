@@ -2,7 +2,7 @@ import { COMMS_CREW, type CrewRow, HUD_STATE_LABEL } from "@mc/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { percent } from "../fmt.ts";
+import { percent, plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import {
@@ -452,7 +452,7 @@ export function CommsGraph({
     last: edge.last,
   }));
   const seatCount = rows.length;
-  const graphLabel = `Comms graph, ${seatCount} seats, ${total} messages in view (${scopeLabel(view)})`;
+  const graphLabel = `Comms graph, ${plural(seatCount, "seat")}, ${plural(total, "message")} in view (${scopeLabel(view)})`;
   const open = (id: string) =>
     navigate(
       id === CAPCOM || id === flight
@@ -545,7 +545,8 @@ export function CommsGraph({
           ) : (
             watched.map((entry) => (
               <p key={`${entry.from}-${entry.to}-${entry.ticket}`}>
-                <b>{`${entry.from} ↔ ${entry.to}`}</b> · {entry.rounds} rounds on {entry.ticket}
+                <b>{`${entry.from} ↔ ${entry.to}`}</b> · {plural(entry.rounds, "round")} on{" "}
+                {entry.ticket}
                 {entry.tokens === undefined || entry.tokens === null
                   ? ""
                   : ` · ${entry.tokens.toLocaleString()} tokens`}

@@ -11,7 +11,7 @@ import {
   type RunView,
 } from "@mc/core";
 import type { LOOP_PATH } from "../crew.ts";
-import { kTokens, shortSha } from "../fmt.ts";
+import { kTokens, plural, shortSha } from "../fmt.ts";
 
 export type LoopStep = (typeof LOOP_PATH)[number];
 
@@ -51,7 +51,7 @@ export const runLimits = (run?: RunView): LoopLimits => ({
 export function loopRule(step: LoopStep, limits: LoopLimits): string | null {
   if (step === "ci") return `↻ fail → back to Working · parks after ${limits.tries} failures`;
   if (step === "review") {
-    return `↻ Critical or Important findings → fix → CI → review · parks after ${limits.rounds} rounds`;
+    return `↻ Critical or Important findings → fix → CI → review · parks after ${plural(limits.rounds, "round")}`;
   }
   return null;
 }

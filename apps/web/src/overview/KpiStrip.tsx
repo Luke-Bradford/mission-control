@@ -1,7 +1,7 @@
 import { type MetricId, type OverviewSummary, usd } from "@mc/core";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { elapsed, hhmm, kTokens } from "../fmt.ts";
+import { elapsed, hhmm, kTokens, percent, plural } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
 import { quietSeries, Sparkline } from "../hud/Sparkline.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
@@ -146,16 +146,16 @@ export function KpiStrip() {
       label: "CI pass rate",
       title: "CI runs that passed in the last 24 hours, of those that finished.",
       page: "board",
-      value: k?.ciPassRate24h?.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
+      value: percent(k?.ciPassRate24h?.pct),
       pending,
       delta:
         k?.ciPassRate24h?.series !== undefined
           ? change(k.ciPassRate24h.series, (n) => `${kTokens(n)} pp`)
           : k?.ciPassRate24h?.runs != null
-            ? `${k.ciPassRate24h.runs} runs · ${k.ciPassRate24h.redNow} red now`
+            ? `${plural(k.ciPassRate24h.runs, "run")} · ${k.ciPassRate24h.redNow} red now`
             : "—",
       series: k?.ciPassRate24h?.series,
-      fmt: (n: number) => `${Math.round(n)}%`,
+      fmt: (n: number) => percent(n),
       history: "last 30 minutes",
       color: "var(--accent)",
     },

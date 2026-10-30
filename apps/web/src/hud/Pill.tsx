@@ -1,5 +1,5 @@
 import type { PillTone } from "@mc/core";
-import type { AriaRole, ReactNode } from "react";
+import type { AriaRole, ButtonHTMLAttributes, ReactNode } from "react";
 import "./Pill.css";
 
 /**
@@ -23,5 +23,22 @@ export function Pill({
     <span className={`pill ${tone}${className ? ` ${className}` : ""}`} title={title} role={role}>
       {children}
     </span>
+  );
+}
+
+/** A pill that is a control: the same dot-and-word look, rendered as a button (`kyou`, a Needs-you action). */
+export function PillButton({
+  tone,
+  className,
+  children,
+  ...rest
+}: { tone: PillTone; className?: string; children: ReactNode } & Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "className" | "type"
+>) {
+  return (
+    <button type="button" className={`pill ${tone}${className ? ` ${className}` : ""}`} {...rest}>
+      {children}
+    </button>
   );
 }

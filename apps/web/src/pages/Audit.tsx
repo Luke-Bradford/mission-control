@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
-import { cost, elapsed, percent, prLabel } from "../fmt.ts";
+import { cost, elapsed, percent, plural, prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
@@ -144,7 +144,7 @@ function Improvements({
       row: x,
     })),
     ...actionable(audit.reworkRounds).map((x) => ({
-      label: `Rework · ${x.rounds ?? 0} rounds`,
+      label: `Rework · ${plural(x.rounds ?? 0, "round")}`,
       row: x,
     })),
   ];
@@ -250,7 +250,7 @@ function Checks({ audit }: { audit: Audit }) {
         <span>Unanswered questions · {unanswered}</span>
         {audit.chatter.map((x) => (
           <span key={`${x.from}:${x.to}:${x.ticket}`}>
-            Chatter · {x.from} ↔ {x.to} · {x.ticket} · {x.rounds} rounds
+            Chatter · {x.from} ↔ {x.to} · {x.ticket} · {plural(x.rounds, "round")}
           </span>
         ))}
         {audit.refusalsByRule.map((x) => (

@@ -154,7 +154,7 @@ export function NodeDetail({
   return (
     <>
       <h3 className="map-detail-path">{path}</h3>
-      {files.length > 1 && <p className="map-note">{files.length} files</p>}
+      {files.length > 1 && <p className="map-note">{plural(files.length, "file")}</p>}
       {work.length ? (
         <ul className="map-who" aria-label="Seats that touched it">
           {work.map(({ seat, changed, read }) => (

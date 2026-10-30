@@ -568,8 +568,8 @@ export function ImpactLens({
           <div className="map-lens-section" key={seat.seat}>
             <h3>{seat.seat}</h3>
             <p>
-              {files.length} files changed → <b>{direct}</b> import them · <b>{reached.size}</b>{" "}
-              depend on them
+              {plural(files.length, "file")} changed → <b>{direct}</b> import them ·{" "}
+              <b>{reached.size}</b> depend on them
             </p>
             {files.some(isTest) && (
               <p className="map-lens-note">
@@ -807,7 +807,7 @@ export function HistoryLens({
         columns="PRs · share"
         rows={unlinked.map((row) => ({
           label: `${name(row.source)} + ${name(row.path)}`,
-          text: `${row.count} PRs · ${percent(row.share * 100)}`,
+          text: `${plural(row.count, "PR")} · ${percent(row.share * 100)}`,
           focus: row.source,
         }))}
         onFocus={onFocus}
@@ -897,7 +897,7 @@ export function OwnershipLens({
       <div className="map-lens-kpis">
         <b>
           {owned}
-          <small>of {snapshot.tree.length} files owned by an area</small>
+          <small>of {plural(snapshot.tree.length, "file")} owned by an area</small>
         </b>
         <b>
           {owner.labels.length}
@@ -997,7 +997,7 @@ export function ReviewLens({
       <header>
         <h2>Review findings</h2>
         <p>
-          {snapshot.findings.length} findings on {rows.size} files
+          {plural(snapshot.findings.length, "finding")} on {plural(rows.size, "file")}
         </p>
       </header>
       {[...rows.entries()]

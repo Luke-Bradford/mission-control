@@ -215,7 +215,7 @@ describe("Map page", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Impact" }));
     expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
-      "1 files changed",
+      "1 file changed",
     );
   });
 

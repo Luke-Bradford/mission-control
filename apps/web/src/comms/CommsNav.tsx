@@ -50,7 +50,10 @@ export function AgentNavRow({
         <small>{`${commsAgentRole(row)} · ${status.label.toLowerCase()}`}</small>
       </span>
       <span className="comms-nav-counts">
-        <small className={recent === 0 ? "zero" : undefined} title={`${recent} messages in 24h`}>
+        <small
+          className={recent === 0 ? "zero" : undefined}
+          title={`${plural(recent, "message")} in 24h`}
+        >
           {recent}
         </small>
         <CountBadges unread={unread} mentions={mentions} direct={direct} />
@@ -157,7 +160,7 @@ export function CommsNav({
         <i aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>FLIGHT ↔ CAPCOM</b>
-          <small>{`${flight?.messages.length ?? 0} messages`}</small>
+          <small>{plural(flight?.messages.length ?? 0, "message")}</small>
         </span>
         <span className="comms-nav-counts">
           <CountBadges
@@ -174,7 +177,7 @@ export function CommsNav({
         <i className="crew" aria-hidden="true" />
         <span className="comms-nav-agent">
           <b>#crew</b>
-          <small>{`${crewMembers} members`}</small>
+          <small>{plural(crewMembers, "member")}</small>
         </span>
         <span className="comms-nav-counts">
           <CountBadges unread={crew?.unread} mentions={unseenMentionsFor(mentions, "crew")} />
@@ -182,7 +185,7 @@ export function CommsNav({
       </button>
       <div className="comms-section-head">
         <h2>Agents</h2>
-        <span>{`${seats.length} agents`}</span>
+        <span>{plural(seats.length, "agent")}</span>
       </div>
       {seats.map((row) => (
         <AgentNavRow

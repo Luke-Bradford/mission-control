@@ -34,6 +34,7 @@ import { NodeDetail, SeatDetail, SeatSelector, type Selection } from "./Selector
 import { SessionTimeline } from "./SessionTimeline.tsx";
 import { useSessionTimeline } from "./timeline.ts";
 import "./map.css";
+import { plural } from "../fmt.ts";
 
 /** The feed's health, shown in the deck under the stage. */
 export interface MapStatus {
@@ -478,8 +479,8 @@ function AnalyticalMapKey({
         {owner ? (
           <>
             <span className="map-key-item">
-              <b>{owned}</b> of {snapshot.tree.length} files owned by an area · <b>{hard}</b>{" "}
-              hard-rule
+              <b>{owned}</b> of {plural(snapshot.tree.length, "file")} owned by an area ·{" "}
+              <b>{hard}</b> hard-rule
             </span>
             {owner.labels.map((label) => (
               <span className="map-key-item" key={label}>

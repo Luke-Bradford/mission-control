@@ -8,7 +8,7 @@ import type {
 import { type ReactNode, useMemo, useState } from "react";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { prLabel, shortSha } from "../fmt.ts";
+import { plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubHref } from "../links.ts";
@@ -122,7 +122,7 @@ function ReadinessCard({
   const size =
     pr.additions == null || pr.deletions == null
       ? "Size not captured"
-      : `${pr.additions + pr.deletions} lines · ${pr.changedFiles ?? "—"} files`;
+      : `${pr.additions + pr.deletions} lines · ${pr.changedFiles == null ? "— files" : plural(pr.changedFiles, "file")}`;
   const diffUrl = githubHref(pr.url) ? githubHref(`${pr.url}/files`) : null;
   return (
     <Panel

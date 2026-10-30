@@ -12,6 +12,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useResources } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
@@ -64,9 +65,9 @@ export function stepRole(p: ConfigProfile, step: ConfigProfile["steps"][number])
 }
 
 function stepExtra(p: ConfigProfile, step: ConfigProfile["steps"][number]): string | null {
-  if (step.max !== undefined) return `Up to ${step.max} tries.`;
-  if (step.phase === "ci") return `Up to ${p.tries} tries.`;
-  if (step.phase === "review") return `Up to ${p.rounds || "∞"} rounds.`;
+  if (step.max !== undefined) return `Up to ${plural(step.max, "try", "tries")}.`;
+  if (step.phase === "ci") return `Up to ${plural(p.tries, "try", "tries")}.`;
+  if (step.phase === "review") return `Up to ${p.rounds ? plural(p.rounds, "round") : "∞ rounds"}.`;
   return null;
 }
 
@@ -154,7 +155,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
                   aria-pressed={x.name === p?.name}
                   onClick={() => setPicked(x.name)}
                 >
-                  {`${x.name} · ${x.trigger ?? profileTrigger(x)} · ${seats?.filter((r) => r.loop?.profile === x.name && r.hudState === "running").length ?? "—"} running · ${x.steps.length} steps`}
+                  {`${x.name} · ${x.trigger ?? profileTrigger(x)} · ${seats?.filter((r) => r.loop?.profile === x.name && r.hudState === "running").length ?? "—"} running · ${plural(x.steps.length, "step")}`}
                 </button>
               </li>
             ))}
@@ -173,7 +174,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
           </ol>
           <div className="pb">
             <p className="s">
-              {`Up to ${p.rounds || "∞"} rounds${p.planRequired ? " · Plan required before a developer starts" : ""}`}
+              {`Up to ${p.rounds ? plural(p.rounds, "round") : "∞ rounds"}${p.planRequired ? " · Plan required before a developer starts" : ""}`}
             </p>
             <p className="s">
               Token budget{" "}

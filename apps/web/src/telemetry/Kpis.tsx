@@ -4,7 +4,7 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { cost, dur, kTokens, mss } from "../fmt.ts";
+import { cost, dur, kTokens, mss, plural } from "../fmt.ts";
 import { MetricName } from "../hud/MetricName.tsx";
 import { metricText, metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { followLink } from "../router.ts";
@@ -197,7 +197,7 @@ export function Kpis({
       key: "lock",
       label: "Lock wait",
       ...figure(history !== undefined || lockHistory.error !== null, history?.today.waitMs, mss),
-      detail: history ? `today · ${history.today.runs} runs` : "today",
+      detail: history ? `today · ${plural(history.today.runs, "run")}` : "today",
     },
     {
       key: "capcom",

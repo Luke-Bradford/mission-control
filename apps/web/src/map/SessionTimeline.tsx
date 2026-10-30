@@ -6,7 +6,7 @@ import {
   useRef,
 } from "react";
 import { useTz } from "../clock.ts";
-import { hhmm } from "../fmt.ts";
+import { hhmm, plural } from "../fmt.ts";
 import { seatToken } from "./cards.ts";
 import {
   TIMELINE_SPAN_MS,
@@ -162,7 +162,7 @@ export function SessionTimeline({
         <span role="status" aria-label="Playback" className="sr-only">
           {playback && current
             ? playback.step === 1 && !done
-              ? `Replaying ${label(playback.seat)}, ${playback.total} steps`
+              ? `Replaying ${label(playback.seat)}, ${plural(playback.total, "step")}`
               : done
                 ? `${label(playback.seat)} replay finished`
                 : ""
