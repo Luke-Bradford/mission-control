@@ -26,6 +26,8 @@ export const READONLY_FILES_NOTE = "Read-only agent: no file changes.";
 export const UP_TO_DATE_MAIN = "Up to date with main.";
 /** Why Update (and Check for updates) is off when the server has no updater. */
 export const UPDATE_UNAVAILABLE = "updates are not available on this server";
+/** `GET /api/update/log` when update.log exists but cannot be read; the errno and path stay in the hub log. */
+export const UPDATE_LOG_UNREADABLE = "could not read update.log";
 /** Why Update (and Check for updates) is off on a preview server. */
 export const PREVIEW_SERVER = "this is a preview server";
 export const FLIGHT_NOT_RUNNING = "FLIGHT is not running yet. It arrives in phase 3.";

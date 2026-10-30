@@ -57,8 +57,8 @@ export const UPDATE_LOG = "update.log";
 export const UPDATE_LOG_SHOWN_BYTES = 64 * 1024;
 
 /**
- * A log tail cut at a byte offset, from its first whole line. A cut that lands on a line start
- * keeps that line. With no newline at all, the leading run of token characters goes, so a
+ * A log tail cut at a byte offset, from its first whole line (the caller keeps a tail that starts
+ * on a line already). With no newline at all, the leading run of token characters goes, so a
  * credential cut in half (its prefix lost) is not shown without its redaction.
  */
 export function fromWholeLine(tail: string): string {
@@ -925,13 +925,14 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         const { size } = await fh.stat();
         if (size <= UPDATE_LOG_SHOWN_BYTES) {
           const all = Buffer.alloc(size);
-          await fh.read(all, 0, size, 0);
-          return cleanText(all.toString("utf8"), UPDATE_LOG_SHOWN_BYTES);
+          const { bytesRead } = await fh.read(all, 0, size, 0);
+          return cleanText(all.subarray(0, bytesRead).toString("utf8"), UPDATE_LOG_SHOWN_BYTES);
         }
         // one byte more than shown: a newline there means the tail starts on a whole line
         const buf = Buffer.alloc(UPDATE_LOG_SHOWN_BYTES + 1);
-        await fh.read(buf, 0, buf.length, size - buf.length);
-        const tail = buf.subarray(1).toString("utf8");
+        const { bytesRead } = await fh.read(buf, 0, buf.length, size - buf.length);
+        // a log rewritten since the stat (a new update started) is shorter: show what was read
+        const tail = buf.subarray(1, Math.max(1, bytesRead)).toString("utf8");
         const shown = buf[0] === 0x0a ? tail : fromWholeLine(tail);
         return `…\n${cleanText(shown, UPDATE_LOG_SHOWN_BYTES)}`;
       } finally {

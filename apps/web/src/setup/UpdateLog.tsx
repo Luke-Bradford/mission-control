@@ -14,11 +14,14 @@ export function UpdateLogModal({
   open,
   onClose,
   returnTo,
+  read = 0,
 }: {
   open: boolean;
   onClose: () => void;
   /** Where focus goes on close: the opener may have been a disabled button (Update while busy). */
   returnTo?: RefObject<HTMLElement | null>;
+  /** Bumped to read the log again while it is open (an Update failed with it showing). */
+  read?: number;
 }) {
   const [state, setState] = useState<LogState>({ kind: "loading" });
   useOverlay("update-log", open, onClose);
@@ -31,6 +34,7 @@ export function UpdateLogModal({
     const target = returnTo;
     return () => target?.current?.focus();
   }, [open, returnTo]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read is a trigger: a bump reads the log again
   useEffect(() => {
     if (!open) {
       setState({ kind: "loading" });
@@ -47,7 +51,7 @@ export function UpdateLogModal({
     return () => {
       live = false;
     };
-  }, [open]);
+  }, [open, read]);
   const pane = useRef<HTMLElement>(null);
   // opens at the end, where a failed step says why
   useEffect(() => {

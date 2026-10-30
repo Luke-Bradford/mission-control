@@ -62,6 +62,11 @@ function checkError(err: unknown, now: number, tz: string | null): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The update route's `logged`: true only when update.log records why the update stopped. */
+function loggedHold(err: ApiError): boolean {
+  return (err.body as { logged?: boolean } | undefined)?.logged === true;
+}
+
 /**
  * `Version {sha7} · {n} commits behind main · checked {when}`, [Check for updates] and [Update].
  * Check fetches origin/main now (disabled, with the reason as its title, on a preview or with no
@@ -69,12 +74,6 @@ function checkError(err: unknown, now: number, tz: string | null): string {
  * restarts the hub on the operator's confirm, and is enabled only when main is ahead: disabled, with the
  * server's reason as its title, when there is nothing to pull or the hub may not update.
  */
-/** The update route says whether update.log records why it stopped: a refusal before the log does not. */
-function loggedHold(err: ApiError): boolean {
-  if (err.status === 500) return (err.body as { logged?: boolean } | undefined)?.logged !== false;
-  return (err.body as { logged?: boolean } | undefined)?.logged === true;
-}
-
 function UpdateControl() {
   const { data: v } = useResource<VersionInfo>(RESOURCES.version);
   const tz = useTz();
@@ -83,6 +82,7 @@ function UpdateControl() {
   const [checking, setChecking] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const logButton = useRef<HTMLButtonElement>(null);
+  const [logRead, setLogRead] = useState(0);
   if (!v) return null;
   const behind =
     v.behind === null
@@ -127,12 +127,9 @@ function UpdateControl() {
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
       // a failed step (500), or a hold the log records (409 with logged): the log says why
-      if (
-        err instanceof ApiError &&
-        (err.status === 500 || err.status === 409) &&
-        loggedHold(err)
-      ) {
+      if (err instanceof ApiError && loggedHold(err)) {
         setLogOpen(true);
+        setLogRead((n) => n + 1); // a log already open reads again, now with the failure
       }
     }
     setBusy(false);
@@ -163,7 +160,12 @@ function UpdateControl() {
           Update log
         </button>
       )}
-      <UpdateLogModal open={logOpen} onClose={() => setLogOpen(false)} returnTo={logButton} />
+      <UpdateLogModal
+        open={logOpen}
+        onClose={() => setLogOpen(false)}
+        returnTo={logButton}
+        read={logRead}
+      />
     </>
   );
 }
