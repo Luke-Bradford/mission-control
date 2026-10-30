@@ -76,6 +76,7 @@ import {
   type PullRequestView,
   QA_RETENTION_DAYS,
   type QaFindingView,
+  type QaReviewRoundView,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -3714,13 +3715,20 @@ export class Store {
     }));
   }
 
-  /** Findings of reviews that ended since `since`, newest review first. */
+  /**
+   * Findings of reviews in the requested window, plus unresolved findings on PRs still open now.
+   * The latter protects an open card from losing its blocking review evidence as it ages.
+   */
   qaFindings(since: number): QaFindingView[] {
     const rows = this.db
       .prepare(
         `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
          JOIN reviews v ON v.id = f.review_id
-         WHERE v.ended_at >= ? ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
+         WHERE v.ended_at >= ? OR (f.resolution IS NULL AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
       )
       .all(since) as Row[];
     return rows.map((r) => ({
@@ -3738,6 +3746,32 @@ export class Store {
       summary: r.summary as string,
       resolution: r.resolution as string | null,
       resolvedReviewId: r.resolved_review_id as number | null,
+    }));
+  }
+
+  /** Completed review rounds in the requested window, plus the full history of open PRs. */
+  qaReviewRounds(since: number): QaReviewRoundView[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM reviews v
+         WHERE v.state = 'reported' AND v.ended_at IS NOT NULL AND (v.ended_at >= ? OR EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, v.id DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      sha: r.sha as string,
+      verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
+      blocking: r.blocking as number,
+      minor: r.minor as number,
+      endedAt: r.ended_at as number,
     }));
   }
 
