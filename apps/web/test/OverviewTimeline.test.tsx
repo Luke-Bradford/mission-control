@@ -110,18 +110,18 @@ it("keeps an observed open lock when a parked agent has no current turn", async 
   expect(container.querySelector(".k-lock")).not.toBeNull();
 });
 
-it("slides every second between fetches", async () => {
+it("slides every five seconds between fetches", async () => {
   const fetch = stub([
     { agentId: "dev-1", spans: [{ kind: "turn", from: NOW - 30 * MIN, to: null }], ticks: [] },
   ]);
   const { container } = render(<TimelinePanel />);
   await screen.findByRole("link", { name: "dev-1" });
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(5000);
   });
   const span = container.querySelector<HTMLElement>(".overview-span");
-  expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 100 / 3600);
-  expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 100 / 3600);
+  expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 500 / 3600);
+  expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 500 / 3600);
   expect(fetch.mock.calls.filter(([path]) => path === "/api/overview/timeline")).toHaveLength(1);
 });
 
