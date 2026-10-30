@@ -5,9 +5,11 @@ import { RESOURCES, useResource } from "../data.ts";
 import { cutText, firstLine } from "../fmt.ts";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import {
+  blockingOf,
   CHECK_CLASS,
   CHECK_ICON,
   heldStep,
+  isFailedPark,
   type LoopLimits,
   minutesText,
   parkNote,
@@ -65,16 +67,34 @@ function EndAsideRun({ row, runId }: { row: CrewRow; runId: string }) {
   return aside ? <EndAsideButton row={row} runId={runId} /> : null;
 }
 
-const dotOf = (mark: StepMark, i: number): string | number =>
-  mark === "done" ? "✓" : mark === "cur" ? "●" : mark === "held" ? "!" : i + 1;
+/** A step's mark on screen: the engine's, or "fail" for the held step of a failure park. */
+type ShownMark = StepMark | "fail";
+
+const dotOf = (mark: ShownMark, i: number): string | number =>
+  mark === "done"
+    ? "✓"
+    : mark === "cur"
+      ? "●"
+      : mark === "held"
+        ? "!"
+        : mark === "fail"
+          ? "✗"
+          : i + 1;
+
+const markClass = (mark: ShownMark): string => (mark === "held" ? "warn" : mark);
 
 /** The current step's reason: a park in numbers, else the loop's own text cut to one line. */
-function currentReason(loop: CrewRow["loop"] & object, runLoop: RunLoop | null | undefined) {
+function currentReason(
+  loop: CrewRow["loop"] & object,
+  runLoop: RunLoop | null | undefined,
+  events: RunLoopView["events"] | undefined,
+) {
   if (loop.phase === "parked") {
     const note = parkNote(
       runLoop?.parked?.reason ?? loop.parked ?? loop.text,
       runLoop?.parked?.kind,
       runLoop?.pushFor,
+      blockingOf(events, runLoop?.pushFor),
     );
     return { line: note.step, full: note.full };
   }
@@ -143,7 +163,7 @@ export function LoopSteps({
       <RepoRef repoId={row.repoId} number={loop.prNumber} kind="pr" bare />
     </div>
   );
-  const reason = currentReason(loop, runLoop);
+  const reason = currentReason(loop, runLoop, view?.events);
 
   if (!runLoop || tries.length === 0) {
     // a parked loop does not say which step it held at: its held line stands, and no step is current
@@ -169,7 +189,7 @@ export function LoopSteps({
             const current = mark === "cur" || mark === "held";
             return (
               <div
-                className={`vstep ${mark === "held" ? "warn" : mark}`}
+                className={`vstep ${markClass(mark)}`}
                 // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
                 key={`${i}:${step.name}`}
                 aria-current={current ? "step" : undefined}
@@ -212,8 +232,10 @@ export function LoopSteps({
       )}
       <div className="vsteps">
         {steps.map((step, i) => {
-          const mark = marks[i] as StepMark;
-          const current = mark === "cur" || mark === "held";
+          const held = marks[i] as StepMark;
+          const mark: ShownMark =
+            held === "held" && isFailedPark(runLoop.parked?.kind) ? "fail" : held;
+          const current = mark === "cur" || mark === "held" || mark === "fail";
           const own = step.phase === null ? [] : stepTries(tries, step.phase);
           const count = own.filter((t) => !t.fix).length;
           const minutes = own.reduce((sum, t) => sum + tryMinutes(t, now), 0);
@@ -228,7 +250,7 @@ export function LoopSteps({
           const last = failure ? tryLines([failure], now)[0] : undefined;
           return (
             <div
-              className={`vstep ${mark === "held" ? "warn" : mark}`}
+              className={`vstep ${markClass(mark)}`}
               // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
               key={`${i}:${step.name}`}
               aria-current={current ? "step" : undefined}

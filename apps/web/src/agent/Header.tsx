@@ -20,7 +20,7 @@ import { agentPath } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { useIsPopout } from "../shell/popout.ts";
 import { toast } from "../shell/Toast.tsx";
-import { parkNote } from "./loopView.ts";
+import { blockingOf, parkNote } from "./loopView.ts";
 import { Reason } from "./Reason.tsx";
 import { endConfirm, endSeat, interruptSeat, seatError } from "./seat.ts";
 import { Tiles } from "./Tiles.tsx";
@@ -554,12 +554,14 @@ export function Header({
 
 /** A parked loop's status in one line (kind, sha, count); the whole park text is behind "details". */
 function ParkedLine({ row }: { row: CrewRow }) {
-  const runLoop = useResource<RunLoopView>(row.run ? RESOURCES.runLoop(row.run.id) : null).data
-    ?.loop;
+  const view = useResource<RunLoopView>(row.run ? RESOURCES.runLoop(row.run.id) : null).data;
+  const runLoop = view?.loop;
+  const events = view?.events;
   const note = parkNote(
     runLoop?.parked?.reason ?? row.loop?.parked ?? row.loop?.text ?? "",
     runLoop?.parked?.kind,
     runLoop?.pushFor,
+    blockingOf(events, runLoop?.pushFor),
   );
   return <Reason className="vnow s fg2 doing" line={note.header} full={note.full} />;
 }

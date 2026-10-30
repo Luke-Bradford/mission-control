@@ -73,6 +73,12 @@
   border-color: var(--warn-mark);
 }
 
+.vstep.fail .tdot {
+  background: var(--crit-soft);
+  color: var(--crit);
+  border-color: var(--crit);
+}
+
 .vhead {
   all: unset;
   box-sizing: border-box;

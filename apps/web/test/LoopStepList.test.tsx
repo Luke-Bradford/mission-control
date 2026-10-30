@@ -4,6 +4,7 @@ import {
   pushChecksText,
   type RunLoop,
   type RunLoopView,
+  reviewParkText,
 } from "@mc/core";
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -11,7 +12,9 @@ import { LoopSteps } from "../src/agent/LoopSteps.tsx";
 import { crewRow, MIN, NOW } from "./fixtures.ts";
 
 const SHA = "c74cdfc1234567";
-const REFUSAL = pushChecksText("80001f8abcdef", [{ command: "pnpm -s test", state: "missing" }]);
+const BARE = pushChecksText("80001f8abcdef", [{ command: "pnpm -s test", state: "missing" }]);
+// as the engine records it when the push never shows up on GitHub
+const REFUSAL = `the push or PR for 80001f8 has not shown up on GitHub after 10 minutes (${BARE}): no PR for the pushed commit`;
 const FINDINGS = `RETRO-CX reviewed c74cdfc and found 1 issue to resolve before this PR can merge. ${"Please address each finding below. ".repeat(30)}\n\n1. [Important] apps/web/src/x.ts:1 — a long finding\n   Why: ${"because ".repeat(40)}`;
 
 const tryAt = (
@@ -108,5 +111,57 @@ describe("Loop steps as a list", () => {
     expect(steps[0]?.querySelector(".vmeta")?.textContent).toBe("1m · 1.0k");
     expect(steps[1]?.querySelector(".titer")?.textContent).toBe("2 tries");
     expect(longestLine(container as HTMLElement)).toBeLessThan(120);
+  });
+});
+
+describe("the held step's count and mark", () => {
+  it("reads the held count from the review event, not the capped park text", () => {
+    const park = reviewParkText("RETRO-CX", SHA, 3, {
+      developer: "Fixed it.",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "one", scenario: "why", fix: "f" },
+      ] as never,
+    });
+    const tries = [tryAt("working", 1, "pass"), tryAt("review", 1, "parked", { reason: park })];
+    const view = {
+      loop: {
+        phase: "parked",
+        pushFor: SHA,
+        parked: { kind: "review", reason: park, ended: false },
+      },
+      tries,
+      events: [
+        { key: "e", runId: "r", at: 1, text: "RETRO-CX reviewed c74cdfc: 1 blocking, 0 minor" },
+      ],
+      round: 3,
+    } as unknown as RunLoopView;
+    const { container } = render(
+      <LoopSteps
+        row={crewRow({
+          loop: loopOf({ phase: "parked", parked: park, text: park }),
+          hudState: "idle",
+        })}
+        view={view}
+        prs={[]}
+        limits={{ tries: 3, rounds: 3 }}
+        now={NOW}
+      />,
+    );
+    expect(container.textContent).toContain("waiting: 1 finding held on c74cdfc");
+  });
+
+  it("marks a failure park as failed and a review park as waiting", () => {
+    const marks = (kind: string, step: LoopTry["step"]) => {
+      const tries = [tryAt("working", 1, "pass"), tryAt(step, 1, "parked", { reason: "x" })];
+      const { container } = show(
+        loopOf({ phase: "parked", parked: "x", text: "Blocked: x" }),
+        tries,
+        { pushFor: SHA, parked: { kind, reason: "x", ended: false } },
+      );
+      const held = container.querySelector(".vstep.fail, .vstep.warn") as HTMLElement;
+      return [held.className, held.querySelector(".tdot")?.textContent];
+    };
+    expect(marks("ci", "ci")).toEqual(["vstep fail", "✗"]);
+    expect(marks("review", "review")).toEqual(["vstep warn", "!"]);
   });
 });

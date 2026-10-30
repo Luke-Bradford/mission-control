@@ -254,11 +254,17 @@ export interface ParkNote {
  * A park's one-line forms, built from its kind and numbers (finding count, sha), never from its
  * text. `kind` and `sha` come from the run's loop; without them a review is told by its text.
  */
-export function parkNote(reason: string, kind?: string | null, sha?: string | null): ParkNote {
+export function parkNote(
+  reason: string,
+  kind?: string | null,
+  sha?: string | null,
+  /** The blocking count of the review the park holds on, from the run's events. */
+  blocking?: number | null,
+): ParkNote {
   const reviewed = REVIEWED_SHA.exec(reason)?.[1];
   const short = sha ? shortSha(sha) : (reviewed ?? null);
   if (kind ? REVIEW_PARK_KIND.test(kind) : reviewed !== undefined) {
-    const count = findingCount(reason);
+    const count = blocking ?? findingCount(reason);
     const held = count === null ? "findings held" : `${plural(count, "finding")} held`;
     return {
       step: cutText(`waiting: ${held}${short ? ` on ${short}` : ""}`, STEP_REASON_MAX),
@@ -277,7 +283,7 @@ export function parkNote(reason: string, kind?: string | null, sha?: string | nu
 /** A try's outcome as a short code: `pass`, `refused: checks not run`, `CI failed: lint`. */
 export function tryCode(t: LoopTry, parkKind?: string | null): string {
   const reason = t.reason ?? "";
-  if (reason.startsWith(MC_PUSH_CHECKS)) {
+  if (reason.includes(MC_PUSH_CHECKS)) {
     return /^- failed: /m.test(reason) ? "refused: checks failed" : "refused: checks not run";
   }
   const why = cutText(firstLine(reason), 40);
@@ -355,3 +361,33 @@ export const minutesText = (minutes: number): string =>
   minutes < 60
     ? `${minutes}m`
     : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+
+/** Park kinds where the step failed (the operator fixes it), against a wait on a review or the operator. */
+const FAILED_PARK_KINDS = new Set([
+  "ci",
+  "refused",
+  "no-ci",
+  "conflict",
+  "gate",
+  "merge-step",
+  "pr-closed",
+]);
+export const isFailedPark = (kind: string | null | undefined): boolean =>
+  kind != null && FAILED_PARK_KINDS.has(kind);
+
+/**
+ * The blocking findings of the newest review of `sha`, read from the run's events
+ * (`RETRO reviewed c74cdfc: 1 blocking, 0 minor`); null when no event says.
+ */
+export function blockingOf(
+  events: readonly { text: string }[] | undefined,
+  sha: string | null | undefined,
+): number | null {
+  if (!events || !sha) return null;
+  const short = shortSha(sha);
+  for (const e of [...events].reverse()) {
+    const found = /\breviewed ([0-9a-f]{7}): (\d+) blocking\b/.exec(e.text);
+    if (found?.[1] === short) return Number(found[2]);
+  }
+  return null;
+}
