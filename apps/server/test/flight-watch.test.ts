@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   BACKGROUND_STALL_MS,
   type BoardItem,
+  carriedFrom,
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
   FLIGHT_DEBOUNCE_MS,
@@ -528,6 +529,40 @@ describe("FLIGHT's evidence", () => {
 });
 
 describe("FLIGHT's flow queues", () => {
+  it("keeps a review carried across a main merge current", () => {
+    live("guido-1", "r-guido");
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "ci",
+      prNumber: 7,
+      carry: { from: "old-sha", to: "new-sha" },
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "old-sha", ci: "passing" })], T0);
+    const oldReview = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: "old-sha",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    if (oldReview === null) throw new Error("review not queued");
+    store.setReviewState(oldReview, ["queued"], "running", { runId: "r-retro", at: T0 });
+    store.recordFindings(oldReview, "r-retro", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: T0,
+    });
+    store.upsertPullRequests("mc", [stored(7, { headSha: "new-sha", ci: "passing" })], T0 + MIN);
+
+    expect(carriedFrom({ from: "old-sha", to: "new-sha" }, null, "new-sha")).toBe("old-sha");
+    expect(flightState({ config, store, busy: [], now: T0 + MIN }).mergeQueue).toEqual([]);
+  });
+
   it("waits for review when the reported review is from an older PR head", () => {
     store.upsertPullRequests("mc", [stored(7, { headSha: "old-sha", ci: "passing" })], T0);
     const oldReview = store.requestReview({

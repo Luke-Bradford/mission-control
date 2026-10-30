@@ -51,6 +51,7 @@ import {
   type FlightWake,
   type FlightWakeList,
   type FlightWakeStatus,
+  carriedFrom,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -720,6 +721,10 @@ export function flightState(i: {
     .map((p) => {
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
       const reviewed = store.latestReportedReview(session.repoId, p.number);
+      const carried =
+        p.headSha === null
+          ? null
+          : carriedFrom(holder?.loop?.carry, holder?.loop?.reviewWaivedSha, p.headSha);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -738,7 +743,7 @@ export function flightState(i: {
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
         review:
-          reviewed?.verdict == null || reviewed.sha !== p.headSha
+          reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
