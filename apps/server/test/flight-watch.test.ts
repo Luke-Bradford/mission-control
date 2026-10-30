@@ -4,9 +4,9 @@ import { join } from "node:path";
 import {
   BACKGROUND_STALL_MS,
   type BoardItem,
-  carriedFrom,
   COMMS_CAPCOM,
   CREW_PAUSE_SETTING,
+  carriedFrom,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,

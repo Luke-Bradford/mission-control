@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import {
   type AttentionItem,
+  carriedFrom,
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
@@ -51,7 +52,6 @@ import {
   type FlightWake,
   type FlightWakeList,
   type FlightWakeStatus,
-  carriedFrom,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
