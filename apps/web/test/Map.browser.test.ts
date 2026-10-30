@@ -55,4 +55,11 @@ describeRendered("Map in a browser", () => {
     },
     60_000,
   );
+
+  it("selects a window when a timeline tick is clicked with the mouse", async () => {
+    const page = await renderAt({ page: "test/mapBrowser.html", width: 1600, height: 900 });
+    await page.boxes(".map-timeline-tick");
+    await page.click(".map-timeline-tick");
+    expect(await page.evaluate(() => window.location.hash, null)).toMatch(/^#win=/);
+  });
 });

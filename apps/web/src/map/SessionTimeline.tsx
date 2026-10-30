@@ -65,7 +65,12 @@ export function SessionTimeline({
   // a drag over the tracks or the axis picks a window; the presets are the keyboard route
   const startDrag = (event: ReactPointerEvent) => {
     const target = event.target as HTMLElement;
-    if (event.button !== 0 || !target.closest(".map-timeline-track, .map-timeline-axis-track"))
+    // a tick is a button of its own: capturing the pointer would send its click to the list
+    if (
+      event.button !== 0 ||
+      target.closest(".map-timeline-tick") ||
+      !target.closest(".map-timeline-track, .map-timeline-axis-track")
+    )
       return;
     const start = timeAt(event.clientX);
     if (start === null) return;
