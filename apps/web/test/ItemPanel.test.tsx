@@ -81,7 +81,10 @@ function open(
   stubFetch({
     "/api/attention": items,
     "/api/escalations": escalations,
-    "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+    "/api/crew?shape=summary": {
+      rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+      firstRunToday: null,
+    },
     "/api/config": CONFIG,
   });
   const view = render(<ItemPanel />);
@@ -114,7 +117,10 @@ describe("ItemPanel, Ask FLIGHT", () => {
     const fn = stubFetch({
       "/api/attention": [item()],
       "/api/escalations": [escalation({ question: QUESTION })],
-      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
       "/api/flight": flight,
       "POST /api/seats/flight-1/message": {},
@@ -164,7 +170,10 @@ describe("ItemPanel, Ask FLIGHT", () => {
     const fn = stubFetch({
       "/api/attention": items,
       "/api/escalations": [],
-      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
       "/api/flight": {
         seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
@@ -320,7 +329,7 @@ describe("ItemPanel, acting on an item", () => {
     const fn = stubFetch({
       "/api/attention": items,
       "/api/escalations": [escalation()],
-      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/crew?shape=summary": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: FLIGHT_SEAT, decisions: [] },
       "POST /api/seats/mc-dev-1/message": {},
@@ -491,7 +500,10 @@ describe("ItemPanel, while the escalations load", () => {
     const fetchFn = stubFetch({
       "/api/attention": [item()],
       "/api/escalations": [escalation({ question: QUESTION })],
-      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
     });
     const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
@@ -518,7 +530,10 @@ describe("ItemPanel, while the escalations load", () => {
     stubFetch({
       "/api/attention": [item()],
       "/api/escalations": () => ({ status: 500, body: { error: "boom" } }),
-      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
     });
     render(<ItemPanel />);
@@ -651,7 +666,11 @@ describe("ItemPanel closing", () => {
   });
 
   it("renders nothing while nothing is open", () => {
-    stubFetch({ "/api/attention": [], "/api/escalations": [], "/api/crew": { rows: [] } });
+    stubFetch({
+      "/api/attention": [],
+      "/api/escalations": [],
+      "/api/crew?shape=summary": { rows: [] },
+    });
     render(
       <>
         <ItemPanel />
@@ -780,7 +799,10 @@ describe("the item URL", () => {
       stubFetch({
         "/api/attention": items,
         "/api/escalations": [escalation({ question: QUESTION })],
-        "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+        "/api/crew?shape=summary": {
+          rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+          firstRunToday: null,
+        },
         "/api/config": CONFIG,
         "/api/repos": [],
       });
@@ -884,7 +906,10 @@ describe("ItemPanel, person variant", () => {
     const fn = stubFetch({
       "/api/attention": [personItem],
       "/api/escalations": [],
-      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "shop-app-ta", index: 2 })],
+        firstRunToday: null,
+      },
       "/api/config": CONFIG,
       "/api/notifications": { open: [thread()], handledToday: [] },
       [`POST /api/attention/${encodeURIComponent(KEY)}/handled`]: post,
@@ -1025,7 +1050,10 @@ describe("ItemPanel choice state", () => {
   it("keeps an answered choice visible and disables another answer", async () => {
     stubFetch({
       "/api/attention": [SEAT_Q],
-      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
       "/api/flight": { seat: null, decisions: [] },
       "POST /api/seats/mc-dev-1/message": {},
     });
@@ -1041,7 +1069,10 @@ describe("ItemPanel choice state", () => {
     const approval = { ...SEAT_Q, kind: "approval" as const };
     stubFetch({
       "/api/attention": [approval],
-      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
     });
     render(<ItemPanel />);
     act(() => openItem(approval.key));
@@ -1079,12 +1110,15 @@ describe("ItemPanel item chat isolation", () => {
     const fn = stubFetch({
       "/api/attention": [a, b],
       "/api/config": CONFIG,
-      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
       "/api/flight": {
         seat: { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" },
         decisions: [],
       },
-      "/api/agents/flight-1/stream": {
+      "/api/agents/flight-1/stream?limit=20": {
         events: [{ id: "global", kind: "msg", text: "Global conversation", at: NOW }],
         total: 1,
       },
@@ -1163,7 +1197,10 @@ it("retains the brief and choices while sending, and a late failure stays with i
   const base = stubFetch({
     "/api/attention": [a, b],
     "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-    "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+    "/api/crew?shape=summary": {
+      rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+      firstRunToday: null,
+    },
   });
   let finish: (response: Response) => void = () => {};
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) =>
@@ -1251,7 +1288,10 @@ it.each(["offline", "load failed", "echo failed"])(
   async (mode) => {
     const fn = stubFetch({
       "/api/attention": [SEAT_Q],
-      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
       "/api/flight": {
         seat: mode === "offline" ? null : { id: "flight-1", live: true },
         decisions: [],
@@ -1550,7 +1590,10 @@ it("records a handled result after switching items while the request is pending"
 it("keeps the answer editable while submitting and preserves newly typed text", async () => {
   const fn = stubFetch({
     "/api/attention": [SEAT_Q],
-    "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+    "/api/crew?shape=summary": {
+      rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+      firstRunToday: null,
+    },
     "POST /api/seats/mc-dev-1/message": {},
   });
   const answer = fn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
@@ -1629,7 +1672,10 @@ it.each(["seat", "flight"] as const)(
       target === "flight" ? discussionPath(first.key) : "/api/seats/mc-dev-1/message";
     const fn = stubFetch({
       "/api/attention": [first, other],
-      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
       "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
       "POST /api/seats/mc-dev-1/message": {},
     });
@@ -1691,7 +1737,7 @@ it("fetches the whole tagged message when the list only has a preview", async ()
     "/api/attention": [tag],
     [RESOURCES.attentionItem(tag.key).path]: { ...tag, text },
     "/api/config": CONFIG,
-    "/api/crew": { rows: [], firstRunToday: null },
+    "/api/crew?shape=summary": { rows: [], firstRunToday: null },
     "/api/flight": { seat: null, decisions: [] },
   });
   render(<ItemPanel />);

@@ -19,6 +19,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   capText,
   ciLogText,
@@ -1059,6 +1060,7 @@ describe("answer_question", () => {
     });
     expect((await call("answer_question", A(id, { answer }))).isError).toBeUndefined();
     expect(decisions()[0]).toMatchObject({ about: `GUIDO-1: ${question}`, decision: answer });
+    expect(Array.from(store.comms(0)[0]?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.recent[0]).toMatchObject({
       about: cut(`GUIDO-1: ${question}`, FLIGHT_STATE_TEXT_MAX),
@@ -1922,6 +1924,14 @@ describe("message_seat", () => {
     text: "Please push",
     basis: "idle",
     ...over,
+  });
+
+  it("refuses a long message and directs FLIGHT to the structured report", async () => {
+    expect(await call("message_seat", M({ text: "x".repeat(COMMS_MESSAGE_MAX + 1) }))).toEqual(
+      refused(
+        "Not sent: messages are limited to 1,200 characters; put findings, plans or evidence in report_findings, report_plan or report_evidence and send a short pointer.",
+      ),
+    );
   });
 
   it("wakes through the supervisor inbox boundary and records it", async () => {

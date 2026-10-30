@@ -153,7 +153,7 @@ interface Data {
 function stub(d: Data = {}) {
   const rows = d.rows ?? [crewRow({ digest: digest(), contextWindow: 200_000 }), studio()];
   const routes: Record<string, unknown> = {
-    "/api/crew": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/attention": d.items ?? [],
     "/api/limits": d.limits ?? [limit5h()],
     "/api/config": CONFIG,
@@ -162,7 +162,12 @@ function stub(d: Data = {}) {
   for (const r of rows) {
     const enc = encodeURIComponent(r.id);
     const streamNow = d.streamNow;
-    routes[`/api/agents/${enc}/stream`] = streamNow
+    // The page's own row follows `rows`, which a test swaps as the seat changes.
+    routes[`/api/crew/${enc}`] = () => ({
+      status: 200,
+      body: rows.find((x) => x.id === r.id) ?? r,
+    });
+    routes[`/api/agents/${enc}/stream?limit=20`] = streamNow
       ? () => ({ status: 200, body: streamNow() })
       : (d.stream ?? STREAM);
     routes[`/api/agents/${enc}/runs?limit=50`] = d.runs ?? [
@@ -254,6 +259,21 @@ describe("Agent page: header before the timezone loads", () => {
   });
 });
 
+describe("Agent page: first load", () => {
+  it("lists the crew by summary and reads the shown seat's row and stream in the budgeted forms", async () => {
+    const f = stub();
+    render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const asked = f.mock.calls.map(([p]) => String(p));
+    expect(asked).toContain("/api/crew?shape=summary");
+    expect(asked).toContain("/api/crew/shop-app-ta");
+    expect(asked).toContain("/api/agents/shop-app-ta/stream?limit=20");
+    expect(asked).not.toContain("/api/crew");
+    // The page asks for no seat's full row but the one it shows.
+    expect(asked).not.toContain("/api/crew/studio");
+  });
+});
+
 describe("Agent page: static run rows", () => {
   it("does not re-render a completed row on a clock tick", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -338,7 +358,7 @@ describe("Agent page: what the seat is doing", () => {
         seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] }),
       ],
       extra: {
-        "/api/repos/shop-app/prs?linked=1": [
+        "/api/repos/shop-app/prs?linked=1&shape=summary": [
           prView({ number: 166, title: "Backfill the quote cache" }),
         ],
       },
@@ -472,7 +492,7 @@ describe("Agent page: what past runs were", () => {
       rows: [seatRow({ hudState: "idle" })],
       runs: [rv({ id: "r-5", seq: 5, branch: "feature/77-cache", ticket: null, prs: [] })],
       extra: {
-        "/api/repos/shop-app/prs?linked=1": [
+        "/api/repos/shop-app/prs?linked=1&shape=summary": [
           prView({ number: 77, branch: "feature/77-cache" }),
           prView({ number: 9, branch: "other" }),
         ],
@@ -482,6 +502,55 @@ describe("Agent page: what past runs were", () => {
     const chip = await within(container).findByRole("link", { name: "shop-app PR #77" });
     expect(chip.closest(".rref")?.getAttribute("title")).toBe("Cache quotes");
     expect(within(container).queryByRole("link", { name: "shop-app PR #9" })).toBeNull();
+  });
+
+  it("updates a run PR from Start preview to Preview when its PR row arrives", async () => {
+    stubFetch({ "/api/config": CONFIG });
+    const runPr = {
+      repoId: "shop-app",
+      number: 77,
+      title: "Cache quotes",
+      url: "https://github.com/octo-org/shop-app/pull/77",
+      state: "open" as const,
+      ticket: null,
+    };
+    const view = render(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "shop-app PR #77" })).toBeTruthy();
+
+    view.rerender(
+      <RunRow
+        row={crewRow()}
+        run={rv({ prs: [runPr] })}
+        tz="UTC"
+        prs={[runPr]}
+        previewPrs={[
+          {
+            ...prView({
+              number: 77,
+            }),
+            preview: {
+              pr: 77,
+              branch: "feature/77-cache",
+              port: 5175,
+              url: "http://127.0.0.1:5175",
+              startedAt: NOW,
+            },
+          } as ReturnType<typeof prView> & { preview: object },
+        ]}
+        open={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Open preview for PR #77" })).toBeTruthy();
   });
 });
 
@@ -1519,7 +1588,7 @@ describe("Agent page: activity stream", () => {
       events: [tool("10:0", "Beta", NOW - 2 * MIN), tool("20:0", "Gamma", NOW - MIN)],
     };
     const before = fetch.mock.calls.length;
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
     await screen.findByText("Gamma");
     expect(open()).toEqual(["Beta"]);
@@ -1541,7 +1610,7 @@ describe("Agent page: activity stream", () => {
     (first.querySelector("details") as HTMLDetailsElement).open = true;
     current = { ...STREAM, runId: "r-13", events: [tool("0:0", "Omega", NOW)] };
     const before = fetch.mock.calls.length;
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before));
     await screen.findByText("Omega");
     const rows = container.querySelectorAll<HTMLElement>("#stream .ev");
@@ -1569,10 +1638,10 @@ describe("Agent page: activity stream", () => {
       },
     });
     const streamFetches = () =>
-      fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length;
+      fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream?limit=20").length;
     const refetch = async () => {
       const before = streamFetches();
-      act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+      act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
       await vi.waitFor(() => expect(streamFetches()).toBe(before + 1));
       await act(async () => {});
     };
@@ -1623,13 +1692,15 @@ describe("Agent page: activity stream", () => {
     });
     fireEvent.scroll(box); // at the bottom: the panel will follow a changed signature
     top = 790; // still within reach of the bottom, but not on it; no scroll event, so still "at bottom"
-    const before = fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length;
+    const before = fetch.mock.calls.filter(
+      ([u]) => u === "/api/agents/shop-app-ta/stream?limit=20",
+    ).length;
     current = { ...STREAM, events: [...STREAM.events] }; // a fresh object, the same content
-    act(() => hub.refetch("/api/agents/shop-app-ta/stream"));
+    act(() => hub.refetch("/api/agents/shop-app-ta/stream?limit=20"));
     await vi.waitFor(() =>
-      expect(fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream").length).toBe(
-        before + 1,
-      ),
+      expect(
+        fetch.mock.calls.filter(([u]) => u === "/api/agents/shop-app-ta/stream?limit=20").length,
+      ).toBe(before + 1),
     );
     await act(async () => {});
     expect(top).toBe(790);
@@ -2084,7 +2155,7 @@ describe("Agent page: loop steps", () => {
 
   describe("from the run's loop view", () => {
     const LOOP_ROUTE = "/api/runs/r-12/loop";
-    const PRS_ROUTE = "/api/repos/shop-app/prs?linked=1";
+    const PRS_ROUTE = "/api/repos/shop-app/prs?linked=1&shape=summary";
     const PUSH = "abc1234def5678";
     const triesAt = (
       step: LoopTry["step"],
@@ -2637,8 +2708,8 @@ describe("Agent page: loop steps", () => {
       run: { ...live, id: runId },
     });
     const f = stub({ rows: [next], runs: [] });
-    act(() => hub.refetch("/api/crew"));
-    await settled(f, "/api/crew");
+    act(() => hub.refetchCrew(next.id));
+    await settled(f, `/api/crew/${next.id}`);
   };
   const title = (panel: HTMLElement) => within(panel).getByRole("heading").textContent;
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
@@ -3177,7 +3248,7 @@ describe("Agent page: header and tile mockup", () => {
     expect(rows[0]?.run).toBe(row.run);
     const posts = f.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts.map(([path]) => path)).toEqual(["/api/crew/sessions/s1/seats"]);
-    for (const path of ["/api/config", "/api/crew", "/api/crew/changes"]) {
+    for (const path of ["/api/config", "/api/crew?shape=summary", "/api/crew/changes"]) {
       expect(f.mock.calls.filter(([p]) => p === path).length).toBeGreaterThan(1);
     }
   });
@@ -3892,7 +3963,7 @@ it("refreshes a Codex plan from live stream tasks", async () => {
     { id: "1", text: "Check the catalogue", status: "done" },
     { id: "2", text: "Verify the form", status: "in_progress" },
   ];
-  act(() => hub.refetch("/api/agents/guido-1/stream"));
+  act(() => hub.refetch("/api/agents/guido-1/stream?limit=20"));
   expect(await screen.findByRole("button", { name: "Plan 1/2" })).toBeTruthy();
   expect(screen.getByText("Verify the form")).toBeTruthy();
 });

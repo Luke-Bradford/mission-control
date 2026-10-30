@@ -74,9 +74,9 @@ function stub(d: Data = {}) {
     "/api/config": d.config ?? CONFIG,
     "/api/boards/shop-app": d.shopApp ?? [],
     "/api/boards/site-builder": d.engine ?? [],
-    "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
-    "/api/repos/site-builder/prs?linked=1": [],
-    "/api/crew": { rows: d.crew ?? [], firstRunToday: null },
+    "/api/repos/shop-app/prs?linked=1&shape=summary": d.prs ?? [],
+    "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+    "/api/crew?shape=summary": { rows: d.crew ?? [], firstRunToday: null },
     "/api/attention": d.attention ?? [],
     "/api/metrics": METRICS_VIEW,
     ...(d.profiles ? { "/api/repos/profiles": d.profiles } : {}),
@@ -335,7 +335,7 @@ describe("cards", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string, init?: RequestInit) =>
-        input === "/api/repos/shop-app/prs?linked=1"
+        input === "/api/repos/shop-app/prs?linked=1&shape=summary"
           ? new Promise<Response>((resolve) => {
               resolvePr = resolve;
             })
@@ -630,6 +630,35 @@ describe("cards", () => {
     expect(within(ov).getByText("CI passing").className).toBe("pill ok");
     expect(within(ov).queryByText("Open")).toBeNull();
     expect(container.querySelectorAll(".overlay .pill").length).toBe(1);
+  });
+
+  it("uses the Board PR payload's running preview URL", async () => {
+    const preview = {
+      pr: 40,
+      branch: "feature/preview",
+      port: 5175,
+      url: "http://127.0.0.1:5175",
+      startedAt: NOW,
+    };
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [{ ...pr(), preview } as PullRequestView & { preview: typeof preview }],
+    });
+    await open();
+
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    const link = within(c).getByRole("link", { name: "Open preview for PR #40" });
+    expect(link.getAttribute("href")).toBe(preview.url);
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("does not offer a Board preview when the payload has none", async () => {
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [{ ...pr(), preview: null } as PullRequestView & { preview: null }],
+    });
+    await open();
+    expect(screen.queryByRole("button", { name: "Start preview for PR #40" })).toBeNull();
   });
 
   it("a PR with review state shows it; a draft shows Draft; failing CI is red", async () => {
@@ -1376,9 +1405,9 @@ describe("missing sources", () => {
       "/api/repos": REPOS,
       "/api/config": CONFIG,
       "/api/boards/site-builder": [todo(2, { repoId: "site-builder", title: "Still here" })],
-      "/api/repos/shop-app/prs?linked=1": [],
-      "/api/repos/site-builder/prs?linked=1": [],
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [],
+      "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/attention": [],
     });
     render(<BoardPage repoId={null} ticket={null} />);
@@ -1390,7 +1419,7 @@ describe("missing sources", () => {
     stubFetch({
       "/api/repos": [],
       "/api/config": CONFIG,
-      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [], firstRunToday: null },
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
@@ -1423,9 +1452,9 @@ describe("render cost", () => {
       "/api/config": CONFIG,
       "/api/boards/shop-app": board,
       "/api/boards/site-builder": [],
-      "/api/repos/shop-app/prs?linked=1": [pr({ number: 41, ticket: "shop-app#3" })],
-      "/api/repos/site-builder/prs?linked=1": [],
-      "/api/crew": () => ({ status: 200, body: { rows: crew, firstRunToday: null } }),
+      "/api/repos/shop-app/prs?linked=1&shape=summary": [pr({ number: 41, ticket: "shop-app#3" })],
+      "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+      "/api/crew?shape=summary": () => ({ status: 200, body: { rows: crew, firstRunToday: null } }),
       "/api/attention": [],
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
@@ -1447,7 +1476,7 @@ describe("render cost", () => {
 
       // shop-app#2's agent stalls; shop-app#6's agent is unchanged (a new but equal row).
       crew = [crewRow({ ticket: "shop-app#2", hudState: "stalled" }), studio("shop-app#6")];
-      act(() => hub.refetch("/api/crew"));
+      act(() => hub.refetch("/api/crew?shape=summary"));
       const c2 = card(container, "shop-app#2") as HTMLElement;
       await waitFor(() => expect(within(c2).getByText("Stalled")).toBeTruthy());
       expect([...new Set(renders)]).toEqual(["shop-app#2"]);

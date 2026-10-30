@@ -334,6 +334,13 @@ describe("Comms routes", () => {
         unread: 1,
         inboxUnread: 0,
       },
+      "/api/comms/agents/alpha?summary=1": {
+        messages: [pin],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 3, lastMessage: pin }],
+        unread: 1,
+        inboxUnread: 0,
+      },
       "/api/comms/agents/alpha/contacts/beta": { messages: [pin] },
       "/api/comms/mentions": { mentions: [] },
       "/api/comms/pins": { messages: [pin] },
@@ -379,7 +386,7 @@ describe("Comms routes", () => {
     };
     const fetch = stubFetch({
       "/api/attention": [],
-      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/crew?shape=summary": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [message], unread: 3 },
@@ -476,7 +483,7 @@ describe("Comms routes", () => {
     const seat = crewRow({ id: "alpha", kind: "crew", index: 2 });
     stubFetch({
       "/api/attention": [],
-      "/api/crew": { rows: [seat], firstRunToday: null },
+      "/api/crew?shape=summary": { rows: [seat], firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [], unread: 0 },
@@ -491,11 +498,174 @@ describe("Comms routes", () => {
         inboxUnread: 0,
         directUnread: 2,
       },
+      "/api/comms/agents/alpha?summary=1": {
+        messages: [],
+        inbox: [],
+        contacts: [],
+        unread: 0,
+        inboxUnread: 0,
+        directUnread: 2,
+      },
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });
     const badge = await within(nav).findByTitle("2 unread replies to you");
     expect(badge.querySelector("[aria-hidden]")?.textContent).toBe("↩2");
+  });
+
+  const stored = (id: string, text: string, at: number) => ({
+    id,
+    at,
+    from: "alpha",
+    to: "crew",
+    text,
+    ticket: null,
+    label: null,
+    ref: null,
+    replyTo: null,
+    mentions: [],
+    reactions: [],
+    pinned: false,
+    operator: false,
+  });
+
+  it("loads older messages above the newest page, and drops the control when none remain", async () => {
+    const fetch = stubFetch({
+      "/api/comms/crew": {
+        messages: [stored("comms:50", "Newest page", NOW)],
+        hasMore: true,
+      },
+      "/api/comms/crew?before=comms%3A50": {
+        messages: [stored("comms:49", "From the page before", NOW - MIN)],
+        hasMore: false,
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    await screen.findByText("Newest page");
+    expect(screen.queryByText("From the page before")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    await screen.findByText("From the page before");
+    const texts = [...document.querySelectorAll(".comms-bubble")].map((b) => b.textContent ?? "");
+    expect(texts[0]).toContain("From the page before");
+    expect(texts[1]).toContain("Newest page");
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+    expect(fetch.mock.calls.map(([p]) => p)).toContain("/api/comms/crew?before=comms%3A50");
+  });
+
+  it("offers no older messages when the route has none", async () => {
+    stubFetch({
+      "/api/comms/crew": { messages: [stored("comms:1", "Only one", NOW)], hasMore: false },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    await screen.findByText("Only one");
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+  });
+
+  it("says so when older messages cannot be loaded", async () => {
+    stubFetch({
+      "/api/comms/crew": { messages: [stored("comms:50", "Newest page", NOW)], hasMore: true },
+      "/api/comms/crew?before=comms%3A50": () => ({ status: 500, body: { error: "boom" } }),
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    await screen.findByText("Newest page");
+    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    await screen.findByText("Could not load older messages.");
+    expect(screen.getByRole("button", { name: "Load older" })).toBeTruthy();
+  });
+
+  it("shows a nav row's conversation total from the summary counts", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": {
+        rows: [seatRow({ id: "alpha", displayCallSign: "alpha" })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/alpha?summary=1": {
+        contacts: [
+          { id: "beta", count: 4, unread: 0, lastMessage: null },
+          { id: "gamma", count: 3, unread: 0, lastMessage: null },
+        ],
+        unread: 0,
+      },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    expect((await within(nav).findByTitle("7 messages with its contacts")).textContent).toBe("7");
+  });
+
+  it("shows no all-messages total for a long history, which the first page cannot give", async () => {
+    const page = Array.from({ length: 50 }, (_, i) => stored(`comms:${i}`, `msg ${i}`, NOW - i));
+    stubFetch({
+      "/api/comms/agents/alpha": {
+        messages: page,
+        inbox: [],
+        hasMore: true,
+        contacts: [{ id: "beta", count: 60, unread: 0, lastMessage: page[0] }],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "agent", agentId: "alpha" }}
+        row={seatRow({ id: "alpha" })}
+      />,
+    );
+    const all = await screen.findByRole("button", { name: /^All messages/ });
+    expect(all.textContent).toBe("All messages");
+    expect(screen.getByRole("button", { name: "Load older" })).toBeTruthy();
+  });
+
+  it("opens on the nav summaries and fetches only the selected conversation's messages", async () => {
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": {
+        rows: [
+          seatRow({ id: "alpha", displayCallSign: "alpha" }),
+          seatRow({ id: "beta", displayCallSign: "beta", index: 1 }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/comms/agents/alpha?summary=1": { contacts: [], unread: 0 },
+      "/api/comms/agents/beta?summary=1": { contacts: [], unread: 0 },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await waitFor(() =>
+      expect(fetch.mock.calls.map(([p]) => p)).toContain("/api/comms/agents/beta?summary=1"),
+    );
+    const asked = fetch.mock.calls.map(([p]) => String(p));
+    expect(asked).toContain("/api/comms/agents/alpha?summary=1");
+    expect(asked).toContain("/api/comms/agents/beta?summary=1");
+    expect(asked).not.toContain("/api/crew");
+    expect(asked.filter((p) => /^\/api\/comms\/agents\/[^?/]+$/.test(p))).toEqual([]);
   });
 
   it("returns CAPCOM to its contact after sending from an agent-to-agent conversation", async () => {
@@ -516,6 +686,13 @@ describe("Comms routes", () => {
     };
     const fetch = stubFetch({
       "/api/comms/agents/alpha": {
+        messages: [message],
+        inbox: [],
+        contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/alpha?summary=1": {
         messages: [message],
         inbox: [],
         contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
@@ -573,7 +750,7 @@ describe("Comms routes", () => {
     };
     const fetch = stubFetch({
       "/api/attention": [],
-      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/crew?shape=summary": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [original, reply] },
@@ -616,7 +793,7 @@ describe("Comms routes", () => {
   it("shows live agent navigation and drills into an agent contact", async () => {
     stubFetch({
       "/api/attention": [],
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             id: "shop-app-ta",
@@ -630,6 +807,28 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/agents/shop-app-ta": {
+        messages: [
+          {
+            id: "comms:1",
+            from: "shop-app-ta",
+            to: "studio",
+            text: "handoff",
+            at: NOW,
+            ticket: null,
+            label: "handoff",
+            ref: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+        ],
+        inbox: [],
+        contacts: [],
+        unread: 0,
+        inboxUnread: 0,
+      },
+      "/api/comms/agents/shop-app-ta?summary=1": {
         messages: [
           {
             id: "comms:1",
@@ -701,7 +900,7 @@ describe("Comms routes", () => {
     };
     stubFetch({
       "/api/attention": [],
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           seatRow({
             id: "guido-cx",
@@ -725,7 +924,9 @@ describe("Comms routes", () => {
       "/api/comms/mentions": { mentions: [{ message: mention, seen: false }] },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+      "/api/comms/agents/guido-cx?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
       "/api/comms/agents/retro-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+      "/api/comms/agents/retro-cx?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
     });
     render(<Comms item={null} view={{ kind: "flight" }} />);
     expect(await screen.findByText("core · running")).toBeTruthy();
@@ -742,7 +943,7 @@ describe("Comms routes", () => {
   it("does not request stored Comms for observed loops", async () => {
     const fetch = stubFetch({
       "/api/attention": [],
-      "/api/crew": {
+      "/api/crew?shape=summary": {
         rows: [
           crewRow({ id: "studio-builder", repoId: "site-builder", kind: "loop", role: null }),
           seatRow({
@@ -760,6 +961,7 @@ describe("Comms routes", () => {
       "/api/comms/mentions": { mentions: [] },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
+      "/api/comms/agents/guido-cx?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
     });
     render(<Comms item={null} view={{ kind: "flight" }} />);
     await screen.findByText("core · running");
@@ -775,7 +977,7 @@ describe("Comms routes", () => {
   it("shows the stored-Comms empty state for crew", async () => {
     stubFetch({
       "/api/attention": [],
-      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/crew?shape=summary": { rows: ROWS, firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [] },

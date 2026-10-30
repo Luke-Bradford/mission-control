@@ -33,7 +33,7 @@ function stub(
   overrides: Record<string, unknown> = {},
 ) {
   return stubFetch({
-    "/api/crew": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/config": {
       ...CONFIG,
       crew: { sessions: [{ id: "s1", seats: [{ id: "flight", loop: "watch" }] }] },
@@ -55,7 +55,7 @@ function stub(
       ],
     },
     "/api/flight/brief": { session: "s1", sections: [], watch: [{ id: "ci" }] },
-    "/api/repos/shop-app/prs?linked=1": [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": [],
     ...overrides,
   });
 }

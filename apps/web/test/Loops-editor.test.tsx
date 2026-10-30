@@ -8,7 +8,7 @@ import { TEMPLATES as list } from "./templateFixtures.ts";
 
 const profiles = { source: "built-in", version: "a".repeat(64), error: null, list };
 const config = { ...CONFIG, profiles };
-beforeEach(() => stubFetch({ "/api/crew": { rows: [], firstRunToday: null } }));
+beforeEach(() => stubFetch({ "/api/crew?shape=summary": { rows: [], firstRunToday: null } }));
 afterEach(cleanup);
 
 it("renders all seven catalogue descriptions, checks, gates, retries and budgets", () => {
@@ -186,7 +186,9 @@ it("announces saving and prevents duplicate submissions while preserving the run
 });
 
 it("shows empty profiles and failed counts without claiming zero running", async () => {
-  stubFetch({ "/api/crew": () => ({ status: 500, body: { error: "Crew unavailable" } }) });
+  stubFetch({
+    "/api/crew?shape=summary": () => ({ status: 500, body: { error: "Crew unavailable" } }),
+  });
   const { rerender } = render(<Loops config={config} />);
   expect(screen.getByText("Loading running counts…")).toBeTruthy();
   await screen.findByText("Running counts unavailable: Crew unavailable");

@@ -128,7 +128,7 @@ function RenameSeat({ row }: { row: CrewRow }) {
     } finally {
       hub.refetch(RESOURCES.crewChanges.path);
       hub.refetch(RESOURCES.config.path);
-      hub.refetch(RESOURCES.crew.path);
+      hub.refetchCrew(row.id);
       setBusy(false);
     }
   };
@@ -271,7 +271,7 @@ function SwitchAccount({ row }: { row: CrewRow }) {
     } finally {
       hub.refetch(RESOURCES.accountStatus.path);
       hub.refetch(RESOURCES.config.path);
-      hub.refetch(RESOURCES.crew.path);
+      hub.refetchCrew(row.id);
       setBusy(false);
     }
   };
@@ -422,7 +422,7 @@ function SeatSettings({ row }: { row: CrewRow }) {
     } finally {
       hub.refetch(RESOURCES.crewChanges.path);
       hub.refetch(RESOURCES.config.path);
-      hub.refetch(RESOURCES.crew.path);
+      hub.refetchCrew(row.id);
       setBusy(false);
     }
   };

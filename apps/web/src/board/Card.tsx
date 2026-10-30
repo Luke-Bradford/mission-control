@@ -12,6 +12,7 @@ import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
+import { PrChip, type PrPreview } from "../hud/PrChip.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
@@ -43,7 +44,12 @@ function PrLine({ pr }: { pr: PullRequestView }) {
   const checks = checksText(pr.checks);
   return (
     <>
-      <RepoRef repoId={pr.repoId} number={pr.number} kind="pr" bare url={pr.url} />
+      <PrChip
+        pr={pr}
+        bare
+        showState={false}
+        preview={(pr as PullRequestView & { preview?: PrPreview | null }).preview}
+      />
       {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
       {checks && <span className="xs muted">{checks}</span>}
       {showState && <Pill tone={state.tone}>{state.label}</Pill>}

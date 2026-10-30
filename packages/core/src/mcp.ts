@@ -256,6 +256,12 @@ export const CALLED_FLIGHT =
   "Called FLIGHT. It wakes within 5 minutes with your reason and decides; an answer arrives as a message. Carry on with what you can meanwhile.";
 /** call_flight from FLIGHT itself. */
 export const CALL_FLIGHT_SELF = "Not called: you are FLIGHT.";
+/** The Comms mirror of an ask_flight question; the full question is kept in the question record. */
+export const ASK_FLIGHT_COMMS_POINTER =
+  "Question recorded for FLIGHT.\nFull question is in the structured question record.";
+/** The Comms mirror of an oversized FLIGHT answer; the full answer is kept in the decision record. */
+export const FLIGHT_ANSWER_COMMS_POINTER =
+  "FLIGHT answered your question.\nFull answer is in FLIGHT's structured decision record.";
 /** A seat's comms_send to CAPCOM labelled `question`: a seat's questions go to FLIGHT (#758). */
 export const COMMS_QUESTION_TO_FLIGHT =
   "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";

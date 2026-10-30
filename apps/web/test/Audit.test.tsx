@@ -450,7 +450,7 @@ it("Hotspots tab shows History and Review findings for the picked repo", async (
       { id: "other", github: "Luke-Bradford/other" },
       { id: "observed", github: "Luke-Bradford/observed" },
     ],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
     "/api/repos/mission-control/map": map("mission-control", "src/main.ts"),
     "/api/repos/other/map": map("other", "lib/other.ts"),
   });
@@ -481,7 +481,7 @@ it("Hotspots tab says so when no repo has a crew session", async () => {
     "/api/audit?range=30d": AUDIT,
     "/api/config": CONFIG,
     "/api/repos": [{ id: "mission-control", github: "Luke-Bradford/mission-control" }],
-    "/api/crew": { rows: [] },
+    "/api/crew?shape=summary": { rows: [] },
   });
   render(<Audit />);
   await screen.findByRole("heading", { level: 1, name: "Audit" });
