@@ -12,8 +12,11 @@ import { fakeModels, MODEL_PAGES } from "./config-codex.ts";
 const boot = vi.hoisted(() => ({
   app: null as FastifyInstance | null,
   deps: null as AppDeps | null,
+  onStreamCount: null as ((count: number) => void) | null,
+  hasViewClients: null as (() => boolean) | null,
   serving: false,
   discoveryStarted: false,
+  expectSupervisorEnabled: true,
   models: {} as ModelDeps,
   catalog: null as CodexModels | null,
   retryMs: 60_000,
@@ -62,6 +65,7 @@ vi.mock("../src/api.ts", async (original) => {
     ...real,
     buildApp: (deps: AppDeps) => {
       boot.deps = deps;
+      boot.onStreamCount = deps.onStreamCount ?? null;
       const app = real.buildApp({ ...deps, logger: false });
       boot.app = app;
       // Exercise main's serve/start ordering and real HTTP routes in process; no listening socket.
@@ -80,7 +84,7 @@ vi.mock("../src/runtime/codex-discovery.ts", async (original) => {
   return {
     startCodexDiscovery: (deps: Parameters<typeof real.startCodexDiscovery>[0]) => {
       expect(boot.serving).toBe(true);
-      expect(boot.deps?.supervisor?.status().enabled).toBe(true);
+      if (boot.expectSupervisorEnabled) expect(boot.deps?.supervisor?.status().enabled).toBe(true);
       boot.discoveryStarted = true;
       return real.startCodexDiscovery({
         ...deps,
@@ -107,6 +111,7 @@ vi.mock("../src/scheduler.ts", async (original) => {
   return {
     ...real,
     createScheduler: (deps: Parameters<typeof real.createScheduler>[0]) => {
+      boot.hasViewClients = deps.hasViewClients ?? null;
       const scheduler = real.createScheduler(deps);
       vi.spyOn(scheduler, "start").mockImplementation(() => {});
       return scheduler;
@@ -143,14 +148,19 @@ beforeEach(async () => {
   boot.catalog = new (await import("../src/runtime/codex-models.ts")).CodexModels();
   boot.app = null;
   boot.deps = null;
+  boot.onStreamCount = null;
+  boot.hasViewClients = null;
   boot.serving = false;
   boot.discoveryStarted = false;
+  boot.expectSupervisorEnabled = true;
   boot.retryMs = 60_000;
   boot.readGate = null;
   boot.discoveryComplete = null;
   boot.ticket.mockClear();
   dir = mkdtempSync(join(tmpdir(), "mc-startup-"));
   const configPath = join(dir, "config.yaml");
+  const worktrees = "/tmp/mc-startup-worktrees";
+  const checkout = "/tmp/mc-startup-checkout";
   const example = readFileSync(
     resolve(import.meta.dirname, "../../../config.example.yaml"),
     "utf8",
@@ -161,11 +171,11 @@ beforeEach(async () => {
       `
 crew:
   node: ${process.execPath}
-  worktrees: ${join(dir, "worktrees")}
+  worktrees: ${worktrees}
   sessions:
     - id: mixed
       repo_id: mission-control
-      checkout: ${join(dir, "checkout")}
+      checkout: ${checkout}
       seats:
         - { id: claude, role: GUIDO, account_id: claude-main, model: us.anthropic.claude-sonnet-4-6, area: ["apps/server/**"] }
         - { id: codex, role: INCO, account_id: codex-main, model: gpt-6-astra, effort: ultra, area: ["apps/web/**"] }
@@ -223,6 +233,18 @@ async function claudeCanStart() {
 
 describe("mixed hub startup", () => {
   const preparing = fakeModels();
+  it("connects stream counts to scheduler client presence", async () => {
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    if (!boot.onStreamCount || !boot.hasViewClients) throw new Error("missing stream wiring");
+
+    boot.onStreamCount(1);
+    expect(boot.hasViewClients()).toBe(true);
+    boot.onStreamCount(0);
+    expect(boot.hasViewClients()).toBe(false);
+  });
+
   it("serves before discovery filesystem preparation completes", async () => {
     boot.models = preparing.deps;
     let release: (bytes: Buffer) => void = () => {};

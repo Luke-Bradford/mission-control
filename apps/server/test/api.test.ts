@@ -4034,7 +4034,7 @@ describe("boards, escalations, health", () => {
     }
   });
 
-  it("builds the map in the background at start, and a request during the warm-up awaits that build", async () => {
+  it("does not build the map until a viewer requests it", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
@@ -4062,11 +4062,10 @@ describe("boards, escalations, health", () => {
         supervisor: stubSupervisor(),
         warmMap: true,
       });
-    // built before anyone asks
     const warmed = start();
     try {
       await warmed.ready();
-      await vi.waitFor(() => expect(builds()).toBe(1));
+      expect(builds()).toBe(0);
       expect(
         (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
       ).toBe(200);
@@ -4074,11 +4073,12 @@ describe("boards, escalations, health", () => {
     } finally {
       await warmed.close();
     }
-    // asked for while the warm-up is still building: the same build, not a second
+    // A new hub also leaves the map cold until its first map request.
     supervisorCalls = [];
     const racing = start();
     try {
       await racing.ready();
+      expect(builds()).toBe(0);
       const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
       expect(response.statusCode).toBe(200);
       expect(builds()).toBe(1);
@@ -4532,6 +4532,7 @@ describe("boards, escalations, health", () => {
       { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
     ]);
     const a = buildApp({ config, store, bus, mapRing: ring });
+    const unsubscribe = ring.subscribe("shop-app", () => {});
     const stop = ring.start();
     try {
       await expect
@@ -4558,6 +4559,7 @@ describe("boards, escalations, health", () => {
       expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
       expect(ring.diff("unknown")).toBeNull();
     } finally {
+      unsubscribe();
       stop();
       await a.close();
     }
@@ -5490,6 +5492,40 @@ describe("SSE stream", () => {
     };
     return { res, until, text: () => text };
   }
+
+  it("reports browser stream opens and closes", async () => {
+    await app.close();
+    const counts: number[] = [];
+    app = buildApp({ config, store, bus, onStreamCount: (count) => counts.push(count) });
+    const first = await open();
+    const second = await open();
+    await Promise.all([first.until(": connected"), second.until(": connected")]);
+    expect(counts).toEqual([1, 2]);
+
+    first.res.raw.res.emit("close");
+    second.res.raw.res.emit("close");
+
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+
+  it("stops map polling after the last map stream closes", async () => {
+    vi.useFakeTimers();
+    await app.close();
+    const poll = vi.spyOn(CallRing.prototype, "poll");
+    app = buildApp({ config, store, bus });
+    try {
+      const client = await open("/api/stream?map=shop-app");
+      await client.until(": connected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+
+      client.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
