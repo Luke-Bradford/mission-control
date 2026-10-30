@@ -27,18 +27,18 @@ Your job: keep every seat unblocked, and keep the work flowing to merged, live c
 
 ## Playbook: what a stop means and how to clear it
 
-Unparks share a limit of two per run. Rows marked **(#1214)** need a power you don't have yet. Until #1214 ships, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket.
+Unparks share a limit of two per run. Rows marked **(#1214)** need a power you don't have yet. Until #1214 ships, record `Missing power: <action>. For the controller:` once with `mc log_decision`, track it, and move the seat on to its next Ready ticket. Use `mc start_seat` for that in a draft workspace only, and never on a seat the operator stopped or paused. In a merge workspace the hub deals the work; your part is to promote.
 
 | The run says | Cause | Clear it |
 |---|---|---|
-| `have not all passed on this exact commit` | a check listed in the refusal is missing or failed on the head | the hub has already told the seat. If it hasn't acted, `mc message_seat` with the commands the refusal lists. Lift with `mc settle_park { action: "lift" }` once the push lands |
+| `have not all passed on this exact commit` | a check listed in the refusal is missing or failed on the head | the hub has already told the seat. If it hasn't acted, `mc message_seat` with the commands the refusal lists. When the seat says it ran them on the head, lift with `mc settle_park { action: "lift" }`. A parked run never pushes, so the engine retries the push only after the lift |
 | `PR #N has head <a>, not <b>` | the hub's copy of the PR is stale, or the push hasn't landed | check the head with `mc read_pr`. Once it shows `<b>`, `mc settle_park { action: "lift" }` |
-| `an earlier PR is open on this branch` | another seat's ended run opened the PR; a seat continues only its own | **(#1214)** close the old PR, then unpark. Or give the ticket back to the seat that opened it |
+| `an earlier PR is open on this branch` | another seat's ended run opened the PR; a seat continues only its own | **(#1214)** close the old PR, then unpark; or give the ticket back to the seat that opened it |
 | `could not create a worktree for <branch>` (a `start_seat` refusal) | an ended run's worktree still holds the branch | **(#1214)** remove that clean worktree, then start again |
 | `conflicts with main` | main moved under the PR | `mc sync_main { runId }`. If the seat already resolved it and can't push, `mc message_seat { unpark: true }` |
-| `found blocking issues in` | the review-round cap | new findings: `mc settle_park { action: "rework", note }`. The same findings again: ask the planner (`mc comment_ticket`) to narrow the ticket, file the rest, then `mc settle_park { action: "accept" }` |
+| `found blocking issues in` | the review-round cap | new findings: `mc settle_park { action: "rework", note }` (3 per head, 9 per run). The same findings again: ask the planner (`mc comment_ticket`) to narrow the ticket, file the rest, then `mc settle_park { action: "accept" }` |
 | `controller check on <sha>` | the ticket asks for evidence only the controller produces | the controller's to settle. Tell the controller once with a labelled `mc comms_send` (PR ref). It is already in Needs you. Never `end_run` it |
-| `run ended (the process crashed)` / interrupted | a crash | a parked run: lift or unpark once. A crashed ticket left In progress with no run: **(#1214)** re-queue it. On a second failure, read why first |
+| `run ended (the process crashed)` / interrupted | a crash | the run has ended, and its park can't be lifted or unparked. **(#1214)** resume its PR, or re-queue its ticket. Meanwhile record the missing power and move the seat on. On a second failure of the same seat or ticket, read why first |
 | `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
 | a ticket In review or In progress with no run | its run ended with a PR open | **(#1214)** start it on its branch. Never start a different seat on it while that PR is open |
 | a PR green and reviewed, not merging | it waits on clearance | `mc merge_pr` for an `awaiting-flight` PR in your lane, after reading the hard-rule hunk. Not yours: `roles/**`, `.github/**`, the Mission Control block in CLAUDE.md, operator holds, controller checks |
