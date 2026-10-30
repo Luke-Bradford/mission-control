@@ -1159,7 +1159,10 @@ export function createEngine(deps: EngineDeps): Engine {
           // a park for no progress then explains itself
           cur.lastRefusal = text;
           if (sent === "sent") {
-            handOff(COMMS_MC, text);
+            handOff(
+              COMMS_MC,
+              commsMirror(text, "Push checks failed; the full command list was sent to the seat."),
+            );
             // running checks makes no commit, so the push clock starts over: a full window from the message
             cur.pushStartedAt = at;
           }
