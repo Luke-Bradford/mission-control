@@ -6002,13 +6002,13 @@ describe("superuser housekeeping", () => {
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
   });
-  it("settles a stale Comms item with its reason and keeps it out of FLIGHT triage", async () => {
+  it("settles FLIGHT's own stale Comms item with its reason, but refuses a seat's", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
     const message = store.addComms({
       at: nowMs - 20 * 60_000,
-      from: "guido-1",
-      to: "flight-1",
+      from: "flight-1",
+      to: "guido-1",
       ticket: "mc#909",
       text: "The already-merged PR needs review",
       label: "blocker",
@@ -6027,6 +6027,22 @@ describe("superuser housekeeping", () => {
     expect(attentionItems(cfg, store, nowMs + 60 * 60_000).some((item) => item.key === key)).toBe(
       false,
     );
+
+    const seatBlocker = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "mc#909",
+      text: "The seat still needs a decision",
+      label: "blocker",
+    });
+    if (seatBlocker === null) throw new Error("message was not stored");
+    expect(
+      await call("dismiss_item", {
+        key: `comms-open:${seatBlocker.id}`,
+        basis: "Not FLIGHT's item.",
+      }),
+    ).toHaveProperty("isError", true);
   });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();

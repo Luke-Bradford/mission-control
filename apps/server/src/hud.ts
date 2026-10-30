@@ -992,6 +992,30 @@ function buildAttentionItems(
   for (const message of store.openCommsItems()) {
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
     if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
+    const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
+    const repoId = ticket?.[1];
+    const issueNumber = ticket === null ? null : Number(ticket[2]);
+    const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
+    const resolvedPr =
+      repoId === undefined
+        ? false
+        : store
+            .pullRequests(repoId)
+            .some(
+              (pr) =>
+                pr.state !== "open" &&
+                (pr.ticket === message.ticket ||
+                  (prNumber !== undefined && pr.number === Number(prNumber))),
+            );
+    const doneTicket =
+      repoId === undefined || issueNumber === null
+        ? false
+        : store
+            .board(repoId)
+            .some(
+              (item) => item.issueNumber === issueNumber && (item.closed || item.state === "done"),
+            );
+    if (resolvedPr || doneTicket) continue;
     items.push({
       owner: OWNER_OPERATOR,
       key: `${COMMS_OPEN_PREFIX}${message.id}`,

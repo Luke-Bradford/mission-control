@@ -3212,6 +3212,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           );
           if (
             message === undefined ||
+            message.from !== ctx.seatId ||
             message.ticket?.split("#")[0] !== repo.id ||
             item === undefined
           )
