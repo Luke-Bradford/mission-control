@@ -1,5 +1,5 @@
 import type { PullRequestView } from "@mc/core";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { QaReadiness } from "../src/pages/QaReadiness.tsx";
@@ -134,6 +134,17 @@ describe("QaReadiness", () => {
       "Mark mission-control PR 987 checked",
     );
     expect(paletteEntry(pr({ headSha: null }))).toEqual([]);
+  });
+
+  it("an open card follows the palette: Mark and Undo from the palette change it at once", async () => {
+    render(<QaReadiness />);
+    expect(await screen.findByRole("button", { name: "Mark checked" })).toBeTruthy();
+    const entry = () => buildEntries({ prs: [pr()] }).find((e) => e.group === "Action");
+    await act(async () => entry()?.run());
+    expect(screen.getByText("Checked at this head.")).toBeTruthy();
+    await act(async () => entry()?.run());
+    expect(screen.getByRole("button", { name: "Mark checked" })).toBeTruthy();
+    expect(screen.queryByText("Checked at this head.")).toBeNull();
   });
 
   it("shows current and old CI attempts plus finding severity and size evidence", async () => {
