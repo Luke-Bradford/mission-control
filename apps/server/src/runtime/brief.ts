@@ -61,7 +61,6 @@ export interface BriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
   fullSuite: readonly string[];
-  verifyResults?: readonly VerifyCheckResult[];
   /** The run's template profile, as snapshotted; absent adds no profile lines. */
   profile?: RunProfile;
   /** This build ticket has no recorded plan, so its seat must write one before coding. */
@@ -212,6 +211,7 @@ export interface ReviewBriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which wait for the test lock. */
   fullSuite: readonly string[];
+  verifyResults?: readonly VerifyCheckResult[];
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";

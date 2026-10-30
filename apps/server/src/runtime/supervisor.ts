@@ -3133,9 +3133,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? (info.repo.commands?.writer ?? [])
             : (info.repo.commands?.review ?? []),
         fullSuite: info.repo.fullSuite ?? [],
-        verifyResults: store
-          .verifyJobs()
-          .find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
@@ -3289,6 +3286,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((s) => seatDef(s).mode === "writer")
           .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
         fullSuite: info.repo.fullSuite ?? [],
+        verifyResults: store
+          .verifyJobs()
+          .find((job) => job.runId === author.id && job.sha === review.sha)?.checks,
       });
       const inbox = withInbox(
         seatId,
