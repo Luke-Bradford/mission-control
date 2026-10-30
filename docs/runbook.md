@@ -69,9 +69,27 @@ Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within 
 `ThrottleInterval`), crew runs resume, and the HUD reconnects. Each command's output goes to
 `update.log` beside the database (mode 0600), rewritten by each update. A failed step answers
 `update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving,
-and Setup opens the log (credentials redacted) so the failed command's output is on the page;
-it does the same for an update held for a person (409). **Update log** beside the button shows
-the last update's log at any time.
+and Setup opens the log (credentials redacted; paths and command output shown as they are) so
+the failed command's output is on the page. A refusal after the log started (a seat starting, a
+change held for a person) adds a `held: <reason>` line and opens the log too. A refusal before
+it (another update running, uncommitted changes) only toasts, since the log would be the previous
+update's. **Update log** beside the button shows the last update's log at any time.
+
+#### Update fails at install every time
+
+If every Update fails at `install` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, pnpm wants to
+rebuild `node_modules` and can't ask without a terminal. A hub started before #876 (merged 29 Oct
+2026) points pnpm at the crew's store and hits this every time, so it can never install the fix.
+From a terminal, in the hub's checkout:
+
+1. Stop the hub: `launchctl bootout gui/$(id -u)/com.missioncontrol.server` (with it running,
+   launchd's `KeepAlive` restarts it during the install).
+2. `git pull --ff-only origin main`
+3. `pnpm install --frozen-lockfile`, and answer yes when pnpm asks to remove `node_modules`.
+4. `pnpm --filter @mc/web build`
+5. Start the hub: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`.
+
+Check `/api/version` shows the new sha.
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 

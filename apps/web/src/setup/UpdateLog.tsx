@@ -1,5 +1,5 @@
 import type { UpdateLog } from "@mc/core";
-import { useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { ACTIONS } from "../data.ts";
 import { trapTab, useOverlay, useReturnFocus } from "../shell/overlays.ts";
@@ -10,14 +10,32 @@ type LogState =
   | { kind: "ok"; log: UpdateLog };
 
 /** The last update's commands and output, read fresh on each open; Esc closes it and Tab stays inside. */
-export function UpdateLogModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function UpdateLogModal({
+  open,
+  onClose,
+  returnTo,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Where focus goes on close: the opener may have been a disabled button (Update while busy). */
+  returnTo?: RefObject<HTMLElement | null>;
+}) {
   const [state, setState] = useState<LogState>({ kind: "loading" });
   useOverlay("update-log", open, onClose);
   const head = useId();
   const close = useRef<HTMLButtonElement>(null);
   useReturnFocus(open);
+  // a known return target wins over whatever had focus when the modal opened
   useEffect(() => {
     if (!open) return;
+    const target = returnTo;
+    return () => target?.current?.focus();
+  }, [open, returnTo]);
+  useEffect(() => {
+    if (!open) {
+      setState({ kind: "loading" });
+      return;
+    }
     close.current?.focus();
     let live = true;
     setState({ kind: "loading" });
@@ -57,7 +75,7 @@ export function UpdateLogModal({ open, onClose }: { open: boolean; onClose: () =
         </div>
         {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll a long log, and a click here keeps focus in the modal */}
         <section className="pb scroll" aria-label="Update log text" tabIndex={0} ref={pane}>
-          <pre>{body}</pre>
+          <pre className="update-log-text">{body}</pre>
         </section>
       </div>
     </div>

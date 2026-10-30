@@ -20,7 +20,7 @@
  * `GIT_*` settings, like every other git call the server makes.
  */
 import { spawn } from "node:child_process";
-import { access, appendFile, chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   errorText as errText,
@@ -53,8 +53,20 @@ export const UPDATE_EXIT_DELAY_MS = 500;
 export const UPDATE_RESTART_GRACE_MS = 5_000;
 /** Beside the database: `{MC_DB dir}/update.log`, rewritten by each update, mode 0600. */
 export const UPDATE_LOG = "update.log";
-/** The most of update.log the page is shown: its end, where a failed step says why. */
-export const UPDATE_LOG_SHOWN = 64 * 1024;
+/** The most of update.log the page is shown, in bytes: its end, where a failed step says why. */
+export const UPDATE_LOG_SHOWN_BYTES = 64 * 1024;
+
+/**
+ * A log tail cut at a byte offset, from its first whole line. A cut that lands on a line start
+ * keeps that line. With no newline at all, the leading run of token characters goes, so a
+ * credential cut in half (its prefix lost) is not shown without its redaction.
+ */
+export function fromWholeLine(tail: string): string {
+  // a cut inside a multi-byte character decodes as U+FFFD at the start: drop it with the line
+  const nl = tail.indexOf("\n");
+  if (nl >= 0) return tail.slice(nl + 1);
+  return tail.replace(/^[\uFFFD]*[A-Za-z0-9_\-.=+/]*/, "");
+}
 /** The web build's output beside the live `dist`, through `MC_WEB_OUTDIR` (apps/web/vite.config.ts). */
 export const WEB_OUTDIR_NEXT = "dist-next";
 const WEB_OUTDIR = "dist";
@@ -165,6 +177,8 @@ export class UpdateError extends Error {
   readonly checkedAt?: number | null;
   /** A 409 from an auto update: the range it left for a person. */
   readonly held?: HeldRange;
+  /** Raised after update.log was started, which then says why: the page may show the log. */
+  logged = false;
   constructor(
     status: 409 | 500 | 502,
     message: string,
@@ -337,8 +351,8 @@ export interface Updater {
   /** Schedules the exit; the route calls it once the successful update flow has completed. */
   restart(): void;
   /**
-   * update.log made safe to show (`cleanText`); a longer one keeps the lines in its last
-   * `UPDATE_LOG_SHOWN` characters, after "…". null before any update.
+   * update.log made safe to show (`cleanText`); a longer one keeps the whole lines in its last
+   * `UPDATE_LOG_SHOWN_BYTES` bytes, after "…". null before any update; another read error throws.
    */
   log(): Promise<string | null>;
 }
@@ -766,10 +780,12 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     async update(opts) {
       if (updating) throw new UpdateError(409, UPDATE_RUNNING);
       updating = true;
+      let logStarted = false;
       try {
         const reason = await refusal(true, false); // the crew's turn comes once the change is known
         if (reason !== null) throw new UpdateError(409, reason);
         await startLog();
+        logStarted = true;
         if (fetching) await fetching; // a version() fetch in flight: never two at once
         await log(`\n$ git fetch origin ${MAIN}\n`);
         const fetched = await fetchMain();
@@ -881,23 +897,46 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         return { restarting: true };
       } catch (e) {
         updating = false;
-        if (e instanceof UpdateError) throw e;
+        if (e instanceof UpdateError) {
+          // after the log started, a refusal says why in it too, so the page can show the log
+          if (logStarted) {
+            if (e.status === 409) await log(`held: ${e.message}\n`);
+            e.logged = true;
+          }
+          throw e;
+        }
         await log(`failed: ${errText(e)}\n`);
-        throw new UpdateError(500, UPDATE_FAILED, { cause: e });
+        const failed = new UpdateError(500, UPDATE_FAILED, { cause: e });
+        failed.logged = logStarted;
+        throw failed;
       }
     },
 
     async log() {
-      let text: string;
+      // only the file's end is read: a failed step's output can make the log tens of MB
+      let fh: Awaited<ReturnType<typeof open>>;
       try {
-        text = await readFile(logPath, "utf8");
-      } catch {
-        return null;
+        fh = await open(logPath, "r");
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; // no update has run
+        throw e;
       }
-      if (text.length <= UPDATE_LOG_SHOWN) return cleanText(text, UPDATE_LOG_SHOWN);
-      // from the first whole line, so the cut leaves no half token for redaction to miss
-      const tail = text.slice(-UPDATE_LOG_SHOWN);
-      return `…\n${cleanText(tail.slice(tail.indexOf("\n") + 1), UPDATE_LOG_SHOWN)}`;
+      try {
+        const { size } = await fh.stat();
+        if (size <= UPDATE_LOG_SHOWN_BYTES) {
+          const all = Buffer.alloc(size);
+          await fh.read(all, 0, size, 0);
+          return cleanText(all.toString("utf8"), UPDATE_LOG_SHOWN_BYTES);
+        }
+        // one byte more than shown: a newline there means the tail starts on a whole line
+        const buf = Buffer.alloc(UPDATE_LOG_SHOWN_BYTES + 1);
+        await fh.read(buf, 0, buf.length, size - buf.length);
+        const tail = buf.subarray(1).toString("utf8");
+        const shown = buf[0] === 0x0a ? tail : fromWholeLine(tail);
+        return `…\n${cleanText(shown, UPDATE_LOG_SHOWN_BYTES)}`;
+      } finally {
+        await fh.close();
+      }
     },
 
     restart() {

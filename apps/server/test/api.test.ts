@@ -6652,7 +6652,7 @@ describe("update routes", () => {
       };
       const r = await post("/api/update");
       expect(r.statusCode).toBe(status);
-      expect(r.json()).toEqual({ error: text });
+      expect(r.json()).toEqual({ error: text, logged: false });
     }
     expect(updaterCalls).not.toContain("restart");
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);

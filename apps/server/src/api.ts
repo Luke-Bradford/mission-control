@@ -3716,7 +3716,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       });
 
-      // The Update button. Texts are fixed; the commands' output goes to update.log, read below.
+      // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
+      // /update/log returns as raw output (paths and stderr included) with credentials redacted.
       const updater = deps.updater;
       const unavailableVersion: VersionInfo = {
         sha: "",
@@ -3755,7 +3756,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
-          if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
+          // logged: update.log says why (the page opens it); false for a refusal before the log
+          if (e instanceof UpdateError)
+            return reply.code(e.status).send({ error: e.message, logged: e.logged });
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
           return reply.code(500).send({ error: UPDATE_FAILED });
         }

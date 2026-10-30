@@ -1989,7 +1989,7 @@ describe("Setup toolbar: Update", () => {
         "/api/update/log": {
           text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted\n",
         },
-        "POST /api/update": () => ({ status, body: { error } }),
+        "POST /api/update": () => ({ status, body: { error, logged: true } }),
       });
       render(<Toast />);
       at("sessions");
@@ -2005,6 +2005,39 @@ describe("Setup toolbar: Update", () => {
       ask.mockRestore();
     },
   );
+
+  it("leaves the log closed for a refusal the log does not record, and for other failures", async () => {
+    for (const [status, body] of [
+      [409, { error: "the checkout has uncommitted changes", logged: false }],
+      [502, { error: "origin unreachable" }],
+    ] as const) {
+      load({
+        "/api/version": version(),
+        "/api/update/log": { text: "an older update\n" },
+        "POST /api/update": () => ({ status, body }),
+      });
+      render(<Toast />);
+      at("sessions");
+      await within(toolbar()).findByText(/^Version/);
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+      fireEvent.click(updateBtn());
+      expect(await screen.findByText(body.error)).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "Update log" })).toBeNull();
+      ask.mockRestore();
+      cleanup();
+    }
+  });
+
+  it("returns focus to the Update log button after Close", async () => {
+    load({ "/api/version": version(), "/api/update/log": { text: "x\n" } });
+    at("sessions");
+    await within(toolbar()).findByText(/^Version/);
+    const button = within(toolbar()).getByRole("button", { name: "Update log" });
+    fireEvent.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Update log" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
 
   it("shows the last update's log from the toolbar, or says none has run", async () => {
     load({ "/api/version": version(), "/api/update/log": { text: null } });

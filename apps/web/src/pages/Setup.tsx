@@ -5,7 +5,7 @@ import {
   UPDATE_UNAVAILABLE,
   type VersionInfo,
 } from "@mc/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
@@ -69,6 +69,12 @@ function checkError(err: unknown, now: number, tz: string | null): string {
  * restarts the hub on the operator's confirm, and is enabled only when main is ahead: disabled, with the
  * server's reason as its title, when there is nothing to pull or the hub may not update.
  */
+/** The update route says whether update.log records why it stopped: a refusal before the log does not. */
+function loggedHold(err: ApiError): boolean {
+  if (err.status === 500) return (err.body as { logged?: boolean } | undefined)?.logged !== false;
+  return (err.body as { logged?: boolean } | undefined)?.logged === true;
+}
+
 function UpdateControl() {
   const { data: v } = useResource<VersionInfo>(RESOURCES.version);
   const tz = useTz();
@@ -76,6 +82,7 @@ function UpdateControl() {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const logButton = useRef<HTMLButtonElement>(null);
   if (!v) return null;
   const behind =
     v.behind === null
@@ -119,8 +126,14 @@ function UpdateControl() {
       hub.refetch(RESOURCES.version.path);
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
-      // a failed step (500) or a hold for a person (409): the log says why; its first line dates it
-      if (err instanceof ApiError && (err.status === 500 || err.status === 409)) setLogOpen(true);
+      // a failed step (500), or a hold the log records (409 with logged): the log says why
+      if (
+        err instanceof ApiError &&
+        (err.status === 500 || err.status === 409) &&
+        loggedHold(err)
+      ) {
+        setLogOpen(true);
+      }
     }
     setBusy(false);
   }
@@ -146,11 +159,11 @@ function UpdateControl() {
         Update
       </button>
       {v.reason !== UPDATE_UNAVAILABLE && (
-        <button type="button" className="sm" onClick={() => setLogOpen(true)}>
+        <button type="button" className="sm" ref={logButton} onClick={() => setLogOpen(true)}>
           Update log
         </button>
       )}
-      <UpdateLogModal open={logOpen} onClose={() => setLogOpen(false)} />
+      <UpdateLogModal open={logOpen} onClose={() => setLogOpen(false)} returnTo={logButton} />
     </>
   );
 }
