@@ -107,8 +107,24 @@ describe("the check recorder", () => {
     await r.begin(KEY, `${LINT} && ${TYPES}`);
     await r.end(KEY, true);
     expect(rows).toEqual([
-      { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
-      { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
     ]);
   });
 
@@ -117,8 +133,24 @@ describe("the check recorder", () => {
     await r.begin(KEY, `${LINT} && ${TYPES}`, [{ runId: "r1", toolUseId: "codex-item-1" }]);
     await r.end({ runId: "r1", toolUseId: "codex-item-1" }, true);
     expect(rows).toEqual([
-      { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
-      { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
     ]);
   });
 
@@ -127,6 +159,38 @@ describe("the check recorder", () => {
     await r.begin(KEY, LINT);
     await r.end(KEY, false);
     expect(rows.map((x) => x.ok)).toEqual([false]);
+  });
+
+  it("keeps a chained invocation and Codex's numeric failure exit", async () => {
+    const detailed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void detailed.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => 99,
+    });
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    await r.end(KEY, false, 2);
+    expect(detailed).toEqual([
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+    ]);
   });
 
   it.each([

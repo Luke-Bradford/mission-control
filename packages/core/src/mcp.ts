@@ -371,7 +371,13 @@ export const pushChecksText = (
   found: readonly {
     command: string;
     state: CheckState;
-    recorded?: { headSha: string; ok: boolean; at: number } | null;
+    recorded?: {
+      headSha: string;
+      invokedCommand: string;
+      ok: boolean;
+      exitCode: number | null;
+      at: number;
+    } | null;
   }[],
 ): string => {
   const lines = found.map((c) => {
@@ -379,7 +385,7 @@ export const pushChecksText = (
     return `- ${result}: ${c.command}\n  ${
       c.recorded == null
         ? "nothing recorded"
-        : `recorded: ${c.command} exited ${c.recorded.ok ? 0 : 1} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
+        : `recorded: ${c.recorded.invokedCommand} exited ${c.recorded.exitCode ?? "unknown"} on ${c.recorded.headSha.slice(0, 7)} at ${new Date(c.recorded.at).toISOString()}`
     }`;
   });
   return `${MC_PUSH_CHECKS} Commit ${head.slice(0, 7)}:\n${lines.join("\n")}\n${CHECKS_ADVICE}`;

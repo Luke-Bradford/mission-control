@@ -3570,7 +3570,9 @@ describe("check runs", () => {
     expect(store.latestCheckRun("r2", "pnpm -s lint", sha("a"))).toBeNull();
     expect(store.newestCheckRun("r1", "pnpm -s lint")).toEqual({
       headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
       ok: false,
+      exitCode: null,
       at: 3,
     });
   });

@@ -697,7 +697,11 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         if (last === null)
           unmet.push({ command, state: "missing", recorded: store.newestCheckRun(runId, command) });
         else if (!last.ok)
-          unmet.push({ command, state: "failed", recorded: { headSha: sha, ...last } });
+          unmet.push({
+            command,
+            state: "failed",
+            recorded: { headSha: sha, invokedCommand: command, exitCode: null, ...last },
+          });
       }
       return unmet;
     }

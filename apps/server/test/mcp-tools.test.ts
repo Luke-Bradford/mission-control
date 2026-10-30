@@ -2358,7 +2358,13 @@ describe("push and draft_pr", () => {
         found: {
           command: string;
           state: "missing" | "failed";
-          recorded?: { headSha: string; ok: boolean; at: number } | null;
+          recorded?: {
+            headSha: string;
+            invokedCommand: string;
+            ok: boolean;
+            exitCode: number | null;
+            at: number;
+          } | null;
         }[],
       ) => ({
         text: pushChecksText(head, found),
@@ -2390,7 +2396,11 @@ describe("push and draft_pr", () => {
         const r = await push(gated());
         expect(r).toEqual(
           refusal(sha, [
-            { command: LINT, state: "failed", recorded: { headSha: sha, ok: false, at: NOW } },
+            {
+              command: LINT,
+              state: "failed",
+              recorded: { headSha: sha, invokedCommand: LINT, ok: false, exitCode: null, at: NOW },
+            },
           ]),
         );
         expect(r.text).toContain(`failed: ${LINT}`);
@@ -2405,7 +2415,17 @@ describe("push and draft_pr", () => {
         ran(TYPES, sha, false, NOW + 1);
         expect(await push(gated())).toEqual(
           refusal(sha, [
-            { command: TYPES, state: "failed", recorded: { headSha: sha, ok: false, at: NOW + 1 } },
+            {
+              command: TYPES,
+              state: "failed",
+              recorded: {
+                headSha: sha,
+                invokedCommand: TYPES,
+                ok: false,
+                exitCode: null,
+                at: NOW + 1,
+              },
+            },
           ]),
         );
       });
@@ -2417,8 +2437,16 @@ describe("push and draft_pr", () => {
         const sha = await commitOk("apps/a.ts", "a3\n");
         expect(await push(gated())).toEqual(
           refusal(sha, [
-            { command: LINT, state: "missing", recorded: { headSha: old, ok: true, at: NOW } },
-            { command: TYPES, state: "missing", recorded: { headSha: old, ok: true, at: NOW } },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: old, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: old, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
         expect(remoteTip()).toBeNull();
@@ -2431,9 +2459,26 @@ describe("push and draft_pr", () => {
         const r = await push(gated());
         expect(r.isError).toBe(true);
         expect(r.text).toContain(
-          `not run: ${LINT}\n  recorded: ${LINT} exited 0 on ${old.slice(0, 7)}`,
+          `not run: ${LINT}\n  recorded: ${LINT} exited unknown on ${old.slice(0, 7)}`,
         );
         expect(r.text).toContain(`not run: ${TYPES}\n  nothing recorded`);
+        expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
+      });
+
+      it("names a chained invocation and its numeric exit", async () => {
+        const old = await commitOk("apps/a.ts", "a2\n");
+        store.addCheckRun({
+          runId: RUN,
+          command: LINT,
+          invokedCommand: `${LINT} && ${TYPES}`,
+          headSha: old,
+          ok: false,
+          exitCode: 2,
+          at: NOW,
+        });
+        const sha = await commitOk("apps/a.ts", "a3\n");
+        const r = await push(gated());
+        expect(r.text).toContain(`recorded: ${LINT} && ${TYPES} exited 2 on ${old.slice(0, 7)}`);
         expect(r.text).toContain(`Commit ${sha.slice(0, 7)}`);
       });
 
@@ -2486,8 +2531,16 @@ describe("push and draft_pr", () => {
         const next = await commitOk("apps/a.ts", "on top\n");
         expect(await push(gated())).toEqual(
           refusal(next, [
-            { command: LINT, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
-            { command: TYPES, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
       });
@@ -2511,8 +2564,22 @@ describe("push and draft_pr", () => {
         const merge = await branchThenMerge(MC_MERGE_AUTHOR, `Merge main into ${BRANCH}`, false);
         expect((await push(gated())).text).toBe(
           pushChecksText(merge, [
-            { command: LINT, state: "missing", recorded: { headSha: first, ok: true, at: NOW } },
-            { command: TYPES, state: "missing", recorded: { headSha: first, ok: true, at: NOW } },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: first, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: {
+                headSha: first,
+                invokedCommand: TYPES,
+                ok: true,
+                exitCode: null,
+                at: NOW,
+              },
+            },
           ]),
         );
       });
@@ -2522,8 +2589,16 @@ describe("push and draft_pr", () => {
         const own = git(wt, "rev-parse", `${merge}^1`).trim();
         expect(await push(gated())).toEqual(
           refusal(merge, [
-            { command: LINT, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
-            { command: TYPES, state: "missing", recorded: { headSha: own, ok: true, at: NOW } },
+            {
+              command: LINT,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: LINT, ok: true, exitCode: null, at: NOW },
+            },
+            {
+              command: TYPES,
+              state: "missing",
+              recorded: { headSha: own, invokedCommand: TYPES, ok: true, exitCode: null, at: NOW },
+            },
           ]),
         );
       });

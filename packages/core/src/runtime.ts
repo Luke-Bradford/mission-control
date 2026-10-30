@@ -1129,8 +1129,8 @@ export type SessionEvent =
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
-  /** `ok`: a Codex command's exit success (the Claude stream carries none; its Post hook does). */
-  | { kind: "tool-result"; toolUseId: string; ok?: boolean }
+  /** Codex sends its exit code; the Claude stream carries none and its Post hook does. */
+  | { kind: "tool-result"; toolUseId: string; ok?: boolean; exitCode?: number | null }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
   | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
