@@ -8409,6 +8409,23 @@ describe("operator token", () => {
     expect(store.getSetting("crew.paused")).toBeNull();
   });
 
+  it("requires the operator token for PR flow", async () => {
+    for (const headers of [{}, { [OPERATOR_HEADER]: "wrong" }]) {
+      const response = await guarded.inject({ method: "GET", url: "/api/prs/flow", headers });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    }
+    expect(
+      (
+        await guarded.inject({
+          method: "GET",
+          url: "/api/prs/flow",
+          headers: { [OPERATOR_HEADER]: "tok-1" },
+        })
+      ).statusCode,
+    ).toBe(200);
+  });
+
   describe("controller check route", () => {
     const calls: [string, string, string, string | undefined][] = [];
     const SHA7 = "abcdef1";

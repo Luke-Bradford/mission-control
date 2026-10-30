@@ -112,12 +112,44 @@ const percentile = (values: number[], p: number): number | null => {
   return sorted[Math.ceil((p / 100) * sorted.length) - 1] ?? null;
 };
 
+const flowStage = (loop: Run["loop"]): FlightPrFlowRow["stage"] =>
+  loop?.controllerCheck
+    ? "controller check"
+    : loop?.mergeHold
+      ? "clearance"
+      : loop?.mainMerge
+        ? "sync"
+        : loop?.parked?.kind === "review-failed"
+          ? "rework"
+          : loop?.phase === "review"
+            ? "review"
+            : loop?.phase === "ci"
+              ? "CI"
+              : loop?.phase === "done"
+                ? "merge"
+                : "building";
+
+const stageSince = (
+  store: Store,
+  run: Run | null,
+  stage: FlightPrFlowRow["stage"],
+  fallback: number,
+): number => {
+  if (run === null) return fallback;
+  const event = store
+    .runAttempts(run.id)
+    .filter((attempt) => attempt.kind === "loop")
+    .reverse()
+    .find((attempt) => flowStage(attempt.data as unknown as Run["loop"]) === stage);
+  return event?.at ?? fallback;
+};
+
 /** Derives the single PR-flow record used by both FLIGHT and the HUD. */
 export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow {
   const runs = store
     .runsActiveSince(now - PR_FLOW_HISTORY_MS)
     .filter((run) => run.repoId === repoId);
-  const holds = store.activeHolds();
+  const holds = store.activeHolds().filter((hold) => hold.ref.startsWith(`${repoId}#`));
   const rows = store
     .pullRequests(repoId)
     .filter((pr) => pr.state === "open")
@@ -126,11 +158,11 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
         (run) =>
           run.loop?.prNumber === pr.number ||
           run.prs.some((seen) => seen.number === pr.number) ||
-          run.ticket === pr.ticket,
+          (pr.ticket !== null && run.ticket === pr.ticket),
       );
       const run = related.at(-1) ?? null;
       const active = run?.endedAt === null ? run : null;
-      const loop = active?.loop ?? null;
+      const loop = run?.loop ?? null;
       const parked = loop?.parked;
       const ahead =
         active?.loop?.aside === undefined
@@ -142,27 +174,26 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
                 candidate.endedAt === null &&
                 candidate.loop?.aside === null,
             ) ?? null);
-      const stage: FlightPrFlowRow["stage"] = loop?.controllerCheck
-        ? "controller check"
-        : loop?.mergeHold
-          ? "clearance"
-          : loop?.mainMerge
-            ? "sync"
-            : parked?.kind === "review-failed"
-              ? "rework"
-              : loop?.phase === "review"
-                ? "review"
-                : loop?.phase === "ci"
-                  ? "CI"
-                  : loop?.phase === "done"
-                    ? "merge"
-                    : "building";
+      const stage = flowStage(loop);
+      const reviewer = store
+        .reviewsIn(["queued", "starting", "running"])
+        .find((review) => review.repoId === repoId && review.prNumber === pr.number);
       const owner =
         active === null
           ? "nobody"
           : ahead?.loop?.prNumber !== null && ahead?.loop?.prNumber !== undefined
             ? `${active.agentId} is on PR ${ahead.loop.prNumber} (2nd in its queue)`
-            : active.agentId;
+            : stage === "CI"
+              ? "CI"
+              : stage === "review"
+                ? (reviewer?.seatId ?? "review seat")
+                : stage === "controller check"
+                  ? "controller"
+                  : stage === "clearance" || stage === "merge"
+                    ? loop?.mergeHold?.by === "CAPCOM"
+                      ? "operator"
+                      : "FLIGHT"
+                    : active.agentId;
       const waitsOn = [
         ...(active === null && run !== null && run.endedAt !== null
           ? [`no run since ${clockHm(run.endedAt, "UTC")}`]
@@ -183,10 +214,17 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
         title: pr.title,
         owner,
         stage,
-        stageSince: active?.startedAt ?? run?.endedAt ?? pr.updatedAt,
+        stageSince: stageSince(store, run, stage, run?.startedAt ?? pr.updatedAt),
         openSince: pr.createdAt,
         waitsOn,
-        blocks: holds.filter((hold) => hold.waitsOn === pr.number).map((hold) => hold.ref),
+        blocks: holds
+          .filter((hold) => hold.waitsOn === pr.number)
+          .flatMap((hold) => {
+            const dependent = store
+              .pullRequests(repoId)
+              .find((candidate) => candidate.state === "open" && candidate.ticket === hold.ref);
+            return dependent === undefined ? [hold.ref] : [hold.ref, `PR ${dependent.number}`];
+          }),
         lastAction: active === null && run?.endedAt !== null ? "run ended" : stage,
         lastActor: run?.agentId ?? null,
       };

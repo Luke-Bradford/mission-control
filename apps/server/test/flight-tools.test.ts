@@ -3015,7 +3015,7 @@ describe("flight_state", () => {
         rows: [
           expect.objectContaining({
             pr: 9,
-            owner: "guido-1",
+            owner: "review seat",
             stage: "review",
             lastAction: "review",
           }),

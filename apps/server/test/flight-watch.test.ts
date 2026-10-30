@@ -588,7 +588,7 @@ describe("FLIGHT's flow queues", () => {
 
     expect(flightState({ config, store, busy: [], now: T0 }).prFlow?.rows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ pr: 7, blocks: ["mc#9"] }),
+        expect.objectContaining({ pr: 7, blocks: ["mc#9", "PR 9"] }),
         expect.objectContaining({ pr: 9, waitsOn: ["PR 7 to merge (mc#9)"] }),
       ]),
     );
