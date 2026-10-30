@@ -37,6 +37,7 @@
 
 /* Summary disclosures keep their headers whole and their details inside the row. */
 .disclosure > summary {
+  min-height: 24px;
   cursor: pointer;
   overflow-wrap: anywhere;
 }

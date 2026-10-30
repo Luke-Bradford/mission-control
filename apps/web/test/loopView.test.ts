@@ -2,6 +2,7 @@ import {
   CI_TRIES,
   DEFAULT_PROFILES,
   type LoopTry,
+  pushChecksText,
   REVIEW_ROUNDS,
   REVIEW_STATUS_RUNNING,
   type RunLoop,
@@ -15,6 +16,7 @@ import {
   heldStep,
   loopRule,
   loopSpan,
+  reasonLine,
   reviewChecks,
   runLimits,
   stepChecks,
@@ -185,5 +187,38 @@ describe("runLimits", () => {
       profile: { profile, route: { by: "label", label: "chore" }, hash: "h" },
     };
     expect(runLimits(small)).toEqual({ tries: profile.tries, rounds: profile.rounds });
+  });
+});
+
+describe("reasonLine", () => {
+  const refusal = pushChecksText("80001f8abcdef", [{ command: "pnpm -s test", state: "missing" }]);
+
+  it("reads the hub's push refusal as one line naming the check and the commit", () => {
+    expect(reasonLine(refusal)).toEqual({
+      line: "push refused: `pnpm -s test` not run on 80001f8",
+      full: refusal,
+    });
+  });
+
+  it("says failed for a failed check and counts the others", () => {
+    const text = pushChecksText("80001f8abcdef", [
+      { command: "pnpm -s lint", state: "failed" },
+      { command: "pnpm -s test", state: "missing" },
+      { command: "pnpm -s build", state: "missing" },
+    ]);
+    expect(reasonLine(text).line).toBe("push refused: `pnpm -s lint` failed on 80001f8 (+2 more)");
+  });
+
+  it("keeps a short one-line reason whole, with no full text to open", () => {
+    expect(reasonLine("CI cap reached")).toEqual({ line: "CI cap reached", full: null });
+  });
+
+  it("cuts other long or multi-line text to its first line, keeping the whole", () => {
+    const long = `${"word ".repeat(60)}end`;
+    const cut = reasonLine(long);
+    expect(cut.line.length).toBeLessThanOrEqual(120);
+    expect(cut.line.endsWith("…")).toBe(true);
+    expect(cut.full).toBe(long);
+    expect(reasonLine("first\nsecond")).toEqual({ line: "first", full: "first\nsecond" });
   });
 });
