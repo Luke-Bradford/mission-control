@@ -278,8 +278,9 @@ their associated rows. Deletions use transactions of at most 500 rows, yield bet
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
 Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
 hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
-also expire after 90 days. Runs, reviews and flight decisions remain available to Activity and
-Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database file on disk.
+also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
+merged-PR history remain available to Activity and Telemetry for one year. Deletion makes SQLite
+pages reusable; it does not shrink the database file on disk.
 
 ## First crew
 

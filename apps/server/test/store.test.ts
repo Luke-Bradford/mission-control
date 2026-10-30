@@ -3139,7 +3139,7 @@ describe("hub retention", () => {
         INSERT INTO hub_events (at,text) VALUES (0,'old');
         INSERT INTO drafts (target,kind,text,created_at,state) VALUES ('old','plan','old',0,'done');
         INSERT INTO crew_errors (agent_id,text,at,acked) VALUES ('seat','old',0,1);`);
-      await store.pruneHistory(91 * 86_400_000);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
         { key: "open" },
       ]);

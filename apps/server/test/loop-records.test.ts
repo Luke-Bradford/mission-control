@@ -66,6 +66,19 @@ describe("runs: loop and endedBy", () => {
         "SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key LIMIT 500",
         "SELECT key FROM attention_notes WHERE run_id = 'r1' AND cleared_at IS NULL ORDER BY key",
         "SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL AND json_extract(loop, '$.aside') IS NOT NULL ORDER BY started_at, seq LIMIT 200",
+        "SELECT * FROM runs WHERE agent_id = 'a1' AND json_extract(loop, '$.aside.worktree') > ''",
+        `SELECT * FROM (
+          SELECT * FROM runs WHERE ended_at IS NULL
+          UNION ALL
+          SELECT * FROM runs INDEXED BY runs_merging_started
+            WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
+        ) ORDER BY started_at, seq`,
+        `SELECT * FROM (
+          SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
+          UNION ALL
+          SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= 0
+            AND (json_extract(loop, '$.phase') != 'done' OR json_extract(loop, '$.merging') > '')
+        ) ORDER BY started_at, seq`,
         "SELECT * FROM comms WHERE at >= 0 AND target_run_id = 'r1' ORDER BY at, id LIMIT 5000",
         "SELECT * FROM comms WHERE ticket = 'repo#1' ORDER BY at, id LIMIT 5000",
         "SELECT * FROM pull_requests WHERE ticket = 'repo#1' ORDER BY updated_at DESC LIMIT 200",
