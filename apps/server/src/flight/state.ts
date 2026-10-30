@@ -1049,6 +1049,7 @@ export function wakeFacts(
       .map((x) => (x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key))
       .sort(),
     release: releasable(s),
+    breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
 

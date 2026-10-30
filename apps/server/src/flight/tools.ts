@@ -343,13 +343,7 @@ import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { createPowerTools } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
-import {
-  FLIGHT_READ_TOOLS,
-  recordWrite,
-  runawayTrip,
-  watchRunaway,
-  writeTarget,
-} from "./runaway.ts";
+import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   flightArrivalSource,
@@ -901,7 +895,7 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
   return `query(${vars.join(", ")}) { repository(owner: $owner, name: $name) { issues(${filters.join(", ")}) { pageInfo { hasNextPage endCursor } nodes { number title labels(first: 20) { nodes { name } } assignees(first: 10) { nodes { login } } projectItems(first: 10) { nodes { project { number } status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }`;
 }
 
-/** Each repo's last create_ticket or comment_ticket call: one at a time, so the cap and the duplicate check hold. */
+/** Each repo's last create_ticket or comment_ticket call: one at a time, so the duplicate check holds. */
 const ticketQueue = new Map<string, Promise<unknown>>();
 /** Chrome is host-wide and expensive: every FLIGHT session shares one render slot. */
 const hudRenderQueue = new Map<string, Promise<unknown>>();
@@ -1802,7 +1796,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if (unfit !== null) return fail(createTextText(unfit));
 
-    // one at a time per repo, so the cap and the duplicate check see the earlier call's issue; the
+    // one at a time per repo, so the duplicate check sees the earlier call's issue; the
     // check lists the repo's open issues, not GitHub search, whose index lags and reads qualifiers
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
       const at = now();
@@ -1853,7 +1847,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (number === undefined) return failed("issue create", { code: 0, stderr: "no issue URL" });
       const issue = Number(number);
       const ref = `${repo.id}#${issue}`;
-      // the issue exists now: whatever follows, it counts against the cap and is logged
+      // the issue exists now: whatever follows, it is logged
       record(at, {
         kind: "ticket",
         ref,
@@ -2356,7 +2350,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     };
   }
 
-  /** What the three GitHub reads check first: arguments, seat, repo, then the shared hourly cap (the call counts before gh runs). */
+  /** What the three GitHub reads check first: arguments, seat, repo, then the repo's powers. */
   function ghReadCall<S extends z.ZodType>(
     ctx: McToolContext,
     schema: S,
@@ -2830,7 +2824,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     basis: basisArg,
   });
 
-  /** Serialise the writes with accept_ruling, so all reruns share the hourly budget. */
+  /** Serialise the writes with accept_ruling, so two re-runs of one head do not race. */
   function superTool<S extends z.ZodType<{ basis: string }>>(
     name: McTool["name"],
     description: string,
@@ -3709,17 +3703,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     call: async (ctx, args) => {
       if (activeAway(store, now(), config.operator.timezone) && !awayLocalTools.has(tool.name))
         return fail(AWAY_WRITES_REFUSED);
-      const write = !FLIGHT_READ_TOOLS.has(tool.name);
+      const write = !isReadCall(tool.name, args);
       if (write) {
         const tripped = runawayTrip(store);
         if (tripped !== null) return fail(runawayRefusedText(tripped.reason));
       }
+      // a ruling still pending leaves no decision row: it is a read
+      const rowsBefore = store.flightDecisions(0, 1)[0]?.id ?? 0;
       const result = await tool.call(ctx, args);
-      if (write && result.isError !== true) {
-        const at = now();
-        recordWrite(store, { at, action: tool.name, target: writeTarget(args) });
-        watchRunaway(store, bus, at);
-      }
+      if (!write) return result;
+      const landed =
+        result.isError !== true
+          ? tool.name !== MC_TOOL_NAMES.acceptRuling ||
+            (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore
+          : // an attempt may have written before it failed
+            tool.name === MC_TOOL_NAMES.screenshotHud ||
+            (tool.name === MC_TOOL_NAMES.closeTicket &&
+              result.text.includes(closeUnconfirmedText()));
+      if (landed) noteFlightWrite(store, bus, now(), tool.name, args);
       return result;
     },
   }));

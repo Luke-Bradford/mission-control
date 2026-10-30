@@ -132,12 +132,12 @@ import {
 } from "../src/config.ts";
 import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { liftRunaway, recordWrite } from "../src/flight/runaway.ts";
+import { liftRunaway, recordWrite, writeTarget } from "../src/flight/runaway.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
-import { attentionItems, CREW_ERROR_KEY } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -759,9 +759,9 @@ describe("screenshot_hud", () => {
     screenshotImpl = async () => {
       throw new Error("Chrome refused");
     };
-    for (let n = 0; n < 6; n++)
+    for (let n = 0; n < 4; n++)
       expect((await call("screenshot_hud", { page: "/" })).text).toBe("Chrome refused");
-    expect(screenshotCalls).toHaveLength(6);
+    expect(screenshotCalls).toHaveLength(4);
     expect(named("screenshot_hud").description).not.toContain("attempts per FLIGHT per hour");
   });
 
@@ -2028,18 +2028,9 @@ describe("message_seat unpark", () => {
   });
 
   it("un-parks one run 5 times, with no refusal", async () => {
-    parked("ci");
-    for (let i = 0; i < 2; i++) {
-      addDecision({
-        at: NOW - 48 * 60 * 60_000,
-        kind: "unpark",
-        seatId: "guido-1",
-        targetRunId: "r-g",
-      });
-    }
-    for (let i = 0; i < 3; i++) {
-      expect((await call("message_seat", U())).isError).toBeUndefined();
+    for (let i = 0; i < 5; i++) {
       parked("ci");
+      expect((await call("message_seat", U())).isError).toBeUndefined();
     }
     expect(decisions().filter((d) => d.kind === "unpark")).toHaveLength(5);
   });
@@ -2341,6 +2332,10 @@ describe("accept_ruling", () => {
       text: "The re-run on aaaaaaa is still going.",
     });
     expect(decisions()).toEqual([]);
+    // waiting on a ruling is a read: it is not a write for the runaway breaker
+    for (let i = 0; i < 8; i++) await call("accept_ruling", A());
+    expect(store.flightDecisions(0, 5).filter((d) => d.kind === "hub")).toEqual([]);
+    expect(store.getSetting("flight.runaway-events")).toBeNull();
   });
 
   it("passes the engine's refusals on", async () => {
@@ -5450,8 +5445,6 @@ describe("scheduled FLIGHT work", () => {
         .isError,
     ).toBeUndefined();
     expect(flightBriefView(cfg, store).planned).toEqual([]);
-    // five identical brief edits in a short time tripped the runaway breaker; the operator lifts it
-    expect(liftRunaway(store, bus, nowMs)).toBe(true);
     expect((await save([plan])).isError).toBeUndefined();
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
@@ -6284,8 +6277,6 @@ describe("track", () => {
     expect(
       await call("track", { ...entry, next: null, owner: null, refs: null, priority: null }),
     ).not.toHaveProperty("isError");
-    // five tracks of one key in a few minutes tripped the runaway breaker; the operator lifts it
-    expect(liftRunaway(store, bus, nowMs)).toBe(true);
     expect(store.flightLedger("s1")[0]).toMatchObject({
       next: null,
       owner: null,
@@ -7238,6 +7229,10 @@ describe("close_ticket", () => {
       expect(r.isError).toBe(true);
       expect(r.text).toMatch(/unconfirmed/);
       expect(decisions()[0]).toMatchObject({ kind: "close", decision: CLOSE_UNCONFIRMED_DECISION });
+      // the comment may have landed, so the failed-looking call still counts as a write
+      expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]").length).toBeGreaterThan(
+        0,
+      );
     }
   });
 
@@ -8233,18 +8228,19 @@ describe("an unrestricted FLIGHT (#1015)", () => {
 });
 
 describe("the runaway breaker", () => {
-  const same = () => call("log_decision", { about: "mc#7", decision: "waiting", basis: "ci" });
+  const msg = { seat: "guido-1", text: "Please push", basis: "idle" };
+  const same = () => call("message_seat", msg);
   const flags = () => store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY);
+  const entry = { kind: "work", key: "k", title: "t", status: "active", basis: "b" };
 
-  it("trips on 5 identical actions in 30 minutes, then refuses writes with its text and raises one brief", async () => {
+  it("trips on 5 identical calls in 30 minutes, then refuses writes with its text and raises one brief", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
       expect((await same()).isError).toBeUndefined();
-    const reason = runawaySameReason("log_decision", "mc#7", FLIGHT_RUNAWAY.sameActionLimit);
+    const target = writeTarget("message_seat", msg);
+    const reason = runawaySameReason("message_seat", target, FLIGHT_RUNAWAY.sameActionLimit);
     expect(await same()).toEqual(refused(runawayRefusedText(reason)));
     // any other write is stopped too, and still no second brief
-    expect(
-      await call("track", { kind: "work", key: "k", title: "t", status: "active", basis: "b" }),
-    ).toEqual(refused(runawayRefusedText(reason)));
+    expect(await call("track", entry)).toEqual(refused(runawayRefusedText(reason)));
     expect(flags()).toHaveLength(1);
     expect(flags()[0]?.text).toBe(runawayNoteText(reason));
     expect(JSON.parse((await call("flight_state", {})).text).breaker).toEqual({
@@ -8253,48 +8249,72 @@ describe("the runaway breaker", () => {
     });
   });
 
-  it("still lets FLIGHT read while tripped", async () => {
+  it("does not trip on the same tool with different arguments, such as messages with different text", async () => {
+    for (let i = 0; i < 8; i++)
+      expect((await call("message_seat", { ...msg, text: `push ${i}` })).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+  });
+
+  it("counts a queue reorder by the ticket it moves", async () => {
+    reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      await call("promote", {
+        action: "queue-reorder",
+        seat: "guido-1",
+        move: "mc#2",
+        above: `mc#${10 + i}`,
+        basis: "b",
+      });
+    expect(flags()).toHaveLength(1);
+  });
+
+  it("still lets FLIGHT read while tripped, including a focus read", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
     fetchImpl = async (n) => ticket(n);
     expect((await call("read_ticket", { issue: 1 })).isError).toBeUndefined();
     expect((await call("recall", { query: "" })).isError).toBeUndefined();
+    expect(
+      (await call("message_seat", { seat: "guido-1", read_focus: true, basis: "b" })).isError,
+    ).toBeUndefined();
   });
 
-  it("trips on five track calls on one key, which leave no decision rows", async () => {
-    const entry = { kind: "work", key: "k", title: "t", status: "active", basis: "b" };
-    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
-      expect((await call("track", entry)).isError).toBeUndefined();
-    expect(decisions()).toMatchObject([{ kind: "hub" }]);
-    expect((await call("track", entry)).isError).toBe(true);
-    expect(flags()).toHaveLength(1);
+  it("does not count focus reads", async () => {
+    for (let i = 0; i < 8; i++)
+      await call("message_seat", { seat: "guido-1", read_focus: true, basis: "b" });
+    expect(flags()).toEqual([]);
+    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toEqual([]);
   });
 
-  it("trips on more than 200 varied writes in an hour, with no decision rows", async () => {
+  it("leaves bookkeeping out of the repeat rule: five track calls on one key do not trip it", async () => {
+    for (let i = 0; i < 8; i++) expect((await call("track", entry)).isError).toBeUndefined();
+    expect(flags()).toEqual([]);
+  });
+
+  it("counts bookkeeping toward the hourly total, with no decision rows", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.writesPerHour; i++)
       recordWrite(store, { at: NOW - 60_000, action: "track", target: `k${i}` });
-    expect(
-      (await call("track", { kind: "work", key: "x", title: "t", status: "active", basis: "b" }))
-        .isError,
-    ).toBeUndefined();
-    const refusal = await call("track", {
-      kind: "work",
-      key: "y",
-      title: "t",
-      status: "active",
-      basis: "b",
-    });
-    expect(refusal).toEqual(
+    expect((await call("track", { ...entry, key: "x" })).isError).toBeUndefined();
+    expect(await call("track", { ...entry, key: "y" })).toEqual(
       refused(runawayRefusedText(runawayWritesReason(FLIGHT_RUNAWAY.writesPerHour + 1))),
     );
     expect(flags()).toHaveLength(1);
   });
 
+  it("counts screenshot_hud, failed attempts too", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    screenshotImpl = async () => {
+      throw new Error("Chrome refused");
+    };
+    for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
+      await call("screenshot_hud", { page: "/" });
+    expect(flags()).toHaveLength(1);
+    expect((await call("screenshot_hud", { page: "/" })).text).toContain("runaway breaker");
+  });
+
   it("stays clear after a lift, even with an unrelated write straight after", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
     expect(liftRunaway(store, bus, nowMs)).toBe(true);
-    expect(
-      (await call("log_decision", { about: "other", decision: "d", basis: "b" })).isError,
-    ).toBeUndefined();
+    expect((await call("message_seat", { ...msg, text: "other" })).isError).toBeUndefined();
     expect(flags()).toEqual([]);
     expect(JSON.parse((await call("flight_state", {})).text).breaker.tripped).toBe(false);
   });
@@ -8310,33 +8330,18 @@ describe("the runaway breaker", () => {
     expect(decisions().filter((d) => d.kind === "hub")).toHaveLength(2);
   });
 
-  it("leaves operator holds, a stopped account and a budget park in force", async () => {
-    // the protected refusals are unchanged by the cap removal: the tools that guard them still refuse
-    parkedForBreakerTest();
-    expect(await call("start_seat", { seat: "guido-1", issue: 7, basis: "ready" })).toEqual(
-      refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
-    );
-  });
-
   it("keeps its own flag out of FLIGHT's hands", async () => {
     for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++) await same();
-    liftRunaway(store, bus, nowMs); // the flag is only the operator's to clear
-    store.raiseNote({
-      key: FLIGHT_RUNAWAY_NOTE_KEY,
-      kind: "flag",
-      runId: null,
-      seatId: null,
-      repoId: null,
-      text: "tripped",
-      at: NOW,
-    });
     expect(
       (await call("dismiss_item", { key: `note:${FLIGHT_RUNAWAY_NOTE_KEY}`, basis: "b" })).isError,
     ).toBe(true);
     expect(flags()).toHaveLength(1);
+    expect(isOperatorCall({ key: `note:${FLIGHT_RUNAWAY_NOTE_KEY}`, kind: "flag" }, store)).toBe(
+      true,
+    );
   });
 
-  function parkedForBreakerTest() {
+  it("leaves a stopped account in force", async () => {
     store.addUsage({
       accountId: "claude-main",
       window: "5h",
@@ -8345,5 +8350,8 @@ describe("the runaway breaker", () => {
       resetAt: NOW + 1000,
       source: "t",
     });
-  }
+    expect(await call("start_seat", { seat: "guido-1", issue: 7, basis: "ready" })).toEqual(
+      refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
+    );
+  });
 });

@@ -46,6 +46,7 @@ import {
   ENGINE_TICK_MS,
   effectiveHardRules,
   type FileDiff,
+  FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   fullAt5h,
   GITHUB_RATE_SETTING,
@@ -3949,6 +3950,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        // dismissing the runaway breaker's flag lifts the breaker, so the flag cannot go while it holds
+        if (noteKey === FLIGHT_RUNAWAY_NOTE_KEY && liftRunaway(store, bus, now()))
+          return { dismissed: key };
         if (key.length > 200 || noteKey === "" || !store.dismissNote(noteKey, now())) {
           return reply.code(404).send({ error: NO_OPEN_NOTE });
         }

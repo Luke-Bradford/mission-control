@@ -13,6 +13,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
+  isReadCall,
   liftRunaway,
   recordWrite,
   runawayReason,
@@ -36,7 +37,7 @@ beforeEach(() => {
 const events = (n: number, over: (i: number) => Partial<WriteEvent> = () => ({})): WriteEvent[] =>
   Array.from({ length: n }, (_, i) => ({
     at: NOW - 1000,
-    action: "track",
+    action: "end_run",
     target: "k",
     ...over(i),
   }));
@@ -65,7 +66,7 @@ describe("runawayReason", () => {
 
   it("trips on the same action on the same target 5 times in 30 minutes", () => {
     expect(runawayReason(events(4), NOW)).toBeNull();
-    expect(runawayReason(events(5), NOW)).toBe(runawaySameReason("track", "k", 5));
+    expect(runawayReason(events(5), NOW)).toBe(runawaySameReason("end_run", "k", 5));
   });
 
   it("does not trip on five spread over more than 30 minutes, or on other targets or actions", () => {
@@ -83,7 +84,7 @@ describe("runawayReason", () => {
     ).toBeNull();
     expect(
       runawayReason(
-        events(5, (i) => ({ action: i % 2 ? "track" : "untrack" })),
+        events(5, (i) => ({ action: i % 2 ? "end_run" : "sync_main" })),
         NOW,
       ),
     ).toBeNull();
@@ -100,12 +101,56 @@ describe("runawayReason", () => {
 });
 
 describe("writeTarget", () => {
-  it("takes the first identifying argument, else the arguments", () => {
-    expect(writeTarget({ key: "k1", title: "t" })).toBe("k1");
-    expect(writeTarget({ runId: "r-1", basis: "b" })).toBe("r-1");
-    expect(writeTarget({ issue: 7 })).toBe("7");
-    expect(writeTarget({ x: 1 })).toBe('{"x":1}');
-    expect(writeTarget(undefined)).toBe("{}");
+  it("is the arguments without the basis, in a stable order", () => {
+    expect(writeTarget("end_run", { runId: "r-1", basis: "one" })).toBe(
+      writeTarget("end_run", { basis: "two", runId: "r-1" }),
+    );
+    expect(writeTarget("message_seat", { seat: "g", text: "a" })).not.toBe(
+      writeTarget("message_seat", { seat: "g", text: "b" }),
+    );
+    expect(writeTarget("end_run", undefined)).toBe("{}");
+  });
+
+  it("is the ticket moved for a queue reorder, whatever it moved above", () => {
+    const a = { action: "queue-reorder", seat: "g", move: "mc#2", above: "mc#1", basis: "b" };
+    expect(writeTarget("promote", a)).toBe("mc#2");
+    expect(writeTarget("promote", { ...a, above: "mc#9", seat: "i" })).toBe("mc#2");
+  });
+});
+
+describe("isReadCall", () => {
+  it("counts read tools, focus reads and nothing else as reads", () => {
+    expect(isReadCall("read_pr", {})).toBe(true);
+    expect(isReadCall("message_seat", { seat: "g", read_focus: true })).toBe(true);
+    expect(isReadCall("message_seat", { seat: "g", text: "hi" })).toBe(false);
+    expect(isReadCall("screenshot_hud", { page: "/" })).toBe(false);
+  });
+});
+
+describe("bookkeeping", () => {
+  it("counts toward the hourly total but never trips the repeat rule", () => {
+    for (const action of ["track", "untrack", "log_decision", "update_brief", "remember", "forget"])
+      expect(
+        runawayReason(
+          events(9, () => ({ action })),
+          NOW,
+        ),
+      ).toBeNull();
+    expect(
+      runawayReason(
+        events(201, (i) => ({ action: "track", target: `k${i}` })),
+        NOW,
+      ),
+    ).toBe(runawayWritesReason(201));
+  });
+
+  it("does not exempt other tools", () => {
+    expect(
+      runawayReason(
+        events(5, () => ({ action: "message_seat" })),
+        NOW,
+      ),
+    ).toBe(runawaySameReason("message_seat", "k", 5));
   });
 });
 
@@ -123,10 +168,10 @@ describe("the breaker", () => {
     write(FLIGHT_RUNAWAY.sameActionLimit);
     watchRunaway(store, bus, NOW);
     watchRunaway(store, bus, NOW + 1);
-    expect(runawayTrip(store)).toEqual({ at: NOW, reason: runawaySameReason("track", "k", 5) });
+    expect(runawayTrip(store)).toEqual({ at: NOW, reason: runawaySameReason("end_run", "k", 5) });
     const flags = store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY);
     expect(flags).toMatchObject([{ kind: "flag", repoId: null, runId: null }]);
-    expect(flags[0]?.text).toContain(runawaySameReason("track", "k", 5));
+    expect(flags[0]?.text).toContain(runawaySameReason("end_run", "k", 5));
     expect(store.flightDecisions(0, 20).filter((d) => d.kind === "hub")).toHaveLength(1);
     expect(seen).toContain("attention");
   });

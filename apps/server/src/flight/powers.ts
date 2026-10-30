@@ -241,7 +241,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           column: a.status,
         });
         if (!r.ok) return stop(r.reason);
-        // its own kind, counted with promote's moves against the hourly cap
+        // its own kind, not promote's
         store.addFlightDecision({
           at: now(),
           kind: "status",

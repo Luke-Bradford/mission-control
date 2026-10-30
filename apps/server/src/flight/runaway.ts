@@ -18,7 +18,6 @@ import type { Store } from "../store.ts";
 export const FLIGHT_READ_TOOLS: ReadonlySet<string> = new Set([
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.flightState,
-  MC_TOOL_NAMES.screenshotHud,
   MC_TOOL_NAMES.readPr,
   MC_TOOL_NAMES.readCiLog,
   MC_TOOL_NAMES.ghRead,
@@ -37,27 +36,62 @@ export interface WriteEvent {
   target: string;
 }
 
-const TARGET_KEYS = [
-  "key",
-  "runId",
-  "pr",
-  "issue",
-  "seat",
-  "topic",
-  "section",
-  "move",
-  "question_id",
-  "about",
-] as const;
+/**
+ * FLIGHT's own bookkeeping: notes to itself that it may repeat while it works. They count toward
+ * the hourly total but never trip the same-target rule.
+ */
+const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([
+  MC_TOOL_NAMES.track,
+  MC_TOOL_NAMES.untrack,
+  MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.updateBrief,
+  MC_TOOL_NAMES.remember,
+  MC_TOOL_NAMES.forget,
+]);
 
-/** A stable target for a write call's arguments: the first identifying one, else the arguments themselves. */
-export function writeTarget(args: unknown): string {
-  const a = (typeof args === "object" && args !== null ? args : {}) as Record<string, unknown>;
-  for (const k of TARGET_KEYS) {
-    const v = a[k];
-    if (typeof v === "string" || typeof v === "number") return String(v).slice(0, 200);
-  }
-  return JSON.stringify(a).slice(0, 200);
+/** Whether a call only reads: a read tool, or message_seat asked for the seat's focus. */
+export function isReadCall(name: string, args: unknown): boolean {
+  if (FLIGHT_READ_TOOLS.has(name)) return true;
+  return name === MC_TOOL_NAMES.messageSeat && argsOf(args).read_focus === true;
+}
+
+const argsOf = (args: unknown): Record<string, unknown> =>
+  (typeof args === "object" && args !== null ? args : {}) as Record<string, unknown>;
+
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canonical)
+    : typeof v === "object" && v !== null
+      ? Object.fromEntries(
+          Object.entries(v)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, x]) => [k, canonical(x)]),
+        )
+      : v;
+
+/**
+ * What a write call acted on: its arguments, without the free-text basis, so the same message or
+ * the same edit repeated is a loop but different work on one ticket is not. A queue reorder is
+ * the ticket it moves.
+ */
+export function writeTarget(name: string, args: unknown): string {
+  const a = argsOf(args);
+  if (name === MC_TOOL_NAMES.promote && a.action === "queue-reorder" && typeof a.move === "string")
+    return a.move.slice(0, 200);
+  const { basis: _basis, ...rest } = a;
+  return JSON.stringify(canonical(rest)).slice(0, 200);
+}
+
+/** Records one successful FLIGHT write and trips the breaker if it is now a loop. */
+export function noteFlightWrite(
+  store: Store,
+  bus: ChangeBus,
+  at: number,
+  action: string,
+  args: unknown,
+): void {
+  recordWrite(store, { at, action, target: writeTarget(action, args) });
+  watchRunaway(store, bus, at);
 }
 
 function readEvents(store: Store): WriteEvent[] {
@@ -97,7 +131,8 @@ export function runawayReason(events: readonly WriteEvent[], now: number): strin
   if (writes.length > FLIGHT_RUNAWAY.writesPerHour) return runawayWritesReason(writes.length);
   const counts = new Map<string, number>();
   for (const e of writes) {
-    if (e.at <= now - FLIGHT_RUNAWAY.sameActionWindowMs) continue;
+    if (e.at <= now - FLIGHT_RUNAWAY.sameActionWindowMs || BOOKKEEPING_TOOLS.has(e.action))
+      continue;
     const key = JSON.stringify([e.action, e.target]);
     const n = (counts.get(key) ?? 0) + 1;
     counts.set(key, n);

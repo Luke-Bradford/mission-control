@@ -8464,6 +8464,26 @@ describe("POST /api/flight/runaway/lift", () => {
     expect(res.json()).toEqual({ error: RUNAWAY_NOT_TRIPPED });
   });
 
+  it("dismissing the breaker's flag lifts the breaker", async () => {
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    store.raiseNote({
+      key: FLIGHT_RUNAWAY_NOTE_KEY,
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "tripped",
+      at: 1,
+    });
+    const res = await post(`/api/attention/note:${FLIGHT_RUNAWAY_NOTE_KEY}/dismiss`);
+    expect(res.statusCode).toBe(200);
+    expect(store.getSetting(FLIGHT_RUNAWAY_SETTING)).toBeNull();
+    expect(store.notes().some((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toBe(false);
+    expect(store.flightDecisions(0, 10)).toMatchObject([
+      { kind: "hub", decision: RUNAWAY_LIFTED_DECISION },
+    ]);
+  });
+
   it("lifts a tripped breaker, clears its flag and logs the lift", async () => {
     store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
     store.raiseNote({

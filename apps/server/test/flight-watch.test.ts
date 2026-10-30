@@ -21,6 +21,7 @@ import {
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
   FLIGHT_RUN_TOOLS_SETTING,
+  FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_UNPARK_KINDS,
@@ -1680,6 +1681,20 @@ describe("the FLIGHT watcher", () => {
         `${FLIGHT_WAKE_HEAD} 1 question · 1 item to brief · woke on: q (1), items (1)\n`,
       ),
     ).toBe(true);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
+    liveCrew();
+    ask();
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    const state = flightState({ config, store, busy: [], now: nowMs });
+    expect(JSON.parse(wakeFacts(state)).breaker).toEqual(["a loop"]);
+    // lifted, the waiting question wakes it
+    store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
   });

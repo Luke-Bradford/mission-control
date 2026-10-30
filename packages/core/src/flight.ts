@@ -661,7 +661,7 @@ export const closeComment = (replacement: number): string =>
 export const CLOSED_PREFIX = "Closed as";
 export const closedDecision = (reason: "duplicate" | "not-planned", url: string): string =>
   `${CLOSED_PREFIX} ${reason === "duplicate" ? "duplicate" : "not planned"}: ${url}`;
-/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both spend the cap. */
+/** Neither starts with CLOSED_PREFIX: the comment, and maybe the close, landed; both count as writes for the runaway breaker. */
 export const CLOSE_UNCONFIRMED_DECISION =
   "Close unconfirmed; the comment and close may have landed";
 export const CLOSE_FAILED_DECISION = "Close failed; the replacement comment may have posted";
@@ -1248,11 +1248,11 @@ export interface FlightRunawayTrip {
 export const runawayWritesReason = (n: number): string =>
   `${n} write decisions in the last hour, over the ${FLIGHT_RUNAWAY.writesPerHour} allowed`;
 export const runawaySameReason = (kind: string, target: string, n: number): string =>
-  `${n} "${kind}" decisions on ${target} in the last ${FLIGHT_RUNAWAY.sameActionWindowMs / 60_000} minutes`;
+  `${n} "${kind}" calls with ${target.length > 80 ? `${target.slice(0, 80)}…` : target} in the last ${FLIGHT_RUNAWAY.sameActionWindowMs / 60_000} minutes`;
 export const runawayRefusedText = (reason: string): string =>
   `Not done: the runaway breaker is tripped (${reason}). FLIGHT's writes are stopped until the operator lifts it.`;
 export const runawayNoteText = (reason: string): string =>
-  `FLIGHT's runaway breaker tripped: ${reason}. Its writes are stopped. Look at what it was doing in Decided without you, then lift the breaker.`;
+  `FLIGHT's runaway breaker tripped: ${reason}. Its writes are stopped. To lift it: look at what FLIGHT was repeating in Decided without you, fix the cause, then dismiss this item (or POST /api/flight/runaway/lift).`;
 export const runawayTrippedDecision = (reason: string): string =>
   `Runaway breaker tripped: ${reason}.`;
 export const RUNAWAY_LIFTED_DECISION = "Operator lifted the runaway breaker.";

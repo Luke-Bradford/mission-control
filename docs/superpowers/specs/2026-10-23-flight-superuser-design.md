@@ -116,9 +116,9 @@ This replaces the merge queue that this design first planned. The operator turne
   - The hub checks the basis with `scanSecrets` and the notifier check, clears the head, then posts the basis.
 - **`settle_park { runId, action, note?, basis }`.** Uses the same lane check as `merge_pr`. The actions are:
   - `lift`: only a stuck park whose head descends from the push, with no per-run limit;
-  - `rereview`: a fresh RETRO review, at most twice per head; the only action for a `review-failed` park;
+  - `rereview`: a fresh RETRO review, with no per-head limit; the only action for a `review-failed` park;
   - `accept`: only `review` and `review-ruling` parks, through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"). CI must pass before merging. A head touching `FLIGHT_FLOOR_ENFORCING_PATHS` needs a reported, unblocked RETRO review on that head. CI `ruling` parks use `accept_ruling` (re-run, then accept);
-  - `rework`: sends the findings to the seat, followed by the optional short `note`. On a capped review park, FLIGHT may grant as many rework rounds as it judges right; each grant gives the head one more blocking review before the run parks again.
+  - `rework`: sends the findings to the seat, followed by the optional short `note`. On a review park, FLIGHT may grant as many rework rounds as it judges right; each grant gives the head one more blocking review before the run parks again.
 - **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, with no hourly or per-head limit. FLIGHT's writes have one limit, the runaway breaker (docs/runbook.md, FLIGHT runaway breaker).
 - **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. Only `write`, `maintain` and `admin` are trusted; results last 24 hours, entries older than 7 days are pruned, and cached authors need no GitHub call on wake. The role doesn't act on that text without the operator.
 

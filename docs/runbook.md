@@ -262,13 +262,13 @@ the launchd job; do not install it for a manually started hub. Check the expande
 FLIGHT has no hourly, per-run or per-ticket caps on what it does; it makes judgement calls. One
 breaker stops it when it loops. It counts every successful FLIGHT write call (the tool and what it
 acted on), whether or not the call leaves a row in Decided without you. It trips when FLIGHT makes
-more than 200 of them in an hour, or the same tool on the same target 5 times in 30 minutes. While it is tripped every FLIGHT
+more than 200 of them in an hour, or the same tool with the same arguments (a queue reorder: the same ticket) 5 times in 30 minutes. FLIGHT's own bookkeeping (`track`, `untrack`, `log_decision`, `update_brief`, `remember`, `forget`) counts toward the hourly total but never trips the repeat rule; focus reads and a ruling still pending are reads. FLIGHT's Comms messages, a close that is left unconfirmed and `screenshot_hud` count too. While it is tripped every FLIGHT
 write is refused with the breaker's text (reads still work), the trip is logged in Decided without
 you, and one flag appears in Needs you. Operator holds, budget and account stops, secret
 redaction and the git safety rules are not affected by it and stay as they were.
 
-Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker with
-`curl -X POST http://localhost:<port>/api/flight/runaway/lift`. The lift is logged and clears the
+Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker by
+dismissing its flag in Needs you, or with `curl -s -X POST 127.0.0.1:7420/api/flight/runaway/lift -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'`. The lift is logged and clears the
 flag and starts the count afresh, so the calls that tripped it do not trip it again; it answers 409
 when the breaker is not tripped. `flight_state` shows `breaker.tripped`.
 
@@ -883,8 +883,8 @@ curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: applic
 On a run parked on review findings, this is the explicit **review waiver**: it accepts the findings
 and lets the run go on to merge. It is deliberately different from FLIGHT's `settle_park` `rework`
 action, which sends the findings back to the author. FLIGHT may grant further rework rounds after the
-configured review-round cap, optionally adding a short fix list: up to 3 per head and 9 per run (the
-cap is raised, not removed; past either, the park stays). A rework for a run set aside while its seat is
+configured review-round cap, optionally adding a short fix list, as many as it judges right (each grant
+gives the head one more blocking review before the run parks again). A rework for a run set aside while its seat is
 on another run is queued in Comms and delivered when the seat is free, as the message route below does.
 
 This accepts the parked run:
@@ -965,7 +965,7 @@ operator.
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat) |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
 | `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
 | `sync_main` | Merge main into a run's branch |
@@ -1237,8 +1237,7 @@ socket) and every request it makes, loopback included, goes through a loopback-o
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
 The shot is taken after the shell is ready, the lazy page's `Loading…` placeholder has gone and the
-page's requests have been quiet for 400 ms. Renders are one at a time per host, capped per FLIGHT
-per hour, and the repo's powers are rechecked just before launch.
+page's requests have been quiet for 400 ms. Renders are one at a time per host, and the repo's powers are rechecked just before launch.
 
 Each screenshot is kept under `hud-screenshots/` in the data dir (directory `0700`, files `0600`,
 an opaque 128-bit id), at most 50 files and one week. The tool's answer ends with `Reference:
