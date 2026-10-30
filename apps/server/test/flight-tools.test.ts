@@ -8093,6 +8093,19 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(r.isError).toBe(true);
       expect(r.text).toContain("could not be confirmed");
     });
+    it("edit_issue does not report a title that did not land", async () => {
+      board(card(7));
+      // gh exits 0 but the ticket still shows the old title, or cannot be read back
+      fetchImpl = async (n) => ticket(n, { title: "Old" });
+      const stale = await call("edit_issue", { issue: 7, title: "New" });
+      expect(stale.isError).toBe(true);
+      expect(stale.text).toContain("could not be confirmed");
+      fetchImpl = async (n) => (ghCalls.length > 0 ? null : ticket(n, { title: "Old" }));
+      expect((await call("edit_issue", { issue: 7, title: "New" })).isError).toBe(true);
+      // and a title that did land is reported as edited
+      fetchImpl = async (n) => ticket(n, { title: "New" });
+      expect((await call("edit_issue", { issue: 7, title: "New" })).isError).toBeUndefined();
+    });
     it("dismiss_item leaves another lane's item and one briefed for the operator", async () => {
       // a draft PR from another login is that lane's to decide
       store.replacePullRequests(

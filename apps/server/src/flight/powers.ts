@@ -162,7 +162,12 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       ]);
       if (!r.ok) return fail("GitHub refused the edit; read the ticket before retrying.");
       const after = await stateOf(repo, a.issue);
-      if (a.body !== undefined && after?.body !== a.body)
+      // exit 0 is not proof: the live ticket must show every part that was asked for
+      if (
+        after === null ||
+        (a.body !== undefined && after.body !== a.body) ||
+        (a.title !== undefined && after.title !== a.title)
+      )
         return fail("The edit could not be confirmed on GitHub; read the ticket.");
       bus.emit("boards");
       return { text: `Edited ${ref}.` };
