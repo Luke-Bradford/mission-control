@@ -1,4 +1,5 @@
 import {
+  FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_LEDGER_KINDS,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_LEDGER_STATUSES,
@@ -116,7 +117,9 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
         ).length,
       0,
     );
-  metrics.forTheController = controllerDecisions(config, store, now).length;
+  metrics.forTheController = controllerDecisions(
+    store.flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT),
+  ).length;
   return metrics;
 }
 

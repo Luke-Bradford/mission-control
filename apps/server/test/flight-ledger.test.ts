@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -161,7 +162,13 @@ describe("flightMetrics", () => {
     for (let n = 0; n <= FLIGHT_VIEW_LIMIT; n++) decision(NOW - n, `newer ${n}`);
     decision(NOW - FLIGHT_METRICS_DAY_MS - 1, `${FOR_THE_CONTROLLER} expired request`);
 
+    const decisions = vi.spyOn(store, "flightDecisions");
     const view = flightView(config, store, NOW);
+    expect(decisions).toHaveBeenCalledTimes(1);
+    expect(decisions).toHaveBeenCalledWith(
+      NOW - FLIGHT_METRICS_DAY_MS,
+      FLIGHT_DECISIONS_SCAN_LIMIT,
+    );
     expect(flightMetrics(config, store, NOW).forTheController).toBe(1);
     expect(view.decisions).toHaveLength(FLIGHT_VIEW_LIMIT);
     expect((view.controllerDecisions ?? []).map((d) => d.decision)).toEqual([
