@@ -119,6 +119,14 @@ const round = (x: number, places: number): number => {
   return Math.round(x * f) / f;
 };
 
+/** `512 B`, `3.4 KB`, `12.3 MB`, `1.20 GB`; binary units throughout. */
+export function bytes(n: number): string {
+  if (n < 2 ** 10) return `${Math.round(n)} B`;
+  if (n < 2 ** 20) return `${(n / 2 ** 10).toFixed(1)} KB`;
+  if (n < 2 ** 30) return `${(n / 2 ** 20).toFixed(1)} MB`;
+  return `${(n / 2 ** 30).toFixed(2)} GB`;
+}
+
 /** `950`, `60.1k` (one decimal under 100k), `612k`, `1.24M` (two decimals under 10M), `18.4M`. */
 export function kTokens(n: number): string {
   if (Math.round(n) < 1000) return String(Math.round(n));

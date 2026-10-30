@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ago,
+  bytes,
   cost,
   dayLabel,
   dayMonth,
@@ -99,6 +100,17 @@ describe("kTokens", () => {
     [18_400_000, "18.4M"],
   ])("%d → %s", (n, s) => {
     expect(kTokens(n)).toBe(s);
+  });
+});
+
+describe("bytes", () => {
+  it.each([
+    [512, "512 B"],
+    [3.4 * 2 ** 10, "3.4 KB"],
+    [12.3 * 2 ** 20, "12.3 MB"],
+    [1.2 * 2 ** 30, "1.20 GB"],
+  ])("%d → %s", (n, expected) => {
+    expect(bytes(n)).toBe(expected);
   });
 });
 
