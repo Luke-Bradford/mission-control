@@ -116,4 +116,17 @@ describe("trimToolResponse", () => {
       expect(trimToolResponse(tool, big, FULL), tool).toBeNull();
     }
   });
+
+  it("never cuts inside a media block: a 90 KB base64 image takes the text fallback whole", () => {
+    const image = { type: "image", source: { type: "base64", data: "QUJD".repeat(22_500) } };
+    // the image alone keeps the result over 32 KB, so the whole becomes one cut text, never a cut image
+    for (const content of [[image], [{ type: "text", text: "t".repeat(40_000) }, image]]) {
+      const r = cutOf("mcp__x__shot", content);
+      expect(typeof r.output).toBe("string");
+      expect(bytes(r.output as string)).toBeLessThan(TOOL_TRIM_HEAD + TOOL_TRIM_TAIL + 400);
+      expect(r.full).toBe(JSON.stringify(content));
+    }
+    // a built-in tool keeps its shape or stays whole
+    expect(trimToolResponse("Read", { type: "image", file: image }, FULL)).toBeNull();
+  });
 });

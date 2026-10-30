@@ -65,13 +65,20 @@ function cutText(text: string, tool: string, fullPath: string): string {
   return `${head}\n${toolTrimMarker(cut, fullPath)}\n${tail}`;
 }
 
-/** Every string in `v` bigger than a cut result is cut on its own; the rest keeps its shape. */
+/** Content blocks whose payload (base64 and the like) is data, not text: never cut inside one. */
+const MEDIA_BLOCKS: ReadonlySet<unknown> = new Set(["image", "audio", "document", "resource"]);
+
+/**
+ * Every string in `v` bigger than a cut result is cut on its own; the rest keeps its shape. A
+ * media block is left as it is.
+ */
 function cutLeaves(v: unknown, tool: string, fullPath: string): unknown {
   if (typeof v === "string") {
     return enc.encode(v).length > TOOL_TRIM_HEAD + TOOL_TRIM_TAIL ? cutText(v, tool, fullPath) : v;
   }
   if (Array.isArray(v)) return v.map((x) => cutLeaves(x, tool, fullPath));
   if (typeof v === "object" && v !== null) {
+    if (MEDIA_BLOCKS.has((v as { type?: unknown }).type)) return v;
     return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cutLeaves(x, tool, fullPath)]));
   }
   return v;
