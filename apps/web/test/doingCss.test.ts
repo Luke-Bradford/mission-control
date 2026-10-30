@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { readStyles } from "./styles.ts";
 
-const css = readStyles();
+const SPACING = [0, 4, 8, 12, 16, 24, 32, 48];
+/** The stylesheets with each spacing token read as its px, so a layout sum can add them up. */
+const css = readStyles().replace(/var\(--sp-(\d)\)/g, (_, n) => `${SPACING[Number(n)]}px`);
 const rule = (sel: string) => css.match(new RegExp(`\\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 interface Track {
@@ -151,8 +153,8 @@ describe("doing lines and run rows (hud.css)", () => {
     expect(rule(String.raw`\.ellip`)).toContain("white-space: nowrap");
     const bar = rule(String.raw`\.stepbar`);
     expect(bar).toContain("display: flex");
-    expect(bar).toContain("gap: 2px");
-    expect(bar).toContain("margin: 4px 0 3px");
+    expect(bar).toContain("gap: 4px");
+    expect(bar).toContain("margin: 4px 0 4px");
     const seg = rule(String.raw`\.stepbar i`);
     expect(seg).toContain("flex: 1");
     expect(seg).toContain("height: 4px");
@@ -257,7 +259,7 @@ describe("doing lines and run rows (hud.css)", () => {
   });
 
   it("a panel-body list keeps the panel body's side padding", () => {
-    expect(rule(String.raw`\.pb\.tlist`)).toMatch(/padding: \d+px 14px/);
+    expect(rule(String.raw`\.pb\.tlist`)).toMatch(/padding: \d+px 12px/);
   });
 
   it("a seat chip on Setup wraps inside its panel and does not clip its state pill", () => {

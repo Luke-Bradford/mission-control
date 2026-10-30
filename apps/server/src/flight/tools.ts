@@ -261,7 +261,6 @@ import {
   rerunPendingText,
   rerunStartedDecision,
   rerunStartedText,
-  restartDoneText,
   restartRefusedText,
   retiredBriefText,
   reworkCapText,
@@ -371,7 +370,7 @@ import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
-import { createPowerTools, POWER_LOCAL_TOOLS } from "./powers.ts";
+import { createPowerTools } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
@@ -403,10 +402,10 @@ export interface FlightToolsDeps {
   store: Store;
   bus: ChangeBus;
   /** `endRun` ends a run on its seat; `endAsideRun` one set aside in review, which holds no seat. */
-  supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun" | "endAsideRun"> &
-    Partial<Pick<Supervisor, "resumeRun">>;
-  /** Restarts the loop engine (stop, start, one tick); absent: restart_engine is unavailable. */
-  restartEngine?: () => Promise<void>;
+  supervisor: Pick<
+    Supervisor,
+    "message" | "busy" | "startRun" | "endRun" | "endAsideRun" | "interrupt"
+  >;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
   lockState?: () => TestLockState;
@@ -702,8 +701,6 @@ const StartSeatArgs = z
   });
 /** A developer run by its id: `accept_ruling`, `sync_main` and `end_run` take this. */
 const RunArgs = z.strictObject({ runId: z.string().min(1).max(200), basis: basisArg });
-/** The columns a restarted ticket was past Ready in: it has been through the Ready check already. */
-const PAST_READY: readonly string[] = ["In progress", "In review", "Blocked", "Ready for QA"];
 const EndRunArgs = RunArgs.extend({ discard: z.boolean().optional() });
 const MessageSeatArgs = z
   .strictObject({
@@ -1212,7 +1209,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: answeredText(call) };
   }
 
-  async function startSeat(ctx: McToolContext, args: unknown, restart = false): Promise<Result> {
+  async function startSeat(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
@@ -1268,16 +1265,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         (n, s) => n + store.countFlightDecisions({ kinds: ["start"], since, ref, seatId: s.id }),
         0,
       );
-    if (again > 0 && !restart) return fail(restartRefusedText(ref));
+    if (again > 0) return fail(restartRefusedText(ref));
     const found = store.board(repo.id).find((i) => i.issueNumber === issue);
     // a card filed or moved since the last board poll: read that one item before refusing
     const card = found ?? (await deps.board.read?.(repo.id, issue).catch(() => null)) ?? undefined;
     if (card === undefined) return fail(notOnBoardText(ref));
-    const cardColumn = hudColumnOf(card);
-    if (restart && cardColumn === "Done") return fail(restartDoneText(ref));
-    // a restart takes the ticket from any open column: it goes back to Ready first
-    const column = restart ? "Ready" : cardColumn;
-    if (!restart && !FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
+    const column = hudColumnOf(card);
+    if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
     let body: string;
@@ -1324,28 +1318,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
-    } else if (
-      // a restart from a column past Ready was ready once; from Backlog or Refinement it is checked
-      (restart && PAST_READY.includes(cardColumn) ? "Ready" : cardColumn) !== "Ready" &&
-      !card.labels.includes(READY_LABEL) &&
-      !hasPlanSection(body)
-    ) {
+    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
       return fail(notReadyText(ref));
     }
-    // what a failed start puts back: the card's column, the seat's row and the crew pause
+    // what a failed start puts back: the seat's row and the crew pause
     const priorPause = readCrewPause(store);
     const priorSeat = store.seatSession(seat);
-    let movedCard = false;
-    if (restart && cardColumn !== "Ready") {
-      const moved = await deps.board.move({
-        runId: ctx.runId,
-        repoId: repo.id,
-        issue,
-        column: "Ready",
-      });
-      if (!moved.ok) return fail(moveFailedText(moved.reason));
-      movedCard = true;
-    }
     // FLIGHT says why on every start: a stopped seat goes back in rotation, a paused one is let out
     // of the pause, and the decision below records both
     const unpaused = unpauseSeat(seat, call, at);
@@ -1382,22 +1360,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const current = store.seatSession(seat);
         if (current !== null && current.runId === null) store.setSeatSession({ ...priorSeat });
       }
-      let restored = "";
-      if (movedCard) {
-        const back = await deps.board
-          .move({ runId: ctx.runId, repoId: repo.id, issue, column: cardColumn })
-          .catch(() => null);
-        if (back?.ok !== true)
-          restored = ` The card could not be put back in ${cardColumn}: check the board.`;
-      }
       // the supervisor's own eligibility refusal: the same text start_seat gives
-      if (e instanceof SupervisorError && e.status === 422) return fail(`${e.message}${restored}`);
+      if (e instanceof SupervisorError && e.status === 422) return fail(e.message);
       return fail(
-        `${
-          e instanceof SupervisorError || e instanceof CheckoutError
-            ? startFailedText(e.message)
-            : START_FAILED
-        }${restored}`,
+        e instanceof SupervisorError || e instanceof CheckoutError
+          ? startFailedText(e.message)
+          : START_FAILED,
       );
     }
     store.addComms({
@@ -1412,7 +1380,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       ref,
       about: `${ref}: ${card.title}`,
-      decision: `${planner ? plannerStartedDecision(call) : startedDecision(call)}${restart ? " (restart)" : ""}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
+      decision: `${planner ? plannerStartedDecision(call) : startedDecision(call)}${wasStopped ? "; the operator had stopped the seat" : ""}${unpaused ? `; ${unpaused}` : ""}`,
       basis,
     });
     store.recordFlightArrival({
@@ -1672,6 +1640,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const ended = lastHour(["end"], at);
     if (ended >= FLIGHT_ENDS_PER_HOUR) return fail(capText("ended runs", ended));
+    // a working seat is still writing: stop its turn before the uncommitted files are read
+    if (onSeat && !parked) {
+      try {
+        await deps.supervisor.interrupt(seat);
+      } catch (e) {
+        return fail(endFailedText(e instanceof Error ? e.message : String(e)));
+      }
+    }
     const dirty = (await deps.engine?.uncommitted(run.id)) ?? null;
     if (dirty === null) return fail(END_UNREADABLE_TEXT);
     if (dirty.length > 0 && !c.args.discard) return fail(endDirtyText(call, dirty));
@@ -3006,7 +2982,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean; queue?: boolean } = {},
+    options: { engine?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -3033,8 +3009,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           bus.emit("flight");
           return result;
         };
-        // restart_engine runs outside the queue: a stuck write there must not block it
-        return options.queue === false ? run() : queued(ticketQueue, repoOf()?.id ?? "", run);
+        return queued(ticketQueue, repoOf()?.id ?? "", run);
       },
     };
   }
@@ -3071,13 +3046,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   const superTools = [
-    superTool(
-      MC_TOOL_NAMES.restartTicket,
-      "Start a seat on a ticket from any open column (a Blocked ticket included): the card goes back to Ready first, and the once-a-day restart limit does not apply. A ticket from Backlog or Refinement still needs to be ready (a plan, the ready label or a complete Done when). Superuser repos only; counts toward the hourly start cap.",
-      StartSeatArgs,
-      "restart",
-      async (a, _repo, ctx) => startSeat(ctx, a, true),
-    ),
     superTool(
       MC_TOOL_NAMES.mergePr,
       "Clear an awaiting-flight run PR in your lane; the engine merges it. Workflows, repo rules and operator holds remain protected.",
@@ -3314,30 +3282,37 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.dismissItem,
-      "Dismiss a non-operator note, or settle a stale comms-open question or blocker with a reason. Guard, budget, account, approval and Update holds remain protected.",
+      "Dismiss any open attention item you can find, or settle a stale comms-open question or blocker with a reason. Operator approvals, guard, budget, account and Update holds, another lane's items and items you briefed for the operator remain protected.",
       z.strictObject({ key: text(200), basis: basisArg }),
       "dismiss",
       async (a, repo, ctx) => {
         const unavailable = "This item is protected or unavailable.";
-        /** The refusal for an item FLIGHT may not dismiss, or null: it must be found, and not another lane's or a decision for the operator. */
-        const dismissProblem = (item: AttentionItem | undefined): string | null => {
+        /** The refusal for an item FLIGHT may not dismiss, or null: it must be found, and not another lane's or briefed for the operator. */
+        const dismissProblem = (item: AttentionItem | undefined, own = false): string | null => {
           if (item === undefined || protectedDecisionItem(store, item, config, now()))
             return unavailable;
           if (item.owner?.startsWith("lane:")) return "This item belongs to another lane.";
-          if (item.kind === "decision" && item.owner === "operator")
-            return "This decision is addressed to the operator.";
+          // an item FLIGHT briefed for the operator is theirs to settle, not FLIGHT's to dismiss
+          if (!own && item.owner === "operator" && item.brief?.for === "operator")
+            return "This item was briefed for the operator.";
           return null;
         };
         if (a.key.startsWith("comms-open:")) {
           const messageId = a.key.slice("comms-open:".length);
           const message = store.openCommsItems().find((item) => item.id === messageId);
+          const ticketRepoId = /^(.+)#\d+$/.exec(message?.ticket ?? "")?.[1];
           const rows = crew(config, store, now(), NO_LOCK, NO_CLI_VERSION).rows;
           const item = attentionItems(config, store, now(), NO_LOCK, rows, deps.login).find(
             (candidate) => candidate.key === a.key,
           );
-          if (message === undefined || message.ticket?.split("#")[0] !== repo.id)
+          if (
+            message === undefined ||
+            message.from !== ctx.seatId ||
+            (ticketRepoId !== undefined && ticketRepoId !== repo.id)
+          )
             return fail(unavailable);
-          const problem = dismissProblem(item);
+          // FLIGHT's own stalled item (the check above) is its to settle even when briefed up
+          const problem = dismissProblem(item, true);
           if (problem !== null) return fail(problem);
           if (!store.settleCommsItem(messageId, ctx.seatId, a.basis, now()))
             return fail("This item is protected or unavailable.");
@@ -3724,6 +3699,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       fail,
       repoOf,
       cardProblem,
+      labelsProblem,
       textProblem,
       superTool: (name, description, schema, kind, act, options) =>
         superTool(
@@ -3875,7 +3851,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.recall,
     MC_TOOL_NAMES.holdItem,
     MC_TOOL_NAMES.releaseHold,
-    ...POWER_LOCAL_TOOLS,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

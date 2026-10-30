@@ -5,19 +5,19 @@
 .awaygrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  gap: var(--sp-4);
 }
 
 .swlist {
   display: grid;
-  gap: 7px;
-  margin-top: 8px;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
 }
 
 .sw {
   font-size: var(--fs-s);
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: flex-start;
 }
 
@@ -32,13 +32,13 @@
 
 .sw.locked::before {
   content: "Always";
-  font-size: 10px;
+  font-size: var(--fs-s);
   font-weight: 600;
   color: var(--muted);
   border: 1px solid var(--line-2);
   border-radius: 4px;
-  padding: 0 4px;
-  margin-top: 2px;
+  padding: 0 var(--sp-1);
+  margin-top: var(--sp-1);
   flex: none;
 }
 
@@ -50,15 +50,15 @@
 
 /* away modal: spacing the mockup set inline */
 .awayctl {
-  margin-bottom: 14px;
+  margin-bottom: var(--sp-3);
 }
 
 .awaypanel h3.gap {
-  margin-top: 14px;
+  margin-top: var(--sp-3);
 }
 
 .awaypanel p.gap {
-  margin: 8px 0;
+  margin: var(--sp-2) 0;
 }
 
 .awaypanel .awaygrid > div {

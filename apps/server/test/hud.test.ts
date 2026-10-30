@@ -2829,6 +2829,242 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(later)?.notTriaging?.keys).toContain(key);
   });
 
+  it.each(["merged", "closed"] as const)(
+    "clears a Comms item and the Needs-you count when its linked PR is %s",
+    (state) => {
+      flight();
+      const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+      const message = store.addComms({
+        at: current - COMMS_FLIGHT_ESCALATION_MS,
+        from: "flight-1",
+        to: "guido-1",
+        ticket: "shop-app#909",
+        ref: "PR 1063",
+        text: "Review the parked PR.",
+        label: "blocker",
+      });
+      if (message === null) throw new Error("message was not stored");
+      const key = `comms-open:${message.id}`;
+      expect(all(current).some((item) => item.key === key)).toBe(true);
+
+      store.replacePullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number: 1063,
+            title: "Merged",
+            url: "u",
+            branch: "feature/1063",
+            ticket: "shop-app#909",
+            state,
+            isDraft: false,
+            review: null,
+            ci: "passing",
+            createdAt: current,
+            updatedAt: current,
+            mergedAt: current,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        current,
+      );
+      const afterMerge = all(current);
+      expect(afterMerge.some((item) => item.key === key)).toBe(false);
+      expect(needsYouItems(afterMerge)).toHaveLength(0);
+    },
+  );
+
+  it("clears a production-shaped PR-ref Comms item when its PR merges", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS - COMMS_CAPCOM_ESCALATION_MS,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "PR 1063",
+      ref: "PR 1063",
+      text: "Review the parked PR.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1063,
+          title: "Open",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "shop-app#909",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    store.replacePullRequests(
+      "site-builder",
+      [
+        {
+          repoId: "site-builder",
+          number: 1063,
+          title: "Open elsewhere",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "site-builder#909",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    expect(all(current).some((item) => item.key === key)).toBe(true);
+    expect(needsYouItems(all(current))).toHaveLength(1);
+
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1063,
+          title: "Merged",
+          url: "u",
+          branch: "feature/1063",
+          ticket: "shop-app#909",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: current,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    const afterMerge = all(current);
+    expect(afterMerge.some((item) => item.key === key)).toBe(false);
+    expect(needsYouItems(afterMerge)).toHaveLength(0);
+  });
+
+  it("keeps a Comms item open when an earlier PR closed and a later one is open", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#909",
+      text: "The current PR still needs review.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1001,
+          title: "Abandoned",
+          url: "u",
+          branch: "feature/old",
+          ticket: "shop-app#909",
+          state: "closed",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+        {
+          repoId: "shop-app",
+          number: 1002,
+          title: "Current",
+          url: "u",
+          branch: "feature/current",
+          ticket: "shop-app#909",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: current,
+          updatedAt: current,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      current,
+    );
+    expect(all(current).some((item) => item.key === `comms-open:${message.id}`)).toBe(true);
+  });
+
+  it("clears a Comms item and Needs-you count when its ticket reaches Done", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "shop-app#909",
+      text: "The ticket is waiting.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.replaceBoard("shop-app", [
+      boardItem({ issueNumber: 909, state: "done", status: "Done" }),
+    ]);
+    const afterDone = all(current);
+    expect(afterDone.some((item) => item.key === key)).toBe(false);
+    expect(needsYouItems(afterDone)).toHaveLength(0);
+  });
+
+  it("clears a production-shaped issue-ref Comms item when its ticket reaches Done", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS - COMMS_CAPCOM_ESCALATION_MS,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "#909",
+      ref: "#909",
+      text: "The ticket is waiting.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.replaceBoard("shop-app", [
+      boardItem({ issueNumber: 909, state: "done", status: "Done" }),
+    ]);
+    const afterDone = all(current);
+    expect(afterDone.some((item) => item.key === key)).toBe(false);
+    expect(needsYouItems(afterDone)).toHaveLength(0);
+  });
+
   it("appears when FLIGHT misses the window, counts the items, and clears once FLIGHT triages them", () => {
     flight();
     const id = ask(NOW - 30 * MIN);

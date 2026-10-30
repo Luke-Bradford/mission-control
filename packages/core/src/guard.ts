@@ -67,15 +67,8 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.closeTicket,
   MC_TOOL_NAMES.addControllerCheck,
   MC_TOOL_NAMES.screenshotHud,
-  MC_TOOL_NAMES.setCrewPause,
-  MC_TOOL_NAMES.liftCrewPause,
-  MC_TOOL_NAMES.resumeSeat,
-  MC_TOOL_NAMES.restartTicket,
-  MC_TOOL_NAMES.closeIssue,
-  MC_TOOL_NAMES.reopenIssue,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
-  MC_TOOL_NAMES.restartEngine,
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */

@@ -234,11 +234,6 @@ function heartbeats(store: Store) {
   return cache;
 }
 
-/** A hub loop's last completion (or first due time) and its interval; null when it has none. */
-export function loopHeartbeat(store: Store, source: string): LoopHeartbeat | null {
-  return heartbeats(store).loops[source] ?? null;
-}
-
 /** A scheduled hub loop's first due time or last completion, and its interval. */
 export function flightLoopHeartbeat(
   store: Store,

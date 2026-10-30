@@ -384,13 +384,6 @@ export async function main(): Promise<void> {
     knownSecrets: mcDeps.knownSecrets,
     log: (line) => log(line),
     engine,
-    // a stuck scheduler tick is abandoned, then the engine is stopped and started again and ticks once now
-    restartEngine: async () => {
-      scheduler.abandonEngineTick();
-      engine.stop();
-      engine.start();
-      await engine.tick();
-    },
     rules: engineRules,
     board: engineBoard,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),

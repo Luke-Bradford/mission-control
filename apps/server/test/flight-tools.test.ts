@@ -98,6 +98,7 @@ import {
   NEW_LOOP,
   NOT_ON_BOARD,
   needsSuperuserText,
+  needsYouItems,
   OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
   type PullRequestView,
@@ -128,6 +129,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -135,9 +137,9 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
+import { readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { flightLoopHeartbeat, observeFlightMain } from "../src/flight/signals.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
@@ -214,6 +216,8 @@ const stateSeen = vi.fn();
 let tools: McTool[];
 let startCalls: unknown[][];
 let endCalls: string[];
+let interruptCalls: string[];
+let callOrder: string[];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let holdCalls: unknown[][];
@@ -260,10 +264,6 @@ let screenshotImpl: (url: string) => Promise<Buffer>;
 let shotsSaved: Buffer[];
 let shotsSaveImpl: (png: Buffer) => string;
 let shotsKnown: string[];
-let resumeCalls: string[];
-const cfgResume = { fail: false, stayError: false };
-let restartEngineCalls: number;
-let restartEngineImpl: () => Promise<void>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -316,6 +316,8 @@ beforeEach(() => {
   cfg = config();
   startCalls = [];
   endCalls = [];
+  interruptCalls = [];
+  callOrder = [];
   messageCalls = [];
   engineCalls = [];
   holdCalls = [];
@@ -363,9 +365,6 @@ beforeEach(() => {
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
   shotsKnown = [];
-  resumeCalls = [];
-  restartEngineCalls = 0;
-  restartEngineImpl = async () => {};
   shotsSaved = [];
   shotsSaveImpl = (png) => {
     shotsSaved.push(png);
@@ -377,10 +376,6 @@ beforeEach(() => {
     hudShots: {
       save: (png) => shotsSaveImpl(png),
       read: (id) => (shotsKnown.includes(id) ? Buffer.from("png") : null),
-    },
-    restartEngine: async () => {
-      restartEngineCalls += 1;
-      await restartEngineImpl();
     },
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
@@ -414,7 +409,12 @@ beforeEach(() => {
       busy: () => busyNow,
       endRun: async (seatId) => {
         endCalls.push(seatId);
+        callOrder.push("end");
         await endImpl(seatId);
+      },
+      interrupt: async (seatId) => {
+        interruptCalls.push(seatId);
+        callOrder.push("interrupt");
       },
       endAsideRun: async (runId) => {
         asideEnds.push(runId);
@@ -424,15 +424,6 @@ beforeEach(() => {
       startRun: async (...a) => {
         startCalls.push(a);
         return startImpl();
-      },
-      resumeRun: async (runId) => {
-        resumeCalls.push(runId);
-        if (cfgResume.fail) throw new Error("cannot resume");
-        // a resume that takes leaves the seat idle on its run
-        const seatId = store.run(runId)?.agentId;
-        const seatRow = seatId === undefined ? null : store.seatSession(seatId);
-        if (seatRow !== null && !cfgResume.stayError)
-          store.setSeatSession({ ...seatRow, state: "idle", reason: null });
       },
     },
     engine: {
@@ -454,7 +445,10 @@ beforeEach(() => {
         syncCalls.push(runId);
         return syncImpl();
       },
-      uncommitted: async () => dirty,
+      uncommitted: async () => {
+        callOrder.push("read");
+        return dirty;
+      },
       holdMerge: async (...a) => {
         holdCalls.push(["hold", ...a]);
         return { ok: true };
@@ -630,7 +624,6 @@ const ticket = (n: number, over: Partial<TicketView> = {}): TicketView => ({
   pullRequests: [],
   ...over,
 });
-const pausedSeatFor = (seat: string): boolean => pausedSeat(store, seat) !== null;
 const decisions = () => store.flightDecisions(0, 200);
 const addDecision = (over: Partial<FlightDecision>) =>
   store.addFlightDecision({
@@ -677,21 +670,14 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
-      "restart_ticket",
       "merge_pr",
       "settle_park",
       "hold_pr",
       "rerun_ci",
       "edit_card",
       "dismiss_item",
-      "set_crew_pause",
-      "lift_crew_pause",
-      "resume_seat",
-      "close_issue",
-      "reopen_issue",
       "edit_issue",
       "set_fields",
-      "restart_engine",
       "draft_reply",
       "track",
       "untrack",
@@ -2206,6 +2192,32 @@ describe("end_run", () => {
     store.setRunLoop("r-g", NEW_LOOP);
     expect(await call("end_run", E())).toEqual(refused(needsSuperuserText("o/mc")));
     expect(endCalls).toEqual([]);
+  });
+
+  it("ends a stalled run on a standard repo: its seat running with no output for ten minutes", async () => {
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    store.setRunLoop("r-g", NEW_LOOP);
+    store.setSeatSession({
+      ...row("guido-1", "r-g"),
+      state: "running",
+      updatedAt: NOW - 11 * 60_000,
+    });
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(endCalls).toEqual(["guido-1"]);
+    // a seat that wrote just now is working, not stalled: a controller power the standard repo lacks
+    live("inco-1", "r-i", { ticket: "mc#8" });
+    store.setRunLoop("r-i", NEW_LOOP);
+    store.setSeatSession({ ...row("inco-1", "r-i"), state: "running", updatedAt: NOW });
+    expect((await call("end_run", E({ runId: "r-i" }))).isError).toBe(true);
+  });
+
+  it("interrupts a working seat before reading its uncommitted files, then ends it", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(callOrder).toEqual(["interrupt", "read", "end"]);
+    expect(interruptCalls).toEqual(["guido-1"]);
   });
 
   it("does not discard uncommitted changes on a standard repo, parked or not", async () => {
@@ -6092,20 +6104,23 @@ describe("superuser housekeeping", () => {
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
     expect(store.notes()[0]?.dismissedAt).toBeNull();
   });
-  it("settles a stale Comms item with its reason and keeps it out of FLIGHT triage", async () => {
+  it("settles FLIGHT's own stale Comms item with its reason, but refuses a seat's", async () => {
     elevated();
     nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
     const message = store.addComms({
-      at: nowMs - 20 * 60_000,
-      from: "guido-1",
-      to: "flight-1",
+      at: nowMs - 50 * 60_000,
+      from: "flight-1",
+      to: "guido-1",
       ticket: "mc#909",
       text: "The already-merged PR needs review",
       label: "blocker",
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(true);
+    expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
+    expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
+      owner: "operator",
+    });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",
       true,
@@ -6117,6 +6132,63 @@ describe("superuser housekeeping", () => {
     expect(attentionItems(cfg, store, nowMs + 60 * 60_000).some((item) => item.key === key)).toBe(
       false,
     );
+    expect(needsYouItems(attentionItems(cfg, store, nowMs)).some((item) => item.key === key)).toBe(
+      false,
+    );
+
+    const seatBlocker = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "mc#909",
+      text: "The seat still needs a decision",
+      label: "blocker",
+    });
+    if (seatBlocker === null) throw new Error("message was not stored");
+    expect(
+      await call("dismiss_item", {
+        key: `comms-open:${seatBlocker.id}`,
+        basis: "Not FLIGHT's item.",
+      }),
+    ).toHaveProperty("isError", true);
+  });
+  it("settles FLIGHT's ticketless Comms blocker with its reason", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: null,
+      text: "Disk capacity is low.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(
+      await call("dismiss_item", { key, basis: "Disk capacity recovered." }),
+    ).not.toHaveProperty("isError", true);
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
+  });
+  it("settles FLIGHT's production-shaped PR-ref Comms blocker", async () => {
+    elevated();
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 20 * 60_000,
+      from: "flight-1",
+      to: "guido-1",
+      ticket: "PR 1063",
+      ref: "PR 1063",
+      text: "The PR is now resolved.",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(attentionItems(cfg, store, nowMs).some((item) => item.key === key)).toBe(false);
   });
   it("refuses always_ask and another lane's cards", async () => {
     elevated();
@@ -7726,6 +7798,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     need(tools.find((t) => t.name === name)).call(ctx(), { basis: "Checked the state", ...a });
   const elevated = () => {
     need(cfg.repos[0]).flightPowers = "superuser";
+    need(cfg.repos[0]).autonomy = "merge";
     engineOn = true;
   };
   let liveLabels: string[] = [];
@@ -7776,17 +7849,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(readCrewPause(store)?.seats).toEqual(["guido-1"]);
       expect(startCalls).toEqual([]);
     });
-    it("restarts a Blocked ticket: back to Ready, with no 24-hour limit", async () => {
-      board(sc(7, { status: "Blocked" }));
-      addDecision({ kind: "start", ref: "mc#7", seatId: "guido-1" });
-      expect(await start("start_seat")).toHaveProperty("isError", true);
-      expect((await start("restart_ticket")).isError).toBeUndefined();
-      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Ready" }]);
-      expect(startCalls).toHaveLength(1);
-      expect(
-        decisions().find((d) => d.kind === "start" && d.decision.includes("restart")),
-      ).toBeDefined();
-    });
     it("puts everything back when the start itself fails", async () => {
       startImpl = async () => {
         throw new Error("checkout failed");
@@ -7800,93 +7862,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       writeCrewPause(store, { seats: ["guido-1"], reason: "ci", at: NOW, by: "op" }, NOW);
       expect((await start()).isError).toBe(true);
       expect(readCrewPause(store)).toMatchObject({ seats: ["guido-1"], by: "op" });
-      // a restarted card goes back to Blocked
-      writeCrewPause(store, null, NOW);
-      board(sc(7, { status: "Blocked" }));
-      moveCalls.length = 0;
-      expect((await start("restart_ticket")).isError).toBe(true);
-      expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Blocked"]);
-    });
-    it("puts a restarted Ready for QA card back where it was when the start fails", async () => {
-      startImpl = async () => {
-        throw new Error("checkout failed");
-      };
-      board(sc(7, { status: "Ready for QA" }));
-      moveCalls.length = 0;
-      expect((await start("restart_ticket")).isError).toBe(true);
-      expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Ready for QA"]);
-      // a rollback that cannot be done is said, not hidden
-      moveCalls.length = 0;
-      let n = 0;
-      moveImpl = async () =>
-        ++n === 2 ? { ok: false, reason: "boom" } : { ok: true, changed: true };
-      const r = await start("restart_ticket");
-      expect(r.isError).toBe(true);
-      expect(r.text).toContain("could not be put back in Ready for QA");
-    });
-    it("does not report a resume that left the seat in error, and puts the pause back", async () => {
-      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
-      live("guido-1", "r-g", { ticket: "mc#7" });
-      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
-      cfgResume.stayError = true;
-      const r = await call("resume_seat", { seat: "guido-1" });
-      cfgResume.stayError = false;
-      expect(r.isError).toBe(true);
-      expect(r.text).toContain("did not resume");
-      expect(readCrewPause(store)).toMatchObject({ seats: "all", by: "op" });
-      expect(readCrewPause(store)?.except ?? []).not.toContain("guido-1");
-    });
-    it("leaves the operator's pause and the seat's state when resume_seat's resume fails", async () => {
-      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
-      live("guido-1", "r-g", { ticket: "mc#7" });
-      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
-      const original = store.seatSession("guido-1");
-      cfgResume.fail = true;
-      const r = await call("resume_seat", { seat: "guido-1" });
-      cfgResume.fail = false;
-      expect(r.isError).toBe(true);
-      expect(readCrewPause(store)).toMatchObject({ seats: "all", by: "op" });
-      expect(store.seatSession("guido-1")).toEqual(original);
-    });
-    it("restart_ticket refuses a closed ticket and a standard repo", async () => {
-      board(sc(7, { closed: true }));
-      expect(await start("restart_ticket")).toHaveProperty("isError", true);
-      need(cfg.repos[0]).flightPowers = "standard";
-      board(sc(7, { status: "Blocked" }));
-      expect(await start("restart_ticket")).toHaveProperty("isError", true);
-      expect(startCalls).toEqual([]);
-    });
-    it("sets and lifts a crew pause as FLIGHT, engine off or on", async () => {
-      engineOn = false;
-      expect(
-        (await call("set_crew_pause", { seats: ["guido-1"], reason: "CI is red" })).isError,
-      ).toBeUndefined();
-      expect(readCrewPause(store)).toMatchObject({
-        seats: ["guido-1"],
-        reason: "CI is red",
-        by: "FLIGHT",
-      });
-      expect(await call("set_crew_pause", { seats: ["nobody"], reason: "x" })).toHaveProperty(
-        "isError",
-        true,
-      );
-      expect((await call("lift_crew_pause", {})).isError).toBeUndefined();
-      expect(readCrewPause(store)).toBeNull();
-      expect(await call("lift_crew_pause", {})).toHaveProperty("isError", true);
-      // every call is logged, a refused one too
-      expect(decisions().filter((d) => d.kind === "pause")).toHaveLength(4);
-    });
-    it("resumes a stopped, paused seat and its unfinished run", async () => {
-      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
-      live("guido-1", "r-g", { ticket: "mc#7" });
-      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
-      expect((await call("resume_seat", { seat: "guido-1" })).isError).toBeUndefined();
-      expect(resumeCalls).toEqual(["r-g"]);
-      expect(readCrewPause(store)).toMatchObject({ seats: "all", except: ["guido-1"], by: "op" });
-      store.setSeatSession({ ...row("inco-1", ""), runId: null, state: "stopped" });
-      expect((await call("resume_seat", { seat: "inco-1" })).isError).toBeUndefined();
-      expect(store.seatSession("inco-1")?.state).toBe("idle");
-      expect(await call("resume_seat", { seat: "nobody-9" })).toHaveProperty("isError", true);
     });
   });
 
@@ -7926,41 +7901,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       for (const key of [`${GUARD_ACK_PREFIX}1`, HUB_UPDATE_HELD_KEY, "approval:1"])
         expect(await call("dismiss_item", { key: `note:${key}` })).toHaveProperty("isError", true);
       expect(store.notes().filter((n) => n.dismissedAt !== null)).toHaveLength(1);
-    });
-    it("closes and reopens an issue, confirming against GitHub", async () => {
-      board(card(7));
-      fetchImpl = async (n) =>
-        ticket(n, { state: ghCalls.some((c) => c[1] === "close") ? "closed" : "open" });
-      expect(
-        (await call("close_issue", { issue: 7, reason: "not-planned", comment: "Superseded." }))
-          .isError,
-      ).toBeUndefined();
-      expect(ghCalls[0]).toEqual([
-        "issue",
-        "close",
-        "7",
-        "--repo=o/mc",
-        "--reason=not planned",
-        "--comment=Superseded.",
-      ]);
-      ghCalls.length = 0;
-      fetchImpl = async (n) =>
-        ticket(n, { state: ghCalls.some((c) => c[1] === "reopen") ? "open" : "closed" });
-      expect((await call("reopen_issue", { issue: 7 })).isError).toBeUndefined();
-      expect(ghCalls[0]).toEqual(["issue", "reopen", "7", "--repo=o/mc"]);
-      expect(decisions().filter((d) => d.kind === "issue")).toHaveLength(2);
-    });
-    it("refuses to close an always_ask ticket or one that GitHub still shows open", async () => {
-      rulesNow = { ...DEFAULT_REPO_RULES, alwaysAsk: ["approval:*"] };
-      liveLabels = ["approval:operator"];
-      board(card(7, { labels: ["approval:operator"] }));
-      expect(await call("close_issue", { issue: 7 })).toHaveProperty("isError", true);
-      expect(ghCalls).toEqual([]);
-      liveLabels = [];
-      rulesNow = DEFAULT_REPO_RULES;
-      board(card(7));
-      fetchImpl = async (n) => ticket(n);
-      expect(await call("close_issue", { issue: 7 })).toHaveProperty("isError", true);
     });
     it("edits a whole issue body and refuses a secret", async () => {
       board(card(7));
@@ -8011,8 +7951,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     it("set_fields counts a status move with promote's against the hourly cap", async () => {
       board(card(7));
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
-      expect(decisions().filter((d) => d.kind === "promote")).toHaveLength(1);
-      for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR; i++) addDecision({ kind: "promote" });
+      // its own kind, not promote's, but counted with promote's against the hourly cap
+      expect(decisions().filter((d) => d.kind === "status")).toHaveLength(1);
+      expect(decisions().filter((d) => d.kind === "promote")).toHaveLength(0);
+      for (let i = 0; i < FLIGHT_PROMOTES_PER_HOUR - 1; i++) addDecision({ kind: "promote" });
       moveCalls.length = 0;
       expect(await call("set_fields", { issue: 7, status: "Blocked" })).toHaveProperty(
         "isError",
@@ -8038,7 +7980,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       });
       expect(r.isError).toBeUndefined();
       expect(editCalls).toEqual([["mc", 7, { size: "M", priority: "P1" }]]);
-      expect(moveCalls).toEqual([{ runId: "flight", repoId: "mc", issue: 7, column: "Blocked" }]);
+      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Blocked" }]);
       expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({
         labels: ["area:server", "lane:home"],
         milestone: 3,
@@ -8057,8 +7999,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         readImpl = impl;
         fetchImpl = async (n) => ticket(n, { body: "x" });
         for (const [name, a] of [
-          ["close_issue", { issue: 7 }],
-          ["reopen_issue", { issue: 7 }],
           ["edit_issue", { issue: 7, body: "new" }],
           ["set_fields", { issue: 7, size: "S" }],
         ] as const)
@@ -8085,11 +8025,8 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       board(card(7));
     });
     const writes: [string, object][] = [
-      ["close_issue", { issue: 7 }],
-      ["reopen_issue", { issue: 7 }],
       ["edit_issue", { issue: 7, body: "new" }],
       ["set_fields", { issue: 7, size: "S" }],
-      ["restart_ticket", { seat: "guido-1", issue: 7 }],
     ];
     it.each(writes)(
       "%s refuses while the operator is away, and writes nothing",
@@ -8102,7 +8039,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         expect(startCalls).toEqual([]);
       },
     );
-    it.each(writes.slice(0, 4))("%s refuses another lane's ticket", async (name, a) => {
+    it.each(writes)("%s refuses another lane's ticket", async (name, a) => {
       need(cfg.crew).lane = "home";
       liveLabels = ["lane:work"];
       expect(await call(name, a)).toHaveProperty("isError", true);
@@ -8129,29 +8066,90 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(r.text).toContain("Set size/priority on mc#7, then stopped: no Status option");
       expect(editCalls).toEqual([["mc", 7, { size: "M" }]]);
     });
-    it("restart_ticket still wants a ready ticket from Backlog, and logs a refusal", async () => {
-      board(card(7, { size: "S", status: "Backlog" }));
-      readImpl = (n) => card(n, { size: "S", status: "Backlog" });
-      const r = await call("restart_ticket", { seat: "guido-1", issue: 7 });
-      expect(r.isError).toBe(true);
-      expect(startCalls).toEqual([]);
-      expect(decisions().some((d) => d.kind === "restart")).toBe(true);
+    it("set_fields refuses a draft workspace, a closed card and an invalid label list", async () => {
+      board(card(7));
+      need(cfg.repos[0]).autonomy = "draft";
+      expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
+      need(cfg.repos[0]).autonomy = "merge";
+      readImpl = (n) => card(n, { closed: true });
+      expect(await call("set_fields", { issue: 7, size: "S" })).toHaveProperty("isError", true);
+      readImpl = (n) => card(n, { labels: ["lane:home"] });
+      // no area label, or a label that is not scoped
+      for (const labels of [["lane:home"], ["area:server", "lane:home", "nonsense"]])
+        expect(await call("set_fields", { issue: 7, labels })).toHaveProperty("isError", true);
+      expect(editCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
     });
-    it("set_crew_pause never pauses FLIGHT itself, and an all-seats pause leaves it out", async () => {
-      expect(await call("set_crew_pause", { seats: ["flight-1"], reason: "x" })).toHaveProperty(
+    it("edit_issue refuses a ticket with a live run, and a write it cannot read back", async () => {
+      board(card(7));
+      live("guido-1", "r-live", { ticket: "mc#7" });
+      expect(await call("edit_issue", { issue: 7, title: "New" })).toHaveProperty("isError", true);
+      expect(ghCalls).toEqual([]);
+      store.upsertRun(run("r-live", "guido-1", { ticket: "mc#7", endedAt: NOW, status: "ok" }));
+      // the body written cannot be confirmed when the read-back fails
+      let reads = 0;
+      fetchImpl = async (n) => (++reads === 1 ? ticket(n, { body: "old" }) : null);
+      const r = await call("edit_issue", { issue: 7, body: "new" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("could not be confirmed");
+    });
+    it("dismiss_item leaves another lane's item and one briefed for the operator", async () => {
+      // a draft PR from another login is that lane's to decide
+      store.replacePullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 40,
+            title: "Other lane's draft",
+            url: "u",
+            branch: "other/40",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: true,
+            review: null,
+            ci: "passing",
+            createdAt: NOW,
+            updatedAt: NOW - 3 * 3600_000,
+            mergedAt: null,
+            headSha: SHA,
+            mergeable: "MERGEABLE",
+            author: "someone-else",
+          },
+        ],
+        NOW,
+      );
+      board(card(7));
+      const items = attentionItems(cfg, store, nowMs, undefined, undefined, "me");
+      const lane = items.find((i) => i.key.startsWith("pr:mc#40"));
+      expect(lane?.owner).toMatch(/^lane:/);
+      expect(await call("dismiss_item", { key: lane?.key ?? "" })).toHaveProperty("isError", true);
+      expect(store.acks().has(lane?.key ?? "")).toBe(false);
+      // an item FLIGHT briefed for the operator stays the operator's
+      live("guido-1", "r-info", { ticket: "mc#7" });
+      store.raiseNote({
+        key: "ready:briefed",
+        kind: "ready",
+        runId: "r-info",
+        seatId: "guido-1",
+        repoId: "mc",
+        text: "Ready",
+        at: NOW,
+      });
+      const briefed = await call("brief_item", {
+        key: "note:ready:briefed",
+        for: "operator",
+        assessment: "A product call.",
+        ask: "Merge?",
+        recommendation: "Yes.",
+        basis: "the ticket",
+      });
+      expect(briefed.isError).toBeUndefined();
+      expect(await call("dismiss_item", { key: "note:ready:briefed" })).toHaveProperty(
         "isError",
         true,
       );
-      expect(
-        (await call("set_crew_pause", { seats: "all", reason: "CI red" })).isError,
-      ).toBeUndefined();
-      expect(readCrewPause(store)).toMatchObject({
-        seats: "all",
-        except: ["flight-1"],
-        by: "FLIGHT",
-      });
-      expect(pausedSeatFor("guido-1")).toBe(true);
-      expect(pausedSeatFor("flight-1")).toBe(false);
+      expect(store.notes().find((n) => n.key === "ready:briefed")?.dismissedAt).toBeNull();
     });
     it("dismiss_item refuses an item it cannot find", async () => {
       expect(await call("dismiss_item", { key: "pr:mc#99:missing" })).toHaveProperty(
@@ -8159,48 +8157,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         true,
       );
       expect(await call("dismiss_item", { key: "note:missing" })).toHaveProperty("isError", true);
-    });
-  });
-
-  describe("the hub", () => {
-    beforeEach(elevated);
-    it("restarts the engine only once it has been silent past its tick twice", async () => {
-      flightLoopHeartbeat(store, "engine", nowMs - 90_000, 60_000);
-      expect(await call("restart_engine", {})).toHaveProperty("isError", true);
-      expect(restartEngineCalls).toBe(0);
-      flightLoopHeartbeat(store, "engine", nowMs - 5 * 60_000, 60_000);
-      expect((await call("restart_engine", {})).isError).toBeUndefined();
-      expect(restartEngineCalls).toBe(1);
-      expect(await call("restart_engine", {})).toHaveProperty("isError", true);
-      expect(restartEngineCalls).toBe(1);
-      // one restart; the two refusals are logged too
-      expect(decisions().filter((d) => d.kind === "hub")).toHaveLength(3);
-      expect(decisions().filter((d) => d.decision === "Restarted the loop engine.")).toHaveLength(
-        1,
-      );
-    });
-    it("says so when the restart throws, and counts no restart", async () => {
-      flightLoopHeartbeat(store, "engine", nowMs - 5 * 60_000, 60_000);
-      restartEngineImpl = async () => {
-        throw new Error("engine would not start");
-      };
-      const r = await call("restart_engine", {});
-      expect(r.isError).toBe(true);
-      expect(r.text).toContain("engine would not start");
-      // not a restart: the next attempt is allowed at once
-      restartEngineImpl = async () => {};
-      expect((await call("restart_engine", {})).isError).toBeUndefined();
-    });
-    it("needs superuser", async () => {
-      need(cfg.repos[0]).flightPowers = "standard";
-      for (const [name, a] of [
-        ["restart_engine", {}],
-        ["set_crew_pause", { seats: "all", reason: "x" }],
-      ] as const)
-        expect(await call(name, a)).toMatchObject({
-          isError: true,
-          text: expect.stringContaining("superuser"),
-        });
     });
   });
 });

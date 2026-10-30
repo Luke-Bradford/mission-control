@@ -362,9 +362,11 @@ What each seat's process starts with:
   loop).
 - **Unanswered Comms.** A labelled direct `question` or `blocker` shows its elapsed wait in Comms.
   After 15 minutes without the addressee replying or reacting, it becomes one FLIGHT triage item.
-  FLIGHT may settle a stale or already-resolved `comms-open:` item with `dismiss_item`, recording
-  its required reason; only this Comms item kind is eligible for that path. Messages from before
-  the feature's rollout boundary do not enter the escalation, preventing a rollout backlog.
+  FLIGHT may settle only a stale or already-resolved `comms-open:` item it sent, recording its
+  required reason; a seat's or the operator's item stays protected. A linked PR that merges or
+  closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
+  Messages from before the feature's rollout boundary do not enter the escalation, preventing a
+  rollout backlog.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
@@ -891,11 +893,9 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park. A paused seat's verdict is
+A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
-
-A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does.
 
 ### Hold a run from merging
 
@@ -931,22 +931,19 @@ ever adds a hold, and is logged as a `card` decision.
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
 repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are tools of a `superuser`
-repo's FLIGHT; each is a logged decision (refused calls too), and none moves the safety floor:
+repo's FLIGHT; each change is a logged decision, and none moves the safety floor:
 guard, sandbox, hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block still need the
 operator.
 
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (capped, queued for a busy seat) |
-| `start_seat`, `resume_seat` | Start or resume a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop, the pause and a restarted card back |
-| `restart_ticket` | Start a seat on a ticket from any open column (Blocked too): the card goes to Ready first and the once-a-day restart limit is waived. From Backlog or Refinement the ticket must still be ready. Refusals are logged |
-| `end_run` | End a working, parked or stalled run (working needs a superuser repo and a run that is not held); refused with uncommitted changes unless `discard: true` (which needs a superuser repo whatever the run's state), and the decision names what was discarded |
+| `start_seat` | Start a seat the operator stopped or a crew pause holds; the decision says why and only that seat is let out of the pause (the record stays the setter's; an all-seats pause gains an exception). A start that fails puts the stop and the pause back |
+| `end_run` | End a working, parked or stalled run (a working one needs a superuser repo and a run that is not held, and its seat is interrupted before its files are read); refused with uncommitted changes unless `discard: true` (which needs a superuser repo whatever the run's state), and the decision names what was discarded |
 | `sync_main` | Merge main into a run's branch |
-| `set_crew_pause`, `lift_crew_pause` | Pause the crew or named seats, or lift the pause (record: `by: FLIGHT`). FLIGHT never pauses its own seat: an all-seats pause leaves it out |
-| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, or a decision addressed to the operator |
+| `dismiss_item` | Dismiss any attention item it can find except an operator approval, a budget or guard hold, an Update hold, another lane's item, or an item FLIGHT briefed for the operator |
 | `promote` | Reads the live card, and refuses when it cannot be read |
-| `close_issue`, `reopen_issue`, `edit_issue`, `set_fields` | Close or reopen an issue, replace an issue's whole body or title, set status, priority, size, labels and milestone (Ready and Backlog moves belong to `promote`; labels keep exactly one area label; a status move counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
-| `restart_engine` | Restart the loop engine once it has been silent past two of its ticks (once per ten minutes): the stuck scheduler tick is abandoned, the restart runs outside the ticket queue with a 90 s limit, and a failed restart is reported |
+| `edit_issue`, `set_fields` | Replace an issue's whole body or title, set status, priority, size, labels and milestone (draft workspaces, closed cards, and Ready and Backlog moves are refused: those belong to `promote`; labels must pass the ticket label rules; a status move is logged as `status` and counts with promote's against the hourly cap; a lane label changes only with `edit_card`; a ticket with a live run is refused, for both; a partial failure says which fields landed). `always_ask` and other-lane tickets are refused, judged on the card read live from the project (a failed read refuses; the cache is never used); text is scanned for secrets and mentions. `edit_issue` never drops or changes the `## Controller check` section (use `add_controller_check`) and refuses a ticket it cannot read whole |
 
 A FLIGHT run keeps the tool set it started with. When the set grows (a hub update adds a tool), the
 watch rotates the run at its next idle wake, so the fresh run has every tool without a restart. A run
@@ -1066,6 +1063,11 @@ This code change does not edit `CLAUDE.md` or your home config.
 run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
+use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
+`300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
+no Claude review did). When a review fails on its budget, the author's next attempt goes to another
+free reviewer of the session, not the same seat, and only a single reviewer retries on itself.
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 

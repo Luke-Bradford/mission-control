@@ -57,15 +57,8 @@ export const MC_TOOL_NAMES = {
   holdItem: "hold_item",
   releaseHold: "release_hold",
   screenshotHud: "screenshot_hud",
-  setCrewPause: "set_crew_pause",
-  liftCrewPause: "lift_crew_pause",
-  resumeSeat: "resume_seat",
-  restartTicket: "restart_ticket",
-  closeIssue: "close_issue",
-  reopenIssue: "reopen_issue",
   editIssue: "edit_issue",
   setFields: "set_fields",
-  restartEngine: "restart_engine",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -125,15 +118,8 @@ export const MC_TOOLS = {
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
-  setCrewPause: mcTool(MC_TOOL_NAMES.setCrewPause),
-  liftCrewPause: mcTool(MC_TOOL_NAMES.liftCrewPause),
-  resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
-  restartTicket: mcTool(MC_TOOL_NAMES.restartTicket),
-  closeIssue: mcTool(MC_TOOL_NAMES.closeIssue),
-  reopenIssue: mcTool(MC_TOOL_NAMES.reopenIssue),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
   setFields: mcTool(MC_TOOL_NAMES.setFields),
-  restartEngine: mcTool(MC_TOOL_NAMES.restartEngine),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
