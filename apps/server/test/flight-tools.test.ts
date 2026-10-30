@@ -3010,6 +3010,18 @@ describe("flight_state", () => {
           failingChecks: [],
         },
       ],
+      prFlow: expect.objectContaining({
+        unowned: 0,
+        rows: [
+          expect.objectContaining({
+            pr: 9,
+            owner: "guido-1",
+            stage: "review",
+            lastAction: "review",
+          }),
+        ],
+        metrics: expect.any(Array),
+      }),
       items: [
         {
           key: "ask:1",

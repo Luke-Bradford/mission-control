@@ -1342,6 +1342,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/drafts/guido-1/copied"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
+  ["GET", "/api/prs/flow"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
   ["GET", "/api/flight/schedule"],
