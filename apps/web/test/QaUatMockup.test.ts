@@ -92,12 +92,15 @@ describe("QA UAT mockup", () => {
   it("turns off Accept, Send back and Ask QA only when disconnected", () => {
     const off = (state: string) => {
       const document = renderMockup(`?state=${state}`);
-      return [...document.querySelectorAll<HTMLButtonElement>(".dhead .actions button")].map(
-        (b) => b.disabled,
-      );
+      const controls = [
+        ...document.querySelectorAll<HTMLButtonElement>(".dhead .actions button"),
+        ...document.querySelectorAll<HTMLButtonElement>(".askrow button"),
+        ...document.querySelectorAll<HTMLTextAreaElement>("#q"),
+      ];
+      return controls.map((control) => control.disabled);
     };
-    expect(off("disconnected")).toEqual([true, true]);
-    expect(off("queue")).toEqual([false, false]);
+    expect(off("disconnected")).toEqual([true, true, true, true]);
+    expect(off("queue")).toEqual([false, false, false, false]);
   });
 
   it("switches state and theme from the mockup controls", () => {
