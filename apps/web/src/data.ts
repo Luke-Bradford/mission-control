@@ -296,6 +296,8 @@ export const ACTIONS = {
   versionCheck: "/api/version/check",
   /** Body `{}`: pulls main, builds, and restarts the hub (202), or answers `{ upToDate }`. */
   update: "/api/update",
+  /** GET: the last update's log, `{ text }` (an UpdateLog). */
+  updateLog: "/api/update/log",
 } as const;
 
 /** Stable identity for the activity API, which currently supplies no source id. */

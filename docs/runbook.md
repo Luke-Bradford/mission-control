@@ -68,7 +68,13 @@ refusal below applies). After you confirm, the hub runs, in its own checkout:
 Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within the 30 s
 `ThrottleInterval`), crew runs resume, and the HUD reconnects. Each command's output goes to
 `update.log` beside the database (mode 0600), rewritten by each update. A failed step answers
-`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving.
+`update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving,
+and Setup opens the log (credentials redacted; paths and command output shown as they are) so
+the failed command's output is on the page. A refusal after the log started (a seat starting, a
+change held for a person) adds a `held: <reason>` line and opens the log too. A refusal before
+it (another update running, uncommitted changes) only toasts, since the log would be the previous
+update's. **Update log** beside the button shows the last update's log at any time.
+
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
@@ -91,6 +97,22 @@ pnpm install        # first: dependencies change
 pnpm build
 launchctl kickstart -k gui/$(id -u)/com.missioncontrol.server   # if it runs under launchd
 ```
+
+#### Update fails at install every time
+
+If every Update fails at `install` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, pnpm wants to
+rebuild `node_modules` and can't ask without a terminal. A hub started before #876 (merged 29 Oct
+2026) points pnpm at the crew's store and hits this every time, so it can never install the fix.
+From a terminal, in the hub's checkout:
+
+1. Stop the hub: `launchctl bootout gui/$(id -u)/com.missioncontrol.server` (with it running,
+   launchd's `KeepAlive` restarts it during the install).
+2. `git pull --ff-only origin main`
+3. `pnpm install --frozen-lockfile`, and answer yes when pnpm asks to remove `node_modules`.
+4. `pnpm --filter @mc/web build`
+5. Start the hub: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist`.
+
+Check `/api/version` shows the new sha.
 
 ## Configure
 
@@ -170,7 +192,7 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
-| Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
+| Update log | `update.log` beside the database: the last update's commands and output, mode 0600; Setup → **Update log** shows its end |
 | launchd logs | `~/Library/Logs/mission-control/server.log`, `server.err.log` |
 
 The server never writes a `config.yaml` that is a symbolic link: it refuses the write and says so, so keep the real file at the config path (`~/.config/mission-control/config.yaml`, or `MC_CONFIG`), not a link to it.
@@ -286,6 +308,15 @@ also expire after 90 days. Runs, reviews and their child evidence, commits, push
 merged-PR history remain available to Activity and Telemetry for one year. Reported reviews and
 unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
 pages reusable; it does not shrink the database file on disk.
+
+### Page-load budget
+
+Every HUD page's first load stays under 500 KB gzipped, and no single response is over 300 KB
+or takes a second to build. `apps/server/test/response-budget.test.ts` builds each page's
+first-load responses from a large fixture and fails above those numbers; run it alone with
+`pnpm -s vitest run apps/server/test/response-budget.test.ts` (it prints each response's size and
+build time). It also runs with the server suite in CI. The routes, paging parameters and summary
+shapes are in `docs/hud-response-budgets.md`.
 
 ## First crew
 
@@ -462,6 +493,19 @@ What each seat's process starts with:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/hook-cli.ts' '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2`.
   `crew.node` defaults to `/opt/homebrew/bin/node`. A start is refused if one of those paths holds
   a `'` or a line break.
+- **The trim hook** (#1045) after every tool call (`PostToolUse`, matcher `*`), for Claude seats:
+  `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/trim-cli.ts' '<run temp root>/tool-output'`.
+  A result over 32 KB is answered as `updatedToolOutput` with its first 8 KB, its last 4 KB and a
+  line `[mc: N bytes cut; the full output is at <path>]`; a Bash result keeps its shape (only the
+  long strings are cut) and its tail starts at the last `FAIL` or `error` line when there is one.
+  The full output is `<run temp root>/tool-output/<tool_use_id>.txt` (0600), removed with the
+  run's temp root. The hub makes that folder before the seat starts and the sandbox denies the
+  seat writes to it; the hook, which runs outside the sandbox, refuses a folder that is a link or
+  not ours and creates each file exclusively without following a link. Unlike the guard hook it never blocks: any failure, or a full output that cannot
+  be written, leaves the result whole. So does a built-in tool's result that cannot be cut in its
+  own shape (the CLI rejects a plain text there), and Edit, Write, MultiEdit and NotebookEdit,
+  whose bulk never reaches the model. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,
   env and settings carry only their paths. When the process exits, for any reason, the token is

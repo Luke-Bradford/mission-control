@@ -54,7 +54,7 @@ import { activityValues } from "./agentActivity.ts";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
-const COLUMNS = ["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"];
+const COLUMNS = ["Agent", "State", "Work", "Tokens", "Cost", "Context", "In state"];
 function WorkCell({
   row,
   doing,
@@ -76,12 +76,13 @@ function WorkCell({
       .join(" · ");
     return (
       <span role="cell" className="ellip s ticket-cell work-cell muted">
-        <span className="ellip">{refs ? `last ${refs}` : DASH}</span>
-        {note ?? (
-          <span className="ellip xs muted" title={doing}>
-            {doing || DASH}
-          </span>
-        )}
+        {refs && <span className="ellip">last {refs}</span>}
+        {note ??
+          (doing || !refs ? (
+            <span className="ellip xs muted" title={doing}>
+              {doing || DASH}
+            </span>
+          ) : null)}
         {actions}
       </span>
     );
@@ -100,22 +101,24 @@ function WorkCell({
       .join(" · ") || DASH;
   return (
     <span role="cell" className="ellip s ticket-cell work-cell" title={text}>
-      <span className="ellip">
-        {row?.ticket && <TicketRef ticket={row.ticket} bare />}
-        {prNumber && row && (
-          <>
-            {row.ticket && " · "}
-            <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
-          </>
-        )}
-        {(row?.ticket || prNumber) && title && (
-          <>
-            {" "}
-            · <span>{title}</span>
-          </>
-        )}
-        {!row?.ticket && !prNumber && DASH}
-      </span>
+      {(row?.ticket || prNumber || !note) && (
+        <span className="ellip">
+          {row?.ticket && <TicketRef ticket={row.ticket} bare />}
+          {prNumber && row && (
+            <>
+              {row.ticket && " · "}
+              <RepoRef repoId={row.repoId} number={prNumber} kind="pr" bare />
+            </>
+          )}
+          {(row?.ticket || prNumber) && title && (
+            <>
+              {" "}
+              · <span>{title}</span>
+            </>
+          )}
+          {!row?.ticket && !prNumber && DASH}
+        </span>
+      )}
       {note ?? (
         <span className="ellip xs muted" title={doing}>
           {doing || DASH}
@@ -562,7 +565,11 @@ export function AgentsPanel() {
         <div className="trow head" role="row">
           {COLUMNS.map((label) => (
             // biome-ignore lint/a11y/useFocusableInteractive: these columns are not sortable
-            <span role="columnheader" key={label} title={label}>
+            <span
+              role="columnheader"
+              key={label}
+              title={label === "Tokens" ? "Tokens · last 30 minutes" : label}
+            >
               {label}
             </span>
           ))}

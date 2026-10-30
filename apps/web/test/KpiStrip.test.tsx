@@ -174,11 +174,45 @@ describe("KpiStrip", () => {
     const tile = await screen.findByRole("link", { name: /Cost · today/ });
     // the trace, its peak and its change wear the value's "~$" (API-equivalent)
     await waitFor(() => expect(tile.querySelector(".kpi-peak")?.textContent).toBe("~$0.40"));
-    expect(within(tile).getByText("+~$0.40 · 30m")).toBeTruthy();
+    expect(within(tile).getByText("+$0.40 · 30m")).toBeTruthy();
     expect(tile.querySelector(".kpi-peak")?.getAttribute("title")).toBe(
       "Peak in the last 30 minutes",
     );
   });
+
+  it.each([
+    ["rises", [0, 0.2, 0.4], [60, 62, 65], "+$0.40 · 30m", "+5 pp · 30m"],
+    ["falls", [0.46, 0.2, 0.4], [65, 62, 60], "−$0.06 · 30m", "−5 pp · 30m"],
+    ["is flat", [0.4, 0.2, 0.4], [60, 70, 60], "±$0.00 · 30m", "±0 pp · 30m"],
+    [
+      "moves less than a cent or a point",
+      [0.4, 0.2, 0.396],
+      [60, 70, 59.6],
+      "±$0.00 · 30m",
+      "±0 pp · 30m",
+    ],
+  ])(
+    "signs the cost and CI changes once when the series %s",
+    async (_, cost, ci, costText, ciText) => {
+      stubFetch({
+        ...REGISTRY_ROUTES,
+        "/api/overview": {
+          ...OVERVIEW,
+          kpis: {
+            ...kpis,
+            spendToday: { usd: 0.4, perHour: [0.4], series: cost },
+            ciPassRate24h: { pct: 60, runs: 10, redNow: 1, series: ci },
+          },
+        },
+      });
+      render(<KpiStrip />);
+      const costTile = await screen.findByRole("link", { name: /Cost · today/ });
+      const ciTile = screen.getByRole("link", { name: /CI pass rate/ });
+      await waitFor(() => expect(within(costTile).getByText(costText)).toBeTruthy());
+      expect(within(ciTile).getByText(ciText)).toBeTruthy();
+      expect(costTile.textContent).not.toMatch(/[+−±]~|~[+−±]/);
+    },
+  );
 
   it("shows eight empty values when the endpoints are unavailable, and says both failed", async () => {
     stubFetch({

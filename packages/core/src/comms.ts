@@ -33,6 +33,9 @@ export const commsMirror = (text: string, pointer: string): string =>
   Array.from(text).length <= COMMS_MESSAGE_MAX
     ? text
     : Array.from(pointer).slice(0, COMMS_MESSAGE_MAX).join("");
+/** A Comms read returns this many newest messages unless `?limit=` says otherwise, up to the max. */
+export const COMMS_PAGE_DEFAULT = 50;
+export const COMMS_PAGE_MAX = 200;
 export const commsCutMarker = (kept: number, total: number): string =>
   `\n[stored text cut at ${kept} of ${total} characters]`;
 

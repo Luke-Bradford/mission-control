@@ -5,7 +5,7 @@ import {
   UPDATE_UNAVAILABLE,
   type VersionInfo,
 } from "@mc/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
@@ -19,6 +19,7 @@ import { Repos } from "../setup/Repos.tsx";
 import { Roles } from "../setup/Roles.tsx";
 import { Sessions } from "../setup/Sessions.tsx";
 import { Sources } from "../setup/Sources.tsx";
+import { UpdateLogModal } from "../setup/UpdateLog.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { toast } from "../shell/Toast.tsx";
 import "../setup/setup.css";
@@ -61,6 +62,11 @@ function checkError(err: unknown, now: number, tz: string | null): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The update route's `logged`: true only when update.log records why the update stopped. */
+function loggedHold(err: ApiError): boolean {
+  return (err.body as { logged?: boolean } | undefined)?.logged === true;
+}
+
 /**
  * `Version {sha7} · {n} commits behind main · checked {when}`, [Check for updates] and [Update].
  * Check fetches origin/main now (disabled, with the reason as its title, on a preview or with no
@@ -74,6 +80,9 @@ function UpdateControl() {
   const now = useNow();
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const logButton = useRef<HTMLButtonElement>(null);
+  const [logRead, setLogRead] = useState(0);
   if (!v) return null;
   const behind =
     v.behind === null
@@ -117,6 +126,11 @@ function UpdateControl() {
       hub.refetch(RESOURCES.version.path);
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
+      // a failed step (500), or a hold the log records (409 with logged): the log says why
+      if (err instanceof ApiError && loggedHold(err)) {
+        setLogOpen(true);
+        setLogRead((n) => n + 1); // a log already open reads again, now with the failure
+      }
     }
     setBusy(false);
   }
@@ -141,6 +155,17 @@ function UpdateControl() {
       >
         Update
       </button>
+      {v.reason !== UPDATE_UNAVAILABLE && (
+        <button type="button" className="sm" ref={logButton} onClick={() => setLogOpen(true)}>
+          Update log
+        </button>
+      )}
+      <UpdateLogModal
+        open={logOpen}
+        onClose={() => setLogOpen(false)}
+        returnTo={logButton}
+        read={logRead}
+      />
     </>
   );
 }

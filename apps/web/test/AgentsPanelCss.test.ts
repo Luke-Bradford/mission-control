@@ -31,7 +31,7 @@ it("keeps seven compact columns with needs beside the work title on one line", (
 
 it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 118px minmax\(220px, 1fr\) 128px 56px 64px 64px/,
+    /#agentsList \.trow \{[^}]*grid-template-columns: 190px 118px minmax\(220px, 1fr\) 128px 56px 64px 64px/,
   );
   expect(css).toMatch(/#agentsList \.ticket-cell \{[^}]*overflow: hidden/);
 });

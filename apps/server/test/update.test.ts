@@ -33,6 +33,7 @@ import {
   createUpdater,
   crewRefusal,
   type Exec,
+  fromWholeLine,
   HUB_CODE_NEEDS_PERSON,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
@@ -44,6 +45,7 @@ import {
   realExec,
   UPDATE_EXIT_DELAY_MS,
   UPDATE_KILL_GRACE_MS,
+  UPDATE_LOG_SHOWN_BYTES,
   UPDATE_MAX_BUFFER,
   UPDATE_PIPE_GRACE_MS,
   UPDATE_RESTART_GRACE_MS,
@@ -763,6 +765,52 @@ describe("update", () => {
     expect(log).toContain("built");
     expect(log).not.toContain("an older update");
     expect(statSync(logPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("reads update.log back for the page: null before any update, its tail when long", async () => {
+    expect(await updater().u.log()).toBeNull();
+    upstreamCommit("b.txt");
+    await updater().u.update();
+    expect(await updater().u.log()).toBe(readFileSync(logPath, "utf8"));
+    writeFileSync(logPath, `${"x".repeat(UPDATE_LOG_SHOWN_BYTES)}\nthe decisive line\n`);
+    expect(await updater().u.log()).toBe("…\nthe decisive line\n");
+  });
+
+  it("keeps a line the cut lands on, drops a half token with no newline, and throws on a read error", async () => {
+    // the shown tail starts exactly at a line start: that line stays
+    writeFileSync(logPath, `${"x".repeat(9)}\n${"y".repeat(UPDATE_LOG_SHOWN_BYTES - 1)}\n`);
+    expect(await updater().u.log()).toBe(`…\n${"y".repeat(UPDATE_LOG_SHOWN_BYTES - 1)}\n`);
+    // no newline in the tail: the leading token run (a credential cut in half) is dropped
+    expect(fromWholeLine("aBcD_123 rest of the line")).toBe(" rest of the line");
+    // another read error is not "no update yet"
+    writeFileSync(logPath, "x\n");
+    chmodSync(logPath, 0o000);
+    try {
+      await expect(updater().u.log()).rejects.toThrow();
+    } finally {
+      chmodSync(logPath, 0o600);
+    }
+  });
+
+  it("marks a refusal after the log started as logged, with its reason in the log; a refusal before it is not", async () => {
+    upstreamCommit("b.txt");
+    const busy = "GUIDO-1 is starting";
+    const held = (await updater({ crewRefusal: () => busy })
+      .u.update()
+      .catch((x: unknown) => x)) as UpdateError;
+    expect(held.status).toBe(409);
+    expect(held.logged).toBe(true);
+    expect(readFileSync(logPath, "utf8")).toContain(`held: ${busy}`);
+    const { u } = updater();
+    const first = u.update();
+    const running = (await u.update().catch((x: unknown) => x)) as UpdateError;
+    expect(running.logged).toBe(false);
+    await first;
+  });
+
+  it("redacts credentials and drops terminal escapes from the log it shows", async () => {
+    writeFileSync(logPath, `\x1b[31mERR\x1b[39m token ghp_${"a".repeat(36)}\n`);
+    expect(await updater().u.log()).toBe("ERR token [redacted]\n");
   });
 
   it("refuses a second update while one is running", async () => {

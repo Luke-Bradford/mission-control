@@ -481,12 +481,14 @@ export function crew(
   lock: TestLockState = NO_LOCK,
   /** The CLI version; tests pass a stub. */
   cliVersion: () => string | null = claudeVersion,
+  /** The Overview's rows: no event timelines are built, current or set-aside (see `crewSummary`). */
+  summary = false,
 ): Crew {
   const { value, ...basis } = memoised(
     store,
     now,
-    ["crew", config, lock, identityOf(cliVersion)],
-    () => buildCrew(config, store, now, lock, cliVersion),
+    ["crew", config, lock, identityOf(cliVersion), summary],
+    () => buildCrew(config, store, now, lock, cliVersion, summary),
   );
   rowOrigins.set(value.rows, basis);
   return value;
@@ -498,6 +500,7 @@ function buildCrew(
   now: number,
   lock: TestLockState,
   cliVersion: () => string | null,
+  summary: boolean,
 ): Crew {
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
@@ -554,7 +557,7 @@ function buildCrew(
             : {}),
         }
       : null;
-  const eventIndex = runEventsIndex(store, now);
+  const eventIndex = summary ? null : runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
   const rows = loopViews(config, store, now, lock, runsByAgent, seatRows, digestByRun).map(
@@ -611,7 +614,9 @@ function buildCrew(
         repoId: agent.repoId,
         index,
         hudState: state,
-        events: latest ? runEvents(store, latest, now, eventIndex) : [],
+        ...(eventIndex === null
+          ? {}
+          : { events: latest ? runEvents(store, latest, now, eventIndex) : [] }),
         stateSince,
         accountId: view.accountId,
         kind: view.kind,
@@ -654,7 +659,9 @@ function buildCrew(
                     ? [
                         {
                           runId: r.id,
-                          events: runEvents(store, r, now, eventIndex),
+                          ...(eventIndex === null
+                            ? {}
+                            : { events: runEvents(store, r, now, eventIndex) }),
                           stateSince:
                             store.loopEventsOfRun(r.id).at(-1)?.at ?? r.endedAt ?? r.startedAt,
                           ticket: t,

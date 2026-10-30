@@ -92,3 +92,8 @@ export function columnOf(item: Pick<BoardItem, "state" | "stage">): BoardColumnK
       return "done";
   }
 }
+
+/** The PRs a list returns: open ones, and ones that changed in the last this many days. */
+export const PR_LIST_DAYS = 7;
+/** `?days=` on a PR list reaches back at most this far. */
+export const PR_LIST_DAYS_MAX = 3650;
