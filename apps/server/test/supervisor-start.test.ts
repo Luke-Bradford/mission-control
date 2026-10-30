@@ -61,6 +61,7 @@ import {
   startClosedText,
   startMissingNeedsText,
   type TicketView,
+  TOOL_OUTPUT_DIR,
   ticketHasRunText,
   twoAreasText,
   waitsOnText,
@@ -855,7 +856,12 @@ describe("startRun", () => {
       join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
       "/tmp/claude-*",
       "/private/tmp/claude-*",
+      // the trim hook writes here outside the sandbox: the hub made it, the seat cannot swap it
+      `${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`,
     ]);
+    expect(
+      lstatSync(`${realpathSync(recorded()[0].env.TMPDIR)}/${TOOL_OUTPUT_DIR}`).isDirectory(),
+    ).toBe(true);
     // the DB, transcripts and prompt files: no seat reads another's (or its own)
     expect(fs.denyRead).toContain(join(dir, "db"));
     // then the hub's own checkout and its git dir (no loops, no other session, no crew.deny_read)
