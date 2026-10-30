@@ -148,8 +148,20 @@ describeRendered("FLIGHT page in a browser", () => {
               join(SHOTS, `flight-${scenario}-${tab}-${colorScheme}-${width}x${height}.png`),
             );
           }
-          // one line of status; a 300-character headline truncates rather than growing the strip
-          expect((await page.box(".flight-strip")).height).toBeLessThan(120);
+          // one line: every item sits on the same row, a 300-character headline is cut, not wrapped
+          const strip = await page.evaluate((selector) => {
+            const el = document.querySelector(selector) as HTMLElement;
+            return {
+              height: el.getBoundingClientRect().height,
+              centres: [...el.children].map((c) => {
+                const b = c.getBoundingClientRect();
+                return b.top + b.height / 2;
+              }),
+            };
+          }, ".flight-strip");
+          const label = `${scenario} strip ${colorScheme}`;
+          expect(strip.height, label).toBeLessThan(56);
+          expect(Math.max(...strip.centres) - Math.min(...strip.centres), label).toBeLessThan(4);
           await page.close();
         }
       },

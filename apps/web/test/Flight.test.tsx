@@ -1671,6 +1671,22 @@ describe("FLIGHT's brief", () => {
     expect(screen.queryByText(NOBODY_WAITING)).toBeNull();
   });
 
+  it("says the GitHub threads could not load, with Retry, and keeps the asks standing", async () => {
+    stubFetch({
+      "/api/attention": [personItem, item({ key: "q1", kind: "question", text: "Which port?" })],
+      "/api/notifications": () => ({ status: 500, body: { error: "GitHub is down" } }),
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not load your GitHub threads: GitHub is down");
+    expect(
+      within(alert.parentElement as HTMLElement).getByRole("button", { name: "Retry" }),
+    ).toBeTruthy();
+    expect(screen.getAllByTestId("ask-row")).toHaveLength(2);
+    expect(screen.queryByTestId("person-card")).toBeNull();
+  });
+
   it("keeps person notifications out of Asked of you until FLIGHT passes them up", async () => {
     stubFetch({
       "/api/attention": [{ ...personItem, owner: "flight", flightTriage: "waiting" }],

@@ -66,7 +66,6 @@ export function AskedOfYou({
   const now = useSecond();
   const tz = useTz();
   const { inRepo } = useSessionScope();
-  // A failed load counts as no threads, so the rest of the list still shows.
   if (attention === undefined)
     return (
       <Pending what="what needs you" error={attentionRes.error} resource={RESOURCES.attention} />
@@ -75,6 +74,11 @@ export function AskedOfYou({
     return <Pending what="your GitHub threads" error={null} resource={RESOURCES.notifications} />;
   const needsYou = sortNeeds(needsYouItems(attention)).filter(
     (i) => withDefaults || i.defaultDueAt === undefined,
+  );
+  // A failed notifications load leaves the asks below standing, but says GitHub threads are missing:
+  // their cards fall back to plain rows until it loads.
+  const notice = notes.data === undefined && notes.error !== null && (
+    <Pending what="your GitHub threads" error={notes.error} resource={RESOURCES.notifications} />
   );
   const open = new Map((notes.data?.open ?? []).map((t) => [t.key, t]));
   // A person item whose thread the notifications view holds is a card; any other item is a row.
@@ -96,6 +100,7 @@ export function AskedOfYou({
   if (threads.length === 0 && items.length === 0 && notTriaging === undefined)
     return (
       <>
+        {notice}
         <p className="pb note">{NOBODY_WAITING}</p>
         {withHeld && <HeldNeeds />}
         {footer}
@@ -103,6 +108,7 @@ export function AskedOfYou({
     );
   return (
     <div>
+      {notice}
       {notTriaging && <NotTriagingRow item={notTriaging} items={attention} open />}
       <div className="askcards">
         {threads.map(({ t, item }) => {

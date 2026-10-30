@@ -117,6 +117,8 @@
    for state. Selection is an accent edge; the one coloured border is the dock's "Waiting on you". */
 #page-flight {
   display: grid;
+  /* A track that may shrink, so a long strip is cut inside it and never widens the page. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
@@ -124,11 +126,12 @@
   container: flight / inline-size;
 }
 
-/* The status strip: one line of state, headline and counts over the tabs; it wraps rather than
-   cutting anything off on a narrow page. */
+/* The status strip: one line of state, wake times, headline and counts over the tabs. The wake line
+   and the headline give way (cut with an ellipsis); the state and the counters never do. */
 .flight-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   align-items: center;
   gap: 8px 16px;
   padding: 8px 16px;
@@ -138,6 +141,7 @@
 }
 
 .flight-strip-run {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -146,17 +150,23 @@
 .flight-strip-wake {
   color: var(--muted);
   font: var(--fs-s) / 1.4 var(--mono);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .flight-strip-headline {
-  flex: 1 1 260px;
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .flight-strip-counters {
+  flex: none;
   display: inline-flex;
   gap: 4px;
 }

@@ -184,7 +184,7 @@ it("uses schedule details for plans without confusing them with ledger keys", as
   expect(row.textContent).not.toContain("Ticket agreed");
 });
 
-it("keeps the summary when ledger details fail and reports the error", async () => {
+it("reports a failed ledger by name with Retry, and claims no empty queue", async () => {
   stub({
     [RESOURCES.flightLedgerOpen.path]: () => ({
       status: 500,
@@ -192,8 +192,47 @@ it("keeps the summary when ledger details fail and reports the error", async () 
     }),
   });
   render(<Summary mode="queue" />);
-  expect((await screen.findByRole("alert")).textContent).toBe("Ledger: Details unavailable");
-  expect(screen.getByRole("table", { name: "FLIGHT forward plan" })).toBeTruthy();
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load the ledger: Details unavailable",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByRole("table", { name: "FLIGHT forward plan" })).toBeNull();
+  expect(screen.queryByText(/No forward commitment/)).toBeNull();
+});
+
+it("reports a failed schedule by name with Retry, and claims no empty queue", async () => {
+  stub({
+    [RESOURCES.flightSchedule.path]: () => ({ status: 500, body: { error: "Plans unavailable" } }),
+  });
+  render(<Summary mode="queue" />);
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load the schedule: Plans unavailable",
+  );
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByText(/No forward commitment/)).toBeNull();
+});
+
+it("says what it is loading while the ledger or the schedule is pending, never an empty queue", async () => {
+  const answers = stub();
+  let resolveLedger!: (r: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string, init?: RequestInit) =>
+      path === RESOURCES.flightLedgerOpen.path
+        ? new Promise<Response>((resolve) => {
+            resolveLedger = resolve;
+          })
+        : answers(path, init),
+    ),
+  );
+  render(<Summary mode="queue" />);
+  expect(await screen.findByText("Loading the ledger…")).toBeTruthy();
+  expect(screen.queryByText(/No forward commitment/)).toBeNull();
+  expect(screen.queryByText("—")).toBeNull();
+  await act(async () =>
+    resolveLedger(new Response(JSON.stringify(flightLedger([...entries, commitment])))),
+  );
+  expect(await screen.findByRole("table", { name: "FLIGHT forward plan" })).toBeTruthy();
 });
 
 it("refreshes summary metrics on run and board changes and ledger details on flight changes", async () => {
@@ -289,7 +328,12 @@ it("names what is loading, then shows a summary error", async () => {
   });
   render(<Summary mode="queue" />);
   expect(screen.getByText("Loading the queue…")).toBeTruthy();
-  expect((await screen.findByRole("alert")).textContent).toBe("Summary unavailable");
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Could not load the queue: Summary unavailable",
+  );
+  // the failure shows once, and the loading line is gone
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.queryByText("Loading the queue…")).toBeNull();
 });
 
 it("refreshes the summary when config changes", async () => {
