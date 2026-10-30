@@ -1024,7 +1024,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          sharedCrew(at).rows,
+          undefined,
           deps.hubLogin?.() ?? null,
         ),
       };
