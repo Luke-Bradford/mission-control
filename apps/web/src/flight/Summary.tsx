@@ -323,7 +323,13 @@ export function Summary({
                     <dt>Parks</dt>
                     <dd>{view.metrics.parks.day}</dd>
                   </div>
-                  <div>
+                  {/* the whole tile toggles the filter; the button keeps it a keyboard control */}
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: the button inside is the semantic control; this widens its mouse target to the tile */}
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: keys reach the button, whose click bubbles here */}
+                  <div
+                    className="flight-tile-toggle"
+                    onClick={() => onControllerOnly?.(!controllerOnly)}
+                  >
                     <dt>For the controller</dt>
                     <dd>
                       <button
@@ -332,7 +338,6 @@ export function Summary({
                         aria-pressed={controllerOnly}
                         aria-label={`For the controller: ${view.metrics.forTheController}`}
                         title="Asks FLIGHT addressed to the controller: show them in the decision list"
-                        onClick={() => onControllerOnly?.(!controllerOnly)}
                       >
                         {view.metrics.forTheController}
                       </button>

@@ -1124,8 +1124,12 @@ button.flight-link:hover {
   cursor: pointer;
 }
 
-.flight-tile-btn[aria-pressed="true"] {
-  border-color: var(--accent);
+.flight-tile-toggle {
+  cursor: pointer;
+}
+
+.flight-tile-toggle:has(.flight-tile-btn[aria-pressed="true"]) {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* The outcomes fit their panel: the text columns share what is left and wrap, so the table never

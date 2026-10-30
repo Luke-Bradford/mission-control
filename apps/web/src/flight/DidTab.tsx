@@ -1,4 +1,9 @@
-import { type Crew, FLIGHT_DECISION_KINDS, FLIGHT_VIEW_LIMIT } from "@mc/core";
+import {
+  type Crew,
+  FLIGHT_DECISION_KINDS,
+  FLIGHT_VIEW_LIMIT,
+  type FlightSummaryView,
+} from "@mc/core";
 import { useMemo, useState } from "react";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -14,6 +19,8 @@ import { WorkingLog } from "./WorkingLog.tsx";
 export const NO_DECISIONS_24H = "FLIGHT has decided nothing in the last 24 hours.";
 export const DECISIONS_CAPPED = `newest ${FLIGHT_VIEW_LIMIT} shown · the hub serves no older decisions of the last 24 h`;
 export const NO_CONTROLLER_ASKS = "Nothing was addressed to the controller in the last 24 hours.";
+export const controllerCapped = (counted: number, listed: number): string =>
+  `${counted} asks for the controller were counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold ${listed}.`;
 export const NO_MATCHING = "No decision matches those filters.";
 export const MISSING_POWERS_PENDING =
   "Missing powers: not available yet. The hub does not report what FLIGHT lacked.";
@@ -38,6 +45,8 @@ function Decisions({ controllerOnly }: { controllerOnly: boolean }) {
   const [kind, setKind] = useState(ALL);
   const [seat, setSeat] = useState(ALL);
   const [text, setText] = useState("");
+  const counted = useResource<FlightSummaryView>(RESOURCES.flightSummary).data?.metrics
+    .forTheController;
   const all = view?.decisions ?? [];
   const rows = useMemo(
     () =>
@@ -91,6 +100,14 @@ function Decisions({ controllerOnly }: { controllerOnly: boolean }) {
         </span>
       </search>
       <p className="pb note">{WAKE_GROUPING_UNAVAILABLE}</p>
+      {controllerOnly &&
+        all.length >= FLIGHT_VIEW_LIMIT &&
+        counted !== undefined &&
+        counted > all.filter(isForTheController).length && (
+          <p className="pb note" role="status">
+            {controllerCapped(counted, all.filter(isForTheController).length)}
+          </p>
+        )}
       {rows.length === 0 ? (
         <p className="pb note">
           {controllerOnly && text === "" && kind === ALL && seat === ALL

@@ -13,6 +13,7 @@ import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
+import { controllerCapped } from "../src/flight/DidTab.tsx";
 import { Drafts, draftRowId, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { NO_INCOMING } from "../src/flight/Incoming.tsx";
@@ -323,7 +324,8 @@ describe("What FLIGHT did: decisions", () => {
     expect(tile.textContent).toContain("1");
     expect(tile.getAttribute("aria-pressed")).toBe("false");
     expect(await screen.findAllByTestId("decided-row")).toHaveLength(2);
-    fireEvent.click(tile);
+    // a click on the tile's label, not just its number, toggles the filter
+    fireEvent.click(screen.getByText("For the controller"));
     expect(tile.getAttribute("aria-pressed")).toBe("true");
     const rows = screen.getAllByTestId("decided-row");
     expect(rows).toHaveLength(1);
@@ -331,6 +333,20 @@ describe("What FLIGHT did: decisions", () => {
     fireEvent.click(tile);
     expect(tile.getAttribute("aria-pressed")).toBe("false");
     expect(screen.getAllByTestId("decided-row")).toHaveLength(2);
+  });
+
+  it("says so when the counted asks outnumber the newest decisions the hub lists", async () => {
+    const base = flightSummary();
+    const decisions = Array.from({ length: FLIGHT_VIEW_LIMIT }, (_, i) =>
+      decided(`d${i + 1}`, NOW - MIN * (i + 1)),
+    );
+    stubDecided(flightView({ decisions }), {
+      "/api/flight/summary": flightSummary({ metrics: { ...base.metrics, forTheController: 1 } }),
+    });
+    render(<Flight />);
+    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
+    fireEvent.click(await screen.findByRole("button", { name: /For the controller/ }));
+    expect((await screen.findByRole("status")).textContent).toBe(controllerCapped(1, 0));
   });
 
   it("disables Overturn when FLIGHT is not live", async () => {
