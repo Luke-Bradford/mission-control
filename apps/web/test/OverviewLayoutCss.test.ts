@@ -60,13 +60,21 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
     expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
     expect(rule(String.raw`\.overview-grid`)).toContain(
-      "grid-template-rows: auto fit-content(45%) fit-content(18%) minmax(0, 1fr)",
+      "grid-template-rows: max-content minmax(160px, 1fr) max-content 280px",
     );
+    // Crew beside Timeline: 31% for the Timeline, 34% at 1280 and under, 27% at 1920 and over.
     expect(rule(String.raw`\.overview-work`)).toContain(
-      "grid-template-columns: minmax(0, 1fr) minmax(260px, 28%)",
+      "grid-template-columns: minmax(0, 1fr) 31%",
     );
+    expect(css).toMatch(
+      /@media \(max-width: 1280px\) \{\s*\.overview-work \{\s*grid-template-columns: minmax\(0, 1fr\) 34%/,
+    );
+    expect(css).toMatch(
+      /@media \(min-width: 1920px\) \{\s*\.overview-work \{\s*grid-template-columns: minmax\(0, 1fr\) 27%/,
+    );
+    // Live log, Machine and Quota in one row.
     expect(rule(String.raw`\.ov`)).toContain(
-      "grid-template-columns: minmax(0, 1fr) minmax(300px, 28%)",
+      "grid-template-columns: minmax(0, 1.6fr) minmax(220px, 0.6fr) minmax(300px, 0.9fr)",
     );
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: hidden");
@@ -81,7 +89,9 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("width: 100%");
     expect(rule(String.raw`\.overview-kpi .spark`)).toContain("height: 24px");
     expect(rule(String.raw`\.overview-lane`)).toContain("height: 100%");
-    expect(rule(String.raw`\.pipeline-grid`)).toContain("repeat(5, minmax(0, 1fr))");
+    expect(rule(String.raw`\.pipeline-grid`)).toContain("display: flex");
+    expect(rule(String.raw`\.pipeline-stage`)).toContain("flex: 1 1 0");
+    expect(rule(String.raw`\.pipeline-stage\.empty`)).toContain("flex: 0 0 112px");
     expect(rule(String.raw`\.pipeline-chip`)).toContain("align-items: center");
     expect(css).not.toContain("@container overview (width < 1100px)");
     expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
@@ -131,7 +141,7 @@ describe("Overview layout (hud.css)", () => {
 
   it("aligns Machine labels, fixed-height charts and values on shared columns", () => {
     const row = rule("#machP .resrow");
-    expect(row).toContain("grid-template-columns: 42px minmax(24px, 1fr) 128px");
+    expect(row).toContain("grid-template-columns: 56px minmax(24px, 1fr) 128px");
     expect(row).toContain("align-items: center");
     expect(rule("#machP .machine-chart")).toContain("height: 24px");
     expect(rule("#machP .ph")).toContain("flex-wrap: nowrap");
@@ -200,6 +210,12 @@ describe("Overview layout (hud.css)", () => {
   });
 });
 
-it("scrolls the pipeline inside its capped row instead of cutting cards off", () => {
-  expect(css).toMatch(/#pipelineP > \.pipeline-grid \{[^}]*min-height: 0;[^}]*overflow-y: auto/);
+it("sizes the pipeline to its whole cards instead of scrolling or cutting them off", () => {
+  expect(css).toMatch(/#pipelineP > \.pipeline-grid \{\s*flex: 0 0 auto;\s*\}/);
+  expect(css).not.toMatch(/#pipelineP > \.pipeline-grid \{[^}]*overflow-y: auto/);
+});
+
+it("keeps every Overview panel header on one line", () => {
+  expect(rule(String.raw`\.overview-grid \.ph`)).toContain("flex-wrap: nowrap");
+  expect(rule(String.raw`\.overview-grid \.ph \.act`)).toContain("flex-wrap: nowrap");
 });

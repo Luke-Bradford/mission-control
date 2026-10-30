@@ -21,8 +21,9 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { agentPath, followLink, itemPath } from "../router.ts";
+import { agentPath, commsAgentPath, commsFlightPath, followLink, itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { logLine } from "./logLine.ts";
 
 type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
 
@@ -321,19 +322,14 @@ export function ActivityPanel() {
     <Panel
       id="actP"
       title="Live log"
-      sub={SUB[filter]}
+      sub={<span className="sr-only">{SUB[filter]}</span>}
       actions={
         <>
-          <button
-            type="button"
-            className="sm ghost"
-            disabled={newCount === 0}
-            aria-hidden={newCount === 0}
-            style={{ visibility: newCount > 0 ? "visible" : "hidden", width: "9ch" }}
-            onClick={() => setReading(null)}
-          >
-            {newCount} new
-          </button>
+          {newCount > 0 && (
+            <button type="button" className="sm ghost" onClick={() => setReading(null)}>
+              {newCount} new
+            </button>
+          )}
           <Seg
             label="Activity filter"
             options={FILTERS}
@@ -373,6 +369,10 @@ export function ActivityPanel() {
       >
         {keyed.map(({ e, key }) => {
           if (isComms(e)) {
+            const preview = logLine(e.text, "comms");
+            // The conversation is with the crew agent at either end; FLIGHT's thread otherwise.
+            const partner = [e.who, e.to].find((id) => agents.has(id));
+            const readPath = partner ? commsAgentPath(partner) : commsFlightPath();
             return (
               <div key={key} className="arow k-comms">
                 <span className="t num" title={tz ? rel(e.at, now, tz) : undefined}>
@@ -382,15 +382,22 @@ export function ActivityPanel() {
                 <span className="log-who ellip">
                   <CommsEnd id={e.who} />
                 </span>
-                <Expandable lines={2}>
-                  <span className="txt">
-                    <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
-                    <MentionText text={e.text} />
-                  </span>
-                </Expandable>
-                {e.ref ? (
+                <span className="txt log-line">
+                  <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                  <MentionText text={preview.text} />
+                </span>
+                {e.ref || preview.cut ? (
                   <span className="arefs">
-                    <TicketRef ticket={e.ref} url={null} />
+                    {e.ref && <TicketRef ticket={e.ref} url={null} />}
+                    {preview.cut && (
+                      <a
+                        className="log-read"
+                        href={readPath}
+                        onClick={(event) => followLink(event, readPath)}
+                      >
+                        read ›
+                      </a>
+                    )}
                   </span>
                 ) : (
                   <span />
@@ -433,10 +440,10 @@ export function ActivityPanel() {
                   <span className="muted">{e.who}</span>
                 )}
               </span>
-              <Expandable lines={2}>
+              <Expandable lines={1}>
                 <span className="txt">
                   <ActivityText
-                    event={e}
+                    event={{ ...e, text: logLine(e.text, "step").text }}
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}

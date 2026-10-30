@@ -27,7 +27,7 @@ const AXIS: [string, number][] = [
 
 /**
  * The last hour per agent: one thin sub-track per kind (turn, checks, lock, review) so overlapping
- * activity stays visible, tool calls as ticks, 5- and 15-minute gridlines and a "now" cursor.
+ * activity stays visible, 5- and 15-minute gridlines and a "now" cursor.
  */
 export function TimelinePanel() {
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
@@ -74,8 +74,6 @@ export function TimelinePanel() {
         />
       );
     });
-    const ticks = lane.ticks.filter((at) => at >= from && at <= now);
-    if (ticks.length) active = true;
     return (
       <a
         key={lane.agentId}
@@ -94,10 +92,6 @@ export function TimelinePanel() {
         </span>
         <span className="overview-track" aria-hidden="true">
           {spans}
-          {ticks.map((at) => {
-            const tick = geometry.tick(at);
-            return <i key={at} className="overview-tick" style={{ left: `${tick.left}%` }} />;
-          })}
         </span>
       </a>
     );
@@ -149,10 +143,6 @@ export function TimelinePanel() {
               {kind}
             </span>
           ))}
-          <span>
-            <i className="tool-tick" />
-            tool calls
-          </span>
         </div>
       </div>
     </Panel>

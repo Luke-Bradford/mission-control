@@ -2,8 +2,16 @@ import { type HealthRow, type LimitRow, usageCollector } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { elapsed, percent } from "../fmt.ts";
 import { Meter } from "../hud/Meter.tsx";
+import { timeToFull } from "../quota.ts";
 
 const MINUTE_MS = 60_000;
+
+/** ` · full in ~2d at this rate`: only for a window that fills before it resets. */
+function forecast(row: LimitRow, now: number): string {
+  return row.fullAt !== null && row.used < 100 && row.fullAt > now
+    ? ` · full in ${timeToFull(row, now)} at this rate`
+    : "";
+}
 
 export function QuotaMeter({
   row,
@@ -55,8 +63,10 @@ export function QuotaMeter({
             : null)
         }
         detail={
-          row && !compact && (showAge || row.stale || note)
-            ? ` · ${age} ago${nextTry ? ` · ${nextTry}` : ""}`
+          row && !compact
+            ? `${forecast(row, now)}${
+                showAge || row.stale || note ? ` · ${age} ago${nextTry ? ` · ${nextTry}` : ""}` : ""
+              }`
             : undefined
         }
       />
