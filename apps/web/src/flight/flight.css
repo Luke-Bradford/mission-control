@@ -531,6 +531,20 @@ button.flight-link:hover {
   overflow-wrap: anywhere;
 }
 
+.wif-stuck-reason {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.wif-stuck-reason .expandable-text {
+  line-height: 1.4;
+}
+
+.wif-stuck-reason .sm {
+  margin-top: 0;
+}
+
 #wifP .wsteps {
   display: flex;
   flex-wrap: nowrap;

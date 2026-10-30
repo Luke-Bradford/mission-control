@@ -57,9 +57,13 @@ function apiFor(scenario: Scenario) {
   const rows = Array.from({ length: n }, (_, i) =>
     seatRow({
       id: `guido-${i + 1}`,
-      hudState: i % 2 ? "blocked" : "running",
+      hudState: scenario === "long" || i % 2 ? "blocked" : "running",
       ticket: `shop-app#${i + 5}`,
       ticketTitle: text("Stop the race", i),
+      note:
+        scenario === "long"
+          ? "Wait for RETRO's review. The branch needs a fresh check after the review fixes land."
+          : null,
     }),
   );
   return {
@@ -206,4 +210,78 @@ describeRendered("FLIGHT page in a browser", () => {
       BROWSER_TEST_TIMEOUT_MS * 2,
     );
   }
+
+  it(
+    "keeps more for a 178-character waiting sentence that exceeds three lines at 1280",
+    async () => {
+      const reason = "Waiting for RETRO while the branch needs another check "
+        .repeat(4)
+        .slice(0, 178);
+      const api = apiFor("one");
+      api["/api/crew"] = {
+        rows: [seatRow({ hudState: "blocked", loop: null, note: reason })],
+        firstRunToday: null,
+      };
+      const page = await renderAt({
+        page: "test/flightBrowser.html",
+        width: 1280,
+        height: 1000,
+        api,
+      });
+      await page.click("#flight-tab-crew");
+      await page.box(".wif-stuck-reason .expandable-text");
+      const closed = await page.evaluate((fullReason) => {
+        const text = document.querySelector(".wif-stuck-reason .expandable-text") as HTMLElement;
+        return {
+          overflows: text.scrollHeight > text.clientHeight,
+          hasMore: document.querySelector("button[aria-label='More waiting reason']") !== null,
+          text: text.textContent,
+          fullReason,
+        };
+      }, reason);
+      expect(closed.overflows).toBe(true);
+      expect(closed.hasMore).toBe(true);
+      await page.evaluate(
+        () =>
+          (
+            document.querySelector("button[aria-label='More waiting reason']") as HTMLButtonElement
+          ).click(),
+        undefined,
+      );
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".wif-stuck-reason .expandable-text")?.textContent,
+          undefined,
+        ),
+      ).toBe(reason);
+      await page.evaluate(
+        async () => new Promise((resolve) => window.setTimeout(resolve, 300)),
+        undefined,
+      );
+      expect(
+        await page.evaluate(
+          () => document.querySelector("button[aria-label='Less waiting reason']") !== null,
+          undefined,
+        ),
+      ).toBe(true);
+      await page.evaluate(
+        () =>
+          (
+            document.querySelector("button[aria-label='Less waiting reason']") as HTMLButtonElement
+          ).click(),
+        undefined,
+      );
+      expect(
+        await page.evaluate(() => {
+          const text = document.querySelector(".wif-stuck-reason .expandable-text") as HTMLElement;
+          return {
+            overflows: text.scrollHeight > text.clientHeight,
+            hasMore: document.querySelector("button[aria-label='More waiting reason']") !== null,
+          };
+        }, undefined),
+      ).toEqual({ overflows: true, hasMore: true });
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
