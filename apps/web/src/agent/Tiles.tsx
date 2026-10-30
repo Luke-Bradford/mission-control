@@ -20,7 +20,7 @@ import {
   seatTurn,
 } from "../crew.ts";
 import { hub, RESOURCES, SEAT_CONTEXT_REFRESH_MS, useResource } from "../data.ts";
-import { cost, dur, kTokens, mss, rel } from "../fmt.ts";
+import { cost, dur, kTokens, mss, percent, plural, rel } from "../fmt.ts";
 import { Meter, meterLevel } from "../hud/Meter.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { LoopStep } from "../overview/LoopStep.tsx";
@@ -85,13 +85,17 @@ function splitUsage(u: ContextUsage) {
 
 /** The compaction count; `—` while there is no digest to count from. */
 const compactionsText = (d: CrewRow["digest"]): string =>
-  d ? `${d.compactions} compaction${d.compactions === 1 ? "" : "s"}` : DASH;
+  d ? plural(d.compactions, "compaction") : DASH;
 
 /** A crew seat's Context tile: the CLI's own breakdown (`GET /api/seats/:id/context`). */
 function SeatContext({ row }: { row: CrewRow }) {
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const config = configRes.data;
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
-  const running = seatTurn(row) === "running";
+  // Codex has no context request to answer: asking would draw a 409 into the console on every
+  // load, so wait for the config to say which vendor this seat is.
+  const configKnown = config !== undefined || configRes.error !== null;
+  const running = seatTurn(row) === "running" && configKnown && !codex;
   const contextRef = RESOURCES.seatContext(row.id);
   const ref = running ? contextRef : null;
   const usage = useResource<ContextUsage | null>(ref).data ?? null;
@@ -110,7 +114,7 @@ function SeatContext({ row }: { row: CrewRow }) {
     return (
       <Tile label="Context">
         <Value className="v num">
-          {pct === null ? DASH : `${Math.round(pct)}%`}
+          {pct === null ? DASH : percent(pct)}
           {pct !== null && window !== null && <small> of {Math.round(window / 1000)}k</small>}
         </Value>
         <span className={`ctxbar${meterLevel(pct)}`}>
@@ -130,7 +134,8 @@ function SeatContext({ row }: { row: CrewRow }) {
   return (
     <Tile label="Context">
       <Value className="v num">
-        {Math.round(pct)}%<small> of {k(window)}k</small>
+        {percent(pct)}
+        <small> of {k(window)}k</small>
       </Value>
       <span className="ctxbar seg">
         {seg("sys", s.system)}
@@ -191,9 +196,7 @@ function TilesBody({
   const add = counted === null ? DASH : counted.reduce((n, f) => n + (f.add ?? 0), 0);
   const del = counted === null ? DASH : counted.reduce((n, f) => n + (f.del ?? 0), 0);
   const work = row.work;
-  const commits = work
-    ? `${work.commits} commit${work.commits === 1 ? "" : "s"}`
-    : `${DASH} commits`;
+  const commits = work ? plural(work.commits, "commit") : `${DASH} commits`;
 
   return (
     <div className="tiles2">
@@ -247,7 +250,7 @@ function TilesBody({
       ) : (
         <Tile label="Context">
           <Value className="v num">
-            {pct === null ? DASH : `${Math.round(pct)}%`}
+            {pct === null ? DASH : percent(pct)}
             {pct !== null && row.contextWindow !== null && (
               <small> of {Math.round(row.contextWindow / 1000)}k</small>
             )}
@@ -264,7 +267,7 @@ function TilesBody({
         <Value className="v num">{t ? kTokens(t.input + t.output) : DASH}</Value>
         <span className="d">
           {t
-            ? `${kTokens(t.input)} in · ${kTokens(t.output)} out · ${hit === null ? DASH : `${Math.round(hit)}%`} cache hit`
+            ? `${kTokens(t.input)} in · ${kTokens(t.output)} out · ${hit === null ? DASH : percent(hit)} cache hit`
             : DASH}
         </span>
       </Tile>

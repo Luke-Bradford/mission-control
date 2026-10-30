@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { age } from "../src/overview/agentActivity.ts";
-import { MIN, NOW } from "./fixtures.ts";
+import { elapsed } from "../src/fmt.ts";
+import { MIN } from "./fixtures.ts";
 
-describe("age", () => {
+describe("elapsed", () => {
   it.each([
     [0, "0m"],
     [59, "59m"],
@@ -14,6 +14,6 @@ describe("age", () => {
     [-1, "0m"],
     [59.9, "59m"],
   ])("formats %s minutes as %s", (minutes, expected) => {
-    expect(age(NOW - minutes * MIN, NOW)).toBe(expected);
+    expect(elapsed(Math.max(0, minutes) * MIN)).toBe(expected);
   });
 });

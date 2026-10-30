@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings } from "../agent/reviewPark.tsx";
-import { useSecond, useTz } from "../clock.ts";
+import { useNow, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -38,7 +38,7 @@ import {
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
-import { cutText } from "../fmt.ts";
+import { cutText, elapsed, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -52,7 +52,7 @@ import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
-import { activityValues, age } from "./agentActivity.ts";
+import { activityValues } from "./agentActivity.ts";
 import { LoopStep } from "./LoopStep.tsx";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
@@ -179,10 +179,21 @@ function flightSeatId(config: ConfigView | undefined): string | null {
   return null;
 }
 
+/**
+ * Whether a row's text counts seconds (a live tool, a stall, a wait for the test lock). Idle rows
+ * show only minutes and so follow the panel's slower clock.
+ */
+const showsSeconds = (row: Crew["rows"][number] | null, lock: TestLockState | undefined): boolean =>
+  row !== null &&
+  row.run?.status === "running" &&
+  (row.hudState === "running" ||
+    row.hudState === "stalled" ||
+    lockSince(lock, row.run.id) !== null);
+
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
   row,
-  now,
+  now: coarseNow,
   tz,
   configPending,
   selected,
@@ -199,6 +210,7 @@ function FlightRow({
   max: number;
   lock: TestLockState | undefined;
 }) {
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
@@ -229,7 +241,10 @@ function FlightRow({
       : label === "Held" || label === "Stopped"
         ? " · next check paused"
         : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
-  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
+  const openAsks = items.filter((i) =>
+    ["question", "person", "decision", "approval"].includes(i.kind),
+  ).length;
+  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${plural(openAsks, "open ask")} · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
   const needs = row ? needLine(row, items, now, lock) : [];
@@ -272,7 +287,7 @@ function FlightRow({
           </Pill>
         )}
         {row && row.stateSince > 0 && (
-          <span className="xs muted block">{age(row.stateSince, now)}</span>
+          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
         )}
       </span>
       <WorkCell
@@ -360,7 +375,7 @@ function AgentRow({
   row,
   items,
   max,
-  now,
+  now: coarseNow,
   tz,
   selected,
   lock,
@@ -374,6 +389,7 @@ function AgentRow({
   lock: TestLockState | undefined;
 }) {
   const mine = seatItems(row, items);
+  const now = useSecondWhile(showsSeconds(row, lock), coarseNow);
   const needs = needLine(row, items, now, lock);
   const repoPrs = useReviewPrs(row ?? undefined);
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -450,7 +466,9 @@ function AgentRow({
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
-        {row.stateSince > 0 && <span className="xs muted block">{age(row.stateSince, now)}</span>}
+        {row.stateSince > 0 && (
+          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
+        )}
       </span>
       <WorkCell
         row={row}
@@ -512,7 +530,7 @@ export function AgentsPanel() {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const lock = useTestLock();
   const tz = useTz();
-  const now = useSecond();
+  const now = useNow();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);

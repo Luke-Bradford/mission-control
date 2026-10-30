@@ -1,14 +1,18 @@
 import {
   type AccountModelsView,
   type ConfigView,
+  type Crew,
   errorText,
+  type MapSnapshot,
   type NewRepo,
   type RepoPreview,
   type SeatInput,
 } from "@mc/core";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
+import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { OwnershipLens } from "../lenses/lenses.tsx";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
 
@@ -220,6 +224,7 @@ function RepoCard({
             <summary>Board configuration</summary>
             <BoardSetup repoId={repo.id} github={repo.github} />
           </details>
+          {session && <RepoOwnership repoId={repo.id} />}
           {session ? (
             <Seats session={session} config={config} defaultAccount={account} />
           ) : (
@@ -230,6 +235,43 @@ function RepoCard({
     </article>
   );
 }
+
+/** The repo's areas and hard-rule files, read from its map when the section is opened. */
+function RepoOwnership({ repoId }: { repoId: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="repo-ownership"
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>Ownership · areas and hard-rule files</summary>
+      {open && <OwnershipTable repoId={repoId} />}
+    </details>
+  );
+}
+
+function OwnershipTable({ repoId }: { repoId: string }) {
+  const map = useResource<MapSnapshot>(RESOURCES.repoMap(repoId));
+  const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
+  const names = useMemo(
+    () => Object.fromEntries((rows ?? []).map((r) => [r.id, callSign(r)])),
+    [rows],
+  );
+  const indices = useMemo(
+    () => Object.fromEntries((rows ?? []).map((r) => [r.id, r.index])),
+    [rows],
+  );
+  if (map.data)
+    return <OwnershipLens snapshot={map.data} names={names} indices={indices} onFocus={noFocus} />;
+  return map.error ? (
+    <p className="note">
+      Could not read the map for {repoId}: {map.error.message}
+    </p>
+  ) : (
+    <p className="note">Loading ownership…</p>
+  );
+}
+const noFocus = () => {};
 
 function Observed({
   repo,

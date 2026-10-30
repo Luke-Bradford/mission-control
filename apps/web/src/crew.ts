@@ -3,6 +3,8 @@ import {
   ATTENTION_KINDS,
   ATTENTION_LABEL,
   type AttentionItem,
+  type ConfigView,
+  type Crew,
   type CrewLoop,
   type CrewMode,
   type CrewRow,
@@ -26,7 +28,16 @@ import {
   seatCallSign,
   type TestLockState,
 } from "@mc/core";
-import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
+import { useCallback } from "react";
+import { RESOURCES, useResource } from "./data.ts";
+import { cutText, hhmm, mss, percent, prLabel, shortSha, wkdTime } from "./fmt.ts";
+
+/** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
+const SEAT_PALETTE = 7;
+
+/** A seat's colour token by its config index: the one palette every page draws from. */
+export const seatColorVar = (index: number): string =>
+  `--seat-${(Math.max(0, index) % SEAT_PALETTE) + 1}`;
 
 /**
  * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
@@ -128,7 +139,7 @@ export const READY_TO_MERGE = "Ready to merge";
 
 /** An idle reviewing seat's doing line: the PR, its short sha and the ticket ref when there is one. */
 export const reviewingLine = (r: ReviewingPr): string =>
-  `Reviewing PR #${r.prNumber} (${r.sha.slice(0, 7)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
+  `Reviewing PR #${r.prNumber} (${shortSha(r.sha)})${r.ref ? `${DOING_SEP}${r.ref}` : ""}`;
 
 /** Whether the seat has a session open: running, or idle at the end of a turn of an open run. */
 const sessionOpen = (row: CrewRow): boolean =>
@@ -327,7 +338,8 @@ export const isFinishedWork = (row: Pick<CrewRow, "kind" | "hudState">): boolean
 export function stopLine(stop: DriverStop, now: number, tz: string | null): string {
   if (stop.quota === null) return `Stopped by its driver: ${stop.reason}`;
   const { usedPct, stopPct } = stop.quota;
-  const figures = usedPct !== null && stopPct !== null ? ` (${usedPct}% of ${stopPct}%)` : "";
+  const figures =
+    usedPct !== null && stopPct !== null ? ` (${percent(usedPct)} of ${percent(stopPct)})` : "";
   const base = `Stopped at the 7-day quota${figures}`;
   if (stop.resumesAt === null) return base;
   if (stop.resumesAt <= now) return `${base}${DOING_SEP}resumes at its next start`;
@@ -706,6 +718,18 @@ export function seatStatus(row: CrewRow): SeatStatus {
 export const hasActiveRun = (row: Pick<CrewRow, "run">): boolean =>
   row.run !== null && row.run.status === "running" && row.run.endedAt === null;
 
+/**
+ * The seats of the repo's crew session that can take a ticket now: not a scratch copy, not the
+ * watch seat, and without a run in flight. Empty when the repo has no session.
+ */
+export function freeSeats(config: ConfigView, crew: Crew, repoId: string) {
+  const session = config.crew?.sessions.find((s) => s.repoId === repoId);
+  return (session?.seats ?? []).filter((seat) => {
+    const row = crew.rows.find((r) => r.id === seat.id);
+    return seat.mode !== "scratch" && seat.loop !== "watch" && (!row || !hasActiveRun(row));
+  });
+}
+
 /** A crew seat's session as the composer sees it. */
 export type SeatTurn = "running" | "idle" | "none";
 
@@ -735,6 +759,12 @@ export function namedSeat(id: string, rows: readonly CrewRow[] | undefined): Cre
 export function seatName(id: string, rows: readonly CrewRow[] | undefined): string {
   const row = namedSeat(id, rows);
   return row ? callSign(row) : seatCallSign(id);
+}
+
+/** Subscribe labels to crew updates, including a rename. */
+export function useSeatName(): (id: string) => string {
+  const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
+  return useCallback((id: string) => seatName(id, rows), [rows]);
 }
 
 /** Whether Work should show current references rather than the last assignment. */

@@ -191,6 +191,8 @@ export interface RunLoop {
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
+    /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
+    webChanged?: boolean;
   } | null;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
@@ -775,6 +777,13 @@ export interface MachineView {
   seats: number;
   /** The most seats in any one session. */
   perSessionMax: number;
+  transcripts: TranscriptFootprint | null;
+}
+
+export interface TranscriptFootprint {
+  totalBytes: number;
+  seats: { seatId: string; bytes: number; files: number }[];
+  oldestAt: number | null;
 }
 
 /** One `/api/repos` row: a configured repo, without its status map. */

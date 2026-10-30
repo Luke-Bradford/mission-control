@@ -70,7 +70,7 @@ describe("Pipeline", () => {
     );
     expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
-      "--c: var(--s4)",
+      "--c: var(--seat-4)",
     );
     expect(
       within(readyLane)

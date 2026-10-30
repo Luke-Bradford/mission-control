@@ -709,7 +709,10 @@ export function createEngine(deps: EngineDeps): Engine {
     const reviewer = reviewerFor(run);
     let review: LoopReviewFacts | null = null;
     if (reviewer !== null) {
-      const rows = store.reviewsOfRun(run.id).map(reviewFact);
+      const rows = store.reviewsOfRun(run.id).map((row) => ({
+        ...reviewFact(row),
+        design: store.reviewChecks(row.id).find((check) => check.check === "design") ?? null,
+      }));
       const cur = pushed
         ? reviewFor(
             rows,

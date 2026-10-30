@@ -549,8 +549,11 @@ function CurrentDoingLine({
   tz: string | null;
   repoPrs?: readonly PullRequestView[];
 }) {
-  if (row.run?.status !== "running")
-    return <DoingLine row={row} now={Date.now()} tz={tz} repoPrs={repoPrs} />;
+  // Only a turn in progress, a stall or a wait for the test lock counts seconds.
+  const ticks =
+    row.run?.status === "running" &&
+    (row.hudState === "running" || row.hudState === "stalled" || row.loop?.wait === "lock");
+  if (!ticks) return <DoingLine row={row} now={Date.now()} tz={tz} repoPrs={repoPrs} />;
   return <TickingDoingLine row={row} tz={tz} repoPrs={repoPrs} />;
 }
 

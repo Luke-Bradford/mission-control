@@ -110,18 +110,18 @@ it("keeps an observed open lock when a parked agent has no current turn", async 
   expect(container.querySelector(".k-lock")).not.toBeNull();
 });
 
-it("slides every second between fetches", async () => {
+it("slides every five seconds between fetches", async () => {
   const fetch = stub([
     { agentId: "dev-1", spans: [{ kind: "turn", from: NOW - 30 * MIN, to: null }], ticks: [] },
   ]);
   const { container } = render(<TimelinePanel />);
   await screen.findByRole("link", { name: "dev-1" });
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(5000);
   });
   const span = container.querySelector<HTMLElement>(".overview-span");
-  expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 100 / 3600);
-  expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 100 / 3600);
+  expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 500 / 3600);
+  expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 500 / 3600);
   expect(fetch.mock.calls.filter(([path]) => path === "/api/overview/timeline")).toHaveLength(1);
 });
 
@@ -157,13 +157,13 @@ it("uses live crew names and colours and resizes its lane grid after updates", a
   stub(lanes, [seatRow({ id: "seat-1", displayCallSign: "guido-cx", index: 2 })]);
   const { container } = render(<TimelinePanel />);
   const lane = await screen.findByRole("link", { name: "guido-cx" });
-  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s3)");
+  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-3)");
   const grid = () => container.querySelector<HTMLElement>(".overview-lanes");
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("2");
   stub(lanes.slice(0, 1), [seatRow({ id: "seat-1", displayCallSign: "renamed", index: 4 })]);
   await act(async () => hub.refetchTopic("agents"));
   const renamed = await screen.findByRole("link", { name: "renamed" });
-  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s5)");
+  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--seat-5)");
   expect(grid()?.style.getPropertyValue("--lane-count")).toBe("1");
   stub();
   await act(async () => hub.refetchTopic("agents"));

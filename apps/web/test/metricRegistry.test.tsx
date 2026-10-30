@@ -76,6 +76,12 @@ const EXPECTED: Record<MetricId, string> = {
   cost: "~$24.31",
 };
 
+/** The FLIGHT page opened on the tab a `#fragment` link names. */
+function flightAt(hash: string): ReactElement {
+  window.history.replaceState(null, "", `/flight${hash}`);
+  return <Flight />;
+}
+
 /** Where each page shows a figure; every figure appears on at least one. */
 const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   {
@@ -83,10 +89,21 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
     page: () => <Overview />,
     shows: ["agentsWorking", "cost", "inProgress", "merged", "cycleTime", "needsYou"],
   },
+  // Only the open tab is mounted, so each tab that shows a figure is opened by its link.
   {
     name: "FLIGHT",
-    page: () => <Flight />,
-    shows: ["inProgress", "blocked", "merged", "cycleTime", "needsYou", "cost"],
+    page: () => flightAt("#askP"),
+    shows: ["needsYou"],
+  },
+  {
+    name: "FLIGHT Crew & board",
+    page: () => flightAt("#wifP"),
+    shows: ["inProgress", "blocked", "needsYou"],
+  },
+  {
+    name: "FLIGHT What FLIGHT did",
+    page: () => flightAt("#outcomesP"),
+    shows: ["cost", "needsYou"],
   },
   {
     name: "Telemetry",
@@ -101,6 +118,7 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
 ];
 
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   hub.clear();
   resetSession();

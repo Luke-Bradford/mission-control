@@ -118,6 +118,8 @@ export interface GateFacts {
   containsMain: boolean;
   hubOnly: boolean;
   strays: string[];
+  /** Whether the head changes the HUD and therefore needs a recorded RETRO design pass. */
+  webChanged: boolean;
 }
 export type GateResult =
   | { ok: true; facts: GateFacts }
@@ -222,7 +224,7 @@ export interface Publisher {
   gateFacts(
     run: Run,
     sha: string,
-    known?: (GateFacts & { sha: string }) | null,
+    known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
@@ -884,8 +886,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
         const { defaultBranch, mainSha } = await originNow(g, null);
-        if (known?.sha === sha && known.mainSha === mainSha) {
-          const { containsMain, hubOnly, strays, missionControlChanged } = known;
+        if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
+          const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
           return {
             ok: true,
             facts: {
@@ -893,6 +895,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               containsMain,
               hubOnly,
               strays: [...strays],
+              webChanged,
               ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
             },
           };
@@ -944,6 +947,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             containsMain,
             hubOnly,
             strays,
+            webChanged: names.some((p) => p === "apps/web" || p.startsWith("apps/web/")),
             ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
           },
         };

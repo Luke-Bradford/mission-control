@@ -18,7 +18,9 @@ it("renders all seven catalogue descriptions, checks, gates, retries and budgets
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${p.name} ·`) }));
     const panel = screen.getByRole("region", { name: p.name });
     expect(panel.textContent).toContain(`runs for: ${p.trigger}`);
-    expect(panel.textContent).toContain(`Up to ${p.rounds || "∞"} rounds`);
+    expect(panel.textContent).toContain(
+      `Up to ${p.rounds === 1 ? "1 round" : `${p.rounds || "∞"} rounds`}`,
+    );
     expect(panel.textContent).toContain(
       `Token budget ${p.budget == null ? "—" : `${p.budget / 1000}k`}`,
     );

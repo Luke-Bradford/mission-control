@@ -1,5 +1,6 @@
 import { type HealthRow, type LimitRow, usageCollector } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
+import { elapsed, percent } from "../fmt.ts";
 import { Meter } from "../hud/Meter.tsx";
 
 const MINUTE_MS = 60_000;
@@ -24,8 +25,7 @@ export function QuotaMeter({
     (h) => h.collector === usageCollector(accountId ?? row?.accountId ?? ""),
   )?.error;
   const stale = !!note || (!!row && (row.stale || now - row.sampledAt > 60 * 60_000));
-  const minutes = row ? Math.max(0, Math.floor((now - row.sampledAt) / MINUTE_MS)) : 0;
-  const age = minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
+  const age = elapsed(row ? now - row.sampledAt : 0);
   const nextTry =
     row?.nextTryAt && row.nextTryAt > now
       ? `next try in ${Math.ceil((row.nextTryAt - now) / MINUTE_MS)}m`
@@ -36,7 +36,7 @@ export function QuotaMeter({
       className={compact && stale ? "quota-compact stale" : undefined}
       title={[
         accountId ?? row?.accountId,
-        row ? `${row.window} · ${row.used}% used` : null,
+        row ? `${row.window} · ${percent(row.used)} used` : null,
         row ? `Last reading ${age} ago` : "No reading yet",
         nextTry,
         note,

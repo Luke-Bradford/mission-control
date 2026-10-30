@@ -5,31 +5,36 @@ import {
   FLIGHT_LEDGER_OPEN,
   type FlightLedgerEntry,
   type FlightLedgerView,
+  type FlightView,
   type RunLoopView,
+  type TestLockState,
 } from "@mc/core";
+import { useLayoutEffect, useRef, useState } from "react";
 import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { Clamp } from "../components/Expandable.tsx";
+import { MarkdownInline } from "../components/Markdown.tsx";
 import {
   doingLine,
-  hasActiveRun,
-  isLoopInFlight,
+  lockSince,
   loopSteps,
-  runElapsed,
   type StepMark,
   seatStatus,
   stepMarks,
+  waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { dur } from "../fmt.ts";
+import { dur, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { Pending } from "./Pending.tsx";
 
 const DASH = "—";
-export const NO_CREW_RUNS = "No crew runs. Start a seat from a ticket on the Board.";
+export const NO_SEATS = "No seats are configured.";
 
 /** The step bar's classes (overview.css): done, current and held. */
 const MARK_CLASS: Record<StepMark, string | undefined> = {
@@ -43,7 +48,7 @@ const MARK_CLASS: Record<StepMark, string | undefined> = {
  * A run's loop step by step, as the Agent page's stepper has it: a cell per step with its name,
  * "×N" from the second try. The counts come from the run's tries and wait until they load.
  */
-function StepCells({ r }: { r: CrewRow }) {
+export function StepCells({ r }: { r: CrewRow }) {
   const tries = useResource<RunLoopView>(r.run ? RESOURCES.runLoop(r.run.id) : null).data?.tries;
   const loop = r.loop;
   if (!loop) return null;
@@ -69,7 +74,7 @@ function StepCells({ r }: { r: CrewRow }) {
             // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
             key={`${i}:${step.name}`}
             className={["wstep", MARK_CLASS[mark]].filter(Boolean).join(" ")}
-            title={n > 0 ? `${label} · ${n} ${n === 1 ? "try" : "tries"}` : undefined}
+            title={n > 0 ? `${label} · ${plural(n, "try", "tries")}` : undefined}
             aria-current={mark === "cur" || mark === "held" ? "step" : undefined}
           >
             {label}
@@ -127,7 +132,7 @@ export function ledgerWork(
  * FLIGHT's recorded next action and checkpoint for a workstream. Missing ones are a data-quality
  * gap in FLIGHT's ledger, marked quietly once rather than flagged on every row; no ETA is guessed.
  */
-function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: number }) {
+export function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: number }) {
   const next = entry?.next ?? null;
   const due = entry?.due ?? null;
   if (next === null && due === null) {
@@ -157,23 +162,106 @@ function NextAction({ entry, now }: { entry: FlightLedgerEntry | null; now: numb
   );
 }
 
+/** FLIGHT's last message to a seat: the newest decision of kind `message` about it. */
+export function lastInstruction(view: FlightView | undefined, seatId: string) {
+  return (view?.decisions ?? [])
+    .filter((d) => d.kind === "message" && d.seatId === seatId)
+    .sort((a, b) => b.at - a.at)[0];
+}
+
+/**
+ * What stops a seat and since when: its pause, its park or block reason, or what its run waits on.
+ * Null for a seat that is working or free.
+ */
+export function stuckLine(
+  row: CrewRow,
+  lock: TestLockState | undefined,
+  now: number,
+): { text: string; since: number } | null {
+  if (row.crewPause) return { text: `paused: ${row.crewPause.reason}`, since: row.crewPause.at };
+  const wait = row.loop ? waitText(row.loop, row.id, lockSince(lock, row.run?.id), now) : null;
+  if (wait !== null) return { text: wait, since: row.stateSince };
+  const status = seatStatus(row);
+  if (["blocked", "parked", "error"].includes(row.hudState))
+    return { text: status.reason ?? status.label.toLowerCase(), since: row.stateSince };
+  if (row.hudState === "stalled") return { text: "stalled", since: row.stateSince };
+  return null;
+}
+
+/** The operator gets the point first; the rest is available without making the row grow. */
+function firstSentence(text: string): string {
+  const firstLine = text.trim().split("\n", 1)[0] ?? "";
+  const sentence = firstLine.match(/^.+?[.!?](?=\s|$)/)?.[0];
+  return sentence ?? firstLine;
+}
+
+function WaitingReason({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  const reason = text.trim();
+  const first = firstSentence(reason);
+  useLayoutEffect(() => {
+    const el = box.current?.querySelector<HTMLElement>(".expandable-text");
+    if (!el) return;
+    // The open element fills its content, so it cannot report whether the closed clamp overflows.
+    const measure = () => {
+      if (!open) setOverflows(el.scrollHeight > el.clientHeight);
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    window.addEventListener("resize", measure);
+    measure();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [open]);
+  const hasMore = open || first !== reason || overflows;
+  return (
+    <span className="wif-stuck-reason">
+      <span ref={box}>
+        <Clamp lines={3} open={open}>
+          {open ? reason : first}
+        </Clamp>
+      </span>
+      {hasMore && (
+        <button
+          type="button"
+          className="sm ghost"
+          aria-expanded={open}
+          aria-label={`${open ? "Less" : "More"} waiting reason`}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "less" : "more"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function WorkRow({
   r,
   now,
   tz,
   entry,
+  lock,
+  view,
 }: {
   r: CrewRow;
   now: number;
   tz: string | null;
   entry: FlightLedgerEntry | null;
+  lock: TestLockState | undefined;
+  view: FlightView | undefined;
 }) {
   const to = agentPath(r.id);
-  const elapsed = r.run ? runElapsed(r.run, now) : null;
   const repoPrs = useReviewPrs(r);
   const doing = doingLine(r, now, tz, repoPrs);
+  const stuck = stuckLine(r, lock, now);
+  const said = lastInstruction(view, r.id);
   return (
-    <tr className="row wif-row">
+    <tr className="row wif-row" data-testid="seat-row">
       <td className="wif-seat">
         <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
           <AgentTag id={r.id} index={r.index} bare />
@@ -181,6 +269,7 @@ function WorkRow({
         <span title={seatStatus(r).reason ?? seatStatus(r).label}>
           <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
         </span>
+        {r.kind === "loop" && <Pill tone="plain">observed loop</Pill>}
       </td>
       <td className="wif-work min0">
         {r.ticketTitle && (
@@ -201,61 +290,70 @@ function WorkRow({
         )}
       </td>
       <td className="wif-stage min0">
-        <StepCells r={r} />
+        {r.loop ? <StepCells r={r} /> : DASH}
         {r.loop?.prNumber != null && (
           <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
         )}
       </td>
+      <td className="wif-stuck min0">
+        {stuck === null ? (
+          DASH
+        ) : (
+          <>
+            <span className="crit-t">
+              <WaitingReason key={stuck.text} text={stuck.text} />
+            </span>
+            <span className="s">{` · since ${dur(Math.max(0, now - stuck.since))} ago`}</span>
+          </>
+        )}
+      </td>
       <NextAction entry={entry} now={now} />
-      <td className="wif-elapsed num">{elapsed === null ? DASH : dur(elapsed)}</td>
+      <td className="wif-said min0" title={said?.decision}>
+        {said ? <MarkdownInline text={said.decision} max={90} /> : DASH}
+      </td>
     </tr>
   );
 }
 
 /**
- * Work in flight (catalogue §2.2): one row per crew seat with an active run and a ticket, and one
- * per run in a loop that is not done (its steps and PR beside the ticket). Observed loops are not
- * listed here.
+ * Seats (catalogue §2.2): one row per seat in the session, observed loops included, with its
+ * ticket, stage, what stops it and since when, FLIGHT's recorded next action and its last
+ * instruction to the seat.
  */
-export function activeCrewRows(
-  crew: Crew | undefined,
-  matchesSession: (row: Pick<CrewRow, "sessionId" | "repoId">) => boolean,
-): CrewRow[] {
-  return (crew?.rows ?? []).filter(
-    (r) =>
-      r.kind === "crew" &&
-      r.ticket !== null &&
-      (hasActiveRun(r) || isLoopInFlight(r)) &&
-      matchesSession(r),
-  );
-}
-
 export function WorkInFlight() {
-  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const crewRes = useResource<Crew>(RESOURCES.crew);
+  const crew = crewRes.data;
+  const view = useResource<FlightView>(RESOURCES.flight).data;
   const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedgerOpen).data;
+  const lock = useResource<TestLockState>(RESOURCES.testLock).data;
   const now = useSecond();
   const tz = useTz();
   const { inView: matchesSession } = useSessionScope();
-  const active = activeCrewRows(crew, matchesSession);
-  if (active.length === 0) return <p className="pb note">{crew ? NO_CREW_RUNS : DASH}</p>;
+  const rows = (crew?.rows ?? []).filter(matchesSession);
+  if (crew === undefined)
+    return <Pending what="seats" error={crewRes.error} resource={RESOURCES.crew} />;
+  if (rows.length === 0) return <p className="pb note">{NO_SEATS}</p>;
   return (
-    <table className="wif-table" aria-label="Crew runs">
+    <table className="wif-table" aria-label="Seats">
       <thead>
         <tr className="wif-table-head">
-          <th scope="col">Owner</th>
+          <th scope="col">Seat</th>
           <th scope="col">Workstream</th>
-          <th scope="col">Delivery path</th>
-          <th scope="col">Next / checkpoint</th>
-          <th scope="col">Age</th>
+          <th scope="col">Stage</th>
+          <th scope="col">Stuck / waiting on</th>
+          <th scope="col">FLIGHT's next action</th>
+          <th scope="col">Last instruction</th>
         </tr>
       </thead>
       <tbody>
-        {active.map((r) => (
+        {rows.map((r) => (
           <WorkRow
             key={r.id}
             r={r}
             now={now}
             tz={tz}
+            lock={lock}
+            view={view}
             entry={ledger?.session === r.sessionId ? ledgerWork(r, ledger.entries ?? []) : null}
           />
         ))}

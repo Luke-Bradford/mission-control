@@ -94,6 +94,7 @@ const BUILD_PROFILES: readonly Profile[] = [
     ],
     checklist: checklist(
       "Plan lists the acceptance criteria as a checklist verify can prove",
+      "For an apps/web ticket, Design names the page question and every KPI's definition, window and unit",
       "Every file in the plan sits inside the agent's area",
       "New test fails on the base commit (Mission Control re-runs it)",
       "The same test passes on the branch",

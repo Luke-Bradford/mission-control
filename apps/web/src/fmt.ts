@@ -119,6 +119,14 @@ const round = (x: number, places: number): number => {
   return Math.round(x * f) / f;
 };
 
+/** `512 B`, `3.4 KB`, `12.3 MB`, `1.20 GB`; binary units throughout. */
+export function bytes(n: number): string {
+  if (n < 2 ** 10) return `${Math.round(n)} B`;
+  if (n < 2 ** 20) return `${(n / 2 ** 10).toFixed(1)} KB`;
+  if (n < 2 ** 30) return `${(n / 2 ** 20).toFixed(1)} MB`;
+  return `${(n / 2 ** 30).toFixed(2)} GB`;
+}
+
 /** `950`, `60.1k` (one decimal under 100k), `612k`, `1.24M` (two decimals under 10M), `18.4M`. */
 export function kTokens(n: number): string {
   if (Math.round(n) < 1000) return String(Math.round(n));
@@ -131,8 +139,42 @@ export function kTokens(n: number): string {
   return `${round(n / 1e6, 1).toFixed(1)}M`;
 }
 
+/** `1 file` / `3 files`: the count with its noun, `-s` unless `many` is given (`fix`, `fixes`). */
+export const plural = (n: number, one: string, many = `${one}s`): string =>
+  `${n.toLocaleString("en-GB")} ${n === 1 ? one : many}`;
+
+/** The short form of a commit sha, as the HUD shows it everywhere. */
+export const shortSha = (sha: string): string => sha.slice(0, 7);
+
 /** API-equivalent cost: `~$1.84`, or `—` when no run reported one. */
-export const cost = (usd: number | null): string => (usd === null ? "—" : `~$${usd.toFixed(2)}`);
+export const cost = (usd: number | null | undefined, approx = true): string =>
+  usd == null ? "—" : `${approx ? "~" : ""}$${usd.toFixed(2)}`;
+
+/** A value on a 0–100 scale as a percent: `42%` (rounded to `places`, default whole), `—` for none. */
+export const percent = (value: number | null | undefined, places = 0): string =>
+  value == null ? "—" : `${Number(value.toFixed(places))}%`;
+
+/** `today` / `1 day ago` / `{n} days ago`: counted days, in words (the briefs' form). */
+export const agoWords = (days: number): string =>
+  days <= 0 ? "today" : `${plural(days, "day")} ago`;
+
+/** `now` / `{n} min ago` / `{n} h ago` / `{n} days ago` for a point `mins` before now. */
+export function minutesAgo(mins: number): string {
+  if (mins < 1) return "now";
+  if (mins < 120) return `${Math.round(mins)} min ago`;
+  if (mins < 2880) return `${Math.round(mins / 60)} h ago`;
+  return agoWords(Math.round(mins / 1440));
+}
+
+/** How long something has run or waited, floored: `42m`, `2h 3m`, `1d 4h`; `—` for none. */
+export function elapsed(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
 
 /** `<0.1s`, `3.4s` (one decimal under 10 s), `42s`, `6m 05s`, `1h 12m`. */
 export function dur(ms: number): string {
@@ -191,3 +233,15 @@ export const firstLine = (s: string): string =>
     .split("\n")
     .find((l) => l.trim() !== "")
     ?.trim() ?? "";
+
+/** Swap used as the guard judges it: GB, and its share of physical RAM (not of the swap file). */
+export function swapOfRam(
+  used: number | null | undefined,
+  memTotal: number | null | undefined,
+): string {
+  if (used == null) return "—";
+  const gb = `${(used / 2 ** 30).toFixed(1)} GB`;
+  return memTotal != null && memTotal > 0
+    ? `${gb} (${Math.round((100 * used) / memTotal)}% of RAM)`
+    : gb;
+}

@@ -11,7 +11,7 @@ import { type MouseEvent, memo } from "react";
 import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
-import { Pill } from "../hud/Pill.tsx";
+import { Pill, PillButton } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
@@ -193,10 +193,10 @@ export const Card = memo(function Card({
       </span>
     ),
     you && (
-      <button
+      <PillButton
         key="you"
-        type="button"
-        className="kyou pill warn"
+        tone="warn"
+        className="kyou"
         title={you.title}
         aria-label={`${you.text}${you.more > 0 ? `, and ${you.more} more` : ""}. Opens its brief.`}
         onClick={(e) => {
@@ -207,7 +207,7 @@ export const Card = memo(function Card({
       >
         {you.text}
         {you.more > 0 && <span className="kyou-more">{` +${you.more}`}</span>}
-      </button>
+      </PillButton>
     ),
     statusOutOfDate && (
       <span key="stale" className="xs warn-t" title={statusOutOfDate}>

@@ -270,6 +270,8 @@ import { commsMessageNumber, commsPosition, crewDir, crewPrBodyPath, type Store 
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -444,6 +446,8 @@ const StartBody = z.strictObject({
     .min(1)
     .max(2 ** 31 - 1)
     .optional(),
+  /** An operator may explicitly start through a temporary machine-capacity hold. */
+  force: z.boolean().optional(),
 });
 
 /**
@@ -582,6 +586,10 @@ const MAP_CACHE_MS = 15_000;
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  let transcriptFootprintCache: {
+    at: number;
+    value: ReturnType<typeof transcriptFootprint>;
+  } | null = null;
   const mapConflicts = new MapConflicts();
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
@@ -700,7 +708,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const head = await mapHead(checkout);
     if (!stopMapRing) stopMapRing = mapRing.start();
     mapRing.poll();
-    const crewRows = sharedCrew()
+    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
+    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
+    const crewRows = crew(config, store, now(), deps.lock?.state() ?? NO_LOCK)
       .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
       .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
     const lock = deps.lock?.state() ?? NO_LOCK;
@@ -975,11 +985,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
-  let crewMemo: { key: string; value: Crew } | undefined;
+  // The configured crew changes only through routes and reloads, which emit one of these topics.
+  // Keep a small local revision rather than serialising the full config for every GET /api/crew.
+  let crewRevision = 0;
+  const crewTopics = new Set<Topic>([
+    "agents",
+    "boards",
+    "escalations",
+    "health",
+    "settings",
+    "config",
+    "guard",
+  ]);
+  let crewMemo: { bucket: number; revision: number; lockKey: string; value: Crew } | undefined;
   const sharedCrew = (at = now()): Crew => {
-    const key = JSON.stringify([Math.floor(at / HUD_MEMO_MS), config, deps.lock?.state()]);
-    if (crewMemo?.key !== key)
-      crewMemo = { key, value: crew(config, store, at, deps.lock?.state() ?? NO_LOCK) };
+    const bucket = Math.floor(at / HUD_MEMO_MS);
+    const lock = deps.lock?.state() ?? NO_LOCK;
+    const lockKey = JSON.stringify(lock);
+    if (
+      crewMemo?.bucket !== bucket ||
+      crewMemo.revision !== crewRevision ||
+      crewMemo.lockKey !== lockKey
+    )
+      crewMemo = { bucket, revision: crewRevision, lockKey, value: crew(config, store, at, lock) };
     return crewMemo.value;
   };
 
@@ -1023,8 +1051,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseRevision++;
       responseCache.clear();
       attentionMemo = undefined;
-      crewMemo = undefined;
       forgetViews(store);
+    }
+    if (crewTopics.has(topic)) {
+      crewRevision++;
+      crewMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
@@ -1120,7 +1151,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           const path = run.transcriptPath;
           if (path === "") return missing();
-          const st = await stat(path).catch(() => null);
+          const st = await stat(transcriptFilePath(path)).catch(() => null);
           if (!st?.isFile()) return missing();
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
@@ -2473,6 +2504,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return store.audit(until - Number(match[1]) * 86_400_000, until, kinds);
       });
       api.get("/machine", async (): Promise<MachineView> => {
+        const cached = transcriptFootprintCache;
+        const footprint =
+          cached !== null && now() - cached.at < 60_000
+            ? cached.value
+            : (() => {
+                const value = transcriptFootprint(store);
+                transcriptFootprintCache = { at: now(), value };
+                return value;
+              })();
         const sessions = config.crew?.sessions ?? [];
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
@@ -2490,6 +2530,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
           seats: counts.reduce((a, b) => a + b, 0),
           perSessionMax: Math.max(0, ...counts),
+          transcripts: footprint,
         };
       });
 
@@ -2956,21 +2997,49 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
         const pause = pausedSeat(store, id);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+        const at = now();
+        const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+        const capacity = machineCapacity(
+          store.machineSamples(machineCapacitySince(at, capacityConfig)),
+          at,
+          capacityConfig,
+        );
+        if (capacity.blocked && b.force !== true)
+          throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;
+        let started: unknown;
         // the watch seat runs the crew and takes no ticket; every other seat needs one
         if (loop === "watch") {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          return sup.startWatch(id);
+          started = await sup.startWatch(id);
+        } else {
+          if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          started = await (deps.engine?.status().on === true && loop === "build"
+            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
         }
-        if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
-        return deps.engine?.status().on === true && loop === "build"
-          ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-          : startUnpausedRun(store, sup, id, b.issue, { operator: true });
+        if (capacity.blocked && b.force === true) {
+          const repoId = configuredAgents(config).find(
+            (agent) => agent.kind === "crew" && agent.id === id,
+          )?.repoId;
+          store.addFlightDecision({
+            at,
+            kind: "start",
+            seatId: id,
+            targetRunId: null,
+            ref: repoId === undefined || b.issue === undefined ? null : `${repoId}#${b.issue}`,
+            questionId: null,
+            about: "machine capacity",
+            decision: `Operator override: started ${seatCallSign(id)} despite machine capacity hold.`,
+            basis: capacity.reason ?? "machine capacity held",
+          });
+        }
+        return started;
       });
       seatAction(
         "/seats/:id/message",

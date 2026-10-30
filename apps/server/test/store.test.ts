@@ -98,6 +98,55 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
 });
 
 describe("Store", () => {
+  it("batches recent runs by agent without dropping empty agents", () => {
+    store.upsertRun(run({ id: "a-old", agentId: "a", seq: 1, startedAt: 1 }));
+    store.upsertRun(run({ id: "a-new", agentId: "a", seq: 2, startedAt: 2 }));
+    store.upsertRun(run({ id: "b", agentId: "b", seq: 1, startedAt: 3 }));
+    const rows = store.runsForAgents(["a", "b", "empty"], 1);
+    expect(rows.get("a")).toEqual(store.runs("a", 1));
+    expect(rows.get("b")).toEqual(store.runs("b", 1));
+    expect(rows.get("empty")).toEqual([]);
+  });
+
+  it("partitions batched pull requests and reuses a prepared statement", () => {
+    const pr = (repoId: string, number: number) => ({
+      repoId,
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: "branch",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: null,
+      headSha: "sha",
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    store.upsertPullRequests("one", [pr("one", 1)], 1);
+    store.upsertPullRequests("two", [pr("two", 2)], 1);
+    const batches = store.pullRequestsForRepos(["one", "two"]);
+    expect(batches.get("one")).toEqual(store.pullRequests("one"));
+    expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
+    const prepare = vi.spyOn(raw, "prepare");
+    store.runs("prepared", 1);
+    store.runs("prepared", 1);
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
     const s = new Store(":memory:");
     s.mapCachePut("tree", "checkout", "a", "1", true);
@@ -2036,6 +2085,13 @@ describe("seat sessions", () => {
     );
   });
 
+  it("batches named seat sessions", () => {
+    store.setSeatSession(seat());
+    const rows = store.seatSessions(["guido", "missing"]);
+    expect(rows.get("guido")).toEqual(store.seatSession("guido"));
+    expect(rows.has("missing")).toBe(false);
+  });
+
   it("keeps null run, session, reason and worktree", () => {
     const row = seat({ runId: null, cliSessionId: null, state: "idle", worktree: null });
     store.setSeatSession(row);
@@ -2657,6 +2713,15 @@ describe("comms", () => {
     });
   });
 
+  it.each([undefined, "run-1"])("keeps the newest Comms window for target %s", (targetRunId) => {
+    for (let i = 1; i <= 5_001; i++)
+      store.addComms({ ...row(String(i), i), ...(targetRunId ? { targetRunId } : {}) });
+    const rows = store.comms(0, targetRunId);
+    expect(rows).toHaveLength(5_000);
+    expect(rows[0]?.text).toBe("2");
+    expect(rows.at(-1)?.text).toBe("5001");
+  });
+
   it("keeps a run-targeted message out of another run's pending Comms", () => {
     store.addComms({ ...row("rework"), targetRunId: "r1" });
     store.addComms({ ...row("general"), at: 101 });
@@ -3074,6 +3139,96 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
+  it("keeps an old current brief only while its attention item remains open", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO attention_notes (key,kind,text,at,cleared_at) VALUES
+        ('brief:open','test','open',0,NULL), ('brief:cleared','test','cleared',0,1);
+        INSERT INTO briefs (key,context,recommendation,options,basis,at) VALUES
+        ('brief:open','context','recommendation','[]','basis',0),
+        ('brief:cleared','context','recommendation','[]','basis',0);`);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      expect(db.prepare("SELECT key FROM briefs ORDER BY key").all()).toEqual([
+        { key: "brief:open" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("expires settled operational history while retaining open attention", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO attention_notes (key,kind,text,at,cleared_at) VALUES
+        ('old-cleared','test','old',0,1), ('open','test','open',0,NULL);
+        INSERT INTO attention_episodes VALUES ('old-cleared','test',NULL,0,1);
+        INSERT INTO runs (id,agent_id,repo_id,seq,started_at,ended_at,status,transcript_path)
+          VALUES ('done-run','seat','repo',1,0,1,'done','/done'),
+          ('open-run','seat','repo',2,0,NULL,'running','/open');
+        INSERT INTO board_moves (id,run_id,repo_id,issue,board_column,state,at) VALUES
+          (1,'done-run','repo',1,'Done','done',0),
+          (2,'open-run','repo',2,'In progress','pending',0);
+        INSERT INTO seat_questions (agent_id,run_id,text,at,answered_at) VALUES
+          ('seat','done-run','answered',0,1), ('seat','open-run','open',0,NULL);
+        INSERT INTO guard_hits (agent_id,rule,text,at) VALUES ('seat','rule','old',0);
+        INSERT INTO hub_events (at,text) VALUES (0,'old');
+        INSERT INTO drafts (target,kind,text,created_at,state) VALUES
+          ('old','plan','old',0,'done'), ('pending','plan','pending',0,'pending');
+        INSERT INTO crew_errors (agent_id,text,at,acked) VALUES
+          ('seat','old',0,1), ('seat','unacked',0,0);`);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
+        { key: "open" },
+      ]);
+      for (const table of ["guard_hits", "hub_events", "drafts", "crew_errors"])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual(
+          table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
+        );
+      expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
+      expect(db.prepare("SELECT answered_at FROM seat_questions").all()).toEqual([
+        { answered_at: null },
+      ]);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM attention_episodes").get()).toEqual({ n: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("expires every settled audit child with its completed owner", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.exec(`INSERT INTO runs (id,agent_id,repo_id,seq,started_at,ended_at,status,transcript_path)
+        VALUES ('old-run','seat','repo',1,0,1,'done','/old');
+        INSERT INTO reviews (id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at)
+        VALUES (1,'old-run','repo','seat',1,'sha',1,1,1,'reported',0,1);
+        INSERT INTO review_checks VALUES (1,'check','pass',NULL);
+        INSERT INTO review_tests (review_id,command,passed,failed,skipped,duration) VALUES (1,'test',1,0,0,1);
+        INSERT INTO review_resolutions VALUES (1,1,1,'fixed');
+        INSERT INTO review_findings (review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,state)
+        VALUES (1,'old-run',1,'minor','f',1,'s','s','f','open');
+        INSERT INTO run_commits (run_id,repo_id,branch,sha,at) VALUES ('old-run','repo','b','sha',0);
+        INSERT INTO run_pushes VALUES ('old-run','sha',0);
+        INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
+        INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * 86_400_000);
+      for (const table of [
+        "runs",
+        "reviews",
+        "review_checks",
+        "review_tests",
+        "review_resolutions",
+        "review_findings",
+        "run_commits",
+        "run_pushes",
+        "run_attempts",
+        "pr_history",
+      ])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("retains the latest plan while a newer run on the same ticket is kept", async () => {
     const old = run({ id: "planner", ticket: "repo#494", endedAt: 1 });
     const newer = run({ id: "worker", ticket: old.ticket });
@@ -3555,7 +3710,13 @@ describe("check runs", () => {
       at: 1,
     });
     store.addCheckRun({ runId: "r1", command: "pnpm -s lint", headSha: sha("a"), ok: true, at: 2 });
-    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: true, at: 2 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: true,
+      exitCode: null,
+      at: 2,
+    });
     // a later failure on the same head wins
     store.addCheckRun({
       runId: "r1",
@@ -3564,21 +3725,46 @@ describe("check runs", () => {
       ok: false,
       at: 3,
     });
-    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({ ok: false, at: 3 });
+    expect(store.latestCheckRun("r1", "pnpm -s lint", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: false,
+      exitCode: null,
+      at: 3,
+    });
     expect(store.latestCheckRun("r1", "pnpm -s lint", sha("b"))).toBeNull();
     expect(store.latestCheckRun("r1", "pnpm -s typecheck", sha("a"))).toBeNull();
     expect(store.latestCheckRun("r2", "pnpm -s lint", sha("a"))).toBeNull();
+    expect(store.newestCheckRun("r1", "pnpm -s lint")).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "pnpm -s lint",
+      ok: false,
+      exitCode: null,
+      at: 3,
+    });
   });
 
   it("breaks a tie on the clock by insertion order", () => {
     store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: true, at: 5 });
     store.addCheckRun({ runId: "r1", command: "c", headSha: sha("a"), ok: false, at: 5 });
-    expect(store.latestCheckRun("r1", "c", sha("a"))).toEqual({ ok: false, at: 5 });
+    expect(store.latestCheckRun("r1", "c", sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: "c",
+      ok: false,
+      exitCode: null,
+      at: 5,
+    });
   });
 
   it("binds a command with quotes and percent signs as a value, never as SQL", () => {
     const command = "x'); DROP TABLE check_runs; -- %";
     store.addCheckRun({ runId: "r1", command, headSha: sha("a"), ok: true, at: 1 });
-    expect(store.latestCheckRun("r1", command, sha("a"))).toEqual({ ok: true, at: 1 });
+    expect(store.latestCheckRun("r1", command, sha("a"))).toEqual({
+      headSha: sha("a"),
+      invokedCommand: command,
+      ok: true,
+      exitCode: null,
+      at: 1,
+    });
   });
 });

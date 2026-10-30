@@ -130,7 +130,7 @@ describe("codexSeatConfig", () => {
     // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
     expect(config).toContain('web_search = "disabled"');
     expect(config).toContain(
-      "[features]\nunified_exec = false\nshell_snapshot = false\nshell_zsh_fork = false",
+      "[features]\nremote_plugin = false\nunified_exec = false\nshell_snapshot = false\nshell_zsh_fork = false",
     );
     expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
     expect(config).toContain(`[mcp_servers.mc]\nurl = "${url}"`);

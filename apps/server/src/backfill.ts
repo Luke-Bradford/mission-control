@@ -13,8 +13,9 @@ import { GqlError } from "./collectors/github.ts";
 import { isRateLimitedError } from "./collectors/rate-limit.ts";
 import { agentIds, type CcConfig } from "./config.ts";
 import { parseTicket } from "./runview.ts";
-import { crewDir, type Store } from "./store.ts";
+import { crewDirPath, type Store } from "./store.ts";
 import type { TranscriptFacts } from "./streamjson.ts";
+import { transcriptFilePath } from "./transcript-file.ts";
 
 /** Runs taken from the store per query. */
 export const BACKFILL_BATCH = 20;
@@ -23,8 +24,9 @@ export const BACKFILL_BATCH = 20;
 function readable(path: string): boolean {
   if (path === "") return false;
   try {
-    accessSync(path, constants.R_OK);
-    const st = statSync(path);
+    const actual = transcriptFilePath(path);
+    accessSync(actual, constants.R_OK);
+    const st = statSync(actual);
     return st.isFile() && st.size > 0;
   } catch {
     return false;
@@ -37,7 +39,9 @@ function readable(path: string): boolean {
  */
 function inCrewDir(store: Store, path: string): boolean {
   try {
-    return realpathSync(path).startsWith(`${realpathSync(crewDir(store.path))}${sep}`);
+    return realpathSync(transcriptFilePath(path)).startsWith(
+      `${realpathSync(crewDirPath(store.path))}${sep}`,
+    );
   } catch {
     return false;
   }

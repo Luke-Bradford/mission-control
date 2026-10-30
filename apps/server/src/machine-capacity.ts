@@ -4,12 +4,15 @@ export const MACHINE_CAPACITY_KEY = "machine-capacity";
 export const MACHINE_CAPACITY_DEFAULTS = {
   diskFreeGb: 15,
   diskFreePct: 5,
-  swapUsedPct: 85,
+  swapUsedPct: 60,
   memoryFreePct: 10,
   loadPerCore: 1.5,
   loadWindowMin: 5,
   clearAfterMin: 5,
 } as const;
+
+/** Swap alone is an emergency only once it exceeds this share of physical RAM. */
+export const SWAP_USED_HARD_PCT_OF_RAM = 90;
 
 export interface MachineCapacityConfig {
   diskFreeGb: number;
@@ -40,15 +43,23 @@ function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | n
     const pct = (s.diskFreeBytes / s.diskTotalBytes) * 100;
     if (pct < c.diskFreePct) return `disk free is ${pct.toFixed(1)}% (below ${c.diskFreePct}%)`;
   }
+  const swap =
+    s.swapUsedBytes !== null && s.swapUsedBytes !== undefined && s.memTotalBytes > 0
+      ? {
+          pctOfRam: (s.swapUsedBytes / s.memTotalBytes) * 100,
+          description: `swap used is ${gb(s.swapUsedBytes)} of ${gb(s.memTotalBytes)} RAM`,
+        }
+      : null;
+  if (swap !== null && swap.pctOfRam > SWAP_USED_HARD_PCT_OF_RAM)
+    return `${swap.description} (above ${SWAP_USED_HARD_PCT_OF_RAM}%)`;
   if (
-    s.swapUsedBytes !== null &&
-    s.swapUsedBytes !== undefined &&
-    s.swapTotalBytes &&
-    s.swapTotalBytes > 0
-  ) {
-    const pct = (s.swapUsedBytes / s.swapTotalBytes) * 100;
-    if (pct > c.swapUsedPct) return `swap is ${pct.toFixed(1)}% used (above ${c.swapUsedPct}%)`;
-  }
+    swap !== null &&
+    swap.pctOfRam > c.swapUsedPct &&
+    s.memoryPressureFreePct !== null &&
+    s.memoryPressureFreePct !== undefined &&
+    s.memoryPressureFreePct < c.memoryFreePct
+  )
+    return `${swap.description} (above ${c.swapUsedPct}%) and memory free is ${s.memoryPressureFreePct.toFixed(1)}% (below ${c.memoryFreePct}%)`;
   if (
     s.memoryPressureFreePct !== null &&
     s.memoryPressureFreePct !== undefined &&

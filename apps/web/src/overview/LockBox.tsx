@@ -1,15 +1,15 @@
 import { type CrewRow, LOCK_NOBODY_WAITING } from "@mc/core";
 import { useState } from "react";
 import { interruptSeat, seatError } from "../agent/seat.ts";
-import { useSecond } from "../clock.ts";
+import { useSecondWhile } from "../clock.ts";
 import { LockUsual, useTestLock } from "../components/LockLines.tsx";
+import { useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
-import { useSeatName } from "../seatName.ts";
 
 /** A seat's ticket as a chip; nothing for a seat the crew does not list or one without a ticket. */
 const TicketChip = ({ row }: { row: CrewRow | undefined }) =>
@@ -23,7 +23,10 @@ export function LockBox() {
   const nameOf = useSeatName();
   const lock = useTestLock();
   const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
-  const now = useSecond();
+  const now = useSecondWhile(
+    lock !== undefined && (!!lock.holder || lock.waiting.length > 0),
+    Date.now(),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heading = <h3>Full test suite · one at a time</h3>;

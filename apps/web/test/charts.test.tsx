@@ -12,8 +12,8 @@ const k = (v: number): string => `${Math.round(v)}`;
 
 describe("StackedArea", () => {
   const series = [
-    { id: "a", name: "shop-app-ta", color: "var(--s1)", values: [1, 2, 3, 4] },
-    { id: "b", name: "studio", color: "var(--s2)", values: [4, 3, 2, 10] },
+    { id: "a", name: "shop-app-ta", color: "var(--seat-1)", values: [1, 2, 3, 4] },
+    { id: "b", name: "studio", color: "var(--seat-2)", values: [4, 3, 2, 10] },
   ];
 
   it("draws one area and one line per series, labelled for screen readers", () => {
@@ -372,7 +372,7 @@ describe("LineChart", () => {
           {
             id: "cpu",
             name: "CPU",
-            color: "var(--s1)",
+            color: "var(--seat-1)",
             points: [
               { at: 0, v: 10 },
               { at: 50, v: null },
@@ -383,7 +383,7 @@ describe("LineChart", () => {
           {
             id: "mem",
             name: "Memory",
-            color: "var(--s2)",
+            color: "var(--seat-2)",
             points: [
               { at: 0, v: 20 },
               { at: 100, v: 25 },
@@ -443,7 +443,7 @@ describe("LineChart", () => {
           {
             id: "q",
             name: "claude-main 5h",
-            color: "var(--s1)",
+            color: "var(--seat-1)",
             points: [
               { at: 0, v: 10.4 },
               { at: 100, v: 62.6 },
@@ -468,7 +468,7 @@ describe("LineChart", () => {
           {
             id: "x",
             name: "x",
-            color: "var(--s1)",
+            color: "var(--seat-1)",
             points: [
               { at: 0, v: 1 },
               { at: 1, v: 2 },
@@ -492,7 +492,7 @@ describe("LineChart", () => {
           {
             id: "q",
             name: "quota",
-            color: "var(--s1)",
+            color: "var(--seat-1)",
             points: [
               { at: 0, v: 80 },
               { at: 50, v: null },
@@ -559,7 +559,7 @@ describe("LineChart", () => {
         {
           id: "q",
           name: "quota",
-          color: "var(--s1)",
+          color: "var(--seat-1)",
           points: [
             { at: 0, v: 10 },
             { at: 100, v: 20 },
@@ -590,7 +590,7 @@ describe("LineChart", () => {
             {
               id: "q",
               name: "quota",
-              color: "var(--s1)",
+              color: "var(--seat-1)",
               points: [
                 { at: 0, v: 10 },
                 { at: 100, v: 20 },
@@ -604,7 +604,7 @@ describe("LineChart", () => {
           at={String}
         />
         <StackedArea
-          series={[{ id: "a", name: "tokens", color: "var(--s2)", values: [1, 2] }]}
+          series={[{ id: "a", name: "tokens", color: "var(--seat-2)", values: [1, 2] }]}
           label="tokens"
           xLabels={["start", "now"]}
           at={String}
@@ -677,9 +677,9 @@ describe("VBars", () => {
             label: "turn 1",
             tip: "turn 1",
             segments: [
-              { name: "input", value: 300, color: "var(--s1)" },
-              { name: "output", value: 100, color: "var(--s2)" },
-              { name: "cache read", value: 9000, color: "var(--s3)" },
+              { name: "input", value: 300, color: "var(--seat-1)" },
+              { name: "output", value: 100, color: "var(--seat-2)" },
+              { name: "cache read", value: 9000, color: "var(--seat-3)" },
             ],
           },
         ]}
@@ -687,9 +687,9 @@ describe("VBars", () => {
     );
     const marks = [...container.querySelectorAll("path.bar")];
     expect(marks.map((m) => m.getAttribute("fill"))).toEqual([
-      "var(--s1)",
-      "var(--s2)",
-      "var(--s3)",
+      "var(--seat-1)",
+      "var(--seat-2)",
+      "var(--seat-3)",
     ]);
     fireEvent.pointerEnter(container.querySelector("rect.hit") as Element);
     expect(container.querySelector(".tip")?.textContent).toBe(
@@ -713,7 +713,7 @@ describe("keyboard", () => {
   it("StackedArea: focus shows the newest point; arrows, Home and End step; blur hides it", () => {
     const { container } = render(
       <StackedArea
-        series={[{ id: "a", name: "shop-app-ta", color: "var(--s1)", values: [1, 2, 3] }]}
+        series={[{ id: "a", name: "shop-app-ta", color: "var(--seat-1)", values: [1, 2, 3] }]}
         label="Tokens"
         xLabels={["-6h", "now"]}
         at={(i) => `p${i}`}
@@ -743,7 +743,7 @@ describe("keyboard", () => {
   it("the tooltip is a polite live region, so stepping reads the new value out", () => {
     const { container } = render(
       <StackedArea
-        series={[{ id: "a", name: "shop-app-ta", color: "var(--s1)", values: [1, 2, 3] }]}
+        series={[{ id: "a", name: "shop-app-ta", color: "var(--seat-1)", values: [1, 2, 3] }]}
         label="Tokens"
         xLabels={["-6h", "now"]}
         at={(i) => `p${i}`}
@@ -768,7 +768,7 @@ describe("keyboard", () => {
           {
             id: "q",
             name: "5h",
-            color: "var(--s1)",
+            color: "var(--seat-1)",
             points: [
               { at: 0, v: 10 },
               { at: 50, v: 30 },

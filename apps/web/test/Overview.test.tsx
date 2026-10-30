@@ -17,6 +17,7 @@ import {
   SEAT_TURN_END_TEXT,
   SEAT_TURN_START_TEXT,
   type TestLockState,
+  type TranscriptFootprint,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
@@ -82,7 +83,10 @@ interface Data {
   /** The seats' repo's PRs. */
   prs?: PullRequestView[];
   /** The crew's seat capacity, as `/api/machine` sends it. */
+  /** The machine-capacity admission reason, as `/api/machine` sends it. */
+  warning?: string | null;
   seats?: { maxSeats: number; seats: number; perSessionMax: number };
+  transcripts?: TranscriptFootprint | null;
   /** The activity feed, read at each fetch. */
   activityNow?: () => ActivityRow[];
   /** More routes, by "METHOD path". */
@@ -97,7 +101,12 @@ function stub(d: Data = {}) {
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
-    "/api/machine": { latest: d.machine === undefined ? sample() : d.machine, ...d.seats },
+    "/api/machine": {
+      latest: d.machine === undefined ? sample() : d.machine,
+      warning: d.warning ?? null,
+      transcripts: d.transcripts,
+      ...d.seats,
+    },
     "/api/limits": d.limits ?? [],
     "/api/limits/github": d.githubRate ?? { queries: {}, pollCost: null },
     "/api/health": d.health ?? [],
@@ -1544,6 +1553,30 @@ describe("Machine panel: the test lock box", () => {
 });
 
 describe("Machine panel", () => {
+  it("shows the transcript footprint and each seat's files on hover", async () => {
+    stub({
+      transcripts: {
+        totalBytes: 12.3 * 2 ** 20,
+        oldestAt: NOW - 3 * HOUR,
+        seats: [{ seatId: "fao-1", bytes: 8 * 2 ** 20, files: 3 }],
+      },
+    });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    const row = await within(mach).findByText("Transcripts");
+    expect(row.parentElement?.textContent).toContain("12.3 MB");
+    expect(row.parentElement?.textContent).toContain("oldest 3 h ago");
+    expect(row.parentElement?.getAttribute("title")).toBe("fao-1 8.0 MB · 3 files");
+  });
+
+  it("leaves out the transcript footprint when the server has none", async () => {
+    stub({ transcripts: null });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await within(mach).findByText("37%");
+    expect(within(mach).queryByText("Transcripts")).toBeNull();
+  });
+
   it("labels CPU, memory and disk, keeping the legend on hover", async () => {
     stub();
     const { container } = render(<Overview />);
@@ -1606,12 +1639,53 @@ describe("Machine panel", () => {
     stub({ machine: null });
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
-    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(3));
+    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(4));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
     for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
     expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
       "Claude/Codex processes (—)",
     );
+  });
+
+  it("shows swap used of total next to memory, and no warning when starts are open", async () => {
+    stub({
+      machine: sample({ swapUsedBytes: 3.5 * GIB, swapTotalBytes: 8 * GIB }),
+    });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
+    expect(swap.textContent).toContain("Swap");
+    expect(swap.textContent).toContain("3.5 GB (5% of RAM)");
+    // The bar fills against physical RAM (3.5 of 64 GB), not the 8 GB swap file.
+    expect(swap.querySelector<HTMLElement>(".stack i")?.style.width).toBe("5.5%");
+    expect(mach.querySelector(".capwarn")).toBeNull();
+  });
+
+  it("a swap that was not measured is a dash", async () => {
+    stub({ machine: sample({ swapUsedBytes: null, swapTotalBytes: null }) });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    const swap = mach.querySelectorAll(".resrow")[2] as HTMLElement;
+    expect(swap.textContent).toBe("Swap—");
+  });
+
+  it("names the reason while the hub is holding new work", async () => {
+    stub({ warning: "swap 21.5 of 22.5 GB used" });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    const warn = await waitFor(() => {
+      const w = mach.querySelector<HTMLElement>(".capwarn");
+      if (!w) throw new Error("no warning");
+      return w;
+    });
+    expect(warn.className).toContain("warn-t");
+    const pill = warn.querySelector(".pill");
+    expect(pill?.className).toContain("warn");
+    expect(pill?.textContent).toBe("Holding new work");
+    expect(pill?.getAttribute("title")).toBe("swap 21.5 of 22.5 GB used");
+    expect(warn.title).toBe("swap 21.5 of 22.5 GB used");
   });
 
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
@@ -1660,7 +1734,7 @@ describe("Account quota panel", () => {
     });
     const { container } = render(<Overview />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
-    await within(quota).findByText("7d 86% · 8h ago");
+    await within(quota).findByText("7d 86% · 8h 0m ago");
     await waitFor(() =>
       expect(quota.querySelector('[title*="Usage endpoint rate limited"]')).toBeTruthy(),
     );

@@ -140,6 +140,8 @@ export interface CrewSessionConfig {
 export interface CrewConfig {
   worktrees: string;
   maxSeats: number;
+  /** Retention for ended crew transcripts. Loaded: always set. */
+  transcripts?: TranscriptRetention;
   /** Machine headroom required before the hub starts new crew work. */
   machineCapacity?: MachineCapacityConfig;
   /** The node the guard hook runs under: a stable path to an executable file. Loaded: always set. */
@@ -168,6 +170,15 @@ export interface CrewConfig {
   roles?: Record<string, RoleDef>;
   sessions: CrewSessionConfig[];
 }
+
+export interface TranscriptRetention {
+  gzipAfterHours: number;
+  deleteAfterDays: number;
+}
+export const TRANSCRIPT_RETENTION_DEFAULTS: TranscriptRetention = {
+  gzipAfterHours: 24,
+  deleteAfterDays: 14,
+};
 
 export const TeamsSelection = z
   .array(
@@ -535,6 +546,23 @@ const fileSchema = z
       .strictObject({
         worktrees: nonEmpty,
         max_seats: z.number().int().min(1).max(32).default(DEFAULT_MAX_SEATS),
+        transcripts: z
+          .strictObject({
+            gzip_after_hours: z
+              .number()
+              .int()
+              .min(1)
+              .default(TRANSCRIPT_RETENTION_DEFAULTS.gzipAfterHours),
+            delete_after_days: z
+              .number()
+              .int()
+              .min(1)
+              .default(TRANSCRIPT_RETENTION_DEFAULTS.deleteAfterDays),
+          })
+          .default({
+            gzip_after_hours: TRANSCRIPT_RETENTION_DEFAULTS.gzipAfterHours,
+            delete_after_days: TRANSCRIPT_RETENTION_DEFAULTS.deleteAfterDays,
+          }),
         machine_capacity: z
           .strictObject({
             disk_free_gb: z.number().positive().default(MACHINE_CAPACITY_DEFAULTS.diskFreeGb),
@@ -679,6 +707,10 @@ const fileSchema = z
             crew: {
               worktrees: expandHome(f.crew.worktrees),
               maxSeats: f.crew.max_seats,
+              transcripts: {
+                gzipAfterHours: f.crew.transcripts.gzip_after_hours,
+                deleteAfterDays: f.crew.transcripts.delete_after_days,
+              },
               machineCapacity: {
                 diskFreeGb: f.crew.machine_capacity.disk_free_gb,
                 diskFreePct: f.crew.machine_capacity.disk_free_pct,

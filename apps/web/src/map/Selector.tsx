@@ -1,9 +1,11 @@
-import { type MapSeat, type MapSnapshot, seatCallSign } from "@mc/core";
+import type { MapSeat, MapSnapshot } from "@mc/core";
 import type { CSSProperties } from "react";
+import { seatName } from "../crew.ts";
+import { dur, plural } from "../fmt.ts";
+import { ConflictDetail } from "../lenses/lenses.tsx";
 import {
   type ChangeCount,
   changeTotals,
-  duration,
   nodeWork,
   readCount,
   type SeatWork,
@@ -12,7 +14,7 @@ import {
 } from "./cards.ts";
 
 export function stateLabel(seat: MapSeat, now: number): string {
-  if (seat.state === "stalled") return `stalled ${duration(now - seat.since)}`;
+  if (seat.state === "stalled") return `stalled ${dur(now - seat.since)}`;
   const call = [...seat.calls].sort((left, right) => left.since - right.since)[0];
   if (call) {
     const verb =
@@ -26,9 +28,9 @@ export function stateLabel(seat: MapSeat, now: number): string {
         Glob: "searching",
         Bash: "running",
       }[call.tool] ?? (call.tool.startsWith("mcp__mc__") ? "using" : call.tool);
-    return `${verb} ${call.detail.replace(/^cd \S+ && /, "").slice(0, 80)} ${duration(now - call.since)}`;
+    return `${verb} ${call.detail.replace(/^cd \S+ && /, "").slice(0, 80)} ${dur(now - call.since)}`;
   }
-  return seat.state === "running" ? "thinking" : `${seat.state} ${duration(now - seat.since)}`;
+  return seat.state === "running" ? "thinking" : `${seat.state} ${dur(now - seat.since)}`;
 }
 
 /** What the rail is showing: a node (a file, or a collapsed folder), or a seat. */
@@ -41,10 +43,19 @@ interface SeatNames {
   names: Record<string, string>;
 }
 
+/** The distinct files in conflict on a branch the seat works on. */
+const seatConflicts = (snapshot: MapSnapshot, seat: MapSeat) =>
+  new Set(
+    snapshot.conflicts
+      .filter((conflict) => conflict.branches.some((branch) => seat.branches.includes(branch)))
+      .map((conflict) => conflict.file),
+  ).size;
+
 /** A seat's light colour, the one its light and path have on the stage. */
 const lightStyle = (seat: string, { indices }: SeatNames): CSSProperties =>
   ({ "--light": `var(${seatToken(seat, indices[seat] ?? 0)})` }) as CSSProperties;
-const callSign = (seat: string, names: Record<string, string>) => names[seat] ?? seatCallSign(seat);
+const labelOf = (seat: string, names: Record<string, string>) =>
+  names[seat] ?? seatName(seat, undefined);
 
 function Light({ seat, ...props }: SeatNames & { seat: string }) {
   return <i className="map-light" style={lightStyle(seat, props)} aria-hidden="true" />;
@@ -80,14 +91,15 @@ export function SeatSelector({
       {seats.map((seat) => {
         const on = workLine(work(seat));
         const pressed = selected === seat.seat;
-        const name = callSign(seat.seat, props.names);
+        const name = labelOf(seat.seat, props.names);
+        const conflicts = seatConflicts(props.snapshot, seat);
         return (
           <li key={seat.seat}>
             <button
               type="button"
               className="map-seat"
               aria-pressed={pressed}
-              aria-label={`${name}: ${on ?? "no ticket"}`}
+              aria-label={`${name}: ${on ?? "no ticket"}${conflicts ? `, ${plural(conflicts, "file")} in conflict` : ""}`}
               title={on ?? undefined}
               onClick={() => onSelect(pressed ? null : seat.seat)}
             >
@@ -96,6 +108,9 @@ export function SeatSelector({
                 {name}
               </span>
               <span className={on ? "map-seat-on" : "map-seat-on none"}>{on ?? "no ticket"}</span>
+              {conflicts > 0 && (
+                <span className="map-seat-conflict">{plural(conflicts, "conflict")}</span>
+              )}
             </button>
           </li>
         );
@@ -107,7 +122,7 @@ export function SeatSelector({
 function Lines({ count, files }: { count: ChangeCount; files?: number }) {
   return (
     <>
-      {files !== undefined && `${files} file${files === 1 ? "" : "s"} · `}
+      {files !== undefined && `${plural(files, "file")} · `}
       <b className="add">+{count.add}</b> <b className="rem">−{count.rem}</b>
       {count.churn && <span className="map-note"> edit churn</span>}
     </>
@@ -127,7 +142,7 @@ export function SeatDetail({
     <>
       <h3 className="map-detail-head">
         <Light seat={seat.seat} {...props} />
-        {callSign(seat.seat, props.names)}
+        {labelOf(seat.seat, props.names)}
       </h3>
       <p className="map-detail-on">{workLine(work) ?? "No ticket"}</p>
       <dl className="map-facts">
@@ -136,9 +151,7 @@ export function SeatDetail({
         <dt>Changed</dt>
         <dd>{totals.files ? <Lines count={totals} files={totals.files} /> : "nothing yet"}</dd>
         <dt>Read</dt>
-        <dd>
-          {read} file{read === 1 ? "" : "s"}
-        </dd>
+        <dd>{plural(read, "file")}</dd>
       </dl>
     </>
   );
@@ -154,13 +167,13 @@ export function NodeDetail({
   return (
     <>
       <h3 className="map-detail-path">{path}</h3>
-      {files.length > 1 && <p className="map-note">{files.length} files</p>}
+      {files.length > 1 && <p className="map-note">{plural(files.length, "file")}</p>}
       {work.length ? (
         <ul className="map-who" aria-label="Seats that touched it">
           {work.map(({ seat, changed, read }) => (
             <li key={seat}>
               <Light seat={seat} {...props} />
-              <span>{callSign(seat, props.names)}</span>
+              <span>{labelOf(seat, props.names)}</span>
               <span className="map-who-count">
                 {changed && (
                   <>
@@ -176,6 +189,12 @@ export function NodeDetail({
       ) : (
         <p className="map-note">No seat has changed or read this.</p>
       )}
+      <ConflictDetail
+        snapshot={props.snapshot}
+        file={path}
+        names={props.names}
+        indices={props.indices}
+      />
     </>
   );
 }

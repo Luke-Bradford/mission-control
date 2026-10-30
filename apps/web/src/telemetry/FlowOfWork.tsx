@@ -1,11 +1,11 @@
 import { CYCLE_TIME_MIN_FOR_P85, FLOW_DAYS, formatHours, NO_SIZE, type Telemetry } from "@mc/core";
-import { dayLabel, dur, narrowDay } from "../fmt.ts";
+import { useSeatName } from "../crew.ts";
+import { dayLabel, dur, narrowDay, percent, plural } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { MetricName } from "../hud/MetricName.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, sessionTag, useMetrics } from "../metrics.ts";
-import { useSeatName } from "../seatName.ts";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
@@ -30,8 +30,6 @@ function Stat({
     </div>
   );
 }
-
-const tickets = (n: number): string => `${n} ${n === 1 ? "ticket" : "tickets"}`;
 
 /** Flow of work (catalogue 2.6.3): throughput, cycle time, quality and review, You as CAPCOM. */
 export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
@@ -63,7 +61,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
   const findings = reviewStat(t?.quality.retroFindingsPerPr, (n) => n.toFixed(1));
   const sentBack = reviewStat(t?.quality.sentBackPrs, String);
   if (t?.quality.sentBackPrs !== undefined && t.quality.firstPassReviewPct != null)
-    sentBack.title = `${Math.round(t.quality.firstPassReviewPct)}% passed the first review round`;
+    sentBack.title = `${percent(t.quality.firstPassReviewPct)} passed the first review round`;
   const humanWait = reviewStat(t?.quality.humanReviewWaitMs, dur);
   // It measures the hub's "ready" and "review" notes, not merged PRs: its own titles.
   if (t?.quality.humanReviewWaitMs !== undefined)
@@ -137,8 +135,8 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
                   value={ms === null ? DASH : formatHours(ms)}
                   extra={
                     r.tickets < CYCLE_TIME_MIN_FOR_P85 || r.p85Ms === null
-                      ? tickets(r.tickets)
-                      : `p85 ${formatHours(r.p85Ms)} · ${tickets(r.tickets)}`
+                      ? plural(r.tickets, "ticket")
+                      : `p85 ${formatHours(r.p85Ms)} · ${plural(r.tickets, "ticket")}`
                   }
                 />
               );
@@ -161,7 +159,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
             <Stat {...humanWait} label="median wait for a human review" />
             <Stat {...sentBack} label="PRs sent back by reviewers" />
             <Stat
-              value={ci === null ? DASH : `${Math.round(ci)}%`}
+              value={ci === null ? DASH : percent(ci)}
               label="CI green on first push"
               title={
                 !t

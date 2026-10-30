@@ -102,13 +102,55 @@ describe("the check recorder", () => {
     checks = CHECKS;
   });
 
-  it("records one row per matched check with the call's exit success, on the head it started on", async () => {
+  it("records a plain lint and typecheck call from Claude on the clean head it started on", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);
     await r.end(KEY, true);
     expect(rows).toEqual([
-      { runId: "r1", command: LINT, headSha: HEAD, ok: true, at: 99 },
-      { runId: "r1", command: TYPES, headSha: HEAD, ok: true, at: 99 },
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+    ]);
+  });
+
+  it("records a plain lint and typecheck call when Codex completes it by its item id", async () => {
+    const r = recorder();
+    await r.begin(KEY, `${LINT} && ${TYPES}`, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    await r.end({ runId: "r1", toolUseId: "codex-item-1" }, true);
+    expect(rows).toEqual([
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: true,
+        exitCode: null,
+        at: 99,
+      },
     ]);
   });
 
@@ -117,6 +159,38 @@ describe("the check recorder", () => {
     await r.begin(KEY, LINT);
     await r.end(KEY, false);
     expect(rows.map((x) => x.ok)).toEqual([false]);
+  });
+
+  it("keeps a chained invocation and Codex's numeric failure exit", async () => {
+    const detailed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void detailed.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => 99,
+    });
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    await r.end(KEY, false, 2);
+    expect(detailed).toEqual([
+      {
+        runId: "r1",
+        command: LINT,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+      {
+        runId: "r1",
+        command: TYPES,
+        invokedCommand: `${LINT} && ${TYPES}`,
+        headSha: HEAD,
+        ok: false,
+        exitCode: 2,
+        at: 99,
+      },
+    ]);
   });
 
   it.each([

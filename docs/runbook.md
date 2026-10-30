@@ -276,9 +276,11 @@ after both their review and author run end; test-lock holds and CI runs stay 90 
 set-aside runs, unanswered questions, pending drafts and open attention notes protect
 their associated rows. Deletions use transactions of at most 500 rows, yield between
 batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
-Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
-Activity and Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database
-file on disk.
+Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
+hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
+also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
+merged-PR history remain available to Activity and Telemetry for one year. Deletion makes SQLite
+pages reusable; it does not shrink the database file on disk.
 
 ## First crew
 
@@ -1677,7 +1679,7 @@ Add a Codex seat in **Setup › Sessions**, or in `config.yaml`: choose an accou
 
 If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery or validation. The hub still boots and Claude seats continue to run. No intervention is required: the state clears itself when discovery succeeds.
 
-Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
+Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. Remote plugins are off for seats, so Codex does not download its shared plugin catalog into each isolated home. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
 
 Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
 

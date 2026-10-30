@@ -682,12 +682,26 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
     }
 
     /** The run's configured checks with no passing run on `sha`: never run there, or last run failed. */
-    async function unmetChecks(sha: string): Promise<{ command: string; state: CheckState }[]> {
-      const unmet: { command: string; state: CheckState }[] = [];
+    async function unmetChecks(
+      sha: string,
+    ): Promise<
+      { command: string; state: CheckState; recorded: ReturnType<Store["newestCheckRun"]> }[]
+    > {
+      const unmet: {
+        command: string;
+        state: CheckState;
+        recorded: ReturnType<Store["newestCheckRun"]>;
+      }[] = [];
       for (const command of await deps.checks(runId)) {
         const last = store.latestCheckRun(runId, command, sha);
-        if (last === null) unmet.push({ command, state: "missing" });
-        else if (!last.ok) unmet.push({ command, state: "failed" });
+        if (last === null)
+          unmet.push({ command, state: "missing", recorded: store.newestCheckRun(runId, command) });
+        else if (!last.ok)
+          unmet.push({
+            command,
+            state: "failed",
+            recorded: last,
+          });
       }
       return unmet;
     }

@@ -68,7 +68,6 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
-  TOPICS,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -96,6 +95,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -2050,6 +2050,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     const latest: MachineSample = {
       at: NOW,
@@ -2070,6 +2071,7 @@ describe("GET /api/machine", () => {
       maxSeats: 8,
       seats: 0,
       perSessionMax: 0,
+      transcripts: null,
     });
     await a.close();
   });
@@ -2097,6 +2099,32 @@ describe("GET /api/machine", () => {
     };
     const r = await get("/api/machine");
     expect(r.json()).toMatchObject({ maxSeats: 8, seats: 4, perSessionMax: 3 });
+  });
+
+  it("carries the crew folder transcript footprint", async () => {
+    const crew = join(dir, "crew");
+    mkdirSync(crew);
+    const path = (id: string, suffix = ".jsonl") => join(crew, `${id}${suffix}`);
+    for (const [id, agentId, bytes] of [
+      ["r1", "a-1", 100],
+      ["r2", "a-1", 40],
+      ["r3", "b-1", 10],
+    ] as const) {
+      const suffix = id === "r2" ? ".jsonl.gz" : ".jsonl";
+      store.upsertRun(run({ id, agentId, transcriptPath: path(id), endedAt: NOW, status: "ok" }));
+      writeFileSync(path(id, suffix), Buffer.alloc(bytes));
+    }
+    writeFileSync(join(crew, "r3.prompt.md"), Buffer.alloc(7));
+    const oldest = NOW - 5 * DAY;
+    utimesSync(path("r3"), new Date(oldest), new Date(oldest));
+    expect((await get("/api/machine")).json().transcripts).toEqual({
+      totalBytes: 157,
+      seats: [
+        { seatId: "a-1", bytes: 140, files: 2 },
+        { seatId: "b-1", bytes: 10, files: 1 },
+      ],
+      oldestAt: oldest,
+    });
   });
 });
 
@@ -5234,6 +5262,35 @@ describe("reload", () => {
     await a.close();
   });
 
+  it("uses machine-capacity thresholds applied by reload immediately", async () => {
+    withCrew();
+    const latest: MachineSample = {
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 16 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    };
+    const reloader = stubReloader();
+    reloader.reload = async () => {
+      const crew = config.crew;
+      if (crew === undefined) throw new Error("test fixture has no crew");
+      crew.machineCapacity = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 20 };
+      return { ...NO_CHANGES, applied: [] };
+    };
+    const a = buildApp({ config, store, bus, crewReloader: reloader, machine: () => latest });
+
+    expect((await a.inject({ method: "GET", url: "/api/machine" })).json().warning).toBeNull();
+    expect((await reloadPost(a)).statusCode).toBe(200);
+    expect((await a.inject({ method: "GET", url: "/api/machine" })).json().warning).toBe(
+      "disk free is 16.0 GB (below 20 GB)",
+    );
+    await a.close();
+  });
+
   it("refuses a foreign origin and a non-JSON body", async () => {
     const { a } = withReloader({});
     const origin = await a.inject({
@@ -5605,6 +5662,40 @@ describe("crew routes", () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
     expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
+  it("holds a constrained operator start unless force records an override", async () => {
+    const crew = config.crew;
+    if (crew === undefined) throw new Error("test fixture has no crew");
+    crew.machineCapacity = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 20 };
+    store.addMachineSample({
+      at: NOW,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 16 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+
+    const held = await post5("start", { issue: 5 });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toEqual({
+      error: "Machine capacity held: disk free is 16.0 GB (below 20 GB)",
+    });
+    expect(supervisorCalls).toEqual([]);
+
+    const forced = await post5("start", { issue: 5, force: true });
+    expect(forced.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+    expect(store.flightDecisions(0, 1)[0]).toMatchObject({
+      kind: "start",
+      seatId: "guido-1",
+      ref: "shop-app#5",
+      decision: "Operator override: started GUIDO-1 despite machine capacity hold.",
+      basis: "disk free is 16.0 GB (below 20 GB)",
+    });
   });
 
   it("transfers one seat explicitly and returns the supervisor outcome", async () => {
@@ -8280,7 +8371,7 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it.each(TOPICS.filter((topic) => topic !== "machine"))(
+  it.each(["agents", "boards", "escalations", "health", "settings", "config", "guard"] as const)(
     "invalidates shared crew on %s",
     async (topic) => {
       const reads = vi.spyOn(store, "asideRuns");
@@ -8293,9 +8384,23 @@ describe("overview", () => {
     },
   );
 
+  it.each(["limits", "machine", "attention", "flight"] as const)(
+    "keeps shared crew for the unrelated %s topic",
+    async (topic) => {
+      const reads = vi.spyOn(store, "readVersion");
+      await get("/api/crew");
+      const initial = reads.mock.calls.length;
+      bus.emit(topic);
+      await get("/api/crew");
+      expect(reads).toHaveBeenCalledTimes(initial);
+      reads.mockRestore();
+    },
+  );
+
   it("rebuilds shared crew when the configured selection changes", async () => {
     await get("/api/crew");
     withCrew();
+    bus.emit("config");
     expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
       true,
     );

@@ -1,7 +1,7 @@
 import type { ConfigView, LimitRow } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { rel } from "../fmt.ts";
+import { percent, rel } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { quotaWarnings, resetWhen, timeToFull } from "../quota.ts";
@@ -12,7 +12,7 @@ const DASH = "—";
 /** The hover text of one bar: `{account} {window}: {used}% used · {time to full} · resets {when}`. */
 function title(row: LimitRow, now: number, tz: string | null): string {
   return [
-    `${row.accountId} ${row.window}: ${Math.round(row.used)}% used`,
+    `${row.accountId} ${row.window}: ${percent(row.used)} used`,
     timeToFull(row, now),
     `resets ${tz ? resetWhen(row, now, tz) : DASH}`,
     row.stale ? "stale" : null,
