@@ -597,3 +597,32 @@ it("names the seat and change size on every changed tile", () => {
     "changed by GUIDO-1, +3 −1",
   );
 });
+
+it("keeps conflict markers on the treemap during playback, on replayed and conflict-only files", () => {
+  vi.useFakeTimers();
+  try {
+    window.history.replaceState(null, "", "#play=GUIDO-1&step=2");
+    const value = playSnapshot();
+    value.seats[0] = { ...value.seats[0], branches: ["feature/7-contract"] };
+    value.conflicts = [
+      {
+        file: "src/contract.ts",
+        branches: ["feature/7-contract", "feature/9-x"],
+        shas: ["a", "b"],
+      },
+      { file: "src/new.ts", branches: ["feature/7-contract", "feature/9-x"], shas: ["a", "b"] },
+    ];
+    render(<CrewMapView snapshot={value} />);
+    expect(playback()).toContain("step 2 of 3");
+    for (const path of ["src/contract.ts", "src/new.ts"]) {
+      expect(tile(path).hasAttribute("data-conflict"), path).toBe(true);
+      expect(tile(path).getAttribute("aria-description"), path).toContain(
+        "conflicts between feature/7-contract, feature/9-x",
+      );
+      expect(tile(path).textContent, path).toContain("conflict");
+    }
+  } finally {
+    vi.useRealTimers();
+    reset();
+  }
+});

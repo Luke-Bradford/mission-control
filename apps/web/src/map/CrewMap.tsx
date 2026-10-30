@@ -205,7 +205,7 @@ export function CrewMapView({
   // Play shows only the replayed seat's changes on the files it has reached so far
   const visibleVisual = useMemo(() => {
     if (!playback) return markConflicts(windowed, snapshot.conflicts);
-    return Object.fromEntries(
+    const replay = Object.fromEntries(
       [...marks.keys()].map((path): [string, ChangeVisual] => [
         path,
         {
@@ -215,6 +215,7 @@ export function CrewMapView({
         },
       ]),
     );
+    return markConflicts(replay, snapshot.conflicts);
   }, [windowed, changesVisual, playback, marks, snapshot.conflicts]);
   const replaying = playback !== null;
   return (
