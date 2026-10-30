@@ -888,6 +888,10 @@
   white-space: nowrap;
 }
 
+#machP .transcript-footprint .num {
+  font-size: var(--fs-s);
+}
+
 #machP .agentslots {
   flex-wrap: nowrap;
   gap: 6px;
