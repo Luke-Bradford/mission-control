@@ -57,7 +57,7 @@ export function parseCheckOutput(
     .filter(Boolean);
   const failingTests = cap(
     lines
-      .filter((line) => /^(?:FAIL|×)\b/.test(line))
+      .filter((line) => /^(?:FAIL\b|×(?:\s|$))/.test(line))
       .map((line) => line.replace(/^(?:FAIL|×)\s*/, "")),
   );
   const errorLines = cap(lines.filter((line) => /(?:error TS\d+|\berror\b)/i.test(line)));

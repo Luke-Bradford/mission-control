@@ -24,6 +24,7 @@ export function verifyProfile(i: {
     "(deny file-write*)",
     `(allow file-write* (subpath ${quote(i.scratch)}))`,
     `(allow file-write* (subpath ${quote(i.tmp)}))`,
+    '(allow file-write* (literal "/dev/null"))',
     `(deny file-write* (subpath ${quote(join(i.scratch, ".git"))})`,
     ...i.denied.map((path) => `(deny file-read* (subpath ${quote(path)}))`),
   ].join("\n");
@@ -62,15 +63,23 @@ export async function runVerifySandbox(i: {
       };
       child.stdout.on("data", append);
       child.stderr.on("data", append);
+      let timedOut = false;
       const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+        timedOut = true;
+        if (child.pid !== undefined) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") reject(error);
+          }
+        }
       }, i.timeoutMs ?? VERIFY_CHECK_TIMEOUT_MS);
       child.once("error", reject);
       child.once("close", (code) => {
         clearTimeout(timer);
         resolve({
           ok: code === 0,
-          output: code === null ? `${output}\ntimed out after 15 minutes` : output,
+          output: timedOut ? `${output}\ntimed out after 15 minutes` : output,
           durationMs: Date.now() - started,
         });
       });

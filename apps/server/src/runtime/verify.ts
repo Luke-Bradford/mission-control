@@ -56,6 +56,8 @@ export function createVerifyQueue(i: {
         const current = i.store.verifyJobs().find((candidate) => candidate.id === job.id);
         if (current?.state !== "running") return;
         const result = await i.runner({ id: job.id, sha: job.sha, command });
+        const afterRun = i.store.verifyJobs().find((candidate) => candidate.id === job.id);
+        if (afterRun?.state !== "running") return;
         const check = {
           command,
           ok: result.ok,
@@ -74,6 +76,8 @@ export function createVerifyQueue(i: {
           durationMs: result.durationMs,
         });
       }
+      if (i.store.verifyJobs().find((candidate) => candidate.id === job.id)?.state !== "running")
+        return;
       i.store.setVerifyJob(
         job.id,
         results.every((result) => result.ok) ? "passed" : "failed",
@@ -104,6 +108,7 @@ export function createVerifyQueue(i: {
     view,
     restore(): void {
       i.store.resetRunningVerifyJobs();
+      void tick();
     },
   };
 }

@@ -4806,7 +4806,7 @@ export class Store {
   }): number {
     this.db
       .prepare(
-        "UPDATE verify_jobs SET state = 'superseded', ended_at = ? WHERE run_id = ? AND state = 'queued' AND sha <> ?",
+        "UPDATE verify_jobs SET state = 'superseded', ended_at = ? WHERE run_id = ? AND state IN ('queued', 'running') AND sha <> ?",
       )
       .run(i.at, i.runId, i.sha);
     this.db

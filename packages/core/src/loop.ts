@@ -901,12 +901,26 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (loop.phase === "parked") return unchanged(loop);
+  if (loop.phase === "ci" && s.verify?.state === "error" && s.verify.sha === headCommit) {
+    return park(
+      loop,
+      "verify",
+      `the verify job for ${sha7(s.verify.sha)} could not run: ${s.verify.reason ?? "unknown error"}`,
+    );
+  }
   if (
     loop.phase === "ci" &&
     s.verify?.state === "failed" &&
     s.verify.sha === headCommit &&
     s.verify.checks.length > 0
   ) {
+    if (fixesSent(s.claimed, s.runId, loop.epoch) + 1 >= reviewRoundLimit(s, loop, s.verify.sha)) {
+      return park(
+        loop,
+        "verify",
+        `the verify queue failed ${sha7(s.verify.sha)} ${fixesSent(s.claimed, s.runId, loop.epoch) + 1} times`,
+      );
+    }
     return {
       loop: {
         ...loop,

@@ -393,14 +393,14 @@ export function nextAttempt(rows: readonly ReviewFact[], epoch: number, sha: str
   return attempts.length === 0 ? 1 : Math.max(...attempts) + 1;
 }
 
-/** The claimed keys that start `fix:<runId>:<epoch>:`. */
+/** The claimed review or verify rework keys for this epoch. */
 export function fixesSent(
   claimed: Readonly<Record<string, number>>,
   runId: string,
   epoch: number,
 ): number {
-  const prefix = `fix:${runId}:${epoch}:`;
-  return Object.keys(claimed).filter((k) => k.startsWith(prefix)).length;
+  const prefixes = [`fix:${runId}:${epoch}:`, `verify-fix:${runId}:${epoch}:`];
+  return Object.keys(claimed).filter((k) => prefixes.some((prefix) => k.startsWith(prefix))).length;
 }
 
 export const readyText = (
