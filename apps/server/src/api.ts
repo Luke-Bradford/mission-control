@@ -875,9 +875,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const hasBody =
       Number(req.headers["content-length"] ?? 0) > 0 ||
       req.headers["transfer-encoding"] !== undefined;
+    const previewActivity = req.routeOptions.url === "/api/previews/:pr/activity";
     if (
       mutating &&
       (req.method !== "DELETE" || hasBody) &&
+      !previewActivity &&
       mediaType(req.headers["content-type"]) !== "application/json"
     ) {
       return reply
@@ -926,7 +928,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         path.startsWith("/api/") &&
         path !== GUARD_CHECK_PATH &&
         !(
-          /^\/api\/previews\/\d+\/activity$/.test(path) &&
+          path === "/api/previews/:pr/activity" &&
           req.headers[PREVIEW_ACTIVITY_HEADER] !== undefined
         ) &&
         !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])

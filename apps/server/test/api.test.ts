@@ -98,7 +98,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
-import { PreviewManager } from "../src/previews.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -8686,10 +8686,14 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     NOW,
   );
   const stop = vi.fn();
+  let activityToken = "";
   const previews = new PreviewManager({
     exists: () => false,
     capacity: () => ({ blocked: false, reason: null }),
-    start: async () => ({ stop, dbPath: join(dir, "preview.sqlite") }),
+    start: async ({ token }) => {
+      activityToken = token;
+      return { stop, dbPath: join(dir, "preview.sqlite") };
+    },
     remove: async () => {},
   });
   const a = buildApp({ config, store, bus, previews, operatorToken: "preview-token" });
@@ -8707,6 +8711,24 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     expect((await a.inject({ method: "GET", url: "/api/previews", headers })).json()).toHaveLength(
       1,
     );
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: activityToken },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await a.inject({
+          method: "POST",
+          url: "/api/previews/41/activity",
+          headers: { [PREVIEW_ACTIVITY_HEADER]: "wrong" },
+        })
+      ).statusCode,
+    ).toBe(404);
     expect(
       (
         await a.inject({

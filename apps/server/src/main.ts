@@ -288,9 +288,11 @@ export async function main(): Promise<void> {
     const token = process.env.MC_PREVIEW_ACTIVITY_TOKEN;
     if (!url || !token) return undefined;
     return () => {
-      void fetch(url, { method: "POST", headers: { [PREVIEW_ACTIVITY_HEADER]: token } }).catch(
-        () => {},
-      );
+      void fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", [PREVIEW_ACTIVITY_HEADER]: token },
+        body: "{}",
+      }).catch(() => {});
     };
   })();
   const previewParentPid = process.env.MC_PREVIEW_PARENT_PID;
