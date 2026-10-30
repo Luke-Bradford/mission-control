@@ -11,6 +11,7 @@ import { cost, elapsed, percent, plural, prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
+import { QaHotspots } from "./QaHotspots.tsx";
 import { QaReadiness } from "./QaReadiness.tsx";
 import "./audit.css";
 
@@ -20,6 +21,7 @@ const RANGE_OPTIONS = RANGES.map((value) => ({ value, label: value }));
 const QA_TABS = [
   { value: "quality", label: "Quality trends" },
   { value: "readiness", label: "PR readiness" },
+  { value: "hotspots", label: "Hotspots" },
 ] as const;
 type QaTab = (typeof QA_TABS)[number]["value"];
 
@@ -41,7 +43,13 @@ export function Audit() {
         <h1 className="toolbar-heading">Audit</h1>
         <Seg label="QA view" options={QA_TABS} value={tab} onChange={setTab} />
       </div>
-      {tab === "quality" ? <AuditDashboard /> : <QaReadiness />}
+      {tab === "quality" ? (
+        <AuditDashboard />
+      ) : tab === "readiness" ? (
+        <QaReadiness />
+      ) : (
+        <QaHotspots />
+      )}
     </section>
   );
 }

@@ -30,7 +30,7 @@ export function MapPage({ repoId }: { repoId: string | null }) {
       ? defaultMapRepo(options, crew, scope.repo ?? "", readKey(MAP_REPO_KEY) ?? "")
       : null;
   useEffect(() => {
-    // keep the deep link's query and hash (`#lens=…&win=…`) across the redirect
+    // keep the deep link's query and hash (`#win=…&play=…`) across the redirect
     if (target)
       navigate(mapPath(target) + window.location.search + window.location.hash, { replace: true });
   }, [target]);

@@ -89,7 +89,7 @@ it("selects and follows a seat from its row, shows its card, and lets go on a se
   expect(card.textContent).toContain("Pick a seat for its card");
 });
 
-it("shows no warnings: no questions, failures, review, tests, CI, findings or conflicts", () => {
+it("shows no warnings: no questions, failures, review, tests, CI or findings, and only the conflict badge", () => {
   // the fixture's seat has a question, a refusal, a review with a finding, tests and CI
   const snapshot: MapSnapshot = {
     ...structuredClone(mapSnapshotFixture),
@@ -106,10 +106,10 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
   };
   const { container } = render(<CrewMapView snapshot={snapshot} />);
   fireEvent.click(screen.getByRole("button", { name: /^GUIDO-1/ }));
-  // the whole page, less the lens tabs (their names are lens names, not warnings)
+  // the whole page, less the key (it names the conflicts the badge counts)
   const pageText = () => {
     const page = container.cloneNode(true) as HTMLElement;
-    page.querySelector(".map-lens-tabs")?.remove();
+    page.querySelector(".map-changes-key")?.remove();
     return page.textContent ?? "";
   };
   const seatCard = pageText();
@@ -126,7 +126,6 @@ it("shows no warnings: no questions, failures, review, tests, CI, findings or co
       /Empty input throws/,
       /tests?:/i,
       /\bCI\b/,
-      /conflict/i,
       /not checked/i,
       /waiting on you/i,
       /stuck/i,

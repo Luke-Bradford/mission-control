@@ -849,3 +849,19 @@
   min-width: 0;
   max-width: 100%;
 }
+
+.repo-ownership {
+  margin-top: 10px;
+}
+
+.repo-ownership summary {
+  cursor: pointer;
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.repo-ownership .map-lens {
+  flex: none;
+  max-height: 420px;
+  margin-top: 8px;
+}
