@@ -264,15 +264,9 @@ describe("Codex session", () => {
         kind: "tool-result",
         toolUseId: "command-approval",
         ok: false,
-        exitCode: null,
       }),
     );
-    expect(events).toContainEqual({
-      kind: "tool-result",
-      toolUseId: "item-1",
-      ok: false,
-      exitCode: null,
-    });
+    expect(events).toContainEqual({ kind: "tool-result", toolUseId: "item-1", ok: false });
     expect(recorded()).toContainEqual({ id: "approval-1", result: { decision: "accept" } });
   });
 
@@ -285,7 +279,12 @@ describe("Codex session", () => {
     session.send(JSON.stringify({ command: "pnpm -s lint", exitCode }));
     await until(() => expect(events.some((e) => e.kind === "tool-result")).toBe(true));
     expect(events.filter((e) => e.kind === "tool-result")).toEqual([
-      { kind: "tool-result", toolUseId: "item-1", ok, exitCode: exitCode ?? null },
+      {
+        kind: "tool-result",
+        toolUseId: "item-1",
+        ok,
+        ...(exitCode === undefined ? {} : { exitCode }),
+      },
     ]);
   });
 

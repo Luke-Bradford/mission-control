@@ -578,7 +578,7 @@ function codexSession(
               kind: "tool-result",
               toolUseId: key,
               ok: item.status === "completed" && item.exitCode === 0,
-              exitCode: typeof item.exitCode === "number" ? item.exitCode : null,
+              ...(typeof item.exitCode === "number" ? { exitCode: item.exitCode } : {}),
             });
           }
         }
