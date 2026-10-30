@@ -605,10 +605,10 @@ describe("FLIGHT's flow queues", () => {
       kind: "machine",
       reason: "disk free is 10.0 GB (below 15 GB)",
       blocks: "5 queued reviews for 2 idle review seats",
+      feedbackLoop: "the hold blocks reviews; held reviews cannot merge",
       blocking: true,
     });
     expect(wakeFacts(result)).toContain("machine");
-    expect(wakeLine(result)).toContain("the hold blocks reviews, and reviews cannot merge");
   });
 
   it("keeps a machine hold's wake fact stable while its reading changes", () => {
@@ -675,7 +675,7 @@ describe("FLIGHT's flow queues", () => {
     });
   });
 
-  it("lists merge waits and quota and stopped-seat holds", () => {
+  it("lists merge waits, including pending CI and conflicts, and quota and stopped-seat holds", () => {
     live("guido-1", "r-guido");
     store.setRunLoop("r-guido", {
       ...NEW_LOOP,
@@ -696,7 +696,16 @@ describe("FLIGHT's flow queues", () => {
               attempt: 1,
               url: null,
             },
+            {
+              name: "build",
+              kind: "check",
+              state: "pending",
+              conclusion: "pending",
+              attempt: 1,
+              url: null,
+            },
           ],
+          mergeable: "CONFLICTING",
         }),
       ],
       T0,
@@ -713,7 +722,12 @@ describe("FLIGHT's flow queues", () => {
 
     const result = flightState({ config, store, busy: [], now: T0 });
 
-    expect(result.mergeQueue).toEqual([{ pr: 7, waitsOn: ["CI: test", "review", "FLIGHT merge"] }]);
+    expect(result.mergeQueue).toEqual([
+      {
+        pr: 7,
+        waitsOn: ["CI: test", "CI pending: build", "merge conflict", "review", "FLIGHT merge"],
+      },
+    ]);
     expect(result.flowHolds).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "quota", reason: "GUIDO-1's 5h quota is 95% (stop 95%)" }),

@@ -745,11 +745,22 @@ export function flightState(i: {
       };
     });
 
+  const mergeFacts = new Map(
+    store
+      .pullRequests(session.repoId)
+      .map((pr) => [pr.number, { checks: pr.checks ?? [], mergeable: pr.mergeable }]),
+  );
   const mergeQueue = prs
     .filter((p) => p.state === "open")
     .map((p) => {
+      const facts = mergeFacts.get(p.pr);
+      const pendingChecks = facts?.checks.filter((check) => check.state === "pending") ?? [];
       const waitsOn = [
         ...(p.failingChecks.length > 0 ? [`CI: ${p.failingChecks.join(", ")}`] : []),
+        ...(pendingChecks.length
+          ? [`CI pending: ${pendingChecks.map((check) => check.name).join(", ")}`]
+          : []),
+        ...(facts?.mergeable === "CONFLICTING" ? ["merge conflict"] : []),
         ...(p.review === null ? ["review"] : []),
         ...(p.review?.blocking
           ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
@@ -829,6 +840,9 @@ export function flightState(i: {
               queuedReviews > 0
                 ? `${queuedReviews} queued review${queuedReviews === 1 ? "" : "s"} for ${idleReviewers} idle review seat${idleReviewers === 1 ? "" : "s"}`
                 : `${eligibleBuilds} eligible ticket${eligibleBuilds === 1 ? "" : "s"} for ${idleBuilds} idle build seat${idleBuilds === 1 ? "" : "s"}`,
+            ...(queuedReviews > 0
+              ? { feedbackLoop: "the hold blocks reviews; held reviews cannot merge" }
+              : {}),
             blocking: queuedReviews > 0 || eligibleBuilds > 0,
           },
         ]

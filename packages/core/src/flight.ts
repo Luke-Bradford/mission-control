@@ -960,6 +960,8 @@ export interface FlightState {
     kind: "machine" | "crew-pause" | "quota" | "seat-stopped";
     reason: string;
     blocks: string;
+    /** The feedback loop this hold creates, when it blocks queued reviews. */
+    feedbackLoop?: string;
     /** True only when this hold currently prevents queued work from moving. */
     blocking: boolean;
   }[];
