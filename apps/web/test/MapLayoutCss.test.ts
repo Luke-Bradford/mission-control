@@ -20,8 +20,12 @@ const contrast = (a: string, b: string): number => {
   const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (light + 0.05) / (dark + 0.05);
 };
+const hudCss = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+/** A palette token's hex: the seats' are the HUD's (hud.css), FLIGHT's tone on the void is the map's. */
 const token = (name: string): string => {
-  const colour = new RegExp(`${name}: (#[0-9a-f]{6})`, "i").exec(css)?.[1];
+  const colour = new RegExp(`${name}: (#[0-9a-f]{6})`, "i").exec(
+    name.startsWith("--seat-") && name !== "--seat-flight" ? hudCss : css,
+  )?.[1];
   if (!colour) throw new Error(`Missing ${name}`);
   return colour;
 };

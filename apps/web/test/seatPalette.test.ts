@@ -28,13 +28,13 @@ describe("one seat palette", () => {
     expect(defining.map((f) => f.slice(SRC.length + 1))).toEqual(["hud.css"]);
   });
 
-  it("keeps each theme's seat hex identical wherever hud.css repeats it", () => {
+  it("gives each seat one hex in every theme", () => {
     const css = readFileSync(join(SRC, "hud.css"), "utf8");
     const byToken = new Map<string, Set<string>>();
     for (const [, n, hex] of css.matchAll(/--seat-([1-7]):\s*(#[0-9a-f]{6})/gi)) {
       byToken.set(`${n}`, (byToken.get(`${n}`) ?? new Set()).add(hex.toLowerCase()));
     }
-    // dark and light: at most two values per seat, never a third copy that drifted
-    for (const hexes of byToken.values()) expect(hexes.size).toBeLessThanOrEqual(2);
+    expect(byToken.size).toBe(7);
+    for (const hexes of byToken.values()) expect(hexes.size).toBe(1);
   });
 });
