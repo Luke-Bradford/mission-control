@@ -2381,6 +2381,10 @@ export function createEngine(deps: EngineDeps): Engine {
 
     onOperatorMessage(runId, by = "CAPCOM", opts) {
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
+      // An operator action is outside the tick that may be awaiting GitHub or git work.
+      // Read fresh PR and note rows rather than inheriting that snapshot.
+      tickPrs = null;
+      tickNotes = null;
       // a pass that throws before deciding leaves this: the error is logged by the chain
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
