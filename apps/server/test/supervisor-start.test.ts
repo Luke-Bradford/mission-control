@@ -692,7 +692,10 @@ describe("startRun", () => {
       const parent = dirname(tmp);
       expect(basename(parent)).toBe(`m${process.getuid?.().toString(36)}`);
       expect(statSync(parent).mode & 0o777).toBe(0o700);
-      expect(settings.sandbox.filesystem.allowRead).toEqual([realpathSync(tmp)]);
+      expect(settings.sandbox.filesystem.allowRead).toEqual([
+        realpathSync(tmp),
+        join(root, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME),
+      ]);
       expect(settings.sandbox.filesystem.denyRead).toContain(realpathSync(parent));
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/tmp");
       expect(settings.sandbox.filesystem.denyRead).not.toContain("/private/tmp");
