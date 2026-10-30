@@ -73,6 +73,7 @@ import {
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
+  prCarries,
   QA_RETENTION_DAYS,
   type QaFindingView,
   type QaReviewRoundView,
@@ -2563,9 +2564,10 @@ export class Store {
         ).map((r) => [r.number, r.read_at]),
       );
       const seen = new Set(prs.map((p) => p.number));
+      const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && at < readAt) del.run(repoId, number);
+        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
       }
       this.writePullRequests(
         repoId,
@@ -2573,6 +2575,21 @@ export class Store {
         readAt,
       );
     });
+  }
+
+  /**
+   * The PRs an open card waits on by name (`After PR N`) or through the issue they carry
+   * (`Depends on`): the sweep keeps them, or the wait would flicker each time it dropped one.
+   */
+  private namedPullRequests(repoId: RepoId): Set<number> {
+    const open = this.board(repoId).filter((c) => !c.closed);
+    const issues = new Set(open.flatMap((c) => c.after?.issues ?? []));
+    const named = new Set(open.flatMap((c) => c.after?.prs ?? []));
+    if (issues.size === 0) return named;
+    for (const p of this.pullRequests(repoId)) {
+      if ([...issues].some((n) => prCarries(p, repoId, n))) named.add(p.number);
+    }
+    return named;
   }
 
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {

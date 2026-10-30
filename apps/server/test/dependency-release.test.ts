@@ -231,6 +231,34 @@ describe("release on merge", () => {
     ]);
   });
 
+  it("keeps a merged PR an open card names through the sweep, so nothing is released again", async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 })], T0);
+    await release(T0);
+    store.sweepPullRequests(REPO, [pr(901)], T0 + 60 * MIN);
+    await release(T0 + 61 * MIN);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 })], T0 + 62 * MIN);
+    await release(T0 + 62 * MIN);
+    expect(moves).toEqual([]);
+    expect(observeWaits(store, REPO, T0 + 62 * MIN).released).toEqual([]);
+  });
+
+  it("keeps the PR that carries an issue an open card depends on through the sweep", () => {
+    store.replaceBoard(REPO, [
+      card(1015, { status: "Done", state: "done", closed: true }),
+      card(51, { status: "Blocked", state: "blocked", after: { issues: [1015], prs: [] } }),
+    ]);
+    store.upsertPullRequests(
+      REPO,
+      [pr(1033, { ticket: "mc#1015", closingIssues: [1015], state: "merged", mergedAt: T0 })],
+      T0,
+    );
+    store.sweepPullRequests(REPO, [pr(901)], T0 + 60 * MIN);
+    expect(store.pullRequests(REPO).map((p) => p.number)).toContain(1033);
+  });
+
   it("leaves an incomplete dependent in Blocked", async () => {
     seed();
     await release(T0);
