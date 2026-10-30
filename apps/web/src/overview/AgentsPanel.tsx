@@ -5,7 +5,6 @@ import {
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
-  type HudState,
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
@@ -27,7 +26,6 @@ import {
   lockSince,
   modelLine,
   type NeedPart,
-  NO_LOOP,
   needLine,
   needsLamp,
   SET_ASIDE_LABEL,
@@ -53,65 +51,21 @@ import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { AgentActivity, AgentCost } from "./AgentActivity.tsx";
 import { activityValues } from "./agentActivity.ts";
-import { LoopStep } from "./LoopStep.tsx";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
 
 const DASH = "—";
-const COLUMNS = ["Agent", "Model", "State", "Work", "Loop", "Tokens · 30 min", "Cost", "Context"];
-const LIVE_LOOP_STATES: readonly HudState[] = ["running", "waiting", "blocked", "parked"];
-
-/** The Loop column describes the run in progress, never a completed seat's last run. */
-function hasLiveLoop(row: Crew["rows"][number] | null, needsYou: boolean): boolean {
-  return Boolean(
-    row?.loop &&
-      hasActiveRun(row) &&
-      row.hudState !== "stopped" &&
-      row.hudState !== "error" &&
-      (LIVE_LOOP_STATES.includes(row.hudState) || needsYou),
-  );
-}
-
-function ModelCell({ row, title }: { row: Crew["rows"][number] | null; title?: string }) {
-  const id = row?.run?.model ?? row?.model ?? DASH;
-  const name = cutText(
-    id.startsWith("gpt-")
-      ? id
-      : id
-          .replace(/[- ]\d{8}$/, "")
-          .replace(/^claude-/, "")
-          .replace(/\[1m\]/i, " 1M")
-          .replace(/(\d)-(\d)/g, "$1.$2")
-          .replace(/-/g, " "),
-    24,
-  );
-  return (
-    <span
-      role="cell"
-      className="ellip xs muted agent-model"
-      title={title ?? (row ? modelLine(row) : undefined)}
-    >
-      <span className="ellip">{name}</span>
-      {row?.cli.version && (
-        <span className="agent-cli">{` · v${row.cli.version.replace(/^v/, "")}`}</span>
-      )}
-      {row?.cli.effort && (
-        <span className="agent-effort">
-          {" "}
-          · {row.cli.effort === "medium" ? "med" : row.cli.effort}
-        </span>
-      )}
-    </span>
-  );
-}
-
+const COLUMNS = ["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"];
 function WorkCell({
   row,
   doing,
   note,
+  actions,
 }: {
   row: Crew["rows"][number] | null;
   doing: string;
   note?: ReactNode;
+  /** A row action that used to sit in the Loop column (the review-park waiver). */
+  actions?: ReactNode;
 }) {
   const prs = useReviewPrs(row ?? undefined);
   const prNumber = row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
@@ -128,6 +82,7 @@ function WorkCell({
             {doing || DASH}
           </span>
         )}
+        {actions}
       </span>
     );
   }
@@ -166,6 +121,7 @@ function WorkCell({
           {doing || DASH}
         </span>
       )}
+      {actions}
     </span>
   );
 }
@@ -260,7 +216,7 @@ function FlightRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={row ? modelLine(row) : undefined}>
         <button
           type="button"
           className="rowlink"
@@ -279,15 +235,11 @@ function FlightRow({
           head agent
         </a>
       </span>
-      <ModelCell row={row} />
       <span role="cell" className={row ? "state-cell" : undefined} title={status?.reason ?? label}>
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
             <span>{label}</span>
           </Pill>
-        )}
-        {row && row.stateSince > 0 && (
-          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
         )}
       </span>
       <WorkCell
@@ -299,24 +251,13 @@ function FlightRow({
           ) : undefined
         }
       />
-      <span role="cell" className="min0 loopstep" title={sessionTurns}>
-        {row?.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            hudState={row.hudState}
-            wait={waitText(row.loop, "FLIGHT", lockSince(lock, row.run?.id), now)}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-          />
-        ) : (
-          <span title={sessionTurns}>{DASH}</span>
-        )}
-      </span>
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span role="cell">{DASH}</span>}
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={row ? contextPct(row) : null} />
+      </span>
+      <span role="cell" className="num xs" title={sessionTurns}>
+        {row && row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
       </span>
     </div>
   );
@@ -454,7 +395,8 @@ function AgentRow({
   const statusTitle = row.crewPause
     ? status.reason
     : lockSince(lock, row.run?.id) !== null
-      ? "Waiting on test lock"
+      ? (row.loop && waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)) ||
+        "Waiting on test lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Crew is paused"
         : (status.reason ?? statusLabel);
@@ -487,7 +429,7 @@ function AgentRow({
         if (!(e.target as Element).closest("a, button")) go();
       }}
     >
-      <span role="cell" className="agent-identity">
+      <span role="cell" className="agent-identity" title={identityTitle}>
         <a
           className="rowlink"
           title={callSign(row)}
@@ -505,14 +447,10 @@ function AgentRow({
             : row.loopKind}
         </span>
       </span>
-      <ModelCell row={row} title={identityTitle} />
       <span role="cell" className="state-cell" title={statusTitle}>
         <Pill tone={status.tone}>
           <span>{statusLabel}</span>
         </Pill>
-        {row.stateSince > 0 && (
-          <span className="xs muted block">{elapsed(now - row.stateSince)}</span>
-        )}
       </span>
       <WorkCell
         row={row}
@@ -520,28 +458,15 @@ function AgentRow({
         note={
           needs.length ? <AgentNeeds row={row} items={items} now={now} lock={lock} /> : undefined
         }
+        actions={<ReviewParkSeatActions row={row} />}
       />
-      <span role="cell" className="min0 loopstep">
-        {row.loop && hasLiveLoop(row, needs.length > 0) ? (
-          <LoopStep
-            compact
-            loop={row.loop}
-            live={row.run?.status === "running" ? row.digest?.liveTool : null}
-            now={now}
-            hudState={row.hudState}
-            wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
-          />
-        ) : (
-          <span className="xs fg2" title={NO_LOOP}>
-            {DASH}
-          </span>
-        )}
-        <ReviewParkSeatActions row={row} />
-      </span>
       <AgentActivity row={row} now={now} max={max} />
       <AgentCost row={row} />
       <span role="cell" title="how full this agent's context window is">
         <Meter label="ctx" pct={contextPct(row)} />
+      </span>
+      <span role="cell" className="num xs">
+        {row.stateSince > 0 ? elapsed(now - row.stateSince) : DASH}
       </span>
     </div>
   );
@@ -553,6 +478,7 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
   const aside = (row.asideRuns ?? [])
     .filter((run) => run.loop.phase === "parked")
     .map((run) => ({ id: run.runId }));
+  if (current.length + aside.length === 0) return null;
   return (
     <span className="acts">
       {[...current, ...aside].map(({ id }) => (
@@ -636,12 +562,7 @@ export function AgentsPanel() {
         <div className="trow head" role="row">
           {COLUMNS.map((label) => (
             // biome-ignore lint/a11y/useFocusableInteractive: these columns are not sortable
-            <span
-              role="columnheader"
-              key={label}
-              title={label}
-              className={label === "Loop" ? "loopstep" : undefined}
-            >
+            <span role="columnheader" key={label} title={label}>
               {label}
             </span>
           ))}

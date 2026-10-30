@@ -14,7 +14,7 @@ it("bounds the Overview rows and lets panel bodies scroll internally", () => {
   expect(css).toMatch(/\.panel > \.pb\.scroll \{\s*flex: 1 1 auto/);
 });
 
-it("keeps eight compact columns with needs on the second Work line", () => {
+it("keeps seven compact columns with needs on the second Work line", () => {
   expect(css).toMatch(
     /#agentsList \.trow \{[^}]*padding: var\(--sp-1\) var\(--sp-2\);[^}]*grid-template-rows: minmax\(0, 1fr\)/,
   );
@@ -28,7 +28,7 @@ it("keeps eight compact columns with needs on the second Work line", () => {
 
 it("gives the Work track the free width and clips its free text", () => {
   expect(css).toMatch(
-    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 120px 118px minmax\(220px, 1fr\) 96px 128px 56px 64px/,
+    /#agentsList \.trow \{[^}]*grid-template-columns: 150px 118px minmax\(220px, 1fr\) 128px 56px 64px 64px/,
   );
   expect(css).toMatch(/#agentsList \.work-cell \{[^}]*overflow: hidden/);
 });

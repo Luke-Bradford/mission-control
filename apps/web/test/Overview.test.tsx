@@ -245,7 +245,7 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
-  it("keeps quota in Systems and exposes the eight Crew columns", async () => {
+  it("keeps quota in Systems and exposes the seven Crew columns", async () => {
     stub({
       rows: [crewRow({ accountId: "codex-main" })],
       limits: [limit7d({ accountId: "codex-main", used: 69 })],
@@ -259,7 +259,7 @@ describe("Agents panel", () => {
       [...container.querySelectorAll("#agentsList [role=columnheader]")].map(
         (cell) => cell.textContent,
       ),
-    ).toEqual(["Agent", "Model", "State", "Work", "Loop", "Tokens · 30 min", "Cost", "Context"]);
+    ).toEqual(["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"]);
   });
 
   it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
@@ -347,7 +347,7 @@ describe("Agents panel", () => {
     },
   });
 
-  it("keeps FLIGHT's session turns in the loop tooltip", async () => {
+  it("keeps FLIGHT's session turns in the In state tooltip", async () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [crewRow({ id: "flight-1", hudState: "error" })],
@@ -368,11 +368,9 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     const flight = container.querySelector(".trow.flight") as HTMLElement;
     await waitFor(() =>
-      expect(flight.querySelector(".loopstep")?.getAttribute("title")).toBe(
-        "Turns this session: 4",
-      ),
+      expect(flight.lastElementChild?.getAttribute("title")).toBe("Turns this session: 4"),
     );
-    expect(flight.querySelector(".loopstep")?.getAttribute("title")).toBe("Turns this session: 4");
+    expect(flight.lastElementChild?.getAttribute("title")).toBe("Turns this session: 4");
     expect(within(flight).getByText("Error", { selector: ".pill > span" })).toBeTruthy();
   });
 
@@ -485,88 +483,15 @@ describe("Agents panel", () => {
     prNumber,
     parked: phase === "parked" ? text : null,
   });
-  /** The Loop step label, whose `<b>` splits its text, found by its whole text content. */
-  const stepLabel = (text: string) =>
-    screen.findByText(
-      (_, el) =>
-        el?.matches(".loopstep .ellip") === true &&
-        el.textContent === text.split(" › ").at(-1)?.split(" · try")[0],
-    );
-  const bar = (row: HTMLElement | undefined) =>
-    [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
-
-  it("the Overview bar has five phases while the label keeps the run's profile step", async () => {
-    const loop: CrewLoop = {
-      ...loopOf("ci", "CI is running"),
-      profile: "feature",
-      step: "verify",
-      steps: DEFAULT_PROFILES.find((p) => p.name === "feature")?.steps,
-      planned: true,
-    };
-    stub({ rows: [crewRow({ loop })] });
-    const { container } = render(<Overview />);
-    await stepLabel("feature › verify");
-    const row = agentRows(container)[0];
-    expect(bar(row)).toEqual(["d", "d", "c", "", ""]);
-    expect(row?.querySelector(".stepbar")?.getAttribute("title")).toBe(
-      "plan → Working → CI → In review → Done",
-    );
-  });
-
-  it("the Loop step column shows the loop type, step and a step bar; a dash without a loop", async () => {
+  it("the roster has no Loop column: a seat's loop reads in its Work and State cells", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);
     stub({ rows: [crewRow({ loop }), crewRow({ id: "other", index: 1, loop: null })] });
     const { container } = render(<Overview />);
     await screen.findByText("other");
-    const [a, b] = agentRows(container);
-    const label = a?.querySelector(".loopstep .ellip") as HTMLElement;
-    expect(label.textContent).toBe("In review");
-    expect(label.querySelector("b")?.textContent).toBe("In review");
-    expect(label.getAttribute("title")).toBe("build › In review · In review · PR #9");
-    expect(a?.querySelector(".loopstep .stepbar")?.getAttribute("title")).toBe(
-      "plan → Working → CI → In review → Done",
-    );
-    expect(bar(a)).toEqual(["", "d", "d", "c", ""]);
-    expect(b?.querySelector(".loopstep")?.textContent).toBe("—");
-  });
-
-  it("an idle seat waiting in CI keeps the last loop out of the Loop column", async () => {
-    const loop = loopOf("ci", "CI on 08a7cfc");
-    stub({ rows: [crewRow({ loop, hudState: "idle" })] });
-    const { container } = render(<Overview />);
-    await waitFor(() => expect(agentRows(container)).toHaveLength(1));
-    expect(agentRows(container)[0]?.querySelector(".loopstep")?.textContent).toBe("—");
-  });
-
-  it("a parked loop holds the whole bar and reads Blocked, with the loop text in the title", async () => {
-    const text = "Blocked: CI failed 3 times; last on 08a7cfc";
-    stub({ rows: [crewRow({ loop: loopOf("parked", text), hudState: "parked" })] });
-    const { container } = render(<Overview />);
-    await stepLabel("build › Blocked");
-    const step = agentRows(container)[0] as HTMLElement;
-    expect(bar(step)).toEqual(["w", "w", "w", "w", "w"]);
-    expect(step.querySelector(".loopstep .ellip")?.getAttribute("title")).toBe(
-      `build › Blocked · ${text}`,
-    );
-    expect(step.querySelector(".loopstep .crit-t")).toBeNull();
-  });
-
-  it("a finished loop is not shown as current work", async () => {
-    stub({ rows: [crewRow({ loop: loopOf("done", "Done · PR #205", 205), hudState: "idle" })] });
-    const { container } = render(<Overview />);
-    await waitFor(() => expect(agentRows(container)).toHaveLength(1));
-    expect(agentRows(container)[0]?.querySelector(".loopstep")?.textContent).toBe("—");
-  });
-
-  it("a stalled seat does not present its last loop as current", async () => {
-    stub({
-      rows: [
-        crewRow({ loop: loopOf("working", "Working on mission-control#198"), hudState: "stalled" }),
-      ],
-    });
-    const { container } = render(<Overview />);
-    await waitFor(() => expect(agentRows(container)).toHaveLength(1));
-    expect(agentRows(container)[0]?.querySelector(".loopstep")?.textContent).toBe("—");
+    expect(container.querySelector("#agentsList .loopstep, #agentsList .stepbar")).toBeNull();
+    expect(
+      [...container.querySelectorAll("#agentsList [role=columnheader]")].map((h) => h.textContent),
+    ).not.toContain("Loop");
   });
 
   // The ticket ref the set-aside run carries: the repo, a hash sign, the number.
@@ -590,11 +515,10 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await stepLabel("build › Working");
+    await screen.findByText("guido-1");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(":scope > .loopstep .loopwait")).toBeNull();
     expect(row.querySelector(".asideline")).toBeNull();
-    const model = row.querySelector(".agent-model") as HTMLElement;
+    const model = row.querySelector(".agent-identity") as HTMLElement;
     expect(model.textContent).not.toContain("set aside");
     for (const text of [
       "Set aside",
@@ -627,42 +551,9 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".loopstep")?.textContent).toBe("—");
-    expect(row.querySelector(".agent-model")?.getAttribute("title")).toContain(
+    expect(row.querySelector(".agent-identity")?.getAttribute("title")).toContain(
       "waiting on GUIDO-1 for rework",
     );
-  });
-
-  it("the Loop step shows the try from the second one on", async () => {
-    stub({
-      rows: [
-        crewRow({
-          loop: { ...loopOf("ci", "CI on 08a7cfc"), tries: { n: 2, max: 3 } },
-          hudState: "waiting",
-        }),
-        crewRow({
-          id: "other",
-          index: 1,
-          loop: { ...loopOf("ci", "CI on 1a2b3c4"), tries: { n: 1, max: 3 } },
-          hudState: "waiting",
-        }),
-      ],
-    });
-    render(<Overview />);
-    expect(await screen.findAllByText("CI", { selector: ".loopstep b" })).toHaveLength(2);
-    expect(screen.getByTitle(/try 2 of 3/)).toBeTruthy();
-  });
-
-  it("the Loop step names the run's template profile, else the build loop", async () => {
-    stub({
-      rows: [
-        crewRow({
-          loop: { ...loopOf("ci", "CI on 08a7cfc"), profile: "feature", step: "verify" },
-        }),
-      ],
-    });
-    render(<Overview />);
-    await stepLabel("feature › verify");
   });
 
   it("a run in line for the test lock says how long, in amber", async () => {
@@ -876,14 +767,12 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
     const [seat, loop] = agentRows(container);
-    expect(seat?.querySelector<HTMLElement>(".agent-model")?.title).toBe(
+    expect(seat?.querySelector<HTMLElement>(".agent-identity")?.title).toBe(
       "claude-opus-4-1 · high · CLI 2.1.302",
     );
-    expect(
-      within(loop as HTMLElement)
-        .getByText("opus 4.1")
-        .closest<HTMLElement>(".agent-model")?.title,
-    ).toBe("claude-opus-4-1 · default");
+    expect(loop?.querySelector<HTMLElement>(".agent-identity")?.title).toBe(
+      "claude-opus-4-1 · default",
+    );
   });
 
   it.each([
@@ -993,7 +882,7 @@ describe("Agents panel", () => {
     expect(row.querySelector(".spark")).toBeTruthy();
   });
 
-  it("a loop cell stays one line with live tool detail in the row tooltip", async () => {
+  it("a running seat keeps live tool detail in the row tooltip, not on a line of its own", async () => {
     const detail = "x".repeat(60);
     const row = crewRow({
       loop: { phase: "working", text: "Implement cache", prNumber: null, parked: null },
@@ -1024,9 +913,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Quote cache");
     const agent = agentRows(container)[0] as HTMLElement;
-    const cell = agent.querySelector(".loopstep") as HTMLElement;
-    expect(cell.textContent).toBe("Working");
-    expect(cell.querySelector(".process-line")).toBeNull();
+    expect(agent.querySelector(".process-line")).toBeNull();
     expect(agent.title).toBe(`Bash 1:05 · ${detail}`);
     expect(agent.querySelector(".doing")).toBeNull();
   });
@@ -2604,20 +2491,33 @@ describe("Activity panel", () => {
     expect(within(act_).getByRole("button", { name: "Resume" })).toBeTruthy();
   });
 
-  it("a long Comms message is one line of 120 characters with a link to read the rest", async () => {
+  it("a long Comms message is one line of 120 characters with an always-visible link to its conversation", async () => {
+    const long = `${"word ".repeat(80)}ZZEND`;
     stub({
-      rows: [...rows, seatRow({ index: 2 })],
+      rows: [...rows, seatRow({ index: 2 }), seatRow({ id: "inco-1", index: 3 })],
       activity: [
-        comms({ at: NOW - MIN, who: "MC", to: "guido-1", text: `${"word ".repeat(80)}ZZEND` }),
+        comms({ at: NOW - MIN, who: "MC", to: "guido-1", text: long }),
+        comms({ at: NOW - 2 * MIN, who: "guido-1", to: "inco-1", text: long }),
+        comms({ at: NOW - 3 * MIN, who: "MC", to: "CAPCOM", text: long }),
       ],
     });
     const { container } = render(<Overview />);
     const act_ = container.querySelector("#actP") as HTMLElement;
     fireEvent.click(await within(act_).findByRole("button", { name: "Messages" }));
-    const row = act_.querySelector(".arow.k-comms") as HTMLElement;
-    expect(row.textContent).not.toContain("ZZEND");
-    expect(row.textContent).toContain("…");
-    expect(within(row).getByRole("link", { name: "read ›" }).getAttribute("href")).toBe("/comms");
+    const rowsOut = [...act_.querySelectorAll<HTMLElement>(".arow.k-comms")];
+    expect(rowsOut).toHaveLength(3);
+    for (const row of rowsOut) {
+      expect(row.textContent).not.toContain("ZZEND");
+      expect(row.textContent).toContain("…");
+      // one line, not behind a Show more toggle, and the link is reachable by keyboard
+      expect(row.querySelector(".expandable")).toBeNull();
+      const link = within(row).getByRole("link", { name: "read ›" });
+      expect(link.getAttribute("tabindex")).toBeNull();
+      expect(row.querySelector(".txt")?.contains(link)).toBe(false);
+    }
+    expect(
+      rowsOut.map((row) => within(row).getByRole("link", { name: "read ›" }).getAttribute("href")),
+    ).toEqual(["/comms/agents/guido-1", "/comms/agents/guido-1", "/comms"]);
   });
 
   it("a comms row between agents of another session is hidden", async () => {
@@ -2762,7 +2662,7 @@ describe("Overview: what a seat is doing", () => {
     );
     expect(row.textContent).not.toContain("Quote cache");
     expect(row.querySelector(".doing")).toBeNull();
-    expect(row.querySelector(".loopstep")?.textContent).toBe("—");
+    expect(row.querySelector(".loopstep")).toBeNull();
   });
 
   it("a seat in CI says Watching and the loop's text", async () => {
@@ -2771,7 +2671,7 @@ describe("Overview: what a seat is doing", () => {
     await screen.findByText("Watching");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".pill")?.textContent).toBe("Watching");
-    expect(row.querySelector(".state-cell")?.textContent).toContain("25m");
+    expect(row.lastElementChild?.textContent).toContain("25m");
     expect(row.title).toBe("CI on 08a7cfc");
     expect(row.textContent).toContain("Quote cache");
   });

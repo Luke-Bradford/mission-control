@@ -65,7 +65,20 @@ const api = {
   "/api/limits": limits,
   "/api/limits/github": { queries: {}, pollCost: null },
   "/api/health": [],
-  "/api/activity": [],
+  "/api/activity": [
+    {
+      at: NOW - 60_000,
+      kind: "comms",
+      who: "MC",
+      to: "seat-1",
+      text: `${"a long message ".repeat(30)}end`,
+      ref: null,
+      url: null,
+      status: null,
+      prs: [],
+      summary: null,
+    },
+  ],
   "/api/settings/away": { on: false, until: "", may: {} },
   "/api/config": { ...CONFIG, accounts },
   "/api/test-lock": { holder: null, waiting: [] },
@@ -123,6 +136,37 @@ describeRendered("Overview v2 layout in a browser", () => {
         expect(Math.abs(log.y - quota.y)).toBeLessThan(2);
         expect(log.x).toBeLessThan(machine.x);
         expect(machine.x).toBeLessThan(quota.x);
+
+        // A long Comms message is one line and its "read" link stays visible and reachable.
+        await page.evaluate(() => {
+          for (const b of document.querySelectorAll<HTMLElement>("#actP button")) {
+            if (b.textContent === "Messages") b.click();
+          }
+        }, undefined);
+        await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 100)), undefined);
+        const row = await page.box("#actList .arow.k-comms");
+        expect(row.height).toBeLessThan(40);
+        const read = await page.box("#actList .arow.k-comms .log-read");
+        expect(read.height).toBeGreaterThanOrEqual(24);
+        expect(read.x + read.width).toBeLessThanOrEqual(row.x + row.width + 1);
+        expect(
+          await page.evaluate(() => {
+            const link = document.querySelector<HTMLElement>("#actList .log-read");
+            link?.focus();
+            return document.activeElement === link;
+          }, undefined),
+        ).toBe(true);
+
+        // The roster has the seven approved columns.
+        expect(
+          await page.evaluate(
+            () =>
+              [...document.querySelectorAll("#agentsList [role=columnheader]")].map(
+                (h) => h.textContent,
+              ),
+            undefined,
+          ),
+        ).toEqual(["Agent", "State", "Work", "Tokens · 30 min", "Cost", "Context", "In state"]);
 
         // The page stays on one screen.
         const bottom = await page.evaluate(

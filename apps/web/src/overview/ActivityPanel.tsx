@@ -375,7 +375,9 @@ export function ActivityPanel() {
         {keyed.map(({ e, key }) => {
           if (isComms(e)) {
             const preview = logLine(e.text, "comms");
-            const readPath = agents.has(e.who) ? commsAgentPath(e.who) : commsFlightPath();
+            // The conversation is with the crew agent at either end; FLIGHT's thread otherwise.
+            const partner = [e.who, e.to].find((id) => agents.has(id));
+            const readPath = partner ? commsAgentPath(partner) : commsFlightPath();
             return (
               <div key={key} className="arow k-comms">
                 <span className="t num" title={tz ? rel(e.at, now, tz) : undefined}>
@@ -385,27 +387,22 @@ export function ActivityPanel() {
                 <span className="log-who ellip">
                   <CommsEnd id={e.who} />
                 </span>
-                <Expandable lines={1}>
-                  <span className="txt">
-                    <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
-                    <MentionText text={preview.text} />
-                    {preview.cut && (
-                      <>
-                        {" "}
-                        <a
-                          className="log-read"
-                          href={readPath}
-                          onClick={(event) => followLink(event, readPath)}
-                        >
-                          read ›
-                        </a>
-                      </>
-                    )}
-                  </span>
-                </Expandable>
-                {e.ref ? (
+                <span className="txt log-line">
+                  <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                  <MentionText text={preview.text} />
+                </span>
+                {e.ref || preview.cut ? (
                   <span className="arefs">
-                    <TicketRef ticket={e.ref} url={null} />
+                    {e.ref && <TicketRef ticket={e.ref} url={null} />}
+                    {preview.cut && (
+                      <a
+                        className="log-read"
+                        href={readPath}
+                        onClick={(event) => followLink(event, readPath)}
+                      >
+                        read ›
+                      </a>
+                    )}
                   </span>
                 ) : (
                   <span />

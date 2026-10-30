@@ -61,9 +61,11 @@ describe("Pipeline", () => {
     render(<PipelinePanel />);
 
     const readyLane = await screen.findByRole("region", { name: "Ready" });
-    // Three cards show; the rest expand in place, then the Board link counts what the hub did not send.
+    // Three cards show and the Board link counts every other ticket; expanding shows the loaded ones in place.
     expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(3);
-    expect(within(readyLane).queryByRole("link", { name: /open Board/ })).toBeNull();
+    expect(
+      within(readyLane).getByRole("link", { name: "+7 · open Board ›" }).getAttribute("href"),
+    ).toBe("/board?stage=ready");
     fireEvent.click(within(readyLane).getByRole("button", { name: "Show more, Ready" }));
     expect(within(readyLane).getAllByRole("link")).toHaveLength(10);
     expect(

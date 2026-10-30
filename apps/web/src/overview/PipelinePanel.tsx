@@ -71,7 +71,8 @@ export function PipelinePanel() {
           const loaded = stageCards.slice(0, VISIBLE_CARDS);
           const open = expanded.has(key);
           const cards = open ? loaded : loaded.slice(0, COLLAPSED_CARDS);
-          const more = count - loaded.length;
+          // Everything not drawn is counted, hidden loaded cards included.
+          const more = count - cards.length;
           const stageHref = `/board?stage=${key}`;
           // A lane with nothing in it collapses to its header instead of holding a column's width.
           const collapsed = data !== undefined && count === 0;
@@ -134,7 +135,7 @@ export function PipelinePanel() {
                   }
                 />
               )}
-              {more > 0 && (open || loaded.length <= COLLAPSED_CARDS) && (
+              {more > 0 && (
                 <a
                   className="pipeline-more mono xs"
                   href={stageHref}

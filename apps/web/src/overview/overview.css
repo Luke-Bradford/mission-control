@@ -549,7 +549,7 @@
 
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: 150px 120px 118px minmax(220px, 1fr) 96px 128px 56px 64px;
+  grid-template-columns: 150px 118px minmax(220px, 1fr) 128px 56px 64px 64px;
   gap: 0 var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
   grid-template-rows: minmax(0, 1fr);
@@ -675,7 +675,7 @@
 
 @container agents (width < 1000px) {
   #agentsList .trow {
-    grid-template-columns: 150px 120px 118px minmax(180px, 1fr) 96px 50px 56px 64px;
+    grid-template-columns: 150px 118px minmax(180px, 1fr) 50px 56px 64px 64px;
   }
   #agentsList .agent-activity .spark,
   #agentsList .activity-live {
@@ -691,7 +691,7 @@
 
 @container agents (width < 900px) {
   #agentsList .trow {
-    grid-template-columns: 100px 90px 80px minmax(140px, 1fr) 64px 50px 44px 46px;
+    grid-template-columns: 100px 80px minmax(140px, 1fr) 50px 44px 46px 46px;
     column-gap: var(--sp-1);
   }
 }
@@ -976,6 +976,21 @@
 .arow .txt {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* A Comms preview is one line; its read link sits in the row's action column. */
+.arow .log-line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.arow .log-read {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  white-space: nowrap;
 }
 
 @media (min-width: 761px) {
