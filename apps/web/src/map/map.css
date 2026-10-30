@@ -520,13 +520,13 @@ button.map-timeline-tick {
   background: var(--accent-soft);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.map-seat:hover .map-seat-name,
-.map-seat[aria-pressed="true"] .map-seat-name {
-  color: var(--fg);
-}
 .map-seat-name {
   color: var(--light);
   font-weight: 500;
+}
+.map-seat:hover .map-seat-name,
+.map-seat[aria-pressed="true"] .map-seat-name {
+  color: var(--fg);
 }
 .map-seat-on {
   color: var(--fg-2);
