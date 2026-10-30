@@ -133,7 +133,7 @@ export function kTokens(n: number): string {
 
 /** `1 file` / `3 files`: the count with its noun, `-s` unless `many` is given (`fix`, `fixes`). */
 export const plural = (n: number, one: string, many = `${one}s`): string =>
-  `${n} ${n === 1 ? one : many}`;
+  `${n.toLocaleString("en-GB")} ${n === 1 ? one : many}`;
 
 /** The short form of a commit sha, as the HUD shows it everywhere. */
 export const shortSha = (sha: string): string => sha.slice(0, 7);

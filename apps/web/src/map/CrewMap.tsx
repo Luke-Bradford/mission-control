@@ -435,7 +435,7 @@ function ChangesKey({ tree }: { tree: MapSnapshot["tree"] }) {
         <i className="map-key-read" aria-hidden="true" /> read only
       </span>
       <span className="map-key-item">click a file for its seats</span>
-      <span className="map-key-item">{tree.length.toLocaleString()} files</span>
+      <span className="map-key-item">{plural(tree.length, "file")}</span>
     </div>
   );
 }

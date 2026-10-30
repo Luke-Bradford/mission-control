@@ -185,7 +185,7 @@ export function Kpis({
           label: "Working · now · filtered",
           hint: filteredHint,
           value: num((x) => String(x.working)),
-          detail: `of ${num((x) => String(x.agents))} agents`,
+          detail: d ? `of ${plural(d.agents, "agent")}` : `of ${DASH} agents`,
           live,
         }
       : registry("agentsWorking", r.agentsWorking?.detail ?? ""),

@@ -1271,3 +1271,13 @@ it("moves, resizes and clears the timeline window with the arrow keys", () => {
     reset();
   }
 });
+
+it("says 1 file for a one-file repository and N files otherwise", () => {
+  const one = structuredClone(mapSnapshotFixture);
+  one.tree = one.tree.slice(0, 1);
+  const { unmount } = render(<CrewMapView snapshot={one} />);
+  expect(screen.getAllByText("1 file").length).toBeGreaterThan(0);
+  unmount();
+  render(<CrewMapView snapshot={structuredClone(mapSnapshotFixture)} />);
+  expect(screen.getAllByText(`${mapSnapshotFixture.tree.length} files`).length).toBeGreaterThan(0);
+});

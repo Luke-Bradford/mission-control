@@ -203,7 +203,7 @@ function PrSizes({ sizes }: { sizes: Audit["prSizes"] }) {
                 />
               </span>
               <span>
-                {changes(s).toLocaleString()} lines
+                {plural(changes(s), "line")}
                 {changes(s) >= AUDIT_PR_OUTLIER_LINES ? " · outlier" : ""}
               </span>
             </div>

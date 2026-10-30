@@ -122,7 +122,7 @@ function ReadinessCard({
   const size =
     pr.additions == null || pr.deletions == null
       ? "Size not captured"
-      : `${pr.additions + pr.deletions} lines · ${pr.changedFiles == null ? "— files" : plural(pr.changedFiles, "file")}`;
+      : `${plural(pr.additions + pr.deletions, "line")} · ${pr.changedFiles == null ? "— files" : plural(pr.changedFiles, "file")}`;
   const diffUrl = githubHref(pr.url) ? githubHref(`${pr.url}/files`) : null;
   return (
     <Panel

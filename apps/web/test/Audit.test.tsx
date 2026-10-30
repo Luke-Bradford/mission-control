@@ -394,3 +394,21 @@ it("does not present stale, observed-loop, or FLIGHT watch runs as improvements"
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();
 });
+
+it("sizes a one-line PR as 1 line", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      prSizes: {
+        prs: [
+          { ...AUDIT.prSizes.prs[0], repoId: "small-repo", number: 4, additions: 1, deletions: 0 },
+        ],
+        outliers: [],
+      },
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+  expect(await screen.findByText(/^1 line$/)).toBeTruthy();
+});

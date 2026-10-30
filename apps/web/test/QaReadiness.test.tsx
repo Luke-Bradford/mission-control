@@ -203,6 +203,24 @@ describe("QaReadiness", () => {
     expect(screen.getByText("Held: 1 open important finding")).toBeTruthy();
   });
 
+  it.each([
+    [1, 0, 1, "1 line · 1 file"],
+    [60, 40, 2, "100 lines · 2 files"],
+  ])(
+    "sizes a PR in the right singular or plural: +%s -%s over %s files",
+    async (additions, deletions, changedFiles, text) => {
+      hub.clear();
+      stubFetch({
+        "/api/repos": [{ id: "mission-control", name: "Mission Control" }],
+        "/api/repos/mission-control/prs": [pr({ additions, deletions, changedFiles })],
+        "/api/qa/ci-runs?days=90": { runs: [] },
+        "/api/qa/findings?days=90": { findings: [] },
+      });
+      render(<QaReadiness />);
+      expect(await screen.findByText(text)).toBeTruthy();
+    },
+  );
+
   it("uses explicit error and empty states, and fails closed without findings", async () => {
     hub.clear();
     stubFetch({
