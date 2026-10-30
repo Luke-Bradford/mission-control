@@ -1410,6 +1410,7 @@ const API_ROUTES: [string, string, object?][] = [
   ],
   ["GET", "/api/test-lock"],
   ["GET", "/api/test-lock/history"],
+  ["GET", "/api/verify-queue"],
   ["GET", "/api/guard/hits?days=7"],
   ["GET", "/api/hud-screenshots/:id"],
   ["GET", "/api/qa/ci-runs"],
