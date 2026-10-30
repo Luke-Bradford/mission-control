@@ -5508,6 +5508,25 @@ describe("SSE stream", () => {
     expect(counts).toEqual([1, 2, 1, 0]);
   });
 
+  it("stops map polling after the last map stream closes", async () => {
+    vi.useFakeTimers();
+    await app.close();
+    const poll = vi.spyOn(CallRing.prototype, "poll");
+    app = buildApp({ config, store, bus });
+    try {
+      const client = await open("/api/stream?map=shop-app");
+      await client.until(": connected");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+
+      client.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
     async (vendor) => {
