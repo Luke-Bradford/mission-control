@@ -771,11 +771,13 @@ describe("update", () => {
     upstreamCommit("b.txt");
     await updater().u.update();
     expect(await updater().u.log()).toBe(readFileSync(logPath, "utf8"));
-    writeFileSync(logPath, `${"x".repeat(UPDATE_LOG_SHOWN)}the decisive line\n`);
-    const tail = await updater().u.log();
-    expect(tail?.startsWith("…\n")).toBe(true);
-    expect(tail?.endsWith("the decisive line\n")).toBe(true);
-    expect(tail?.length).toBe(2 + UPDATE_LOG_SHOWN);
+    writeFileSync(logPath, `${"x".repeat(UPDATE_LOG_SHOWN)}\nthe decisive line\n`);
+    expect(await updater().u.log()).toBe("…\nthe decisive line\n");
+  });
+
+  it("redacts credentials and drops terminal escapes from the log it shows", async () => {
+    writeFileSync(logPath, `\x1b[31mERR\x1b[39m token ghp_${"a".repeat(36)}\n`);
+    expect(await updater().u.log()).toBe("ERR token [redacted]\n");
   });
 
   it("refuses a second update while one is running", async () => {

@@ -6704,6 +6704,9 @@ describe("update routes", () => {
     const u = await a.inject({ method: "POST", url: "/api/update", headers: json, payload: {} });
     expect(u.statusCode).toBe(409);
     expect(u.json()).toEqual({ error: "updates are not available on this server" });
+    expect((await a.inject({ method: "GET", url: "/api/update/log" })).json()).toEqual({
+      text: null,
+    });
     const c = await a.inject({
       method: "POST",
       url: "/api/version/check",

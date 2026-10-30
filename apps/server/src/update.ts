@@ -33,6 +33,7 @@ import {
   type VersionInfo,
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
+import { cleanText } from "./clean.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
 import { gitEnv } from "./files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
@@ -335,7 +336,10 @@ export interface Updater {
   changes(): Promise<HeldRange | null>;
   /** Schedules the exit; the route calls it once the successful update flow has completed. */
   restart(): void;
-  /** update.log, cut to its last `UPDATE_LOG_SHOWN` characters after "…"; null before any update. */
+  /**
+   * update.log made safe to show (`cleanText`); a longer one keeps the lines in its last
+   * `UPDATE_LOG_SHOWN` characters, after "…". null before any update.
+   */
   log(): Promise<string | null>;
 }
 
@@ -890,7 +894,10 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       } catch {
         return null;
       }
-      return text.length > UPDATE_LOG_SHOWN ? `…\n${text.slice(-UPDATE_LOG_SHOWN)}` : text;
+      if (text.length <= UPDATE_LOG_SHOWN) return cleanText(text, UPDATE_LOG_SHOWN);
+      // from the first whole line, so the cut leaves no half token for redaction to miss
+      const tail = text.slice(-UPDATE_LOG_SHOWN);
+      return `…\n${cleanText(tail.slice(tail.indexOf("\n") + 1), UPDATE_LOG_SHOWN)}`;
     },
 
     restart() {

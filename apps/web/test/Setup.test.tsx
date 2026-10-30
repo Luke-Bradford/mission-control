@@ -1978,30 +1978,33 @@ describe("Setup toolbar: Update", () => {
     ask.mockRestore();
   });
 
-  it("opens the update log when an update fails, so the reason is on the page", async () => {
-    load({
-      "/api/version": version(),
-      "/api/update/log": {
-        text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted\n",
-      },
-      "POST /api/update": () => ({
-        status: 500,
-        body: { error: "update failed at install; see update.log" },
-      }),
-    });
-    render(<Toast />);
-    at("sessions");
-    await within(toolbar()).findByText(/^Version/);
-    const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(updateBtn());
-    const dialog = await screen.findByRole("dialog", { name: "Update log" });
-    expect(
-      await within(dialog).findByText(/ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY/),
-    ).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog", { name: "Update log" })).toBeNull();
-    ask.mockRestore();
-  });
+  it.each([
+    [500, "update failed at install; see update.log"],
+    [409, "Update waits for you: pnpm needs to rebuild node_modules."],
+  ])(
+    "opens the update log when an update answers %i, so the reason is on the page",
+    async (status, error) => {
+      load({
+        "/api/version": version(),
+        "/api/update/log": {
+          text: "$ pnpm install --frozen-lockfile\n[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted\n",
+        },
+        "POST /api/update": () => ({ status, body: { error } }),
+      });
+      render(<Toast />);
+      at("sessions");
+      await within(toolbar()).findByText(/^Version/);
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+      fireEvent.click(updateBtn());
+      const dialog = await screen.findByRole("dialog", { name: "Update log" });
+      expect(
+        await within(dialog).findByText(/ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY/),
+      ).toBeTruthy();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog", { name: "Update log" })).toBeNull();
+      ask.mockRestore();
+    },
+  );
 
   it("shows the last update's log from the toolbar, or says none has run", async () => {
     load({ "/api/version": version(), "/api/update/log": { text: null } });
@@ -2010,6 +2013,11 @@ describe("Setup toolbar: Update", () => {
     fireEvent.click(within(toolbar()).getByRole("button", { name: "Update log" }));
     const dialog = await screen.findByRole("dialog", { name: "Update log" });
     expect(await within(dialog).findByText("No update has run on this hub yet.")).toBeTruthy();
+    cleanup();
+    load({ "/api/version": version({ canUpdate: false, reason: UPDATE_UNAVAILABLE }) });
+    at("sessions");
+    await within(toolbar()).findByText(/^Version/);
+    expect(within(toolbar()).queryByRole("button", { name: "Update log" })).toBeNull();
   });
 
   it("toasts when the hub is already up to date", async () => {

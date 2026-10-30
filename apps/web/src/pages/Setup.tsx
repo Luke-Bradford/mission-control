@@ -119,8 +119,8 @@ function UpdateControl() {
       hub.refetch(RESOURCES.version.path);
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
-      // a failed step: its output is the why
-      if (err instanceof ApiError && err.status === 500) setLogOpen(true);
+      // a failed step (500) or a hold for a person (409): the log says why; its first line dates it
+      if (err instanceof ApiError && (err.status === 500 || err.status === 409)) setLogOpen(true);
     }
     setBusy(false);
   }
@@ -145,9 +145,11 @@ function UpdateControl() {
       >
         Update
       </button>
-      <button type="button" className="sm" onClick={() => setLogOpen(true)}>
-        Update log
-      </button>
+      {v.reason !== UPDATE_UNAVAILABLE && (
+        <button type="button" className="sm" onClick={() => setLogOpen(true)}>
+          Update log
+        </button>
+      )}
       <UpdateLogModal open={logOpen} onClose={() => setLogOpen(false)} />
     </>
   );

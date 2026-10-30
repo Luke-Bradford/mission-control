@@ -69,8 +69,9 @@ Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within 
 `ThrottleInterval`), crew runs resume, and the HUD reconnects. Each command's output goes to
 `update.log` beside the database (mode 0600), rewritten by each update. A failed step answers
 `update failed at <step>; see update.log`: the hub keeps running and the old `dist` keeps serving,
-and Setup opens the log so the failed command's output is on the page. **Update log** beside
-the button shows the last update's log at any time.
+and Setup opens the log (credentials redacted) so the failed command's output is on the page;
+it does the same for an update held for a person (409). **Update log** beside the button shows
+the last update's log at any time.
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
