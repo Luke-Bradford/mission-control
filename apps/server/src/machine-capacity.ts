@@ -52,8 +52,14 @@ function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | n
       : null;
   if (swap !== null && swap.pctOfRam > SWAP_USED_HARD_PCT_OF_RAM)
     return `${swap.description} (above ${SWAP_USED_HARD_PCT_OF_RAM}%)`;
-  if (swap !== null && swap.pctOfRam > c.swapUsedPct)
-    return `${swap.description} (above ${c.swapUsedPct}%)`;
+  if (
+    swap !== null &&
+    swap.pctOfRam > c.swapUsedPct &&
+    s.memoryPressureFreePct !== null &&
+    s.memoryPressureFreePct !== undefined &&
+    s.memoryPressureFreePct < c.memoryFreePct
+  )
+    return `${swap.description} (above ${c.swapUsedPct}%) and memory free is ${s.memoryPressureFreePct.toFixed(1)}% (below ${c.memoryFreePct}%)`;
   if (
     s.memoryPressureFreePct !== null &&
     s.memoryPressureFreePct !== undefined &&

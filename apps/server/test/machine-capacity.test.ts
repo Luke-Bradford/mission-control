@@ -45,15 +45,35 @@ describe("machineCapacity", () => {
     });
     expect(machineCapacity([recovered], NOW)).toEqual({ blocked: false, reason: null });
 
-    const criticallySwapped = sample({
+    const softSwapWithHealthyPressure = sample({
       memTotalBytes: 24 * gb,
+      swapUsedBytes: 16 * gb,
+      memoryPressureFreePct: 50,
+    });
+    expect(machineCapacity([softSwapWithHealthyPressure], NOW)).toEqual({
+      blocked: false,
+      reason: null,
+    });
+
+    const softSwapWithLowPressure = sample({
+      memTotalBytes: 24 * gb,
+      swapUsedBytes: 16 * gb,
+      memoryPressureFreePct: 9,
+    });
+    expect(machineCapacity([softSwapWithLowPressure], NOW)).toMatchObject({
+      blocked: true,
+      reason: "swap used is 16.0 GB of 24.0 GB RAM (above 60%) and memory free is 9.0% (below 10%)",
+    });
+
+    const criticallySwapped = sample({
+      memTotalBytes: 18.4 * gb,
       swapUsedBytes: 17.5 * gb,
       swapTotalBytes: 18.4 * gb,
       memoryPressureFreePct: 50,
     });
     expect(machineCapacity([criticallySwapped], NOW)).toMatchObject({
       blocked: true,
-      reason: "swap used is 17.5 GB of 24.0 GB RAM (above 60%)",
+      reason: "swap used is 17.5 GB of 18.4 GB RAM (above 90%)",
     });
 
     expect(

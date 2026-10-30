@@ -1225,10 +1225,14 @@ describe("start_seat", () => {
     ],
     [
       "swap",
-      { swapUsedBytes: 18 * 1024 ** 3, memTotalBytes: 24 * 1024 ** 3 },
-      "swap used is 18.0 GB of 24.0 GB RAM",
+      {
+        swapUsedBytes: 18 * 1024 ** 3,
+        memTotalBytes: 24 * 1024 ** 3,
+        memoryPressureFreePct: 9,
+      },
+      "swap used is 18.0 GB of 24.0 GB RAM (above 60%) and memory free is 9.0% (below 10%)",
     ],
-    ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
+    ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0% (below 10%)"],
   ])("refuses a start while %s capacity is constrained", async (_name, over, reason) => {
     store.addMachineSample({
       at: NOW,
@@ -1246,7 +1250,7 @@ describe("start_seat", () => {
     });
     expect(await start()).toEqual(
       refused(
-        `the machine has insufficient headroom: ${reason}${reason.startsWith("disk free is 4") ? " (below 5%)" : reason.startsWith("swap") ? " (above 60%)" : reason.startsWith("memory") ? " (below 10%)" : " (below 15 GB)"}`,
+        `the machine has insufficient headroom: ${reason}${reason.startsWith("disk free is 4") ? " (below 5%)" : reason.startsWith("swap") || reason.startsWith("memory") ? "" : " (below 15 GB)"}`,
       ),
     );
     expect(startCalls).toEqual([]);

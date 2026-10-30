@@ -1056,8 +1056,12 @@ describe("scheduler", () => {
       ],
       [
         "swap",
-        { swapUsedBytes: 18 * 1024 ** 3, memTotalBytes: 24 * 1024 ** 3 },
-        "swap used is 18.0 GB of 24.0 GB RAM (above 60%)",
+        {
+          swapUsedBytes: 18 * 1024 ** 3,
+          memTotalBytes: 24 * 1024 ** 3,
+          memoryPressureFreePct: 9,
+        },
+        "swap used is 18.0 GB of 24.0 GB RAM (above 60%) and memory free is 9.0% (below 10%)",
       ],
       ["memory", { memoryPressureFreePct: 9 }, "memory free is 9.0%"],
     ])("raises exactly one capacity item for %s", async (_name, over, reason) => {
@@ -1106,7 +1110,7 @@ describe("scheduler", () => {
               swapUsedBytes: disk ? 1 : 18,
               swapTotalBytes: 20,
               memTotalBytes: 20,
-              memoryPressureFreePct: 20,
+              memoryPressureFreePct: disk ? 20 : 9,
               load1: 1,
               topConsumers: [
                 {

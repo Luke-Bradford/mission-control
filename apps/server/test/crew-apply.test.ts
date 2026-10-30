@@ -26,6 +26,7 @@ import {
   watchWaitText,
 } from "../src/crew-apply.ts";
 import { crew } from "../src/hud.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
@@ -492,6 +493,27 @@ describe("the reloader", () => {
     vi.useRealTimers();
     store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("applies machine-capacity thresholds on reload", async () => {
+    const appliedCrew = applied.crew;
+    if (appliedCrew === undefined) throw new Error("test fixture has no crew");
+    appliedCrew.machineCapacity = { ...MACHINE_CAPACITY_DEFAULTS };
+    loaded = structuredClone(applied);
+    const loadedCrew = loaded.crew;
+    if (loadedCrew === undefined) throw new Error("test fixture has no crew");
+    loadedCrew.machineCapacity = {
+      ...MACHINE_CAPACITY_DEFAULTS,
+      swapUsedPct: 70,
+      memoryFreePct: 15,
+    };
+
+    await make().reload();
+
+    expect(applied.crew?.machineCapacity).toMatchObject({
+      swapUsedPct: 70,
+      memoryFreePct: 15,
+    });
   });
 
   describe("flight_powers", () => {
