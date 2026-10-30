@@ -14,7 +14,7 @@ import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hms, MONTHS } from "../fmt.ts";
+import { hms, MONTHS, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
@@ -217,7 +217,7 @@ function MachineButton() {
   const label = `Machine status: ${status}${held === null ? "" : `. ${held}`}. Opens Overview.`;
   const detail =
     m && (m.swapUsedBytes != null || m.diskFreeBytes !== null)
-      ? `Swap ${gb(m.swapUsedBytes)} of ${gb(m.swapTotalBytes)} GB, Disk ${gb(m.diskFreeBytes)} GB free`
+      ? `Swap ${swapOfRam(m.swapUsedBytes, m.memTotalBytes)}, Disk ${gb(m.diskFreeBytes)} GB free`
       : null;
   const lockExplanation = holderStalled
     ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`

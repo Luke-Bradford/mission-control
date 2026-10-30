@@ -1,6 +1,7 @@
 import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { useId } from "react";
 import { RESOURCES, useResource } from "../data.ts";
+import { swapOfRam } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
@@ -123,10 +124,9 @@ function usage(m: MachineSample | null) {
     diskTotal !== null && diskTotal > 0 && diskFree !== null
       ? (100 * (diskTotal - diskFree)) / diskTotal
       : null;
-  const swapTotal = m?.swapTotalBytes ?? null;
   const swapUsed = m?.swapUsedBytes ?? null;
   const swapPct =
-    swapTotal !== null && swapTotal > 0 && swapUsed !== null ? (100 * swapUsed) / swapTotal : null;
+    memTotal !== null && swapUsed !== null ? Math.min(100, (100 * swapUsed) / memTotal) : null;
   return {
     cores,
     cpu,
@@ -135,7 +135,6 @@ function usage(m: MachineSample | null) {
     memUsed,
     agentsMem,
     memPct,
-    swapTotal,
     swapUsed,
     swapPct,
     diskFree,
@@ -278,11 +277,7 @@ export function MachinePanel() {
               className="num s"
               title={none ?? (u.swapUsed === null ? "Not measured" : undefined)}
             >
-              {u.swapUsed === null ? DASH : (u.swapUsed / GIB).toFixed(1)}
-              <span className="muted">
-                {" "}
-                of {u.swapTotal === null ? DASH : Math.round((u.swapTotal / GIB) * 10) / 10} GB
-              </span>
+              {swapOfRam(u.swapUsed, u.memTotal)}
             </span>
           </div>
           <div className="resrow">

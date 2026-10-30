@@ -962,7 +962,7 @@ describe("Capacity and cost", () => {
     it("normal: swap used of total and disk free, no warning", async () => {
       await loaded(undefined, undefined, view());
       const p = panel("tMach");
-      await waitFor(() => expect(p.textContent).toContain("Swap 3.5 of 8 GB"));
+      await waitFor(() => expect(p.textContent).toContain("Swap 3.5 GB (22% of RAM)"));
       expect(p.textContent).toContain("Disk 40 GB free");
       expect(p.querySelector(".pill")).toBeNull();
     });
@@ -988,7 +988,7 @@ describe("Capacity and cost", () => {
         }),
       );
       const p = panel("tMach");
-      await waitFor(() => expect(p.textContent).toContain("Swap — of — GB"));
+      await waitFor(() => expect(p.textContent).toContain("Swap —"));
       expect(p.textContent).toContain("Disk — GB free");
     });
   });
@@ -1290,6 +1290,9 @@ describe("engine telemetry", () => {
     within(panel("tLock")).getByText(state === "stalled" ? "no output" : "running");
     expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 runs" });
     expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
+    // Lock holds shade the chart; their names stay in the tooltip so the 100% line has no text pile.
+    const chartText = [...panel("tMach").querySelectorAll("svg text")].map((t) => t.textContent);
+    expect(chartText.filter((t) => t?.includes("suite"))).toEqual([]);
     const live = within(panel("tLock"))
       .getByText(state === "stalled" ? "no output" : "running")
       .closest("tr") as HTMLTableRowElement;

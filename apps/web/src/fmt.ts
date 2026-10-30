@@ -191,3 +191,15 @@ export const firstLine = (s: string): string =>
     .split("\n")
     .find((l) => l.trim() !== "")
     ?.trim() ?? "";
+
+/** Swap used as the guard judges it: GB, and its share of physical RAM (not of the swap file). */
+export function swapOfRam(
+  used: number | null | undefined,
+  memTotal: number | null | undefined,
+): string {
+  if (used == null) return "—";
+  const gb = `${(used / 2 ** 30).toFixed(1)} GB`;
+  return memTotal != null && memTotal > 0
+    ? `${gb} (${Math.round((100 * used) / memTotal)}% of RAM)`
+    : gb;
+}

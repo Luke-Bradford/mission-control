@@ -1,5 +1,6 @@
 import type { MachineView } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
+import { swapOfRam } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { DASH } from "./common.ts";
 
@@ -13,9 +14,7 @@ export function MachineReadout() {
   const m = view?.latest ?? null;
   return (
     <div className="s machine-readout">
-      <span className="num">
-        Swap {gb(m?.swapUsedBytes)} <span className="muted">of {gb(m?.swapTotalBytes)} GB</span>
-      </span>{" "}
+      <span className="num">Swap {swapOfRam(m?.swapUsedBytes, m?.memTotalBytes)}</span>{" "}
       <span className="num">
         Disk {gb(m?.diskFreeBytes)} <span className="muted">GB free</span>
       </span>
