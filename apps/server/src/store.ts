@@ -53,7 +53,6 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
-  type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightWatchEntry,
@@ -65,11 +64,11 @@ import {
   type GuardHit,
   type GuardRule,
   type HealthRow,
+  type HudColumn,
   type HudState,
   inferTicket,
   type LoopEvent,
   type MachineSample,
-  type MoveColumn,
   memoryTopicKey,
   type PrCheck,
   type ProfileOverride,
@@ -680,7 +679,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn | FlightMoveColumn;
+  column: HudColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -1969,7 +1968,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn | FlightMoveColumn,
+      column: r.board_column as HudColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,

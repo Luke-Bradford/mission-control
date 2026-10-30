@@ -262,6 +262,7 @@ let shotsSaveImpl: (png: Buffer) => string;
 let shotsKnown: string[];
 let checkCalls: unknown[][];
 let resumeCalls: string[];
+const cfgResume = { fail: false };
 let restartEngineCalls: number;
 let updaterImpl: {
   changes: () => Promise<{ commits: string[]; paths: string[] } | null>;
@@ -441,6 +442,7 @@ beforeEach(() => {
       },
       resumeRun: async (runId) => {
         resumeCalls.push(runId);
+        if (cfgResume.fail) throw new Error("cannot resume");
       },
     },
     engine: {
@@ -7892,6 +7894,35 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       moveCalls.length = 0;
       expect((await start("restart_ticket")).isError).toBe(true);
       expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Blocked"]);
+    });
+    it("puts a restarted Ready for QA card back where it was when the start fails", async () => {
+      startImpl = async () => {
+        throw new Error("checkout failed");
+      };
+      board(sc(7, { status: "Ready for QA" }));
+      moveCalls.length = 0;
+      expect((await start("restart_ticket")).isError).toBe(true);
+      expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Ready for QA"]);
+      // a rollback that cannot be done is said, not hidden
+      moveCalls.length = 0;
+      let n = 0;
+      moveImpl = async () =>
+        ++n === 2 ? { ok: false, reason: "boom" } : { ok: true, changed: true };
+      const r = await start("restart_ticket");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("could not be put back in Ready for QA");
+    });
+    it("leaves the operator's pause and the seat's state when resume_seat's resume fails", async () => {
+      writeCrewPause(store, { seats: "all", reason: "all", at: NOW, by: "op" }, NOW);
+      live("guido-1", "r-g", { ticket: "mc#7" });
+      store.setSeatSession({ ...row("guido-1", "r-g"), state: "error", reason: "x" });
+      const original = store.seatSession("guido-1");
+      cfgResume.fail = true;
+      const r = await call("resume_seat", { seat: "guido-1" });
+      cfgResume.fail = false;
+      expect(r.isError).toBe(true);
+      expect(readCrewPause(store)).toMatchObject({ seats: "all", by: "op" });
+      expect(store.seatSession("guido-1")).toEqual(original);
     });
     it("restart_ticket refuses a closed ticket and a standard repo", async () => {
       board(sc(7, { closed: true }));

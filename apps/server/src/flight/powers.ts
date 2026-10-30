@@ -169,6 +169,12 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           await deps.supervisor.resumeRun(run.id);
           done.push("resumed its run");
         } catch (e) {
+          // nothing was resumed: the operator's pause and stop stand as they were
+          if (done.includes("lifted its pause")) writeCrewPause(store, pause, at);
+          if (row !== null && done.includes("took it off the operator's stop"))
+            store.setSeatSession({ ...row });
+          bus.emit("settings");
+          bus.emit("agents");
           return fail(
             `Could not resume ${a.seat}'s run: ${e instanceof Error ? e.message : "failed"}`,
           );

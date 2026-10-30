@@ -132,7 +132,6 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
-  FLIGHT_MOVE_COLUMNS,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
@@ -195,7 +194,6 @@ import {
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
-  MOVE_COLUMNS,
   mcToolHitText,
   messageAboutText,
   missingNeedsText,
@@ -1383,25 +1381,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const current = store.seatSession(seat);
         if (current !== null && current.runId === null) store.setSeatSession({ ...priorSeat });
       }
-      if (
-        movedCard &&
-        (MOVE_COLUMNS as readonly string[]).concat(FLIGHT_MOVE_COLUMNS).includes(cardColumn)
-      ) {
-        await deps.board
-          .move({
-            runId: ctx.runId,
-            repoId: repo.id,
-            issue,
-            column: cardColumn as (typeof MOVE_COLUMNS)[number],
-          })
+      let restored = "";
+      if (movedCard) {
+        const back = await deps.board
+          .move({ runId: ctx.runId, repoId: repo.id, issue, column: cardColumn })
           .catch(() => null);
+        if (back?.ok !== true)
+          restored = ` The card could not be put back in ${cardColumn}: check the board.`;
       }
       // the supervisor's own eligibility refusal: the same text start_seat gives
-      if (e instanceof SupervisorError && e.status === 422) return fail(e.message);
+      if (e instanceof SupervisorError && e.status === 422) return fail(`${e.message}${restored}`);
       return fail(
-        e instanceof SupervisorError || e instanceof CheckoutError
-          ? startFailedText(e.message)
-          : START_FAILED,
+        `${
+          e instanceof SupervisorError || e instanceof CheckoutError
+            ? startFailedText(e.message)
+            : START_FAILED
+        }${restored}`,
       );
     }
     store.addComms({
