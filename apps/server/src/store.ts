@@ -2104,7 +2104,11 @@ export class Store {
       ],
       [
         "reviews",
-        "ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')",
+        `ended_at IS NOT NULL AND ended_at < ? AND state IN ('reported', 'failed', 'superseded')
+         AND NOT (state = 'reported' AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = reviews.repo_id AND p.number = reviews.pr_number AND p.state = 'open'
+         ))`,
         AUDIT_RETENTION_DAYS,
       ],
       [
@@ -2194,7 +2198,12 @@ export class Store {
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
-            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
+            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})
+          AND NOT (review_findings.resolution IS NULL AND EXISTS (
+            SELECT 1 FROM reviews v JOIN pull_requests p
+              ON p.repo_id = v.repo_id AND p.number = v.pr_number
+            WHERE v.id = review_findings.review_id AND p.state = 'open'
+          ))`
             : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(

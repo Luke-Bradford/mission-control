@@ -3139,6 +3139,76 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
+  it("keeps unresolved findings and review rounds for an open PR", async () => {
+    const day = 86_400_000;
+    store.upsertRun(run({ id: "author", endedAt: 1, status: "ok" }));
+    store.upsertRun(run({ id: "review", endedAt: 1, status: "ok", reviewId: 1 }));
+    store.upsertPullRequests(
+      "repo",
+      [
+        {
+          repoId: "repo",
+          number: 7,
+          title: "Open PR",
+          url: "https://example.test/7",
+          branch: "feature/7",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: 0,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: "a".repeat(40),
+          mergeable: null,
+          checks: [],
+        },
+      ],
+      1,
+    );
+    const reviewId = store.requestReview({
+      authorRunId: "author",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 7,
+      sha: "a".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 0,
+    });
+    if (reviewId === null) throw new Error("fixture review missing");
+    store.setReviewState(reviewId, ["queued"], "running", { at: 0, runId: "review" });
+    store.recordFindings(reviewId, "review", {
+      verdict: { spec: "fail", quality: "pass" },
+      summary: "Old review",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "Open", scenario: "s", fix: "f" },
+        {
+          severity: "Important",
+          file: "b.ts",
+          line: 1,
+          summary: "Resolved",
+          scenario: "s",
+          fix: "f",
+        },
+      ],
+      at: 1,
+    });
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.prepare(
+        "UPDATE review_findings SET resolution = 'fixed' WHERE review_id = ? AND pos = 1",
+      ).run(reviewId);
+      for (let i = 0; i < 12; i++) await store.pruneHistory(366 * day);
+      expect(store.findingsOf(reviewId).map((finding) => finding.summary)).toEqual(["Open"]);
+      expect(store.qaReviewRounds(366 * day).map((review) => review.reviewId)).toContain(reviewId);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps an old current brief only while its attention item remains open", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     try {
