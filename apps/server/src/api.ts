@@ -3725,30 +3725,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(500).send({ error: CHECK_FAILED });
         }
       });
-      api.post(
-        "/update",
-        {
-          // The exit is scheduled only once the 202 has gone out.
-          onResponse: async (_req, reply) => {
-            if (reply.statusCode === 202) updater?.restart();
-          },
-        },
-        async (req, reply) => {
-          const body = NoBody.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-          if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
-          try {
-            const out = await updater.update();
-            if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
-            return "restarting" in out ? reply.code(202).send(out) : out;
-          } catch (e) {
-            captureError(reply, e);
-            if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
-            reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
-            return reply.code(500).send({ error: UPDATE_FAILED });
-          }
-        },
-      );
+      api.post("/update", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE });
+        try {
+          const out = await updater.update();
+          if ("restarting" in out) updater.restart();
+          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          return "restarting" in out ? reply.code(202).send(out) : out;
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
+          reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
+          return reply.code(500).send({ error: UPDATE_FAILED });
+        }
+      });
 
       api.get(
         "/attention",

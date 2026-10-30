@@ -72,6 +72,10 @@ Then it stops its crew and exits; launchd's `KeepAlive` starts it again (within 
 An update that failed after its pull is not "up to date": pressing Update again skips the pull
 (unless `main` has moved on since) and installs, builds, swaps and restarts.
 
+Do not give a scripted Update a short client timeout. The build can take several minutes; leave
+the request connected until it answers, then allow the hub to reconnect. If a caller disconnects,
+the completed update still restarts the hub.
+
 The button is disabled, with the reason as its tooltip, on a preview server (any port but 7420, or
 `MC_NO_LOOP_WRITES=1`), when the checkout is not on `main`, when it has uncommitted changes
 (untracked files included), and while a crew seat is mid-turn or starting. With nothing new on

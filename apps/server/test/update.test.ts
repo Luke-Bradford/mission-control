@@ -46,6 +46,7 @@ import {
   UPDATE_KILL_GRACE_MS,
   UPDATE_MAX_BUFFER,
   UPDATE_PIPE_GRACE_MS,
+  UPDATE_RESTART_GRACE_MS,
   UPDATE_RUNNING,
   UPDATE_STEP_TIMEOUT_MS,
   UpdateError,
@@ -884,7 +885,7 @@ describe("headSha", () => {
 
 describe("restart", () => {
   it("calls exit once, UPDATE_EXIT_DELAY_MS after it is asked", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { u, exit } = updater();
     u.restart();
     vi.advanceTimersByTime(UPDATE_EXIT_DELAY_MS - 1);
@@ -892,6 +893,21 @@ describe("restart", () => {
     vi.advanceTimersByTime(1);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(UPDATE_EXIT_DELAY_MS).toBe(500);
+  });
+
+  it("clears a restart that did not stop the hub, and logs the recovery", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    upstreamCommit("b.txt");
+    const { u } = updater();
+    expect(await u.update()).toEqual({ restarting: true });
+
+    u.restart();
+    await vi.advanceTimersByTimeAsync(UPDATE_EXIT_DELAY_MS + UPDATE_RESTART_GRACE_MS);
+
+    expect((await u.version()).reason).not.toBe(UPDATE_RUNNING);
+    expect(readFileSync(logPath, "utf8")).toContain(
+      "restart did not stop the hub after 5500ms; clearing update state",
+    );
   });
 });
 
