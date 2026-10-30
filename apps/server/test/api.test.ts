@@ -5493,6 +5493,21 @@ describe("SSE stream", () => {
     return { res, until, text: () => text };
   }
 
+  it("reports browser stream opens and closes", async () => {
+    await app.close();
+    const counts: number[] = [];
+    app = buildApp({ config, store, bus, onStreamCount: (count) => counts.push(count) });
+    const first = await open();
+    const second = await open();
+    await Promise.all([first.until(": connected"), second.until(": connected")]);
+    expect(counts).toEqual([1, 2]);
+
+    first.res.raw.res.emit("close");
+    second.res.raw.res.emit("close");
+
+    expect(counts).toEqual([1, 2, 1, 0]);
+  });
+
   it.each(["claude", "codex"] as const)(
     "%s: sends ordered map calls only to the selected repo and keeps changed pings",
     async (vendor) => {
