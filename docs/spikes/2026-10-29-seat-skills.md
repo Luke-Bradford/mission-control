@@ -54,3 +54,6 @@ executable or a link) is left out whole (`skillFileProblem` in `packages/core/sr
 `node --experimental-strip-types apps/server/test/live/skills-live-check.ts` runs probe 3 with the
 hub's own plugin builder and fails if the seat does not invoke `hud-design`. Probes 1 and 2 are the
 commands above.
+
+The probe outputs above were measured on 29 Oct (ticket #1051) and copied here; the plugin builder
+and refusal rules are covered by `apps/server/test/skills.test.ts`.
