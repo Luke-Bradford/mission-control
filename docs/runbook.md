@@ -1002,7 +1002,7 @@ merge main, once each. A step that fails or is refused is tried again after five
 wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and `flight_state` and
 `GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
 it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
-`Depends on` line for that PR's ticket (or `After PR N`).
+`Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
 
 ### FLIGHT's controller powers
 
