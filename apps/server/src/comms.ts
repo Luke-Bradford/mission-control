@@ -3,6 +3,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_MESSAGE_MAX,
   COMMS_RATE_LIMIT_COUNT,
   COMMS_RATE_LIMIT_WINDOW_MS,
   type CommsMessage,
@@ -11,6 +12,7 @@ import {
   type CommsSendInput,
   type CommsThreadMessage,
   commsCutMarker,
+  commsTooLongText,
   scanSecrets,
 } from "@mc/core";
 import { statNoted } from "./file-deps.ts";
@@ -53,6 +55,7 @@ export async function sendComms(
   from: string,
   input: CommsSendInput,
 ): Promise<CommsMessage> {
+  if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
   let members = new Set([...crew, COMMS_CAPCOM]);

@@ -248,6 +248,12 @@ export const MC_COMMIT_TOO_BIG =
 
 export const ASKED_FLIGHT =
   "Asked FLIGHT. It answers, or takes the question to the operator with its brief; the answer arrives as a message. Carry on with what you can meanwhile.";
+/** The Comms mirror of an ask_flight question; the full question is kept in the question record. */
+export const ASK_FLIGHT_COMMS_POINTER =
+  "Question recorded for FLIGHT.\nFull question is in the structured question record.";
+/** The Comms mirror of an oversized FLIGHT answer; the full answer is kept in the decision record. */
+export const FLIGHT_ANSWER_COMMS_POINTER =
+  "FLIGHT answered your question.\nFull answer is in FLIGHT's structured decision record.";
 /** A seat's comms_send to CAPCOM labelled `question`: a seat's questions go to FLIGHT (#758). */
 export const COMMS_QUESTION_TO_FLIGHT =
   "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";

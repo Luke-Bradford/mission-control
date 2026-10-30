@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  COMMS_METRICS,
   CYCLE_TIME_DAYS,
   cycleTimeDetail,
   formatHours,
@@ -38,6 +39,14 @@ const VIEW: MetricsView = {
 };
 
 describe("metric registry", () => {
+  it("defines the shared Comms message-length p95 metric", () => {
+    expect(COMMS_METRICS.messageLengthP95).toMatchObject({
+      label: "Message length p95",
+      window: "24h",
+      unit: "characters",
+    });
+  });
+
   it("defines every figure once with a label, window, unit, definition and source", () => {
     expect(Object.keys(METRICS).sort()).toEqual([...METRIC_IDS].sort());
     for (const id of METRIC_IDS) {

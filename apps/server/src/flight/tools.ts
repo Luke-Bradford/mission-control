@@ -40,6 +40,7 @@ import {
   CLOSE_UNCONFIRMED_DECISION,
   CLOSED_PREFIX,
   COMMENTED_DECISION,
+  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
@@ -87,6 +88,7 @@ import {
   FIELDS_NEED_SUPERUSER,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_ANSWER_COMMS_POINTER,
   FLIGHT_BASIS_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
@@ -1194,7 +1196,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       from: ctx.seatId,
       to: q.agentId,
       ticket: store.run(q.runId)?.ticket ?? null,
-      text: answer,
+      text: Array.from(answer).length > COMMS_MESSAGE_MAX ? FLIGHT_ANSWER_COMMS_POINTER : answer,
     });
     bus.emit("agents");
     record(at, {
