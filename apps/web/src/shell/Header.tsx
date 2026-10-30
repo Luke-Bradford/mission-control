@@ -186,9 +186,16 @@ function Met() {
 const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
 const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
+const gb = (n: number | null | undefined): string =>
+  n == null ? "—" : String(Math.round((n / 2 ** 30) * 10) / 10);
+
 function MachineButton() {
   const nameOf = useSeatName();
-  const m = useResource<{ latest: MachineSample | null }>(RESOURCES.machine).data?.latest ?? null;
+  const view = useResource<{ latest: MachineSample | null; warning?: string | null }>(
+    RESOURCES.machine,
+  ).data;
+  const m = view?.latest ?? null;
+  const warning = view?.warning ?? null;
   const lock = useTestLock();
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const holderStalled =
@@ -206,14 +213,19 @@ function MachineButton() {
       ? (100 * m.memUsedBytes) / m.memTotalBytes
       : null;
   const status = `CPU ${pct(m?.cpuPct ?? null)}, RAM ${pct(ram)}, ${lockText}`;
-  const label = `Machine status: ${status}. Opens Overview.`;
+  const held = warning === null ? null : `Holding new work: ${warning}`;
+  const label = `Machine status: ${status}${held === null ? "" : `. ${held}`}. Opens Overview.`;
+  const detail =
+    m && (m.swapUsedBytes != null || m.diskFreeBytes !== null)
+      ? `Swap ${gb(m.swapUsedBytes)} of ${gb(m.swapTotalBytes)} GB, Disk ${gb(m.diskFreeBytes)} GB free`
+      : null;
   const lockExplanation = holderStalled
     ? `${LOCK_STALLED_TITLE}. ${LOCK_HEADER_TITLE}.`
     : LOCK_HEADER_TITLE;
   return (
     <button
       type="button"
-      className={`mach-btn iconbtn${holderStalled && lock && lock.waiting.length > 0 ? " hot" : ""}`}
+      className={`mach-btn iconbtn${held !== null || (holderStalled && lock && lock.waiting.length > 0) ? " hot" : ""}`}
       aria-label={label}
       aria-describedby="machine-tooltip"
       onClick={() => {
@@ -242,6 +254,8 @@ function MachineButton() {
       </svg>
       <span id="machine-tooltip" className="mach-tooltip" role="tooltip">
         <span>{status}</span>
+        {held !== null && <span>{held}</span>}
+        {detail !== null && <span>{detail}</span>}
         <span>{lockExplanation}</span>
       </span>
     </button>
