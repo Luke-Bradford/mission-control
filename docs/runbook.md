@@ -270,7 +270,8 @@ redaction and the git safety rules are not affected by it and stay as they were.
 Look at what FLIGHT was repeating in Decided without you, fix the cause, then lift the breaker by
 dismissing its flag in Needs you, or with `curl -s -X POST 127.0.0.1:7420/api/flight/runaway/lift -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'`. The lift is logged and clears the
 flag and starts the count afresh, so the calls that tripped it do not trip it again; it answers 409
-when the breaker is not tripped. `flight_state` shows `breaker.tripped`.
+when the breaker is not tripped. `flight_state` shows `breaker.tripped`. While it is tripped the hub
+sends FLIGHT no wakes (it could only idle), and the wake facts list the breaker.
 
 ### Map payload cache and polling
 
