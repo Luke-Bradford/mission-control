@@ -38,7 +38,7 @@ import {
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
-import { cutText, elapsed } from "../fmt.ts";
+import { cutText, elapsed, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -229,7 +229,10 @@ function FlightRow({
       : label === "Held" || label === "Stopped"
         ? " · next check paused"
         : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
-  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
+  const openAsks = items.filter((i) =>
+    ["question", "person", "decision", "approval"].includes(i.kind),
+  ).length;
+  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${plural(openAsks, "open ask")} · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
   const needs = row ? needLine(row, items, now, lock) : [];

@@ -246,7 +246,7 @@ it("counts the files an area owns, not every file, and the configured areas, not
   expect(lens.textContent).toContain("none");
   expect(lens.textContent).toContain("everything else");
   expect(screen.getByRole("note", { name: "Ownership colour key" }).textContent).toContain(
-    `${owned} of ${value.tree.length} files owned by an area · 2 hard-rule`,
+    `${owned} of ${value.tree.length} files owned by an area · 2 hard-rules`,
   );
 });
 
@@ -1280,4 +1280,64 @@ it("says 1 file for a one-file repository and N files otherwise", () => {
   unmount();
   render(<CrewMapView snapshot={structuredClone(mapSnapshotFixture)} />);
   expect(screen.getAllByText(`${mapSnapshotFixture.tree.length} files`).length).toBeGreaterThan(0);
+});
+
+it("says 1 step for a direct import and N steps for a longer chain in the Impact overlap", () => {
+  const direct = structuredClone(mapSnapshotFixture);
+  direct.seats.push({
+    ...structuredClone(direct.seats[0]),
+    seat: "INCO-1",
+    scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
+  });
+  const { unmount } = render(<CrewMapView snapshot={direct} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
+    "which depends on INCO-1’s changes · 1 step: main.ts → util.ts.",
+  );
+  unmount();
+
+  const chained = structuredClone(mapSnapshotFixture);
+  chained.tree = [
+    { path: "src/main.ts", lines: 10 },
+    { path: "src/mid.ts", lines: 10 },
+    { path: "src/util.ts", lines: 10 },
+  ];
+  chained.imports = [
+    { from: "src/main.ts", to: "src/mid.ts" },
+    { from: "src/mid.ts", to: "src/util.ts" },
+  ];
+  chained.seats.push({
+    ...structuredClone(chained.seats[0]),
+    seat: "INCO-1",
+    scope: { read: [], modified: [{ file: "src/util.ts", add: 3, rem: 0, source: "diff" }] },
+  });
+  render(<CrewMapView snapshot={chained} />);
+  fireEvent.click(screen.getByRole("button", { name: "Impact" }));
+  expect(screen.getByRole("region", { name: "Impact lens" }).textContent).toContain(
+    "· 2 steps: main.ts → mid.ts → util.ts.",
+  );
+});
+
+it("counts hard-rule files and findings in the analytical keys, singular and plural", () => {
+  const ownershipKey = (snapshot: MapSnapshot): string => {
+    render(<CrewMapView snapshot={snapshot} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ownership" }));
+    const text = screen.getByRole("note", { name: "Ownership colour key" }).textContent ?? "";
+    cleanup();
+    return text;
+  };
+  // contract.ts and unowned.ts are the two hard-rule files
+  expect(ownershipKey(ownershipSnapshot())).toContain("· 2 hard-rules");
+  const one = ownershipSnapshot();
+  one.tree = one.tree.filter((file) => file.path !== "src/unowned.ts");
+  expect(ownershipKey(one)).toContain("· 1 hard-rule");
+  expect(ownershipKey(one)).not.toContain("1 hard-rules");
+
+  const single = reviewSnapshot();
+  single.findings = single.findings.slice(0, 1);
+  render(<CrewMapView snapshot={single} />);
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
+  expect(screen.getByRole("note", { name: "Review severity key" }).textContent).toContain(
+    "1 finding on 1 file",
+  );
 });

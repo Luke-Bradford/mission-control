@@ -598,7 +598,7 @@ export function ImpactLens({
           overlap.map((row) => (
             <p key={`${row.owner}:${row.other}:${row.path}`}>
               <b>{row.other}</b> changed <FileButton path={row.path} onFocus={onFocus} /> which
-              depends on <b>{row.owner}</b>’s changes · {row.chain.length - 1} steps:{" "}
+              depends on <b>{row.owner}</b>’s changes · {plural(row.chain.length - 1, "step")}:{" "}
               {row.chain.map(name).join(" → ")}.
             </p>
           ))

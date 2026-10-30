@@ -480,7 +480,7 @@ function AnalyticalMapKey({
           <>
             <span className="map-key-item">
               <b>{owned}</b> of {plural(snapshot.tree.length, "file")} owned by an area ·{" "}
-              <b>{hard}</b> hard-rule
+              {plural(hard, "hard-rule")}
             </span>
             {owner.labels.map((label) => (
               <span className="map-key-item" key={label}>
@@ -512,8 +512,8 @@ function AnalyticalMapKey({
     return (
       <div className="map-analytical-key" role="note" aria-label="Review severity key">
         <span className="map-key-item">
-          <b>{snapshot.findings.length}</b> findings on{" "}
-          {new Set(snapshot.findings.map((finding) => finding.file)).size} files
+          {plural(snapshot.findings.length, "finding")} on{" "}
+          {plural(new Set(snapshot.findings.map((finding) => finding.file)).size, "file")}
         </span>
         {FINDING_SEVERITIES.map((severity) => (
           <span className="map-key-item" key={severity}>

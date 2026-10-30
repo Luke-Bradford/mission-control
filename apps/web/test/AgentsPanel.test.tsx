@@ -366,6 +366,23 @@ it("renders the Overview crew-pause override as a short pill", async () => {
   expect(pill?.textContent?.length).toBeLessThanOrEqual(MAX_STATE_PILL_LENGTH);
 });
 
+it.each([
+  [1, "1 open ask ·"],
+  [2, "2 open asks ·"],
+])("counts FLIGHT's open asks in the coverage line: %s", async (count, text) => {
+  stub(
+    [seatRow({ id: "flight", hudState: "idle" })],
+    true,
+    Array.from({ length: count }, (_, i) =>
+      item({ key: `ask-${i}`, kind: "decision", agentId: "need", ticket: null }),
+    ),
+  );
+  render(<AgentsPanel />);
+  await screen.findByText("Watching");
+  const link = screen.getByRole("link", { name: "head agent" });
+  await waitFor(() => expect(link.title).toContain(text));
+});
+
 it("keeps FLIGHT coverage, the latest decision and session turns on the head-agent link", async () => {
   stub([seatRow({ id: "flight", hudState: "idle" })]);
   render(<AgentsPanel />);

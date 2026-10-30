@@ -346,7 +346,12 @@ describe("What FLIGHT did: decisions", () => {
     render(<Flight />);
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     fireEvent.click(await screen.findByRole("button", { name: /For the controller/ }));
-    expect((await screen.findByRole("status")).textContent).toBe(controllerCapped(1, 0));
+    expect((await screen.findByRole("status")).textContent).toBe(
+      `1 ask for the controller was counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold 0.`,
+    );
+    expect(controllerCapped(2, 1)).toBe(
+      `2 asks for the controller were counted, but only the newest ${FLIGHT_VIEW_LIMIT} decisions are listed here, which hold 1.`,
+    );
   });
 
   it("disables Overturn when FLIGHT is not live", async () => {
