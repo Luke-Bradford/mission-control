@@ -26,15 +26,19 @@ tab=$'\t'
 # report once per key
 say() { grep -qxF -- "$1" "$SEEN" || { print -r -- "$2"; print -r -- "$1" >> "$SEEN"; } }
 # forget keys that start with a prefix, so the next occurrence is reported again
-forget() { local f; for f in "$SEEN" "$FIRST"; do grep -vF -- "$1" "$f" > "$f.tmp"; mv "$f.tmp" "$f"; done; }
+forget() { local f; for f in "$SEEN" "$FIRST"; do awk -v p="$1" 'index($0, p) != 1' "$f" > "$f.tmp"; mv "$f.tmp" "$f"; done; }
 # seconds since a condition was first seen (records it now if new)
 age() {
-  local line; line=$(grep -F -- "$1$tab" "$FIRST" | tail -1)
+  local line; line=$(awk -v p="$1$tab" 'index($0, p) == 1' "$FIRST" | tail -1)
   if [[ -z $line ]]; then print -r -- "$1$tab$now" >> "$FIRST"; print 0; else print $(( now - ${line##*$tab} )); fi
 }
 
 blind_hub=""; blind_gh=""
-[[ -s $LAST ]] || curl -s -m 10 "$MC_HUB/api/flight" | jq --argjson c $(( ($(date +%s) - 1800) * 1000 )) '[.decisions[]|select(.at < $c)|.id]|max // 0' > "$LAST" 2>/dev/null
+# the newest FLIGHT note already read: seeded from 30 minutes back, once the hub answers
+seed_last() {
+  local v; v=$(curl -s -m 10 "$MC_HUB/api/flight" | jq -e --argjson c $(( ($(date +%s) - 1800) * 1000 )) '[.decisions[]|select(.at < $c)|.id]|max // 0' 2>/dev/null) && print -r -- "$v" > "$LAST"
+}
+[[ -s $LAST ]] || seed_last
 
 tick=0
 while true; do
@@ -79,15 +83,17 @@ while true; do
   # every developer seat idle for 10+ minutes while a developer seat has queued work
   busy=$(print -r -- "$crew" | jq '[.rows[]|select(.kind=="crew" and .mode=="writer" and .hudState!="stopped" and .hudState!="idle")]|length')
   queued=$(print -r -- "$crew" | jq '[.rows[]|select(.kind=="crew" and .mode=="writer")|(.queue // [])[]]|length')
-  if [[ $busy == 0 && $queued -gt 0 ]]; then (( $(age "idle") >= 600 )) && say "idle:$(( now / 3600 ))" "idle: every developer seat idle 10+ min with $queued tickets queued"
-  else forget "idle"; fi
+  # reported once per idle stretch: the stretch's start is in the key
+  if [[ $busy == 0 && $queued -gt 0 ]]; then
+    (( $(age "idle-since") >= 600 )) && say "idle:$(awk -v p="idle-since$tab" 'index($0, p) == 1 {split($0, a, "\t"); print a[2]}' "$FIRST" | tail -1)" "idle: every developer seat idle 10+ min with $queued tickets queued"
+  else forget "idle-since$tab"; fi
 
   # seats: a run that crashed, was interrupted or ended in error, for 2+ minutes;
   # a seat stopped or crew-paused for 30+ minutes while it has queued work.
   # The key carries stateSince, so a second failure is reported again.
-  print -r -- "$crew" | jq -r --argjson now $(( now * 1000 )) '.rows[]|select(.kind=="crew")|(($now - (.stateSince // $now))) as $age
-    | if ((.hudState=="error" or ((.loop.text // "")|test("crashed|interrupted";"i"))) and $age > 120000) then "\(.id)\t\(.stateSince)\t\(.hudState) \((.loop.text // "")|gsub("\n";" ")|.[0:60])"
-      elif ((.hudState=="stopped" or .crewPause != null) and ((.queue // [])|length) > 0 and $age > 1800000) then "\(.id)\t\(.stateSince)\t\(.hudState) with queue \([.queue[].issue]|join(","))"
+  print -r -- "$crew" | jq -r --argjson now $(( now * 1000 )) '.rows[]|select(.kind=="crew")|(.stateSince // $now) as $since|(($now - $since)) as $age
+    | if ((.hudState=="error" or ((.loop.text // "")|test("crashed|interrupted";"i"))) and $age > 120000) then "\(.id)\t\($since)\t\(.hudState) \((.loop.text // "")|gsub("\n";" ")|.[0:60])"
+      elif ((.hudState=="stopped" or .crewPause != null) and ((.queue // [])|length) > 0 and $age > 1800000) then "\(.id)\t\($since)\t\(.hudState) with queue \([.queue[].issue]|join(","))"
       else empty end' | while IFS=$tab read -r id since what; do say "seat:$id:$since" "seat-down: $id $what"; done
 
   # runs waiting on the controller's own verdict, active or set aside
@@ -100,18 +106,25 @@ while true; do
 
   # FLIGHT notes for the controller since the last one read (kept in a file, so a restart repeats none)
   j=$(curl -s -m 10 "$MC_HUB/api/flight")
+  [[ -s $LAST ]] || seed_last
   last=$(<"$LAST")
-  print -r -- "$j" | jq -r --argjson l "${last:-0}" '.decisions[]?|select(.id>$l and .kind=="note" and (.decision|test("controller";"i")))|"flight-note: \(.id) | \(.about|tostring|gsub("\n";" "))"' 2>/dev/null
-  m=$(print -r -- "$j" | jq '[.decisions[]?.id]|max' 2>/dev/null); [[ -n $m && $m != null ]] && print -r -- "$m" > "$LAST"
+  # the last-read id moves only when the notes were read, so a bad batch is retried, never lost
+  if notes=$(print -r -- "$j" | jq -r --argjson l "${last:-0}" '.decisions[]|select(.id>$l and .kind=="note" and ((.decision // "")|test("controller";"i")))|"flight-note: \(.id) | \(.about|tostring|gsub("\n";" "))"' 2>/dev/null); then
+    [[ -n $notes ]] && print -r -- "$notes"
+    m=$(print -r -- "$j" | jq '[.decisions[]?.id]|max' 2>/dev/null); [[ -n $m && $m != null ]] && print -r -- "$m" > "$LAST"
+  fi
 
   # every 30th pass: remote branches with no open PR and no live run (not main, not archive/*)
   if (( tick % 30 == 2 )) && [[ -z $blind_gh ]]; then
     heads=$(gh api --paginate "repos/$MC_REPO/pulls?state=open&per_page=100" --jq '.[].head.ref' 2>/dev/null) && {
-      live=$(print -r -- "$crew" | jq -r '.rows[]|(.run.branch // empty), (.asideRuns[]?|.branch // empty)')
+      live=$(print -r -- "$crew" | jq -r '.rows[]|.run.branch // empty')
       gh api --paginate "repos/$MC_REPO/branches?per_page=100" --jq '.[].name' 2>/dev/null | grep -v -x -e main -e 'archive/.*' |
         while read -r b; do
           print -r -- "$heads"$'\n'"$live" | grep -qxF -- "$b" || say "orphan:$b" "branch-orphan: $b"
         done
+      # a deleted branch is forgotten, so one recreated later is reported again
+      branches=$(gh api --paginate "repos/$MC_REPO/branches?per_page=100" --jq '.[].name' 2>/dev/null) &&
+        grep '^orphan:' "$SEEN" | while read -r k; do print -r -- "$branches" | grep -qxF -- "${k#orphan:}" || forget "$k"; done
     }
   fi
 

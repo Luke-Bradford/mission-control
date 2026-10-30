@@ -25,7 +25,7 @@ FLIGHT works through these checks each wake. Its role prompt (`roles/FLIGHT.md`)
 
 | Check | When | Action | Today | Moves to |
 |---|---|---|---|---|
-| A seat that crashed | its run crashed, was interrupted or ended in error, 2 min ago | restart it once; on a second failure, find the cause | FLIGHT; controller (`seat-down`) | #1182 has the hub resume it |
+| A seat that crashed | its run crashed, was interrupted or ended in error, for 2 min | restart it once; on a second failure, find the cause | FLIGHT; controller (`seat-down`) | #1182 has the hub resume it |
 | A stopped or paused seat with work | stopped or in a crew pause for 30 min with tickets queued | brief the operator with a recommendation; start it only on the operator's word | FLIGHT; controller (`seat-down`) | #1204 |
 | Every developer seat idle | none working for 10 min while tickets are queued | find the cause (pause, park, dependency, machine guard) and clear it | FLIGHT; controller (`idle`) | #1053 |
 
@@ -48,5 +48,6 @@ MC_REPO=Luke-Bradford/mission-control zsh scripts/controller-monitor.sh
 - It reads only. The hub's read routes need no token, and `gh` reads as the account it is signed in to. It needs `gh`, `jq` and zsh.
 - `MC_HUB` sets the hub (default `localhost:7420`). `MC_DATA` sets the hub's data folder (default `~/.local/share/mission-control`); a preview hub with `MC_DB` elsewhere keeps its files beside that database. `MC_TICK` sets the seconds between passes (default 60).
 - Its state files are in `$MC_DATA/controller/`. A restart repeats nothing it has already reported. A seat that fails again is reported again.
-- It checks the hub every pass and GitHub every 5th pass, so a time above can run up to one pass late. If the hub or `gh` stops answering, it prints one `monitor-blind` line and pauses those checks.
+- It checks the hub every pass and GitHub every 5th pass, so a hub time above can run one pass late and a GitHub time up to 5 passes late. If the hub stops answering, it prints one `monitor-blind` line and skips whole passes until it answers again. If `gh` stops, it prints one line and pauses the GitHub checks only.
+- `idle` is reported once per idle stretch, and an orphan branch once, until it is deleted.
 - Act on each line, or route it to FLIGHT.
