@@ -4,7 +4,7 @@ import { apiDelete, apiPost, apiPut } from "../api.ts";
 import { copyText } from "../clipboard.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
-import { plural, rel, wkdTime } from "../fmt.ts";
+import { percent, plural, rel, wkdTime } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
@@ -80,13 +80,13 @@ function AccountMeter({
         {projected != null && Number.isFinite(projected) && (
           <b
             className="projection-tick"
-            title={`Projected at reset: ${Math.round(projected)}%`}
+            title={`Projected at reset: ${percent(projected)}`}
             style={{ left: `${Math.min(100, Math.max(0, projected))}%` }}
           />
         )}
         {pct !== null && <i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />}
       </span>
-      <span className="num xs">{value === null ? "—" : `${value}%`}</span>
+      <span className="num xs">{percent(value)}</span>
     </span>
   );
 }
@@ -389,7 +389,7 @@ export function Accounts({ config }: { config: ConfigView }) {
                         {(seven ?? five) && tz ? wkdTime((seven ?? five)?.resetAt ?? 0, tz) : "—"}
                       </td>
                       <td className="mono num">
-                        {account.alertAt}% / {account.stopAt}%
+                        {percent(account.alertAt)} / {percent(account.stopAt)}
                       </td>
                       <td className="account-actions">
                         <button type="button" className="sm" onClick={() => setEditor(account)}>

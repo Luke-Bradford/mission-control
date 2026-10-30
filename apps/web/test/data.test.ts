@@ -44,6 +44,38 @@ describe("hub", () => {
     off();
   });
 
+  it("keeps a fresh read when an older fetch of the same path answers after it", async () => {
+    const path = "/api/limits";
+    const waiting: Array<(body: unknown) => void> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            waiting.push((body) => resolve(Response.json(body)));
+          }),
+      ),
+    );
+    // a mounted consumer starts the older fetch
+    const off = hub.subscribe(path, "limits", () => {});
+    await settle();
+    expect(waiting).toHaveLength(1);
+    // a fresh read starts later and answers first
+    const read = hub.read<{ v: string }>({ path, topic: "limits" });
+    await settle();
+    expect(waiting).toHaveLength(2);
+    waiting[1]?.({ v: "fresh" });
+    await expect(read).resolves.toEqual({ v: "fresh" });
+    expect(hub.snapshot(path, "limits").data).toEqual({ v: "fresh" });
+    // the older fetch answers last: its stale body must not replace the fresh one
+    waiting[0]?.({ v: "stale" });
+    await settle();
+    expect(hub.snapshot(path, "limits").data).toEqual({ v: "fresh" });
+    expect(hub.snapshot(path, "limits").loading).toBe(false);
+    expect(hub.isFetching(path)).toBe(false);
+    off();
+  });
+
   it("refetches only the changed topic, and only what is on screen", async () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

@@ -30,7 +30,7 @@ import {
 } from "@mc/core";
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
-import { cutText, hhmm, mss, prLabel, shortSha, wkdTime } from "./fmt.ts";
+import { cutText, hhmm, mss, percent, prLabel, shortSha, wkdTime } from "./fmt.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -338,7 +338,8 @@ export const isFinishedWork = (row: Pick<CrewRow, "kind" | "hudState">): boolean
 export function stopLine(stop: DriverStop, now: number, tz: string | null): string {
   if (stop.quota === null) return `Stopped by its driver: ${stop.reason}`;
   const { usedPct, stopPct } = stop.quota;
-  const figures = usedPct !== null && stopPct !== null ? ` (${usedPct}% of ${stopPct}%)` : "";
+  const figures =
+    usedPct !== null && stopPct !== null ? ` (${percent(usedPct)} of ${percent(stopPct)})` : "";
   const base = `Stopped at the 7-day quota${figures}`;
   if (stop.resumesAt === null) return base;
   if (stop.resumesAt <= now) return `${base}${DOING_SEP}resumes at its next start`;

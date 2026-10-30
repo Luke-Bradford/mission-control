@@ -20,7 +20,7 @@ import {
   seatTurn,
 } from "../crew.ts";
 import { hub, RESOURCES, SEAT_CONTEXT_REFRESH_MS, useResource } from "../data.ts";
-import { cost, dur, kTokens, mss, plural, rel } from "../fmt.ts";
+import { cost, dur, kTokens, mss, percent, plural, rel } from "../fmt.ts";
 import { Meter, meterLevel } from "../hud/Meter.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { LoopStep } from "../overview/LoopStep.tsx";
@@ -110,7 +110,7 @@ function SeatContext({ row }: { row: CrewRow }) {
     return (
       <Tile label="Context">
         <Value className="v num">
-          {pct === null ? DASH : `${Math.round(pct)}%`}
+          {pct === null ? DASH : percent(pct)}
           {pct !== null && window !== null && <small> of {Math.round(window / 1000)}k</small>}
         </Value>
         <span className={`ctxbar${meterLevel(pct)}`}>
@@ -130,7 +130,8 @@ function SeatContext({ row }: { row: CrewRow }) {
   return (
     <Tile label="Context">
       <Value className="v num">
-        {Math.round(pct)}%<small> of {k(window)}k</small>
+        {percent(pct)}
+        <small> of {k(window)}k</small>
       </Value>
       <span className="ctxbar seg">
         {seg("sys", s.system)}
@@ -245,7 +246,7 @@ function TilesBody({
       ) : (
         <Tile label="Context">
           <Value className="v num">
-            {pct === null ? DASH : `${Math.round(pct)}%`}
+            {pct === null ? DASH : percent(pct)}
             {pct !== null && row.contextWindow !== null && (
               <small> of {Math.round(row.contextWindow / 1000)}k</small>
             )}
@@ -262,7 +263,7 @@ function TilesBody({
         <Value className="v num">{t ? kTokens(t.input + t.output) : DASH}</Value>
         <span className="d">
           {t
-            ? `${kTokens(t.input)} in · ${kTokens(t.output)} out · ${hit === null ? DASH : `${Math.round(hit)}%`} cache hit`
+            ? `${kTokens(t.input)} in · ${kTokens(t.output)} out · ${hit === null ? DASH : percent(hit)} cache hit`
             : DASH}
         </span>
       </Tile>

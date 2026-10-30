@@ -350,6 +350,8 @@ interface Entry {
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  /** The start sequence of the newest answer kept: an older request must not replace it. */
+  appliedSeq: number;
   settled: number;
   settledListeners: Set<() => void>;
 }
@@ -360,6 +362,8 @@ class Hub {
   private readonly entries = new Map<string, Entry>();
   /** Bumped by clear(): a response to a request from an older generation is dropped. */
   private generation = 0;
+  /** Stamps each request as it starts, so answers can be told apart by age. */
+  private seq = 0;
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -371,6 +375,7 @@ class Hub {
         listeners: new Set(),
         inflight: false,
         again: false,
+        appliedSeq: 0,
         settled: 0,
         settledListeners: new Set(),
       };
@@ -440,6 +445,7 @@ class Hub {
       return;
     }
     const gen = this.generation;
+    const seq = ++this.seq;
     e.inflight = true;
     // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
     // this lets identical responses retain their complete snapshot identity.
@@ -526,6 +532,9 @@ class Hub {
       next = { ...e.snap, error, loading: false };
     }
     if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
+    // A read that started later may already have stored a newer answer: keep that one.
+    if (seq < e.appliedSeq) next = e.snap;
+    else e.appliedSeq = seq;
     e.inflight = false;
     this.set(e, next);
     this.settle(e);
@@ -544,10 +553,14 @@ class Hub {
    */
   async read<T>(ref: ResourceRef): Promise<T> {
     const gen = this.generation;
+    const seq = ++this.seq;
     const data = await apiGet<T>(ref.path);
     const e = this.entry(ref.path, ref.topic);
-    if (gen === this.generation && (e.snap.error !== null || !sameJson(data, e.snap.data))) {
-      this.set(e, { data, error: null, loading: false });
+    if (gen === this.generation && seq > e.appliedSeq) {
+      e.appliedSeq = seq;
+      if (e.snap.error !== null || !sameJson(data, e.snap.data)) {
+        this.set(e, { data, error: null, loading: false });
+      }
     }
     return data;
   }

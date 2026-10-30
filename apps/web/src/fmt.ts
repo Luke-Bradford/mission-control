@@ -139,12 +139,24 @@ export const plural = (n: number, one: string, many = `${one}s`): string =>
 export const shortSha = (sha: string): string => sha.slice(0, 7);
 
 /** API-equivalent cost: `~$1.84`, or `—` when no run reported one. */
-export const cost = (usd: number | null | undefined): string =>
-  usd == null ? "—" : `~$${usd.toFixed(2)}`;
+export const cost = (usd: number | null | undefined, approx = true): string =>
+  usd == null ? "—" : `${approx ? "~" : ""}$${usd.toFixed(2)}`;
 
-/** A fraction (0–1) as a whole percent: `42%`, or `—` for none. */
-export const percent = (fraction: number | null | undefined): string =>
-  fraction == null ? "—" : `${Math.round(fraction * 100)}%`;
+/** A value on a 0–100 scale as a percent: `42%` (rounded to `places`, default whole), `—` for none. */
+export const percent = (value: number | null | undefined, places = 0): string =>
+  value == null ? "—" : `${Number(value.toFixed(places))}%`;
+
+/** `today` / `1 day ago` / `{n} days ago`: counted days, in words (the briefs' form). */
+export const agoWords = (days: number): string =>
+  days <= 0 ? "today" : `${plural(days, "day")} ago`;
+
+/** `now` / `{n} min ago` / `{n} h ago` / `{n} days ago` for a point `mins` before now. */
+export function minutesAgo(mins: number): string {
+  if (mins < 1) return "now";
+  if (mins < 120) return `${Math.round(mins)} min ago`;
+  if (mins < 2880) return `${Math.round(mins / 60)} h ago`;
+  return agoWords(Math.round(mins / 1440));
+}
 
 /** How long something has run or waited, floored: `42m`, `2h 3m`, `1d 4h`; `—` for none. */
 export function elapsed(ms: number | null | undefined): string {

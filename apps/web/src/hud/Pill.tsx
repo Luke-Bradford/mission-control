@@ -1,5 +1,5 @@
 import type { PillTone } from "@mc/core";
-import type { ReactNode } from "react";
+import type { AriaRole, ReactNode } from "react";
 import "./Pill.css";
 
 /**
@@ -9,14 +9,18 @@ import "./Pill.css";
 export function Pill({
   tone,
   title,
+  className,
+  role,
   children,
 }: {
   tone: PillTone;
   title?: string;
+  className?: string;
+  role?: AriaRole;
   children: ReactNode;
 }) {
   return (
-    <span className={`pill ${tone}`} title={title}>
+    <span className={`pill ${tone}${className ? ` ${className}` : ""}`} title={title} role={role}>
       {children}
     </span>
   );

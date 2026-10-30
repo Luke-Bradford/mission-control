@@ -98,8 +98,6 @@ function scopeLabel(view: CommsView): string {
   return `${view.agentId}, all contacts`;
 }
 
-const pct = (value: number, of: number) => `${Number(((value / of) * 100).toFixed(3))}%`;
-
 /** `Idle`, `Paused`, `Crew paused`, ...: the HUD's word for a seat's state. */
 function stateLabel(row: CrewRow): string {
   if (row.crewPause != null) return "Crew paused";
@@ -552,7 +550,7 @@ export function CommsGraph({
                   ? ""
                   : ` · ${entry.tokens.toLocaleString()} tokens`}
                 <span className="comms-watch-bar" aria-hidden="true">
-                  <i style={{ width: pct(entry.rounds, mostRounds) }} />
+                  <i style={{ width: percent((entry.rounds / mostRounds) * 100, 3) }} />
                 </span>
               </p>
             ))
@@ -577,7 +575,7 @@ export function CommsGraph({
             <>
               <Stat value={total} unit="msg" label="messages" />
               <Stat
-                value={total ? percent((total - capcomCount) / total) : "—"}
+                value={total ? percent(((total - capcomCount) / total) * 100) : "—"}
                 label="agent↔agent"
                 tone="think"
               />

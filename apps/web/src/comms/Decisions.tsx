@@ -5,6 +5,7 @@ import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { ACTIONS } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
+import { mss } from "../fmt.ts";
 import { followLink, NEEDS_YOU_PATH } from "../router.ts";
 import { answerTarget, sendAnswer } from "./answer.ts";
 import { HoldForm } from "./HoldForm.tsx";
@@ -31,10 +32,7 @@ export function DecisionCard({
   );
   const dueAt = item.defaultDueAt ?? item.triageDueAt;
   const countdown = dueAt === undefined ? null : Math.max(0, Math.ceil((dueAt - now) / 1000));
-  const clock =
-    countdown === null
-      ? null
-      : `${String(Math.floor(countdown / 60)).padStart(2, "0")}:${String(countdown % 60).padStart(2, "0")}`;
+  const clock = countdown === null ? null : mss(countdown * 1000);
   const ticket = item.ticket?.match(/#\d+$/)?.[0] ?? item.ticket;
   const accept = async () => {
     if (!option) return;

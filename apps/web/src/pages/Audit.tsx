@@ -228,8 +228,9 @@ function Changes({ changes: rows }: { changes: AuditChange[] }) {
               <span>
                 {" effect · merged "}
                 {x.before.merged} → {x.after.merged} · review fail{" "}
-                {percent(x.before.reviewFailRate)} → {percent(x.after.reviewFailRate)} · median cost{" "}
-                {cost(x.before.medianCostPerMergedTicket)} →{" "}
+                {percent(x.before.reviewFailRate == null ? null : x.before.reviewFailRate * 100)} →{" "}
+                {percent(x.after.reviewFailRate == null ? null : x.after.reviewFailRate * 100)} ·
+                median cost {cost(x.before.medianCostPerMergedTicket)} →{" "}
                 {cost(x.after.medianCostPerMergedTicket)} · rework {x.before.reworkRounds} →{" "}
                 {x.after.reworkRounds}
               </span>

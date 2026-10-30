@@ -1,5 +1,6 @@
 import { TELEMETRY_RANGES, type Telemetry } from "@mc/core";
 import { useState } from "react";
+import { cost, minutesAgo, percent } from "../fmt.ts";
 import {
   keyStep,
   Legend,
@@ -11,7 +12,7 @@ import {
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { chartAnnotations } from "./annotations.ts";
-import { minutesAgo, type Scope } from "./common.ts";
+import type { Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
@@ -451,7 +452,7 @@ export function InstrumentCharts({
                   xLabels={labels}
                   at={at}
                   annotations={annotations}
-                  format={(v) => (isPct ? `${Math.round(v)}%` : v.toFixed(1))}
+                  format={(v) => (isPct ? percent(v) : v.toFixed(1))}
                   height={116}
                 />
               );
@@ -474,7 +475,7 @@ export function InstrumentCharts({
         ) : !mergedCosts.some((point) => point.v !== null) ? (
           <>
             <p className="pb s muted">No API-equivalent cost was reported for merged tickets.</p>
-            <p className="note xs">In range: ${inRangeCost.toFixed(2)}</p>
+            <p className="note xs">In range: {cost(inRangeCost, false)}</p>
           </>
         ) : (
           <>
@@ -499,9 +500,9 @@ export function InstrumentCharts({
               xLabels={labels}
               at={at}
               annotations={annotations}
-              format={(v) => `$${v.toFixed(2)}`}
+              format={(v) => cost(v, false)}
             />
-            <p className="note xs">In range: ${inRangeCost.toFixed(2)}</p>
+            <p className="note xs">In range: {cost(inRangeCost, false)}</p>
           </>
         )}
       </Panel>

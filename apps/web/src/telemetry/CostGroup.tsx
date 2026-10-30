@@ -1,7 +1,7 @@
 import type { BoardItem, ConfigView, Telemetry } from "@mc/core";
 import { ticketRef } from "../board/cards.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { cost, kTokens } from "../fmt.ts";
+import { cost, kTokens, percent } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -109,7 +109,7 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
                     <td className="r num">{kTokens(r.output)}</td>
                     <td className="r num">{kTokens(r.cacheRead)}</td>
                     <td className="r num">
-                      {r.cacheHitPct === null ? DASH : `${Math.round(r.cacheHitPct)}%`}
+                      {r.cacheHitPct === null ? DASH : percent(r.cacheHitPct)}
                     </td>
                     <td className="r num">{r.turns}</td>
                     <td className="r num">{r.toolCalls}</td>

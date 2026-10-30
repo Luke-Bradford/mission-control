@@ -1,6 +1,6 @@
 import { type HealthRow, type LimitRow, usageCollector } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
-import { elapsed } from "../fmt.ts";
+import { elapsed, percent } from "../fmt.ts";
 import { Meter } from "../hud/Meter.tsx";
 
 const MINUTE_MS = 60_000;
@@ -36,7 +36,7 @@ export function QuotaMeter({
       className={compact && stale ? "quota-compact stale" : undefined}
       title={[
         accountId ?? row?.accountId,
-        row ? `${row.window} · ${row.used}% used` : null,
+        row ? `${row.window} · ${percent(row.used)} used` : null,
         row ? `Last reading ${age} ago` : "No reading yet",
         nextTry,
         note,

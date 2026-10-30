@@ -7,7 +7,7 @@ import {
   type Telemetry,
 } from "@mc/core";
 import { type ReactNode, useState } from "react";
-import { dur, kTokens } from "../fmt.ts";
+import { dur, kTokens, minutesAgo, percent } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { StackedArea } from "../hud/charts/StackedArea.tsx";
@@ -15,7 +15,7 @@ import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { DASH, indexOf, minutesAgo, type Scope } from "./common.ts";
+import { DASH, indexOf, type Scope } from "./common.ts";
 
 type TokMode = "live" | "hist";
 const TOK_MODES = [
@@ -116,18 +116,18 @@ function Utilisation({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
               {UTIL.filter((u) => (r[u.key] ?? 0) > 0).map((u) => (
                 <i
                   key={u.key}
-                  title={`${u.label} ${Math.round(r[u.key] ?? 0)}%`}
+                  title={`${u.label} ${percent(r[u.key] ?? 0)}`}
                   style={{ width: `${r[u.key]}%`, background: u.color }}
                 />
               ))}
               {(r.unknown ?? 0) > 0 && (
                 <i
-                  title={`unknown ${Math.round(r.unknown ?? 0)}%`}
+                  title={`unknown ${percent(r.unknown ?? 0)}`}
                   style={{ width: `${r.unknown}%`, background: "var(--muted)" }}
                 />
               )}
             </span>
-            <span className="num xs">{Math.round(r.working)}%</span>
+            <span className="num xs">{percent(r.working)}</span>
           </div>
         ))}
         <div className="tnote">

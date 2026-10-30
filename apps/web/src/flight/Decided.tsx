@@ -1,10 +1,11 @@
-import { type ConfigView, type Crew, clockHm, seatCallSign } from "@mc/core";
+import { type ConfigView, type Crew, seatCallSign } from "@mc/core";
 import { useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { useSeatName } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
+import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { githubItemHref } from "../links.ts";
@@ -63,7 +64,7 @@ export function DecidedRow({
     <div className="drow" data-testid="decided-row">
       <div className="row">
         {call !== null && <AgentTag id={call} index={index} sm />}
-        <span className="s">{tz === null ? DASH : clockHm(d.at, tz)}</span>
+        <span className="s">{tz === null ? DASH : hhmm(d.at, tz)}</span>
         {done ? (
           <Pill tone="plain">You overturned it</Pill>
         ) : (

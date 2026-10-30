@@ -1,5 +1,5 @@
 import { FINDING_SEVERITIES, type FindingSeverity, globMatches, type MapSnapshot } from "@mc/core";
-import { percent } from "../fmt.ts";
+import { percent, plural } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
 import { seatToken, touchedFiles } from "./cards.ts";
 
@@ -753,7 +753,7 @@ export function HistoryLens({
               <FileButton path={partner.path} onFocus={onFocus} />
               <span>{partner.linked ? "import" : "no import"}</span>
               <span>
-                {partner.count} · {percent(partner.share)}
+                {partner.count} · {percent(partner.share * 100)}
               </span>
             </div>
           ))}
@@ -807,7 +807,7 @@ export function HistoryLens({
         columns="PRs · share"
         rows={unlinked.map((row) => ({
           label: `${name(row.source)} + ${name(row.path)}`,
-          text: `${row.count} PRs · ${percent(row.share)}`,
+          text: `${row.count} PRs · ${percent(row.share * 100)}`,
           focus: row.source,
         }))}
         onFocus={onFocus}
@@ -1049,7 +1049,7 @@ export function conflictSummary(snapshot: MapSnapshot): string {
       ? `No conflicts among the branches checked · ${unchecked} unchecked`
       : "No merge conflicts found between open branches";
   const pairs = conflictPairs(snapshot.conflicts);
-  return `${files} ${files === 1 ? "file conflicts" : "files that conflict"} between open branches · ${pairs} branch ${pairs === 1 ? "pair" : "pairs"}${unchecked ? ` · ${unchecked} unchecked` : ""}`;
+  return `${plural(files, "file")} ${files === 1 ? "conflicts" : "that conflict"} between open branches · ${plural(pairs, "branch pair")}${unchecked ? ` · ${unchecked} unchecked` : ""}`;
 }
 
 export function ConflictsLens({
