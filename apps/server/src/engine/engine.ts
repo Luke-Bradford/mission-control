@@ -424,6 +424,13 @@ export function createEngine(deps: EngineDeps): Engine {
   const reviewStatusFailures = new Map<string, string>();
   /** PR rows are immutable enough for one engine pass; avoid one whole-table read per run. */
   let tickPrs: Map<RepoId, ReturnType<Store["pullRequests"]>> | null = null;
+  const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
+    const cached = tickPrs?.get(repoId);
+    if (cached !== undefined) return cached;
+    const rows = store.pullRequests(repoId);
+    tickPrs?.set(repoId, rows);
+    return rows;
+  };
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -529,11 +536,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
-    let prs = tickPrs?.get(run.repoId);
-    if (prs === undefined) {
-      prs = store.pullRequests(run.repoId);
-      tickPrs?.set(run.repoId, prs);
-    }
+    const prs = prsFor(run.repoId);
     if (loop.prNumber !== null) return prs.find((p) => p.number === loop.prNumber) ?? null;
     if (run.branch === null) return null;
     return (
@@ -1929,17 +1932,14 @@ export function createEngine(deps: EngineDeps): Engine {
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
     const author = store.run(row.authorRunId);
     if (author === null) return true;
-    const ownAuthor = store
-      .pullRequests(author.repoId)
-      .find((pr) => pr.number === row.prNumber)?.author;
-    const older = store
-      .pullRequests(author.repoId)
-      .filter(
-        (pr) =>
-          pr.state !== "closed" &&
-          pr.number < row.prNumber &&
-          !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
-      );
+    const prs = prsFor(author.repoId);
+    const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
+    const older = prs.filter(
+      (pr) =>
+        pr.state !== "closed" &&
+        pr.number < row.prNumber &&
+        !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
+    );
     if (older.length === 0) return false;
     try {
       const rules = await rulesFor(author.repoId);
